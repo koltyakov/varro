@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+@theme {
+  --color-vscode-bg: var(--vscode-editor-background, #1e1e1e);
+  --color-vscode-fg: var(--vscode-editor-foreground, #cccccc);
+  --color-vscode-sidebar: var(--vscode-sideBar-background, #252526);
+  --color-vscode-input-bg: var(--vscode-input-background, #3c3c3c);
+  --color-vscode-input-border: var(--vscode-input-border, #3c3c3c);
+  --color-vscode-input-fg: var(--vscode-input-foreground, #cccccc);
+  --color-vscode-button-bg: var(--vscode-button-background, #0e639c);
+  --color-vscode-button-fg: var(--vscode-button-foreground, #ffffff);
+  --color-vscode-button-hover: var(--vscode-button-hoverBackground, #1177bb);
+  --color-vscode-border: var(--vscode-panel-border, #474747);
+  --color-vscode-link: var(--vscode-textLink-foreground, #3794ff);
+  --color-vscode-muted: var(--vscode-descriptionForeground, #8b8b8b);
+  --color-vscode-accent: var(--vscode-focusBorder, #007fd4);
+  --color-vscode-error: var(--vscode-errorForeground, #f44747);
+  --color-vscode-warning: var(--vscode-editorWarning-foreground, #cca700);
+  --color-vscode-success: #73c991;
+  --color-vscode-card: var(--vscode-editorWidget-background, #252526);
+  --color-vscode-hover: var(--vscode-list-hoverBackground, #2a2d2e);
+  --color-vscode-diff-add: var(--vscode-diffEditor-insertedTextBackground, rgba(156, 204, 156, 0.2));
+  --color-vscode-diff-del: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
+  --font-mono: var(--vscode-editor-font-family, "SF Mono", "Menlo", "Monaco", "Consolas", monospace);
+  --font-sans: var(--vscode-font-family, system-ui, -apple-system, sans-serif);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-sidebar);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-vscode-border);
+  border-radius: 3px;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.code-block {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+.markdown-content p {
+  margin-bottom: 0.5em;
+}
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+.markdown-content pre {
+  margin: 0.5em 0;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.markdown-content code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.markdown-content code:not(pre code) {
+  background: var(--color-vscode-input-bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.5em;
+  margin-bottom: 0.5em;
+}
+.markdown-content a {
+  color: var(--color-vscode-link);
+  text-decoration: none;
+}
+.markdown-content a:hover {
+  text-decoration: underline;
+}
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin-top: 0.75em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+.markdown-content blockquote {
+  border-left: 3px solid var(--color-vscode-border);
+  padding-left: 0.75em;
+  color: var(--color-vscode-muted);
+  margin: 0.5em 0;
+}

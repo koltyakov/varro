@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist/extension",
+    "types": ["vscode", "node"],
+    "lib": ["ES2022"]
+  },
+  "include": ["src/extension/**/*", "src/shared/**/*"]
+}

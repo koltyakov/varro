@@ -1,0 +1,139 @@
+{
+  "name": "opencode-vscode",
+  "displayName": "OpenCode",
+  "description": "AI-powered agentic coding assistant powered by OpenCode",
+  "version": "0.1.0",
+  "publisher": "opencode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Chat",
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "ai",
+    "chat",
+    "copilot",
+    "opencode",
+    "agent"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension/extension.js",
+  "icon": "assets/icon.png",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "opencode",
+          "title": "OpenCode",
+          "icon": "assets/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "opencode": [
+        {
+          "type": "webview",
+          "id": "opencode.chat",
+          "name": "OpenCode"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "opencode.chat.focus",
+        "title": "OpenCode: Focus Chat"
+      },
+      {
+        "command": "opencode.chat.newSession",
+        "title": "OpenCode: New Session"
+      },
+      {
+        "command": "opencode.chat.addToContext",
+        "title": "OpenCode: Add to Context"
+      },
+      {
+        "command": "opencode.chat.share",
+        "title": "OpenCode: Share Session"
+      },
+      {
+        "command": "opencode.chat.abort",
+        "title": "OpenCode: Abort Session"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "opencode.chat.focus",
+        "key": "cmd+shift+o",
+        "mac": "cmd+shift+o",
+        "win": "ctrl+shift+o",
+        "linux": "ctrl+shift+o"
+      },
+      {
+        "command": "opencode.chat.addToContext",
+        "key": "cmd+shift+k",
+        "mac": "cmd+shift+k",
+        "win": "ctrl+shift+k",
+        "linux": "ctrl+shift+k"
+      }
+    ],
+    "configuration": {
+      "title": "OpenCode",
+      "properties": {
+        "opencode.server.port": {
+          "type": "number",
+          "default": 4096,
+          "description": "Port for the OpenCode server"
+        },
+        "opencode.server.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the OpenCode server when the extension activates"
+        },
+        "opencode.context.autoAttachFile": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically attach the active file as context"
+        },
+        "opencode.context.autoAttachSelection": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically attach the current selection as context"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build:extension": "node esbuild.config.mjs",
+    "build:webview": "vite build",
+    "build": "npm run build:extension && npm run build:webview",
+    "watch:extension": "node esbuild.config.mjs --watch",
+    "watch:webview": "vite build --watch",
+    "dev": "npm run watch:extension & npm run watch:webview",
+    "lint": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.webview.json",
+    "package": "npm run build && npx vsce package"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^25.6.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.0",
+    "esbuild": "^0.25.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0",
+    "vite-plugin-solid": "^2.11.0"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.4.0",
+    "marked": "^15.0.0",
+    "shiki": "^3.2.0",
+    "solid-js": "^1.9.0"
+  }
+}
