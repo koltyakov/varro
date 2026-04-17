@@ -5,35 +5,65 @@ export function ServerStatus() {
   const status = () => state.serverStatus
 
   return (
-    <div class="flex flex-1 flex-col items-center justify-center gap-3 px-4">
-      <Show
-        when={status().state === "error"}
-        fallback={
-          <div class="text-center text-vscode-muted">
-            <svg class="mx-auto mb-2 h-8 w-8 opacity-50" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1zM9 2H4v13h8V5.5L9 2z" />
-              <path d="M5 7h6v1H5V7zm0 2h6v1H5V9zm0 2h4v1H5v-1z" />
-            </svg>
-            <p class="text-sm">Connect to OpenCode to get started</p>
-            <Show when={status().state === "stopped"}>
-              <p class="mt-1 text-xs opacity-70">
-                Run <code class="rounded bg-vscode-input-bg px-1 py-0.5">opencode serve</code> or
-                check your settings
-              </p>
-            </Show>
-          </div>
-        }
-      >
-        <div class="text-center">
-          <svg class="mx-auto mb-2 h-8 w-8 text-vscode-error" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M7.56 1h.88l6.54 12.26-.44.74H1.44l-.42-.74L7.56 1z" />
-            <path d="M8 5v4H7V5h1zm0 6V9H7v2h1z" />
-          </svg>
-          <p class="text-sm text-vscode-error">
+    <div class="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-10 text-center">
+      <Show when={status().state === "starting"}>
+        <Spinner />
+        <div>
+          <p class="text-lg font-semibold text-vscode-fg">Starting OpenCode…</p>
+          <p class="mt-1 text-sm text-vscode-muted">Spawning the local server</p>
+        </div>
+      </Show>
+
+      <Show when={status().state === "stopped"}>
+        <Dot class="bg-vscode-muted" />
+        <div>
+          <p class="text-lg font-semibold text-vscode-fg">Server not running</p>
+          <p class="mt-1 text-sm text-vscode-muted">
+            Waiting to connect…
+          </p>
+        </div>
+      </Show>
+
+      <Show when={status().state === "error"}>
+        <Dot class="bg-vscode-error" />
+        <div class="max-w-[360px] rounded-md border border-vscode-border bg-vscode-card px-5 py-4">
+          <p class="text-lg font-semibold text-vscode-error">OpenCode unavailable</p>
+          <p class="mt-2 break-words text-sm text-vscode-muted">
             {(status() as { state: "error"; message: string }).message}
+          </p>
+          <p class="mt-4 text-[12px] text-vscode-muted">
+            Install the CLI with{" "}
+            <code class="rounded bg-vscode-input-bg px-1 py-0.5 text-vscode-fg">
+              npm i -g opencode-ai
+            </code>
+            , or start a server manually with{" "}
+            <code class="rounded bg-vscode-input-bg px-1 py-0.5 text-vscode-fg">
+              opencode serve
+            </code>
+            .
           </p>
         </div>
       </Show>
     </div>
   )
+}
+
+function Spinner() {
+  return (
+    <div class="flex items-center gap-1.5">
+      <span class="h-2.5 w-2.5 animate-pulse rounded-full bg-vscode-accent" />
+      <span
+        class="h-2.5 w-2.5 animate-pulse rounded-full bg-vscode-accent"
+        style={{ "animation-delay": "0.2s" }}
+      />
+      <span
+        class="h-2.5 w-2.5 animate-pulse rounded-full bg-vscode-accent"
+        style={{ "animation-delay": "0.4s" }}
+      />
+    </div>
+  )
+}
+
+function Dot(props: { class: string }) {
+  return <span class={`h-3 w-3 rounded-full ${props.class}`} />
 }

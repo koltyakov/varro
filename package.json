@@ -90,6 +90,11 @@
           "default": 4096,
           "description": "Port for the OpenCode server"
         },
+        "opencode.server.command": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to the OpenCode CLI executable used to start the server"
+        },
         "opencode.server.autoStart": {
           "type": "boolean",
           "default": true,

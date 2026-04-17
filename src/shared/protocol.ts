@@ -32,10 +32,14 @@ export type ServerStatus =
 
 export type ExtensionMessage =
   | { type: "server/status"; payload: ServerStatus }
+  | { type: "server/event"; payload: { type: string; properties?: any; [k: string]: unknown } }
   | { type: "context/update"; payload: EditorContext }
   | { type: "files/dropped"; payload: DroppedFile[] }
-  | { type: "init"; payload: { serverUrl: string; theme: "dark" | "light" } }
+  | { type: "theme/update"; payload: { theme: "dark" | "light" } }
   | { type: "api/response"; payload: { id: number; data?: any; error?: string } }
+  | { type: "command/new-session" }
+  | { type: "command/abort" }
+  | { type: "command/share" }
 
 export type WebviewMessage =
   | { type: "context/request" }
@@ -44,4 +48,4 @@ export type WebviewMessage =
   | { type: "vscode/diff"; payload: { path: string } }
   | { type: "ready" }
   | { type: "api/request"; payload: { id: number; method: string; path: string; body?: unknown } }
-  | { type: "log"; payload: { msg: string; data?: string; error?: string } }
+  | { type: "log"; payload: { msg: string; data?: string; error?: string; level?: "info" | "warn" | "error" } }

@@ -1,40 +1,35 @@
 import * as vscode from "vscode"
 import { readFileSync } from "fs"
 import { resolve, join } from "path"
-import type { ExtensionMessage, WebviewMessage } from "../shared/protocol"
+import type { ExtensionMessage, ServerStatus, WebviewMessage } from "../shared/protocol"
 import { ContextProvider } from "./context-provider"
+import { OpenCodeServer } from "./server"
 import { logger } from "./logger"
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "opencode.chat"
   private view?: vscode.WebviewView
   private contextProvider: ContextProvider
-  private _serverUrl = ""
-  private _proxyUrl = ""
-  private _theme: "dark" | "light" =
-    vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark ? "dark" : "light"
+  private server: OpenCodeServer
+  private _status: ServerStatus = { state: "stopped" }
+  private themeDisposable?: vscode.Disposable
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     contextProvider: ContextProvider,
+    server: OpenCodeServer,
   ) {
     this.contextProvider = contextProvider
-  }
+    this.server = server
 
-  set serverUrl(url: string) {
-    if (this._serverUrl === url) return
-    this._serverUrl = url
-    this.refreshHtml()
-  }
+    this.server.on("status", (status: ServerStatus) => {
+      this._status = status
+      this.post({ type: "server/status", payload: status })
+    })
 
-  set proxyUrl(url: string) {
-    this._proxyUrl = url
-  }
-
-  private refreshHtml() {
-    if (this.view) {
-      this.view.webview.html = this.getHtml()
-    }
+    this.server.on("event", (event: any) => {
+      this.post({ type: "server/event", payload: event })
+    })
   }
 
   resolveWebviewView(
@@ -47,7 +42,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.extensionUri],
-      enableCommandUris: true,
     }
 
     webviewView.webview.html = this.getHtml()
@@ -59,14 +53,29 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
         this.postContext()
+        this.post({ type: "server/status", payload: this._status })
       }
     })
+
+    this.themeDisposable?.dispose()
+    this.themeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
+      this.post({ type: "theme/update", payload: { theme: this.currentTheme() } })
+    })
+  }
+
+  private currentTheme(): "dark" | "light" {
+    const k = vscode.window.activeColorTheme.kind
+    return k === vscode.ColorThemeKind.Dark || k === vscode.ColorThemeKind.HighContrast
+      ? "dark"
+      : "light"
   }
 
   handleMessage(msg: WebviewMessage) {
     switch (msg.type) {
       case "ready":
         this.postContext()
+        this.post({ type: "server/status", payload: this._status })
+        this.post({ type: "theme/update", payload: { theme: this.currentTheme() } })
         break
       case "context/request":
         this.postContext()
@@ -91,31 +100,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.handleApiRequest(msg.payload)
         break
       case "log":
-        logger.info(`[webview-debug] ${msg.payload.msg} ${msg.payload.data || ""} ${msg.payload.error || ""}`)
+        {
+          const level = msg.payload.level || "info"
+          const line = `[webview] ${msg.payload.msg} ${msg.payload.data || ""} ${msg.payload.error || ""}`.trim()
+          if (level === "error") logger.error(line)
+          else if (level === "warn") logger.warn(line)
+          else logger.info(line)
+        }
         break
     }
   }
 
   private async handleApiRequest(payload: { id: number; method: string; path: string; body?: unknown }) {
-    const baseUrl = this._serverUrl || this._proxyUrl
-    if (!baseUrl) {
-      this.post({ type: "api/response", payload: { id: payload.id, error: "Server not connected" } })
+    if (this._status.state !== "running") {
+      this.post({
+        type: "api/response",
+        payload: { id: payload.id, error: "Server is not running" },
+      })
       return
     }
     try {
-      const url = `${baseUrl}${payload.path}`
-      const init: RequestInit = {
-        method: payload.method,
-        headers: { "Content-Type": "application/json" },
-      }
-      if (payload.body && payload.method !== "GET" && payload.method !== "HEAD") {
-        init.body = JSON.stringify(payload.body)
-      }
-      const res = await fetch(url, init)
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status} ${res.statusText}`)
-      }
-      const data = await res.json()
+      const data = await this.server.request(payload.method, payload.path, payload.body)
       this.post({ type: "api/response", payload: { id: payload.id, data } })
     } catch (err) {
       this.post({
@@ -139,8 +144,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: "files/dropped", payload: files })
   }
 
-  postServerStatus(status: ExtensionMessage) {
-    this.post(status)
+  postCommand(cmd: "new-session" | "abort" | "share") {
+    this.post({ type: `command/${cmd}` } as ExtensionMessage)
   }
 
   private getHtml(): string {
@@ -151,16 +156,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     try {
       scriptContent = readFileSync(join(distDir, "webview.js"), "utf-8")
     } catch {
-      logger.warn("webview.js not found - run `npm run build:webview` first")
+      logger.warn("webview.js not found — run `npm run build:webview` first")
     }
     try {
       cssContent = readFileSync(join(distDir, "webview.css"), "utf-8")
     } catch {}
 
-    this._theme =
-      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
-        ? "dark"
-        : "light"
+    const nonce = randomNonce()
 
     return /*html*/ `<!DOCTYPE html>
 <html lang="en">
@@ -168,25 +170,32 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src http://127.0.0.1:* http://localhost:*;" />
+    content="default-src 'none'; img-src data: https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
   <title>OpenCode</title>
   <style>${cssContent}</style>
 </head>
 <body>
   <div id="root"></div>
-  <script>
-    window.__initData = ${JSON.stringify({
-      serverUrl: this._serverUrl,
-      eventStreamUrl: this._proxyUrl,
-      theme: this._theme,
-    })};
-  </script>
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    window.__initialTheme = ${JSON.stringify(this.currentTheme())};
     window.__sendToExtension = function(msg) { vscode.postMessage(msg); };
   </script>
-  <script>${scriptContent}</script>
+  <script nonce="${nonce}">${scriptContent}</script>
 </body>
 </html>`
   }
+
+  dispose() {
+    this.themeDisposable?.dispose()
+  }
+}
+
+function randomNonce(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  let result = ""
+  for (let i = 0; i < 32; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return result
 }

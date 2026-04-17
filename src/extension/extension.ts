@@ -15,13 +15,14 @@ export async function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("opencode")
   const port = config.get<number>("server.port", 4096)
   const autoStart = config.get<boolean>("server.autoStart", true)
+  const command = config.get<string>("server.command", "")
 
-  server = new OpenCodeServer(port)
+  server = new OpenCodeServer(port, autoStart, command)
   contextProvider = new ContextProvider((ctx) => {
     sidebarProvider?.post({ type: "context/update", payload: ctx })
   })
 
-  sidebarProvider = new SidebarProvider(context.extensionUri, contextProvider)
+  sidebarProvider = new SidebarProvider(context.extensionUri, contextProvider, server)
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
@@ -31,32 +32,22 @@ export async function activate(context: vscode.ExtensionContext) {
     ),
   )
 
-  server.on("connected", () => {
-    logger.info(`Setting server URL: ${server.url}, proxy URL: ${server.proxyUrl}`)
-    sidebarProvider.serverUrl = server.url
-    sidebarProvider.proxyUrl = server.proxyUrl
-  })
-
   registerCommands(context, sidebarProvider)
 
   vscode.commands.executeCommand("setContext", "opencode:activated", true)
   logger.info("OpenCode extension activated")
 
-  if (autoStart) {
-    server.start().then((url) => {
-      logger.info(`OpenCode server started at ${url}`)
-    }).catch((err) => {
-      logger.error("Failed to start OpenCode server:", err)
-      vscode.window.showErrorMessage(
-        `OpenCode: Failed to start server. ${err instanceof Error ? err.message : String(err)}`,
-      )
-    })
-  }
+  server.start().then((url) => {
+    logger.info(`OpenCode server running at ${url}`)
+  }).catch((err) => {
+    logger.error(`Failed to start OpenCode server: ${err instanceof Error ? err.message : String(err)}`)
+  })
 }
 
 export async function deactivate() {
   await server?.dispose()
   contextProvider?.dispose()
+  sidebarProvider?.dispose()
   vscode.commands.executeCommand("setContext", "opencode:activated", false)
   logger.info("OpenCode extension deactivated")
 }

@@ -8,6 +8,8 @@ import type {
   Todo,
   SessionStatus,
   FileDiff,
+  Agent,
+  Provider,
 } from "../types"
 import type { EditorContext, DroppedFile, ServerStatus } from "../../shared/protocol"
 
@@ -24,6 +26,10 @@ interface AppState {
   diffs: FileDiff[]
   streamingPartId: string | null
   streamingText: string
+  agents: Agent[]
+  providers: Provider[]
+  selectedAgent: string | null
+  selectedModel: { providerID: string; modelID: string } | null
 }
 
 export const [state, setState] = createStore<AppState>({
@@ -39,6 +45,10 @@ export const [state, setState] = createStore<AppState>({
   diffs: [],
   streamingPartId: null,
   streamingText: "",
+  agents: [],
+  providers: [],
+  selectedAgent: null,
+  selectedModel: null,
 })
 
 export const [inputText, setInputText] = createSignal("")
@@ -46,8 +56,9 @@ export const [isLoading, setIsLoading] = createSignal(false)
 export const [error, setError] = createSignal<string | null>(null)
 export const [showSessionPicker, setShowSessionPicker] = createSignal(false)
 export const [showModelPicker, setShowModelPicker] = createSignal(false)
-export const [theme, setTheme] = createSignal<"dark" | "light">("dark")
-export const [serverUrl, setServerUrl] = createSignal("")
+export const [theme, setTheme] = createSignal<"dark" | "light">(
+  ((window as any).__initialTheme as "dark" | "light") || "dark",
+)
 
 export function addContextFile(file: DroppedFile) {
   setState(
@@ -88,6 +99,34 @@ export function upsertMessage(msg: { info: Message; parts: Part[] }) {
   )
 }
 
+export function upsertMessageInfo(info: Message) {
+  setState(
+    "messages",
+    produce((msgs) => {
+      const idx = msgs.findIndex((m) => m.info.id === info.id)
+      if (idx !== -1) {
+        msgs[idx].info = info
+      } else {
+        msgs.push({ info, parts: [] })
+      }
+    }),
+  )
+}
+
+export function upsertPart(part: Part) {
+  setState(
+    "messages",
+    produce((msgs) => {
+      const msgId = (part as any).messageID
+      const msg = msgs.find((m) => m.info.id === msgId)
+      if (!msg) return
+      const idx = msg.parts.findIndex((p) => p.id === part.id)
+      if (idx !== -1) msg.parts[idx] = part
+      else msg.parts.push(part)
+    }),
+  )
+}
+
 export function updateMessagePart(part: Part) {
   setState(
     "messages",
@@ -99,6 +138,41 @@ export function updateMessagePart(part: Part) {
           break
         }
       }
+    }),
+  )
+}
+
+export function applyMessagePartDelta(
+  messageId: string,
+  partId: string,
+  delta: string,
+  sessionId?: string,
+  field = "text",
+) {
+  if (field !== "text" || !delta) return
+
+  setState(
+    "messages",
+    produce((msgs) => {
+      const msg = msgs.find((item) => item.info.id === messageId)
+      if (!msg) return
+
+      let part = msg.parts.find(
+        (item): item is Part & { type: "text"; text: string } => item.id === partId && item.type === "text",
+      )
+
+      if (!part) {
+        part = {
+          id: partId,
+          messageID: messageId,
+          sessionID: sessionId || msg.info.sessionID,
+          type: "text",
+          text: "",
+        }
+        msg.parts.push(part)
+      }
+
+      part.text += delta
     }),
   )
 }

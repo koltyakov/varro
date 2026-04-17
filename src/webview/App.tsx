@@ -1,6 +1,6 @@
 import { Show } from "solid-js"
 import { useOpenCode } from "./hooks/useOpenCode"
-import { state, error } from "./lib/state"
+import { state, error, setError } from "./lib/state"
 import { Chat } from "./components/Chat"
 import { ServerStatus } from "./components/ServerStatus"
 
@@ -8,23 +8,23 @@ export function App() {
   useOpenCode()
 
   return (
-    <div class="flex h-full flex-col bg-vscode-sidebar">
+    <div class="flex h-full min-h-0 flex-col bg-vscode-sidebar text-[14px] text-vscode-fg">
       <Show
-        when={state.serverStatus.state === "running" || state.serverStatus.state === "starting"}
+        when={state.serverStatus.state === "running"}
         fallback={<ServerStatus />}
       >
-        <Show when={state.serverStatus.state === "running"}>
-          <Chat />
-        </Show>
-        <Show when={state.serverStatus.state === "starting"}>
-          <div class="flex flex-1 items-center justify-center">
-            <div class="text-vscode-muted">Starting OpenCode server...</div>
-          </div>
-        </Show>
+        <Chat />
       </Show>
       <Show when={error()}>
-        <div class="border-t border-vscode-border px-3 py-2 text-xs text-vscode-error">
-          {error()}
+        <div class="flex items-start justify-between gap-2 border-t border-vscode-border bg-vscode-card px-3 py-2 text-xs text-vscode-error">
+          <span class="break-words">{error()}</span>
+          <button
+            class="shrink-0 rounded px-1 text-vscode-muted hover:text-vscode-fg"
+            onClick={() => setError(null)}
+            title="Dismiss"
+          >
+            ×
+          </button>
         </div>
       </Show>
     </div>

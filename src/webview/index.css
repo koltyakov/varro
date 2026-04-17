@@ -38,20 +38,20 @@ body,
   width: 100%;
   overflow: hidden;
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-vscode-fg);
   background: var(--color-vscode-sidebar);
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-vscode-border);
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 input,
@@ -63,35 +63,35 @@ textarea {
 
 .code-block {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.5;
   tab-size: 2;
 }
 
 .markdown-content p {
-  margin-bottom: 0.5em;
+  margin-bottom: 0.7em;
 }
 .markdown-content p:last-child {
   margin-bottom: 0;
 }
 .markdown-content pre {
-  margin: 0.5em 0;
-  border-radius: 4px;
+  margin: 0.75em 0;
+  border-radius: 6px;
   overflow-x: auto;
 }
 .markdown-content code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 .markdown-content code:not(pre code) {
   background: var(--color-vscode-input-bg);
-  padding: 1px 4px;
+  padding: 2px 5px;
   border-radius: 3px;
 }
 .markdown-content ul,
 .markdown-content ol {
   padding-left: 1.5em;
-  margin-bottom: 0.5em;
+  margin-bottom: 0.75em;
 }
 .markdown-content a {
   color: var(--color-vscode-link);
@@ -110,7 +110,29 @@ textarea {
 }
 .markdown-content blockquote {
   border-left: 3px solid var(--color-vscode-border);
-  padding-left: 0.75em;
+  padding-left: 0.9em;
   color: var(--color-vscode-muted);
-  margin: 0.5em 0;
+  margin: 0.75em 0;
+}
+
+kbd {
+  border: 1px solid var(--color-vscode-border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 11px;
+  background: var(--color-vscode-input-bg);
+  color: var(--color-vscode-muted);
+}
+
+button,
+textarea,
+input {
+  -webkit-font-smoothing: antialiased;
+}
+
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 1px;
 }

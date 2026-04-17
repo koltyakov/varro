@@ -1,6 +1,6 @@
-import { state } from "../lib/state"
-import { createSignal, Show, For } from "solid-js"
-import { selectSession, createSession, deleteSession } from "../hooks/useOpenCode"
+import { state, showSessionPicker, setShowSessionPicker } from "../lib/state"
+import { Show, For } from "solid-js"
+import { selectSession, createSession, deleteSession, shareSession } from "../hooks/useOpenCode"
 import { MessageList } from "./MessageList"
 import { ChatInput } from "./ChatInput"
 import { ContextBar } from "./ContextBar"
@@ -8,25 +8,53 @@ import { PermissionPrompt } from "./PermissionPrompt"
 import { TodoList } from "./TodoList"
 
 export function Chat() {
-  const [showSessions, setShowSessions] = createSignal(false)
+  const activeTitle = () => {
+    if (!state.activeSessionId) return "New chat"
+    const session = state.sessions.find((s) => s.id === state.activeSessionId)
+    return session?.title || "New chat"
+  }
 
   return (
-    <div class="flex h-full flex-col">
-      <div class="flex items-center justify-between border-b border-vscode-border px-2 py-1.5">
+    <div class="flex h-full min-h-0 flex-col">
+      <div class="flex items-center justify-between border-b border-vscode-border bg-vscode-sidebar/95 px-3 py-2.5 backdrop-blur">
         <button
-          class="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs hover:bg-vscode-hover"
-          onClick={() => setShowSessions(!showSessions())}
+          class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-vscode-hover"
+          onClick={() => setShowSessionPicker(!showSessionPicker())}
+          title="Switch session"
         >
-          <span class="truncate max-w-[160px]" title={activeTitle()}>
-            {activeTitle()}
-          </span>
-          <svg class="h-3 w-3 text-vscode-muted" viewBox="0 0 16 16" fill="currentColor">
+          <svg class="h-4 w-4 shrink-0 text-vscode-muted" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h12v2H2V2zm0 5h12v2H2V7zm0 5h8v2H2v-2z" />
+          </svg>
+          <div class="min-w-0 flex-1 text-left">
+            <div class="truncate font-medium" title={activeTitle()}>
+              {activeTitle()}
+            </div>
+            <div class="text-[11px] text-vscode-muted">
+              {state.activeSessionId ? "Session history and messages" : "Start a new conversation"}
+            </div>
+          </div>
+          <svg
+            class={`h-3.5 w-3.5 shrink-0 text-vscode-muted transition-transform ${showSessionPicker() ? "rotate-180" : ""}`}
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
             <path d="M4.5 6l3.5 4 3.5-4z" />
           </svg>
         </button>
-        <div class="flex items-center gap-1">
+        <div class="ml-2 flex shrink-0 items-center gap-1">
+          <Show when={state.activeSessionId}>
+            <button
+              class="rounded-md p-2 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
+              onClick={shareSession}
+              title="Share session (copy link)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M12 3a2 2 0 100 4 2 2 0 000-4zM8.5 5a3.5 3.5 0 116.166 2.24l-4.86 2.83a3.5 3.5 0 010 1.86l4.86 2.83a3.5 3.5 0 11-.5.87l-4.86-2.83a3.5 3.5 0 110-4.54l4.86-2.83A3.5 3.5 0 018.5 5zM5 6.5a2 2 0 100 4 2 2 0 000-4zM12 11a2 2 0 100 4 2 2 0 000-4z" />
+              </svg>
+            </button>
+          </Show>
           <button
-            class="rounded p-1 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
+            class="rounded-md p-2 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
             onClick={() => createSession()}
             title="New session"
           >
@@ -37,8 +65,8 @@ export function Chat() {
         </div>
       </div>
 
-      <Show when={showSessions()}>
-        <SessionOverlay onSelect={() => setShowSessions(false)} />
+      <Show when={showSessionPicker()}>
+        <SessionOverlay />
       </Show>
 
       <Show when={state.todos.length > 0}>
@@ -55,43 +83,53 @@ export function Chat() {
       <ChatInput />
     </div>
   )
-
-  function activeTitle() {
-    if (!state.activeSessionId) return "New chat"
-    const session = state.sessions.find((s) => s.id === state.activeSessionId)
-    return session?.title || "New chat"
-  }
 }
 
-function SessionOverlay(props: { onSelect: () => void }) {
+function SessionOverlay() {
   return (
-    <div class="border-b border-vscode-border bg-vscode-card max-h-[200px] overflow-y-auto">
-      <For each={state.sessions}>
-        {(session) => (
-          <div
-            class={`flex w-full items-center justify-between px-3 py-1.5 text-xs hover:bg-vscode-hover cursor-pointer ${
-              session.id === state.activeSessionId ? "bg-vscode-hover" : ""
-            }`}
-            onClick={() => {
-              selectSession(session.id)
-              props.onSelect()
-            }}
-          >
-            <span class="truncate">{session.title || "Untitled"}</span>
-            <button
-              class="ml-2 rounded p-0.5 text-vscode-muted hover:text-vscode-error"
-              onClick={(e) => {
-                e.stopPropagation()
-                deleteSession(session.id)
+    <div class="max-h-[280px] overflow-y-auto border-b border-vscode-border bg-vscode-card/95 px-1 py-1">
+      <Show
+        when={state.sessions.length > 0}
+        fallback={
+          <div class="px-3 py-4 text-center text-sm text-vscode-muted">No previous sessions</div>
+        }
+      >
+        <For each={state.sessions}>
+          {(session) => (
+            <div
+              class={`group flex w-full cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 text-sm hover:bg-vscode-hover ${
+                session.id === state.activeSessionId ? "bg-vscode-hover" : ""
+              }`}
+              onClick={() => {
+                selectSession(session.id)
+                setShowSessionPicker(false)
               }}
             >
-              <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-              </svg>
-            </button>
-          </div>
-        )}
-      </For>
+              <div class="min-w-0 flex-1">
+                <div class="truncate font-medium">{session.title || "Untitled"}</div>
+                <Show when={session.summary}>
+                  <div class="text-[11px] text-vscode-muted">
+                    {session.summary?.files ?? 0} files, +{session.summary?.additions ?? 0}/-
+                    {session.summary?.deletions ?? 0}
+                  </div>
+                </Show>
+              </div>
+              <button
+                class="shrink-0 rounded-sm p-1 text-vscode-muted opacity-0 hover:text-vscode-error group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  deleteSession(session.id)
+                }}
+                title="Delete session"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M10 3h3v1h-1v9a2 2 0 01-2 2H6a2 2 0 01-2-2V4H3V3h3V2a1 1 0 011-1h2a1 1 0 011 1v1zM5 4v9a1 1 0 001 1h4a1 1 0 001-1V4H5zm2 2h1v6H7V6zm2 0h1v6H9V6z" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </For>
+      </Show>
     </div>
   )
 }

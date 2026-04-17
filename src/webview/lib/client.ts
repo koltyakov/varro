@@ -1,15 +1,11 @@
-import { createSignal, onCleanup } from "solid-js"
-import { apiCall } from "./bridge"
+import { apiCall, onMessage } from "./bridge"
 import type {
   Session,
   Message,
   Part,
   SessionStatus,
   Agent,
-  Model,
   Provider,
-  Permission,
-  Todo,
   FileDiff,
 } from "../types"
 
@@ -49,16 +45,6 @@ export const client = {
     },
     async messages(id: string): Promise<Array<{ info: Message; parts: Part[] }>> {
       return apiCall("GET", `/session/${id}/message`)
-    },
-    async send(
-      id: string,
-      body: {
-        parts: Array<{ type: string; text?: string; [key: string]: unknown }>
-        model?: { providerID: string; modelID: string }
-        agent?: string
-      },
-    ): Promise<{ info: Message; parts: Part[] }> {
-      return apiCall("POST", `/session/${id}/message`, body)
     },
     async sendAsync(
       id: string,
@@ -102,51 +88,27 @@ export const client = {
   },
 }
 
-export function createEventSource() {
-  const [connected, setConnected] = createSignal(false)
-  let source: EventSource | null = null
-  const listeners = new Map<string, Set<(data: any) => void>>()
+type EventHandler = (data: any) => void
 
-  function start(serverUrl: string) {
-    if (source) source.close()
+const eventListeners = new Map<string, Set<EventHandler>>()
 
-    source = new EventSource(`${serverUrl}/event`)
-
-    source.onopen = () => setConnected(true)
-    source.onerror = () => setConnected(false)
-
-    source.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data) as { type: string; [key: string]: unknown }
-        const handlers = listeners.get(parsed.type)
-        if (handlers) {
-          for (const handler of handlers) {
-            handler(parsed)
-          }
-        }
-        const wildcardHandlers = listeners.get("*")
-        if (wildcardHandlers) {
-          for (const handler of wildcardHandlers) {
-            handler(parsed)
-          }
-        }
-      } catch {}
-    }
+onMessage((msg) => {
+  if (msg.type !== "server/event") return
+  const evt = msg.payload
+  const handlers = eventListeners.get(evt.type)
+  if (handlers) {
+    for (const h of handlers) h(evt)
   }
-
-  function on(type: string, handler: (data: any) => void): () => void {
-    if (!listeners.has(type)) listeners.set(type, new Set())
-    listeners.get(type)!.add(handler)
-    return () => listeners.get(type)?.delete(handler)
+  const wildcard = eventListeners.get("*")
+  if (wildcard) {
+    for (const h of wildcard) h(evt)
   }
+})
 
-  function stop() {
-    source?.close()
-    source = null
-    setConnected(false)
-  }
-
-  onCleanup(() => stop())
-
-  return { start, stop, on, connected }
+export const serverEvents = {
+  on(type: string, handler: EventHandler): () => void {
+    if (!eventListeners.has(type)) eventListeners.set(type, new Set())
+    eventListeners.get(type)!.add(handler)
+    return () => eventListeners.get(type)?.delete(handler)
+  },
 }
