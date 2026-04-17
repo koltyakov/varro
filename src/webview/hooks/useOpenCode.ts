@@ -3,6 +3,8 @@ import { client, serverEvents } from "../lib/client"
 import {
   state,
   setState,
+  setSelectedAgent,
+  setSelectedModel,
   setTheme,
   setIsLoading,
   setError,
@@ -91,9 +93,12 @@ async function loadAgents() {
     const agents = await client.agent.list()
     const primaries = agents.filter((a) => a.mode !== "subagent" && !(a as any).hidden)
     setState("agents", primaries)
+    if (state.selectedAgent && !primaries.some((agent) => agent.name === state.selectedAgent)) {
+      setSelectedAgent(null)
+    }
     if (!state.selectedAgent) {
       const def = primaries.find((a) => a.name === "build") || primaries[0]
-      if (def) setState("selectedAgent", def.name)
+      if (def) setSelectedAgent(def.name)
     }
   } catch {}
 }
@@ -102,11 +107,12 @@ async function loadProviders() {
   try {
     const res = await client.config.providers()
     setState("providers", res.providers)
+    setState("providerDefaults", res.default || {})
     if (state.selectedModel) {
       const provider = res.providers.find((item) => item.id === state.selectedModel?.providerID)
       const model = provider?.models[state.selectedModel.modelID]
       if (!provider || !model) {
-        setState("selectedModel", null)
+        setSelectedModel(null)
       }
     }
   } catch {}
@@ -232,7 +238,7 @@ async function sendPromptWithFallback(
 
     const retryBody = { ...body }
     delete retryBody.model
-    setState("selectedModel", null)
+    setSelectedModel(null)
     await client.session.sendAsync(sessionId, retryBody)
   }
 }

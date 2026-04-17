@@ -5,7 +5,7 @@ export type UserMessage = {
   time: { created: number }
   summary?: { title?: string; body?: string; diffs: FileDiff[] }
   agent: string
-  model: { providerID: string; modelID: string }
+  model: { providerID: string; modelID: string; variant?: string }
   system?: string
   tools?: { [key: string]: boolean }
 }
@@ -20,15 +20,18 @@ export type AssistantMessage = {
   modelID: string
   providerID: string
   mode: string
+  agent?: string
   path: { cwd: string; root: string }
   summary?: boolean
   cost: number
   tokens: {
+    total?: number
     input: number
     output: number
     reasoning: number
     cache: { read: number; write: number }
   }
+  variant?: string
   finish?: string
 }
 
@@ -136,6 +139,7 @@ export type StepFinishPart = {
   snapshot?: string
   cost: number
   tokens: {
+    total?: number
     input: number
     output: number
     reasoning: number
@@ -177,6 +181,8 @@ export type SubtaskPart = {
   prompt: string
   description: string
   agent: string
+  model?: { providerID: string; modelID: string }
+  command?: string
 }
 
 export type RetryPart = {
@@ -195,6 +201,7 @@ export type CompactionPart = {
   messageID: string
   type: "compaction"
   auto: boolean
+  overflow?: boolean
 }
 
 export type Part =
@@ -285,8 +292,20 @@ export type Provider = {
     [key: string]: {
       id: string
       name: string
-      capabilities: { toolcall: boolean }
-      cost: { input: number; output: number }
+      capabilities: {
+        reasoning?: boolean
+        toolcall: boolean
+      }
+      cost: {
+        input: number
+        output: number
+        cache?: { read: number; write: number }
+      }
+      limit?: {
+        context: number
+        input?: number
+        output: number
+      }
     }
   }
 }

@@ -8,7 +8,7 @@ export function ContextBar() {
 
   return (
     <Show when={hasContext()}>
-      <div class="border-t border-vscode-border/40 px-3 py-1.5 animate-slide-up">
+      <div class="border-t border-vscode-border px-4 py-2">
         <div class="flex items-center gap-2">
           <span class="text-[10px] font-medium uppercase tracking-[0.06em] text-vscode-muted">Context</span>
           <div class="flex flex-1 flex-wrap gap-1 overflow-hidden">
@@ -28,7 +28,7 @@ export function ContextBar() {
             </For>
           </div>
           <button
-            class="shrink-0 rounded p-0.5 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
+            class="shrink-0 p-0.5 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
             onClick={clearContextFiles}
             title="Clear all"
           >
@@ -44,7 +44,7 @@ export function ContextBar() {
 
 function ContextChip(props: { label: string; onRemove: () => void }) {
   return (
-    <span class="inline-flex items-center gap-1 rounded border border-vscode-border/50 bg-vscode-card/60 px-1.5 py-0.5 text-[10px] text-vscode-fg transition-colors hover:border-vscode-accent/30">
+    <span class="inline-flex items-center gap-1 border border-vscode-border bg-vscode-card px-1.5 py-0.5 text-[10px] text-vscode-fg transition-colors hover:border-vscode-accent/30">
       <span class="max-w-[120px] truncate">{props.label}</span>
       <button
         class="text-vscode-muted/50 transition-colors hover:text-vscode-error"

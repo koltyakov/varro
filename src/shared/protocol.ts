@@ -43,6 +43,7 @@ export type ExtensionMessage =
 
 export type WebviewMessage =
   | { type: "context/request" }
+  | { type: "files/drop"; payload: { paths: string[] } }
   | { type: "file/read"; payload: { path: string } }
   | { type: "vscode/open"; payload: { path: string; line?: number } }
   | { type: "vscode/diff"; payload: { path: string } }

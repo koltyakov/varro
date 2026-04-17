@@ -13,6 +13,32 @@ import type {
 } from "../types"
 import type { EditorContext, DroppedFile, ServerStatus } from "../../shared/protocol"
 
+const STORAGE_KEYS = {
+  selectedAgent: "opencode.selectedAgent",
+  selectedModel: "opencode.selectedModel",
+} as const
+
+type SelectedModel = { providerID: string; modelID: string }
+
+function readStored<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(key)
+    return raw ? (JSON.parse(raw) as T) : null
+  } catch {
+    return null
+  }
+}
+
+function writeStored(key: string, value: unknown) {
+  try {
+    if (value === null || value === undefined) {
+      window.localStorage.removeItem(key)
+      return
+    }
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {}
+}
+
 interface AppState {
   serverStatus: ServerStatus
   editorContext: EditorContext
@@ -28,8 +54,9 @@ interface AppState {
   streamingText: string
   agents: Agent[]
   providers: Provider[]
+  providerDefaults: Record<string, string>
   selectedAgent: string | null
-  selectedModel: { providerID: string; modelID: string } | null
+  selectedModel: SelectedModel | null
 }
 
 export const [state, setState] = createStore<AppState>({
@@ -47,8 +74,9 @@ export const [state, setState] = createStore<AppState>({
   streamingText: "",
   agents: [],
   providers: [],
-  selectedAgent: null,
-  selectedModel: null,
+  providerDefaults: {},
+  selectedAgent: readStored<string>(STORAGE_KEYS.selectedAgent),
+  selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
 })
 
 export const [inputText, setInputText] = createSignal("")
@@ -83,6 +111,16 @@ export function removeContextFile(path: string) {
 
 export function clearContextFiles() {
   setState("droppedFiles", [])
+}
+
+export function setSelectedAgent(agent: string | null) {
+  setState("selectedAgent", agent)
+  writeStored(STORAGE_KEYS.selectedAgent, agent)
+}
+
+export function setSelectedModel(model: SelectedModel | null) {
+  setState("selectedModel", model)
+  writeStored(STORAGE_KEYS.selectedModel, model)
 }
 
 export function upsertMessage(msg: { info: Message; parts: Part[] }) {

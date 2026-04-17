@@ -1,6 +1,6 @@
 import * as vscode from "vscode"
 import { readFileSync } from "fs"
-import { resolve, join } from "path"
+import { resolve, join, basename } from "path"
 import type { ExtensionMessage, ServerStatus, WebviewMessage } from "../shared/protocol"
 import { ContextProvider } from "./context-provider"
 import { OpenCodeServer } from "./server"
@@ -80,6 +80,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case "context/request":
         this.postContext()
         break
+      case "files/drop":
+        this.handleDroppedPaths(msg.payload.paths)
+        break
       case "file/read":
         this.contextProvider.readFile(msg.payload.path).then(() => {
           this.postContext()
@@ -132,6 +135,41 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   post(msg: ExtensionMessage) {
     this.view?.webview.postMessage(msg)
+  }
+
+  private async handleDroppedPaths(paths: string[]) {
+    const dropped = await Promise.all(
+      Array.from(new Set(paths)).map(async (path) => {
+        try {
+          const uri = vscode.Uri.file(path)
+          const stat = await vscode.workspace.fs.stat(uri)
+          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri)
+          const relativePath = workspaceFolder
+            ? vscode.workspace.asRelativePath(uri, false)
+            : basename(path)
+
+          return {
+            path,
+            relativePath,
+            type:
+              stat.type & vscode.FileType.Directory
+                ? ("directory" as const)
+                : ("file" as const),
+          }
+        } catch (err) {
+          logger.warn(`Ignoring dropped path ${path}: ${err instanceof Error ? err.message : String(err)}`)
+          return null
+        }
+      }),
+    )
+
+    const normalized = dropped.filter(
+      (item): item is { path: string; relativePath: string; type: "file" | "directory" } => Boolean(item),
+    )
+
+    if (normalized.length > 0) {
+      this.postDroppedFiles(normalized)
+    }
   }
 
   private postContext() {

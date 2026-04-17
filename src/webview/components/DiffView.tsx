@@ -1,10 +1,10 @@
-import { Show, For } from "solid-js"
+import { For } from "solid-js"
 import type { FileDiff } from "../types"
 
 export function DiffView(props: { diffs: FileDiff[] }) {
   return (
-    <div class="mx-1 my-1 rounded-lg border border-vscode-border/50 overflow-hidden">
-      <div class="flex items-center justify-between bg-vscode-card/60 px-2.5 py-1.5">
+    <div class="my-2 border border-vscode-border">
+      <div class="flex items-center justify-between bg-vscode-card px-3 py-1.5">
         <span class="text-[11px] font-medium text-vscode-fg">Changes</span>
         <span class="text-[10px] text-vscode-muted">
           {props.diffs.length} file{props.diffs.length !== 1 ? "s" : ""}
@@ -19,7 +19,7 @@ export function DiffView(props: { diffs: FileDiff[] }) {
 
 function DiffItem(props: { diff: FileDiff }) {
   return (
-    <div class="flex items-center justify-between px-2.5 py-1 text-[12px] transition-colors hover:bg-vscode-hover/50 border-t border-vscode-border/30">
+    <div class="flex items-center justify-between border-t border-vscode-border px-3 py-1 text-[12px] transition-colors hover:bg-vscode-hover">
       <span class="truncate text-vscode-fg">{props.diff.file}</span>
       <span class="ml-2 shrink-0 text-[10px] font-mono">
         <span class="text-vscode-success">+{props.diff.additions}</span>

@@ -21,24 +21,15 @@
   --color-vscode-hover: var(--vscode-list-hoverBackground, #2a2d2e);
   --color-vscode-diff-add: var(--vscode-diffEditor-insertedTextBackground, rgba(156, 204, 156, 0.2));
   --color-vscode-diff-del: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
-  --color-vscode-user-bubble: var(--vscode-button-background, #0e639c);
-  --color-vscode-user-fg: var(--vscode-button-foreground, #ffffff);
-  --color-vscode-assistant-bg: var(--vscode-editor-background, #1e1e1e);
   --font-mono: var(--vscode-editor-font-family, "SF Mono", "Menlo", "Monaco", "Consolas", monospace);
   --font-sans: var(--vscode-font-family, system-ui, -apple-system, sans-serif);
-  --animate-fade-in: fade-in 0.15s ease-out;
-  --animate-slide-up: slide-up 0.2s ease-out;
+  --animate-fade-in: fade-in 0.12s ease-out;
   --animate-pulse-soft: pulse-soft 1.5s ease-in-out infinite;
 }
 
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@keyframes slide-up {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes pulse-soft {
@@ -74,7 +65,6 @@ body,
 }
 ::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
-  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--color-vscode-fg) 35%, transparent);
@@ -95,14 +85,13 @@ textarea {
 }
 
 .markdown-content p {
-  margin-bottom: 0.6em;
+  margin-bottom: 0.5em;
 }
 .markdown-content p:last-child {
   margin-bottom: 0;
 }
 .markdown-content pre {
-  margin: 0.6em 0;
-  border-radius: 6px;
+  margin: 0.75em 0;
   overflow-x: auto;
 }
 .markdown-content code {
@@ -111,13 +100,12 @@ textarea {
 }
 .markdown-content code:not(pre code) {
   background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 1px 4px;
 }
 .markdown-content ul,
 .markdown-content ol {
   padding-left: 1.5em;
-  margin-bottom: 0.6em;
+  margin-bottom: 0.5em;
 }
 .markdown-content a {
   color: var(--color-vscode-link);
@@ -130,19 +118,19 @@ textarea {
 .markdown-content h2,
 .markdown-content h3,
 .markdown-content h4 {
-  margin-top: 0.6em;
+  margin-top: 0.75em;
   margin-bottom: 0.4em;
   font-weight: 600;
 }
 .markdown-content blockquote {
   border-left: 2px solid var(--color-vscode-border);
-  padding-left: 0.8em;
+  padding-left: 0.75em;
   color: var(--color-vscode-muted);
-  margin: 0.6em 0;
+  margin: 0.75em 0;
 }
 .markdown-content table {
   border-collapse: collapse;
-  margin: 0.6em 0;
+  margin: 0.75em 0;
   width: 100%;
 }
 .markdown-content th,
@@ -158,7 +146,6 @@ textarea {
 
 kbd {
   border: 1px solid var(--color-vscode-border);
-  border-radius: 3px;
   padding: 0px 4px;
   font-size: 10px;
   background: var(--color-vscode-input-bg);
@@ -179,7 +166,7 @@ button {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  transition: background-color 0.1s, color 0.1s, opacity 0.1s;
+  transition: background-color 0.1s, color 0.1s;
 }
 
 button:disabled {
@@ -191,7 +178,7 @@ button:focus-visible,
 textarea:focus-visible,
 input:focus-visible {
   outline: 1px solid var(--color-vscode-accent);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 ::selection {
