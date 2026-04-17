@@ -8,29 +8,34 @@ export function PermissionPrompt(props: { permission: Permission }) {
   const sessionId = () => props.permission.sessionID
 
   return (
-    <div class="mx-2 my-1 rounded border border-vscode-warning bg-vscode-card px-3 py-2">
-      <div class="mb-2 text-xs font-medium text-vscode-warning">Permission Required</div>
-      <div class="mb-2 text-xs">{props.permission.title}</div>
+    <div class="mx-3 my-1.5 rounded-lg border border-vscode-warning/30 bg-vscode-warning/5 px-3 py-2.5 animate-slide-up">
+      <div class="mb-1.5 flex items-center gap-1.5">
+        <svg class="h-3.5 w-3.5 text-vscode-warning" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 1.5a.5.5 0 01.44.27l6.5 12a.5.5 0 01-.44.73H1.5a.5.5 0 01-.44-.73l6.5-12A.5.5 0 018 1.5zM8 5a.75.75 0 00-.75.75v2.5a.75.75 0 001.5 0v-2.5A.75.75 0 008 5zm0 6a1 1 0 100-2 1 1 0 000 2z" />
+        </svg>
+        <span class="text-[11px] font-semibold text-vscode-warning">Permission Required</span>
+      </div>
+      <div class="mb-2 text-[12px] text-vscode-fg">{props.permission.title}</div>
       <Show when={props.permission.metadata}>
-        <div class="mb-2 max-h-[100px] overflow-y-auto rounded bg-vscode-input-bg p-1.5 text-[10px]">
+        <div class="mb-2 max-h-[80px] overflow-y-auto rounded-md bg-vscode-input-bg/60 p-1.5 text-[10px]">
           <pre class="whitespace-pre-wrap text-vscode-muted">
             {JSON.stringify(props.permission.metadata, null, 2)}
           </pre>
         </div>
       </Show>
       <div class="flex items-center justify-between">
-        <label class="flex items-center gap-1 text-[10px] text-vscode-muted">
+        <label class="flex items-center gap-1.5 text-[10px] text-vscode-muted cursor-pointer">
           <input
             type="checkbox"
             checked={remember()}
             onChange={(e) => setRemember(e.currentTarget.checked)}
-            class="h-3 w-3"
+            class="h-3 w-3 rounded accent-vscode-accent"
           />
-          Remember for this session
+          Remember for session
         </label>
-        <div class="flex gap-1">
+        <div class="flex gap-1.5">
           <button
-            class="rounded px-2 py-0.5 text-xs bg-vscode-input-bg text-vscode-fg hover:bg-vscode-hover"
+            class="rounded-md px-2.5 py-1 text-[11px] font-medium bg-vscode-input-bg text-vscode-fg transition-colors hover:bg-vscode-hover"
             onClick={() =>
               respondPermission(sessionId(), props.permission.id, "deny", remember())
             }
@@ -38,7 +43,7 @@ export function PermissionPrompt(props: { permission: Permission }) {
             Deny
           </button>
           <button
-            class="rounded px-2 py-0.5 text-xs bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hover"
+            class="rounded-md px-2.5 py-1 text-[11px] font-medium bg-vscode-accent text-white transition-colors hover:bg-vscode-accent/80"
             onClick={() =>
               respondPermission(sessionId(), props.permission.id, "allow", remember())
             }

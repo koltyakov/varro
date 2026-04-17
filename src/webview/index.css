@@ -21,8 +21,29 @@
   --color-vscode-hover: var(--vscode-list-hoverBackground, #2a2d2e);
   --color-vscode-diff-add: var(--vscode-diffEditor-insertedTextBackground, rgba(156, 204, 156, 0.2));
   --color-vscode-diff-del: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
+  --color-vscode-user-bubble: var(--vscode-button-background, #0e639c);
+  --color-vscode-user-fg: var(--vscode-button-foreground, #ffffff);
+  --color-vscode-assistant-bg: var(--vscode-editor-background, #1e1e1e);
   --font-mono: var(--vscode-editor-font-family, "SF Mono", "Menlo", "Monaco", "Consolas", monospace);
   --font-sans: var(--vscode-font-family, system-ui, -apple-system, sans-serif);
+  --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-slide-up: slide-up 0.2s ease-out;
+  --animate-pulse-soft: pulse-soft 1.5s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
 }
 
 * {
@@ -38,20 +59,25 @@ body,
   width: 100%;
   overflow: hidden;
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-vscode-fg);
   background: var(--color-vscode-sidebar);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-vscode-border);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 35%, transparent);
 }
 
 input,
@@ -63,35 +89,35 @@ textarea {
 
 .code-block {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.5;
   tab-size: 2;
 }
 
 .markdown-content p {
-  margin-bottom: 0.7em;
+  margin-bottom: 0.6em;
 }
 .markdown-content p:last-child {
   margin-bottom: 0;
 }
 .markdown-content pre {
-  margin: 0.75em 0;
+  margin: 0.6em 0;
   border-radius: 6px;
   overflow-x: auto;
 }
 .markdown-content code {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 .markdown-content code:not(pre code) {
-  background: var(--color-vscode-input-bg);
-  padding: 2px 5px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
+  padding: 1px 5px;
   border-radius: 3px;
 }
 .markdown-content ul,
 .markdown-content ol {
   padding-left: 1.5em;
-  margin-bottom: 0.75em;
+  margin-bottom: 0.6em;
 }
 .markdown-content a {
   color: var(--color-vscode-link);
@@ -104,24 +130,40 @@ textarea {
 .markdown-content h2,
 .markdown-content h3,
 .markdown-content h4 {
-  margin-top: 0.75em;
-  margin-bottom: 0.5em;
+  margin-top: 0.6em;
+  margin-bottom: 0.4em;
   font-weight: 600;
 }
 .markdown-content blockquote {
-  border-left: 3px solid var(--color-vscode-border);
-  padding-left: 0.9em;
+  border-left: 2px solid var(--color-vscode-border);
+  padding-left: 0.8em;
   color: var(--color-vscode-muted);
-  margin: 0.75em 0;
+  margin: 0.6em 0;
+}
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  width: 100%;
+}
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid var(--color-vscode-border);
+  padding: 4px 8px;
+  text-align: left;
+}
+.markdown-content th {
+  background: var(--color-vscode-input-bg);
+  font-weight: 600;
 }
 
 kbd {
   border: 1px solid var(--color-vscode-border);
   border-radius: 3px;
-  padding: 1px 4px;
-  font-size: 11px;
+  padding: 0px 4px;
+  font-size: 10px;
   background: var(--color-vscode-input-bg);
   color: var(--color-vscode-muted);
+  font-family: var(--font-mono);
 }
 
 button,
@@ -130,9 +172,28 @@ input {
   -webkit-font-smoothing: antialiased;
 }
 
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  transition: background-color 0.1s, color 0.1s, opacity 0.1s;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
 button:focus-visible,
 textarea:focus-visible,
 input:focus-visible {
   outline: 1px solid var(--color-vscode-accent);
   outline-offset: 1px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-vscode-accent) 40%, transparent);
 }

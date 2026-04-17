@@ -9,7 +9,7 @@ export function ToolCall(props: { part: ToolPart }) {
   const statusColor = () => {
     switch (state().status) {
       case "pending":
-        return "text-vscode-muted"
+        return "text-vscode-muted/60"
       case "running":
         return "text-vscode-accent"
       case "completed":
@@ -19,16 +19,16 @@ export function ToolCall(props: { part: ToolPart }) {
     }
   }
 
-  const statusIcon = () => {
+  const statusDot = () => {
     switch (state().status) {
       case "pending":
-        return "○"
+        return "bg-vscode-muted/40"
       case "running":
-        return "◐"
+        return "bg-vscode-accent animate-pulse-soft"
       case "completed":
-        return "✓"
+        return "bg-vscode-success"
       case "error":
-        return "✕"
+        return "bg-vscode-error"
     }
   }
 
@@ -44,23 +44,27 @@ export function ToolCall(props: { part: ToolPart }) {
     const input: any = s.input || {}
     const keys = ["file_path", "path", "command", "query", "pattern"]
     for (const k of keys) {
-      if (typeof input[k] === "string") return String(input[k]).slice(0, 120)
+      if (typeof input[k] === "string") return String(input[k]).slice(0, 100)
     }
     return ""
   }
 
   return (
-    <div class="my-1 rounded border border-vscode-border bg-vscode-card">
+    <div class={`my-1 rounded-lg border transition-colors ${
+      state().status === "running"
+        ? "border-vscode-accent/30 bg-vscode-accent/5"
+        : state().status === "error"
+          ? "border-vscode-error/20 bg-vscode-error/5"
+          : "border-vscode-border/50 bg-vscode-card/50"
+    }`}>
       <button
-        class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-vscode-hover"
+        class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-vscode-hover/50"
         onClick={() => setExpanded(!expanded())}
       >
-        <span class={`shrink-0 text-sm ${statusColor()} ${state().status === "running" ? "animate-pulse" : ""}`}>
-          {statusIcon()}
-        </span>
-        <span class="shrink-0 font-medium">{title()}</span>
+        <span class={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot()}`} />
+        <span class="shrink-0 font-medium text-vscode-fg">{title()}</span>
         <Show when={preview()}>
-          <span class="min-w-0 flex-1 truncate font-mono text-vscode-muted">
+          <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-vscode-muted">
             {preview()}
           </span>
         </Show>
@@ -68,14 +72,14 @@ export function ToolCall(props: { part: ToolPart }) {
           {(() => {
             const s = state() as import("../types").ToolStateCompleted
             return (
-              <span class="shrink-0 text-vscode-muted">
+              <span class="shrink-0 text-[10px] text-vscode-muted">
                 {formatDuration(s.time.end - s.time.start)}
               </span>
             )
           })()}
         </Show>
         <svg
-          class={`h-3 w-3 shrink-0 text-vscode-muted transition-transform ${expanded() ? "rotate-90" : ""}`}
+          class={`h-3 w-3 shrink-0 text-vscode-muted/50 transition-transform duration-150 ${expanded() ? "rotate-90" : ""}`}
           viewBox="0 0 16 16"
           fill="currentColor"
         >
@@ -84,34 +88,37 @@ export function ToolCall(props: { part: ToolPart }) {
       </button>
 
       <Show when={expanded()}>
-        <div class="border-t border-vscode-border px-2 py-1.5 text-xs">
+        <div class="border-t border-vscode-border/40 px-2.5 py-2 text-[11px] animate-fade-in">
           <Show when={Object.keys(state().input || {}).length > 0}>
-            <div class="mb-1.5">
-              <div class="mb-0.5 text-[10px] uppercase tracking-wider text-vscode-muted">
+            <div class="mb-2">
+              <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-vscode-muted">
                 Input
               </div>
-              <pre class="overflow-x-auto whitespace-pre-wrap rounded bg-vscode-input-bg p-1.5 font-mono text-[11px] text-vscode-fg">
+              <pre class="overflow-x-auto whitespace-pre-wrap rounded-md bg-vscode-input-bg/60 p-2 font-mono text-[11px] text-vscode-fg">
                 {JSON.stringify(state().input, null, 2)}
               </pre>
             </div>
           </Show>
           <Show when={state().status === "completed"}>
             <div>
-              <div class="mb-0.5 text-[10px] uppercase tracking-wider text-vscode-muted">
+              <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-vscode-muted">
                 Output
               </div>
-              <pre class="max-h-[240px] overflow-auto whitespace-pre-wrap rounded bg-vscode-input-bg p-1.5 font-mono text-[11px]">
+              <pre class="max-h-[200px] overflow-auto whitespace-pre-wrap rounded-md bg-vscode-input-bg/60 p-2 font-mono text-[11px] text-vscode-fg">
                 {(state() as any).output || "(empty)"}
               </pre>
             </div>
           </Show>
           <Show when={state().status === "error"}>
-            <div class="rounded bg-vscode-input-bg p-1.5 text-vscode-error">
+            <div class="rounded-md bg-vscode-error/10 p-2 text-vscode-error">
               {(state() as any).error}
             </div>
           </Show>
           <Show when={state().status === "running"}>
-            <div class="text-vscode-muted">Running…</div>
+            <div class="flex items-center gap-1.5 text-vscode-muted">
+              <span class="h-1 w-1 rounded-full bg-vscode-accent animate-pulse-soft" />
+              Running…
+            </div>
           </Show>
         </div>
       </Show>
