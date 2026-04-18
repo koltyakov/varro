@@ -279,7 +279,7 @@ export type Agent = {
     bash: { [key: string]: "ask" | "allow" | "deny" }
     webfetch?: "ask" | "allow" | "deny"
   }
-  model?: { modelID: string; providerID: string }
+  model?: { modelID: string; providerID: string; variant?: string }
   tools: { [key: string]: boolean }
   maxSteps?: number
 }
@@ -305,6 +305,16 @@ export type Provider = {
         context: number
         input?: number
         output: number
+      }
+      variants?: {
+        [key: string]: {
+          reasoningEffort?: string
+          reasoningSummary?: string
+          effort?: string
+          thinking?: { type?: string; budgetTokens?: number }
+          include?: string[]
+          [key: string]: unknown
+        }
       }
     }
   }

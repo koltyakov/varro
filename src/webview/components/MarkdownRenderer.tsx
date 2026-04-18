@@ -12,7 +12,8 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-  return `<pre class="code-block overflow-x-auto rounded bg-vscode-input-bg p-2"><code${lang ? ` class="language-${lang}"` : ""}>${escaped}</code></pre>`
+  const label = lang ? `<div class="code-block-header">${lang}</div>` : ""
+  return `<div class="code-block-shell">${label}<pre class="code-block overflow-x-auto"><code${lang ? ` class="language-${lang}"` : ""}>${escaped}</code></pre></div>`
 }
 
 marked.setOptions({

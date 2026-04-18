@@ -1,9 +1,10 @@
 {
-  "name": "opencode-vscode",
+  "name": "vscode",
   "displayName": "OpenCode",
   "description": "AI-powered agentic coding assistant powered by OpenCode",
   "version": "0.1.0",
-  "publisher": "opencode",
+  "publisher": "koltyakov",
+  "repository": "https://github.com/koltyakov/vschat",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"

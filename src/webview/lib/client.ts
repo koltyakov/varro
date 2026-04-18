@@ -49,9 +49,11 @@ export const client = {
     async sendAsync(
       id: string,
       body: {
-        parts: Array<{ type: string; text?: string; [key: string]: unknown }>
+        parts: Array<{ type: string; text?: string; mime?: string; filename?: string; url?: string; [key: string]: unknown }>
         model?: { providerID: string; modelID: string }
         agent?: string
+        noReply?: boolean
+        variant?: string
       },
     ): Promise<void> {
       await apiCall("POST", `/session/${id}/prompt_async`, body)

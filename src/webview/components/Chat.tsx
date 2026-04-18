@@ -1,4 +1,4 @@
-import { state, showSessionPicker, setShowSessionPicker } from "../lib/state"
+import { state, showSessionPicker, setShowSessionPicker, showSettings, setShowSettings } from "../lib/state"
 import { Show, For } from "solid-js"
 import { selectSession, createSession, deleteSession, shareSession } from "../hooks/useOpenCode"
 import { MessageList } from "./MessageList"
@@ -6,6 +6,7 @@ import { ChatInput } from "./ChatInput"
 import { ContextBar } from "./ContextBar"
 import { PermissionPrompt } from "./PermissionPrompt"
 import { TodoList } from "./TodoList"
+import { SettingsPanel } from "./SettingsPanel"
 
 export function Chat() {
   const activeTitle = () => {
@@ -39,6 +40,15 @@ export function Chat() {
           </svg>
         </button>
         <div class="ml-2 flex shrink-0 items-center gap-1">
+          <button
+            class="p-1.5 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+            onClick={() => setShowSettings(!showSettings())}
+            title="Settings"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M6.1 1h3.8l.4 1.9c.4.1.8.3 1.2.5l1.8-.8 1.9 3.3-1.5 1.2c0 .2.1.5.1.7s0 .5-.1.7l1.5 1.2-1.9 3.3-1.8-.8c-.4.2-.8.4-1.2.5L9.9 15H6.1l-.4-1.9c-.4-.1-.8-.3-1.2-.5l-1.8.8-1.9-3.3 1.5-1.2A5 5 0 012 8c0-.2 0-.5.1-.7L.6 6.1l1.9-3.3 1.8.8c.4-.2.8-.4 1.2-.5L6.1 1zM8 5.2A2.8 2.8 0 108 10.8 2.8 2.8 0 008 5.2z" />
+            </svg>
+          </button>
           <Show when={state.activeSessionId}>
             <button
               class="p-1.5 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
@@ -64,6 +74,10 @@ export function Chat() {
 
       <Show when={showSessionPicker()}>
         <SessionOverlay />
+      </Show>
+
+      <Show when={showSettings()}>
+        <SettingsPanel />
       </Show>
 
       <Show when={state.todos.length > 0}>

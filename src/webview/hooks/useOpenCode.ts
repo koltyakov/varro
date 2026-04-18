@@ -5,9 +5,11 @@ import {
   setState,
   setSelectedAgent,
   setSelectedModel,
+  resolveSelectedModel,
   setTheme,
   setIsLoading,
   setError,
+  clearClipboardImages,
   clearMessages,
   upsertMessageInfo,
   upsertPart,
@@ -108,12 +110,16 @@ async function loadProviders() {
     const res = await client.config.providers()
     setState("providers", res.providers)
     setState("providerDefaults", res.default || {})
-    if (state.selectedModel) {
-      const provider = res.providers.find((item) => item.id === state.selectedModel?.providerID)
-      const model = provider?.models[state.selectedModel.modelID]
-      if (!provider || !model) {
-        setSelectedModel(null)
-      }
+    const effectiveModel = resolveSelectedModel(state.selectedModel, res.providers, res.default || {})
+    if (state.selectedModel && !effectiveModel) {
+      setSelectedModel(null)
+    } else if (
+      effectiveModel &&
+      state.selectedModel &&
+      state.selectedModel.variant &&
+      !effectiveModel.variant
+    ) {
+      setSelectedModel({ providerID: effectiveModel.providerID, modelID: effectiveModel.modelID })
     }
   } catch {}
 }
@@ -176,14 +182,14 @@ export async function deleteSession(id: string) {
   } catch {}
 }
 
-export async function sendMessage(text: string) {
+export async function sendMessage(text: string, options?: { noReply?: boolean }) {
   let sessionId = state.activeSessionId
   if (!sessionId) {
     sessionId = await createSession()
     if (!sessionId) return
   }
 
-  const parts: Array<{ type: string; text: string }> = []
+  const parts: Array<{ type: string; text?: string; mime?: string; filename?: string; url?: string }> = []
   if (text.trim()) parts.push({ type: "text", text })
 
   const sel = state.editorContext.selection
@@ -199,6 +205,15 @@ export async function sendMessage(text: string) {
     parts.push({ type: "text", text: `@${file.relativePath}` })
   }
 
+  for (const image of state.clipboardImages) {
+    parts.push({
+      type: "file",
+      mime: image.mime,
+      filename: image.filename,
+      url: image.url,
+    })
+  }
+
   if (parts.length === 0) return
 
   setIsLoading(true)
@@ -208,11 +223,17 @@ export async function sendMessage(text: string) {
     parts: typeof parts
     model?: { providerID: string; modelID: string }
     agent?: string
+    noReply?: boolean
+    variant?: string
   } = { parts }
   if (state.selectedAgent) body.agent = state.selectedAgent
-  if (state.selectedModel) body.model = state.selectedModel
+  const effectiveModel = resolveSelectedModel(state.selectedModel, state.providers, state.providerDefaults)
+  if (effectiveModel) body.model = effectiveModel
+  if (effectiveModel?.variant) body.variant = effectiveModel.variant
+  if (options?.noReply) body.noReply = true
 
   setState("droppedFiles", [])
+  clearClipboardImages()
 
   try {
     await sendPromptWithFallback(sessionId, body)
@@ -229,6 +250,8 @@ async function sendPromptWithFallback(
     parts: Array<{ type: string; text?: string; [key: string]: unknown }>
     model?: { providerID: string; modelID: string }
     agent?: string
+    noReply?: boolean
+    variant?: string
   },
 ) {
   try {
@@ -238,6 +261,7 @@ async function sendPromptWithFallback(
 
     const retryBody = { ...body }
     delete retryBody.model
+    delete retryBody.variant
     setSelectedModel(null)
     await client.session.sendAsync(sessionId, retryBody)
   }

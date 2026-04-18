@@ -1,9 +1,10 @@
-import { createSignal, For, Show } from "solid-js"
-import { state } from "../lib/state"
+import { createMemo, createSignal, For, Show } from "solid-js"
+import { getVisibleProviders, state } from "../lib/state"
 
 interface Selection {
   providerID?: string
   modelID?: string
+  variant?: string
   agent?: string
 }
 
@@ -12,6 +13,8 @@ export function ModelPicker(props: {
   onClose: () => void
 }) {
   const [tab, setTab] = createSignal<"agents" | "models">("agents")
+  const defaultModelLabel = createMemo(() => "Automatic (OpenCode default)")
+  const visibleProviders = createMemo(() => getVisibleProviders(state.providers))
 
   return (
     <div class="fixed inset-0 z-50 flex items-end justify-center" onClick={props.onClose}>
@@ -68,7 +71,7 @@ export function ModelPicker(props: {
           </Show>
           <Show when={tab() === "models"}>
             <Show
-              when={state.providers.length > 0}
+              when={visibleProviders().length > 0}
               fallback={<EmptyState label="No providers configured" />}
             >
               <button
@@ -80,12 +83,12 @@ export function ModelPicker(props: {
                   props.onClose()
                 }}
               >
-                <span class="min-w-0 truncate font-medium">Automatic</span>
+                <span class="min-w-0 truncate font-medium">{defaultModelLabel()}</span>
                 <Show when={state.selectedModel === null}>
                   <span class="text-vscode-accent text-xs">✓</span>
                 </Show>
               </button>
-              <For each={state.providers}>
+              <For each={visibleProviders()}>
                 {(provider) => (
                   <div>
                     <div class="bg-vscode-sidebar px-4 py-1.5 text-[10px] uppercase tracking-wider text-vscode-muted">
@@ -93,28 +96,56 @@ export function ModelPicker(props: {
                     </div>
                     <For each={Object.values(provider.models)}>
                       {(model) => (
-                        <button
-                          class={`flex w-full items-center justify-between gap-2 px-4 py-2 text-left text-[13px] transition-colors hover:bg-vscode-hover ${
-                            state.selectedModel?.providerID === provider.id &&
-                            state.selectedModel?.modelID === model.id
-                              ? "bg-vscode-hover"
-                              : ""
-                          }`}
-                          onClick={() => {
-                            props.onSelect({ providerID: provider.id, modelID: model.id })
-                            props.onClose()
-                          }}
-                        >
-                          <span class="min-w-0 truncate">{model.name}</span>
-                          <Show
-                            when={
+                        <div class="border-b border-vscode-border/30 last:border-b-0">
+                          <button
+                            class={`flex w-full items-center justify-between gap-2 px-4 py-2 text-left text-[13px] transition-colors hover:bg-vscode-hover ${
                               state.selectedModel?.providerID === provider.id &&
-                              state.selectedModel?.modelID === model.id
-                            }
+                              state.selectedModel?.modelID === model.id &&
+                              !state.selectedModel?.variant
+                                ? "bg-vscode-hover"
+                                : ""
+                            }`}
+                            onClick={() => {
+                              props.onSelect({ providerID: provider.id, modelID: model.id, variant: undefined })
+                              props.onClose()
+                            }}
                           >
-                            <span class="text-vscode-accent text-xs">✓</span>
+                            <span class="min-w-0 truncate">{model.name}</span>
+                            <Show
+                              when={
+                                state.selectedModel?.providerID === provider.id &&
+                                state.selectedModel?.modelID === model.id &&
+                                !state.selectedModel?.variant
+                              }
+                            >
+                              <span class="text-vscode-accent text-xs">✓</span>
+                            </Show>
+                          </button>
+                          <Show when={Object.keys(model.variants || {}).length > 0}>
+                            <div class="flex flex-wrap gap-1 px-4 pb-2">
+                              <For each={Object.keys(model.variants || {})}>
+                                {(variant) => (
+                                  <button
+                                    class={`border px-2 py-1 text-[11px] transition-colors ${
+                                      state.selectedModel?.providerID === provider.id &&
+                                      state.selectedModel?.modelID === model.id &&
+                                      state.selectedModel?.variant === variant
+                                        ? "border-vscode-accent/50 bg-vscode-accent/10 text-vscode-fg"
+                                        : "border-vscode-border/50 bg-vscode-card/40 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
+                                    }`}
+                                    onClick={() => {
+                                      props.onSelect({ providerID: provider.id, modelID: model.id, variant })
+                                      props.onClose()
+                                    }}
+                                    title={`Thinking level: ${formatThinkingLabel(variant)}`}
+                                  >
+                                    {formatThinkingLabel(variant)}
+                                  </button>
+                                )}
+                              </For>
+                            </div>
                           </Show>
-                        </button>
+                        </div>
                       )}
                     </For>
                   </div>
@@ -145,4 +176,11 @@ function TabButton(props: { active: boolean; onClick: () => void; label: string 
 
 function EmptyState(props: { label: string }) {
   return <div class="px-4 py-8 text-center text-[12px] text-vscode-muted">{props.label}</div>
+}
+
+function formatThinkingLabel(variant: string) {
+  return variant
+    .split(/[-_]/g)
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(" ")
 }

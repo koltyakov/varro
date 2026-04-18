@@ -45,14 +45,20 @@ export function Message(props: { info: MessageType; parts: Part[] }) {
   )
 
   return (
-    <div class="animate-fade-in">
+    <article class="animate-fade-in">
       <div class="flex items-start gap-3">
-        <div class={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center text-[10px] font-semibold ${isUser() ? "text-vscode-accent" : "text-vscode-muted"}`}>
+        <div
+          class={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center border text-[11px] font-semibold ${
+            isUser()
+              ? "border-vscode-accent/35 bg-vscode-accent/8 text-vscode-accent"
+              : "border-vscode-border/60 bg-vscode-card/60 text-vscode-muted"
+          }`}
+        >
           {isUser() ? "U" : "A"}
         </div>
         <div class="min-w-0 flex-1">
-          <div class="mb-1.5 flex items-center gap-2">
-            <span class={`text-[11px] font-medium ${isUser() ? "text-vscode-accent" : "text-vscode-muted"}`}>
+          <div class="mb-2.5 flex items-center gap-2">
+            <span class={`text-[11px] font-medium uppercase tracking-[0.08em] ${isUser() ? "text-vscode-accent" : "text-vscode-muted"}`}>
               {isUser() ? "You" : roleLabel(props.info)}
             </span>
             <Show when={!isUser() && (props.info as any).cost > 0}>
@@ -68,7 +74,7 @@ export function Message(props: { info: MessageType; parts: Part[] }) {
             <AssistantMessageContent info={assistant()!} parts={props.parts} />
           </Show>
           <Show when={(props.info as any).error?.data?.message}>
-            <div class="mt-3 border-l-2 border-vscode-error bg-vscode-error/8 px-3 py-2 text-xs text-vscode-error">
+            <div class="mt-3 border border-vscode-error/35 bg-vscode-error/8 px-3 py-2.5 text-[12px] leading-6 text-vscode-error">
               {((props.info as any).error?.data?.message as string) || "error"}
             </div>
           </Show>
@@ -84,7 +90,7 @@ export function Message(props: { info: MessageType; parts: Part[] }) {
           </Show>
         </div>
       </div>
-    </div>
+    </article>
   )
 }
 
@@ -99,15 +105,19 @@ function cap(s: string): string {
 }
 
 function UserMessageContent(props: { parts: Part[] }) {
-  const text = () =>
-    props.parts
-      .filter((p): p is Part & { type: "text" } => p.type === "text")
-      .map((p) => p.text)
-      .join("\n\n")
-
   return (
-    <div class="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-vscode-fg">
-      {text() || <span class="text-vscode-muted italic">(no content)</span>}
+    <div class="border border-vscode-accent/20 bg-vscode-accent/5 px-4 py-3 space-y-3 text-[14px] leading-7 text-vscode-fg">
+      <For each={props.parts.filter((part) => part.type === "text" || part.type === "file")}>
+        {(part) => {
+          if (part.type === "text") {
+            return <div class="whitespace-pre-wrap break-words">{part.text}</div>
+          }
+          return <MessagePart part={part} />
+        }}
+      </For>
+      <Show when={!props.parts.some((part) => part.type === "text" || part.type === "file")}>
+        <span class="text-vscode-muted italic">(no content)</span>
+      </Show>
     </div>
   )
 }
@@ -127,7 +137,7 @@ function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] 
   )
 
   return (
-    <div class="space-y-2 text-[13px] leading-relaxed">
+    <div class="border border-vscode-border/50 bg-vscode-bg/25 px-4 py-3 space-y-3 text-[14px] leading-7">
       <For each={props.parts}>
         {(part) => {
           const matchedRun = part.type === "subtask" ? childRuns()[subtaskIndex++] : undefined
@@ -149,6 +159,12 @@ function AssistantMeta(props: {
   const contextWindow = createMemo(() => getContextWindow(props.info, state.providers))
   const taskDuration = () => getAssistantDuration(props.info)
   const totalTokens = () => getAssistantTotalTokens(props.info)
+  const modelLabel = createMemo(() => {
+    const provider = state.providers.find((item) => item.id === props.info.providerID)
+    const model = provider?.models[props.info.modelID]
+    const base = `${provider?.name || props.info.providerID} / ${model?.name || props.info.modelID}`
+    return props.info.variant ? `${base} [${formatVariantLabel(props.info.variant)}]` : base
+  })
   const diffSummary = createMemo(() =>
     props.diffs.reduce(
       (acc, diff) => {
@@ -161,8 +177,9 @@ function AssistantMeta(props: {
   )
 
   return (
-    <div class="mt-3 space-y-2">
-      <div class="flex flex-wrap gap-1.5 text-[10px]">
+    <div class="mt-3 space-y-2.5">
+      <div class="flex flex-wrap gap-1.5 text-[11px]">
+        <MetaChip label="Model" value={modelLabel()} />
         <MetaChip label="In" value={`${formatNumber(props.info.tokens.input)} tok`} />
         <MetaChip label="Out" value={`${formatNumber(props.info.tokens.output)} tok`} />
         <Show when={props.info.tokens.reasoning > 0}>
@@ -203,9 +220,16 @@ function AssistantMeta(props: {
 
 function MetaChip(props: { label: string; value: string }) {
   return (
-    <span class="inline-flex items-center gap-1 rounded border border-vscode-border/50 bg-vscode-card/50 px-2 py-1 text-vscode-muted">
-      <span class="uppercase tracking-[0.08em] text-vscode-muted/70">{props.label}</span>
-      <span class="text-vscode-fg">{props.value}</span>
+    <span class="inline-flex max-w-full items-center gap-1.5 border border-vscode-border/50 bg-vscode-card/50 px-2 py-1 text-vscode-muted">
+      <span class="uppercase tracking-[0.08em] text-vscode-muted/70 shrink-0">{props.label}</span>
+      <span class="text-vscode-fg truncate">{props.value}</span>
     </span>
   )
+}
+
+function formatVariantLabel(variant: string) {
+  return variant
+    .split(/[-_]/g)
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(" ")
 }

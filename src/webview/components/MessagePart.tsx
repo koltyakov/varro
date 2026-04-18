@@ -17,7 +17,7 @@ export function MessagePart(props: {
     switch (part.type) {
       case "text":
         return (
-          <div class="markdown-content text-[13px] leading-relaxed">
+          <div class="markdown-content text-[14px] leading-7 text-vscode-fg">
             <MarkdownRenderer content={(part as any).text} />
           </div>
         )
@@ -27,8 +27,8 @@ export function MessagePart(props: {
         return <ReasoningBlock text={part.text} />
       case "agent":
         return (
-          <div class="my-2 flex items-center gap-2 border-l-2 border-vscode-accent/40 bg-vscode-accent/5 px-3 py-1.5 text-[12px] text-vscode-muted">
-            <svg class="h-3 w-3 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+          <div class="my-3 flex items-center gap-2 border border-vscode-accent/25 bg-vscode-accent/5 px-3 py-2 text-[12px] text-vscode-muted">
+            <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 1.5a.5.5 0 01.5.5v1.05A5 5 0 0113 8a.5.5 0 01-1 0 4 4 0 10-4 4 .5.5 0 010 1 5 5 0 01-.5-9.95V2a.5.5 0 01.5-.5z" />
             </svg>
             <span>Handing off to</span>
@@ -37,8 +37,8 @@ export function MessagePart(props: {
         )
       case "patch":
         return (
-          <div class="my-2 flex items-center gap-2 border-l-2 border-vscode-success/50 bg-vscode-success/5 px-3 py-1.5 text-[12px]">
-            <svg class="h-3 w-3 shrink-0 text-vscode-success" viewBox="0 0 16 16" fill="currentColor">
+          <div class="my-3 flex items-center gap-2 border border-vscode-success/25 bg-vscode-success/5 px-3 py-2 text-[12px]">
+            <svg class="h-3.5 w-3.5 shrink-0 text-vscode-success" viewBox="0 0 16 16" fill="currentColor">
               <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
             </svg>
             <span class="text-vscode-muted">Applied patch to</span>
@@ -47,9 +47,9 @@ export function MessagePart(props: {
         )
       case "retry":
         return (
-          <div class="my-2 border-l-2 border-vscode-warning/50 bg-vscode-warning/5 px-3 py-1.5 text-[12px] text-vscode-warning">
+          <div class="my-3 border border-vscode-warning/25 bg-vscode-warning/6 px-3 py-2 text-[12px] text-vscode-warning">
             <div class="flex items-center gap-1.5">
-              <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 2a6 6 0 106 6 1 1 0 012 0 8 8 0 11-3.5-6.6V1a1 1 0 012 0v3.5a1 1 0 01-1 1H10a1 1 0 010-2h1.3A5.98 5.98 0 008 2z" />
               </svg>
               <span>Retry attempt {part.attempt}</span>
@@ -61,7 +61,7 @@ export function MessagePart(props: {
         )
       case "compaction":
         return (
-          <div class="my-1 text-[11px] italic text-vscode-muted/50">
+          <div class="my-2 border border-vscode-border/35 bg-vscode-card/30 px-3 py-2 text-[11px] italic text-vscode-muted/70">
             Context compacted ({part.auto ? "auto" : "manual"})
             <Show when={part.overflow}> after overflow</Show>
           </div>
@@ -71,14 +71,7 @@ export function MessagePart(props: {
       case "step-finish":
         return <StepFinishBlock part={part} />
       case "file":
-        return (
-          <div class="my-1 inline-flex items-center gap-1.5 border border-vscode-border bg-vscode-card px-2 py-0.5 text-[11px] text-vscode-muted">
-            <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-            </svg>
-            {part.filename || "(file)"}
-          </div>
-        )
+        return <FileBlock part={part} />
       default:
         return null
     }
@@ -91,13 +84,13 @@ function ReasoningBlock(props: { text: string }) {
   const [expanded, setExpanded] = createSignal(false)
 
   return (
-    <div class="my-1">
+    <div class="my-3 border border-vscode-border/35 bg-vscode-card/25">
       <button
-        class="flex items-center gap-1.5 px-1 py-0.5 text-[11px] italic text-vscode-muted/60 transition-colors hover:text-vscode-muted"
+        class="flex w-full items-center gap-1.5 px-3 py-2 text-[11px] italic text-vscode-muted/70 transition-colors hover:bg-vscode-hover/40 hover:text-vscode-muted"
         onClick={() => setExpanded(!expanded())}
       >
         <svg
-          class={`h-3 w-3 transition-transform ${expanded() ? "rotate-90" : ""}`}
+          class={`h-3.5 w-3.5 transition-transform ${expanded() ? "rotate-90" : ""}`}
           viewBox="0 0 16 16"
           fill="currentColor"
         >
@@ -106,7 +99,7 @@ function ReasoningBlock(props: { text: string }) {
         Thinking
       </button>
       <Show when={expanded()}>
-        <div class="mt-1.5 whitespace-pre-wrap border-l-2 border-vscode-border bg-vscode-card/50 p-3 text-[11px] italic leading-relaxed text-vscode-muted animate-fade-in">
+        <div class="whitespace-pre-wrap border-t border-vscode-border/35 bg-vscode-bg/30 px-3 py-3 text-[11px] italic leading-6 text-vscode-muted animate-fade-in">
           {props.text}
         </div>
       </Show>
@@ -120,20 +113,24 @@ function SubtaskBlock(props: { part: SubtaskPart; run?: AssistantMessage }) {
     if (run()) {
       const provider = state.providers.find((item) => item.id === run()!.providerID)
       const model = provider?.models[run()!.modelID]
-      return `${provider?.name || run()!.providerID} / ${model?.name || run()!.modelID}`
+      return formatModelLabel(provider?.name || run()!.providerID, model?.name || run()!.modelID, run()!.variant)
     }
 
     if (props.part.model) {
       const provider = state.providers.find((item) => item.id === props.part.model!.providerID)
       const model = provider?.models[props.part.model!.modelID]
-      return `${provider?.name || props.part.model!.providerID} / ${model?.name || props.part.model!.modelID}`
+      return formatModelLabel(
+        provider?.name || props.part.model!.providerID,
+        model?.name || props.part.model!.modelID,
+        props.part.model!.variant,
+      )
     }
 
     return null
   })
 
   return (
-    <div class="my-2 border-l-2 border-vscode-border px-3 py-1.5 text-[12px]">
+    <div class="my-3 border border-vscode-border/40 bg-vscode-card/20 px-3 py-2 text-[12px]">
       <div class="flex items-center gap-1.5 font-medium text-vscode-fg">
         <div class="h-1.5 w-1.5 bg-vscode-accent" />
         {props.part.description}
@@ -163,6 +160,17 @@ function SubtaskBlock(props: { part: SubtaskPart; run?: AssistantMessage }) {
   )
 }
 
+function formatModelLabel(providerName: string, modelName: string, variant?: string) {
+  return `${providerName} / ${modelName}${variant ? ` [${formatVariantLabel(variant)}]` : ""}`
+}
+
+function formatVariantLabel(variant: string) {
+  return variant
+    .split(/[-_]/g)
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(" ")
+}
+
 function StepFinishBlock(props: { part: StepFinishPart }) {
   const totalTokens =
     props.part.tokens.total ||
@@ -173,7 +181,7 @@ function StepFinishBlock(props: { part: StepFinishPart }) {
       (props.part.tokens.cache.write || 0)
 
   return (
-    <div class="my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-vscode-border/50 bg-vscode-card/30 px-3 py-1.5 text-[11px] text-vscode-muted">
+    <div class="my-3 flex flex-wrap items-center gap-x-3 gap-y-1 border border-vscode-border/40 bg-vscode-card/25 px-3 py-2 text-[11px] text-vscode-muted">
       <span class="font-medium text-vscode-fg">Step finished</span>
       <span>Reason: {props.part.reason}</span>
       <span>In: {formatNumber(props.part.tokens.input)}</span>
@@ -183,5 +191,34 @@ function StepFinishBlock(props: { part: StepFinishPart }) {
       </Show>
       <span>Total: {formatNumber(totalTokens)}</span>
     </div>
+  )
+}
+
+function FileBlock(props: { part: Extract<Part, { type: "file" }> }) {
+  const isImage = () => props.part.mime.startsWith("image/")
+
+  return (
+    <Show
+      when={isImage()}
+      fallback={
+        <div class="my-2 inline-flex items-center gap-2 border border-vscode-border bg-vscode-card px-2.5 py-1 text-[11px] text-vscode-muted">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
+          </svg>
+          {props.part.filename || "(file)"}
+        </div>
+      }
+    >
+      <figure class="my-3 border border-vscode-border/40 bg-vscode-card/20 p-3">
+        <img
+          src={props.part.url}
+          alt={props.part.filename || "image"}
+          class="max-h-[320px] w-auto max-w-full border border-vscode-border/40 bg-vscode-bg/40 object-contain"
+        />
+        <figcaption class="mt-2 text-[11px] text-vscode-muted">
+          {props.part.filename || "image"} <span class="text-vscode-muted/70">· {props.part.mime}</span>
+        </figcaption>
+      </figure>
+    </Show>
   )
 }

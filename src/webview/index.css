@@ -80,32 +80,84 @@ textarea {
 .code-block {
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
   tab-size: 2;
 }
 
+.code-block-shell {
+  margin: 1em 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-card) 78%, transparent);
+}
+
+.code-block-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 55%, transparent);
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-vscode-muted);
+  background: color-mix(in srgb, var(--color-vscode-bg) 55%, transparent);
+}
+
+.code-block-shell pre.code-block {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+
+.markdown-content {
+  color: var(--color-vscode-fg);
+  line-height: 1.75;
+  word-break: break-word;
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
 .markdown-content p {
-  margin-bottom: 0.5em;
+  margin: 0 0 0.9em;
 }
 .markdown-content p:last-child {
   margin-bottom: 0;
 }
-.markdown-content pre {
-  margin: 0.75em 0;
-  overflow-x: auto;
+
+.markdown-content strong {
+  color: color-mix(in srgb, var(--color-vscode-fg) 96%, white 4%);
+  font-weight: 650;
 }
+
+.markdown-content em {
+  color: color-mix(in srgb, var(--color-vscode-fg) 88%, var(--color-vscode-muted) 12%);
+}
+
 .markdown-content code {
   font-family: var(--font-mono);
   font-size: 12px;
 }
 .markdown-content code:not(pre code) {
-  background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
-  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 50%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-bg) 50%, transparent);
+  padding: 1px 5px;
+  color: color-mix(in srgb, var(--color-vscode-fg) 92%, white 8%);
 }
 .markdown-content ul,
 .markdown-content ol {
-  padding-left: 1.5em;
-  margin-bottom: 0.5em;
+  margin: 0.9em 0;
+  padding-left: 1.45em;
+}
+.markdown-content li {
+  margin: 0.3em 0;
+}
+.markdown-content li > ul,
+.markdown-content li > ol {
+  margin: 0.4em 0;
 }
 .markdown-content a {
   color: var(--color-vscode-link);
@@ -118,29 +170,51 @@ textarea {
 .markdown-content h2,
 .markdown-content h3,
 .markdown-content h4 {
-  margin-top: 0.75em;
-  margin-bottom: 0.4em;
+  margin: 1.2em 0 0.45em;
   font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.markdown-content h1 {
+  font-size: 1.45em;
+}
+.markdown-content h2 {
+  font-size: 1.26em;
+}
+.markdown-content h3 {
+  font-size: 1.12em;
+}
+.markdown-content h4 {
+  font-size: 1em;
 }
 .markdown-content blockquote {
-  border-left: 2px solid var(--color-vscode-border);
-  padding-left: 0.75em;
+  margin: 1em 0;
+  border-left: 2px solid color-mix(in srgb, var(--color-vscode-accent) 55%, var(--color-vscode-border) 45%);
+  background: color-mix(in srgb, var(--color-vscode-card) 45%, transparent);
+  padding: 10px 12px;
   color: var(--color-vscode-muted);
-  margin: 0.75em 0;
+}
+.markdown-content hr {
+  margin: 1.2em 0;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
 }
 .markdown-content table {
+  display: block;
+  overflow-x: auto;
   border-collapse: collapse;
-  margin: 0.75em 0;
+  margin: 1em 0;
   width: 100%;
 }
 .markdown-content th,
 .markdown-content td {
-  border: 1px solid var(--color-vscode-border);
-  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  padding: 7px 10px;
   text-align: left;
+  vertical-align: top;
 }
 .markdown-content th {
-  background: var(--color-vscode-input-bg);
+  background: color-mix(in srgb, var(--color-vscode-card) 82%, transparent);
   font-weight: 600;
 }
 

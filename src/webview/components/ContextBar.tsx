@@ -1,59 +1,146 @@
 import { Show, For } from "solid-js"
-import { state, removeContextFile, clearContextFiles } from "../lib/state"
+import { state, removeClipboardImage, removeContextFile, clearClipboardImages, clearContextFiles } from "../lib/state"
 
 export function ContextBar() {
   const files = () => state.droppedFiles
+  const clipboardImages = () => state.clipboardImages
   const selection = () => state.editorContext.selection
-  const hasContext = () => files().length > 0 || !!selection()
+  const activeFile = () => state.editorContext.activeFile
+  const hasContext = () => files().length > 0 || clipboardImages().length > 0 || !!selection()
+  const activeContext = () => {
+    const file = activeFile()
+    if (!file) return null
+
+    const selectedLines = selection()
+    if (!selectedLines) return { filename: file.relativePath, lineRange: null as string | null }
+
+    const lineRange =
+      selectedLines.startLine === selectedLines.endLine
+        ? `L${selectedLines.startLine}`
+        : `L${selectedLines.startLine}-${selectedLines.endLine}`
+
+    return { filename: file.relativePath, lineRange }
+  }
 
   return (
     <Show when={hasContext()}>
-      <div class="border-t border-vscode-border px-4 py-2">
+      <div class="border-t border-vscode-border px-4 py-2.5">
         <div class="flex items-center gap-2">
-          <span class="text-[10px] font-medium uppercase tracking-[0.06em] text-vscode-muted">Context</span>
-          <div class="flex flex-1 flex-wrap gap-1 overflow-hidden">
-            <Show when={selection()}>
+          <div class="flex flex-1 flex-wrap gap-1.5 overflow-hidden">
+            <Show when={activeContext()}>
               <ContextChip
-                label={`L${selection()!.startLine}-${selection()!.endLine}`}
-                onRemove={() => {}}
+                label={activeContext()!.filename}
+                detail={activeContext()!.lineRange}
+                title={
+                  activeContext()!.lineRange
+                    ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
+                    : activeContext()!.filename
+                }
               />
             </Show>
             <For each={files()}>
               {(file) => (
                 <ContextChip
                   label={file.relativePath}
-                  onRemove={() => removeContextFile(file.path)}
+                  title={file.relativePath}
+                  onRemove={files().length > 0 ? () => removeContextFile(file.path) : undefined}
                 />
               )}
             </For>
+            <For each={clipboardImages()}>
+              {(image) => (
+                <ImageContextChip image={image} onRemove={() => removeClipboardImage(image.id)} />
+              )}
+            </For>
           </div>
-          <button
-            class="shrink-0 p-0.5 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
-            onClick={clearContextFiles}
-            title="Clear all"
-          >
-            <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-            </svg>
-          </button>
+          <div class="flex items-center gap-1">
+            <Show when={clipboardImages().length > 0}>
+              <button
+                class="shrink-0 p-1 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
+                onClick={clearClipboardImages}
+                title="Clear pasted images"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                </svg>
+              </button>
+            </Show>
+            <Show when={files().length > 0}>
+              <button
+                class="shrink-0 p-1 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
+                onClick={clearContextFiles}
+                title="Clear dropped files"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                </svg>
+              </button>
+            </Show>
+          </div>
         </div>
       </div>
     </Show>
   )
 }
 
-function ContextChip(props: { label: string; onRemove: () => void }) {
+function ContextChip(props: { label: string; detail?: string | null; title?: string; onRemove?: () => void }) {
   return (
-    <span class="inline-flex items-center gap-1 border border-vscode-border bg-vscode-card px-1.5 py-0.5 text-[10px] text-vscode-fg transition-colors hover:border-vscode-accent/30">
-      <span class="max-w-[120px] truncate">{props.label}</span>
-      <button
-        class="text-vscode-muted/50 transition-colors hover:text-vscode-error"
-        onClick={props.onRemove}
-      >
-        <svg class="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-        </svg>
-      </button>
+    <span
+      class="inline-flex min-w-0 items-center gap-1.5 border border-vscode-border bg-vscode-card px-2.5 py-1.5 text-[11px] text-vscode-fg transition-colors hover:border-vscode-accent/30"
+      title={props.title}
+    >
+      <span class="max-w-[180px] truncate">{props.label}</span>
+      <Show when={props.detail}>
+        <span class="shrink-0 text-vscode-muted/80">{props.detail}</span>
+      </Show>
+      <Show when={props.onRemove}>
+        <button
+          class="text-vscode-muted/50 transition-colors hover:text-vscode-error"
+          onClick={() => props.onRemove?.()}
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+          </svg>
+        </button>
+      </Show>
     </span>
   )
+}
+
+function ImageContextChip(props: {
+  image: { url: string; filename: string; size: number }
+  onRemove?: () => void
+}) {
+  return (
+    <span
+      class="inline-flex min-w-0 items-center gap-2 border border-vscode-border bg-vscode-card px-2 py-1.5 text-[11px] text-vscode-fg transition-colors hover:border-vscode-accent/30"
+      title={`${props.image.filename} · ${formatImageSize(props.image.size)}`}
+    >
+      <img
+        src={props.image.url}
+        alt={props.image.filename}
+        class="h-8 w-8 shrink-0 border border-vscode-border/50 object-cover"
+      />
+      <span class="min-w-0">
+        <span class="block max-w-[180px] truncate">{props.image.filename}</span>
+        <span class="block text-vscode-muted/80">{formatImageSize(props.image.size)}</span>
+      </span>
+      <Show when={props.onRemove}>
+        <button
+          class="text-vscode-muted/50 transition-colors hover:text-vscode-error"
+          onClick={() => props.onRemove?.()}
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+          </svg>
+        </button>
+      </Show>
+    </span>
+  )
+}
+
+function formatImageSize(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size >= 100 * 1024 ? 0 : 1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
