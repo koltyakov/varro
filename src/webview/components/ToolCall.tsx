@@ -55,10 +55,15 @@ export function ToolCall(props: { part: ToolPart }) {
           })()}
         </Show>
         <Show when={state().status === 'running'}>
-          <span class="tool-invocation-running-label">running</span>
+          <span class="tool-invocation-running-label">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" style={{ animation: 'spin 0.8s linear infinite' }}>
+              <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z" opacity="0.25" />
+              <path d="M8 0a8 8 0 018 8h-1.5A6.5 6.5 0 008 1.5V0z" />
+            </svg>
+          </span>
         </Show>
         <Show when={state().status === 'error'}>
-          <span class="tool-invocation-error-label">error</span>
+          <span class="tool-invocation-error-label">failed</span>
         </Show>
         <svg
           class={`tool-invocation-chevron ${expanded() ? 'expanded' : ''}`}

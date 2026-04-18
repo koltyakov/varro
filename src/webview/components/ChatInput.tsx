@@ -75,9 +75,31 @@ export function ChatInput() {
     e.preventDefault();
     e.stopPropagation();
     setIsDraggingOver(false);
+
     const paths = await collectDroppedPaths(e.dataTransfer);
     if (paths.length > 0) {
       postMessage({ type: 'files/drop', payload: { paths } });
+      return;
+    }
+
+    const dataTransfer = e.dataTransfer;
+    if (!dataTransfer) return;
+
+    const uriList = await readItemByType(dataTransfer, 'text/uri-list');
+    if (uriList) {
+      const uris = parseDroppedText(uriList);
+      if (uris.length > 0) {
+        postMessage({ type: 'files/drop', payload: { paths: uris } });
+        return;
+      }
+    }
+
+    const plainText = await readItemByType(dataTransfer, 'text/plain');
+    if (plainText) {
+      const uris = parseDroppedText(plainText);
+      if (uris.length > 0) {
+        postMessage({ type: 'files/drop', payload: { paths: uris } });
+      }
     }
   }
 
@@ -277,33 +299,20 @@ export function ChatInput() {
       </Show>
 
       <Show when={showVariantPicker() && availableVariants().length > 0}>
-        <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={() => setShowVariantPicker(false)}>
-          <div
-            class="w-full overflow-hidden rounded-lg border border-vscode-border/50 bg-vscode-card shadow-[0_-4px_16px_rgba(0,0,0,0.3)]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <For each={availableVariants()}>
-              {(v) => (
-                <button
-                  class={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-vscode-hover ${
-                    effectiveVariant() === v ? 'text-vscode-accent' : 'text-vscode-fg'
-                  }`}
-                  onClick={() => {
-                    const m = currentModel();
-                    setSelectedModel({
-                      providerID: m.providerID!,
-                      modelID: m.modelID!,
-                      variant: v,
-                    });
-                    setShowVariantPicker(false);
-                  }}
-                >
-                  {formatThinkingLabel(v)}
-                </button>
-              )}
-            </For>
-          </div>
-        </div>
+        <VariantPicker
+          variants={availableVariants()}
+          selected={effectiveVariant()}
+          onSelect={(v) => {
+            const m = currentModel();
+            setSelectedModel({
+              providerID: m.providerID!,
+              modelID: m.modelID!,
+              variant: v,
+            });
+            setShowVariantPicker(false);
+          }}
+          onClose={() => setShowVariantPicker(false)}
+        />
       </Show>
 
       <div
@@ -387,8 +396,8 @@ export function ChatInput() {
               isLoading()
                 ? busyPromptMode() === 'steer'
                   ? 'Steer current run...'
-                  : 'Describe what to build'
-                : 'Describe what to build'
+                  : 'Ask anything...'
+                : 'Ask anything...'
             }
             value={inputText()}
             onInput={(e) => {
@@ -399,6 +408,12 @@ export function ChatInput() {
             onPaste={handlePaste}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
+            onClick={() => {
+              setShowAgentPicker(false);
+              setShowModelPicker(false);
+              setShowVariantPicker(false);
+              setShowBusyMenu(false);
+            }}
           />
         </div>
 
@@ -410,6 +425,7 @@ export function ChatInput() {
                 onClick={() => {
                   setShowAgentPicker(!showAgentPicker());
                   setShowModelPicker(false);
+                  setShowVariantPicker(false);
                   setShowBusyMenu(false);
                 }}
                 title="Select agent"
@@ -438,9 +454,6 @@ export function ChatInput() {
               <Show when={currentModel().modelName} fallback={<span>Model</span>}>
                 <span class="toolbar-picker-label model-name">
                   {currentModel().modelName}
-                  <Show when={currentModel().providerName}>
-                    <span class="toolbar-picker-detail"> ({currentModel().providerName})</span>
-                  </Show>
                 </span>
               </Show>
               <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
@@ -627,8 +640,8 @@ export function ChatInput() {
                 disabled={!canSend()}
                 title="Send (Enter)"
               >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M1 1.91L1.78 1.5 15 8 1.78 14.5 1 14.09 3.61 8 1 1.91zM3.39 8.5L1.72 13.09 13.31 8 1.72 2.91 3.39 7.5H9v1H3.39z" />
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3 3l10 5-10 5V9.5l6-1.5-6-1.5V3z" />
                 </svg>
               </button>
             </Show>
@@ -643,34 +656,72 @@ function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => 
   return (
     <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
       <div
-        class="w-full overflow-hidden rounded-lg border border-vscode-border/50 bg-vscode-card shadow-[0_-4px_16px_rgba(0,0,0,0.3)]"
+        class="dropdown-menu w-full"
         onClick={(e) => e.stopPropagation()}
       >
-        <For each={state.agents}>
-          {(agent) => (
-            <button
-              class={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-vscode-hover ${
-                state.selectedAgent === agent.name ? 'text-vscode-accent' : 'text-vscode-fg'
-              }`}
-              onClick={() => props.onSelect(agent.name)}
-            >
-              <span class="min-w-0 flex-1 truncate">{agent.name}</span>
-              <Show when={agent.description}>
-                <span class="shrink-0 text-[11px] text-vscode-muted/60">{agent.description}</span>
-              </Show>
-              <Show when={state.selectedAgent === agent.name}>
-                <svg class="h-3.5 w-3.5 shrink-0 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                </svg>
-              </Show>
-            </button>
-          )}
-        </For>
-        <Show when={state.agents.length === 0}>
-          <div class="px-3 py-6 text-center text-[11px] text-vscode-muted">
-            No agents available
-          </div>
-        </Show>
+        <div class="py-1">
+          <For each={state.agents}>
+            {(agent) => (
+              <button
+                class={`dropdown-item ${state.selectedAgent === agent.name ? 'selected' : ''}`}
+                onClick={() => props.onSelect(agent.name)}
+              >
+                <span class="dropdown-check">
+                  <Show when={state.selectedAgent === agent.name}>
+                    <svg class="h-3 w-3 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                    </svg>
+                  </Show>
+                </span>
+                <span class="min-w-0 flex-1 truncate">{agent.name}</span>
+                <Show when={agent.description}>
+                  <span class="dropdown-hint">{agent.description}</span>
+                </Show>
+              </button>
+            )}
+          </For>
+          <Show when={state.agents.length === 0}>
+            <div class="px-3 py-4 text-center text-[11px] text-vscode-muted">
+              No agents available
+            </div>
+          </Show>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VariantPicker(props: {
+  variants: string[];
+  selected: string | null;
+  onSelect: (v: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
+      <div
+        class="dropdown-menu w-full"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div class="py-1">
+          <For each={props.variants}>
+            {(v) => (
+              <button
+                class={`dropdown-item ${props.selected === v ? 'selected' : ''}`}
+                onClick={() => props.onSelect(v)}
+              >
+                <span class="dropdown-check">
+                  <Show when={props.selected === v}>
+                    <svg class="h-3 w-3 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                    </svg>
+                  </Show>
+                </span>
+                <span class="min-w-0 flex-1">{formatThinkingLabel(v)}</span>
+              </button>
+            )}
+          </For>
+        </div>
       </div>
     </div>
   );
@@ -753,7 +804,22 @@ async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<s
 function isPathDrop(dataTransfer: DataTransfer | null): boolean {
   if (!dataTransfer) return false;
   const types = Array.from(dataTransfer.types || []);
-  return types.includes('Files') || types.includes('text/uri-list');
+  return (
+    types.includes('Files') ||
+    types.includes('text/uri-list') ||
+    types.includes('text/plain')
+  );
+}
+
+function readItemByType(dataTransfer: DataTransfer, type: string): Promise<string> {
+  return new Promise((resolve) => {
+    const item = Array.from(dataTransfer.items).find((i) => i.type === type && i.kind === 'string');
+    if (!item) {
+      resolve(dataTransfer.getData(type) || '');
+      return;
+    }
+    item.getAsString((value) => resolve(value || ''));
+  });
 }
 
 function readDroppedItem(item: DataTransferItem): Promise<string> {
@@ -773,6 +839,15 @@ function parseDroppedText(value: string): string[] {
 }
 
 function decodeDroppedPath(value: string): string | null {
+  if (value.startsWith('vscode-file://')) {
+    try {
+      const url = new URL(value);
+      const pathname = decodeURIComponent(url.pathname);
+      return pathname.replace(/^\/([A-Za-z]:\/)/, '$1');
+    } catch {
+      return null;
+    }
+  }
   if (value.startsWith('file://')) {
     try {
       const pathname = decodeURIComponent(new URL(value).pathname);

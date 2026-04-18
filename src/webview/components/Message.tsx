@@ -33,7 +33,7 @@ export function Message(props: { info: MessageType; parts: Part[]; isFirstInGrou
                   when={isUser()}
                   fallback={
                     <svg class="codicon" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-avatar-fg)' }}>
-                      <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3.5 8.5a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0zM6.5 6a1 1 0 100-2 1 1 0 000 2zm3 0a1 1 0 100-2 1 1 0 000 2z" />
+                      <path d="M14 4.5V14a2 2 0 01-2 2H4a2 2 0 01-2-2V2a2 2 0 012-2h5.5L14 4.5zm-3 0A1.5 1.5 0 019.5 3V1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V4.5h-2zM5.5 7h5a.5.5 0 010 1h-5a.5.5 0 010-1zm0 2h5a.5.5 0 010 1h-5a.5.5 0 010-1zm0 2h3a.5.5 0 010 1h-3a.5.5 0 010-1z" />
                     </svg>
                   }
                 >

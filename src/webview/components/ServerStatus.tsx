@@ -7,20 +7,20 @@ export function ServerStatus() {
   return (
     <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center">
       <Show when={status().state === 'starting'}>
-        <div class="flex items-center gap-1.5">
-          <span class="h-1.5 w-1.5 rounded-full bg-vscode-accent animate-pulse-soft" />
+        <div class="flex items-center gap-2">
+          <span class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft" />
           <span
-            class="h-1.5 w-1.5 rounded-full bg-vscode-accent animate-pulse-soft"
+            class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft"
             style={{ 'animation-delay': '0.3s' }}
           />
           <span
-            class="h-1.5 w-1.5 rounded-full bg-vscode-accent animate-pulse-soft"
+            class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft"
             style={{ 'animation-delay': '0.6s' }}
           />
         </div>
         <div>
           <p class="text-[13px] font-medium text-vscode-fg">Starting OpenCode...</p>
-          <p class="mt-1 text-[12px] text-vscode-muted">Spawning the local server</p>
+          <p class="mt-1.5 text-[12px] text-vscode-muted/70">Spawning the local server</p>
         </div>
       </Show>
 

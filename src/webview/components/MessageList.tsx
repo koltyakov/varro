@@ -48,9 +48,10 @@ export function MessageList() {
         }}
       </For>
       <Show when={isLoading()}>
-        <div class="interactive-item-container interactive-response" style={{ padding: '8px 16px' }}>
+        <div class="interactive-item-container interactive-response" style={{ padding: '10px 16px' }}>
           <div class="loading-indicator">
             <div class="loading-spinner" />
+            <span style={{ 'font-size': '11px', color: 'var(--color-vscode-muted)' }}>Generating</span>
             <span class="chat-animated-ellipsis" />
           </div>
         </div>

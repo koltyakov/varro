@@ -92,6 +92,9 @@ function ReasoningBlock(props: { text: string }) {
         >
           <path d="M6 4l4 4-4 4z" />
         </svg>
+        <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" style={{ opacity: 0.6 }}>
+          <path d="M8 1C4.69 1 2 3.47 2 6.5c0 1.59.74 3.03 1.95 4.07-.06.49-.35 1.38-1.45 2.43 1.75 0 3.1-.68 3.81-1.2.53.13 1.1.2 1.69.2 3.31 0 6-2.47 6-5.5S11.31 1 8 1z" />
+        </svg>
         <Show when={isStreaming()} fallback={<span class="thinking-label">Thinking</span>}>
           <span class="thinking-label shimmer-progress">Thinking</span>
         </Show>

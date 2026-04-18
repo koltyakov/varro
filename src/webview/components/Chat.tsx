@@ -16,16 +16,16 @@ export function Chat() {
 
   return (
     <div class="interactive-session">
-      <div class="flex h-[36px] shrink-0 items-center justify-between px-3">
+      <div class="flex h-[38px] shrink-0 items-center justify-between border-b border-vscode-border/8 px-3">
         <button
-          class="flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
+          class="flex min-w-0 items-center gap-1.5 rounded px-2 py-1 text-[12px] text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
           onClick={() => setShowSessionPicker(!showSessionPicker())}
           title="Switch session"
         >
           <svg class="h-[14px] w-[14px] shrink-0" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.2A5.8 5.8 0 1113.8 8 5.8 5.8 0 018 2.2zM7.4 4v4.4l3.2 1.9.6-1-2.6-1.5V4H7.4z" />
+            <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM14 3v2H2V3h12zM2 13V6h12v7H2z" />
           </svg>
-          <span class="max-w-[180px] truncate">{activeTitle()}</span>
+          <span class="max-w-[200px] truncate font-medium">{activeTitle()}</span>
           <svg
             class={`h-3 w-3 shrink-0 opacity-50 transition-transform ${showSessionPicker() ? 'rotate-180' : ''}`}
             viewBox="0 0 16 16"
@@ -35,10 +35,10 @@ export function Chat() {
           </svg>
         </button>
 
-        <div class="flex items-center">
+        <div class="flex items-center gap-0.5">
           <Show when={state.activeSessionId}>
             <button
-              class="flex h-[26px] w-[26px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
+              class="flex h-[28px] w-[28px] items-center justify-center rounded-md text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
               onClick={shareSession}
               title="Share session"
             >
@@ -48,7 +48,7 @@ export function Chat() {
             </button>
           </Show>
           <button
-            class="flex h-[26px] w-[26px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
+            class="flex h-[28px] w-[28px] items-center justify-center rounded-md text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
             onClick={() => createSession()}
             title="New chat"
           >
@@ -82,7 +82,7 @@ export function Chat() {
 
 function SessionOverlay() {
   return (
-    <div class="absolute inset-x-0 top-[36px] z-40 max-h-[400px] overflow-hidden border-b border-vscode-request-border/30 bg-vscode-sidebar shadow-[0_4px_16px_rgba(0,0,0,0.3)] animate-fade-in">
+    <div class="absolute inset-x-0 top-[38px] z-40 max-h-[400px] overflow-hidden border-b border-vscode-request-border/30 bg-vscode-sidebar shadow-[0_4px_16px_rgba(0,0,0,0.3)] animate-fade-in">
       <div class="flex h-[32px] items-center justify-between px-4">
         <span class="text-[11px] font-semibold uppercase tracking-wide text-vscode-muted">
           Sessions
@@ -126,10 +126,10 @@ function SessionOverlay() {
                     <Show
                       when={isActive()}
                       fallback={
-                        <span class="block h-[8px] w-[8px] rounded-full bg-vscode-accent" />
+                        <span class="block h-[6px] w-[6px] rounded-full border-[1.5px] border-vscode-muted/40" />
                       }
                     >
-                      <span class="block h-[8px] w-[8px] rounded-full border-[1.5px] border-vscode-muted" />
+                      <span class="block h-[7px] w-[7px] rounded-full bg-vscode-accent" />
                     </Show>
                   </div>
 
