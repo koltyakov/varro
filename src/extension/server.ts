@@ -1,4 +1,5 @@
-import { ChildProcess, spawn } from "child_process"
+import type { ChildProcess} from "child_process";
+import { spawn } from "child_process"
 import { delimiter, join } from "path"
 import { existsSync } from "fs"
 import * as vscode from "vscode"
@@ -210,7 +211,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private processSseChunk(chunk: string) {
-    let dataLines: string[] = []
+    const dataLines: string[] = []
     for (const line of chunk.split("\n")) {
       if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart())
     }

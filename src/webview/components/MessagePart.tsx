@@ -1,6 +1,6 @@
 import { Show, createMemo, createSignal } from "solid-js"
 import { state } from "../lib/state"
-import { formatDuration, formatNumber, getAssistantDuration, getAssistantTotalTokens } from "../lib/message-metrics"
+import { formatDuration, getAssistantDuration } from "../lib/message-metrics"
 import type { AssistantMessage, Part, SubtaskPart } from "../types"
 import { MarkdownRenderer } from "./MarkdownRenderer"
 import { ToolCall } from "./ToolCall"
@@ -17,7 +17,7 @@ export function MessagePart(props: {
     switch (part.type) {
       case "text":
         return (
-          <div class="markdown-content text-[13px] leading-relaxed text-vscode-fg">
+          <div class="markdown-content text-[13px] leading-[1.5] text-vscode-fg">
             <MarkdownRenderer content={(part as any).text} />
           </div>
         )
@@ -27,42 +27,32 @@ export function MessagePart(props: {
         return <ReasoningBlock text={part.text} />
       case "agent":
         return (
-          <div class="my-2 flex items-center gap-2 rounded-md border border-vscode-accent/20 bg-vscode-accent/4 px-3 py-2 text-[12px] text-vscode-muted">
-            <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8 1.5a.5.5 0 01.5.5v1.05A5 5 0 0113 8a.5.5 0 01-1 0 4 4 0 10-4 4 .5.5 0 010 1 5 5 0 01-.5-9.95V2a.5.5 0 01.5-.5z" />
-            </svg>
+          <div class="my-0.5 flex items-center gap-1.5 text-[11px] text-vscode-muted/40">
+            <span>→</span>
             <span>Handing off to</span>
-            <span class="font-medium text-vscode-fg">{part.name}</span>
+            <span class="text-vscode-fg/70">{part.name}</span>
           </div>
         )
       case "patch":
         return (
-          <div class="my-2 flex items-center gap-2 rounded-md border border-vscode-success/20 bg-vscode-success/4 px-3 py-2 text-[12px]">
-            <svg class="h-3.5 w-3.5 shrink-0 text-vscode-success" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-            </svg>
-            <span class="text-vscode-muted">Applied patch to</span>
-            <span class="font-medium text-vscode-fg">{part.files.length} file{part.files.length === 1 ? "" : "s"}</span>
+          <div class="my-0.5 flex items-center gap-1.5 text-[11px] text-vscode-muted/40">
+            <span class="text-vscode-success">✓</span>
+            <span>Applied patch to {part.files.length} file{part.files.length === 1 ? "" : "s"}</span>
           </div>
         )
       case "retry":
         return (
-          <div class="my-2 rounded-md border border-vscode-warning/20 bg-vscode-warning/5 px-3 py-2 text-[12px] text-vscode-warning">
-            <div class="flex items-center gap-1.5">
-              <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 2a6 6 0 106 6 1 1 0 012 0 8 8 0 11-3.5-6.6V1a1 1 0 012 0v3.5a1 1 0 01-1 1H10a1 1 0 010-2h1.3A5.98 5.98 0 008 2z" />
-              </svg>
-              <span>Retry attempt {part.attempt}</span>
-            </div>
+          <div class="my-0.5 text-[11px] text-vscode-warning/50">
+            ↻ Retry attempt {part.attempt}
             <Show when={part.error?.data?.message}>
-              <div class="mt-1 text-[11px] opacity-70">{part.error.data.message}</div>
+              <span class="ml-1 text-[10px] opacity-60">— {part.error.data.message}</span>
             </Show>
           </div>
         )
       case "compaction":
         return (
-          <div class="my-1.5 rounded border border-vscode-border/25 bg-vscode-card/20 px-3 py-1.5 text-[11px] italic text-vscode-muted/60">
-            Context compacted ({part.auto ? "auto" : "manual"})
+          <div class="my-0.5 text-[10px] text-vscode-muted/25">
+            — context compacted ({part.auto ? "auto" : "manual"})
             <Show when={part.overflow}> after overflow</Show>
           </div>
         )
@@ -84,13 +74,13 @@ function ReasoningBlock(props: { text: string }) {
   const [expanded, setExpanded] = createSignal(false)
 
   return (
-    <div class="my-2 rounded-lg border border-vscode-border/30 bg-vscode-card/18">
+    <div class="my-0.5">
       <button
-        class="flex w-full items-center gap-1.5 px-3 py-2 text-[11px] italic text-vscode-muted/60 transition-colors hover:bg-vscode-hover/30 hover:text-vscode-muted"
+        class="flex items-center gap-1 text-[11px] text-vscode-muted/30 transition-colors hover:text-vscode-muted/50"
         onClick={() => setExpanded(!expanded())}
       >
         <svg
-          class={`h-3 w-3 transition-transform ${expanded() ? "rotate-90" : ""}`}
+          class={`h-2.5 w-2.5 transition-transform ${expanded() ? "rotate-90" : ""}`}
           viewBox="0 0 16 16"
           fill="currentColor"
         >
@@ -99,7 +89,7 @@ function ReasoningBlock(props: { text: string }) {
         Thinking
       </button>
       <Show when={expanded()}>
-        <div class="whitespace-pre-wrap border-t border-vscode-border/25 bg-vscode-bg/20 px-3 py-2.5 text-[11px] italic leading-6 text-vscode-muted animate-fade-in rounded-b-lg">
+        <div class="ml-[9px] mt-0.5 whitespace-pre-wrap border-l border-vscode-border/10 pl-2.5 text-[11px] italic leading-[1.5] text-vscode-muted/40 animate-fade-in">
           {props.text}
         </div>
       </Show>
@@ -130,32 +120,21 @@ function SubtaskBlock(props: { part: SubtaskPart; run?: AssistantMessage }) {
   })
 
   return (
-    <div class="my-2 rounded-lg border border-vscode-border/30 bg-vscode-card/15 px-3 py-2 text-[12px]">
-      <div class="flex items-center gap-1.5 font-medium text-vscode-fg">
-        <div class="h-1.5 w-1.5 rounded-full bg-vscode-accent" />
+    <div class="my-0.5 text-[11px]">
+      <div class="flex items-center gap-1.5 text-vscode-muted">
+        <div class="h-[5px] w-[5px] shrink-0 rounded-full bg-vscode-accent" />
         {props.part.description}
       </div>
-      <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-vscode-muted">
-        <span>Agent: {props.part.agent}</span>
-        <Show when={selectedModel()}>
-          <span>Model: {selectedModel()}</span>
-        </Show>
-        <Show when={props.part.command}>
-          <span>Command: {props.part.command}</span>
-        </Show>
-        <Show when={run()}>
-          <span>Time: {formatDuration(getAssistantDuration(run()!))}</span>
-        </Show>
-        <Show when={run()}>
-          <span>Tokens: {formatNumber(getAssistantTotalTokens(run()!))}</span>
-        </Show>
-        <Show when={run()}>
-          <span>In: {formatNumber(run()!.tokens.input)}</span>
-        </Show>
-        <Show when={run() && run()!.tokens.output > 0}>
-          <span>Out: {formatNumber(run()!.tokens.output)}</span>
-        </Show>
-      </div>
+      <Show when={selectedModel() || run()}>
+        <div class="ml-[11px] flex flex-wrap gap-x-2 text-[10px] text-vscode-muted/30">
+          <Show when={props.part.agent}>
+            <span>{props.part.agent}</span>
+          </Show>
+          <Show when={run()}>
+            <span>{formatDuration(getAssistantDuration(run()!))}</span>
+          </Show>
+        </div>
+      </Show>
     </div>
   )
 }
@@ -179,22 +158,22 @@ function FileBlock(props: { part: Extract<Part, { type: "file" }> }) {
     <Show
       when={isImage()}
       fallback={
-        <div class="my-1.5 inline-flex items-center gap-2 rounded border border-vscode-border/40 bg-vscode-card/40 px-2.5 py-1 text-[11px] text-vscode-muted">
-          <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+        <div class="my-1 inline-flex items-center gap-1.5 rounded border border-vscode-border/30 bg-vscode-card/30 px-2 py-0.5 text-[11px] text-vscode-muted">
+          <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
             <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
           </svg>
           {props.part.filename || "(file)"}
         </div>
       }
     >
-      <figure class="my-2 rounded-lg border border-vscode-border/30 bg-vscode-card/15 p-2.5">
+      <figure class="my-1.5 rounded border border-vscode-border/20 bg-vscode-card/10 p-2">
         <img
           src={props.part.url}
           alt={props.part.filename || "image"}
-          class="max-h-[320px] w-auto max-w-full rounded border border-vscode-border/30 bg-vscode-bg/30 object-contain"
+          class="max-h-[280px] w-auto max-w-full rounded border border-vscode-border/20 bg-vscode-bg/20 object-contain"
         />
-        <figcaption class="mt-1.5 text-[11px] text-vscode-muted">
-          {props.part.filename || "image"} <span class="text-vscode-muted/60">· {props.part.mime}</span>
+        <figcaption class="mt-1 text-[10px] text-vscode-muted">
+          {props.part.filename || "image"} <span class="text-vscode-muted/50">· {props.part.mime}</span>
         </figcaption>
       </figure>
     </Show>

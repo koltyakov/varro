@@ -1,5 +1,5 @@
 import * as vscode from "vscode"
-import { SidebarProvider } from "./sidebar-provider"
+import type { SidebarProvider } from "./sidebar-provider"
 
 export function registerCommands(
   context: vscode.ExtensionContext,

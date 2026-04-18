@@ -31,17 +31,19 @@ export function MessageList() {
       class="min-h-0 flex-1 overflow-y-auto scroll-smooth"
       onScroll={onScroll}
     >
-      <div class="mx-auto flex w-full max-w-245 flex-col gap-6 px-5 py-6 pb-8">
+      <div class="flex w-full flex-col px-3 py-2">
         <For each={state.messages}>
-          {(msg) => <Message info={msg.info} parts={msg.parts} />}
+          {(msg, i) => {
+            const prev = () => i() > 0 ? state.messages[i() - 1] : null
+            const isFirstInGroup = () => !prev() || prev()!.info.role !== msg.info.role
+            return <Message info={msg.info} parts={msg.parts} isFirstInGroup={isFirstInGroup()} />
+          }}
         </For>
         <Show when={isLoading()}>
-          <div class="flex items-center gap-3 pl-10 animate-fade-in">
-            <div class="flex items-center gap-1.5">
-              <span class="h-2 w-2 rounded-full bg-vscode-muted/50 animate-pulse-soft" />
-              <span class="h-2 w-2 rounded-full bg-vscode-muted/50 animate-pulse-soft" style={{ "animation-delay": "0.25s" }} />
-              <span class="h-2 w-2 rounded-full bg-vscode-muted/50 animate-pulse-soft" style={{ "animation-delay": "0.5s" }} />
-            </div>
+          <div class="mt-1 flex items-center gap-1.5 animate-fade-in">
+            <span class="h-1.5 w-1.5 rounded-full bg-vscode-muted/40 animate-pulse-soft" />
+            <span class="h-1.5 w-1.5 rounded-full bg-vscode-muted/40 animate-pulse-soft" style={{ "animation-delay": "0.25s" }} />
+            <span class="h-1.5 w-1.5 rounded-full bg-vscode-muted/40 animate-pulse-soft" style={{ "animation-delay": "0.5s" }} />
           </div>
         </Show>
       </div>

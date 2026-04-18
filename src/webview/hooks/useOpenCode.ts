@@ -137,7 +137,7 @@ async function loadSessions() {
     const sessions = await client.session.list()
     setState(
       "sessions",
-      sessions.sort((a, b) => b.time.updated - a.time.updated),
+      sessions.toSorted((a, b) => b.time.updated - a.time.updated),
     )
   } catch {}
 }

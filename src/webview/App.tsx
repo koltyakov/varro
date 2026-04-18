@@ -8,7 +8,7 @@ export function App() {
   useOpenCode()
 
   return (
-    <div class="flex h-full min-h-0 flex-col bg-vscode-sidebar text-[14px] text-vscode-fg">
+    <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
       <Show
         when={state.serverStatus.state === "running"}
         fallback={<ServerStatus />}

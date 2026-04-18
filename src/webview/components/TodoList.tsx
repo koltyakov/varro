@@ -9,16 +9,16 @@ export function TodoList() {
   const progress = () => total() > 0 ? (completed() / total()) * 100 : 0
 
   return (
-    <div class="border-b border-vscode-border/40 px-4 py-2.5 animate-fade-in">
-      <div class="mb-2 flex items-center justify-between">
-        <span class="text-[10px] font-semibold uppercase tracking-wide text-vscode-muted">
-          Tasks
+    <div class="border-b border-vscode-border/15 px-3 py-2 animate-fade-in">
+      <div class="mb-1.5 flex items-center gap-1.5">
+        <span class="text-[11px] font-semibold text-vscode-fg">
+          Todos
         </span>
-        <span class="text-[10px] text-vscode-muted">
-          {completed()}/{total()}
+        <span class="text-[11px] text-vscode-muted/50">
+          ({completed()}/{total()})
         </span>
       </div>
-      <div class="mb-2 h-0.5 rounded-full bg-vscode-border/25">
+      <div class="mb-2 h-[2px] rounded-full bg-vscode-border/15">
         <div
           class="h-full rounded-full bg-vscode-accent transition-all duration-300"
           style={{ width: `${progress()}%` }}
@@ -38,32 +38,34 @@ function TodoItem(props: { todo: Todo }) {
     switch (props.todo.status) {
       case "completed":
         return (
-          <svg class="h-3 w-3 text-vscode-success" viewBox="0 0 16 16" fill="currentColor">
+          <svg class="h-3.5 w-3.5 text-vscode-success" viewBox="0 0 16 16" fill="currentColor">
             <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
           </svg>
         )
       case "in_progress":
         return (
-          <div class="h-3 w-3 flex items-center justify-center">
-            <div class="h-1.5 w-1.5 rounded-full bg-vscode-accent animate-pulse-soft" />
+          <div class="flex h-3.5 w-3.5 items-center justify-center">
+            <div class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft" />
           </div>
         )
       default:
         return (
-          <div class="h-3 w-3 rounded-sm border border-vscode-border/40" />
+          <div class="flex h-3.5 w-3.5 items-center justify-center">
+            <div class="h-2.5 w-2.5 rounded-full border border-vscode-border/40" />
+          </div>
         )
     }
   }
 
   return (
-    <div class={`flex items-start gap-2 py-0.5 text-[12px] leading-5 ${
+    <div class={`flex items-start gap-2 rounded px-1 py-0.5 text-[12px] leading-[1.4] ${
       props.todo.status === "completed"
-        ? "text-vscode-muted line-through opacity-50"
+        ? "text-vscode-muted/40 line-through"
         : props.todo.status === "in_progress"
           ? "text-vscode-fg"
-          : "text-vscode-muted"
+          : "text-vscode-muted/60"
     }`}>
-      <div class="mt-1 shrink-0">{statusIcon()}</div>
+      <div class="mt-[1px] shrink-0">{statusIcon()}</div>
       <span class="min-w-0">{props.todo.content}</span>
     </div>
   )

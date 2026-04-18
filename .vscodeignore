@@ -1,0 +1,14 @@
+.vscode/**
+src/**
+tmp/**
+node_modules/**
+.claude/**
+.gitignore
+.oxfmtrc.json
+.oxlintrc.json
+esbuild.config.mjs
+vite.config.ts
+tsconfig.json
+tsconfig.extension.json
+tsconfig.webview.json
+**/*.map

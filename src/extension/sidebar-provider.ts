@@ -2,8 +2,8 @@ import * as vscode from "vscode"
 import { readFileSync } from "fs"
 import { resolve, join, basename } from "path"
 import type { ExtensionMessage, ServerStatus, WebviewMessage } from "../shared/protocol"
-import { ContextProvider } from "./context-provider"
-import { OpenCodeServer } from "./server"
+import type { ContextProvider } from "./context-provider"
+import type { OpenCodeServer } from "./server"
 import { logger } from "./logger"
 
 export class SidebarProvider implements vscode.WebviewViewProvider {

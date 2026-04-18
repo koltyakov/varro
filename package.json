@@ -121,7 +121,9 @@
     "watch:extension": "node esbuild.config.mjs --watch",
     "watch:webview": "vite build --watch",
     "dev": "npm run watch:extension & npm run watch:webview",
-    "lint": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.webview.json",
+    "lint": "oxlint src/ --fix",
+    "fmt": "oxfmt src/",
+    "typecheck": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.webview.json",
     "package": "npm run build && npx vsce package"
   },
   "devDependencies": {
@@ -130,6 +132,8 @@
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.9.0",
     "esbuild": "^0.25.0",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^1.60.0",
     "postcss": "^8.5.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",

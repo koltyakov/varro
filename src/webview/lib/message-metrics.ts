@@ -83,7 +83,7 @@ export function getDirectChildAssistants(parentID: string, messages: Array<{ inf
     .filter((entry): entry is { info: AssistantMessage; parts: Part[] } => {
       return isAssistantMessage(entry.info) && entry.info.parentID === parentID
     })
-    .sort((a, b) => a.info.time.created - b.info.time.created)
+    .toSorted((a, b) => a.info.time.created - b.info.time.created)
 }
 
 export function getDescendantAssistants(parentID: string, messages: Array<{ info: Message; parts: Part[] }>) {
@@ -97,7 +97,7 @@ export function getDescendantAssistants(parentID: string, messages: Array<{ info
   }
 
   const results: Array<{ info: AssistantMessage; parts: Part[] }> = []
-  const queue = [...(byParent.get(parentID) || []).sort((a, b) => a.info.time.created - b.info.time.created)]
+  const queue = [...(byParent.get(parentID) || []).toSorted((a, b) => a.info.time.created - b.info.time.created)]
 
   while (queue.length > 0) {
     const current = queue.shift()!
