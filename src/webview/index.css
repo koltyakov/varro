@@ -20,11 +20,17 @@
   --color-vscode-success: #73c991;
   --color-vscode-card: var(--vscode-editorWidget-background, #252526);
   --color-vscode-hover: var(--vscode-list-hoverBackground, #2a2d2e);
-  --color-vscode-list-bg: var(--vscode-chat-list-background, var(--vscode-sideBar-background, #252526));
+  --color-vscode-list-bg: var(
+    --vscode-chat-list-background,
+    var(--vscode-sideBar-background, #252526)
+  );
   --color-vscode-request-border: var(--vscode-chat-requestBorder, #474747);
   --color-vscode-request-bubble: var(--vscode-chat-requestBubbleBackground, #2a2d2e);
   --color-vscode-request-bubble-hover: var(--vscode-chat-requestBubbleHoverBackground, #2f3233);
-  --color-vscode-result-editor-bg: var(--vscode-interactive-result-editor-background-color, #1e1e1e);
+  --color-vscode-result-editor-bg: var(
+    --vscode-interactive-result-editor-background-color,
+    #1e1e1e
+  );
   --color-vscode-preformat-fg: var(--vscode-textPreformat-foreground, #d67a00);
   --color-vscode-preformat-bg: var(--vscode-textPreformat-background, rgba(255, 255, 255, 0.1));
   --color-vscode-preformat-border: var(--vscode-textPreformat-border, rgba(255, 255, 255, 0.12));
@@ -40,45 +46,97 @@
   --color-vscode-avatar-bg: var(--vscode-chat-avatarBackground, #37373d);
   --color-vscode-avatar-fg: var(--vscode-chat-avatarForeground, #c5c5c5);
   --color-vscode-session-fg: var(--vscode-interactive-session-foreground, #cccccc);
-  --color-vscode-diff-add: var(--vscode-diffEditor-insertedTextBackground, rgba(156, 204, 156, 0.2));
+  --color-vscode-diff-add: var(
+    --vscode-diffEditor-insertedTextBackground,
+    rgba(156, 204, 156, 0.2)
+  );
   --color-vscode-diff-del: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
-  --font-mono: var(--vscode-editor-font-family, 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace);
-  --font-sans: var(--vscode-font-family, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  --font-mono: var(
+    --vscode-editor-font-family,
+    'SF Mono',
+    'Menlo',
+    'Monaco',
+    'Consolas',
+    monospace
+  );
+  --font-sans: var(
+    --vscode-font-family,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif
+  );
   --animate-fade-in: fade-in 0.12s ease-out;
   --animate-pulse-soft: pulse-soft 1.5s ease-in-out infinite;
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(2px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes pulse-soft {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @keyframes ellipsis {
-  0% { content: ''; }
-  25% { content: '.'; }
-  50% { content: '..'; }
-  75% { content: '...'; }
-  100% { content: ''; }
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75% {
+    content: '...';
+  }
+  100% {
+    content: '';
+  }
 }
 
 @keyframes chat-thinking-shimmer {
-  0% { background-position: 120% 0; }
-  100% { background-position: -120% 0; }
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
-html, body, #root {
-  height: 100%; width: 100%; overflow: hidden;
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
   font-family: var(--font-sans);
   font-size: var(--vscode-font-size, 13px);
   line-height: 1.4;
@@ -87,19 +145,55 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
 }
 
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-vscode-fg) 22%, transparent); }
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 22%, transparent);
+}
 
-input, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
 
-button { cursor: pointer; border: none; background: none; font-family: inherit; font-size: inherit; color: inherit; transition: background-color 0.1s, color 0.1s, opacity 0.1s; }
-button:disabled { cursor: default; opacity: 0.4; }
-button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px solid var(--color-vscode-accent); outline-offset: -1px; }
-::selection { background: color-mix(in srgb, var(--color-vscode-accent) 30%, transparent); }
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  transition:
+    background-color 0.1s,
+    color 0.1s,
+    opacity 0.1s;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: -1px;
+}
+::selection {
+  background: color-mix(in srgb, var(--color-vscode-accent) 30%, transparent);
+}
 
 .interactive-session {
+  --chat-horizontal-padding: 14px;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -113,10 +207,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   min-height: 0;
   overflow-y: auto;
   scroll-behavior: smooth;
+  padding: 0 0 8px 0;
+}
+
+.interactive-list-track {
+  width: 100%;
+  padding: 10px var(--chat-horizontal-padding) 20px;
 }
 
 .interactive-item-container {
-  padding: 6px 16px;
+  padding: 4px 0;
   display: flex;
   flex-direction: column;
   color: var(--color-vscode-session-fg);
@@ -127,22 +227,57 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 
 .interactive-item-container.interactive-request {
   align-items: flex-end;
-  padding-top: 10px;
+  padding: 8px 0 4px 0;
 }
 
 .interactive-item-container.interactive-response {
   align-items: flex-start;
-  padding-top: 4px;
+  padding: 2px 0 8px 0;
 }
 
-.interactive-item-container .value {
+.chat-turn {
+  width: 100%;
+}
+
+.chat-turn-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chat-turn-content {
   width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.interactive-item-container .value > :last-child,
-.interactive-item-container .value > :last-child.rendered-markdown > :last-child {
+.chat-turn-user .chat-turn-content {
+  width: auto;
+}
+
+.chat-turn-card {
+  max-width: min(78%, 720px);
+  border-radius: 16px;
+  padding: 11px 14px;
+  background: var(--color-vscode-request-bubble);
+}
+
+.user-message-card {
+  border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
+  box-shadow: none;
+}
+
+.assistant-turn-content {
+  padding-top: 0;
+}
+
+.assistant-message-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-turn-content > :last-child,
+.chat-turn-content > :last-child.rendered-markdown > :last-child {
   margin-bottom: 0;
 }
 
@@ -160,29 +295,39 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   animation: ellipsis steps(4, end) 1s infinite;
 }
 
-.interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
-  background-color: color-mix(in srgb, var(--color-vscode-accent) 10%, var(--color-vscode-request-bubble));
-  border-radius: 12px;
-  padding: 8px 14px;
-  max-width: 85%;
-  width: fit-content;
-  margin-left: auto;
-  margin-bottom: 2px;
-  position: relative;
-  line-height: 1.5;
-}
-
-.interactive-session .interactive-item-container.interactive-request .value .rendered-markdown > :first-child {
+.interactive-session
+  .interactive-item-container.interactive-request
+  .chat-turn-card
+  > .rendered-markdown
+  > :first-child {
   margin-top: 0;
 }
 
-.interactive-session .interactive-item-container.interactive-request .value .rendered-markdown > :last-child {
+.interactive-session
+  .interactive-item-container.interactive-request
+  .chat-turn-card
+  > .rendered-markdown
+  > :last-child {
   margin-bottom: 0;
 }
 
-.interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p {
-  width: fit-content;
-  margin: 0;
+.interactive-session
+  .interactive-item-container.interactive-request
+  .chat-turn-card
+  > .rendered-markdown
+  p {
+  margin-bottom: 10px;
+}
+
+.chat-empty-state {
+  margin: 22vh 0 0 0;
+  padding: 0 2px;
+}
+
+.chat-empty-copy {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-vscode-muted);
 }
 
 .rendered-markdown {
@@ -195,10 +340,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   margin: 0 0 16px 0;
 }
 
-.rendered-markdown > p:first-child { margin-top: 0; }
-.rendered-markdown > p:last-child { margin-bottom: 0; }
+.rendered-markdown > p:first-child {
+  margin-top: 0;
+}
+.rendered-markdown > p:last-child {
+  margin-bottom: 0;
+}
 
-.rendered-markdown strong { font-weight: 600; }
+.rendered-markdown strong {
+  font-weight: 600;
+}
 
 .rendered-markdown blockquote {
   margin: 0 0 8px 0;
@@ -208,17 +359,43 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   background: none;
 }
 
-.rendered-markdown h1 { font-size: 20px; font-weight: 600; margin: 1.5em 0 0.875em; }
-.rendered-markdown h2 { font-size: 16px; font-weight: 600; margin: 1.5em 0 0.875em; }
-.rendered-markdown h3 { font-size: 14px; font-weight: 600; margin: 1.5em 0 0.875em; }
+.rendered-markdown h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 1.5em 0 0.875em;
+}
+.rendered-markdown h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 1.5em 0 0.875em;
+}
+.rendered-markdown h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 1.5em 0 0.875em;
+}
 
-.rendered-markdown ul { padding-inline-start: 24px; }
-.rendered-markdown ol { padding-inline-start: 28px; }
-.rendered-markdown li { margin: 4px 0; }
-.rendered-markdown li > p { margin: 0; }
+.rendered-markdown ul {
+  padding-inline-start: 24px;
+}
+.rendered-markdown ol {
+  padding-inline-start: 28px;
+}
+.rendered-markdown li {
+  margin: 4px 0;
+}
+.rendered-markdown li > p {
+  margin: 0;
+}
 
-.rendered-markdown a { color: var(--color-vscode-link); user-select: text; }
-.rendered-markdown a:hover, .rendered-markdown a:active { color: var(--color-vscode-link-active); }
+.rendered-markdown a {
+  color: var(--color-vscode-link);
+  user-select: text;
+}
+.rendered-markdown a:hover,
+.rendered-markdown a:active {
+  color: var(--color-vscode-link-active);
+}
 
 .rendered-markdown a.file-path-link,
 .tool-invocation-preview a.file-path-link,
@@ -233,7 +410,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   text-decoration: underline;
 }
 
-.rendered-markdown img { max-width: 100%; }
+.rendered-markdown img {
+  max-width: 100%;
+}
 
 .rendered-markdown code {
   font-family: var(--font-mono);
@@ -258,17 +437,28 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   margin-bottom: 16px;
 }
 
-.rendered-markdown table td, .rendered-markdown table th {
+.rendered-markdown table td,
+.rendered-markdown table th {
   border: 1px solid var(--color-vscode-request-border);
   border-top: none;
   border-left: none;
   padding: 4px 6px;
 }
 
-.rendered-markdown table th { white-space: normal; overflow-wrap: break-word; }
-.rendered-markdown table td:last-child, .rendered-markdown table th:last-child { border-right: none; }
-.rendered-markdown table tbody tr:last-child td { border-bottom: none; }
-.rendered-markdown hr { border-color: rgba(255, 255, 255, 0.18); }
+.rendered-markdown table th {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.rendered-markdown table td:last-child,
+.rendered-markdown table th:last-child {
+  border-right: none;
+}
+.rendered-markdown table tbody tr:last-child td {
+  border-bottom: none;
+}
+.rendered-markdown hr {
+  border-color: rgba(255, 255, 255, 0.18);
+}
 
 .interactive-result-code-block {
   position: relative;
@@ -309,7 +499,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   border: none;
   background: none;
   opacity: 0.3;
-  transition: opacity 0.15s, background-color 0.15s;
+  transition:
+    opacity 0.15s,
+    background-color 0.15s;
 }
 
 .interactive-result-code-block:hover .code-block-copy-btn,
@@ -351,7 +543,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   width: 100%;
   position: relative;
   overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .interactive-session .chat-input-container.focused {
@@ -360,7 +554,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 }
 
 .interactive-session .interactive-input-part {
-  margin: 0 12px 12px 12px;
+  margin: 0 var(--chat-horizontal-padding) 12px;
   padding: 6px 0;
   display: flex;
   flex-direction: column;
@@ -657,7 +851,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 25%, transparent);
   background: color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
-  transition: background-color 0.12s, border-color 0.12s;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
@@ -683,7 +879,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   border-radius: 8px;
   border: none;
   cursor: pointer;
-  transition: background-color 0.15s, opacity 0.15s, transform 0.1s;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s,
+    transform 0.1s;
 }
 
 .chat-send-button.enabled:active {
@@ -717,7 +916,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   cursor: pointer;
   color: var(--color-vscode-error);
   background: color-mix(in srgb, var(--color-vscode-error) 12%, transparent);
-  transition: background-color 0.12s, transform 0.1s;
+  transition:
+    background-color 0.12s,
+    transform 0.1s;
 }
 
 .chat-stop-button:hover {
@@ -751,7 +952,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   width: fit-content;
   background: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
   color: var(--color-vscode-fg);
-  transition: background-color 0.1s, border-color 0.1s;
+  transition:
+    background-color 0.1s,
+    border-color 0.1s;
 }
 
 .chat-attachment-chip:hover {
@@ -799,6 +1002,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   outline: none;
   position: relative;
   color: var(--color-vscode-muted);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 74%, transparent);
+  overflow: hidden;
 }
 
 .chat-thinking-box .thinking-header {
@@ -808,13 +1015,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   font-size: 12px;
   color: var(--color-vscode-muted);
   cursor: pointer;
-  padding: 3px 6px;
-  margin-left: -6px;
+  padding: 8px 10px;
   border: none;
-  background: none;
-  border-radius: 3px;
-  width: fit-content;
-  transition: color 0.1s, background-color 0.1s;
+  background: transparent;
+  width: 100%;
+  transition:
+    color 0.1s,
+    background-color 0.1s;
 }
 
 .chat-thinking-box .thinking-header:hover {
@@ -832,17 +1039,14 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 }
 
 .chat-thinking-box .thinking-content {
-  margin-left: 5px;
-  border-left: 1px solid var(--color-vscode-request-border);
-  border-bottom: 1px solid var(--color-vscode-request-border);
-  border-bottom-left-radius: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
   padding: 0;
-  max-height: 200px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
 .chat-thinking-box .thinking-content .thinking-item {
-  padding: 6px 12px 6px 18px;
+  padding: 10px 12px;
   position: relative;
   font-size: 12px;
   line-height: 1.5;
@@ -850,10 +1054,14 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 }
 
 .shimmer-progress {
-  background: linear-gradient(90deg,
-    var(--color-vscode-muted) 0%, var(--color-vscode-muted) 30%,
+  background: linear-gradient(
+    90deg,
+    var(--color-vscode-muted) 0%,
+    var(--color-vscode-muted) 30%,
     var(--color-vscode-thinking-shimmer) 50%,
-    var(--color-vscode-muted) 70%, var(--color-vscode-muted) 100%);
+    var(--color-vscode-muted) 70%,
+    var(--color-vscode-muted) 100%
+  );
   background-size: 400% 100%;
   background-clip: text;
   -webkit-background-clip: text;
@@ -876,7 +1084,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 0;
+  padding: 10px 0 2px 0;
   color: var(--color-vscode-muted);
   font-size: 12px;
 }
@@ -890,34 +1098,45 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   animation: spin 0.8s linear infinite;
 }
 
-.diff-summary { margin-top: 4px; }
+.diff-summary {
+  margin-top: 4px;
+}
 
 .diff-summary .diff-summary-btn {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: color-mix(in srgb, var(--color-vscode-muted) 65%, transparent);
-  border: none;
-  background: none;
+  color: color-mix(in srgb, var(--color-vscode-muted) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 70%, transparent);
   cursor: pointer;
-  padding: 3px 6px;
-  margin-left: -6px;
-  border-radius: 3px;
-  transition: color 0.1s, background-color 0.1s;
+  padding: 7px 10px;
+  border-radius: 9px;
+  transition:
+    color 0.1s,
+    background-color 0.1s;
 }
 
 .diff-summary .diff-summary-btn:hover {
   color: var(--color-vscode-fg);
-  background: var(--color-vscode-toolbar-hover);
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-toolbar-hover) 70%,
+    var(--color-vscode-widget-bg)
+  );
 }
 
 .diff-summary .diff-summary-content {
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
-.diff-lines-added { color: var(--color-vscode-lines-add); }
-.diff-lines-removed { color: var(--color-vscode-lines-del); }
+.diff-lines-added {
+  color: var(--color-vscode-lines-add);
+}
+.diff-lines-removed {
+  color: var(--color-vscode-lines-del);
+}
 
 kbd {
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
@@ -930,11 +1149,15 @@ kbd {
 }
 
 .chat-tool-invocation-part {
-  margin: 2px 0;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 76%, transparent);
+  overflow: hidden;
 }
 
 .chat-tool-invocation-part:not(:last-child) {
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 .chat-tool-invocation-part .tool-invocation-header {
@@ -942,21 +1165,20 @@ kbd {
   width: 100%;
   align-items: center;
   gap: 6px;
-  padding: 3px 6px;
-  margin-left: -6px;
-  margin-right: -6px;
+  padding: 8px 10px;
   border: none;
-  background: none;
+  background: transparent;
   cursor: pointer;
   font-size: 12px;
   color: var(--color-vscode-muted);
   text-align: left;
-  transition: color 0.1s, background-color 0.1s;
-  border-radius: 4px;
+  transition:
+    color 0.1s,
+    background-color 0.1s;
 }
 
 .chat-tool-invocation-part .tool-invocation-header:hover {
-  background: var(--color-vscode-toolbar-hover);
+  background: color-mix(in srgb, var(--color-vscode-toolbar-hover) 70%, transparent);
   color: var(--color-vscode-fg);
 }
 
@@ -1021,7 +1243,7 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-preview {
-  margin-left: 11px;
+  padding: 0 10px 10px 26px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1031,9 +1253,8 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-detail {
-  margin-left: 11px;
-  border-left: 1px solid color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
-  padding: 6px 0 6px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
+  padding: 10px 12px 12px 26px;
   font-size: 11px;
 }
 
@@ -1073,7 +1294,6 @@ kbd {
   white-space: nowrap;
 }
 
-
 .chat-tool-invocation-part .tool-invocation-output {
   max-height: 160px;
   overflow: auto;
@@ -1083,6 +1303,9 @@ kbd {
   line-height: 1.5;
   color: color-mix(in srgb, var(--color-vscode-fg) 75%, transparent);
   margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-vscode-bg) 84%, transparent);
 }
 
 .chat-tool-invocation-part .tool-invocation-error {
@@ -1099,7 +1322,11 @@ kbd {
 }
 
 .chat-subtask-part {
-  margin: 2px 0;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 72%, transparent);
+  padding: 8px 10px;
 }
 
 .chat-subtask-part .subtask-header {
@@ -1124,7 +1351,7 @@ kbd {
   align-items: center;
   gap: 8px;
   margin-left: 10px;
-  margin-top: 2px;
+  margin-top: 6px;
   font-size: 11px;
   color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
 }
@@ -1144,6 +1371,10 @@ kbd {
   font-size: 11px;
   color: var(--color-vscode-warning);
   opacity: 0.65;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-warning) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 16%, transparent);
 }
 
 .chat-retry-notice .chat-retry-error {
@@ -1154,11 +1385,12 @@ kbd {
 
 .chat-compaction-notice {
   margin: 6px 0;
-  padding: 3px 0;
+  padding: 8px 10px;
   font-size: 10px;
   color: var(--color-vscode-muted);
   opacity: 0.5;
-  border-top: 1px dashed color-mix(in srgb, var(--color-vscode-border) 15%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
+  border-radius: 10px;
 }
 
 .chat-thinking-box .thinking-text {
@@ -1169,9 +1401,10 @@ kbd {
 
 .chat-image-figure {
   margin: 6px 0;
-  border-radius: 4px;
-  border: 1px solid var(--color-vscode-widget-border);
-  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-widget-border) 70%, transparent);
+  padding: 8px;
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 72%, transparent);
 }
 
 .chat-image-figure .chat-image-img {
@@ -1196,6 +1429,10 @@ kbd {
   align-items: start;
   gap: 6px;
   margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-error) 18%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-error) 7%, transparent);
 }
 
 .interactive-response-error-details .error-icon {
@@ -1210,6 +1447,10 @@ kbd {
   color: var(--color-vscode-error);
   margin: 0;
   font-size: 12px;
+}
+
+.interactive-loading-row {
+  padding-top: 2px;
 }
 
 .user-message-text {
@@ -1324,24 +1565,6 @@ kbd {
   border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 15%, transparent);
 }
 
-.chat-header-title {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 4px 6px;
-  margin: -4px -6px;
-  border-radius: 4px;
-  transition: background-color 0.1s;
-}
-
-.chat-header-title:hover {
-  background: var(--color-vscode-toolbar-hover);
-}
-
 .chat-header-title-text {
   font-size: 12px;
   font-weight: 600;
@@ -1350,18 +1573,6 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chat-header-chevron {
-  width: 10px;
-  height: 10px;
-  color: var(--color-vscode-muted);
-  transition: transform 0.12s;
-  flex-shrink: 0;
-}
-
-.chat-header-chevron.open {
-  transform: rotate(180deg);
 }
 
 .chat-header-actions {
@@ -1381,7 +1592,9 @@ kbd {
   background: none;
   cursor: pointer;
   color: var(--color-vscode-muted);
-  transition: background-color 0.1s, color 0.1s;
+  transition:
+    background-color 0.1s,
+    color 0.1s;
 }
 
 .chat-header-btn:hover {
@@ -1478,7 +1691,10 @@ kbd {
   color: var(--color-vscode-muted);
   opacity: 0;
   flex-shrink: 0;
-  transition: opacity 0.1s, color 0.1s, background-color 0.1s;
+  transition:
+    opacity 0.1s,
+    color 0.1s,
+    background-color 0.1s;
 }
 
 .session-item:hover .session-item-archive {
@@ -1534,7 +1750,9 @@ kbd {
   border-radius: 4px;
   font-size: 11px;
   color: var(--color-vscode-muted);
-  transition: background-color 0.1s, color 0.1s;
+  transition:
+    background-color 0.1s,
+    color 0.1s;
 }
 
 .settings-reset-btn:hover {

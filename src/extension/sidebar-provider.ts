@@ -1,9 +1,15 @@
 import * as vscode from 'vscode';
 import { readFileSync } from 'fs';
-import { resolve, join, basename } from 'path';
-import type { ExtensionMessage, ServerStatus, WebviewMessage } from '../shared/protocol';
+import { resolve, join, basename, isAbsolute } from 'path';
+import type {
+  DroppedFile,
+  ExtensionMessage,
+  ServerStatus,
+  WebviewMessage,
+} from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
+import type { ContextTreeProvider } from './context-tree';
 import { logger } from './logger';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -13,6 +19,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private server: OpenCodeServer;
   private _status: ServerStatus = { state: 'stopped' };
   private themeDisposable?: vscode.Disposable;
+  private contextFiles: DroppedFile[] = [];
+  private contextTreeProvider?: ContextTreeProvider;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -28,8 +36,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     this.server.on('event', (event: unknown) => {
-      this.post({ type: 'server/event', payload: { type: 'event', ...(event as Record<string, unknown>) } });
+      this.post({
+        type: 'server/event',
+        payload: { type: 'event', ...(event as Record<string, unknown>) },
+      });
     });
+  }
+
+  setContextTreeProvider(provider: ContextTreeProvider) {
+    this.contextTreeProvider = provider;
   }
 
   resolveWebviewView(
@@ -63,31 +78,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  async handleDrop(
-    _webviewView: vscode.WebviewView,
-    dataTransfer: vscode.DataTransfer,
-    _token: vscode.CancellationToken
-  ): Promise<void> {
-    const paths: string[] = [];
-
-    const uriListItem = dataTransfer.get('text/uri-list');
-    if (uriListItem) {
-      const raw = await uriListItem.asString();
-      for (const line of raw.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        try {
-          const uri = vscode.Uri.parse(trimmed);
-          if (uri.fsPath) paths.push(uri.fsPath);
-        } catch {}
-      }
-    }
-
-    if (paths.length > 0) {
-      await this.handleDroppedPaths(paths);
-    }
-  }
-
   private currentTheme(): 'dark' | 'light' {
     const k = vscode.window.activeColorTheme.kind;
     return k === vscode.ColorThemeKind.Dark || k === vscode.ColorThemeKind.HighContrast
@@ -107,6 +97,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
       case 'files/drop':
         this.handleDroppedPaths(msg.payload.paths);
+        break;
+      case 'files/remove':
+        this.removeContextFile(msg.payload.path);
+        break;
+      case 'files/clear':
+        this.clearContextFiles();
         break;
       case 'file/read':
         this.contextProvider.readFile(msg.payload.path).then(() => {
@@ -169,19 +165,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(msg);
   }
 
-  private async handleDroppedPaths(paths: string[]) {
+  async handleDroppedPaths(paths: string[]) {
     const dropped = await Promise.all(
       Array.from(new Set(paths)).map(async (path) => {
         try {
-          const uri = vscode.Uri.file(path);
+          const uri = await this.resolveDroppedUri(path);
+          if (!uri) {
+            throw new Error('Path is not part of the current workspace or does not exist');
+          }
           const stat = await vscode.workspace.fs.stat(uri);
           const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
           const relativePath = workspaceFolder
             ? vscode.workspace.asRelativePath(uri, false)
-            : basename(path);
+            : basename(uri.fsPath);
 
           return {
-            path,
+            path: uri.fsPath,
             relativePath,
             type:
               stat.type & vscode.FileType.Directory ? ('directory' as const) : ('file' as const),
@@ -205,6 +204,49 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async resolveDroppedUri(rawPath: string): Promise<vscode.Uri | null> {
+    const input = rawPath.trim();
+    if (!input) return null;
+
+    const absoluteUri = vscode.Uri.file(input);
+    if (isAbsolute(input)) {
+      try {
+        await vscode.workspace.fs.stat(absoluteUri);
+        return absoluteUri;
+      } catch {
+        return null;
+      }
+    }
+
+    const relativePath = input.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+    if (!relativePath) return null;
+
+    for (const folder of vscode.workspace.workspaceFolders || []) {
+      const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
+      try {
+        await vscode.workspace.fs.stat(candidate);
+        return candidate;
+      } catch {}
+    }
+
+    return null;
+  }
+
+  removeContextFile(path: string) {
+    this.contextFiles = this.contextFiles.filter((f) => f.path !== path);
+    this.syncTreeView();
+    this.post({ type: 'files/removed', payload: { path } });
+  }
+
+  clearContextFiles() {
+    this.contextFiles = [];
+    this.syncTreeView();
+  }
+
+  private syncTreeView() {
+    this.contextTreeProvider?.setFiles([...this.contextFiles]);
+  }
+
   private postContext() {
     this.post({ type: 'context/update', payload: this.contextProvider.context });
   }
@@ -212,7 +254,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   postDroppedFiles(
     files: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>
   ) {
-    this.post({ type: 'files/dropped', payload: files });
+    const next = files.filter(
+      (file) => !this.contextFiles.find((existing) => existing.path === file.path)
+    );
+    if (next.length === 0) return;
+
+    this.contextFiles.push(...next);
+    this.syncTreeView();
+    this.post({ type: 'files/dropped', payload: next });
   }
 
   postCommand(cmd: 'new-session' | 'abort' | 'share') {

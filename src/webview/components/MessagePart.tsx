@@ -4,6 +4,7 @@ import { formatDuration, getAssistantDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, SubtaskPart, TextPart } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ToolCall } from './ToolCall';
+import { formatDisplayPath } from '../lib/path-display';
 
 export function MessagePart(props: {
   part: Part;
@@ -26,7 +27,9 @@ export function MessagePart(props: {
           <div class="chat-subtask-part">
             <div class="subtask-header">
               <span class="subtask-dot" />
-              <span>Handing off to <span class="subtask-agent-name">{part.name}</span></span>
+              <span>
+                Handing off to <span class="subtask-agent-name">{part.name}</span>
+              </span>
             </div>
           </div>
         );
@@ -35,7 +38,9 @@ export function MessagePart(props: {
           <div class="chat-subtask-part">
             <div class="subtask-header">
               <span class="subtask-check">✓</span>
-              <span>Applied patch to {part.files.length} file{part.files.length === 1 ? '' : 's'}</span>
+              <span>
+                Applied patch to {part.files.length} file{part.files.length === 1 ? '' : 's'}
+              </span>
             </div>
           </div>
         );
@@ -75,10 +80,7 @@ function ReasoningBlock(props: { text: string }) {
 
   return (
     <div class="chat-thinking-box">
-      <button
-        class="thinking-header"
-        onClick={() => setExpanded(!expanded())}
-      >
+      <button class="thinking-header" onClick={() => setExpanded(!expanded())}>
         <svg
           class={`chevron ${expanded() ? 'expanded' : ''}`}
           viewBox="0 0 16 16"
@@ -95,9 +97,7 @@ function ReasoningBlock(props: { text: string }) {
       <Show when={expanded()}>
         <div class="thinking-content animate-fade-in">
           <div class="thinking-item">
-            <div class="thinking-text">
-              {props.text}
-            </div>
+            <div class="thinking-text">{props.text}</div>
           </div>
         </div>
       </Show>
@@ -164,6 +164,15 @@ function formatVariantLabel(variant: string) {
 
 function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
   const isImage = () => props.part.mime.startsWith('image/');
+  const displayName = () => {
+    if (props.part.source?.path) {
+      return formatDisplayPath(props.part.source.path, state.editorContext.workspacePath);
+    }
+    if (props.part.filename) {
+      return formatDisplayPath(props.part.filename, state.editorContext.workspacePath);
+    }
+    return '(file)';
+  };
 
   return (
     <Show
@@ -173,19 +182,14 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
           <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
             <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
           </svg>
-          <span class="chip-label">{props.part.filename || '(file)'}</span>
+          <span class="chip-label">{displayName()}</span>
         </div>
       }
     >
       <figure class="chat-image-figure">
-        <img
-          src={props.part.url}
-          alt={props.part.filename || 'image'}
-          class="chat-image-img"
-        />
+        <img src={props.part.url} alt={displayName()} class="chat-image-img" />
         <figcaption class="chat-image-caption">
-          {props.part.filename || 'image'}{' '}
-          <span class="chat-image-mime">· {props.part.mime}</span>
+          {displayName()} <span class="chat-image-mime">· {props.part.mime}</span>
         </figcaption>
       </figure>
     </Show>

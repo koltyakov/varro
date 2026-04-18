@@ -15,7 +15,9 @@ export function onMessage(handler: MessageHandler): () => void {
 }
 
 export function postMessage(msg: WebviewMessage): void {
-  const send = (window as unknown as Record<string, unknown>).__sendToExtension as ((m: WebviewMessage) => void) | undefined;
+  const send = (window as unknown as Record<string, unknown>).__sendToExtension as
+    | ((m: WebviewMessage) => void)
+    | undefined;
   if (send) send(msg);
 }
 

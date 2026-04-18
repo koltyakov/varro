@@ -54,8 +54,7 @@ export function registerCommands(context: vscode.ExtensionContext, sidebar: Side
         );
 
         const valid = files.filter(
-          (f): f is { path: string; relativePath: string; type: 'file' | 'directory' } =>
-            f !== null
+          (f): f is { path: string; relativePath: string; type: 'file' | 'directory' } => f !== null
         );
         if (valid.length > 0) {
           sidebar.postDroppedFiles(valid);

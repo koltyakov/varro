@@ -53,7 +53,9 @@ export class OpenCodeServer extends EventEmitter {
         message: `No server at ${this.url}. Start one with "opencode serve --port ${this.port}" or enable opencode.server.autoStart.`,
       });
       throw new Error(
-        this._status.state === 'error' ? (this._status as { message: string }).message : 'server not running'
+        this._status.state === 'error'
+          ? (this._status as { message: string }).message
+          : 'server not running'
       );
     }
 

@@ -1,10 +1,11 @@
-import { For, Show, createEffect, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { state, isLoading } from '../lib/state';
 import { Message } from './Message';
 
 export function MessageList() {
-  let containerRef: HTMLDivElement | undefined;
+  const containerRef: HTMLDivElement | undefined = undefined;
   const [autoScroll, setAutoScroll] = createSignal(true);
+  const visibleMessages = createMemo(() => state.messages);
 
   function onScroll() {
     if (!containerRef) return;
@@ -14,8 +15,8 @@ export function MessageList() {
   }
 
   createEffect(() => {
-    const _len = state.messages.length;
-    const _parts = state.messages.reduce((acc, m) => acc + m.parts.length, 0);
+    const _len = visibleMessages().length;
+    const _parts = visibleMessages().reduce((acc, m) => acc + m.parts.length, 0);
     void _len;
     void _parts;
     if (!containerRef || !autoScroll()) return;
@@ -30,26 +31,37 @@ export function MessageList() {
       class="interactive-list min-h-0 flex-1 overflow-y-auto scroll-smooth"
       onScroll={onScroll}
     >
-      <For each={state.messages}>
-        {(msg) => (
-          <div
-            class={`interactive-item-container ${
-              msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
-            }`}
-          >
-            <Message info={msg.info} parts={msg.parts} />
+      <div class="interactive-list-track">
+        <Show
+          when={visibleMessages().length > 0}
+          fallback={
+            <div class="chat-empty-state">
+              <p class="chat-empty-copy">Ask for edits, explanations, or multi-step repo work.</p>
+            </div>
+          }
+        >
+          <For each={visibleMessages()}>
+            {(msg) => (
+              <div
+                class={`interactive-item-container ${
+                  msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
+                }`}
+              >
+                <Message info={msg.info} parts={msg.parts} />
+              </div>
+            )}
+          </For>
+        </Show>
+        <Show when={isLoading()}>
+          <div class="interactive-item-container interactive-response interactive-loading-row">
+            <div class="loading-indicator">
+              <div class="loading-spinner" />
+              <span>Generating</span>
+              <span class="chat-animated-ellipsis" />
+            </div>
           </div>
-        )}
-      </For>
-      <Show when={isLoading()}>
-        <div class="interactive-item-container interactive-response" style={{ padding: '10px 16px' }}>
-          <div class="loading-indicator">
-            <div class="loading-spinner" />
-            <span style={{ 'font-size': '11px', color: 'var(--color-vscode-muted)' }}>Generating</span>
-            <span class="chat-animated-ellipsis" />
-          </div>
-        </div>
-      </Show>
+        </Show>
+      </div>
     </div>
   );
 }

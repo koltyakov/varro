@@ -17,6 +17,7 @@ import {
   removeMessagePart,
   addPermission,
   removePermission,
+  removeContextFile,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage } from '../../shared/protocol';
@@ -24,6 +25,50 @@ import type { Session, SessionStatus, Message, Part, Permission, Todo, FileDiff 
 
 let initialized = false;
 let handlersRegistered = false;
+let currentWorkspacePath: string | null = null;
+
+function normalizeProjectPath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalizedPath || null;
+}
+
+function isSessionInWorkspace(session: Session, workspacePath: string | null | undefined): boolean {
+  const normalizedWorkspace = normalizeProjectPath(workspacePath);
+  if (!normalizedWorkspace) return true;
+  return normalizeProjectPath(session.directory) === normalizedWorkspace;
+}
+
+function sortSessions(sessions: Session[]) {
+  return sessions.toSorted((a, b) => b.time.updated - a.time.updated);
+}
+
+function applySessions(sessions: Session[]) {
+  const nextSessions = sortSessions(
+    sessions.filter((session) => isSessionInWorkspace(session, currentWorkspacePath))
+  );
+  setState('sessions', nextSessions);
+
+  if (
+    state.activeSessionId &&
+    !nextSessions.some((session) => session.id === state.activeSessionId)
+  ) {
+    setState('activeSessionId', null);
+    clearMessages();
+    setIsLoading(false);
+  }
+}
+
+function upsertSession(session: Session) {
+  if (!isSessionInWorkspace(session, currentWorkspacePath)) {
+    if (state.sessions.some((item) => item.id === session.id)) {
+      applySessions(state.sessions.filter((item) => item.id !== session.id));
+    }
+    return;
+  }
+
+  applySessions([session, ...state.sessions.filter((item) => item.id !== session.id)]);
+}
 
 export function useOpenCode() {
   onMount(() => {
@@ -50,7 +95,15 @@ export function useOpenCode() {
           setTheme(msg.payload.theme);
           break;
         case 'context/update':
-          setState('editorContext', msg.payload);
+          {
+            const nextWorkspacePath = normalizeProjectPath(msg.payload.workspacePath);
+            const workspaceChanged = nextWorkspacePath !== currentWorkspacePath;
+            currentWorkspacePath = nextWorkspacePath;
+            setState('editorContext', msg.payload);
+            if (workspaceChanged && initialized) {
+              loadSessions().catch(() => {});
+            }
+          }
           break;
         case 'files/dropped':
           for (const file of msg.payload) {
@@ -59,6 +112,9 @@ export function useOpenCode() {
               return [...prev, file];
             });
           }
+          break;
+        case 'files/removed':
+          removeContextFile(msg.payload.path);
           break;
         case 'command/new-session':
           createSession();
@@ -94,7 +150,9 @@ async function initConnection() {
 async function loadAgents() {
   try {
     const agents = await client.agent.list();
-    const primaries = agents.filter((a) => a.mode !== 'subagent' && !('hidden' in a && (a as { hidden?: boolean }).hidden));
+    const primaries = agents.filter(
+      (a) => a.mode !== 'subagent' && !('hidden' in a && (a as { hidden?: boolean }).hidden)
+    );
     setState('agents', primaries);
     if (state.selectedAgent && !primaries.some((agent) => agent.name === state.selectedAgent)) {
       setSelectedAgent(null);
@@ -140,10 +198,7 @@ async function loadProviders() {
 async function loadSessions() {
   try {
     const sessions = await client.session.list();
-    setState(
-      'sessions',
-      sessions.toSorted((a, b) => b.time.updated - a.time.updated)
-    );
+    applySessions(sessions);
   } catch {}
 }
 
@@ -173,7 +228,7 @@ async function syncSessionMessages(sessionId: string) {
 export async function createSession(title?: string): Promise<string | null> {
   try {
     const session = await client.session.create(title ? { title } : undefined);
-    setState('sessions', [session, ...state.sessions.filter((s) => s.id !== session.id)]);
+    upsertSession(session);
     setState('activeSessionId', session.id);
     clearMessages();
     return session.id;
@@ -276,6 +331,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
 
   setState('droppedFiles', []);
   clearClipboardImages();
+  postMessage({ type: 'files/clear' });
 
   try {
     await sendPromptWithFallback(sessionId, body);
@@ -352,19 +408,21 @@ function getProps(data: unknown): Record<string, unknown> | undefined {
 function registerEventHandlers() {
   serverEvents.on('session.created', (data) => {
     const info = getProps(data)?.info as Session | undefined;
-    if (info) setState('sessions', [info, ...state.sessions.filter((s) => s.id !== info.id)]);
+    if (info) upsertSession(info);
   });
 
   serverEvents.on('session.updated', (data) => {
     const info = getProps(data)?.info as Session | undefined;
-    if (info) {
-      setState('sessions', state.sessions.map((s) => (s.id === info.id ? info : s)));
-    }
+    if (info) upsertSession(info);
   });
 
   serverEvents.on('session.deleted', (data) => {
     const id = (getProps(data)?.info as { id: string } | undefined)?.id;
-    if (id) setState('sessions', state.sessions.filter((s) => s.id !== id));
+    if (id)
+      setState(
+        'sessions',
+        state.sessions.filter((s) => s.id !== id)
+      );
   });
 
   serverEvents.on('session.status', (data) => {
@@ -401,7 +459,13 @@ function registerEventHandlers() {
     const p = getProps(data);
     if (!p) return;
     if ((p.sessionID as string) === state.activeSessionId) {
-      applyMessagePartDelta(p.messageID as string, p.partID as string, p.delta as string, p.sessionID as string, p.field as string);
+      applyMessagePartDelta(
+        p.messageID as string,
+        p.partID as string,
+        p.delta as string,
+        p.sessionID as string,
+        p.field as string
+      );
     }
   });
 
@@ -414,7 +478,10 @@ function registerEventHandlers() {
     const p = getProps(data);
     if (!p) return;
     if ((p.sessionID as string) === state.activeSessionId) {
-      setState('messages', state.messages.filter((m) => m.info.id !== (p.messageID as string)));
+      setState(
+        'messages',
+        state.messages.filter((m) => m.info.id !== (p.messageID as string))
+      );
     }
   });
 
@@ -435,6 +502,7 @@ function registerEventHandlers() {
 
   serverEvents.on('session.diff', (data) => {
     const p = getProps(data);
-    if ((p?.sessionID as string) === state.activeSessionId) setState('diffs', p!.diff as FileDiff[]);
+    if ((p?.sessionID as string) === state.activeSessionId)
+      setState('diffs', p!.diff as FileDiff[]);
   });
 }

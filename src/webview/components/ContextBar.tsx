@@ -6,6 +6,7 @@ import {
   clearClipboardImages,
   clearContextFiles,
 } from '../lib/state';
+import { getLeafPathName } from '../lib/path-display';
 
 export function ContextBar() {
   const files = () => state.droppedFiles;
@@ -18,14 +19,16 @@ export function ContextBar() {
     if (!file) return null;
 
     const selectedLines = selection();
-    if (!selectedLines) return { filename: file.relativePath, lineRange: null as string | null };
+    if (!selectedLines) {
+      return { filename: getLeafPathName(file.relativePath), lineRange: null as string | null };
+    }
 
     const lineRange =
       selectedLines.startLine === selectedLines.endLine
         ? `L${selectedLines.startLine}`
         : `L${selectedLines.startLine}-${selectedLines.endLine}`;
 
-    return { filename: file.relativePath, lineRange };
+    return { filename: getLeafPathName(file.relativePath), lineRange };
   };
 
   return (
@@ -46,7 +49,7 @@ export function ContextBar() {
           <For each={files()}>
             {(file) => (
               <ContextChip
-                label={file.relativePath}
+                label={getLeafPathName(file.relativePath)}
                 title={file.relativePath}
                 onRemove={files().length > 0 ? () => removeContextFile(file.path) : undefined}
               />

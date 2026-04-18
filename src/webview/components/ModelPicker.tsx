@@ -1,12 +1,16 @@
 import { createMemo, For, Show } from 'solid-js';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
 
-interface Selection {
+interface ModelSelection {
   providerID?: string;
   modelID?: string;
+  variant?: string;
 }
 
-export function ModelPicker(props: { onSelect: (sel: Selection) => void; onClose: () => void }) {
+export function ModelPicker(props: {
+  onSelect: (sel: ModelSelection) => void;
+  onClose: () => void;
+}) {
   const visibleProviders = createMemo(() => getVisibleProviders(state.providers));
 
   const isSelected = (providerID: string, modelID: string) => {
@@ -16,10 +20,7 @@ export function ModelPicker(props: { onSelect: (sel: Selection) => void; onClose
 
   return (
     <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
-      <div
-        class="dropdown-menu w-full"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div class="dropdown-menu w-full" onClick={(e) => e.stopPropagation()}>
         <div class="max-h-[280px] overflow-y-auto py-1">
           <Show
             when={visibleProviders().length > 0}
@@ -32,10 +33,12 @@ export function ModelPicker(props: { onSelect: (sel: Selection) => void; onClose
             <For each={visibleProviders()}>
               {(provider) => (
                 <>
-                  <div class="dropdown-group-header">
-                    {provider.name}
-                  </div>
-                  <For each={Object.values(provider.models).sort((a, b) => a.name.localeCompare(b.name))}>
+                  <div class="dropdown-group-header">{provider.name}</div>
+                  <For
+                    each={Object.values(provider.models).toSorted((a, b) =>
+                      a.name.localeCompare(b.name)
+                    )}
+                  >
                     {(model) => (
                       <button
                         class={`dropdown-item ${isSelected(provider.id, model.id) ? 'selected' : ''}`}
@@ -46,14 +49,16 @@ export function ModelPicker(props: { onSelect: (sel: Selection) => void; onClose
                       >
                         <span class="dropdown-check">
                           <Show when={isSelected(provider.id, model.id)}>
-                            <svg class="h-3 w-3 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
+                            <svg
+                              class="h-3 w-3 text-vscode-accent"
+                              viewBox="0 0 16 16"
+                              fill="currentColor"
+                            >
                               <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
                             </svg>
                           </Show>
                         </span>
-                        <span class="min-w-0 flex-1 truncate">
-                          {model.name}
-                        </span>
+                        <span class="min-w-0 flex-1 truncate">{model.name}</span>
                         <Show when={model.limit?.context}>
                           <span class="dropdown-hint">
                             {formatContextLimit(model.limit!.context)}

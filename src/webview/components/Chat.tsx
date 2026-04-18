@@ -4,7 +4,6 @@ import { selectSession, createSession, deleteSession } from '../hooks/useOpenCod
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { PermissionPrompt } from './PermissionPrompt';
-import { TodoList } from './TodoList';
 import { SettingsPanel } from './SettingsPanel';
 
 export function Chat() {
@@ -21,22 +20,20 @@ export function Chat() {
           when={showSessionPicker()}
           fallback={
             <>
-              <button
-                class="chat-header-title"
-                onClick={() => setShowSessionPicker(true)}
-                title="Sessions"
-              >
-                <span class="chat-header-title-text">{activeTitle()}</span>
-                <svg class="chat-header-chevron" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M4.5 6l3.5 4 3.5-4z" />
-                </svg>
-              </button>
-              <div class="chat-header-actions">
+              <div class="chat-header-left">
                 <button
                   class="chat-header-btn"
-                  onClick={() => createSession()}
-                  title="New chat"
+                  onClick={() => setShowSessionPicker(true)}
+                  title="Back to sessions"
                 >
+                  <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+                  </svg>
+                </button>
+                <span class="chat-header-title-text">{activeTitle()}</span>
+              </div>
+              <div class="chat-header-actions">
+                <button class="chat-header-btn" onClick={() => createSession()} title="New chat">
                   <svg viewBox="0 0 16 16" fill="currentColor">
                     <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
                   </svg>
@@ -46,15 +43,6 @@ export function Chat() {
           }
         >
           <div class="chat-header-left">
-            <button
-              class="chat-header-btn"
-              onClick={() => setShowSessionPicker(false)}
-              title="Back to chat"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor">
-                <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
-              </svg>
-            </button>
             <span class="chat-header-title-text">Sessions</span>
           </div>
           <div class="chat-header-actions">
@@ -74,16 +62,9 @@ export function Chat() {
         </Show>
       </div>
 
-      <Show
-        when={!showSessionPicker()}
-        fallback={<SessionListView />}
-      >
+      <Show when={!showSessionPicker()} fallback={<SessionListView />}>
         <Show when={showSettings()}>
           <SettingsPanel />
-        </Show>
-
-        <Show when={state.todos.length > 0}>
-          <TodoList />
         </Show>
 
         <MessageList />
@@ -101,9 +82,7 @@ function SessionListView() {
     <div class="session-list-view">
       <Show
         when={state.sessions.length > 0}
-        fallback={
-          <div class="session-empty">No sessions yet</div>
-        }
+        fallback={<div class="session-empty">No sessions yet</div>}
       >
         <For each={state.sessions}>
           {(session) => {

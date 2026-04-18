@@ -1,6 +1,10 @@
 import { Show, For, createSignal } from 'solid-js';
 import type { ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
+import { state as appState } from '../lib/state';
+import { formatDisplayPath } from '../lib/path-display';
+
+const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 
 export function ToolCall(props: { part: ToolPart }) {
   const [expanded, setExpanded] = createSignal(false);
@@ -37,8 +41,6 @@ export function ToolCall(props: { part: ToolPart }) {
     return null;
   };
 
-  const isPathKey = (key: string) => key === 'file_path' || key === 'path';
-
   const openFile = (path: string) => {
     postMessage({ type: 'vscode/open', payload: { path } });
   };
@@ -52,15 +54,18 @@ export function ToolCall(props: { part: ToolPart }) {
     if (state().status !== 'completed') return '';
     const output = (state() as ToolStateCompleted).output || '';
     if (output.length <= 2000) return output;
-    return output.slice(0, 1000) + '\n\n… (' + Math.round((output.length - 2000) / 1000) + 'k chars truncated) …\n\n' + output.slice(-1000);
+    return (
+      output.slice(0, 1000) +
+      '\n\n… (' +
+      Math.round((output.length - 2000) / 1000) +
+      'k chars truncated) …\n\n' +
+      output.slice(-1000)
+    );
   };
 
   return (
     <div class="chat-tool-invocation-part">
-      <button
-        class="tool-invocation-header"
-        onClick={() => setExpanded(!expanded())}
-      >
+      <button class="tool-invocation-header" onClick={() => setExpanded(!expanded())}>
         <span class={`tool-status-dot ${statusClass()}`} />
         <span class="tool-invocation-title">{title()}</span>
         <Show when={state().status === 'completed'}>
@@ -75,8 +80,17 @@ export function ToolCall(props: { part: ToolPart }) {
         </Show>
         <Show when={state().status === 'running'}>
           <span class="tool-invocation-running-label">
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" style={{ animation: 'spin 0.8s linear infinite' }}>
-              <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z" opacity="0.25" />
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              style={{ animation: 'spin 0.8s linear infinite' }}
+            >
+              <path
+                d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z"
+                opacity="0.25"
+              />
               <path d="M8 0a8 8 0 018 8h-1.5A6.5 6.5 0 008 1.5V0z" />
             </svg>
           </span>
@@ -97,8 +111,19 @@ export function ToolCall(props: { part: ToolPart }) {
           {(() => {
             const p = preview()!;
             return isPathKey(p.key) ? (
-              <a href="#" class="file-path-link" onClick={(e) => { e.preventDefault(); openFile(p.text); }}>{p.text}</a>
-            ) : p.text;
+              <a
+                href="#"
+                class="file-path-link"
+                onClick={(e) => {
+                  e.preventDefault();
+                  openFile(p.text);
+                }}
+              >
+                {formatDisplayPath(p.text, appState.editorContext.workspacePath)}
+              </a>
+            ) : (
+              p.text
+            );
           })()}
         </div>
       </Show>
@@ -112,7 +137,16 @@ export function ToolCall(props: { part: ToolPart }) {
                   <div class="tool-input-entry">
                     <span class="tool-input-key">{key}</span>
                     {isPathKey(key) && typeof value === 'string' ? (
-                      <a href="#" class="file-path-link tool-input-value" onClick={(e) => { e.preventDefault(); openFile(String(value)); }}>{formatValue(value)}</a>
+                      <a
+                        href="#"
+                        class="file-path-link tool-input-value"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          openFile(String(value));
+                        }}
+                      >
+                        {formatDisplayPath(String(value), appState.editorContext.workspacePath)}
+                      </a>
                     ) : (
                       <span class="tool-input-value">{formatValue(value)}</span>
                     )}

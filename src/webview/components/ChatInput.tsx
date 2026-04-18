@@ -18,11 +18,18 @@ import {
 import { postMessage } from '../lib/bridge';
 import { sendMessage, abortSession } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel, formatThinkingLabel } from './ModelPicker';
-import { isAssistantMessage, getContextWindow, sumAssistantTokens, formatNumber } from '../lib/message-metrics';
+import {
+  isAssistantMessage,
+  getContextWindow,
+  sumAssistantTokens,
+  formatNumber,
+} from '../lib/message-metrics';
+import { getLeafPathName } from '../lib/path-display';
+import { TodoList } from './TodoList';
 
 export function ChatInput() {
-  let textareaRef: HTMLTextAreaElement | undefined;
-  let containerRef: HTMLDivElement | undefined;
+  const textareaRef: HTMLTextAreaElement | undefined = undefined;
+  const containerRef: HTMLDivElement | undefined = undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [busyPromptMode, setBusyPromptMode] = createSignal<'queue' | 'steer'>('queue');
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
@@ -41,12 +48,20 @@ export function ChatInput() {
     const file = activeFile();
     if (!file) return null;
     const selectedLines = selection();
-    if (!selectedLines)       return { filename: file.relativePath.split('/').pop()!, lineRange: null as string | null };
+    if (!selectedLines) {
+      return {
+        filename: getLeafPathName(file.relativePath),
+        lineRange: null as string | null,
+      };
+    }
     const lineRange =
       selectedLines.startLine === selectedLines.endLine
         ? `L${selectedLines.startLine}`
         : `L${selectedLines.startLine}-${selectedLines.endLine}`;
-    return { filename: file.relativePath.split('/').pop()!, lineRange };
+    return {
+      filename: getLeafPathName(file.relativePath),
+      lineRange,
+    };
   };
 
   function handleKeydown(e: KeyboardEvent) {
@@ -156,14 +171,18 @@ export function ChatInput() {
       }
     };
 
-    const handleWindowDragOver = (e: DragEvent) => {
-      // Always accept drops so the browser fires the drop event.
-      // VS Code explorer drags may not expose MIME types during dragover.
+    const beginDropTarget = (e: DragEvent) => {
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       if (isPathDrop(e.dataTransfer) || hasAnyData(e.dataTransfer)) {
         setIsDraggingOver(true);
       }
+    };
+
+    const handleWindowDragOver = (e: DragEvent) => {
+      // Always accept drops so the browser fires the drop event.
+      // VS Code explorer drags may not expose MIME types during dragover.
+      beginDropTarget(e);
     };
 
     const handleWindowDrop = async (e: DragEvent) => {
@@ -178,15 +197,25 @@ export function ChatInput() {
     };
 
     window.addEventListener('click', handleWindowClick, true);
-    window.addEventListener('dragover', handleWindowDragOver);
-    window.addEventListener('drop', handleWindowDrop);
-    window.addEventListener('dragleave', handleWindowDragLeave);
+    document.addEventListener('dragenter', beginDropTarget, true);
+    document.addEventListener('dragover', handleWindowDragOver, true);
+    document.addEventListener('drop', handleWindowDrop, true);
+    document.addEventListener('dragleave', handleWindowDragLeave, true);
+    window.addEventListener('dragenter', beginDropTarget, true);
+    window.addEventListener('dragover', handleWindowDragOver, true);
+    window.addEventListener('drop', handleWindowDrop, true);
+    window.addEventListener('dragleave', handleWindowDragLeave, true);
 
     onCleanup(() => {
       window.removeEventListener('click', handleWindowClick, true);
-      window.removeEventListener('dragover', handleWindowDragOver);
-      window.removeEventListener('drop', handleWindowDrop);
-      window.removeEventListener('dragleave', handleWindowDragLeave);
+      document.removeEventListener('dragenter', beginDropTarget, true);
+      document.removeEventListener('dragover', handleWindowDragOver, true);
+      document.removeEventListener('drop', handleWindowDrop, true);
+      document.removeEventListener('dragleave', handleWindowDragLeave, true);
+      window.removeEventListener('dragenter', beginDropTarget, true);
+      window.removeEventListener('dragover', handleWindowDragOver, true);
+      window.removeEventListener('drop', handleWindowDrop, true);
+      window.removeEventListener('dragleave', handleWindowDragLeave, true);
     });
   });
 
@@ -365,17 +394,44 @@ export function ChatInput() {
       <div
         ref={containerRef}
         class={`chat-input-container ${isFocused() ? 'focused' : ''} ${isDraggingOver() ? 'focused' : ''}`}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+          setIsDraggingOver(true);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+          setIsDraggingOver(true);
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          setIsDraggingOver(false);
+        }}
+        onDrop={handleDrop}
       >
+        <Show when={state.todos.length > 0}>
+          <TodoList placement="composer" />
+        </Show>
+
         <Show when={hasContext()}>
           <div class="chat-attachments-container">
             <Show when={activeContext()}>
-              <AttachmentChip label={activeContext()!.filename} detail={activeContext()!.lineRange} />
+              <AttachmentChip
+                label={activeContext()!.filename}
+                detail={activeContext()!.lineRange}
+              />
             </Show>
             <For each={files()}>
               {(file) => (
                 <AttachmentChip
-                  label={file.relativePath}
-                  onRemove={() => removeContextFile(file.path)}
+                  label={getLeafPathName(file.relativePath)}
+                  onRemove={() => {
+                    removeContextFile(file.path);
+                    postMessage({ type: 'files/remove', payload: { path: file.path } });
+                  }}
                 />
               )}
             </For>
@@ -391,10 +447,17 @@ export function ChatInput() {
             <Show when={files().length > 1 || clipboardImages().length > 1}>
               <button
                 class="chat-attachment-chip"
-                style={{ cursor: 'pointer', border: 'none', background: 'none', opacity: 0.4, 'font-size': '10px' }}
+                style={{
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: 'none',
+                  opacity: 0.4,
+                  'font-size': '10px',
+                }}
                 onClick={() => {
                   clearContextFiles();
                   clearClipboardImages();
+                  postMessage({ type: 'files/clear' });
                 }}
                 title="Clear all"
               >
@@ -462,7 +525,13 @@ export function ChatInput() {
                 title="Select agent"
               >
                 <span class="toolbar-picker-label">{selectedAgentLabel()}</span>
-                <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                <svg
+                  class="codicon-chevron"
+                  width="10"
+                  height="10"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
                   <path d="M4.5 6l3.5 4 3.5-4z" />
                 </svg>
               </button>
@@ -483,11 +552,15 @@ export function ChatInput() {
               }
             >
               <Show when={currentModel().modelName} fallback={<span>Model</span>}>
-                <span class="toolbar-picker-label model-name">
-                  {currentModel().modelName}
-                </span>
+                <span class="toolbar-picker-label model-name">{currentModel().modelName}</span>
               </Show>
-              <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+              <svg
+                class="codicon-chevron"
+                width="10"
+                height="10"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
                 <path d="M4.5 6l3.5 4 3.5-4z" />
               </svg>
             </button>
@@ -503,10 +576,14 @@ export function ChatInput() {
                 }}
                 title="Thinking level"
               >
-                <span class="toolbar-picker-label">
-                  {formatThinkingLabel(effectiveVariant()!)}
-                </span>
-                <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                <span class="toolbar-picker-label">{formatThinkingLabel(effectiveVariant()!)}</span>
+                <svg
+                  class="codicon-chevron"
+                  width="10"
+                  height="10"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
                   <path d="M4.5 6l3.5 4 3.5-4z" />
                 </svg>
               </button>
@@ -529,9 +606,11 @@ export function ChatInput() {
                     <circle class="progress-bg" cx="18" cy="18" r="14" />
                     <circle
                       class="progress-arc"
-                      cx="18" cy="18" r="14"
-                      stroke-dasharray={87.96}
-                      stroke-dashoffset={87.96 - (contextUsage()!.percent / 100) * 87.96}
+                      cx="18"
+                      cy="18"
+                      r="14"
+                      stroke-dasharray="87.96"
+                      stroke-dashoffset={`${87.96 - (contextUsage()!.percent / 100) * 87.96}`}
                     />
                   </svg>
                 </button>
@@ -606,14 +685,22 @@ export function ChatInput() {
                         border: 'none',
                         cursor: 'pointer',
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-vscode-hover)')}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = 'var(--color-vscode-hover)')
+                      }
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
                       onClick={() => {
                         abortSession();
                         handleSend();
                       }}
                     >
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-error)' }}>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        style={{ color: 'var(--color-vscode-error)' }}
+                      >
                         <path d="M1 1.91L1.78 1.5 15 8 1.78 14.5 1 14.09 3.61 8 1 1.91z" />
                       </svg>
                       Stop and Send
@@ -632,7 +719,9 @@ export function ChatInput() {
                         border: 'none',
                         cursor: 'pointer',
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-vscode-hover)')}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = 'var(--color-vscode-hover)')
+                      }
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
                       onClick={() => {
                         setBusyPromptMode('queue');
@@ -640,12 +729,26 @@ export function ChatInput() {
                       }}
                     >
                       <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)' }}>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                          style={{ color: 'var(--color-vscode-muted)' }}
+                        >
                           <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
                         </svg>
                         Add to Queue
                       </div>
-                      <span style={{ 'font-size': '11px', color: 'var(--color-vscode-muted)', opacity: 0.4 }}>Enter</span>
+                      <span
+                        style={{
+                          'font-size': '11px',
+                          color: 'var(--color-vscode-muted)',
+                          opacity: 0.4,
+                        }}
+                      >
+                        Enter
+                      </span>
                     </button>
                     <button
                       style={{
@@ -661,7 +764,9 @@ export function ChatInput() {
                         border: 'none',
                         cursor: 'pointer',
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-vscode-hover)')}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = 'var(--color-vscode-hover)')
+                      }
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
                       onClick={() => {
                         setBusyPromptMode('steer');
@@ -669,12 +774,26 @@ export function ChatInput() {
                       }}
                     >
                       <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)' }}>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                          style={{ color: 'var(--color-vscode-muted)' }}
+                        >
                           <path d="M7.5 1L9 5h4l-3.5 3 1.5 4.5L7.5 10 4 12.5 5.5 8 2 5h4l1.5-4z" />
                         </svg>
                         Steer with Message
                       </div>
-                      <span style={{ 'font-size': '11px', color: 'var(--color-vscode-muted)', opacity: 0.4 }}>{'\u2303'}Enter</span>
+                      <span
+                        style={{
+                          'font-size': '11px',
+                          color: 'var(--color-vscode-muted)',
+                          opacity: 0.4,
+                        }}
+                      >
+                        {'\u2303'}Enter
+                      </span>
                     </button>
                   </div>
                 </Show>
@@ -702,7 +821,14 @@ export function ChatInput() {
 
 function ContextPopup(props: {
   usage: { used: number; limit: number; percent: number };
-  tokens: { total: number; input: number; output: number; reasoning: number; cacheRead: number; cacheWrite: number };
+  tokens: {
+    total: number;
+    input: number;
+    output: number;
+    reasoning: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
   model: { providerName: string; modelName: string };
   onClose: () => void;
 }) {
@@ -769,10 +895,7 @@ function ContextPopup(props: {
 function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => void }) {
   return (
     <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
-      <div
-        class="dropdown-menu w-full"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div class="dropdown-menu w-full" onClick={(e) => e.stopPropagation()}>
         <div class="py-1">
           <For each={state.agents}>
             {(agent) => (
@@ -813,10 +936,7 @@ function VariantPicker(props: {
 }) {
   return (
     <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
-      <div
-        class="dropdown-menu w-full"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div class="dropdown-menu w-full" onClick={(e) => e.stopPropagation()}>
         <div class="py-1">
           <For each={props.variants}>
             {(v) => (
@@ -909,9 +1029,7 @@ async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<s
 
   if (paths.size === 0) {
     // Fall back to async string reading from ALL DataTransferItems
-    const stringItems = Array.from(dataTransfer.items).filter(
-      (item) => item.kind === 'string'
-    );
+    const stringItems = Array.from(dataTransfer.items).filter((item) => item.kind === 'string');
 
     const itemText = await Promise.all(stringItems.map(readDroppedItem));
 
@@ -961,52 +1079,145 @@ function readDroppedItem(item: DataTransferItem): Promise<string> {
 
 function parseDroppedText(value: string): string[] {
   if (!value) return [];
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'))
-    .map(decodeDroppedPath)
-    .filter((path): path is string => Boolean(path));
+  const paths = new Set<string>();
+
+  for (const line of value.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const decoded = decodeDroppedCandidate(trimmed);
+    if (decoded) paths.add(decoded);
+  }
+
+  for (const candidate of extractPathsFromStructuredDrop(value)) {
+    paths.add(candidate);
+  }
+
+  return Array.from(paths);
+}
+
+function decodeDroppedCandidate(value: string): string | null {
+  return decodeDroppedPath(value) || decodeWorkspaceRelativePath(value);
 }
 
 function decodeDroppedPath(value: string): string | null {
-  // vscode-file://vscode-app/<path> — VS Code explorer drag
-  if (value.startsWith('vscode-file://')) {
-    try {
-      const url = new URL(value);
-      let pathname = decodeURIComponent(url.pathname);
-      // Strip the /vscode-app prefix if present
-      pathname = pathname.replace(/^\/vscode-app/, '');
-      return pathname.replace(/^\/([A-Za-z]:\/)/, '$1');
-    } catch {
-      return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('/')) return trimmed;
+  if (/^[A-Za-z]:[\\/]/.test(trimmed)) return trimmed;
+
+  try {
+    const url = new URL(trimmed);
+    let pathname = decodeURIComponent(url.pathname);
+
+    if (url.protocol === 'vscode-file:') {
+      pathname = pathname.replace(/^\/vscode-app(?=\/|$)/, '');
     }
-  }
-  // vscode-resource: scheme
-  if (value.startsWith('vscode-resource://')) {
-    try {
-      const pathname = decodeURIComponent(new URL(value).pathname);
-      return pathname.replace(/^\/([A-Za-z]:\/)/, '$1');
-    } catch {
-      return null;
+
+    if (
+      url.protocol === 'vscode-resource:' &&
+      url.hostname === 'file' &&
+      pathname.startsWith('///')
+    ) {
+      pathname = pathname.slice(2);
     }
-  }
-  if (value.startsWith('file://')) {
-    try {
-      const pathname = decodeURIComponent(new URL(value).pathname);
-      return pathname.replace(/^\/([A-Za-z]:\/)/, '$1');
-    } catch {
-      return null;
+
+    if (url.protocol === 'file:' && url.hostname && !/^\/[A-Za-z]:\//.test(pathname)) {
+      pathname = `//${url.hostname}${pathname}`;
     }
+
+    return normalizeDroppedPath(pathname);
+  } catch {
+    return null;
   }
-  return value.startsWith('/') ? value : null;
+}
+
+function normalizeDroppedPath(pathname: string): string | null {
+  if (!pathname) return null;
+  if (/^\/[A-Za-z]:\//.test(pathname)) return pathname.slice(1);
+  if (/^[A-Za-z]:[\\/]/.test(pathname)) return pathname;
+  return pathname.startsWith('/') || pathname.startsWith('//') ? pathname : null;
+}
+
+function decodeWorkspaceRelativePath(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null;
+  if (trimmed.startsWith('/') || trimmed.startsWith('//')) return null;
+  if (/^[A-Za-z]:[\\/]/.test(trimmed)) return null;
+  if (/\s/.test(trimmed)) return null;
+
+  const normalized = trimmed.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  if (!normalized || normalized === '.' || normalized === '..') return null;
+
+  const looksPathLike =
+    trimmed.startsWith('./') ||
+    trimmed.startsWith('../') ||
+    trimmed.includes('/') ||
+    trimmed.includes('\\') ||
+    trimmed.startsWith('.') ||
+    /^[^/\\]+\.[^/\\]+$/.test(trimmed);
+
+  return looksPathLike ? normalized : null;
+}
+
+function extractPathsFromStructuredDrop(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed || !/^[[{"]/.test(trimmed)) return [];
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    const paths = new Set<string>();
+    collectStructuredDropPaths(parsed, paths);
+    return Array.from(paths);
+  } catch {
+    return [];
+  }
+}
+
+function collectStructuredDropPaths(value: unknown, paths: Set<string>, keyHint = '') {
+  if (typeof value === 'string') {
+    const looksPathLike =
+      !keyHint ||
+      /(path|uri|url|resource)/i.test(keyHint) ||
+      value.startsWith('/') ||
+      value.startsWith('./') ||
+      value.startsWith('../') ||
+      /^[A-Za-z]:[\\/]/.test(value) ||
+      value.includes('/') ||
+      value.includes('\\') ||
+      /^[^/\\]+\.[^/\\]+$/.test(value) ||
+      /^[a-z][a-z0-9+.-]*:/i.test(value);
+
+    if (!looksPathLike) return;
+
+    for (const candidate of value.split(/\r?\n/)) {
+      const decoded = decodeDroppedCandidate(candidate);
+      if (decoded) paths.add(decoded);
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectStructuredDropPaths(item, paths, keyHint);
+    }
+    return;
+  }
+
+  if (!value || typeof value !== 'object') return;
+
+  for (const [key, entry] of Object.entries(value)) {
+    collectStructuredDropPaths(entry, paths, key);
+  }
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener('load', () => resolve(String(reader.result || '')));
-    reader.addEventListener('error', () => reject(reader.error || new Error('Failed to read clipboard image')));
+    reader.addEventListener('error', () =>
+      reject(reader.error || new Error('Failed to read clipboard image'))
+    );
     reader.readAsDataURL(file);
   });
 }
@@ -1030,5 +1241,3 @@ function extensionForMime(mime: string) {
       return 'png';
   }
 }
-
-

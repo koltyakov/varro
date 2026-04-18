@@ -1,14 +1,18 @@
 import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
-import { state } from '../lib/state';
 import { client } from '../lib/client';
 import { isAssistantMessage } from '../lib/message-metrics';
 import type { AssistantMessage, FileDiff, Message as MessageType, Part, TextPart } from '../types';
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
+import { state } from '../lib/state';
 
 export function Message(props: { info: MessageType; parts: Part[] }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
+  const isSubagent = () => assistant()?.mode === 'subagent';
+  const visibleAssistantParts = createMemo(() =>
+    assistant() ? props.parts.filter(shouldShowAssistantPartInline) : props.parts
+  );
 
   const [diffs] = createResource(
     () => {
@@ -21,33 +25,42 @@ export function Message(props: { info: MessageType; parts: Part[] }) {
       return client.session.diff(sessionID, messageID).catch(() => [] as FileDiff[]);
     }
   );
+  const shouldRender = () =>
+    isUser() ||
+    visibleAssistantParts().length > 0 ||
+    !!assistant()?.error?.data?.message ||
+    (diffs() || []).length > 0;
 
   return (
-    <>
-      <div class="value">
-        <Show when={isUser()}>
-          <UserMessageContent parts={props.parts} />
-        </Show>
-        <Show when={!isUser() && assistant()}>
-          <AssistantMessageContent info={assistant()!} parts={props.parts} />
-        </Show>
-        <Show when={assistant() && assistant()!.error?.data?.message}>
-          <div class="interactive-response-error-details">
-            <svg class="error-icon" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-            </svg>
-            <div class="rendered-markdown">
-              <p class="error-message-text">
-                {assistant()!.error?.data?.message || 'error'}
-              </p>
+    <Show when={shouldRender()}>
+      <div class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}`}>
+        <div
+          class={`value chat-turn-content ${
+            isUser() ? 'chat-turn-card user-message-card' : 'assistant-turn-content'
+          } ${isSubagent() ? 'chat-turn-subagent' : ''}`}
+        >
+          <Show when={isUser()}>
+            <UserMessageContent parts={props.parts} />
+          </Show>
+          <Show when={!isUser() && assistant()}>
+            <AssistantMessageContent info={assistant()!} parts={visibleAssistantParts()} />
+          </Show>
+          <Show when={assistant() && assistant()!.error?.data?.message}>
+            <div class="interactive-response-error-details">
+              <svg class="error-icon" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+              </svg>
+              <div class="rendered-markdown">
+                <p class="error-message-text">{assistant()!.error?.data?.message || 'error'}</p>
+              </div>
             </div>
-          </div>
-        </Show>
-        <Show when={assistant() && (diffs() || []).length > 0}>
-          <DiffSummary diffs={diffs()!} />
-        </Show>
+          </Show>
+          <Show when={assistant() && (diffs() || []).length > 0}>
+            <DiffSummary diffs={diffs()!} />
+          </Show>
+        </div>
       </div>
-    </>
+    </Show>
   );
 }
 
@@ -92,7 +105,7 @@ function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] 
   );
 
   return (
-    <div>
+    <div class="assistant-message-flow">
       <For each={props.parts}>
         {(part) => {
           const matchedRun = part.type === 'subtask' ? childRuns()[subtaskIndex++] : undefined;
@@ -114,10 +127,7 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
 
   return (
     <div class="diff-summary">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        class="diff-summary-btn"
-      >
+      <button onClick={() => setExpanded((v) => !v)} class="diff-summary-btn">
         <svg
           class={`h-3 w-3 transition-transform ${expanded() ? 'rotate-90' : ''}`}
           viewBox="0 0 16 16"
@@ -137,5 +147,32 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
         </div>
       </Show>
     </div>
+  );
+}
+
+function shouldShowAssistantPartInline(part: Part) {
+  return !(part.type === 'tool' && isTodoToolPart(part));
+}
+
+function isTodoToolPart(part: Extract<Part, { type: 'tool' }>) {
+  const toolName = part.tool.trim().toLowerCase();
+  if (
+    toolName.includes('todo') ||
+    toolName === 'update_plan' ||
+    toolName === 'updateplan' ||
+    toolName === 'todowrite'
+  ) {
+    return true;
+  }
+
+  const title =
+    (part.state.status === 'running' || part.state.status === 'completed'
+      ? part.state.title
+      : undefined) || '';
+  const normalizedTitle = title.trim().toLowerCase();
+  return (
+    normalizedTitle.includes('todo') ||
+    normalizedTitle === 'update plan' ||
+    normalizedTitle === 'updating plan'
   );
 }
