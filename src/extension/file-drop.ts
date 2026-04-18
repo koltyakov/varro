@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import { logger } from './logger';
 
 export class FileDropController {

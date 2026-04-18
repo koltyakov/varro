@@ -27,8 +27,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'server/status', payload: status });
     });
 
-    this.server.on('event', (event: any) => {
-      this.post({ type: 'server/event', payload: event });
+    this.server.on('event', (event: unknown) => {
+      this.post({ type: 'server/event', payload: event as Record<string, unknown> });
     });
   }
 
@@ -140,7 +140,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   post(msg: ExtensionMessage) {
-    this.view?.webview.postMessage(msg);
+    this.view?.webview.postMessage(msg, '*');
   }
 
   private async handleDroppedPaths(paths: string[]) {

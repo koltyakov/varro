@@ -3,6 +3,7 @@ import { state, isLoading } from '../lib/state';
 import { Message } from './Message';
 
 export function MessageList() {
+  // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   let userScrolledUp = false;
 

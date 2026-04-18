@@ -1,4 +1,4 @@
-import { Show, createSignal, createMemo, onMount } from 'solid-js';
+import { createMemo } from 'solid-js';
 import { marked } from 'marked';
 
 interface MarkdownProps {

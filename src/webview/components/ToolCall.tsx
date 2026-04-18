@@ -1,5 +1,5 @@
 import { Show, createSignal } from 'solid-js';
-import type { ToolPart } from '../types';
+import type { ToolPart, ToolStateCompleted } from '../types';
 
 export function ToolCall(props: { part: ToolPart }) {
   const [expanded, setExpanded] = createSignal(false);
@@ -28,7 +28,7 @@ export function ToolCall(props: { part: ToolPart }) {
 
   const preview = () => {
     const s = state();
-    const input: any = s.input || {};
+    const input: Record<string, unknown> = (s.input || {}) as Record<string, unknown>;
     const keys = ['file_path', 'path', 'command', 'query', 'pattern'];
     for (const k of keys) {
       if (typeof input[k] === 'string') return String(input[k]).slice(0, 100);
@@ -47,7 +47,7 @@ export function ToolCall(props: { part: ToolPart }) {
           {title()}
           <Show when={state().status === 'completed'}>
             {(() => {
-              const s = state() as import('../types').ToolStateCompleted;
+              const s = state() as ToolStateCompleted;
               return (
                 <span class="ml-1.5 text-[10px] tabular-nums text-vscode-muted/30">
                   {formatDuration(s.time.end - s.time.start)}
@@ -85,11 +85,11 @@ export function ToolCall(props: { part: ToolPart }) {
           </Show>
           <Show when={state().status === 'completed'}>
             <pre class="max-h-[160px] overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-[1.5] text-vscode-fg/60">
-              {(state() as any).output || '(empty)'}
+              {(state() as ToolStateCompleted).output || '(empty)'}
             </pre>
           </Show>
           <Show when={state().status === 'error'}>
-            <div class="text-[11px] text-vscode-error/70">{(state() as any).error}</div>
+            <div class="text-[11px] text-vscode-error/70">{(state() as ToolStateCompleted).error}</div>
           </Show>
           <Show when={state().status === 'running'}>
             <div class="flex items-center gap-1.5 text-[11px] text-vscode-muted/30">

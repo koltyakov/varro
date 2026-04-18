@@ -33,11 +33,11 @@ export type ServerStatus =
 
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
-  | { type: 'server/event'; payload: { type: string; properties?: any; [k: string]: unknown } }
+  | { type: 'server/event'; payload: { type: string; properties?: Record<string, unknown>; [k: string]: unknown } }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'files/dropped'; payload: DroppedFile[] }
   | { type: 'theme/update'; payload: { theme: 'dark' | 'light' } }
-  | { type: 'api/response'; payload: { id: number; data?: any; error?: string } }
+  | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session' }
   | { type: 'command/abort' }
   | { type: 'command/share' };

@@ -36,7 +36,8 @@
     "typescript/no-namespace": "error",
     "typescript/consistent-type-imports": "warn",
     "import/no-duplicates": "error",
-    "react/jsx-key": "error",
+    "react/react-in-jsx-scope": "off",
+    "react/jsx-key": "off",
     "react/jsx-no-duplicate-props": "error"
   }
 }

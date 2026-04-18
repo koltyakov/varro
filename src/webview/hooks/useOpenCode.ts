@@ -20,6 +20,7 @@ import {
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage } from '../../shared/protocol';
+import type { SessionStatus } from '../types';
 
 let initialized = false;
 let handlersRegistered = false;
@@ -85,7 +86,7 @@ async function initConnection() {
   try {
     await client.health();
     await Promise.all([loadSessions(), loadAgents(), loadProviders()]);
-  } catch (err) {
+  } catch (_err) {
     setError('Failed to connect to OpenCode server');
   }
 }
@@ -93,7 +94,7 @@ async function initConnection() {
 async function loadAgents() {
   try {
     const agents = await client.agent.list();
-    const primaries = agents.filter((a) => a.mode !== 'subagent' && !(a as any).hidden);
+    const primaries = agents.filter((a) => a.mode !== 'subagent' && !('hidden' in a && (a as { hidden?: boolean }).hidden));
     setState('agents', primaries);
     if (state.selectedAgent && !primaries.some((agent) => agent.name === state.selectedAgent)) {
       setSelectedAgent(null);
@@ -154,10 +155,10 @@ export async function selectSession(id: string) {
     setState('messages', msgs);
     const statuses = await client.session
       .status()
-      .catch(() => ({}) as Record<string, import('../types').SessionStatus>);
+      .catch(() => ({}) as Record<string, SessionStatus>);
     setState('sessionStatus', statuses);
     setIsLoading(statuses[id]?.type === 'busy');
-  } catch (err) {
+  } catch (_err) {
     setError('Failed to load messages');
   }
 }
@@ -333,24 +334,26 @@ export async function respondPermission(
   } catch {}
 }
 
+type EventData = { properties?: Record<string, unknown> };
+
 function registerEventHandlers() {
-  serverEvents.on('session.created', (data: any) => {
-    const info = data.properties?.info;
-    if (info) setState('sessions', [info, ...state.sessions.filter((s) => s.id !== info.id)]);
+  serverEvents.on('session.created', (data: unknown) => {
+    const info = (data as EventData).properties?.info;
+    if (info) setState('sessions', [info, ...state.sessions.filter((s) => s.id !== (info as { id: string }).id)]);
   });
 
-  serverEvents.on('session.updated', (data: any) => {
-    const info = data.properties?.info;
+  serverEvents.on('session.updated', (data: unknown) => {
+    const info = (data as EventData).properties?.info;
     if (info) {
       setState(
         'sessions',
-        state.sessions.map((s) => (s.id === info.id ? info : s))
+        state.sessions.map((s) => (s.id === (info as { id: string }).id ? info : s))
       );
     }
   });
 
-  serverEvents.on('session.deleted', (data: any) => {
-    const id = data.properties?.info?.id;
+  serverEvents.on('session.deleted', (data: unknown) => {
+    const id = ((data as EventData).properties?.info as { id: string } | undefined)?.id;
     if (id)
       setState(
         'sessions',
@@ -358,72 +361,73 @@ function registerEventHandlers() {
       );
   });
 
-  serverEvents.on('session.status', (data: any) => {
-    const props = data.properties;
+  serverEvents.on('session.status', (data: unknown) => {
+    const props = (data as EventData).properties;
     if (!props) return;
-    const { sessionID, status } = props;
+    const { sessionID, status } = props as { sessionID: string; status: SessionStatus };
     setState('sessionStatus', { ...state.sessionStatus, [sessionID]: status });
     if (sessionID === state.activeSessionId) {
-      setIsLoading(status.type === 'busy' || status.type === 'retry');
+      setIsLoading((status as { type: string }).type === 'busy' || (status as { type: string }).type === 'retry');
     }
   });
 
-  serverEvents.on('session.idle', (data: any) => {
-    const sid = data.properties?.sessionID;
+  serverEvents.on('session.idle', (data: unknown) => {
+    const sid = (data as EventData).properties?.sessionID as string | undefined;
     if (!sid || sid === state.activeSessionId) setIsLoading(false);
     if (sid && sid === state.activeSessionId) {
       syncSessionMessages(sid).catch(() => {});
     }
   });
 
-  serverEvents.on('message.updated', (data: any) => {
-    const info = data.properties?.info;
-    if (info?.sessionID === state.activeSessionId) upsertMessageInfo(info);
+  serverEvents.on('message.updated', (data: unknown) => {
+    const info = (data as EventData).properties?.info;
+    if ((info as { sessionID?: string } | undefined)?.sessionID === state.activeSessionId) upsertMessageInfo(info as Parameters<typeof upsertMessageInfo>[0]);
   });
 
-  serverEvents.on('message.part.updated', (data: any) => {
-    const part = data.properties?.part;
-    if (part?.sessionID === state.activeSessionId) upsertPart(part);
+  serverEvents.on('message.part.updated', (data: unknown) => {
+    const part = (data as EventData).properties?.part;
+    if ((part as { sessionID?: string } | undefined)?.sessionID === state.activeSessionId) upsertPart(part as Parameters<typeof upsertPart>[0]);
   });
 
-  serverEvents.on('message.part.delta', (data: any) => {
-    const p = data.properties;
-    if (p?.sessionID === state.activeSessionId) {
-      applyMessagePartDelta(p.messageID, p.partID, p.delta, p.sessionID, p.field);
+  serverEvents.on('message.part.delta', (data: unknown) => {
+    const p = (data as EventData).properties as Record<string, unknown> | undefined;
+    if ((p?.sessionID as string) === state.activeSessionId) {
+      applyMessagePartDelta(p!.messageID as string, p!.partID as string, p!.delta as string, p!.sessionID as string, p!.field as string);
     }
   });
 
-  serverEvents.on('message.part.removed', (data: any) => {
-    const p = data.properties;
-    if (p) removeMessagePart(p.sessionID, p.messageID, p.partID);
+  serverEvents.on('message.part.removed', (data: unknown) => {
+    const p = (data as EventData).properties as Record<string, unknown> | undefined;
+    if (p) removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
   });
 
-  serverEvents.on('message.removed', (data: any) => {
-    const p = data.properties;
-    if (p?.sessionID === state.activeSessionId) {
+  serverEvents.on('message.removed', (data: unknown) => {
+    const p = (data as EventData).properties as Record<string, unknown> | undefined;
+    if ((p?.sessionID as string) === state.activeSessionId) {
       setState(
         'messages',
-        state.messages.filter((m) => m.info.id !== p.messageID)
+        state.messages.filter((m) => m.info.id !== (p!.messageID as string))
       );
     }
   });
 
-  serverEvents.on('permission.updated', (data: any) => {
-    if (data.properties) addPermission(data.properties);
+  serverEvents.on('permission.updated', (data: unknown) => {
+    const props = (data as EventData).properties;
+    if (props) addPermission(props as Parameters<typeof addPermission>[0]);
   });
 
-  serverEvents.on('permission.replied', (data: any) => {
-    const pid = data.properties?.permissionID;
+  serverEvents.on('permission.replied', (data: unknown) => {
+    const pid = (data as EventData).properties?.permissionID as string | undefined;
     if (pid) removePermission(pid);
   });
 
-  serverEvents.on('todo.updated', (data: any) => {
-    const p = data.properties;
-    if (p?.sessionID === state.activeSessionId) setState('todos', p.todos);
+  serverEvents.on('todo.updated', (data: unknown) => {
+    const p = (data as EventData).properties as Record<string, unknown> | undefined;
+    if ((p?.sessionID as string) === state.activeSessionId) setState('todos', p!.todos as Parameters<typeof setState>[1]);
   });
 
-  serverEvents.on('session.diff', (data: any) => {
-    const p = data.properties;
-    if (p?.sessionID === state.activeSessionId) setState('diffs', p.diff);
+  serverEvents.on('session.diff', (data: unknown) => {
+    const p = (data as EventData).properties as Record<string, unknown> | undefined;
+    if ((p?.sessionID as string) === state.activeSessionId) setState('diffs', p!.diff as Parameters<typeof setState>[1]);
   });
 }

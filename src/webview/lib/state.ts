@@ -102,7 +102,7 @@ export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [theme, setTheme] = createSignal<'dark' | 'light'>(
-  ((window as any).__initialTheme as 'dark' | 'light') || 'dark'
+  ((window as unknown as Record<string, string>).__initialTheme as 'dark' | 'light') || 'dark'
 );
 
 export function addContextFile(file: DroppedFile) {
@@ -280,7 +280,7 @@ export function upsertPart(part: Part) {
   setState(
     'messages',
     produce((msgs) => {
-      const msgId = (part as any).messageID;
+      const msgId = (part as { messageID: string }).messageID;
       const msg = msgs.find((m) => m.info.id === msgId);
       if (!msg) return;
       const idx = msg.parts.findIndex((p) => p.id === part.id);

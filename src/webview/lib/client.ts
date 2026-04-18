@@ -89,18 +89,18 @@ export const client = {
   },
 };
 
-type EventHandler = (data: any) => void;
+type EventHandler = (data: unknown) => void;
 
 const eventListeners = new Map<string, Set<EventHandler>>();
 
 onMessage((msg) => {
   if (msg.type !== 'server/event') return;
   const evt = msg.payload;
-  const handlers = eventListeners.get(evt.type);
+  const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
   if (handlers) {
     for (const h of handlers) h(evt);
   }
-  const wildcard = eventListeners.get('*');
+  const wildcard = eventListeners.get('*') as Set<EventHandler> | undefined;
   if (wildcard) {
     for (const h of wildcard) h(evt);
   }

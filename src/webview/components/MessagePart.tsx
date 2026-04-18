@@ -18,7 +18,7 @@ export function MessagePart(props: {
       case 'text':
         return (
           <div class="markdown-content text-[13px] leading-[1.5] text-vscode-fg">
-            <MarkdownRenderer content={(part as any).text} />
+            <MarkdownRenderer content={(part as TextPart).text} />
           </div>
         );
       case 'tool':
@@ -118,7 +118,7 @@ function SubtaskBlock(props: { part: SubtaskPart; run?: AssistantMessage }) {
       return formatModelLabel(
         provider?.name || props.part.model!.providerID,
         model?.name || props.part.model!.modelID,
-        (props.part.model as any).variant
+        (props.part.model as { variant?: string }).variant
       );
     }
 

@@ -53,7 +53,7 @@ export class OpenCodeServer extends EventEmitter {
         message: `No server at ${this.url}. Start one with "opencode serve --port ${this.port}" or enable opencode.server.autoStart.`,
       });
       throw new Error(
-        this._status.state === 'error' ? (this._status as any).message : 'server not running'
+        this._status.state === 'error' ? (this._status as { message: string }).message : 'server not running'
       );
     }
 
@@ -99,7 +99,7 @@ export class OpenCodeServer extends EventEmitter {
               state: 'error',
               message: 'OpenCode CLI not found. Install it with: npm install -g opencode-ai',
             });
-            reject(new Error((this._status as any).message));
+            reject(new Error((this._status as { message: string }).message));
             return;
           }
         });
@@ -146,7 +146,7 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
-  async request(method: string, path: string, body?: unknown): Promise<any> {
+  async request(method: string, path: string, body?: unknown): Promise<unknown> {
     const init: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json' },
@@ -156,7 +156,7 @@ export class OpenCodeServer extends EventEmitter {
     }
     const res = await fetch(`${this.url}${path}`, init);
     const text = await res.text();
-    let data: any = text;
+    let data: unknown = text;
     try {
       data = text ? JSON.parse(text) : null;
     } catch {}
@@ -198,9 +198,10 @@ export class OpenCodeServer extends EventEmitter {
           this.processSseChunk(chunk);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (controller.signal.aborted) return;
-      logger.warn(`Event stream error: ${err?.message || err}`);
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(`Event stream error: ${message}`);
       shouldReconnect = true;
     } finally {
       if (shouldReconnect && !controller.signal.aborted && this._status.state === 'running') {

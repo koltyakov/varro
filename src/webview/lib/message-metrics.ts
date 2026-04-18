@@ -103,9 +103,7 @@ export function getDescendantAssistants(
   }
 
   const results: Array<{ info: AssistantMessage; parts: Part[] }> = [];
-  const queue = [
-    ...(byParent.get(parentID) || []).toSorted((a, b) => a.info.time.created - b.info.time.created),
-  ];
+  const queue = (byParent.get(parentID) || []).toSorted((a, b) => a.info.time.created - b.info.time.created);
 
   while (queue.length > 0) {
     const current = queue.shift()!;

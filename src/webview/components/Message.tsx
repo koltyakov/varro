@@ -39,9 +39,9 @@ export function Message(props: { info: MessageType; parts: Part[]; isFirstInGrou
       <Show when={!isUser() && assistant()}>
         <AssistantMessageContent info={assistant()!} parts={props.parts} />
       </Show>
-      <Show when={(props.info as any).error?.data?.message}>
+      <Show when={assistant() && assistant()!.error?.data?.message}>
         <div class="mt-1 rounded border border-vscode-error/25 bg-vscode-error/5 px-3 py-2 text-[12px] text-vscode-error">
-          {((props.info as any).error?.data?.message as string) || 'error'}
+          {assistant()!.error?.data?.message || 'error'}
         </div>
       </Show>
       <Show when={assistant() && (diffs() || []).length > 0}>
@@ -52,7 +52,8 @@ export function Message(props: { info: MessageType; parts: Part[]; isFirstInGrou
 }
 
 function roleLabel(info: MessageType): string {
-  const agent = (info as any).agent || (info as any).mode;
+  if (!isAssistantMessage(info)) return 'Assistant';
+  const agent = info.agent || info.mode;
   if (agent && agent !== 'primary') return `${cap(agent)}`;
   return 'Assistant';
 }
@@ -66,8 +67,8 @@ function UserMessageContent(props: { parts: Part[] }) {
     props.parts.filter(
       (p) =>
         (p.type === 'text' &&
-          !(p as any).text?.startsWith('[Working directory:') &&
-          !(p as any).text?.startsWith('[Selection from')) ||
+          !(p as TextPart).text?.startsWith('[Working directory:') &&
+          !(p as TextPart).text?.startsWith('[Selection from')) ||
         p.type === 'file'
     );
   return (
@@ -75,7 +76,7 @@ function UserMessageContent(props: { parts: Part[] }) {
       <For each={visibleParts()}>
         {(part) => {
           if (part.type === 'text') {
-            return <div class="whitespace-pre-wrap wrap-break-word">{(part as any).text}</div>;
+            return <div class="whitespace-pre-wrap wrap-break-word">{(part as TextPart).text}</div>;
           }
           return <MessagePart part={part} />;
         }}

@@ -15,12 +15,12 @@ export function onMessage(handler: MessageHandler): () => void {
 }
 
 export function postMessage(msg: WebviewMessage): void {
-  const send = (window as any).__sendToExtension as ((m: WebviewMessage) => void) | undefined;
+  const send = (window as unknown as Record<string, unknown>).__sendToExtension as ((m: WebviewMessage) => void) | undefined;
   if (send) send(msg);
 }
 
 let reqId = 0;
-const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
+const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
 
 onMessage((msg) => {
   if (msg.type === 'api/response') {

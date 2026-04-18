@@ -23,7 +23,9 @@ import { ModelPicker } from './ModelPicker';
 import { isAssistantMessage } from '../lib/message-metrics';
 
 export function ChatInput() {
+  // oxlint-disable-next-line no-unassigned-vars
   let textareaRef: HTMLTextAreaElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [busyPromptMode, setBusyPromptMode] = createSignal<'queue' | 'steer'>('queue');
@@ -707,8 +709,8 @@ function decodeDroppedPath(value: string): string | null {
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(reader.error || new Error('Failed to read clipboard image'));
+    reader.addEventListener('load', () => resolve(String(reader.result || '')));
+    reader.addEventListener('error', () => reject(reader.error || new Error('Failed to read clipboard image')));
     reader.readAsDataURL(file);
   });
 }
