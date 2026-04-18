@@ -10,8 +10,6 @@ import {
   addClipboardImage,
   showModelPicker,
   setShowModelPicker,
-  showSettings,
-  setShowSettings,
   removeClipboardImage,
   removeContextFile,
   clearClipboardImages,
@@ -19,8 +17,8 @@ import {
 } from '../lib/state';
 import { postMessage } from '../lib/bridge';
 import { sendMessage, abortSession } from '../hooks/useOpenCode';
-import { ModelPicker } from './ModelPicker';
-import { isAssistantMessage } from '../lib/message-metrics';
+import { ModelPicker, getVariantsForModel, formatThinkingLabel } from './ModelPicker';
+import { isAssistantMessage, getContextWindow, sumAssistantTokens } from '../lib/message-metrics';
 
 export function ChatInput() {
   let textareaRef: HTMLTextAreaElement | undefined;
@@ -29,6 +27,7 @@ export function ChatInput() {
   const [busyPromptMode, setBusyPromptMode] = createSignal<'queue' | 'steer'>('queue');
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
   const [showBusyMenu, setShowBusyMenu] = createSignal(false);
+  const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [isFocused, setIsFocused] = createSignal(false);
 
   const files = () => state.droppedFiles;
@@ -41,12 +40,12 @@ export function ChatInput() {
     const file = activeFile();
     if (!file) return null;
     const selectedLines = selection();
-    if (!selectedLines) return { filename: file.relativePath, lineRange: null as string | null };
+    if (!selectedLines)       return { filename: file.relativePath.split('/').pop()!, lineRange: null as string | null };
     const lineRange =
       selectedLines.startLine === selectedLines.endLine
         ? `L${selectedLines.startLine}`
         : `L${selectedLines.startLine}-${selectedLines.endLine}`;
-    return { filename: file.relativePath, lineRange };
+    return { filename: file.relativePath.split('/').pop()!, lineRange };
   };
 
   function handleKeydown(e: KeyboardEvent) {
@@ -111,6 +110,15 @@ export function ChatInput() {
   }
 
   onMount(() => {
+    const handleWindowClick = (e: MouseEvent) => {
+      if (!containerRef?.contains(e.target as Node | null)) {
+        setShowAgentPicker(false);
+        setShowModelPicker(false);
+        setShowVariantPicker(false);
+        setShowBusyMenu(false);
+      }
+    };
+
     const handleWindowDragOver = (e: DragEvent) => {
       if (!isPathDrop(e.dataTransfer)) return;
       e.preventDefault();
@@ -129,10 +137,12 @@ export function ChatInput() {
       await handleDrop(e);
     };
 
+    window.addEventListener('click', handleWindowClick, true);
     window.addEventListener('dragover', handleWindowDragOver);
     window.addEventListener('drop', handleWindowDrop);
 
     onCleanup(() => {
+      window.removeEventListener('click', handleWindowClick, true);
       window.removeEventListener('dragover', handleWindowDragOver);
       window.removeEventListener('drop', handleWindowDrop);
     });
@@ -208,6 +218,30 @@ export function ChatInput() {
     state.messages.map((entry) => entry.info).filter(isAssistantMessage)
   );
 
+  const contextUsage = createMemo(() => {
+    const assistants = assistantMessages();
+    if (assistants.length === 0) return null;
+    const last = assistants[assistants.length - 1];
+    const ctx = getContextWindow(last, state.providers);
+    if (!ctx) return null;
+    return ctx;
+  });
+
+  const availableVariants = createMemo(() => {
+    const model = currentModel();
+    return getVariantsForModel(model.providerID, model.modelID, state.providers).filter(
+      (v) => v !== 'none'
+    );
+  });
+
+  const effectiveVariant = createMemo(() => {
+    const variants = availableVariants();
+    if (variants.length === 0) return null;
+    return currentModel().variant && variants.includes(currentModel().variant!)
+      ? currentModel().variant
+      : variants[0];
+  });
+
   const selectedAgentLabel = () => {
     const name = state.selectedAgent;
     if (!name) return 'Agent';
@@ -240,6 +274,36 @@ export function ChatInput() {
           }}
           onClose={() => setShowAgentPicker(false)}
         />
+      </Show>
+
+      <Show when={showVariantPicker() && availableVariants().length > 0}>
+        <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={() => setShowVariantPicker(false)}>
+          <div
+            class="w-full overflow-hidden rounded-lg border border-vscode-border/50 bg-vscode-card shadow-[0_-4px_16px_rgba(0,0,0,0.3)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <For each={availableVariants()}>
+              {(v) => (
+                <button
+                  class={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-vscode-hover ${
+                    effectiveVariant() === v ? 'text-vscode-accent' : 'text-vscode-fg'
+                  }`}
+                  onClick={() => {
+                    const m = currentModel();
+                    setSelectedModel({
+                      providerID: m.providerID!,
+                      modelID: m.modelID!,
+                      variant: v,
+                    });
+                    setShowVariantPicker(false);
+                  }}
+                >
+                  {formatThinkingLabel(v)}
+                </button>
+              )}
+            </For>
+          </div>
+        </div>
       </Show>
 
       <div
@@ -302,7 +366,7 @@ export function ChatInput() {
           </div>
         </Show>
 
-        <div class="chat-editor-container" style={{ padding: '4px 0 0 4px' }}>
+        <div class="chat-editor-container">
           <textarea
             ref={textareaRef!}
             style={{
@@ -310,7 +374,7 @@ export function ChatInput() {
               width: '100%',
               resize: 'none',
               background: 'transparent',
-              padding: '0 8px',
+              padding: '0 0 0 6px',
               'font-size': '13px',
               'line-height': '1.45',
               color: 'var(--color-vscode-input-fg)',
@@ -339,77 +403,90 @@ export function ChatInput() {
         </div>
 
         <div class="chat-input-toolbars">
-          <button
-            class="toolbar-icon"
-            onClick={() => postMessage({ type: 'context/request' })}
-            title="Add context"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
-            </svg>
-          </button>
+          <div class="toolbar-left">
+            <Show when={state.agents.length > 0}>
+              <button
+                class="toolbar-picker"
+                onClick={() => {
+                  setShowAgentPicker(!showAgentPicker());
+                  setShowModelPicker(false);
+                  setShowBusyMenu(false);
+                }}
+                title="Select agent"
+              >
+                <span class="toolbar-picker-label">{selectedAgentLabel()}</span>
+                <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M4.5 6l3.5 4 3.5-4z" />
+                </svg>
+              </button>
+            </Show>
 
-          <Show when={state.agents.length > 0}>
             <button
-              class="toolbar-picker"
+              class="toolbar-picker model-picker-btn"
               onClick={() => {
-                setShowAgentPicker(!showAgentPicker());
-                setShowModelPicker(false);
+                setShowModelPicker(!showModelPicker());
+                setShowAgentPicker(false);
+                setShowVariantPicker(false);
                 setShowBusyMenu(false);
               }}
-              title="Select agent"
+              title={
+                currentModel().modelName
+                  ? `${currentModel().providerName} / ${currentModel().modelName}`
+                  : 'Choose model'
+              }
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M14 8A6 6 0 102 8a6 6 0 0012 0zm-1 0A5 5 0 113 8a5 5 0 0110 0z" />
-              </svg>
-              <span style={{ 'max-width': '100px', overflow: 'hidden', 'text-overflow': 'ellipsis' }}>{selectedAgentLabel()}</span>
+              <Show when={currentModel().modelName} fallback={<span>Model</span>}>
+                <span class="toolbar-picker-label model-name">
+                  {currentModel().modelName}
+                  <Show when={currentModel().providerName}>
+                    <span class="toolbar-picker-detail"> ({currentModel().providerName})</span>
+                  </Show>
+                </span>
+              </Show>
               <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M4.5 6l3.5 4 3.5-4z" />
               </svg>
             </button>
-          </Show>
 
-          <button
-            class="toolbar-picker"
-            onClick={() => {
-              setShowModelPicker(!showModelPicker());
-              setShowAgentPicker(false);
-              setShowBusyMenu(false);
-            }}
-            title={
-              currentModel().modelName
-                ? `${currentModel().providerName} / ${currentModel().modelName}`
-                : 'Choose model'
-            }
-          >
-            <Show when={currentModel().modelName} fallback={<span>Model</span>}>
-              <span style={{ 'max-width': '180px', overflow: 'hidden', 'text-overflow': 'ellipsis' }}>
-                {currentModel().modelName}
-                <Show when={currentModel().variant}>
-                  <span style={{ opacity: 0.5 }}>
-                    {' '}
-                    · {formatThinkingLabel(currentModel().variant!)}
-                  </span>
-                </Show>
-              </span>
+            <Show when={availableVariants().length > 0}>
+              <button
+                class="toolbar-picker"
+                onClick={() => {
+                  setShowVariantPicker(!showVariantPicker());
+                  setShowAgentPicker(false);
+                  setShowModelPicker(false);
+                  setShowBusyMenu(false);
+                }}
+                title="Thinking level"
+              >
+                <span class="toolbar-picker-label">
+                  {formatThinkingLabel(effectiveVariant()!)}
+                </span>
+                <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M4.5 6l3.5 4 3.5-4z" />
+                </svg>
+              </button>
             </Show>
-            <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M4.5 6l3.5 4 3.5-4z" />
-            </svg>
-          </button>
 
-          <button
-            class={`toolbar-icon ${showSettings() ? 'active' : ''}`}
-            onClick={() => setShowSettings(!showSettings())}
-            title="Model settings"
-            style={showSettings() ? { background: 'var(--color-vscode-toolbar-hover)' } : {}}
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M3.5 2h-1v5h1V2zm6.1 5H6.4L6 6.45v-1L6.4 5h3.2l.4.5v1l-.4.5zm-5 3H1.4L1 9.5v-1l.4-.5h3.2l.4.5v1l-.4.5zm3.9-8h-1v12h1V2zm-1 4h-1v8h1V6zm8-2h-1v10h1V4zm-2.1 3h-3.2l-.4.5v1l.4.5h3.2l.4-.5v-1l-.4-.5z" />
-            </svg>
-          </button>
+            <Show when={contextUsage()}>
+              <div
+                class={`chat-context-usage ${contextUsage()!.percent >= 75 ? (contextUsage()!.percent >= 90 ? 'error' : 'warning') : ''}`}
+                title={`${Math.round(contextUsage()!.used).toLocaleString()} / ${contextUsage()!.limit.toLocaleString()} tokens (${Math.round(contextUsage()!.percent)}%)`}
+              >
+                <svg class="circular-progress" viewBox="0 0 36 36">
+                  <circle class="progress-bg" cx="18" cy="18" r="14" />
+                  <circle
+                    class="progress-arc"
+                    cx="18" cy="18" r="14"
+                    stroke-dasharray={87.96}
+                    stroke-dashoffset={87.96 - (contextUsage()!.percent / 100) * 87.96}
+                  />
+                </svg>
+              </div>
+            </Show>
+          </div>
 
-          <div style={{ 'margin-left': 'auto', display: 'flex', 'align-items': 'center', gap: '4px' }}>
+          <div class="toolbar-right">
             <Show when={isLoading()}>
               <div style={{ position: 'relative' }}>
                 <button
@@ -564,49 +641,25 @@ export function ChatInput() {
 
 function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => void }) {
   return (
-    <div style={{ position: 'absolute', inset: '0 auto auto 0', 'z-index': 50, 'margin': '0 12px' }} onClick={props.onClose}>
+    <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
       <div
-        style={{
-          width: '100%',
-          overflow: 'hidden',
-          'border-radius': '4px',
-          border: '1px solid var(--color-vscode-widget-border)',
-          background: 'var(--color-vscode-widget-bg)',
-          'box-shadow': '0 4px 16px rgba(0,0,0,0.3)',
-        }}
+        class="w-full overflow-hidden rounded-lg border border-vscode-border/50 bg-vscode-card shadow-[0_-4px_16px_rgba(0,0,0,0.3)]"
         onClick={(e) => e.stopPropagation()}
       >
         <For each={state.agents}>
           {(agent) => (
             <button
-              style={{
-                display: 'flex',
-                width: '100%',
-                'align-items': 'center',
-                gap: '8px',
-                padding: '6px 10px',
-                'text-align': 'left',
-                'font-size': '12px',
-                background: state.selectedAgent === agent.name ? 'var(--color-vscode-hover)' : 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--color-vscode-fg)',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-vscode-hover)')}
-              onMouseLeave={(e) => {
-                if (state.selectedAgent !== agent.name) e.currentTarget.style.background = 'none';
-              }}
+              class={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-vscode-hover ${
+                state.selectedAgent === agent.name ? 'text-vscode-accent' : 'text-vscode-fg'
+              }`}
               onClick={() => props.onSelect(agent.name)}
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)', 'flex-shrink': 0 }}>
-                <path d="M14 8A6 6 0 102 8a6 6 0 0012 0zm-1 0A5 5 0 113 8a5 5 0 0110 0z" />
-              </svg>
-              <span style={{ flex: 1, 'font-weight': 500 }}>{agent.name}</span>
+              <span class="min-w-0 flex-1 truncate">{agent.name}</span>
               <Show when={agent.description}>
-                <span style={{ 'font-size': '11px', color: 'var(--color-vscode-muted)', opacity: 0.6 }}>{agent.description}</span>
+                <span class="shrink-0 text-[11px] text-vscode-muted/60">{agent.description}</span>
               </Show>
               <Show when={state.selectedAgent === agent.name}>
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-accent)', 'flex-shrink': 0 }}>
+                <svg class="h-3.5 w-3.5 shrink-0 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
                 </svg>
               </Show>
@@ -614,7 +667,7 @@ function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => 
           )}
         </For>
         <Show when={state.agents.length === 0}>
-          <div style={{ padding: '12px 10px', 'text-align': 'center', 'font-size': '11px', color: 'var(--color-vscode-muted)' }}>
+          <div class="px-3 py-6 text-center text-[11px] text-vscode-muted">
             No agents available
           </div>
         </Show>
@@ -760,9 +813,4 @@ function extensionForMime(mime: string) {
   }
 }
 
-function formatThinkingLabel(variant: string) {
-  return variant
-    .split(/[-_]/g)
-    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
-    .join(' ');
-}
+

@@ -383,7 +383,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   background-color: var(--color-vscode-input-bg);
   border: 1px solid var(--color-vscode-input-border, transparent);
   border-radius: 8px;
-  padding: 0 6px 6px 6px;
+  padding: 6px;
   width: 100%;
   position: relative;
   overflow: hidden;
@@ -394,7 +394,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 }
 
 .interactive-session .interactive-input-part {
-  margin: 0 12px;
+  margin: 0 12px 12px 12px;
   padding: 4px 0;
   display: flex;
   flex-direction: column;
@@ -409,12 +409,81 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
   margin-top: 4px;
 }
 
-.interactive-session .chat-input-toolbars > :first-child {
-  margin-right: auto;
+.interactive-session .chat-input-toolbars .toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.interactive-session .chat-input-toolbars .toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.toolbar-picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar-picker-label.model-name {
+  max-width: none;
+}
+
+.toolbar-picker-detail {
+  opacity: 1;
+  color: var(--color-vscode-muted);
+}
+
+.chat-context-usage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.chat-context-usage .circular-progress {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.chat-context-usage .progress-bg {
+  fill: none;
+  stroke: var(--color-vscode-muted);
+  stroke-width: 4;
+  opacity: 0.25;
+}
+
+.chat-context-usage .progress-arc {
+  fill: none;
+  stroke: var(--color-vscode-icon-fg);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  pointer-events: none;
+  transition: stroke-dashoffset 0.3s ease;
+}
+
+.chat-context-usage.warning .progress-arc {
+  stroke: var(--color-vscode-warning);
+}
+
+.chat-context-usage.error .progress-arc {
+  stroke: var(--color-vscode-error);
 }
 
 .interactive-session .chat-editor-container {
-  padding: 0 0 0 4px;
+  padding: 0;
 }
 
 .interactive-session .chat-editor-container textarea {
@@ -471,7 +540,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 
 .toolbar-picker .codicon-chevron {
   font-size: 10px;
-  margin-left: 2px;
+  margin-left: 0;
   opacity: 0.75;
 }
 
@@ -522,10 +591,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 .chat-attachments-container {
   display: flex;
   flex-direction: row;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
   cursor: default;
-  padding: 6px 8px 0 8px;
+  padding: 6px 0 0 6px;
 }
 
 .chat-attachment-chip {

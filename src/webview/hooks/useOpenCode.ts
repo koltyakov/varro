@@ -262,7 +262,16 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     state.providerDefaults
   );
   if (effectiveModel) body.model = effectiveModel;
-  if (effectiveModel?.variant) body.variant = effectiveModel.variant;
+  if (effectiveModel?.variant) {
+    body.variant = effectiveModel.variant;
+  } else if (body.model) {
+    const provider = state.providers.find((p) => p.id === body.model!.providerID);
+    const modelObj = provider?.models[body.model!.modelID];
+    if (modelObj?.variants) {
+      const realVariants = Object.keys(modelObj.variants).filter((v) => v !== 'none');
+      if (realVariants.length > 0) body.variant = realVariants[0];
+    }
+  }
   if (options?.noReply) body.noReply = true;
 
   setState('droppedFiles', []);

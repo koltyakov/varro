@@ -1,10 +1,8 @@
 import { For, Show } from 'solid-js';
 import {
   isModelVisible,
-  isProviderVisible,
   resetModelVisibility,
   setModelVisible,
-  setProviderVisible,
   setShowSettings,
   state,
 } from '../lib/state';
@@ -47,30 +45,24 @@ export function SettingsPanel() {
         >
           <For each={state.providers}>
             {(provider) => {
-              const models = () => Object.values(provider.models);
+              const models = () => Object.values(provider.models).sort((a, b) => a.name.localeCompare(b.name));
 
               return (
                 <div class="border-b border-vscode-border/15 last:border-b-0">
-                  {/* Provider row */}
-                  <label class="flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors hover:bg-vscode-hover">
-                    <input
-                      type="checkbox"
-                      checked={isProviderVisible(provider.id)}
-                      onChange={(e) => setProviderVisible(provider.id, e.currentTarget.checked)}
-                      class="accent-vscode-accent"
-                    />
-                    <span class="text-[12px] font-medium text-vscode-fg">{provider.name}</span>
-                    <span class="text-[11px] text-vscode-muted/50">{models().length}</span>
-                  </label>
+                  {/* Provider header */}
+                  <div class="flex items-center gap-2 px-3 pt-2 pb-1">
+                    <span class="text-[10px] font-medium uppercase tracking-wider text-vscode-muted/50">
+                      {provider.name}
+                    </span>
+                  </div>
 
                   {/* Model rows */}
                   <For each={models()}>
                     {(model) => (
-                      <label class="flex cursor-pointer items-center gap-2.5 py-1.5 pl-8 pr-3 transition-colors hover:bg-vscode-hover">
+                      <label class="flex cursor-pointer items-center gap-2.5 py-1.5 px-3 transition-colors hover:bg-vscode-hover">
                         <input
                           type="checkbox"
                           checked={isModelVisible(provider.id, model.id)}
-                          disabled={!isProviderVisible(provider.id)}
                           onChange={(e) =>
                             setModelVisible(provider.id, model.id, e.currentTarget.checked)
                           }
