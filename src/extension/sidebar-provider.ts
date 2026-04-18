@@ -28,7 +28,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     this.server.on('event', (event: unknown) => {
-      this.post({ type: 'server/event', payload: event as Record<string, unknown> });
+      this.post({ type: 'server/event', payload: { type: 'event', ...(event as Record<string, unknown>) } });
     });
   }
 
@@ -140,7 +140,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   post(msg: ExtensionMessage) {
-    this.view?.webview.postMessage(msg, '*');
+    // oxlint-disable-next-line require-post-message-target-origin
+    this.view?.webview.postMessage(msg);
   }
 
   private async handleDroppedPaths(paths: string[]) {

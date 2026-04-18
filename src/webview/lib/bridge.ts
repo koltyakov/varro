@@ -20,7 +20,7 @@ export function postMessage(msg: WebviewMessage): void {
 }
 
 let reqId = 0;
-const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
+const pending = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void }>();
 
 onMessage((msg) => {
   if (msg.type === 'api/response') {

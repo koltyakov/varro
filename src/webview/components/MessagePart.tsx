@@ -1,7 +1,7 @@
 import { Show, createMemo, createSignal } from 'solid-js';
 import { state } from '../lib/state';
 import { formatDuration, getAssistantDuration } from '../lib/message-metrics';
-import type { AssistantMessage, Part, SubtaskPart } from '../types';
+import type { AssistantMessage, Part, SubtaskPart, TextPart } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ToolCall } from './ToolCall';
 

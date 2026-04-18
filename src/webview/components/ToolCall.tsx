@@ -1,5 +1,5 @@
 import { Show, createSignal } from 'solid-js';
-import type { ToolPart, ToolStateCompleted } from '../types';
+import type { ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 
 export function ToolCall(props: { part: ToolPart }) {
   const [expanded, setExpanded] = createSignal(false);
@@ -89,7 +89,7 @@ export function ToolCall(props: { part: ToolPart }) {
             </pre>
           </Show>
           <Show when={state().status === 'error'}>
-            <div class="text-[11px] text-vscode-error/70">{(state() as ToolStateCompleted).error}</div>
+            <div class="text-[11px] text-vscode-error/70">{(state() as ToolStateError).error}</div>
           </Show>
           <Show when={state().status === 'running'}>
             <div class="flex items-center gap-1.5 text-[11px] text-vscode-muted/30">

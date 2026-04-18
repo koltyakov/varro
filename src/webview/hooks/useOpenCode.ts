@@ -20,7 +20,7 @@ import {
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage } from '../../shared/protocol';
-import type { SessionStatus } from '../types';
+import type { Session, SessionStatus, Message, Part, Permission, Todo, FileDiff } from '../types';
 
 let initialized = false;
 let handlersRegistered = false;
@@ -336,98 +336,96 @@ export async function respondPermission(
 
 type EventData = { properties?: Record<string, unknown> };
 
+function getProps(data: unknown): Record<string, unknown> | undefined {
+  return (data as EventData).properties;
+}
+
 function registerEventHandlers() {
-  serverEvents.on('session.created', (data: unknown) => {
-    const info = (data as EventData).properties?.info;
-    if (info) setState('sessions', [info, ...state.sessions.filter((s) => s.id !== (info as { id: string }).id)]);
+  serverEvents.on('session.created', (data) => {
+    const info = getProps(data)?.info as Session | undefined;
+    if (info) setState('sessions', [info, ...state.sessions.filter((s) => s.id !== info.id)]);
   });
 
-  serverEvents.on('session.updated', (data: unknown) => {
-    const info = (data as EventData).properties?.info;
+  serverEvents.on('session.updated', (data) => {
+    const info = getProps(data)?.info as Session | undefined;
     if (info) {
-      setState(
-        'sessions',
-        state.sessions.map((s) => (s.id === (info as { id: string }).id ? info : s))
-      );
+      setState('sessions', state.sessions.map((s) => (s.id === info.id ? info : s)));
     }
   });
 
-  serverEvents.on('session.deleted', (data: unknown) => {
-    const id = ((data as EventData).properties?.info as { id: string } | undefined)?.id;
-    if (id)
-      setState(
-        'sessions',
-        state.sessions.filter((s) => s.id !== id)
-      );
+  serverEvents.on('session.deleted', (data) => {
+    const id = (getProps(data)?.info as { id: string } | undefined)?.id;
+    if (id) setState('sessions', state.sessions.filter((s) => s.id !== id));
   });
 
-  serverEvents.on('session.status', (data: unknown) => {
-    const props = (data as EventData).properties;
+  serverEvents.on('session.status', (data) => {
+    const props = getProps(data);
     if (!props) return;
-    const { sessionID, status } = props as { sessionID: string; status: SessionStatus };
+    const sessionID = props.sessionID as string;
+    const status = props.status as SessionStatus;
     setState('sessionStatus', { ...state.sessionStatus, [sessionID]: status });
     if (sessionID === state.activeSessionId) {
-      setIsLoading((status as { type: string }).type === 'busy' || (status as { type: string }).type === 'retry');
+      const statusType = (status as { type: string }).type;
+      setIsLoading(statusType === 'busy' || statusType === 'retry');
     }
   });
 
-  serverEvents.on('session.idle', (data: unknown) => {
-    const sid = (data as EventData).properties?.sessionID as string | undefined;
+  serverEvents.on('session.idle', (data) => {
+    const sid = getProps(data)?.sessionID as string | undefined;
     if (!sid || sid === state.activeSessionId) setIsLoading(false);
     if (sid && sid === state.activeSessionId) {
       syncSessionMessages(sid).catch(() => {});
     }
   });
 
-  serverEvents.on('message.updated', (data: unknown) => {
-    const info = (data as EventData).properties?.info;
-    if ((info as { sessionID?: string } | undefined)?.sessionID === state.activeSessionId) upsertMessageInfo(info as Parameters<typeof upsertMessageInfo>[0]);
+  serverEvents.on('message.updated', (data) => {
+    const info = getProps(data)?.info as { sessionID?: string } | undefined;
+    if (info?.sessionID === state.activeSessionId) upsertMessageInfo(info as Message);
   });
 
-  serverEvents.on('message.part.updated', (data: unknown) => {
-    const part = (data as EventData).properties?.part;
-    if ((part as { sessionID?: string } | undefined)?.sessionID === state.activeSessionId) upsertPart(part as Parameters<typeof upsertPart>[0]);
+  serverEvents.on('message.part.updated', (data) => {
+    const part = getProps(data)?.part as { sessionID?: string } | undefined;
+    if (part?.sessionID === state.activeSessionId) upsertPart(part as Part);
   });
 
-  serverEvents.on('message.part.delta', (data: unknown) => {
-    const p = (data as EventData).properties as Record<string, unknown> | undefined;
-    if ((p?.sessionID as string) === state.activeSessionId) {
-      applyMessagePartDelta(p!.messageID as string, p!.partID as string, p!.delta as string, p!.sessionID as string, p!.field as string);
+  serverEvents.on('message.part.delta', (data) => {
+    const p = getProps(data);
+    if (!p) return;
+    if ((p.sessionID as string) === state.activeSessionId) {
+      applyMessagePartDelta(p.messageID as string, p.partID as string, p.delta as string, p.sessionID as string, p.field as string);
     }
   });
 
-  serverEvents.on('message.part.removed', (data: unknown) => {
-    const p = (data as EventData).properties as Record<string, unknown> | undefined;
+  serverEvents.on('message.part.removed', (data) => {
+    const p = getProps(data);
     if (p) removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
   });
 
-  serverEvents.on('message.removed', (data: unknown) => {
-    const p = (data as EventData).properties as Record<string, unknown> | undefined;
-    if ((p?.sessionID as string) === state.activeSessionId) {
-      setState(
-        'messages',
-        state.messages.filter((m) => m.info.id !== (p!.messageID as string))
-      );
+  serverEvents.on('message.removed', (data) => {
+    const p = getProps(data);
+    if (!p) return;
+    if ((p.sessionID as string) === state.activeSessionId) {
+      setState('messages', state.messages.filter((m) => m.info.id !== (p.messageID as string)));
     }
   });
 
-  serverEvents.on('permission.updated', (data: unknown) => {
-    const props = (data as EventData).properties;
-    if (props) addPermission(props as Parameters<typeof addPermission>[0]);
+  serverEvents.on('permission.updated', (data) => {
+    const props = getProps(data);
+    if (props) addPermission(props as Permission);
   });
 
-  serverEvents.on('permission.replied', (data: unknown) => {
-    const pid = (data as EventData).properties?.permissionID as string | undefined;
+  serverEvents.on('permission.replied', (data) => {
+    const pid = getProps(data)?.permissionID as string | undefined;
     if (pid) removePermission(pid);
   });
 
-  serverEvents.on('todo.updated', (data: unknown) => {
-    const p = (data as EventData).properties as Record<string, unknown> | undefined;
-    if ((p?.sessionID as string) === state.activeSessionId) setState('todos', p!.todos as Parameters<typeof setState>[1]);
+  serverEvents.on('todo.updated', (data) => {
+    const p = getProps(data);
+    if ((p?.sessionID as string) === state.activeSessionId) setState('todos', p!.todos as Todo[]);
   });
 
-  serverEvents.on('session.diff', (data: unknown) => {
-    const p = (data as EventData).properties as Record<string, unknown> | undefined;
-    if ((p?.sessionID as string) === state.activeSessionId) setState('diffs', p!.diff as Parameters<typeof setState>[1]);
+  serverEvents.on('session.diff', (data) => {
+    const p = getProps(data);
+    if ((p?.sessionID as string) === state.activeSessionId) setState('diffs', p!.diff as FileDiff[]);
   });
 }

@@ -2,7 +2,7 @@ import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
 import { state } from '../lib/state';
 import { client } from '../lib/client';
 import { isAssistantMessage } from '../lib/message-metrics';
-import type { AssistantMessage, FileDiff, Message as MessageType, Part } from '../types';
+import type { AssistantMessage, FileDiff, Message as MessageType, Part, TextPart } from '../types';
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
 
