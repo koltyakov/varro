@@ -1,26 +1,32 @@
-import { Show, For } from "solid-js"
-import { state, removeClipboardImage, removeContextFile, clearClipboardImages, clearContextFiles } from "../lib/state"
+import { Show, For } from 'solid-js';
+import {
+  state,
+  removeClipboardImage,
+  removeContextFile,
+  clearClipboardImages,
+  clearContextFiles,
+} from '../lib/state';
 
 export function ContextBar() {
-  const files = () => state.droppedFiles
-  const clipboardImages = () => state.clipboardImages
-  const selection = () => state.editorContext.selection
-  const activeFile = () => state.editorContext.activeFile
-  const hasContext = () => files().length > 0 || clipboardImages().length > 0 || !!selection()
+  const files = () => state.droppedFiles;
+  const clipboardImages = () => state.clipboardImages;
+  const selection = () => state.editorContext.selection;
+  const activeFile = () => state.editorContext.activeFile;
+  const hasContext = () => files().length > 0 || clipboardImages().length > 0 || !!selection();
   const activeContext = () => {
-    const file = activeFile()
-    if (!file) return null
+    const file = activeFile();
+    if (!file) return null;
 
-    const selectedLines = selection()
-    if (!selectedLines) return { filename: file.relativePath, lineRange: null as string | null }
+    const selectedLines = selection();
+    if (!selectedLines) return { filename: file.relativePath, lineRange: null as string | null };
 
     const lineRange =
       selectedLines.startLine === selectedLines.endLine
         ? `L${selectedLines.startLine}`
-        : `L${selectedLines.startLine}-${selectedLines.endLine}`
+        : `L${selectedLines.startLine}-${selectedLines.endLine}`;
 
-    return { filename: file.relativePath, lineRange }
-  }
+    return { filename: file.relativePath, lineRange };
+  };
 
   return (
     <Show when={hasContext()}>
@@ -78,10 +84,15 @@ export function ContextBar() {
         </div>
       </div>
     </Show>
-  )
+  );
 }
 
-function ContextChip(props: { label: string; detail?: string | null; title?: string; onRemove?: () => void }) {
+function ContextChip(props: {
+  label: string;
+  detail?: string | null;
+  title?: string;
+  onRemove?: () => void;
+}) {
   return (
     <span
       class="inline-flex min-w-0 items-center gap-1 rounded border border-vscode-border/30 bg-vscode-card/30 px-2 py-0.5 text-[11px] text-vscode-fg"
@@ -105,12 +116,12 @@ function ContextChip(props: { label: string; detail?: string | null; title?: str
         </button>
       </Show>
     </span>
-  )
+  );
 }
 
 function ImageContextChip(props: {
-  image: { url: string; filename: string; size: number }
-  onRemove?: () => void
+  image: { url: string; filename: string; size: number };
+  onRemove?: () => void;
 }) {
   return (
     <span
@@ -135,11 +146,11 @@ function ImageContextChip(props: {
         </button>
       </Show>
     </span>
-  )
+  );
 }
 
 function formatImageSize(size: number) {
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size >= 100 * 1024 ? 0 : 1)} KB`
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size >= 100 * 1024 ? 0 : 1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }

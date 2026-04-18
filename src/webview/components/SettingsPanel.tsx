@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js"
+import { For, Show } from 'solid-js';
 import {
   isModelVisible,
   isProviderVisible,
@@ -7,7 +7,7 @@ import {
   setProviderVisible,
   setShowSettings,
   state,
-} from "../lib/state"
+} from '../lib/state';
 
 export function SettingsPanel() {
   return (
@@ -39,11 +39,15 @@ export function SettingsPanel() {
       <div class="min-h-0 flex-1 overflow-y-auto border-t border-vscode-border/20">
         <Show
           when={state.providers.length > 0}
-          fallback={<div class="px-4 py-8 text-center text-[12px] text-vscode-muted">No providers configured</div>}
+          fallback={
+            <div class="px-4 py-8 text-center text-[12px] text-vscode-muted">
+              No providers configured
+            </div>
+          }
         >
           <For each={state.providers}>
             {(provider) => {
-              const models = () => Object.values(provider.models)
+              const models = () => Object.values(provider.models);
 
               return (
                 <div class="border-b border-vscode-border/15 last:border-b-0">
@@ -67,28 +71,34 @@ export function SettingsPanel() {
                           type="checkbox"
                           checked={isModelVisible(provider.id, model.id)}
                           disabled={!isProviderVisible(provider.id)}
-                          onChange={(e) => setModelVisible(provider.id, model.id, e.currentTarget.checked)}
+                          onChange={(e) =>
+                            setModelVisible(provider.id, model.id, e.currentTarget.checked)
+                          }
                           class="accent-vscode-accent"
                         />
-                        <span class="min-w-0 flex-1 truncate text-[12px] text-vscode-fg">{model.name}</span>
+                        <span class="min-w-0 flex-1 truncate text-[12px] text-vscode-fg">
+                          {model.name}
+                        </span>
                         <Show when={model.limit?.context}>
-                          <span class="shrink-0 text-[10px] text-vscode-muted/40">{formatContextLimit(model.limit!.context)}</span>
+                          <span class="shrink-0 text-[10px] text-vscode-muted/40">
+                            {formatContextLimit(model.limit!.context)}
+                          </span>
                         </Show>
                       </label>
                     )}
                   </For>
                 </div>
-              )
+              );
             }}
           </For>
         </Show>
       </div>
     </div>
-  )
+  );
 }
 
 function formatContextLimit(value: number) {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}k`
-  return String(value)
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}k`;
+  return String(value);
 }

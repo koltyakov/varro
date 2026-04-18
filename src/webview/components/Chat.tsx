@@ -1,18 +1,18 @@
-import { state, showSessionPicker, setShowSessionPicker, showSettings } from "../lib/state"
-import { Show, For } from "solid-js"
-import { selectSession, createSession, deleteSession, shareSession } from "../hooks/useOpenCode"
-import { MessageList } from "./MessageList"
-import { ChatInput } from "./ChatInput"
-import { PermissionPrompt } from "./PermissionPrompt"
-import { TodoList } from "./TodoList"
-import { SettingsPanel } from "./SettingsPanel"
+import { state, showSessionPicker, setShowSessionPicker, showSettings } from '../lib/state';
+import { Show, For } from 'solid-js';
+import { selectSession, createSession, deleteSession, shareSession } from '../hooks/useOpenCode';
+import { MessageList } from './MessageList';
+import { ChatInput } from './ChatInput';
+import { PermissionPrompt } from './PermissionPrompt';
+import { TodoList } from './TodoList';
+import { SettingsPanel } from './SettingsPanel';
 
 export function Chat() {
   const activeTitle = () => {
-    if (!state.activeSessionId) return "New Chat"
-    const session = state.sessions.find((s) => s.id === state.activeSessionId)
-    return session?.title || "New Chat"
-  }
+    if (!state.activeSessionId) return 'New Chat';
+    const session = state.sessions.find((s) => s.id === state.activeSessionId);
+    return session?.title || 'New Chat';
+  };
 
   return (
     <div class="flex h-full min-h-0 flex-col">
@@ -28,7 +28,11 @@ export function Chat() {
             <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.2A5.8 5.8 0 1113.8 8 5.8 5.8 0 018 2.2zM7.4 4v4.4l3.2 1.9.6-1-2.6-1.5V4H7.4z" />
           </svg>
           <span class="max-w-[180px] truncate">{activeTitle()}</span>
-          <svg class={`h-3 w-3 shrink-0 opacity-50 transition-transform ${showSessionPicker() ? "rotate-180" : ""}`} viewBox="0 0 16 16" fill="currentColor">
+          <svg
+            class={`h-3 w-3 shrink-0 opacity-50 transition-transform ${showSessionPicker() ? 'rotate-180' : ''}`}
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
             <path d="M4.5 6l3.5 4 3.5-4z" />
           </svg>
         </button>
@@ -71,13 +75,11 @@ export function Chat() {
 
       <MessageList />
 
-      <For each={state.permissions}>
-        {(perm) => <PermissionPrompt permission={perm} />}
-      </For>
+      <For each={state.permissions}>{(perm) => <PermissionPrompt permission={perm} />}</For>
 
       <ChatInput />
     </div>
-  )
+  );
 }
 
 function SessionOverlay() {
@@ -85,7 +87,9 @@ function SessionOverlay() {
     <div class="absolute inset-x-0 top-[36px] z-40 max-h-[400px] overflow-hidden border-b border-vscode-border/30 bg-vscode-sidebar shadow-[0_4px_16px_rgba(0,0,0,0.3)] animate-fade-in">
       {/* Header */}
       <div class="flex h-[32px] items-center justify-between px-4">
-        <span class="text-[11px] font-semibold uppercase tracking-wide text-vscode-muted">Sessions</span>
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-vscode-muted">
+          Sessions
+        </span>
         <div class="flex items-center gap-0.5">
           <button
             class="flex h-[22px] w-[22px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
@@ -104,20 +108,22 @@ function SessionOverlay() {
         <Show
           when={state.sessions.length > 0}
           fallback={
-            <div class="px-4 py-8 text-center text-[12px] text-vscode-muted">No previous sessions</div>
+            <div class="px-4 py-8 text-center text-[12px] text-vscode-muted">
+              No previous sessions
+            </div>
           }
         >
           <For each={state.sessions}>
             {(session) => {
-              const isActive = () => session.id === state.activeSessionId
+              const isActive = () => session.id === state.activeSessionId;
               return (
                 <div
                   class={`group flex w-full cursor-pointer items-start gap-2.5 px-4 py-2 transition-colors hover:bg-vscode-hover ${
-                    isActive() ? "bg-vscode-hover/50" : ""
+                    isActive() ? 'bg-vscode-hover/50' : ''
                   }`}
                   onClick={() => {
-                    selectSession(session.id)
-                    setShowSessionPicker(false)
+                    selectSession(session.id);
+                    setShowSessionPicker(false);
                   }}
                 >
                   {/* Status dot */}
@@ -133,10 +139,14 @@ function SessionOverlay() {
                   </div>
 
                   <div class="min-w-0 flex-1">
-                    <div class="truncate text-[13px] text-vscode-fg">{session.title || "Untitled"}</div>
+                    <div class="truncate text-[13px] text-vscode-fg">
+                      {session.title || 'Untitled'}
+                    </div>
                     <div class="mt-0.5 truncate text-[12px] text-vscode-muted">
                       <Show when={session.summary} fallback={formatTimeAgo(session.time.updated)}>
-                        {session.summary!.files} file{session.summary!.files !== 1 ? "s" : ""} · <span class="text-vscode-success">+{session.summary!.additions}</span>{" "}<span class="text-vscode-error">-{session.summary!.deletions}</span>
+                        {session.summary!.files} file{session.summary!.files !== 1 ? 's' : ''} ·{' '}
+                        <span class="text-vscode-success">+{session.summary!.additions}</span>{' '}
+                        <span class="text-vscode-error">-{session.summary!.deletions}</span>
                       </Show>
                     </div>
                   </div>
@@ -144,8 +154,8 @@ function SessionOverlay() {
                   <button
                     class="mt-0.5 shrink-0 rounded p-1 text-vscode-muted opacity-0 transition-all hover:bg-vscode-error/10 hover:text-vscode-error group-hover:opacity-100"
                     onClick={(e) => {
-                      e.stopPropagation()
-                      deleteSession(session.id)
+                      e.stopPropagation();
+                      deleteSession(session.id);
                     }}
                     title="Delete session"
                   >
@@ -154,24 +164,24 @@ function SessionOverlay() {
                     </svg>
                   </button>
                 </div>
-              )
+              );
             }}
           </For>
         </Show>
       </div>
     </div>
-  )
+  );
 }
 
 function formatTimeAgo(timestamp: number): string {
-  const diff = Date.now() - timestamp
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return "just now"
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} min${minutes !== 1 ? "s" : ""} ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} hr${hours !== 1 ? "s" : ""} ago`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days} day${days !== 1 ? "s" : ""} ago`
-  return new Date(timestamp).toLocaleDateString()
+  const diff = Date.now() - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min${minutes !== 1 ? 's' : ''} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr${hours !== 1 ? 's' : ''} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days !== 1 ? 's' : ''} ago`;
+  return new Date(timestamp).toLocaleDateString();
 }

@@ -1,4 +1,4 @@
-import { Show, For, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { Show, For, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import {
   state,
   inputText,
@@ -16,134 +16,142 @@ import {
   removeContextFile,
   clearClipboardImages,
   clearContextFiles,
-} from "../lib/state"
-import { postMessage } from "../lib/bridge"
-import { sendMessage, abortSession } from "../hooks/useOpenCode"
-import { ModelPicker } from "./ModelPicker"
-import { isAssistantMessage } from "../lib/message-metrics"
+} from '../lib/state';
+import { postMessage } from '../lib/bridge';
+import { sendMessage, abortSession } from '../hooks/useOpenCode';
+import { ModelPicker } from './ModelPicker';
+import { isAssistantMessage } from '../lib/message-metrics';
 
 export function ChatInput() {
-  let textareaRef: HTMLTextAreaElement | undefined
-  let containerRef: HTMLDivElement | undefined
-  const [isDraggingOver, setIsDraggingOver] = createSignal(false)
-  const [busyPromptMode, setBusyPromptMode] = createSignal<"queue" | "steer">("queue")
-  const [showAgentPicker, setShowAgentPicker] = createSignal(false)
-  const [showBusyMenu, setShowBusyMenu] = createSignal(false)
+  let textareaRef: HTMLTextAreaElement | undefined;
+  let containerRef: HTMLDivElement | undefined;
+  const [isDraggingOver, setIsDraggingOver] = createSignal(false);
+  const [busyPromptMode, setBusyPromptMode] = createSignal<'queue' | 'steer'>('queue');
+  const [showAgentPicker, setShowAgentPicker] = createSignal(false);
+  const [showBusyMenu, setShowBusyMenu] = createSignal(false);
 
   // Context data (moved from ContextBar)
-  const files = () => state.droppedFiles
-  const clipboardImages = () => state.clipboardImages
-  const selection = () => state.editorContext.selection
-  const activeFile = () => state.editorContext.activeFile
-  const hasContext = () => files().length > 0 || clipboardImages().length > 0 || !!activeFile()
+  const files = () => state.droppedFiles;
+  const clipboardImages = () => state.clipboardImages;
+  const selection = () => state.editorContext.selection;
+  const activeFile = () => state.editorContext.activeFile;
+  const hasContext = () => files().length > 0 || clipboardImages().length > 0 || !!activeFile();
 
   const activeContext = () => {
-    const file = activeFile()
-    if (!file) return null
-    const selectedLines = selection()
-    if (!selectedLines) return { filename: file.relativePath, lineRange: null as string | null }
+    const file = activeFile();
+    if (!file) return null;
+    const selectedLines = selection();
+    if (!selectedLines) return { filename: file.relativePath, lineRange: null as string | null };
     const lineRange =
       selectedLines.startLine === selectedLines.endLine
         ? `L${selectedLines.startLine}`
-        : `L${selectedLines.startLine}-${selectedLines.endLine}`
-    return { filename: file.relativePath, lineRange }
-  }
+        : `L${selectedLines.startLine}-${selectedLines.endLine}`;
+    return { filename: file.relativePath, lineRange };
+  };
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-      e.preventDefault()
-      handleSend()
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      handleSend();
     }
   }
 
   async function handleSend() {
-    const text = inputText()
-    if (!text.trim() && state.droppedFiles.length === 0 && state.clipboardImages.length === 0) return
-    const sendMode = isLoading() ? busyPromptMode() : "queue"
-    setInputText("")
-    if (textareaRef) textareaRef.style.height = "auto"
-    await sendMessage(text, { noReply: sendMode === "steer" })
+    const text = inputText();
+    if (!text.trim() && state.droppedFiles.length === 0 && state.clipboardImages.length === 0)
+      return;
+    const sendMode = isLoading() ? busyPromptMode() : 'queue';
+    setInputText('');
+    if (textareaRef) textareaRef.style.height = 'auto';
+    await sendMessage(text, { noReply: sendMode === 'steer' });
   }
 
   function autoResize() {
-    if (!textareaRef) return
-    textareaRef.style.height = "auto"
-    textareaRef.style.height = Math.min(textareaRef.scrollHeight, 200) + "px"
+    if (!textareaRef) return;
+    textareaRef.style.height = 'auto';
+    textareaRef.style.height = Math.min(textareaRef.scrollHeight, 200) + 'px';
   }
 
   async function handleDrop(e: DragEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDraggingOver(false)
-    const paths = await collectDroppedPaths(e.dataTransfer)
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+    const paths = await collectDroppedPaths(e.dataTransfer);
     if (paths.length > 0) {
-      postMessage({ type: "files/drop", payload: { paths } })
+      postMessage({ type: 'files/drop', payload: { paths } });
     }
   }
 
   async function handlePaste(e: ClipboardEvent) {
-    const clipboardData = e.clipboardData
-    if (!clipboardData) return
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
 
     const imageItems = Array.from(clipboardData.items).filter(
-      (item) => item.kind === "file" && item.type.startsWith("image/"),
-    )
+      (item) => item.kind === 'file' && item.type.startsWith('image/')
+    );
 
-    if (imageItems.length === 0) return
+    if (imageItems.length === 0) return;
 
-    e.preventDefault()
+    e.preventDefault();
 
     for (const [index, item] of imageItems.entries()) {
-      const file = item.getAsFile()
-      if (!file) continue
+      const file = item.getAsFile();
+      if (!file) continue;
 
-      const url = await readFileAsDataUrl(file)
+      const url = await readFileAsDataUrl(file);
       addClipboardImage({
         id: createAttachmentID(),
         url,
-        mime: file.type || "image/png",
-        filename: file.name || `pasted-image-${Date.now()}-${index + 1}.${extensionForMime(file.type)}`,
+        mime: file.type || 'image/png',
+        filename:
+          file.name || `pasted-image-${Date.now()}-${index + 1}.${extensionForMime(file.type)}`,
         size: file.size,
-      })
+      });
     }
   }
 
   onMount(() => {
     const handleWindowDragOver = (e: DragEvent) => {
-      if (!isPathDrop(e.dataTransfer)) return
-      e.preventDefault()
-      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"
-    }
+      if (!isPathDrop(e.dataTransfer)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    };
 
     const handleWindowDrop = async (e: DragEvent) => {
-      if (!isPathDrop(e.dataTransfer)) return
-      e.preventDefault()
+      if (!isPathDrop(e.dataTransfer)) return;
+      e.preventDefault();
 
       if (!containerRef?.contains(e.target as Node | null)) {
-        setIsDraggingOver(false)
-        return
+        setIsDraggingOver(false);
+        return;
       }
 
-      await handleDrop(e)
-    }
+      await handleDrop(e);
+    };
 
-    window.addEventListener("dragover", handleWindowDragOver)
-    window.addEventListener("drop", handleWindowDrop)
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('drop', handleWindowDrop);
 
     onCleanup(() => {
-      window.removeEventListener("dragover", handleWindowDragOver)
-      window.removeEventListener("drop", handleWindowDrop)
-    })
-  })
+      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('drop', handleWindowDrop);
+    });
+  });
 
   const canSend = () =>
-    inputText().trim().length > 0 || state.droppedFiles.length > 0 || state.clipboardImages.length > 0
+    inputText().trim().length > 0 ||
+    state.droppedFiles.length > 0 ||
+    state.clipboardImages.length > 0;
 
   const currentModel = () => {
-    const selected = resolveSelectedModel(state.selectedModel, state.providers, state.providerDefaults)
+    const selected = resolveSelectedModel(
+      state.selectedModel,
+      state.providers,
+      state.providerDefaults
+    );
     if (selected) {
-      const provider = state.providers.find((item) => item.id === selected.providerID)
-      const model = provider?.models[selected.modelID]
+      const provider = state.providers.find((item) => item.id === selected.providerID);
+      const model = provider?.models[selected.modelID];
       return {
         providerID: selected.providerID,
         modelID: selected.modelID,
@@ -151,13 +159,13 @@ export function ChatInput() {
         providerName: provider?.name || selected.providerID,
         modelName: model?.name || selected.modelID,
         contextLimit: model?.limit?.context || null,
-      }
+      };
     }
 
-    const latestAuto = [...assistantMessages()].toReversed()[0]
+    const latestAuto = [...assistantMessages()].toReversed()[0];
     if (latestAuto) {
-      const provider = state.providers.find((item) => item.id === latestAuto.providerID)
-      const model = provider?.models[latestAuto.modelID]
+      const provider = state.providers.find((item) => item.id === latestAuto.providerID);
+      const model = provider?.models[latestAuto.modelID];
       return {
         providerID: latestAuto.providerID,
         modelID: latestAuto.modelID,
@@ -165,13 +173,15 @@ export function ChatInput() {
         providerName: provider?.name || latestAuto.providerID,
         modelName: model?.name || latestAuto.modelID,
         contextLimit: model?.limit?.context || null,
-      }
+      };
     }
 
-    const firstProvider = state.providers[0]
+    const firstProvider = state.providers[0];
     if (firstProvider) {
-      const defaultModelID = state.providerDefaults[firstProvider.id]
-      const defaultModel = defaultModelID ? firstProvider.models[defaultModelID] : Object.values(firstProvider.models)[0]
+      const defaultModelID = state.providerDefaults[firstProvider.id];
+      const defaultModel = defaultModelID
+        ? firstProvider.models[defaultModelID]
+        : Object.values(firstProvider.models)[0];
       if (defaultModel) {
         return {
           providerID: firstProvider.id,
@@ -180,7 +190,7 @@ export function ChatInput() {
           providerName: firstProvider.name,
           modelName: defaultModel.name,
           contextLimit: defaultModel.limit?.context || null,
-        }
+        };
       }
     }
 
@@ -188,25 +198,22 @@ export function ChatInput() {
       providerID: null as string | null,
       modelID: null as string | null,
       variant: null as string | null,
-      providerName: "",
-      modelName: "",
+      providerName: '',
+      modelName: '',
       contextLimit: null as number | null,
-    }
-  }
+    };
+  };
 
   const assistantMessages = createMemo(() =>
-    state.messages
-      .map((entry) => entry.info)
-      .filter(isAssistantMessage),
-  )
-
+    state.messages.map((entry) => entry.info).filter(isAssistantMessage)
+  );
 
   const selectedAgentLabel = () => {
-    const name = state.selectedAgent
-    if (!name) return "Agent"
-    const agent = state.agents.find((a) => a.name === name)
-    return agent?.name || name
-  }
+    const name = state.selectedAgent;
+    if (!name) return 'Agent';
+    const agent = state.agents.find((a) => a.name === name);
+    return agent?.name || name;
+  };
 
   return (
     <div class="relative shrink-0 px-3 pb-3">
@@ -215,7 +222,11 @@ export function ChatInput() {
         <ModelPicker
           onSelect={(sel) => {
             if (sel.providerID && sel.modelID) {
-              setSelectedModel({ providerID: sel.providerID, modelID: sel.modelID, variant: sel.variant })
+              setSelectedModel({
+                providerID: sel.providerID,
+                modelID: sel.modelID,
+                variant: sel.variant,
+              });
             }
           }}
           onClose={() => setShowModelPicker(false)}
@@ -226,8 +237,8 @@ export function ChatInput() {
       <Show when={showAgentPicker()}>
         <AgentPicker
           onSelect={(agent) => {
-            setSelectedAgent(agent)
-            setShowAgentPicker(false)
+            setSelectedAgent(agent);
+            setShowAgentPicker(false);
           }}
           onClose={() => setShowAgentPicker(false)}
         />
@@ -238,34 +249,31 @@ export function ChatInput() {
         ref={containerRef}
         class={`overflow-hidden rounded-lg border transition-colors ${
           isDraggingOver()
-            ? "border-vscode-accent bg-vscode-accent/5"
-            : "border-vscode-border focus-within:border-vscode-accent/60"
+            ? 'border-vscode-accent bg-vscode-accent/5'
+            : 'border-vscode-border focus-within:border-vscode-accent/60'
         }`}
         onDrop={(e) => handleDrop(e as DragEvent)}
         onDragEnter={(e) => {
-          if (!isPathDrop(e.dataTransfer)) return
-          e.preventDefault()
-          setIsDraggingOver(true)
+          if (!isPathDrop(e.dataTransfer)) return;
+          e.preventDefault();
+          setIsDraggingOver(true);
         }}
         onDragOver={(e) => {
-          if (!isPathDrop(e.dataTransfer)) return
-          e.preventDefault()
-          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"
-          setIsDraggingOver(true)
+          if (!isPathDrop(e.dataTransfer)) return;
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+          setIsDraggingOver(true);
         }}
         onDragLeave={(e) => {
-          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
-          setIsDraggingOver(false)
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          setIsDraggingOver(false);
         }}
       >
         {/* Context chips inside input container */}
         <Show when={hasContext()}>
           <div class="flex flex-wrap items-center gap-1 px-3 pt-2.5">
             <Show when={activeContext()}>
-              <ContextChip
-                label={activeContext()!.filename}
-                detail={activeContext()!.lineRange}
-              />
+              <ContextChip label={activeContext()!.filename} detail={activeContext()!.lineRange} />
             </Show>
             <For each={files()}>
               {(file) => (
@@ -287,7 +295,10 @@ export function ChatInput() {
             <Show when={files().length > 1 || clipboardImages().length > 1}>
               <button
                 class="rounded px-1 py-0.5 text-[10px] text-vscode-muted/40 transition-colors hover:text-vscode-error"
-                onClick={() => { clearContextFiles(); clearClipboardImages() }}
+                onClick={() => {
+                  clearContextFiles();
+                  clearClipboardImages();
+                }}
                 title="Clear all"
               >
                 <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
@@ -305,15 +316,15 @@ export function ChatInput() {
           rows={1}
           placeholder={
             isLoading()
-              ? busyPromptMode() === "steer"
-                ? "Steer current run..."
-                : "Describe what to build"
-              : "Describe what to build"
+              ? busyPromptMode() === 'steer'
+                ? 'Steer current run...'
+                : 'Describe what to build'
+              : 'Describe what to build'
           }
           value={inputText()}
           onInput={(e) => {
-            setInputText(e.currentTarget.value)
-            autoResize()
+            setInputText(e.currentTarget.value);
+            autoResize();
           }}
           onKeyDown={handleKeydown}
           onPaste={handlePaste}
@@ -326,7 +337,7 @@ export function ChatInput() {
             {/* Add context button */}
             <button
               class="flex h-7 w-7 items-center justify-center rounded text-vscode-muted/60 transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
-              onClick={() => postMessage({ type: "context/request" })}
+              onClick={() => postMessage({ type: 'context/request' })}
               title="Add context"
             >
               <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
@@ -341,12 +352,12 @@ export function ChatInput() {
             <Show when={state.agents.length > 0}>
               <button
                 class={`flex items-center gap-1 rounded px-2 py-1 text-[12px] transition-colors hover:bg-vscode-hover ${
-                  showAgentPicker() ? "bg-vscode-hover text-vscode-fg" : "text-vscode-muted"
+                  showAgentPicker() ? 'bg-vscode-hover text-vscode-fg' : 'text-vscode-muted'
                 }`}
                 onClick={() => {
-                  setShowAgentPicker(!showAgentPicker())
-                  setShowModelPicker(false)
-                  setShowBusyMenu(false)
+                  setShowAgentPicker(!showAgentPicker());
+                  setShowModelPicker(false);
+                  setShowBusyMenu(false);
                 }}
                 title="Select agent"
               >
@@ -363,24 +374,27 @@ export function ChatInput() {
             {/* Model selector */}
             <button
               class={`flex items-center gap-1 rounded px-2 py-1 text-[12px] transition-colors hover:bg-vscode-hover ${
-                showModelPicker() ? "bg-vscode-hover text-vscode-fg" : "text-vscode-muted"
+                showModelPicker() ? 'bg-vscode-hover text-vscode-fg' : 'text-vscode-muted'
               }`}
               onClick={() => {
-                setShowModelPicker(!showModelPicker())
-                setShowAgentPicker(false)
-                setShowBusyMenu(false)
+                setShowModelPicker(!showModelPicker());
+                setShowAgentPicker(false);
+                setShowBusyMenu(false);
               }}
               title={
                 currentModel().modelName
                   ? `${currentModel().providerName} / ${currentModel().modelName}`
-                  : "Choose model"
+                  : 'Choose model'
               }
             >
               <Show when={currentModel().modelName} fallback={<span>Model</span>}>
                 <span class="max-w-[180px] truncate">
                   {currentModel().modelName}
                   <Show when={currentModel().variant}>
-                    <span class="opacity-50"> · {formatThinkingLabel(currentModel().variant!)}</span>
+                    <span class="opacity-50">
+                      {' '}
+                      · {formatThinkingLabel(currentModel().variant!)}
+                    </span>
                   </Show>
                 </span>
               </Show>
@@ -392,7 +406,7 @@ export function ChatInput() {
             {/* Settings/tune button */}
             <button
               class={`flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-vscode-hover ${
-                showSettings() ? "text-vscode-fg" : "text-vscode-muted/60"
+                showSettings() ? 'text-vscode-fg' : 'text-vscode-muted/60'
               }`}
               onClick={() => setShowSettings(!showSettings())}
               title="Model settings"
@@ -405,19 +419,18 @@ export function ChatInput() {
 
           {/* Right controls */}
           <div class="flex items-center gap-1.5">
-
             <Show when={isLoading()}>
               <div class="relative">
                 <button
                   class="flex h-7 w-7 items-center justify-center rounded bg-vscode-error/10 text-vscode-error transition-colors hover:bg-vscode-error/20"
                   onClick={() => {
                     if (canSend()) {
-                      setShowBusyMenu(!showBusyMenu())
+                      setShowBusyMenu(!showBusyMenu());
                     } else {
-                      abortSession()
+                      abortSession();
                     }
                   }}
-                  title={canSend() ? "Send options" : "Stop"}
+                  title={canSend() ? 'Send options' : 'Stop'}
                 >
                   <Show
                     when={canSend()}
@@ -441,19 +454,33 @@ export function ChatInput() {
                   >
                     <button
                       class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] text-vscode-fg transition-colors hover:bg-vscode-hover"
-                      onClick={() => { abortSession(); handleSend() }}
+                      onClick={() => {
+                        abortSession();
+                        handleSend();
+                      }}
                     >
-                      <svg class="h-3.5 w-3.5 shrink-0 text-vscode-error" viewBox="0 0 16 16" fill="currentColor">
+                      <svg
+                        class="h-3.5 w-3.5 shrink-0 text-vscode-error"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                      >
                         <path d="M1 1.91L1.78 1.5 15 8 1.78 14.5 1 14.09 3.61 8 1 1.91z" />
                       </svg>
                       Stop and Send
                     </button>
                     <button
                       class="flex w-full items-center justify-between px-3 py-2 text-left text-[12px] text-vscode-fg transition-colors hover:bg-vscode-hover"
-                      onClick={() => { setBusyPromptMode("queue"); handleSend() }}
+                      onClick={() => {
+                        setBusyPromptMode('queue');
+                        handleSend();
+                      }}
                     >
                       <div class="flex items-center gap-2.5">
-                        <svg class="h-3.5 w-3.5 shrink-0 text-vscode-muted" viewBox="0 0 16 16" fill="currentColor">
+                        <svg
+                          class="h-3.5 w-3.5 shrink-0 text-vscode-muted"
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                        >
                           <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
                         </svg>
                         Add to Queue
@@ -462,15 +489,22 @@ export function ChatInput() {
                     </button>
                     <button
                       class="flex w-full items-center justify-between px-3 py-2 text-left text-[12px] text-vscode-fg transition-colors hover:bg-vscode-hover"
-                      onClick={() => { setBusyPromptMode("steer"); handleSend() }}
+                      onClick={() => {
+                        setBusyPromptMode('steer');
+                        handleSend();
+                      }}
                     >
                       <div class="flex items-center gap-2.5">
-                        <svg class="h-3.5 w-3.5 shrink-0 text-vscode-muted" viewBox="0 0 16 16" fill="currentColor">
+                        <svg
+                          class="h-3.5 w-3.5 shrink-0 text-vscode-muted"
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                        >
                           <path d="M7.5 1L9 5h4l-3.5 3 1.5 4.5L7.5 10 4 12.5 5.5 8 2 5h4l1.5-4z" />
                         </svg>
                         Steer with Message
                       </div>
-                      <span class="text-[11px] text-vscode-muted/40">{"\u2303"}Enter</span>
+                      <span class="text-[11px] text-vscode-muted/40">{'\u2303'}Enter</span>
                     </button>
                   </div>
                 </Show>
@@ -482,8 +516,8 @@ export function ChatInput() {
               <button
                 class={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
                   canSend()
-                    ? "bg-vscode-fg text-vscode-sidebar hover:opacity-80"
-                    : "text-vscode-muted/20"
+                    ? 'bg-vscode-fg text-vscode-sidebar hover:opacity-80'
+                    : 'text-vscode-muted/20'
                 }`}
                 onClick={handleSend}
                 disabled={!canSend()}
@@ -498,7 +532,7 @@ export function ChatInput() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -516,11 +550,15 @@ function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => 
           {(agent) => (
             <button
               class={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] transition-colors hover:bg-vscode-hover ${
-                state.selectedAgent === agent.name ? "bg-vscode-hover/50" : ""
+                state.selectedAgent === agent.name ? 'bg-vscode-hover/50' : ''
               }`}
               onClick={() => props.onSelect(agent.name)}
             >
-              <svg class="h-3.5 w-3.5 shrink-0 text-vscode-muted" viewBox="0 0 16 16" fill="currentColor">
+              <svg
+                class="h-3.5 w-3.5 shrink-0 text-vscode-muted"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
                 <path d="M14 8A6 6 0 102 8a6 6 0 0012 0zm-1 0A5 5 0 113 8a5 5 0 0110 0z" />
               </svg>
               <span class="flex-1 font-medium text-vscode-fg">{agent.name}</span>
@@ -528,7 +566,11 @@ function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => 
                 <span class="text-[11px] text-vscode-muted/60">{agent.description}</span>
               </Show>
               <Show when={state.selectedAgent === agent.name}>
-                <svg class="h-3.5 w-3.5 shrink-0 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
+                <svg
+                  class="h-3.5 w-3.5 shrink-0 text-vscode-accent"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
                   <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
                 </svg>
               </Show>
@@ -540,22 +582,27 @@ function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => 
         </Show>
       </div>
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ */
 /* Context Chip                                                        */
 /* ------------------------------------------------------------------ */
 
-function ContextChip(props: { label: string; detail?: string | null; icon?: "file" | "image"; onRemove?: () => void }) {
+function ContextChip(props: {
+  label: string;
+  detail?: string | null;
+  icon?: 'file' | 'image';
+  onRemove?: () => void;
+}) {
   return (
     <span class="inline-flex min-w-0 items-center gap-1 rounded bg-vscode-hover/60 px-2 py-0.5 text-[11px] text-vscode-fg">
-      <Show when={props.icon === "image"}>
+      <Show when={props.icon === 'image'}>
         <svg class="h-3 w-3 shrink-0 text-vscode-muted/60" viewBox="0 0 16 16" fill="currentColor">
           <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
         </svg>
       </Show>
-      <Show when={props.icon !== "image"}>
+      <Show when={props.icon !== 'image'}>
         <svg class="h-3 w-3 shrink-0 text-vscode-muted/60" viewBox="0 0 16 16" fill="currentColor">
           <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
         </svg>
@@ -575,7 +622,7 @@ function ContextChip(props: { label: string; detail?: string | null; icon?: "fil
         </button>
       </Show>
     </span>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -583,103 +630,106 @@ function ContextChip(props: { label: string; detail?: string | null; icon?: "fil
 /* ------------------------------------------------------------------ */
 
 async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<string[]> {
-  if (!dataTransfer) return []
+  if (!dataTransfer) return [];
 
-  const paths = new Set<string>()
+  const paths = new Set<string>();
 
-  for (const type of ["text/uri-list", "text/plain"]) {
+  for (const type of ['text/uri-list', 'text/plain']) {
     for (const path of parseDroppedText(dataTransfer.getData(type))) {
-      paths.add(path)
+      paths.add(path);
     }
   }
 
   for (const file of Array.from(dataTransfer.files)) {
-    const path = (file as File & { path?: string }).path
-    if (path) paths.add(path)
+    const path = (file as File & { path?: string }).path;
+    if (path) paths.add(path);
   }
 
   for (const item of Array.from(dataTransfer.items)) {
-    const file = item.getAsFile() as (File & { path?: string }) | null
-    if (file?.path) paths.add(file.path)
+    const file = item.getAsFile() as (File & { path?: string }) | null;
+    if (file?.path) paths.add(file.path);
   }
 
   if (paths.size === 0) {
     const itemText = await Promise.all(
       Array.from(dataTransfer.items)
-        .filter((item) => item.kind === "string" && (item.type === "text/uri-list" || item.type === "text/plain"))
-        .map(readDroppedItem),
-    )
+        .filter(
+          (item) =>
+            item.kind === 'string' && (item.type === 'text/uri-list' || item.type === 'text/plain')
+        )
+        .map(readDroppedItem)
+    );
 
     for (const value of itemText) {
       for (const path of parseDroppedText(value)) {
-        paths.add(path)
+        paths.add(path);
       }
     }
   }
 
-  return Array.from(paths)
+  return Array.from(paths);
 }
 
 function isPathDrop(dataTransfer: DataTransfer | null): boolean {
-  if (!dataTransfer) return false
-  const types = Array.from(dataTransfer.types || [])
-  return types.includes("Files") || types.includes("text/uri-list")
+  if (!dataTransfer) return false;
+  const types = Array.from(dataTransfer.types || []);
+  return types.includes('Files') || types.includes('text/uri-list');
 }
 
 function readDroppedItem(item: DataTransferItem): Promise<string> {
   return new Promise((resolve) => {
-    item.getAsString((value) => resolve(value || ""))
-  })
+    item.getAsString((value) => resolve(value || ''));
+  });
 }
 
 function parseDroppedText(value: string): string[] {
-  if (!value) return []
+  if (!value) return [];
   return value
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
+    .filter((line) => line && !line.startsWith('#'))
     .map(decodeDroppedPath)
-    .filter((path): path is string => Boolean(path))
+    .filter((path): path is string => Boolean(path));
 }
 
 function decodeDroppedPath(value: string): string | null {
-  if (value.startsWith("file://")) {
+  if (value.startsWith('file://')) {
     try {
-      const pathname = decodeURIComponent(new URL(value).pathname)
-      return pathname.replace(/^\/([A-Za-z]:\/)/, "$1")
+      const pathname = decodeURIComponent(new URL(value).pathname);
+      return pathname.replace(/^\/([A-Za-z]:\/)/, '$1');
     } catch {
-      return null
+      return null;
     }
   }
-  return value.startsWith("/") ? value : null
+  return value.startsWith('/') ? value : null;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ""))
-    reader.onerror = () => reject(reader.error || new Error("Failed to read clipboard image"))
-    reader.readAsDataURL(file)
-  })
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Failed to read clipboard image'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function createAttachmentID() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID()
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
   }
-  return `img-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return `img-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function extensionForMime(mime: string) {
   switch (mime) {
-    case "image/jpeg":
-      return "jpg"
-    case "image/gif":
-      return "gif"
-    case "image/webp":
-      return "webp"
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
     default:
-      return "png"
+      return 'png';
   }
 }
 
@@ -687,5 +737,5 @@ function formatThinkingLabel(variant: string) {
   return variant
     .split(/[-_]/g)
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
-    .join(" ")
+    .join(' ');
 }

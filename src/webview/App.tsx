@@ -1,18 +1,15 @@
-import { Show } from "solid-js"
-import { useOpenCode } from "./hooks/useOpenCode"
-import { state, error, setError } from "./lib/state"
-import { Chat } from "./components/Chat"
-import { ServerStatus } from "./components/ServerStatus"
+import { Show } from 'solid-js';
+import { useOpenCode } from './hooks/useOpenCode';
+import { state, error, setError } from './lib/state';
+import { Chat } from './components/Chat';
+import { ServerStatus } from './components/ServerStatus';
 
 export function App() {
-  useOpenCode()
+  useOpenCode();
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
-      <Show
-        when={state.serverStatus.state === "running"}
-        fallback={<ServerStatus />}
-      >
+      <Show when={state.serverStatus.state === 'running'} fallback={<ServerStatus />}>
         <Chat />
       </Show>
       <Show when={error()}>
@@ -30,5 +27,5 @@ export function App() {
         </div>
       </Show>
     </div>
-  )
+  );
 }

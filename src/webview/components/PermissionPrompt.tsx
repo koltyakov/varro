@@ -1,10 +1,10 @@
-import { Show, createSignal } from "solid-js"
-import type { Permission } from "../types"
-import { respondPermission } from "../hooks/useOpenCode"
+import { Show, createSignal } from 'solid-js';
+import type { Permission } from '../types';
+import { respondPermission } from '../hooks/useOpenCode';
 
 export function PermissionPrompt(props: { permission: Permission }) {
-  const [remember, setRemember] = createSignal(false)
-  const sessionId = () => props.permission.sessionID
+  const [remember, setRemember] = createSignal(false);
+  const sessionId = () => props.permission.sessionID;
 
   return (
     <div class="mx-3 my-1.5 rounded-md border border-vscode-warning/20 bg-vscode-warning/[0.03] px-3 py-2.5 animate-fade-in">
@@ -35,22 +35,18 @@ export function PermissionPrompt(props: { permission: Permission }) {
         <div class="flex gap-1.5">
           <button
             class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-hover text-vscode-fg transition-colors hover:bg-vscode-hover/80"
-            onClick={() =>
-              respondPermission(sessionId(), props.permission.id, "deny", remember())
-            }
+            onClick={() => respondPermission(sessionId(), props.permission.id, 'deny', remember())}
           >
             Deny
           </button>
           <button
             class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-accent text-white transition-colors hover:opacity-80"
-            onClick={() =>
-              respondPermission(sessionId(), props.permission.id, "allow", remember())
-            }
+            onClick={() => respondPermission(sessionId(), props.permission.id, 'allow', remember())}
           >
             Allow
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }

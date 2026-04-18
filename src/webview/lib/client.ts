@@ -1,116 +1,115 @@
-import { apiCall, onMessage } from "./bridge"
-import type {
-  Session,
-  Message,
-  Part,
-  SessionStatus,
-  Agent,
-  Provider,
-  FileDiff,
-} from "../types"
+import { apiCall, onMessage } from './bridge';
+import type { Session, Message, Part, SessionStatus, Agent, Provider, FileDiff } from '../types';
 
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
-    return apiCall("GET", "/global/health")
+    return apiCall('GET', '/global/health');
   },
 
   session: {
     async list(): Promise<Session[]> {
-      return apiCall("GET", "/session")
+      return apiCall('GET', '/session');
     },
     async get(id: string): Promise<Session> {
-      return apiCall("GET", `/session/${id}`)
+      return apiCall('GET', `/session/${id}`);
     },
     async create(body?: { title?: string }): Promise<Session> {
-      return apiCall("POST", "/session", body || {})
+      return apiCall('POST', '/session', body || {});
     },
     async delete(id: string): Promise<boolean> {
-      return apiCall("DELETE", `/session/${id}`)
+      return apiCall('DELETE', `/session/${id}`);
     },
     async abort(id: string): Promise<boolean> {
-      return apiCall("POST", `/session/${id}/abort`)
+      return apiCall('POST', `/session/${id}/abort`);
     },
     async share(id: string): Promise<Session> {
-      return apiCall("POST", `/session/${id}/share`)
+      return apiCall('POST', `/session/${id}/share`);
     },
     async unshare(id: string): Promise<Session> {
-      return apiCall("DELETE", `/session/${id}/share`)
+      return apiCall('DELETE', `/session/${id}/share`);
     },
     async diff(id: string, messageID?: string): Promise<FileDiff[]> {
-      const query = messageID ? `?messageID=${messageID}` : ""
-      return apiCall("GET", `/session/${id}/diff${query}`)
+      const query = messageID ? `?messageID=${messageID}` : '';
+      return apiCall('GET', `/session/${id}/diff${query}`);
     },
     async status(): Promise<Record<string, SessionStatus>> {
-      return apiCall("GET", "/session/status")
+      return apiCall('GET', '/session/status');
     },
     async messages(id: string): Promise<Array<{ info: Message; parts: Part[] }>> {
-      return apiCall("GET", `/session/${id}/message`)
+      return apiCall('GET', `/session/${id}/message`);
     },
     async sendAsync(
       id: string,
       body: {
-        parts: Array<{ type: string; text?: string; mime?: string; filename?: string; url?: string; [key: string]: unknown }>
-        model?: { providerID: string; modelID: string }
-        agent?: string
-        noReply?: boolean
-        variant?: string
-      },
+        parts: Array<{
+          type: string;
+          text?: string;
+          mime?: string;
+          filename?: string;
+          url?: string;
+          [key: string]: unknown;
+        }>;
+        model?: { providerID: string; modelID: string };
+        agent?: string;
+        noReply?: boolean;
+        variant?: string;
+      }
     ): Promise<void> {
-      await apiCall("POST", `/session/${id}/prompt_async`, body)
+      await apiCall('POST', `/session/${id}/prompt_async`, body);
     },
     async respondPermission(
       sessionId: string,
       permissionId: string,
       response: string,
-      remember?: boolean,
+      remember?: boolean
     ): Promise<boolean> {
-      return apiCall("POST", `/session/${sessionId}/permissions/${permissionId}`, {
+      return apiCall('POST', `/session/${sessionId}/permissions/${permissionId}`, {
         response,
         remember,
-      })
+      });
     },
     async revert(id: string, messageID: string): Promise<boolean> {
-      return apiCall("POST", `/session/${id}/revert`, { messageID })
+      return apiCall('POST', `/session/${id}/revert`, { messageID });
     },
   },
 
   config: {
     async providers(): Promise<{
-      providers: Provider[]
-      default: Record<string, string>
+      providers: Provider[];
+      default: Record<string, string>;
     }> {
-      return apiCall("GET", "/config/providers")
+      return apiCall('GET', '/config/providers');
     },
   },
 
   agent: {
     async list(): Promise<Agent[]> {
-      return apiCall("GET", "/agent")
+      return apiCall('GET', '/agent');
     },
   },
-}
+};
 
-type EventHandler = (data: any) => void
+type EventHandler = (data: any) => void;
 
-const eventListeners = new Map<string, Set<EventHandler>>()
+const eventListeners = new Map<string, Set<EventHandler>>();
 
 onMessage((msg) => {
-  if (msg.type !== "server/event") return
-  const evt = msg.payload
-  const handlers = eventListeners.get(evt.type)
+  if (msg.type !== 'server/event') return;
+  const evt = msg.payload;
+  const handlers = eventListeners.get(evt.type);
   if (handlers) {
-    for (const h of handlers) h(evt)
+    for (const h of handlers) h(evt);
   }
-  const wildcard = eventListeners.get("*")
+  const wildcard = eventListeners.get('*');
   if (wildcard) {
-    for (const h of wildcard) h(evt)
+    for (const h of wildcard) h(evt);
   }
-})
+});
 
 export const serverEvents = {
   on(type: string, handler: EventHandler): () => void {
-    if (!eventListeners.has(type)) eventListeners.set(type, new Set())
-    eventListeners.get(type)!.add(handler)
-    return () => eventListeners.get(type)?.delete(handler)
+    if (!eventListeners.has(type)) eventListeners.set(type, new Set());
+    eventListeners.get(type)!.add(handler);
+    return () => eventListeners.get(type)?.delete(handler);
   },
-}
+};
