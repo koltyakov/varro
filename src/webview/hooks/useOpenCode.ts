@@ -22,6 +22,7 @@ import {
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage } from '../../shared/protocol';
 import type { Session, SessionStatus, Message, Part, Permission, Todo, FileDiff } from '../types';
+import { getWorkspaceRelativePath } from '../lib/path-display';
 
 let initialized = false;
 let handlersRegistered = false;
@@ -286,7 +287,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   }
 
   for (const file of state.droppedFiles) {
-    parts.push({ type: 'text', text: `@${file.relativePath}` });
+    parts.push({ type: 'text', text: getAttachmentReference(file, wp) });
   }
 
   for (const image of state.clipboardImages) {
@@ -340,6 +341,18 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     setIsLoading(false);
     setError(err instanceof Error ? err.message : 'Failed to send message');
   }
+}
+
+function getAttachmentReference(
+  file: { path: string; type: 'file' | 'directory' },
+  workspacePath: string | null
+) {
+  const relativePath = getWorkspaceRelativePath(file.path, workspacePath) ?? file.path;
+  const normalizedPath = relativePath.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (file.type === 'directory') {
+    return `@${normalizedPath === '.' ? './' : `${normalizedPath}/`}`;
+  }
+  return `@${normalizedPath}`;
 }
 
 async function sendPromptWithFallback(

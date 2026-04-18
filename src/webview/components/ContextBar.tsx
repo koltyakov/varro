@@ -49,8 +49,9 @@ export function ContextBar() {
           <For each={files()}>
             {(file) => (
               <ContextChip
-                label={getLeafPathName(file.relativePath)}
-                title={file.relativePath}
+                label={getDroppedFileLabel(file)}
+                title={file.relativePath || file.path}
+                icon={file.type === 'directory' ? 'folder' : 'file'}
                 onRemove={files().length > 0 ? () => removeContextFile(file.path) : undefined}
               />
             )}
@@ -94,6 +95,7 @@ function ContextChip(props: {
   label: string;
   detail?: string | null;
   title?: string;
+  icon?: 'file' | 'folder';
   onRemove?: () => void;
 }) {
   return (
@@ -101,9 +103,22 @@ function ContextChip(props: {
       class="inline-flex min-w-0 items-center gap-1 rounded border border-vscode-border/30 bg-vscode-card/30 px-2 py-0.5 text-[11px] text-vscode-fg"
       title={props.title}
     >
-      <svg class="h-3 w-3 shrink-0 text-vscode-muted/60" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-      </svg>
+      <Show
+        when={props.icon === 'folder'}
+        fallback={
+          <svg
+            class="h-3 w-3 shrink-0 text-vscode-muted/60"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
+            <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
+          </svg>
+        }
+      >
+        <svg class="h-3 w-3 shrink-0 text-vscode-muted/60" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
+        </svg>
+      </Show>
       <span class="max-w-[140px] truncate">{props.label}</span>
       <Show when={props.detail}>
         <span class="shrink-0 text-vscode-muted/60">{props.detail}</span>
@@ -120,6 +135,13 @@ function ContextChip(props: {
       </Show>
     </span>
   );
+}
+
+function getDroppedFileLabel(file: { path: string; relativePath: string }) {
+  if (!file.relativePath || file.relativePath === '.') {
+    return getLeafPathName(file.path);
+  }
+  return getLeafPathName(file.relativePath);
 }
 
 function ImageContextChip(props: {

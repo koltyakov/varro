@@ -169,9 +169,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           }
           const stat = await vscode.workspace.fs.stat(uri);
           const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-          const relativePath = workspaceFolder
-            ? vscode.workspace.asRelativePath(uri, false)
-            : basename(uri.fsPath);
+          const relativePath = getDroppedRelativePath(uri, workspaceFolder);
 
           return {
             path: uri.fsPath,
@@ -296,6 +294,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   dispose() {
     this.themeDisposable?.dispose();
   }
+}
+
+function getDroppedRelativePath(
+  uri: vscode.Uri,
+  workspaceFolder: vscode.WorkspaceFolder | undefined
+) {
+  if (!workspaceFolder) return basename(uri.fsPath);
+
+  const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
+  return relativePath || '.';
 }
 
 function randomNonce(): string {

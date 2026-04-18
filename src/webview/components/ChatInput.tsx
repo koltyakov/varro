@@ -429,7 +429,8 @@ export function ChatInput() {
             <For each={files()}>
               {(file) => (
                 <AttachmentChip
-                  label={getLeafPathName(file.relativePath)}
+                  label={getDroppedFileLabel(file)}
+                  icon={file.type === 'directory' ? 'folder' : 'file'}
                   onRemove={() => {
                     removeContextFile(file.path);
                     postMessage({ type: 'files/remove', payload: { path: file.path } });
@@ -966,7 +967,7 @@ function VariantPicker(props: {
 function AttachmentChip(props: {
   label: string;
   detail?: string | null;
-  icon?: 'file' | 'image';
+  icon?: 'file' | 'folder' | 'image';
   onRemove?: () => void;
 }) {
   return (
@@ -976,7 +977,12 @@ function AttachmentChip(props: {
           <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
         </svg>
       </Show>
-      <Show when={props.icon !== 'image'}>
+      <Show when={props.icon === 'folder'}>
+        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+          <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
+        </svg>
+      </Show>
+      <Show when={props.icon !== 'image' && props.icon !== 'folder'}>
         <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
           <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
         </svg>
@@ -994,6 +1000,13 @@ function AttachmentChip(props: {
       </Show>
     </span>
   );
+}
+
+function getDroppedFileLabel(file: { path: string; relativePath: string }) {
+  if (!file.relativePath || file.relativePath === '.') {
+    return getLeafPathName(file.path);
+  }
+  return getLeafPathName(file.relativePath);
 }
 
 async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<string[]> {

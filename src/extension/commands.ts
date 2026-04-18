@@ -36,9 +36,7 @@ export function registerCommands(context: vscode.ExtensionContext, sidebar: Side
             try {
               const stat = await vscode.workspace.fs.stat(target);
               const workspaceFolder = vscode.workspace.getWorkspaceFolder(target);
-              const relativePath = workspaceFolder
-                ? vscode.workspace.asRelativePath(target, false)
-                : basename(target.fsPath);
+              const relativePath = getDroppedRelativePath(target, workspaceFolder);
               return {
                 path: target.fsPath,
                 relativePath,
@@ -63,4 +61,14 @@ export function registerCommands(context: vscode.ExtensionContext, sidebar: Side
       }
     )
   );
+}
+
+function getDroppedRelativePath(
+  uri: vscode.Uri,
+  workspaceFolder: vscode.WorkspaceFolder | undefined
+) {
+  if (!workspaceFolder) return basename(uri.fsPath);
+
+  const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
+  return relativePath || '.';
 }
