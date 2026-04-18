@@ -13,13 +13,12 @@ export function ModelPicker(props: {
   onClose: () => void
 }) {
   const [tab, setTab] = createSignal<"agents" | "models">("agents")
-  const defaultModelLabel = createMemo(() => "Automatic (OpenCode default)")
   const visibleProviders = createMemo(() => getVisibleProviders(state.providers))
 
   return (
     <div class="fixed inset-0 z-50 flex items-end justify-center" onClick={props.onClose}>
       <div
-        class="mb-20 w-[min(380px,calc(100%-2rem))] overflow-hidden border border-vscode-border bg-vscode-card shadow-lg"
+        class="mb-16 w-[min(380px,calc(100%-2rem))] overflow-hidden rounded-lg border border-vscode-border bg-vscode-card shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="flex border-b border-vscode-border">
@@ -52,7 +51,7 @@ export function ModelPicker(props: {
                     }}
                   >
                     <span
-                      class="mt-1 h-2 w-2 shrink-0"
+                      class="mt-1 h-2 w-2 shrink-0 rounded-full"
                       style={{ "background-color": agent.color || "var(--color-vscode-muted)" }}
                     />
                     <div class="min-w-0 flex-1">
@@ -74,20 +73,6 @@ export function ModelPicker(props: {
               when={visibleProviders().length > 0}
               fallback={<EmptyState label="No providers configured" />}
             >
-              <button
-                class={`flex w-full items-center justify-between gap-2 border-b border-vscode-border px-4 py-2 text-left text-[13px] transition-colors hover:bg-vscode-hover ${
-                  state.selectedModel === null ? "bg-vscode-hover" : ""
-                }`}
-                onClick={() => {
-                  props.onSelect({ providerID: undefined, modelID: undefined })
-                  props.onClose()
-                }}
-              >
-                <span class="min-w-0 truncate font-medium">{defaultModelLabel()}</span>
-                <Show when={state.selectedModel === null}>
-                  <span class="text-vscode-accent text-xs">✓</span>
-                </Show>
-              </button>
               <For each={visibleProviders()}>
                 {(provider) => (
                   <div>
@@ -96,7 +81,7 @@ export function ModelPicker(props: {
                     </div>
                     <For each={Object.values(provider.models)}>
                       {(model) => (
-                        <div class="border-b border-vscode-border/30 last:border-b-0">
+                        <div class="border-t border-vscode-border/25">
                           <button
                             class={`flex w-full items-center justify-between gap-2 px-4 py-2 text-left text-[13px] transition-colors hover:bg-vscode-hover ${
                               state.selectedModel?.providerID === provider.id &&
@@ -126,12 +111,12 @@ export function ModelPicker(props: {
                               <For each={Object.keys(model.variants || {})}>
                                 {(variant) => (
                                   <button
-                                    class={`border px-2 py-1 text-[11px] transition-colors ${
+                                    class={`rounded border px-2 py-0.5 text-[11px] transition-colors ${
                                       state.selectedModel?.providerID === provider.id &&
                                       state.selectedModel?.modelID === model.id &&
                                       state.selectedModel?.variant === variant
-                                        ? "border-vscode-accent/50 bg-vscode-accent/10 text-vscode-fg"
-                                        : "border-vscode-border/50 bg-vscode-card/40 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
+                                        ? "border-vscode-accent/40 bg-vscode-accent/8 text-vscode-fg"
+                                        : "border-vscode-border/40 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
                                     }`}
                                     onClick={() => {
                                       props.onSelect({ providerID: provider.id, modelID: model.id, variant })
@@ -162,7 +147,7 @@ export function ModelPicker(props: {
 function TabButton(props: { active: boolean; onClick: () => void; label: string }) {
   return (
     <button
-      class={`flex-1 px-3 py-2 text-[13px] transition-colors ${
+      class={`flex-1 px-3 py-2.5 text-[13px] font-medium transition-colors ${
         props.active
           ? "border-b-2 border-vscode-accent text-vscode-fg"
           : "border-b-2 border-transparent text-vscode-muted hover:text-vscode-fg"

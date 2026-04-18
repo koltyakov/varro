@@ -31,10 +31,10 @@ There are two ways to load the extension:
 npm run package
 ```
 
-This produces `opencode-vscode-0.1.0.vsix` in the project root. Install it:
+This produces `vscode-opencode-0.1.0.vsix` in the project root. Install it:
 
 ```sh
-code --install-extension opencode-vscode-0.1.0.vsix
+code --install-extension vscode-opencode-0.1.0.vsix
 ```
 
 Or via the VSCode UI: open the **Extensions** view (`Cmd+Shift+X`), click the `…` menu, select **"Install from VSIX..."**, and pick the `.vsix` file.

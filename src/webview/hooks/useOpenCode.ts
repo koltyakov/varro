@@ -121,6 +121,14 @@ async function loadProviders() {
     ) {
       setSelectedModel({ providerID: effectiveModel.providerID, modelID: effectiveModel.modelID })
     }
+    if (!state.selectedModel && res.providers.length > 0) {
+      const firstProvider = res.providers[0]
+      const defaultModelID = (res.default || {})[firstProvider.id]
+      const modelID = defaultModelID || Object.keys(firstProvider.models)[0]
+      if (modelID) {
+        setSelectedModel({ providerID: firstProvider.id, modelID })
+      }
+    }
   } catch {}
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "vscode",
+  "name": "vscode-opencode",
   "displayName": "OpenCode",
   "description": "AI-powered agentic coding assistant powered by OpenCode",
   "version": "0.1.0",

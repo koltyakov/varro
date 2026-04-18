@@ -141,13 +141,29 @@ export function ChatInput() {
       }
     }
 
+    const firstProvider = state.providers[0]
+    if (firstProvider) {
+      const defaultModelID = state.providerDefaults[firstProvider.id]
+      const defaultModel = defaultModelID ? firstProvider.models[defaultModelID] : Object.values(firstProvider.models)[0]
+      if (defaultModel) {
+        return {
+          providerID: firstProvider.id,
+          modelID: defaultModel.id,
+          variant: null,
+          providerName: firstProvider.name,
+          modelName: defaultModel.name,
+          contextLimit: defaultModel.limit?.context || null,
+        }
+      }
+    }
+
     return {
-      providerID: null,
-      modelID: null,
-      variant: null,
-      providerName: "OpenCode",
-      modelName: "Default",
-      contextLimit: null,
+      providerID: null as string | null,
+      modelID: null as string | null,
+      variant: null as string | null,
+      providerName: "",
+      modelName: "",
+      contextLimit: null as number | null,
     }
   }
 
@@ -183,16 +199,15 @@ export function ChatInput() {
       percent: 0,
     }
   })
+
   return (
-    <div class="relative shrink-0 border-t border-vscode-border/60 bg-vscode-sidebar px-4 pb-4 pt-3">
+    <div class="relative shrink-0 border-t border-vscode-border/40 bg-vscode-sidebar px-3 pb-3 pt-2">
       <Show when={showModelPicker()}>
         <ModelPicker
           onSelect={(sel) => {
             if (sel.agent) setSelectedAgent(sel.agent)
             if (sel.providerID && sel.modelID) {
               setSelectedModel({ providerID: sel.providerID, modelID: sel.modelID, variant: sel.variant })
-            } else if (!sel.providerID && !sel.modelID) {
-              setSelectedModel(null)
             }
           }}
           onClose={() => setShowModelPicker(false)}
@@ -201,12 +216,12 @@ export function ChatInput() {
 
       <div
         ref={containerRef}
-        class={`flex flex-col border transition-all duration-150 ${
+        class={`flex flex-col rounded-lg border transition-all duration-150 ${
           isDraggingOver()
             ? "border-vscode-accent bg-vscode-accent/5"
-            : "border-vscode-border/60 bg-vscode-input-bg focus-within:border-vscode-accent/60"
+            : "border-vscode-border/50 bg-vscode-input-bg focus-within:border-vscode-accent/50"
         }`}
-        onDropCapture={handleDrop}
+        onDrop={(e) => handleDrop(e as DragEvent)}
         onDragEnter={(e) => {
           if (!isPathDrop(e.dataTransfer)) return
           e.preventDefault()
@@ -225,16 +240,16 @@ export function ChatInput() {
       >
         <textarea
           ref={textareaRef!}
-          class="min-h-[60px] w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[14px] leading-relaxed text-vscode-input-fg outline-none placeholder:text-vscode-muted/60"
+          class="min-h-[52px] w-full resize-none bg-transparent px-3 pt-3 pb-1 text-[13px] leading-relaxed text-vscode-input-fg outline-none placeholder:text-vscode-muted/50"
           rows={2}
           placeholder={
             isLoading()
               ? busyPromptMode() === "steer"
-                ? "Steer current run…"
-                : "Queue next prompt…"
+                ? "Steer current run..."
+                : "Queue next prompt..."
               : state.activeSessionId
-                ? "Message…"
-                : "Ask anything…"
+                ? "Message..."
+                : "Ask anything..."
           }
           value={inputText()}
           onInput={(e) => {
@@ -245,44 +260,40 @@ export function ChatInput() {
           onPaste={handlePaste}
         />
 
-        <div class="flex flex-wrap items-center justify-between gap-3 px-3 pb-3 pt-2">
-          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <div class="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
+          <div class="flex min-w-0 flex-1 items-center gap-1.5">
             <button
-              class="inline-flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[12px] text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+              class="inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-1 text-[12px] text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
               onClick={() => setShowModelPicker(!showModelPicker())}
-              title="Choose model"
+              title={
+                currentModel().modelName
+                  ? `${currentModel().modelName}${currentModel().variant ? ` [${formatThinkingLabel(currentModel().variant!)}]` : ""} — ${currentModel().providerName}`
+                  : "Choose model"
+              }
             >
-              <svg class="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+              <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1l2 4.5L15 6l-3.5 3.5L12.5 15 8 12.5 3.5 15l1-5.5L1 6l5-.5L8 1z" />
               </svg>
-              <span class="truncate max-w-[260px]">
-                {(state.selectedAgent || "Default") +
-                  " · " +
-                  currentModel().modelName +
-                  (currentModel().variant ? ` [${formatThinkingLabel(currentModel().variant!)}]` : "") +
-                  " (" +
-                  currentModel().providerName +
-                  ")"}
-              </span>
+              <Show when={currentModel().modelName} fallback={<span>Pick model</span>}>
+                <span class="truncate max-w-[200px]">
+                  {currentModel().modelName}
+                  <Show when={currentModel().variant}>
+                    <span class="text-vscode-muted/70"> [{formatThinkingLabel(currentModel().variant!)}]</span>
+                  </Show>
+                </span>
+              </Show>
             </button>
 
-            <StatChip
-              label="Session"
-              value={`${formatNumber(sessionTokenTotals().total)} tok`}
-              title={`Input ${formatNumber(sessionTokenTotals().input)} · Output ${formatNumber(sessionTokenTotals().output)} · Thinking ${formatNumber(sessionTokenTotals().reasoning)}`}
-            />
-            <Show when={sessionTokenTotals().reasoning > 0}>
-              <StatChip
-                label="Think"
-                value={formatNumber(sessionTokenTotals().reasoning)}
-                title="Reasoning tokens"
+            <Show when={activeModelContext()}>
+              <ContextDonut
+                used={activeModelContext()!.used}
+                limit={activeModelContext()!.limit}
+                tokens={sessionTokenTotals()}
               />
             </Show>
-            <Show when={activeModelContext()}>
-              <ContextWindowChip used={activeModelContext()!.used} limit={activeModelContext()!.limit} />
-            </Show>
           </div>
-          <div class="flex items-center gap-2">
+
+          <div class="flex items-center gap-1.5">
             <Show when={isLoading()}>
               <>
                 <BusyModeButton
@@ -299,31 +310,27 @@ export function ChatInput() {
                 />
               </>
             </Show>
-            <span class="hidden text-[11px] text-vscode-muted/60 sm:inline">Drop files, folders, or paste images</span>
-            <span class="hidden text-[11px] text-vscode-muted/50 sm:inline">
-              <kbd>↵</kbd> send
-            </span>
             <button
-              class={`flex h-9 w-9 items-center justify-center transition-all duration-150 ${
+              class={`flex h-7 w-7 items-center justify-center rounded-md transition-all duration-150 ${
                 canSend()
                   ? "bg-vscode-accent text-white hover:bg-vscode-accent/80"
-                  : "text-vscode-muted/40"
+                  : "text-vscode-muted/30"
               }`}
               onClick={handleSend}
               disabled={!canSend()}
               title={isLoading() ? (busyPromptMode() === "steer" ? "Steer current run (Enter)" : "Queue prompt (Enter)") : "Send (Enter)"}
             >
-              <svg class="h-4.5 w-4.5" viewBox="0 0 16 16" fill="currentColor">
+              <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M2 2.5l12 5.5L2 13.5V9l8-1-8-1V2.5z" />
               </svg>
             </button>
             <Show when={isLoading()}>
               <button
-                class="flex h-9 w-9 items-center justify-center bg-vscode-error/15 text-vscode-error transition-colors hover:bg-vscode-error/25"
+                class="flex h-7 w-7 items-center justify-center rounded-md bg-vscode-error/12 text-vscode-error transition-colors hover:bg-vscode-error/20"
                 onClick={abortSession}
                 title="Stop"
               >
-                <svg class="h-4.5 w-4.5" viewBox="0 0 16 16" fill="currentColor">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
                   <rect x="4" y="4" width="8" height="8" rx="1" />
                 </svg>
               </button>
@@ -332,6 +339,120 @@ export function ChatInput() {
         </div>
       </div>
     </div>
+  )
+}
+
+function ContextDonut(props: {
+  used: number
+  limit: number
+  tokens: { input: number; output: number; reasoning: number; total: number }
+}) {
+  const percentUsed = () => Math.min(props.limit > 0 ? (props.used / props.limit) * 100 : 0, 100)
+  const percentLeft = () => Math.max(0, 100 - percentUsed())
+
+  const color = () => {
+    const p = percentUsed()
+    if (p >= 90) return "var(--color-vscode-error)"
+    if (p >= 70) return "var(--color-vscode-warning)"
+    return "var(--color-vscode-accent)"
+  }
+
+  const r = 6
+  const circumference = 2 * Math.PI * r
+  const dashOffset = () => circumference * (1 - percentUsed() / 100)
+  const dashArray = String(circumference)
+
+  return (
+    <span class="group relative inline-flex items-center">
+      <span
+        class="inline-flex items-center justify-center p-0.5 cursor-default"
+        tabindex="0"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16">
+          <circle
+            cx="8"
+            cy="8"
+            r={r}
+            fill="none"
+            stroke="var(--color-vscode-border)"
+            stroke-width="2"
+            opacity="0.4"
+          />
+          <circle
+            cx="8"
+            cy="8"
+            r={r}
+            fill="none"
+            stroke={color()}
+            stroke-width="2"
+            stroke-dasharray={dashArray}
+            stroke-dashoffset={dashOffset()}
+            stroke-linecap="round"
+            transform="rotate(-90 8 8)"
+            style="transition: stroke-dashoffset 0.3s, stroke 0.3s"
+          />
+        </svg>
+      </span>
+
+      <span class="pointer-events-none absolute bottom-[calc(100%+8px)] right-0 z-20 w-56 rounded-lg border border-vscode-border/60 bg-vscode-card px-4 py-3 text-[12px] text-vscode-fg opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.4)] transition-all duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+        <div class="mb-2 flex items-center gap-2">
+          <svg width="20" height="20" viewBox="0 0 16 16">
+            <circle
+              cx="8"
+              cy="8"
+              r={r}
+              fill="none"
+              stroke="var(--color-vscode-border)"
+              stroke-width="2"
+              opacity="0.4"
+            />
+            <circle
+              cx="8"
+              cy="8"
+              r={r}
+              fill="none"
+              stroke={color()}
+              stroke-width="2"
+              stroke-dasharray={dashArray}
+              stroke-dashoffset={dashOffset()}
+              stroke-linecap="round"
+              transform="rotate(-90 8 8)"
+            />
+          </svg>
+          <span class="font-medium">{percentUsed().toFixed(1)}% used</span>
+        </div>
+        <div class="space-y-1 text-[11px]">
+          <div class="flex justify-between text-vscode-muted">
+            <span>Remaining</span>
+            <span class="text-vscode-fg">{percentLeft().toFixed(1)}%</span>
+          </div>
+          <div class="flex justify-between text-vscode-muted">
+            <span>Used / Limit</span>
+            <span class="text-vscode-fg">{formatCompactNumber(props.used)} / {formatCompactNumber(props.limit)}</span>
+          </div>
+          <div class="mt-2 border-t border-vscode-border/30 pt-2">
+            <div class="flex justify-between text-vscode-muted">
+              <span>Input</span>
+              <span class="text-vscode-fg">{formatNumber(props.tokens.input)}</span>
+            </div>
+            <div class="flex justify-between text-vscode-muted">
+              <span>Output</span>
+              <span class="text-vscode-fg">{formatNumber(props.tokens.output)}</span>
+            </div>
+            <Show when={props.tokens.reasoning > 0}>
+              <div class="flex justify-between text-vscode-muted">
+                <span>Thinking</span>
+                <span class="text-vscode-fg">{formatNumber(props.tokens.reasoning)}</span>
+              </div>
+            </Show>
+            <div class="flex justify-between text-vscode-muted">
+              <span>Total</span>
+              <span class="text-vscode-fg font-medium">{formatNumber(props.tokens.total)}</span>
+            </div>
+          </div>
+        </div>
+      </span>
+    </span>
   )
 }
 
@@ -407,48 +528,6 @@ function decodeDroppedPath(value: string): string | null {
   return value.startsWith("/") ? value : null
 }
 
-function StatChip(props: { label: string; value: string; title?: string }) {
-  return (
-    <span
-      class="inline-flex items-center gap-2 border border-vscode-border/50 bg-vscode-card/50 px-2.5 py-1.5 text-[11px] text-vscode-muted"
-      title={props.title}
-    >
-      <span class="uppercase tracking-[0.08em] text-vscode-muted/70">{props.label}</span>
-      <span class="text-vscode-fg">{props.value}</span>
-    </span>
-  )
-}
-
-function ContextWindowChip(props: { used: number; limit: number }) {
-  const percentUsed = () => Math.min(props.limit > 0 ? (props.used / props.limit) * 100 : 0, 100)
-  const percentLeft = () => Math.max(0, 100 - percentUsed())
-
-  return (
-    <span class="group relative inline-flex">
-      <span
-        class="inline-flex items-center gap-2 border border-vscode-border/50 bg-vscode-card/50 px-2.5 py-1.5 text-[11px] text-vscode-muted transition-colors group-hover:border-vscode-accent/40 group-hover:text-vscode-fg"
-        tabindex="0"
-      >
-        <span class="uppercase tracking-[0.08em] text-vscode-muted/70">Ctx</span>
-        <span class="text-vscode-fg">{percentUsed().toFixed(0)}%</span>
-      </span>
-
-      <span class="pointer-events-none absolute bottom-[calc(100%+10px)] left-0 z-20 w-52 border border-vscode-border bg-vscode-card px-4 py-3.5 text-[12px] text-vscode-fg opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition-all duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-        <span class="block text-vscode-muted">Context window:</span>
-        <span class="mt-1 block font-medium">
-          {percentUsed().toFixed(1)}% used ({percentLeft().toFixed(1)}% left)
-        </span>
-        <span class="mt-1 block text-vscode-muted">
-          {formatCompactNumber(props.used)} / {formatCompactNumber(props.limit)} tokens used
-        </span>
-        <span class="mt-2 block leading-relaxed text-vscode-fg/85">
-          Codex automatically compacts its context
-        </span>
-      </span>
-    </span>
-  )
-}
-
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -490,10 +569,10 @@ function formatCompactNumber(value: number) {
 function BusyModeButton(props: { active: boolean; label: string; title: string; onClick: () => void }) {
   return (
     <button
-      class={`border px-2.5 py-1.5 text-[11px] transition-colors ${
+      class={`rounded border px-2 py-1 text-[11px] transition-colors ${
         props.active
-          ? "border-vscode-accent/50 bg-vscode-accent/10 text-vscode-fg"
-          : "border-vscode-border/50 bg-vscode-card/40 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
+          ? "border-vscode-accent/40 bg-vscode-accent/8 text-vscode-fg"
+          : "border-vscode-border/40 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
       }`}
       onClick={props.onClick}
       title={props.title}

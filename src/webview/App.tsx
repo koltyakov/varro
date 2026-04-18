@@ -16,7 +16,7 @@ export function App() {
         <Chat />
       </Show>
       <Show when={error()}>
-        <div class="flex items-start justify-between gap-2 border-t border-vscode-error/40 bg-vscode-error/8 px-4 py-2 text-[11px] text-vscode-error">
+        <div class="flex items-start justify-between gap-2 border-t border-vscode-error/30 bg-vscode-error/6 px-4 py-2 text-[11px] text-vscode-error">
           <span class="break-words leading-relaxed">{error()}</span>
           <button
             class="shrink-0 px-1 text-vscode-error/60 transition-colors hover:text-vscode-error"

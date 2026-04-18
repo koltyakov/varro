@@ -7,16 +7,16 @@ export function PermissionPrompt(props: { permission: Permission }) {
   const sessionId = () => props.permission.sessionID
 
   return (
-    <div class="mx-4 my-2 border-l-2 border-vscode-warning bg-vscode-warning/5 px-4 py-3 animate-fade-in">
+    <div class="mx-3 my-2 rounded-lg border-l-2 border-vscode-warning bg-vscode-warning/4 px-4 py-3 animate-fade-in">
       <div class="mb-1.5 flex items-center gap-1.5">
         <svg class="h-3.5 w-3.5 text-vscode-warning" viewBox="0 0 16 16" fill="currentColor">
           <path d="M8 1.5a.5.5 0 01.44.27l6.5 12a.5.5 0 01-.44.73H1.5a.5.5 0 01-.44-.73l6.5-12A.5.5 0 018 1.5zM8 5a.75.75 0 00-.75.75v2.5a.75.75 0 001.5 0v-2.5A.75.75 0 008 5zm0 6a1 1 0 100-2 1 1 0 000 2z" />
         </svg>
         <span class="text-[11px] font-semibold text-vscode-warning">Permission Required</span>
       </div>
-      <div class="mb-3 text-[12px] text-vscode-fg">{props.permission.title}</div>
+      <div class="mb-3 text-[12px] leading-relaxed text-vscode-fg">{props.permission.title}</div>
       <Show when={props.permission.metadata}>
-        <div class="mb-3 max-h-[80px] overflow-y-auto bg-vscode-input-bg/60 p-2 text-[10px]">
+        <div class="mb-3 max-h-[80px] overflow-y-auto rounded-md bg-vscode-input-bg/50 p-2 text-[10px]">
           <pre class="whitespace-pre-wrap text-vscode-muted">
             {JSON.stringify(props.permission.metadata, null, 2)}
           </pre>
@@ -32,9 +32,9 @@ export function PermissionPrompt(props: { permission: Permission }) {
           />
           Remember for session
         </label>
-        <div class="flex gap-1">
+        <div class="flex gap-1.5">
           <button
-            class="px-3 py-1 text-[11px] font-medium bg-vscode-input-bg text-vscode-fg transition-colors hover:bg-vscode-hover"
+            class="rounded-md px-3 py-1 text-[11px] font-medium bg-vscode-input-bg text-vscode-fg transition-colors hover:bg-vscode-hover"
             onClick={() =>
               respondPermission(sessionId(), props.permission.id, "deny", remember())
             }
@@ -42,7 +42,7 @@ export function PermissionPrompt(props: { permission: Permission }) {
             Deny
           </button>
           <button
-            class="px-3 py-1 text-[11px] font-medium bg-vscode-accent text-white transition-colors hover:bg-vscode-accent/80"
+            class="rounded-md px-3 py-1 text-[11px] font-medium bg-vscode-accent text-white transition-colors hover:bg-vscode-accent/80"
             onClick={() =>
               respondPermission(sessionId(), props.permission.id, "allow", remember())
             }

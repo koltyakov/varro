@@ -16,26 +16,26 @@ export function SettingsPanel() {
   return (
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6" onClick={() => setShowSettings(false)}>
       <div
-        class="flex max-h-full w-[min(720px,100%)] flex-col border border-vscode-border bg-vscode-card shadow-lg"
+        class="flex max-h-full w-[min(680px,100%)] flex-col rounded-xl border border-vscode-border/50 bg-vscode-card shadow-[0_16px_48px_rgba(0,0,0,0.45)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="flex items-center justify-between border-b border-vscode-border px-4 py-3">
+        <div class="flex items-center justify-between border-b border-vscode-border/40 px-5 py-3.5">
           <div>
-            <div class="text-[14px] font-medium text-vscode-fg">Settings</div>
-            <div class="mt-1 text-[11px] text-vscode-muted">
+            <div class="text-[14px] font-semibold text-vscode-fg">Settings</div>
+            <div class="mt-0.5 text-[11px] text-vscode-muted">
               Disable providers or individual models from the picker.
             </div>
           </div>
           <div class="flex items-center gap-2">
             <button
-              class="border border-vscode-border/50 px-2.5 py-1.5 text-[11px] text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+              class="rounded-md border border-vscode-border/40 px-2.5 py-1.5 text-[11px] text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
               onClick={resetModelVisibility}
               title="Reset provider and model visibility"
             >
               Reset
             </button>
             <button
-              class="p-1 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+              class="rounded-md p-1 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
               onClick={() => setShowSettings(false)}
               title="Close settings"
             >
@@ -46,28 +46,28 @@ export function SettingsPanel() {
           </div>
         </div>
 
-        <div class="grid gap-4 border-b border-vscode-border px-4 py-3 text-[12px] text-vscode-muted md:grid-cols-3">
+        <div class="grid gap-3 border-b border-vscode-border/40 px-5 py-3 text-[12px] text-vscode-muted md:grid-cols-3">
           <StatBlock label="Providers" value={String(state.providers.length)} />
           <StatBlock label="Disabled Providers" value={String(hiddenProviderCount())} />
           <StatBlock label="Disabled Models" value={String(hiddenModelCount())} />
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <Show
             when={state.providers.length > 0}
             fallback={<div class="py-8 text-center text-[12px] text-vscode-muted">No providers configured</div>}
           >
-            <div class="space-y-4">
+            <div class="space-y-3">
               <For each={state.providers}>
                 {(provider) => {
                   const models = () => Object.values(provider.models)
 
                   return (
-                    <section class="border border-vscode-border/45 bg-vscode-bg/20">
-                      <div class="flex items-center justify-between gap-3 border-b border-vscode-border/30 px-4 py-3">
+                    <section class="rounded-lg border border-vscode-border/35 bg-vscode-bg/15 overflow-hidden">
+                      <div class="flex items-center justify-between gap-3 border-b border-vscode-border/25 px-4 py-3">
                         <div class="min-w-0">
                           <div class="text-[13px] font-medium text-vscode-fg">{provider.name}</div>
-                          <div class="mt-1 text-[11px] text-vscode-muted">
+                          <div class="mt-0.5 text-[11px] text-vscode-muted">
                             {models().length} model{models().length === 1 ? "" : "s"} available
                           </div>
                         </div>
@@ -81,13 +81,13 @@ export function SettingsPanel() {
                         </label>
                       </div>
 
-                      <div class="divide-y divide-vscode-border/20">
+                      <div class="divide-y divide-vscode-border/15">
                         <For each={models()}>
                           {(model) => (
-                            <div class="flex items-start justify-between gap-3 px-4 py-3">
+                            <div class="flex items-start justify-between gap-3 px-4 py-2.5">
                               <div class="min-w-0 flex-1">
                                 <div class="text-[12px] font-medium text-vscode-fg">{model.name}</div>
-                                <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-vscode-muted">
+                                <div class="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-vscode-muted">
                                   <span>{model.id}</span>
                                   <Show when={model.limit?.context}>
                                     <span>{formatContextLimit(model.limit!.context)} ctx</span>
@@ -124,9 +124,9 @@ export function SettingsPanel() {
 
 function StatBlock(props: { label: string; value: string }) {
   return (
-    <div class="border border-vscode-border/35 bg-vscode-bg/20 px-3 py-2">
-      <div class="text-[10px] uppercase tracking-[0.08em] text-vscode-muted/80">{props.label}</div>
-      <div class="mt-1 text-[16px] font-medium text-vscode-fg">{props.value}</div>
+    <div class="rounded-md border border-vscode-border/30 bg-vscode-bg/15 px-3 py-2">
+      <div class="text-[10px] uppercase tracking-wide text-vscode-muted/70">{props.label}</div>
+      <div class="mt-0.5 text-[15px] font-semibold text-vscode-fg">{props.value}</div>
     </div>
   )
 }

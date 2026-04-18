@@ -9,22 +9,22 @@ export function TodoList() {
   const progress = () => total() > 0 ? (completed() / total()) * 100 : 0
 
   return (
-    <div class="border-b border-vscode-border px-4 py-3 animate-fade-in">
+    <div class="border-b border-vscode-border/40 px-4 py-2.5 animate-fade-in">
       <div class="mb-2 flex items-center justify-between">
-        <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-vscode-muted">
+        <span class="text-[10px] font-semibold uppercase tracking-wide text-vscode-muted">
           Tasks
         </span>
         <span class="text-[10px] text-vscode-muted">
           {completed()}/{total()}
         </span>
       </div>
-      <div class="mb-3 h-0.5 bg-vscode-border/30">
+      <div class="mb-2 h-0.5 rounded-full bg-vscode-border/25">
         <div
-          class="h-full bg-vscode-accent transition-all duration-300"
+          class="h-full rounded-full bg-vscode-accent transition-all duration-300"
           style={{ width: `${progress()}%` }}
         />
       </div>
-      <div class="space-y-1">
+      <div class="space-y-0.5">
         <For each={todos()}>
           {(todo) => <TodoItem todo={todo} />}
         </For>
@@ -45,12 +45,12 @@ function TodoItem(props: { todo: Todo }) {
       case "in_progress":
         return (
           <div class="h-3 w-3 flex items-center justify-center">
-            <div class="h-1.5 w-1.5 bg-vscode-accent animate-pulse-soft" />
+            <div class="h-1.5 w-1.5 rounded-full bg-vscode-accent animate-pulse-soft" />
           </div>
         )
       default:
         return (
-          <div class="h-3 w-3 border border-vscode-border" />
+          <div class="h-3 w-3 rounded-sm border border-vscode-border/40" />
         )
     }
   }
@@ -58,7 +58,7 @@ function TodoItem(props: { todo: Todo }) {
   return (
     <div class={`flex items-start gap-2 py-0.5 text-[12px] leading-5 ${
       props.todo.status === "completed"
-        ? "text-vscode-muted line-through opacity-60"
+        ? "text-vscode-muted line-through opacity-50"
         : props.todo.status === "in_progress"
           ? "text-vscode-fg"
           : "text-vscode-muted"

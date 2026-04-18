@@ -22,14 +22,14 @@
   --color-vscode-diff-add: var(--vscode-diffEditor-insertedTextBackground, rgba(156, 204, 156, 0.2));
   --color-vscode-diff-del: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
   --font-mono: var(--vscode-editor-font-family, "SF Mono", "Menlo", "Monaco", "Consolas", monospace);
-  --font-sans: var(--vscode-font-family, system-ui, -apple-system, sans-serif);
-  --animate-fade-in: fade-in 0.12s ease-out;
+  --font-sans: var(--vscode-font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  --animate-fade-in: fade-in 0.15s ease-out;
   --animate-pulse-soft: pulse-soft 1.5s ease-in-out infinite;
 }
 
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes pulse-soft {
@@ -51,10 +51,12 @@ body,
   overflow: hidden;
   font-family: var(--font-sans);
   font-size: 13px;
+  line-height: 1.5;
   color: var(--color-vscode-fg);
   background: var(--color-vscode-sidebar);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 ::-webkit-scrollbar {
@@ -65,6 +67,7 @@ body,
 }
 ::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--color-vscode-fg) 35%, transparent);
@@ -80,22 +83,24 @@ textarea {
 .code-block {
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.65;
   tab-size: 2;
 }
 
 .code-block-shell {
-  margin: 1em 0;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  margin: 0.75em 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
+  border-radius: 6px;
   background: color-mix(in srgb, var(--color-vscode-card) 78%, transparent);
+  overflow: hidden;
 }
 
 .code-block-header {
   border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 55%, transparent);
-  padding: 6px 10px;
+  padding: 6px 12px;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-bg) 55%, transparent);
@@ -103,14 +108,15 @@ textarea {
 
 .code-block-shell pre.code-block {
   margin: 0;
-  padding: 12px 14px;
+  padding: 12px 16px;
   overflow-x: auto;
 }
 
 .markdown-content {
   color: var(--color-vscode-fg);
-  line-height: 1.75;
+  line-height: 1.7;
   word-break: break-word;
+  font-size: 13px;
 }
 
 .markdown-content > :first-child {
@@ -122,7 +128,7 @@ textarea {
 }
 
 .markdown-content p {
-  margin: 0 0 0.9em;
+  margin: 0 0 0.75em;
 }
 .markdown-content p:last-child {
   margin-bottom: 0;
@@ -130,7 +136,7 @@ textarea {
 
 .markdown-content strong {
   color: color-mix(in srgb, var(--color-vscode-fg) 96%, white 4%);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .markdown-content em {
@@ -142,22 +148,23 @@ textarea {
   font-size: 12px;
 }
 .markdown-content code:not(pre code) {
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 50%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+  border-radius: 4px;
   background: color-mix(in srgb, var(--color-vscode-bg) 50%, transparent);
-  padding: 1px 5px;
+  padding: 1px 6px;
   color: color-mix(in srgb, var(--color-vscode-fg) 92%, white 8%);
 }
 .markdown-content ul,
 .markdown-content ol {
-  margin: 0.9em 0;
-  padding-left: 1.45em;
+  margin: 0.6em 0;
+  padding-left: 1.5em;
 }
 .markdown-content li {
-  margin: 0.3em 0;
+  margin: 0.25em 0;
 }
 .markdown-content li > ul,
 .markdown-content li > ol {
-  margin: 0.4em 0;
+  margin: 0.25em 0;
 }
 .markdown-content a {
   color: var(--color-vscode-link);
@@ -170,57 +177,61 @@ textarea {
 .markdown-content h2,
 .markdown-content h3,
 .markdown-content h4 {
-  margin: 1.2em 0 0.45em;
+  margin: 1em 0 0.4em;
   font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
 }
 .markdown-content h1 {
-  font-size: 1.45em;
+  font-size: 1.35em;
 }
 .markdown-content h2 {
-  font-size: 1.26em;
+  font-size: 1.2em;
 }
 .markdown-content h3 {
-  font-size: 1.12em;
+  font-size: 1.08em;
 }
 .markdown-content h4 {
   font-size: 1em;
 }
 .markdown-content blockquote {
-  margin: 1em 0;
-  border-left: 2px solid color-mix(in srgb, var(--color-vscode-accent) 55%, var(--color-vscode-border) 45%);
-  background: color-mix(in srgb, var(--color-vscode-card) 45%, transparent);
-  padding: 10px 12px;
+  margin: 0.75em 0;
+  border-left: 2.5px solid color-mix(in srgb, var(--color-vscode-accent) 50%, var(--color-vscode-border) 50%);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--color-vscode-card) 40%, transparent);
+  padding: 8px 14px;
   color: var(--color-vscode-muted);
 }
 .markdown-content hr {
-  margin: 1.2em 0;
+  margin: 1em 0;
   border: none;
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 50%, transparent);
 }
 .markdown-content table {
   display: block;
   overflow-x: auto;
   border-collapse: collapse;
-  margin: 1em 0;
+  margin: 0.75em 0;
   width: 100%;
+  border-radius: 4px;
 }
 .markdown-content th,
 .markdown-content td {
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
-  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
+  padding: 6px 12px;
   text-align: left;
   vertical-align: top;
 }
 .markdown-content th {
-  background: color-mix(in srgb, var(--color-vscode-card) 82%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-card) 80%, transparent);
   font-weight: 600;
+  font-size: 12px;
 }
 
 kbd {
-  border: 1px solid var(--color-vscode-border);
-  padding: 0px 4px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  border-radius: 3px;
+  padding: 0px 5px;
   font-size: 10px;
   background: var(--color-vscode-input-bg);
   color: var(--color-vscode-muted);
@@ -240,7 +251,7 @@ button {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  transition: background-color 0.1s, color 0.1s;
+  transition: background-color 0.12s, color 0.12s, opacity 0.12s;
 }
 
 button:disabled {
@@ -256,5 +267,5 @@ input:focus-visible {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-vscode-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-accent) 35%, transparent);
 }

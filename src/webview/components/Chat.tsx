@@ -17,9 +17,9 @@ export function Chat() {
 
   return (
     <div class="flex h-full min-h-0 flex-col">
-      <div class="flex items-center justify-between border-b border-vscode-border bg-vscode-sidebar px-4 py-2">
+      <div class="flex items-center justify-between border-b border-vscode-border/40 px-3 py-1.5">
         <button
-          class="flex min-w-0 flex-1 items-center gap-2 px-1 py-0.5 text-[13px] transition-colors hover:bg-vscode-hover"
+          class="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1 text-[13px] transition-colors hover:bg-vscode-hover"
           onClick={() => setShowSessionPicker(!showSessionPicker())}
           title="Switch session"
         >
@@ -39,9 +39,9 @@ export function Chat() {
             <path d="M4.5 6l3.5 4 3.5-4z" />
           </svg>
         </button>
-        <div class="ml-2 flex shrink-0 items-center gap-1">
+        <div class="ml-1 flex shrink-0 items-center gap-0.5">
           <button
-            class="p-1.5 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+            class="rounded p-1.5 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
             onClick={() => setShowSettings(!showSettings())}
             title="Settings"
           >
@@ -51,7 +51,7 @@ export function Chat() {
           </button>
           <Show when={state.activeSessionId}>
             <button
-              class="p-1.5 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+              class="rounded p-1.5 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
               onClick={shareSession}
               title="Share session"
             >
@@ -61,7 +61,7 @@ export function Chat() {
             </button>
           </Show>
           <button
-            class="p-1.5 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+            class="rounded p-1.5 text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
             onClick={() => createSession()}
             title="New session"
           >
@@ -98,7 +98,7 @@ export function Chat() {
 
 function SessionOverlay() {
   return (
-    <div class="max-h-[260px] overflow-y-auto border-b border-vscode-border bg-vscode-card py-0.5 animate-fade-in">
+    <div class="max-h-[260px] overflow-y-auto border-b border-vscode-border/40 bg-vscode-card/60 py-0.5 animate-fade-in">
       <Show
         when={state.sessions.length > 0}
         fallback={
@@ -125,7 +125,7 @@ function SessionOverlay() {
                 </Show>
               </div>
               <button
-                class="shrink-0 p-1 text-vscode-muted opacity-0 transition-opacity hover:text-vscode-error group-hover:opacity-100"
+                class="shrink-0 rounded p-1 text-vscode-muted opacity-0 transition-opacity hover:text-vscode-error group-hover:opacity-100"
                 onClick={(e) => {
                   e.stopPropagation()
                   deleteSession(session.id)
