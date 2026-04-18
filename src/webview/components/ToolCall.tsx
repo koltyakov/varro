@@ -1,5 +1,6 @@
-import { Show, createSignal } from 'solid-js';
+import { Show, For, createSignal } from 'solid-js';
 import type { ToolPart, ToolStateCompleted, ToolStateError } from '../types';
+import { postMessage } from '../lib/bridge';
 
 export function ToolCall(props: { part: ToolPart }) {
   const [expanded, setExpanded] = createSignal(false);
@@ -31,9 +32,27 @@ export function ToolCall(props: { part: ToolPart }) {
     const input: Record<string, unknown> = (s.input || {}) as Record<string, unknown>;
     const keys = ['file_path', 'path', 'command', 'query', 'pattern'];
     for (const k of keys) {
-      if (typeof input[k] === 'string') return String(input[k]).slice(0, 100);
+      if (typeof input[k] === 'string') return { text: String(input[k]).slice(0, 100), key: k };
     }
-    return '';
+    return null;
+  };
+
+  const isPathKey = (key: string) => key === 'file_path' || key === 'path';
+
+  const openFile = (path: string) => {
+    postMessage({ type: 'vscode/open', payload: { path } });
+  };
+
+  const inputEntries = () => {
+    const input = (state().input || {}) as Record<string, unknown>;
+    return Object.entries(input).filter(([, v]) => v !== undefined && v !== null);
+  };
+
+  const truncatedOutput = () => {
+    if (state().status !== 'completed') return '';
+    const output = (state() as ToolStateCompleted).output || '';
+    if (output.length <= 2000) return output;
+    return output.slice(0, 1000) + '\n\n… (' + Math.round((output.length - 2000) / 1000) + 'k chars truncated) …\n\n' + output.slice(-1000);
   };
 
   return (
@@ -74,18 +93,36 @@ export function ToolCall(props: { part: ToolPart }) {
         </svg>
       </button>
       <Show when={preview() && !expanded()}>
-        <div class="tool-invocation-preview">{preview()}</div>
+        <div class="tool-invocation-preview">
+          {(() => {
+            const p = preview()!;
+            return isPathKey(p.key) ? (
+              <a href="#" class="file-path-link" onClick={(e) => { e.preventDefault(); openFile(p.text); }}>{p.text}</a>
+            ) : p.text;
+          })()}
+        </div>
       </Show>
 
       <Show when={expanded()}>
         <div class="tool-invocation-detail animate-fade-in">
-          <Show when={Object.keys(state().input || {}).length > 0}>
+          <Show when={inputEntries().length > 0}>
             <div class="tool-invocation-input">
-              <pre class="tool-invocation-pre">{JSON.stringify(state().input, null, 2)}</pre>
+              <For each={inputEntries()}>
+                {([key, value]) => (
+                  <div class="tool-input-entry">
+                    <span class="tool-input-key">{key}</span>
+                    {isPathKey(key) && typeof value === 'string' ? (
+                      <a href="#" class="file-path-link tool-input-value" onClick={(e) => { e.preventDefault(); openFile(String(value)); }}>{formatValue(value)}</a>
+                    ) : (
+                      <span class="tool-input-value">{formatValue(value)}</span>
+                    )}
+                  </div>
+                )}
+              </For>
             </div>
           </Show>
-          <Show when={state().status === 'completed'}>
-            <pre class="tool-invocation-output">{(state() as ToolStateCompleted).output || '(empty)'}</pre>
+          <Show when={state().status === 'completed' && truncatedOutput()}>
+            <pre class="tool-invocation-output">{truncatedOutput()}</pre>
           </Show>
           <Show when={state().status === 'error'}>
             <div class="tool-invocation-error">{(state() as ToolStateError).error}</div>
@@ -100,6 +137,12 @@ export function ToolCall(props: { part: ToolPart }) {
       </Show>
     </div>
   );
+}
+
+function formatValue(value: unknown): string {
+  if (typeof value === 'string') return value.length > 200 ? value.slice(0, 200) + '...' : value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
 }
 
 function formatDuration(ms: number | undefined): string {

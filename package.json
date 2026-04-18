@@ -41,7 +41,10 @@
         {
           "type": "webview",
           "id": "opencode.chat",
-          "name": "OpenCode"
+          "name": "OpenCode",
+          "dropMimeTypes": [
+            "text/uri-list"
+          ]
         }
       ]
     },
@@ -67,6 +70,19 @@
         "title": "OpenCode: Abort Session"
       }
     ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "opencode.chat.addToContext",
+          "group": "z_opencode"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "opencode.chat.addToContext"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "opencode.chat.focus",

@@ -63,6 +63,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  async handleDrop(
+    _webviewView: vscode.WebviewView,
+    dataTransfer: vscode.DataTransfer,
+    _token: vscode.CancellationToken
+  ): Promise<void> {
+    const paths: string[] = [];
+
+    const uriListItem = dataTransfer.get('text/uri-list');
+    if (uriListItem) {
+      const raw = await uriListItem.asString();
+      for (const line of raw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        try {
+          const uri = vscode.Uri.parse(trimmed);
+          if (uri.fsPath) paths.push(uri.fsPath);
+        } catch {}
+      }
+    }
+
+    if (paths.length > 0) {
+      await this.handleDroppedPaths(paths);
+    }
+  }
+
   private currentTheme(): 'dark' | 'light' {
     const k = vscode.window.activeColorTheme.kind;
     return k === vscode.ColorThemeKind.Dark || k === vscode.ColorThemeKind.HighContrast

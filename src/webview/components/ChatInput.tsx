@@ -18,7 +18,7 @@ import {
 import { postMessage } from '../lib/bridge';
 import { sendMessage, abortSession } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel, formatThinkingLabel } from './ModelPicker';
-import { isAssistantMessage, getContextWindow, sumAssistantTokens } from '../lib/message-metrics';
+import { isAssistantMessage, getContextWindow, sumAssistantTokens, formatNumber } from '../lib/message-metrics';
 
 export function ChatInput() {
   let textareaRef: HTMLTextAreaElement | undefined;
@@ -28,6 +28,7 @@ export function ChatInput() {
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
   const [showBusyMenu, setShowBusyMenu] = createSignal(false);
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
+  const [showContextPopup, setShowContextPopup] = createSignal(false);
   const [isFocused, setIsFocused] = createSignal(false);
 
   const files = () => state.droppedFiles;
@@ -76,21 +77,34 @@ export function ChatInput() {
     e.stopPropagation();
     setIsDraggingOver(false);
 
-    const paths = await collectDroppedPaths(e.dataTransfer);
+    const dataTransfer = e.dataTransfer;
+    if (!dataTransfer) return;
+
+    const paths = await collectDroppedPaths(dataTransfer);
     if (paths.length > 0) {
       postMessage({ type: 'files/drop', payload: { paths } });
       return;
     }
 
-    const dataTransfer = e.dataTransfer;
-    if (!dataTransfer) return;
-
+    // Async fallback: try reading items one by one via getAsString
     const uriList = await readItemByType(dataTransfer, 'text/uri-list');
     if (uriList) {
       const uris = parseDroppedText(uriList);
       if (uris.length > 0) {
         postMessage({ type: 'files/drop', payload: { paths: uris } });
         return;
+      }
+    }
+
+    // Try any vscode-specific type
+    for (const type of Array.from(dataTransfer.types || [])) {
+      if (type.startsWith('application/vnd.code.')) {
+        const data = await readItemByType(dataTransfer, type);
+        const uris = parseDroppedText(data);
+        if (uris.length > 0) {
+          postMessage({ type: 'files/drop', payload: { paths: uris } });
+          return;
+        }
       }
     }
 
@@ -138,35 +152,41 @@ export function ChatInput() {
         setShowModelPicker(false);
         setShowVariantPicker(false);
         setShowBusyMenu(false);
+        setShowContextPopup(false);
       }
     };
 
     const handleWindowDragOver = (e: DragEvent) => {
-      if (!isPathDrop(e.dataTransfer)) return;
+      // Always accept drops so the browser fires the drop event.
+      // VS Code explorer drags may not expose MIME types during dragover.
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      if (isPathDrop(e.dataTransfer) || hasAnyData(e.dataTransfer)) {
+        setIsDraggingOver(true);
+      }
     };
 
     const handleWindowDrop = async (e: DragEvent) => {
-      if (!isPathDrop(e.dataTransfer)) return;
       e.preventDefault();
-
-      if (!containerRef?.contains(e.target as Node | null)) {
-        setIsDraggingOver(false);
-        return;
-      }
-
+      setIsDraggingOver(false);
       await handleDrop(e);
+    };
+
+    const handleWindowDragLeave = (e: DragEvent) => {
+      if (e.relatedTarget) return;
+      setIsDraggingOver(false);
     };
 
     window.addEventListener('click', handleWindowClick, true);
     window.addEventListener('dragover', handleWindowDragOver);
     window.addEventListener('drop', handleWindowDrop);
+    window.addEventListener('dragleave', handleWindowDragLeave);
 
     onCleanup(() => {
       window.removeEventListener('click', handleWindowClick, true);
       window.removeEventListener('dragover', handleWindowDragOver);
       window.removeEventListener('drop', handleWindowDrop);
+      window.removeEventListener('dragleave', handleWindowDragLeave);
     });
   });
 
@@ -208,20 +228,34 @@ export function ChatInput() {
       };
     }
 
+    // Prefer a provider that has a configured default model
+    for (const provider of state.providers) {
+      const defaultModelID = state.providerDefaults[provider.id];
+      if (defaultModelID && provider.models[defaultModelID]) {
+        const model = provider.models[defaultModelID];
+        return {
+          providerID: provider.id,
+          modelID: model.id,
+          variant: null,
+          providerName: provider.name,
+          modelName: model.name,
+          contextLimit: model.limit?.context || null,
+        };
+      }
+    }
+
+    // Fall back to first provider's first model
     const firstProvider = state.providers[0];
     if (firstProvider) {
-      const defaultModelID = state.providerDefaults[firstProvider.id];
-      const defaultModel = defaultModelID
-        ? firstProvider.models[defaultModelID]
-        : Object.values(firstProvider.models)[0];
-      if (defaultModel) {
+      const firstModel = Object.values(firstProvider.models)[0];
+      if (firstModel) {
         return {
           providerID: firstProvider.id,
-          modelID: defaultModel.id,
+          modelID: firstModel.id,
           variant: null,
           providerName: firstProvider.name,
-          modelName: defaultModel.name,
-          contextLimit: defaultModel.limit?.context || null,
+          modelName: firstModel.name,
+          contextLimit: firstModel.limit?.context || null,
         };
       }
     }
@@ -248,6 +282,8 @@ export function ChatInput() {
     if (!ctx) return null;
     return ctx;
   });
+
+  const sessionTokens = createMemo(() => sumAssistantTokens(assistantMessages()));
 
   const availableVariants = createMemo(() => {
     const model = currentModel();
@@ -315,25 +351,20 @@ export function ChatInput() {
         />
       </Show>
 
+      <Show when={isDraggingOver()}>
+        <div class="chat-drop-overlay">
+          <div class="chat-drop-overlay-content">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
+            </svg>
+            <span>Drop to add context</span>
+          </div>
+        </div>
+      </Show>
+
       <div
         ref={containerRef}
         class={`chat-input-container ${isFocused() ? 'focused' : ''} ${isDraggingOver() ? 'focused' : ''}`}
-        onDrop={(e) => handleDrop(e as DragEvent)}
-        onDragEnter={(e) => {
-          if (!isPathDrop(e.dataTransfer)) return;
-          e.preventDefault();
-          setIsDraggingOver(true);
-        }}
-        onDragOver={(e) => {
-          if (!isPathDrop(e.dataTransfer)) return;
-          e.preventDefault();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-          setIsDraggingOver(true);
-        }}
-        onDragLeave={(e) => {
-          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-          setIsDraggingOver(false);
-        }}
       >
         <Show when={hasContext()}>
           <div class="chat-attachments-container">
@@ -482,19 +513,36 @@ export function ChatInput() {
             </Show>
 
             <Show when={contextUsage()}>
-              <div
-                class={`chat-context-usage ${contextUsage()!.percent >= 75 ? (contextUsage()!.percent >= 90 ? 'error' : 'warning') : ''}`}
-                title={`${Math.round(contextUsage()!.used).toLocaleString()} / ${contextUsage()!.limit.toLocaleString()} tokens (${Math.round(contextUsage()!.percent)}%)`}
-              >
-                <svg class="circular-progress" viewBox="0 0 36 36">
-                  <circle class="progress-bg" cx="18" cy="18" r="14" />
-                  <circle
-                    class="progress-arc"
-                    cx="18" cy="18" r="14"
-                    stroke-dasharray={87.96}
-                    stroke-dashoffset={87.96 - (contextUsage()!.percent / 100) * 87.96}
+              <div style={{ position: 'relative' }}>
+                <button
+                  class={`chat-context-usage ${contextUsage()!.percent >= 75 ? (contextUsage()!.percent >= 90 ? 'error' : 'warning') : ''}`}
+                  onClick={() => {
+                    setShowContextPopup(!showContextPopup());
+                    setShowAgentPicker(false);
+                    setShowModelPicker(false);
+                    setShowVariantPicker(false);
+                    setShowBusyMenu(false);
+                  }}
+                  title="Context usage"
+                >
+                  <svg class="circular-progress" viewBox="0 0 36 36">
+                    <circle class="progress-bg" cx="18" cy="18" r="14" />
+                    <circle
+                      class="progress-arc"
+                      cx="18" cy="18" r="14"
+                      stroke-dasharray={87.96}
+                      stroke-dashoffset={87.96 - (contextUsage()!.percent / 100) * 87.96}
+                    />
+                  </svg>
+                </button>
+                <Show when={showContextPopup()}>
+                  <ContextPopup
+                    usage={contextUsage()!}
+                    tokens={sessionTokens()}
+                    model={currentModel()}
+                    onClose={() => setShowContextPopup(false)}
                   />
-                </svg>
+                </Show>
               </div>
             </Show>
           </div>
@@ -652,6 +700,72 @@ export function ChatInput() {
   );
 }
 
+function ContextPopup(props: {
+  usage: { used: number; limit: number; percent: number };
+  tokens: { total: number; input: number; output: number; reasoning: number; cacheRead: number; cacheWrite: number };
+  model: { providerName: string; modelName: string };
+  onClose: () => void;
+}) {
+  const rows = () => {
+    const t = props.tokens;
+    const items: Array<{ label: string; value: number; color?: string }> = [
+      { label: 'Input', value: t.input },
+      { label: 'Output', value: t.output },
+    ];
+    if (t.reasoning > 0) items.push({ label: 'Reasoning', value: t.reasoning });
+    if (t.cacheRead > 0) items.push({ label: 'Cache read', value: t.cacheRead });
+    if (t.cacheWrite > 0) items.push({ label: 'Cache write', value: t.cacheWrite });
+    return items;
+  };
+
+  return (
+    <div class="context-popup" onClick={(e) => e.stopPropagation()}>
+      <div class="context-popup-header">
+        <span class="context-popup-title">Context Window</span>
+        <span class="context-popup-pct">{Math.round(props.usage.percent)}%</span>
+      </div>
+
+      <div class="context-popup-bar">
+        <div
+          class={`context-popup-bar-fill ${props.usage.percent >= 90 ? 'error' : props.usage.percent >= 75 ? 'warning' : ''}`}
+          style={{ width: `${Math.min(props.usage.percent, 100)}%` }}
+        />
+      </div>
+
+      <div class="context-popup-stat">
+        <span>{formatNumber(props.usage.used)}</span>
+        <span class="context-popup-sep">/</span>
+        <span>{formatNumber(props.usage.limit)}</span>
+        <span class="context-popup-unit">tokens</span>
+      </div>
+
+      <Show when={props.tokens.total > 0}>
+        <div class="context-popup-section">Session Tokens</div>
+        <div class="context-popup-rows">
+          <For each={rows()}>
+            {(row) => (
+              <div class="context-popup-row">
+                <span class="context-popup-row-label">{row.label}</span>
+                <span class="context-popup-row-value">{formatNumber(row.value)}</span>
+              </div>
+            )}
+          </For>
+          <div class="context-popup-row context-popup-row-total">
+            <span class="context-popup-row-label">Total</span>
+            <span class="context-popup-row-value">{formatNumber(props.tokens.total)}</span>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={props.model.modelName}>
+        <div class="context-popup-model">
+          {props.model.providerName} / {props.model.modelName}
+        </div>
+      </Show>
+    </div>
+  );
+}
+
 function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => void }) {
   return (
     <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
@@ -765,10 +879,22 @@ async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<s
 
   const paths = new Set<string>();
 
-  for (const type of ['text/uri-list', 'text/plain']) {
-    for (const path of parseDroppedText(dataTransfer.getData(type))) {
-      paths.add(path);
+  // Collect all types that might contain paths, including VS Code internal types
+  const knownTypes = ['text/uri-list', 'ResourceURLs', 'text/plain'];
+  const allTypes = Array.from(dataTransfer.types || []);
+  for (const t of allTypes) {
+    if (t.startsWith('application/vnd.code.') || !knownTypes.includes(t)) {
+      knownTypes.push(t);
     }
+  }
+
+  for (const type of knownTypes) {
+    try {
+      const data = dataTransfer.getData(type);
+      for (const path of parseDroppedText(data)) {
+        paths.add(path);
+      }
+    } catch {}
   }
 
   for (const file of Array.from(dataTransfer.files)) {
@@ -782,14 +908,12 @@ async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<s
   }
 
   if (paths.size === 0) {
-    const itemText = await Promise.all(
-      Array.from(dataTransfer.items)
-        .filter(
-          (item) =>
-            item.kind === 'string' && (item.type === 'text/uri-list' || item.type === 'text/plain')
-        )
-        .map(readDroppedItem)
+    // Fall back to async string reading from ALL DataTransferItems
+    const stringItems = Array.from(dataTransfer.items).filter(
+      (item) => item.kind === 'string'
     );
+
+    const itemText = await Promise.all(stringItems.map(readDroppedItem));
 
     for (const value of itemText) {
       for (const path of parseDroppedText(value)) {
@@ -801,13 +925,20 @@ async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<s
   return Array.from(paths);
 }
 
+function hasAnyData(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer) return false;
+  const types = Array.from(dataTransfer.types || []);
+  return types.length > 0 || dataTransfer.files.length > 0;
+}
+
 function isPathDrop(dataTransfer: DataTransfer | null): boolean {
   if (!dataTransfer) return false;
   const types = Array.from(dataTransfer.types || []);
   return (
     types.includes('Files') ||
     types.includes('text/uri-list') ||
-    types.includes('text/plain')
+    types.includes('ResourceURLs') ||
+    types.some((t) => t.startsWith('application/vnd.code.'))
   );
 }
 
@@ -839,10 +970,22 @@ function parseDroppedText(value: string): string[] {
 }
 
 function decodeDroppedPath(value: string): string | null {
+  // vscode-file://vscode-app/<path> — VS Code explorer drag
   if (value.startsWith('vscode-file://')) {
     try {
       const url = new URL(value);
-      const pathname = decodeURIComponent(url.pathname);
+      let pathname = decodeURIComponent(url.pathname);
+      // Strip the /vscode-app prefix if present
+      pathname = pathname.replace(/^\/vscode-app/, '');
+      return pathname.replace(/^\/([A-Za-z]:\/)/, '$1');
+    } catch {
+      return null;
+    }
+  }
+  // vscode-resource: scheme
+  if (value.startsWith('vscode-resource://')) {
+    try {
+      const pathname = decodeURIComponent(new URL(value).pathname);
       return pathname.replace(/^\/([A-Za-z]:\/)/, '$1');
     } catch {
       return null;

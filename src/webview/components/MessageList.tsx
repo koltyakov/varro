@@ -1,16 +1,16 @@
-import { For, Show, createEffect, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createSignal } from 'solid-js';
 import { state, isLoading } from '../lib/state';
 import { Message } from './Message';
 
 export function MessageList() {
   let containerRef: HTMLDivElement | undefined;
-  let userScrolledUp = false;
+  const [autoScroll, setAutoScroll] = createSignal(true);
 
   function onScroll() {
     if (!containerRef) return;
     const near =
       containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight < 60;
-    userScrolledUp = !near;
+    setAutoScroll(near);
   }
 
   createEffect(() => {
@@ -18,13 +18,11 @@ export function MessageList() {
     const _parts = state.messages.reduce((acc, m) => acc + m.parts.length, 0);
     void _len;
     void _parts;
-    if (!containerRef || userScrolledUp) return;
+    if (!containerRef || !autoScroll()) return;
     requestAnimationFrame(() => {
       containerRef!.scrollTop = containerRef!.scrollHeight;
     });
   });
-
-  onCleanup(() => {});
 
   return (
     <div
@@ -33,19 +31,15 @@ export function MessageList() {
       onScroll={onScroll}
     >
       <For each={state.messages}>
-        {(msg, i) => {
-          const prev = () => (i() > 0 ? state.messages[i() - 1] : null);
-          const isFirstInGroup = () => !prev() || prev()!.info.role !== msg.info.role;
-          return (
-            <div
-              class={`interactive-item-container ${
-                msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
-              }`}
-            >
-              <Message info={msg.info} parts={msg.parts} isFirstInGroup={isFirstInGroup()} />
-            </div>
-          );
-        }}
+        {(msg) => (
+          <div
+            class={`interactive-item-container ${
+              msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
+            }`}
+          >
+            <Message info={msg.info} parts={msg.parts} />
+          </div>
+        )}
       </For>
       <Show when={isLoading()}>
         <div class="interactive-item-container interactive-response" style={{ padding: '10px 16px' }}>

@@ -6,7 +6,7 @@ import type { AssistantMessage, FileDiff, Message as MessageType, Part, TextPart
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
 
-export function Message(props: { info: MessageType; parts: Part[]; isFirstInGroup?: boolean }) {
+export function Message(props: { info: MessageType; parts: Part[] }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
 
@@ -24,30 +24,6 @@ export function Message(props: { info: MessageType; parts: Part[]; isFirstInGrou
 
   return (
     <>
-      <Show when={props.isFirstInGroup !== false}>
-        <div class="header">
-          <div class="user">
-            <div class="avatar-container">
-              <div class="avatar codicon-avatar">
-                <Show
-                  when={isUser()}
-                  fallback={
-                    <svg class="codicon" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-avatar-fg)' }}>
-                      <path d="M14 4.5V14a2 2 0 01-2 2H4a2 2 0 01-2-2V2a2 2 0 012-2h5.5L14 4.5zm-3 0A1.5 1.5 0 019.5 3V1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V4.5h-2zM5.5 7h5a.5.5 0 010 1h-5a.5.5 0 010-1zm0 2h5a.5.5 0 010 1h-5a.5.5 0 010-1zm0 2h3a.5.5 0 010 1h-3a.5.5 0 010-1z" />
-                    </svg>
-                  }
-                >
-                  <svg class="codicon" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-avatar-fg)' }}>
-                    <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.5a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM4.25 12.5a4.5 4.5 0 017.5 0 5.49 5.49 0 01-3.75 1.5 5.49 5.49 0 01-3.75-1.5z" />
-                  </svg>
-                </Show>
-              </div>
-            </div>
-            <h3 class="username">{isUser() ? 'You' : roleLabel(props.info)}</h3>
-          </div>
-        </div>
-      </Show>
-
       <div class="value">
         <Show when={isUser()}>
           <UserMessageContent parts={props.parts} />
@@ -73,17 +49,6 @@ export function Message(props: { info: MessageType; parts: Part[]; isFirstInGrou
       </div>
     </>
   );
-}
-
-function roleLabel(info: MessageType): string {
-  if (!isAssistantMessage(info)) return 'Assistant';
-  const agent = info.agent || info.mode;
-  if (agent && agent !== 'primary') return `${cap(agent)}`;
-  return 'Assistant';
-}
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function UserMessageContent(props: { parts: Part[] }) {
