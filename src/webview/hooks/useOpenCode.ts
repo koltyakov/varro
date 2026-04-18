@@ -200,6 +200,11 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   const parts: Array<{ type: string; text?: string; mime?: string; filename?: string; url?: string }> = []
   if (text.trim()) parts.push({ type: "text", text })
 
+  const wp = state.editorContext.workspacePath
+  if (wp) {
+    parts.push({ type: "text", text: `[Working directory: ${wp}]` })
+  }
+
   const sel = state.editorContext.selection
   const af = state.editorContext.activeFile
   if (sel && af) {

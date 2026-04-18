@@ -24,9 +24,9 @@ export function ContextBar() {
 
   return (
     <Show when={hasContext()}>
-      <div class="border-t border-vscode-border/30 px-3 py-2">
+      <div class="border-t border-vscode-border/30 px-3 py-2.5">
         <div class="flex items-center gap-2">
-          <div class="flex flex-1 flex-wrap gap-1.5 overflow-hidden">
+          <div class="flex flex-1 flex-wrap gap-2 overflow-hidden">
             <Show when={activeContext()}>
               <ContextChip
                 label={activeContext()!.filename}
@@ -56,22 +56,22 @@ export function ContextBar() {
           <div class="flex items-center gap-0.5">
             <Show when={clipboardImages().length > 0}>
               <button
-                class="shrink-0 rounded p-1 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
+                class="shrink-0 rounded-md p-1.5 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
                 onClick={clearClipboardImages}
                 title="Clear pasted images"
               >
-                <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
                 </svg>
               </button>
             </Show>
             <Show when={files().length > 0}>
               <button
-                class="shrink-0 rounded p-1 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
+                class="shrink-0 rounded-md p-1.5 text-vscode-muted/50 transition-colors hover:bg-vscode-hover hover:text-vscode-error"
                 onClick={clearContextFiles}
                 title="Clear dropped files"
               >
-                <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
                 </svg>
               </button>
@@ -86,7 +86,7 @@ export function ContextBar() {
 function ContextChip(props: { label: string; detail?: string | null; title?: string; onRemove?: () => void }) {
   return (
     <span
-      class="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-vscode-border/40 bg-vscode-card/40 px-2 py-1 text-[11px] text-vscode-fg transition-colors hover:border-vscode-accent/25"
+      class="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-vscode-border/40 bg-vscode-card/40 px-2.5 py-1 text-[12px] text-vscode-fg transition-colors hover:border-vscode-accent/30"
       title={props.title}
     >
       <span class="max-w-[180px] truncate">{props.label}</span>
@@ -98,7 +98,7 @@ function ContextChip(props: { label: string; detail?: string | null; title?: str
           class="text-vscode-muted/40 transition-colors hover:text-vscode-error"
           onClick={() => props.onRemove?.()}
         >
-          <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
             <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
           </svg>
         </button>
@@ -113,7 +113,7 @@ function ImageContextChip(props: {
 }) {
   return (
     <span
-      class="inline-flex min-w-0 items-center gap-2 rounded-md border border-vscode-border/40 bg-vscode-card/40 px-2 py-1 text-[11px] text-vscode-fg transition-colors hover:border-vscode-accent/25"
+      class="inline-flex min-w-0 items-center gap-2 rounded-md border border-vscode-border/40 bg-vscode-card/40 px-2.5 py-1 text-[12px] text-vscode-fg transition-colors hover:border-vscode-accent/30"
       title={`${props.image.filename} · ${formatImageSize(props.image.size)}`}
     >
       <img
@@ -130,7 +130,7 @@ function ImageContextChip(props: {
           class="text-vscode-muted/40 transition-colors hover:text-vscode-error"
           onClick={() => props.onRemove?.()}
         >
-          <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
             <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
           </svg>
         </button>

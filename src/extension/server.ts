@@ -1,6 +1,7 @@
 import { ChildProcess, spawn } from "child_process"
 import { delimiter, join } from "path"
 import { existsSync } from "fs"
+import * as vscode from "vscode"
 import { logger } from "./logger"
 import { EventEmitter } from "events"
 import type { ServerStatus } from "../shared/protocol"
@@ -63,6 +64,7 @@ export class OpenCodeServer extends EventEmitter {
         this.process = spawn(command, ["serve", "--port", String(this.port)], {
           stdio: ["ignore", "pipe", "pipe"],
           detached: false,
+          cwd: this.getWorkspaceCwd(),
           env: this.buildServerEnv(),
         })
 
@@ -238,6 +240,14 @@ export class OpenCodeServer extends EventEmitter {
     this.process?.kill("SIGTERM")
     this.process = null
     this.setStatus({ state: "stopped" })
+  }
+
+  private getWorkspaceCwd(): string | undefined {
+    const folders = vscode.workspace.workspaceFolders
+    if (folders && folders.length > 0) {
+      return folders[0].uri.fsPath
+    }
+    return undefined
   }
 
   private resolveCommand(): string {

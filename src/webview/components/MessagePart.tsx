@@ -1,7 +1,7 @@
 import { Show, createMemo, createSignal } from "solid-js"
 import { state } from "../lib/state"
 import { formatDuration, formatNumber, getAssistantDuration, getAssistantTotalTokens } from "../lib/message-metrics"
-import type { AssistantMessage, Part, StepFinishPart, SubtaskPart } from "../types"
+import type { AssistantMessage, Part, SubtaskPart } from "../types"
 import { MarkdownRenderer } from "./MarkdownRenderer"
 import { ToolCall } from "./ToolCall"
 
@@ -69,7 +69,7 @@ export function MessagePart(props: {
       case "subtask":
         return <SubtaskBlock part={part} run={props.subtaskRun} />
       case "step-finish":
-        return <StepFinishBlock part={part} />
+        return null
       case "file":
         return <FileBlock part={part} />
       default:
@@ -171,28 +171,6 @@ function formatVariantLabel(variant: string) {
     .join(" ")
 }
 
-function StepFinishBlock(props: { part: StepFinishPart }) {
-  const totalTokens =
-    props.part.tokens.total ||
-    props.part.tokens.input +
-      props.part.tokens.output +
-      props.part.tokens.reasoning +
-      (props.part.tokens.cache.read || 0) +
-      (props.part.tokens.cache.write || 0)
-
-  return (
-    <div class="my-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-vscode-border/30 bg-vscode-card/18 px-3 py-2 text-[11px] text-vscode-muted">
-      <span class="font-medium text-vscode-fg">Step finished</span>
-      <span>Reason: {props.part.reason}</span>
-      <span>In: {formatNumber(props.part.tokens.input)}</span>
-      <span>Out: {formatNumber(props.part.tokens.output)}</span>
-      <Show when={props.part.tokens.reasoning > 0}>
-        <span>Thinking: {formatNumber(props.part.tokens.reasoning)}</span>
-      </Show>
-      <span>Total: {formatNumber(totalTokens)}</span>
-    </div>
-  )
-}
 
 function FileBlock(props: { part: Extract<Part, { type: "file" }> }) {
   const isImage = () => props.part.mime.startsWith("image/")

@@ -5,6 +5,7 @@ import { logger } from "./logger"
 export class ContextProvider implements vscode.Disposable {
   private disposables: vscode.Disposable[] = []
   private _context: EditorContext = {
+    workspacePath: null,
     activeFile: null,
     selection: null,
     diagnostics: [],
@@ -18,6 +19,7 @@ export class ContextProvider implements vscode.Disposable {
       vscode.window.onDidChangeActiveTextEditor(() => this.update()),
       vscode.window.onDidChangeTextEditorSelection(() => this.update()),
       vscode.languages.onDidChangeDiagnostics(() => this.updateDiagnostics()),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.update()),
     )
 
     this.update()
@@ -28,6 +30,9 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   private update() {
+    const folders = vscode.workspace.workspaceFolders
+    this._context.workspacePath = folders && folders.length > 0 ? folders[0].uri.fsPath : null
+
     const editor = vscode.window.activeTextEditor
     if (!editor) {
       this._context.activeFile = null

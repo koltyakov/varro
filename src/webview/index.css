@@ -50,7 +50,7 @@ body,
   width: 100%;
   overflow: hidden;
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--color-vscode-fg);
   background: var(--color-vscode-sidebar);
@@ -82,25 +82,25 @@ textarea {
 
 .code-block {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.65;
   tab-size: 2;
 }
 
 .code-block-shell {
-  margin: 0.75em 0;
+  margin: 0.85em 0;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
-  border-radius: 6px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--color-vscode-card) 78%, transparent);
   overflow: hidden;
 }
 
 .code-block-header {
   border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 55%, transparent);
-  padding: 6px 12px;
-  font-size: 10px;
+  padding: 7px 14px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-bg) 55%, transparent);
@@ -108,15 +108,15 @@ textarea {
 
 .code-block-shell pre.code-block {
   margin: 0;
-  padding: 12px 16px;
+  padding: 14px 16px;
   overflow-x: auto;
 }
 
 .markdown-content {
   color: var(--color-vscode-fg);
-  line-height: 1.7;
+  line-height: 1.75;
   word-break: break-word;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .markdown-content > :first-child {
@@ -128,7 +128,7 @@ textarea {
 }
 
 .markdown-content p {
-  margin: 0 0 0.75em;
+  margin: 0 0 0.85em;
 }
 .markdown-content p:last-child {
   margin-bottom: 0;
@@ -151,16 +151,16 @@ textarea {
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
   border-radius: 4px;
   background: color-mix(in srgb, var(--color-vscode-bg) 50%, transparent);
-  padding: 1px 6px;
+  padding: 2px 6px;
   color: color-mix(in srgb, var(--color-vscode-fg) 92%, white 8%);
 }
 .markdown-content ul,
 .markdown-content ol {
-  margin: 0.6em 0;
-  padding-left: 1.5em;
+  margin: 0.7em 0;
+  padding-left: 1.6em;
 }
 .markdown-content li {
-  margin: 0.25em 0;
+  margin: 0.35em 0;
 }
 .markdown-content li > ul,
 .markdown-content li > ol {

@@ -14,7 +14,7 @@ import {
 import { postMessage } from "../lib/bridge"
 import { sendMessage, abortSession } from "../hooks/useOpenCode"
 import { ModelPicker } from "./ModelPicker"
-import { formatNumber, getContextWindow, isAssistantMessage, sumAssistantTokens } from "../lib/message-metrics"
+import { isAssistantMessage, sumAssistantTokens } from "../lib/message-metrics"
 
 export function ChatInput() {
   let textareaRef: HTMLTextAreaElement | undefined
@@ -175,33 +175,8 @@ export function ChatInput() {
 
   const sessionTokenTotals = createMemo(() => sumAssistantTokens(assistantMessages()))
 
-  const activeModelContext = createMemo(() => {
-    const model = currentModel()
-    if (!model.providerID || !model.modelID) return null
-
-    const latestMatch = [...assistantMessages()]
-      .reverse()
-      .find(
-        (message) =>
-          message.providerID === model.providerID &&
-          message.modelID === model.modelID &&
-          (message.variant || null) === (model.variant || null),
-      )
-
-    if (latestMatch) {
-      return getContextWindow(latestMatch, state.providers)
-    }
-
-    if (!model.contextLimit) return null
-    return {
-      used: 0,
-      limit: model.contextLimit,
-      percent: 0,
-    }
-  })
-
   return (
-    <div class="relative shrink-0 border-t border-vscode-border/40 bg-vscode-sidebar px-3 pb-3 pt-2">
+    <div class="relative shrink-0 border-t border-vscode-border/40 bg-vscode-sidebar px-3 pb-3.5 pt-2.5">
       <Show when={showModelPicker()}>
         <ModelPicker
           onSelect={(sel) => {
@@ -216,10 +191,10 @@ export function ChatInput() {
 
       <div
         ref={containerRef}
-        class={`flex flex-col rounded-lg border transition-all duration-150 ${
+        class={`flex flex-col rounded-md border transition-all duration-150 ${
           isDraggingOver()
             ? "border-vscode-accent bg-vscode-accent/5"
-            : "border-vscode-border/50 bg-vscode-input-bg focus-within:border-vscode-accent/50"
+            : "border-vscode-border/60 bg-vscode-input-bg focus-within:border-vscode-accent/60"
         }`}
         onDrop={(e) => handleDrop(e as DragEvent)}
         onDragEnter={(e) => {
@@ -240,7 +215,7 @@ export function ChatInput() {
       >
         <textarea
           ref={textareaRef!}
-          class="min-h-[52px] w-full resize-none bg-transparent px-3 pt-3 pb-1 text-[13px] leading-relaxed text-vscode-input-fg outline-none placeholder:text-vscode-muted/50"
+          class="min-h-20 w-full resize-none bg-transparent px-4 pt-4 pb-2 text-[14px] leading-relaxed text-vscode-input-fg outline-none placeholder:text-vscode-muted/50"
           rows={2}
           placeholder={
             isLoading()
@@ -260,10 +235,10 @@ export function ChatInput() {
           onPaste={handlePaste}
         />
 
-        <div class="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
-          <div class="flex min-w-0 flex-1 items-center gap-1.5">
+        <div class="flex items-center justify-between gap-2 px-3 pb-3 pt-1.5">
+          <div class="flex min-w-0 flex-1 items-center gap-2">
             <button
-              class="inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-1 text-[12px] text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+              class="inline-flex min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
               onClick={() => setShowModelPicker(!showModelPicker())}
               title={
                 currentModel().modelName
@@ -271,7 +246,7 @@ export function ChatInput() {
                   : "Choose model"
               }
             >
-              <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+              <svg class="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1l2 4.5L15 6l-3.5 3.5L12.5 15 8 12.5 3.5 15l1-5.5L1 6l5-.5L8 1z" />
               </svg>
               <Show when={currentModel().modelName} fallback={<span>Pick model</span>}>
@@ -284,16 +259,14 @@ export function ChatInput() {
               </Show>
             </button>
 
-            <Show when={activeModelContext()}>
-              <ContextDonut
-                used={activeModelContext()!.used}
-                limit={activeModelContext()!.limit}
-                tokens={sessionTokenTotals()}
-              />
-            </Show>
           </div>
 
-          <div class="flex items-center gap-1.5">
+          <div class="flex items-center gap-2">
+            <Show when={sessionTokenTotals().total > 0}>
+              <span class="tabular-nums text-[12px] text-vscode-muted/60">
+                {formatCompactNumber(sessionTokenTotals().total)} tok
+              </span>
+            </Show>
             <Show when={isLoading()}>
               <>
                 <BusyModeButton
@@ -311,7 +284,7 @@ export function ChatInput() {
               </>
             </Show>
             <button
-              class={`flex h-7 w-7 items-center justify-center rounded-md transition-all duration-150 ${
+              class={`flex h-8 w-8 items-center justify-center rounded-md transition-all duration-150 ${
                 canSend()
                   ? "bg-vscode-accent text-white hover:bg-vscode-accent/80"
                   : "text-vscode-muted/30"
@@ -320,17 +293,17 @@ export function ChatInput() {
               disabled={!canSend()}
               title={isLoading() ? (busyPromptMode() === "steer" ? "Steer current run (Enter)" : "Queue prompt (Enter)") : "Send (Enter)"}
             >
-              <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+              <svg class="h-4.5 w-4.5" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M2 2.5l12 5.5L2 13.5V9l8-1-8-1V2.5z" />
               </svg>
             </button>
             <Show when={isLoading()}>
               <button
-                class="flex h-7 w-7 items-center justify-center rounded-md bg-vscode-error/12 text-vscode-error transition-colors hover:bg-vscode-error/20"
+                class="flex h-8 w-8 items-center justify-center rounded-md bg-vscode-error/12 text-vscode-error transition-colors hover:bg-vscode-error/20"
                 onClick={abortSession}
                 title="Stop"
               >
-                <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
                   <rect x="4" y="4" width="8" height="8" rx="1" />
                 </svg>
               </button>
@@ -342,119 +315,6 @@ export function ChatInput() {
   )
 }
 
-function ContextDonut(props: {
-  used: number
-  limit: number
-  tokens: { input: number; output: number; reasoning: number; total: number }
-}) {
-  const percentUsed = () => Math.min(props.limit > 0 ? (props.used / props.limit) * 100 : 0, 100)
-  const percentLeft = () => Math.max(0, 100 - percentUsed())
-
-  const color = () => {
-    const p = percentUsed()
-    if (p >= 90) return "var(--color-vscode-error)"
-    if (p >= 70) return "var(--color-vscode-warning)"
-    return "var(--color-vscode-accent)"
-  }
-
-  const r = 6
-  const circumference = 2 * Math.PI * r
-  const dashOffset = () => circumference * (1 - percentUsed() / 100)
-  const dashArray = String(circumference)
-
-  return (
-    <span class="group relative inline-flex items-center">
-      <span
-        class="inline-flex items-center justify-center p-0.5 cursor-default"
-        tabindex="0"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16">
-          <circle
-            cx="8"
-            cy="8"
-            r={r}
-            fill="none"
-            stroke="var(--color-vscode-border)"
-            stroke-width="2"
-            opacity="0.4"
-          />
-          <circle
-            cx="8"
-            cy="8"
-            r={r}
-            fill="none"
-            stroke={color()}
-            stroke-width="2"
-            stroke-dasharray={dashArray}
-            stroke-dashoffset={dashOffset()}
-            stroke-linecap="round"
-            transform="rotate(-90 8 8)"
-            style="transition: stroke-dashoffset 0.3s, stroke 0.3s"
-          />
-        </svg>
-      </span>
-
-      <span class="pointer-events-none absolute bottom-[calc(100%+8px)] right-0 z-20 w-56 rounded-lg border border-vscode-border/60 bg-vscode-card px-4 py-3 text-[12px] text-vscode-fg opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.4)] transition-all duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-        <div class="mb-2 flex items-center gap-2">
-          <svg width="20" height="20" viewBox="0 0 16 16">
-            <circle
-              cx="8"
-              cy="8"
-              r={r}
-              fill="none"
-              stroke="var(--color-vscode-border)"
-              stroke-width="2"
-              opacity="0.4"
-            />
-            <circle
-              cx="8"
-              cy="8"
-              r={r}
-              fill="none"
-              stroke={color()}
-              stroke-width="2"
-              stroke-dasharray={dashArray}
-              stroke-dashoffset={dashOffset()}
-              stroke-linecap="round"
-              transform="rotate(-90 8 8)"
-            />
-          </svg>
-          <span class="font-medium">{percentUsed().toFixed(1)}% used</span>
-        </div>
-        <div class="space-y-1 text-[11px]">
-          <div class="flex justify-between text-vscode-muted">
-            <span>Remaining</span>
-            <span class="text-vscode-fg">{percentLeft().toFixed(1)}%</span>
-          </div>
-          <div class="flex justify-between text-vscode-muted">
-            <span>Used / Limit</span>
-            <span class="text-vscode-fg">{formatCompactNumber(props.used)} / {formatCompactNumber(props.limit)}</span>
-          </div>
-          <div class="mt-2 border-t border-vscode-border/30 pt-2">
-            <div class="flex justify-between text-vscode-muted">
-              <span>Input</span>
-              <span class="text-vscode-fg">{formatNumber(props.tokens.input)}</span>
-            </div>
-            <div class="flex justify-between text-vscode-muted">
-              <span>Output</span>
-              <span class="text-vscode-fg">{formatNumber(props.tokens.output)}</span>
-            </div>
-            <Show when={props.tokens.reasoning > 0}>
-              <div class="flex justify-between text-vscode-muted">
-                <span>Thinking</span>
-                <span class="text-vscode-fg">{formatNumber(props.tokens.reasoning)}</span>
-              </div>
-            </Show>
-            <div class="flex justify-between text-vscode-muted">
-              <span>Total</span>
-              <span class="text-vscode-fg font-medium">{formatNumber(props.tokens.total)}</span>
-            </div>
-          </div>
-        </div>
-      </span>
-    </span>
-  )
-}
 
 async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<string[]> {
   if (!dataTransfer) return []
@@ -569,7 +429,7 @@ function formatCompactNumber(value: number) {
 function BusyModeButton(props: { active: boolean; label: string; title: string; onClick: () => void }) {
   return (
     <button
-      class={`rounded border px-2 py-1 text-[11px] transition-colors ${
+      class={`rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
         props.active
           ? "border-vscode-accent/40 bg-vscode-accent/8 text-vscode-fg"
           : "border-vscode-border/40 text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"

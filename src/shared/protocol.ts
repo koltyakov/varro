@@ -1,4 +1,5 @@
 export interface EditorContext {
+  workspacePath: string | null
   activeFile: {
     path: string
     relativePath: string

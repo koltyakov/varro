@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createResource } from "solid-js"
+import { For, Show, createMemo, createResource, createSignal } from "solid-js"
 import { state } from "../lib/state"
 import { client } from "../lib/client"
 import {
@@ -46,23 +46,23 @@ export function Message(props: { info: MessageType; parts: Part[] }) {
 
   return (
     <article class="animate-fade-in">
-      <div class="flex items-start gap-3">
+      <div class="flex items-start gap-3.5">
         <div
-          class={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+          class={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
             isUser()
-              ? "bg-vscode-accent/12 text-vscode-accent"
-              : "bg-vscode-card text-vscode-muted"
+              ? "bg-vscode-accent/20 text-vscode-accent"
+              : "bg-vscode-muted/15 text-vscode-muted"
           }`}
         >
           {isUser() ? "U" : "A"}
         </div>
         <div class="min-w-0 flex-1">
-          <div class="mb-1.5 flex items-center gap-2">
-            <span class={`text-[11px] font-medium tracking-wide ${isUser() ? "text-vscode-accent" : "text-vscode-muted"}`}>
+          <div class="mb-2.5 flex items-center gap-2">
+            <span class={`text-[13px] font-semibold ${isUser() ? "text-vscode-accent" : "text-vscode-fg"}`}>
               {isUser() ? "You" : roleLabel(props.info)}
             </span>
             <Show when={!isUser() && (props.info as any).cost > 0}>
-              <span class="text-[10px] text-vscode-muted">
+              <span class="text-[12px] text-vscode-muted/60">
                 ${(Number((props.info as any).cost)).toFixed(4)}
               </span>
             </Show>
@@ -74,7 +74,7 @@ export function Message(props: { info: MessageType; parts: Part[] }) {
             <AssistantMessageContent info={assistant()!} parts={props.parts} />
           </Show>
           <Show when={(props.info as any).error?.data?.message}>
-            <div class="mt-2 rounded-md border border-vscode-error/30 bg-vscode-error/6 px-3 py-2 text-[12px] leading-relaxed text-vscode-error">
+            <div class="mt-2.5 rounded-md border border-vscode-error/30 bg-vscode-error/6 px-3.5 py-2.5 text-[13px] leading-relaxed text-vscode-error">
               {((props.info as any).error?.data?.message as string) || "error"}
             </div>
           </Show>
@@ -105,17 +105,20 @@ function cap(s: string): string {
 }
 
 function UserMessageContent(props: { parts: Part[] }) {
+  const visibleParts = () => props.parts.filter(
+    (p) => (p.type === "text" && !(p as any).text?.startsWith("[Working directory:") && !(p as any).text?.startsWith("[Selection from")) || p.type === "file"
+  )
   return (
-    <div class="rounded-lg border border-vscode-accent/15 bg-vscode-accent/4 px-4 py-3 space-y-2 text-[13px] leading-relaxed text-vscode-fg">
-      <For each={props.parts.filter((part) => part.type === "text" || part.type === "file")}>
+    <div class="rounded-xl bg-vscode-accent/[0.07] px-4 py-3.5 space-y-2.5 text-[14px] leading-relaxed text-vscode-fg">
+      <For each={visibleParts()}>
         {(part) => {
           if (part.type === "text") {
-            return <div class="whitespace-pre-wrap break-words">{part.text}</div>
+            return <div class="whitespace-pre-wrap wrap-break-word">{(part as any).text}</div>
           }
           return <MessagePart part={part} />
         }}
       </For>
-      <Show when={!props.parts.some((part) => part.type === "text" || part.type === "file")}>
+      <Show when={visibleParts().length === 0}>
         <span class="text-vscode-muted italic">(no content)</span>
       </Show>
     </div>
@@ -137,7 +140,7 @@ function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] 
   )
 
   return (
-    <div class="rounded-lg border border-vscode-border/40 bg-vscode-bg/20 px-4 py-3 space-y-2 text-[13px] leading-relaxed">
+    <div class="space-y-2 text-[14px] leading-relaxed text-vscode-fg">
       <For each={props.parts}>
         {(part) => {
           const matchedRun = part.type === "subtask" ? childRuns()[subtaskIndex++] : undefined
@@ -156,6 +159,7 @@ function AssistantMeta(props: {
   subagentDuration: number
   diffs: FileDiff[]
 }) {
+  const [expanded, setExpanded] = createSignal(false)
   const contextWindow = createMemo(() => getContextWindow(props.info, state.providers))
   const taskDuration = () => getAssistantDuration(props.info)
   const totalTokens = () => getAssistantTotalTokens(props.info)
@@ -176,43 +180,64 @@ function AssistantMeta(props: {
     ),
   )
 
+  const compactSummary = createMemo(() => {
+    const parts: string[] = []
+    parts.push(`${formatNumber(totalTokens())} tok`)
+    const dur = taskDuration()
+    if (dur) parts.push(formatDuration(dur))
+    if (props.stepCount > 0) parts.push(`${props.stepCount} step${props.stepCount !== 1 ? "s" : ""}`)
+    if (props.diffs.length > 0) parts.push(`${props.diffs.length} file${props.diffs.length !== 1 ? "s" : ""} changed`)
+    return parts.join(" · ")
+  })
+
   return (
     <div class="mt-2.5 space-y-2">
-      <div class="flex flex-wrap gap-1.5 text-[11px]">
-        <MetaChip label="Model" value={modelLabel()} />
-        <MetaChip label="In" value={`${formatNumber(props.info.tokens.input)} tok`} />
-        <MetaChip label="Out" value={`${formatNumber(props.info.tokens.output)} tok`} />
-        <Show when={props.info.tokens.reasoning > 0}>
-          <MetaChip label="Thinking" value={`${formatNumber(props.info.tokens.reasoning)} tok`} />
-        </Show>
-        <MetaChip label="Total" value={`${formatNumber(totalTokens())} tok`} />
-        <Show when={taskDuration()}>
-          <MetaChip label="Time" value={formatDuration(taskDuration())} />
-        </Show>
-        <Show when={contextWindow()}>
-          <MetaChip
-            label="Context"
-            value={`${formatNumber(contextWindow()!.used)} / ${formatNumber(contextWindow()!.limit)} tok (${contextWindow()!.percent.toFixed(1)}%)`}
-          />
-        </Show>
-        <Show when={props.stepCount > 0}>
-          <MetaChip label="Steps" value={String(props.stepCount)} />
-        </Show>
-        <Show when={props.subagentCount > 0}>
-          <MetaChip
-            label="Subagents"
-            value={`${props.subagentCount} · ${formatNumber(props.subagentTokens.total)} tok · ${formatDuration(props.subagentDuration)}`}
-          />
-        </Show>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        class="flex items-center gap-2 text-[12px] text-vscode-muted/60 hover:text-vscode-muted transition-colors cursor-pointer group"
+      >
+        <span class="truncate">{compactSummary()}</span>
+        <span class="shrink-0 opacity-40 group-hover:opacity-80 transition-opacity select-none">
+          {expanded() ? "▴" : "▾"}
+        </span>
+      </button>
+      <Show when={expanded()}>
+        <div class="flex flex-wrap gap-1.5 text-[11px]">
+          <MetaChip label="Model" value={modelLabel()} />
+          <MetaChip label="In" value={`${formatNumber(props.info.tokens.input)} tok`} />
+          <MetaChip label="Out" value={`${formatNumber(props.info.tokens.output)} tok`} />
+          <Show when={props.info.tokens.reasoning > 0}>
+            <MetaChip label="Thinking" value={`${formatNumber(props.info.tokens.reasoning)} tok`} />
+          </Show>
+          <MetaChip label="Total" value={`${formatNumber(totalTokens())} tok`} />
+          <Show when={taskDuration()}>
+            <MetaChip label="Time" value={formatDuration(taskDuration())} />
+          </Show>
+          <Show when={contextWindow()}>
+            <MetaChip
+              label="Context"
+              value={`${formatNumber(contextWindow()!.used)} / ${formatNumber(contextWindow()!.limit)} tok (${contextWindow()!.percent.toFixed(1)}%)`}
+            />
+          </Show>
+          <Show when={props.stepCount > 0}>
+            <MetaChip label="Steps" value={String(props.stepCount)} />
+          </Show>
+          <Show when={props.subagentCount > 0}>
+            <MetaChip
+              label="Subagents"
+              value={`${props.subagentCount} · ${formatNumber(props.subagentTokens.total)} tok · ${formatDuration(props.subagentDuration)}`}
+            />
+          </Show>
+          <Show when={props.diffs.length > 0}>
+            <MetaChip
+              label="Changed"
+              value={`${props.diffs.length} files · +${formatNumber(diffSummary().additions)} / -${formatNumber(diffSummary().deletions)}`}
+            />
+          </Show>
+        </div>
         <Show when={props.diffs.length > 0}>
-          <MetaChip
-            label="Changed"
-            value={`${props.diffs.length} files · +${formatNumber(diffSummary().additions)} / -${formatNumber(diffSummary().deletions)}`}
-          />
+          <DiffView diffs={props.diffs} />
         </Show>
-      </div>
-      <Show when={props.diffs.length > 0}>
-        <DiffView diffs={props.diffs} />
       </Show>
     </div>
   )

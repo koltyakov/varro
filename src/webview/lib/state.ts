@@ -74,7 +74,7 @@ export interface ClipboardImage {
 
 export const [state, setState] = createStore<AppState>({
   serverStatus: { state: "stopped" },
-  editorContext: { activeFile: null, selection: null, diagnostics: [] },
+  editorContext: { workspacePath: null, activeFile: null, selection: null, diagnostics: [] },
   droppedFiles: [],
   clipboardImages: [],
   sessions: [],
