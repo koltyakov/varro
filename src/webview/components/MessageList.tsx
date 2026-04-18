@@ -2,8 +2,11 @@ import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { state, isLoading } from '../lib/state';
 import { Message } from './Message';
 
+const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
+
 export function MessageList() {
-  const containerRef: HTMLDivElement | undefined = undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let containerRef: HTMLDivElement | undefined;
   const [autoScroll, setAutoScroll] = createSignal(true);
   const visibleMessages = createMemo(() => state.messages);
 
@@ -36,7 +39,13 @@ export function MessageList() {
           when={visibleMessages().length > 0}
           fallback={
             <div class="chat-empty-state">
-              <p class="chat-empty-copy">Ask for edits, explanations, or multi-step repo work.</p>
+              <img
+                class="chat-empty-logo"
+                src={emptyStateLogoUrl}
+                alt=""
+                aria-hidden="true"
+                draggable="false"
+              />
             </div>
           }
         >

@@ -9,7 +9,6 @@ import type {
 } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
-import type { ContextTreeProvider } from './context-tree';
 import { logger } from './logger';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -20,7 +19,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _status: ServerStatus = { state: 'stopped' };
   private themeDisposable?: vscode.Disposable;
   private contextFiles: DroppedFile[] = [];
-  private contextTreeProvider?: ContextTreeProvider;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -43,10 +41,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  setContextTreeProvider(provider: ContextTreeProvider) {
-    this.contextTreeProvider = provider;
-  }
-
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
@@ -59,11 +53,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this.extensionUri],
     };
 
-    webviewView.webview.html = this.getHtml();
-
     webviewView.webview.onDidReceiveMessage((msg: WebviewMessage) => {
       this.handleMessage(msg);
     });
+
+    webviewView.webview.html = this.getHtml();
 
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
@@ -234,17 +228,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   removeContextFile(path: string) {
     this.contextFiles = this.contextFiles.filter((f) => f.path !== path);
-    this.syncTreeView();
     this.post({ type: 'files/removed', payload: { path } });
   }
 
   clearContextFiles() {
     this.contextFiles = [];
-    this.syncTreeView();
-  }
-
-  private syncTreeView() {
-    this.contextTreeProvider?.setFiles([...this.contextFiles]);
   }
 
   private postContext() {
@@ -260,7 +248,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (next.length === 0) return;
 
     this.contextFiles.push(...next);
-    this.syncTreeView();
     this.post({ type: 'files/dropped', payload: next });
   }
 

@@ -212,6 +212,9 @@ input:focus-visible {
 
 .interactive-list-track {
   width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
   padding: 10px var(--chat-horizontal-padding) 20px;
 }
 
@@ -320,14 +323,21 @@ input:focus-visible {
 }
 
 .chat-empty-state {
-  margin: 22vh 0 0 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0 2px;
+  pointer-events: none;
 }
 
-.chat-empty-copy {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-vscode-muted);
+.chat-empty-logo {
+  width: clamp(52px, 10vw, 72px);
+  height: auto;
+  opacity: 0.22;
+  filter: grayscale(1);
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .rendered-markdown {

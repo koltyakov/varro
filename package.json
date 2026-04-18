@@ -39,23 +39,12 @@
     "views": {
       "opencode": [
         {
-          "id": "opencode.context",
-          "name": "Context",
-          "icon": "$(file)"
-        },
-        {
           "type": "webview",
           "id": "opencode.chat",
           "name": "OpenCode"
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "opencode.context",
-        "contents": "Drag files or folders from the Explorer here to add them as context for your chat.\n\nYou can also use the **OpenCode: Add to Context** command ($cmd+shift+k$)."
-      }
-    ],
     "commands": [
       {
         "command": "opencode.chat.focus",
@@ -76,16 +65,6 @@
       {
         "command": "opencode.chat.abort",
         "title": "OpenCode: Abort Session"
-      },
-      {
-        "command": "opencode.context.remove",
-        "title": "Remove from Context",
-        "icon": "$(close)"
-      },
-      {
-        "command": "opencode.context.clearAll",
-        "title": "Clear All Context",
-        "icon": "$(clear-all)"
       }
     ],
     "menus": {
@@ -98,20 +77,6 @@
       "commandPalette": [
         {
           "command": "opencode.chat.addToContext"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "opencode.context.remove",
-          "when": "view == opencode.context && viewItem == contextFile",
-          "group": "inline"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "opencode.context.clearAll",
-          "when": "view == opencode.context",
-          "group": "navigation"
         }
       ]
     },

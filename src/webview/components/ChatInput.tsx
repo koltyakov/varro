@@ -28,8 +28,10 @@ import { getLeafPathName } from '../lib/path-display';
 import { TodoList } from './TodoList';
 
 export function ChatInput() {
-  const textareaRef: HTMLTextAreaElement | undefined = undefined;
-  const containerRef: HTMLDivElement | undefined = undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let textareaRef: HTMLTextAreaElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let containerRef: HTMLDivElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [busyPromptMode, setBusyPromptMode] = createSignal<'queue' | 'steer'>('queue');
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);

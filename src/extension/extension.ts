@@ -2,8 +2,6 @@ import * as vscode from 'vscode';
 import { OpenCodeServer } from './server';
 import { SidebarProvider } from './sidebar-provider';
 import { ContextProvider } from './context-provider';
-import { ContextTreeProvider, ContextDropController } from './context-tree';
-import type { ContextFileItem } from './context-tree';
 import { registerCommands } from './commands';
 import { logger } from './logger';
 
@@ -33,32 +31,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   registerCommands(context, sidebarProvider);
-
-  const contextTreeProvider = new ContextTreeProvider();
-  sidebarProvider.setContextTreeProvider(contextTreeProvider);
-
-  const contextDropController = new ContextDropController((paths) => {
-    sidebarProvider.handleDroppedPaths(paths);
-  });
-
-  context.subscriptions.push(
-    vscode.window.createTreeView('opencode.context', {
-      treeDataProvider: contextTreeProvider,
-      dragAndDropController: contextDropController,
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('opencode.context.remove', (item: ContextFileItem) => {
-      sidebarProvider.removeContextFile(item.path);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('opencode.context.clearAll', () => {
-      sidebarProvider.clearContextFiles();
-    })
-  );
 
   vscode.commands.executeCommand('setContext', 'opencode:activated', true);
   logger.info('OpenCode extension activated');

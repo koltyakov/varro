@@ -116,7 +116,8 @@ function ProviderCheckbox(props: {
   indeterminate: boolean;
   onChange: () => void;
 }) {
-  const ref: HTMLInputElement | undefined = undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let ref: HTMLInputElement | undefined;
 
   createEffect(() => {
     if (ref) ref.indeterminate = props.indeterminate;

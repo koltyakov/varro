@@ -75,7 +75,8 @@ function linkifyPaths(html: string): string {
 }
 
 export function MarkdownRenderer(props: MarkdownProps) {
-  const ref: HTMLDivElement | undefined = undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let ref: HTMLDivElement | undefined;
 
   const html = createMemo(() => {
     try {
