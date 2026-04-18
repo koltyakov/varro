@@ -3,7 +3,6 @@ import { state, isLoading } from '../lib/state';
 import { Message } from './Message';
 
 export function MessageList() {
-  // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   let userScrolledUp = false;
 
@@ -30,31 +29,32 @@ export function MessageList() {
   return (
     <div
       ref={containerRef}
-      class="min-h-0 flex-1 overflow-y-auto scroll-smooth"
+      class="interactive-list min-h-0 flex-1 overflow-y-auto scroll-smooth"
       onScroll={onScroll}
     >
-      <div class="flex w-full flex-col px-3 py-2">
-        <For each={state.messages}>
-          {(msg, i) => {
-            const prev = () => (i() > 0 ? state.messages[i() - 1] : null);
-            const isFirstInGroup = () => !prev() || prev()!.info.role !== msg.info.role;
-            return <Message info={msg.info} parts={msg.parts} isFirstInGroup={isFirstInGroup()} />;
-          }}
-        </For>
-        <Show when={isLoading()}>
-          <div class="mt-1 flex items-center gap-1.5 animate-fade-in">
-            <span class="h-1.5 w-1.5 rounded-full bg-vscode-muted/40 animate-pulse-soft" />
-            <span
-              class="h-1.5 w-1.5 rounded-full bg-vscode-muted/40 animate-pulse-soft"
-              style={{ 'animation-delay': '0.25s' }}
-            />
-            <span
-              class="h-1.5 w-1.5 rounded-full bg-vscode-muted/40 animate-pulse-soft"
-              style={{ 'animation-delay': '0.5s' }}
-            />
+      <For each={state.messages}>
+        {(msg, i) => {
+          const prev = () => (i() > 0 ? state.messages[i() - 1] : null);
+          const isFirstInGroup = () => !prev() || prev()!.info.role !== msg.info.role;
+          return (
+            <div
+              class={`interactive-item-container ${
+                msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
+              }`}
+            >
+              <Message info={msg.info} parts={msg.parts} isFirstInGroup={isFirstInGroup()} />
+            </div>
+          );
+        }}
+      </For>
+      <Show when={isLoading()}>
+        <div class="interactive-item-container interactive-response" style={{ padding: '8px 16px' }}>
+          <div class="loading-indicator">
+            <div class="loading-spinner" />
+            <span class="chat-animated-ellipsis" />
           </div>
-        </Show>
-      </div>
+        </div>
+      </Show>
     </div>
   );
 }

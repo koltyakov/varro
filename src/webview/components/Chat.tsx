@@ -15,15 +15,13 @@ export function Chat() {
   };
 
   return (
-    <div class="flex h-full min-h-0 flex-col">
-      {/* Header bar — compact, Copilot-style */}
-      <div class="flex h-[36px] items-center justify-between px-3">
+    <div class="interactive-session">
+      <div class="flex h-[36px] shrink-0 items-center justify-between px-3">
         <button
-          class="flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+          class="flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
           onClick={() => setShowSessionPicker(!showSessionPicker())}
           title="Switch session"
         >
-          {/* History / clock icon */}
           <svg class="h-[14px] w-[14px] shrink-0" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.2A5.8 5.8 0 1113.8 8 5.8 5.8 0 018 2.2zM7.4 4v4.4l3.2 1.9.6-1-2.6-1.5V4H7.4z" />
           </svg>
@@ -40,7 +38,7 @@ export function Chat() {
         <div class="flex items-center">
           <Show when={state.activeSessionId}>
             <button
-              class="flex h-[26px] w-[26px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+              class="flex h-[26px] w-[26px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
               onClick={shareSession}
               title="Share session"
             >
@@ -50,7 +48,7 @@ export function Chat() {
             </button>
           </Show>
           <button
-            class="flex h-[26px] w-[26px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+            class="flex h-[26px] w-[26px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
             onClick={() => createSession()}
             title="New chat"
           >
@@ -84,15 +82,14 @@ export function Chat() {
 
 function SessionOverlay() {
   return (
-    <div class="absolute inset-x-0 top-[36px] z-40 max-h-[400px] overflow-hidden border-b border-vscode-border/30 bg-vscode-sidebar shadow-[0_4px_16px_rgba(0,0,0,0.3)] animate-fade-in">
-      {/* Header */}
+    <div class="absolute inset-x-0 top-[36px] z-40 max-h-[400px] overflow-hidden border-b border-vscode-request-border/30 bg-vscode-sidebar shadow-[0_4px_16px_rgba(0,0,0,0.3)] animate-fade-in">
       <div class="flex h-[32px] items-center justify-between px-4">
         <span class="text-[11px] font-semibold uppercase tracking-wide text-vscode-muted">
           Sessions
         </span>
         <div class="flex items-center gap-0.5">
           <button
-            class="flex h-[22px] w-[22px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-hover hover:text-vscode-fg"
+            class="flex h-[22px] w-[22px] items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-toolbar-hover hover:text-vscode-fg"
             onClick={() => createSession()}
             title="New session"
           >
@@ -103,7 +100,6 @@ function SessionOverlay() {
         </div>
       </div>
 
-      {/* Session list */}
       <div class="max-h-[368px] overflow-y-auto">
         <Show
           when={state.sessions.length > 0}
@@ -126,7 +122,6 @@ function SessionOverlay() {
                     setShowSessionPicker(false);
                   }}
                 >
-                  {/* Status dot */}
                   <div class="mt-[5px] flex h-[10px] w-[10px] shrink-0 items-center justify-center">
                     <Show
                       when={isActive()}
@@ -145,8 +140,8 @@ function SessionOverlay() {
                     <div class="mt-0.5 truncate text-[12px] text-vscode-muted">
                       <Show when={session.summary} fallback={formatTimeAgo(session.time.updated)}>
                         {session.summary!.files} file{session.summary!.files !== 1 ? 's' : ''} ·{' '}
-                        <span class="text-vscode-success">+{session.summary!.additions}</span>{' '}
-                        <span class="text-vscode-error">-{session.summary!.deletions}</span>
+                        <span class="diff-lines-added">+{session.summary!.additions}</span>{' '}
+                        <span class="diff-lines-removed">-{session.summary!.deletions}</span>
                       </Show>
                     </div>
                   </div>

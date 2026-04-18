@@ -17,7 +17,7 @@ export function MessagePart(props: {
     switch (part.type) {
       case 'text':
         return (
-          <div class="markdown-content text-[13px] leading-[1.5] text-vscode-fg">
+          <div class="rendered-markdown">
             <MarkdownRenderer content={(part as TextPart).text} />
           </div>
         );
@@ -27,33 +27,34 @@ export function MessagePart(props: {
         return <ReasoningBlock text={part.text} />;
       case 'agent':
         return (
-          <div class="my-0.5 flex items-center gap-1.5 text-[11px] text-vscode-muted/40">
-            <span>→</span>
-            <span>Handing off to</span>
-            <span class="text-vscode-fg/70">{part.name}</span>
+          <div class="chat-subtask-part">
+            <div class="subtask-header">
+              <span class="subtask-dot" />
+              <span>Handing off to <span class="subtask-agent-name">{part.name}</span></span>
+            </div>
           </div>
         );
       case 'patch':
         return (
-          <div class="my-0.5 flex items-center gap-1.5 text-[11px] text-vscode-muted/40">
-            <span class="text-vscode-success">✓</span>
-            <span>
-              Applied patch to {part.files.length} file{part.files.length === 1 ? '' : 's'}
-            </span>
+          <div class="chat-subtask-part">
+            <div class="subtask-header">
+              <span class="subtask-check">✓</span>
+              <span>Applied patch to {part.files.length} file{part.files.length === 1 ? '' : 's'}</span>
+            </div>
           </div>
         );
       case 'retry':
         return (
-          <div class="my-0.5 text-[11px] text-vscode-warning/50">
+          <div class="chat-retry-notice">
             ↻ Retry attempt {part.attempt}
             <Show when={part.error?.data?.message}>
-              <span class="ml-1 text-[10px] opacity-60">— {part.error.data.message}</span>
+              <span class="chat-retry-error">— {part.error!.data.message}</span>
             </Show>
           </div>
         );
       case 'compaction':
         return (
-          <div class="my-0.5 text-[10px] text-vscode-muted/25">
+          <div class="chat-compaction-notice">
             — context compacted ({part.auto ? 'auto' : 'manual'})
             <Show when={part.overflow}> after overflow</Show>
           </div>
@@ -74,25 +75,34 @@ export function MessagePart(props: {
 
 function ReasoningBlock(props: { text: string }) {
   const [expanded, setExpanded] = createSignal(false);
+  const isStreaming = () => !props.text || props.text.endsWith('…') || props.text.length < 50;
 
   return (
-    <div class="my-0.5">
+    <div class="chat-thinking-box">
       <button
-        class="flex items-center gap-1 text-[11px] text-vscode-muted/30 transition-colors hover:text-vscode-muted/50"
+        class="thinking-header"
         onClick={() => setExpanded(!expanded())}
       >
         <svg
-          class={`h-2.5 w-2.5 transition-transform ${expanded() ? 'rotate-90' : ''}`}
+          class={`chevron ${expanded() ? 'expanded' : ''}`}
           viewBox="0 0 16 16"
           fill="currentColor"
+          width="12"
+          height="12"
         >
           <path d="M6 4l4 4-4 4z" />
         </svg>
-        Thinking
+        <Show when={isStreaming()} fallback={<span class="thinking-label">Thinking</span>}>
+          <span class="thinking-label shimmer-progress">Thinking</span>
+        </Show>
       </button>
       <Show when={expanded()}>
-        <div class="ml-[9px] mt-0.5 whitespace-pre-wrap border-l border-vscode-border/10 pl-2.5 text-[11px] italic leading-[1.5] text-vscode-muted/40 animate-fade-in">
-          {props.text}
+        <div class="thinking-content animate-fade-in">
+          <div class="thinking-item">
+            <div class="thinking-text">
+              {props.text}
+            </div>
+          </div>
         </div>
       </Show>
     </div>
@@ -126,13 +136,13 @@ function SubtaskBlock(props: { part: SubtaskPart; run?: AssistantMessage }) {
   });
 
   return (
-    <div class="my-0.5 text-[11px]">
-      <div class="flex items-center gap-1.5 text-vscode-muted">
-        <div class="h-[5px] w-[5px] shrink-0 rounded-full bg-vscode-accent" />
-        {props.part.description}
+    <div class="chat-subtask-part">
+      <div class="subtask-header">
+        <div class="subtask-dot" />
+        <span>{props.part.description}</span>
       </div>
       <Show when={selectedModel() || run()}>
-        <div class="ml-[11px] flex flex-wrap gap-x-2 text-[10px] text-vscode-muted/30">
+        <div class="subtask-meta">
           <Show when={props.part.agent}>
             <span>{props.part.agent}</span>
           </Show>
@@ -163,23 +173,23 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
     <Show
       when={isImage()}
       fallback={
-        <div class="my-1 inline-flex items-center gap-1.5 rounded border border-vscode-border/30 bg-vscode-card/30 px-2 py-0.5 text-[11px] text-vscode-muted">
-          <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
+        <div class="chat-attachment-chip">
+          <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
             <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
           </svg>
-          {props.part.filename || '(file)'}
+          <span class="chip-label">{props.part.filename || '(file)'}</span>
         </div>
       }
     >
-      <figure class="my-1.5 rounded border border-vscode-border/20 bg-vscode-card/10 p-2">
+      <figure class="chat-image-figure">
         <img
           src={props.part.url}
           alt={props.part.filename || 'image'}
-          class="max-h-[280px] w-auto max-w-full rounded border border-vscode-border/20 bg-vscode-bg/20 object-contain"
+          class="chat-image-img"
         />
-        <figcaption class="mt-1 text-[10px] text-vscode-muted">
+        <figcaption class="chat-image-caption">
           {props.part.filename || 'image'}{' '}
-          <span class="text-vscode-muted/50">· {props.part.mime}</span>
+          <span class="chat-image-mime">· {props.part.mime}</span>
         </figcaption>
       </figure>
     </Show>

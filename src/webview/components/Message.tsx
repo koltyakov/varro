@@ -23,31 +23,55 @@ export function Message(props: { info: MessageType; parts: Part[]; isFirstInGrou
   );
 
   return (
-    <article
-      class={props.isFirstInGroup !== false ? (isUser() ? 'mt-4 first:mt-0' : 'mt-1') : 'mt-0.5'}
-    >
+    <>
       <Show when={props.isFirstInGroup !== false}>
-        <div
-          class={`mb-0.5 text-[11px] font-medium ${isUser() ? 'text-vscode-fg' : 'text-vscode-muted'}`}
-        >
-          {isUser() ? 'You' : roleLabel(props.info)}
+        <div class="header">
+          <div class="user">
+            <div class="avatar-container">
+              <div class="avatar codicon-avatar">
+                <Show
+                  when={isUser()}
+                  fallback={
+                    <svg class="codicon" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-avatar-fg)' }}>
+                      <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3.5 8.5a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0zM6.5 6a1 1 0 100-2 1 1 0 000 2zm3 0a1 1 0 100-2 1 1 0 000 2z" />
+                    </svg>
+                  }
+                >
+                  <svg class="codicon" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-avatar-fg)' }}>
+                    <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.5a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM4.25 12.5a4.5 4.5 0 017.5 0 5.49 5.49 0 01-3.75 1.5 5.49 5.49 0 01-3.75-1.5z" />
+                  </svg>
+                </Show>
+              </div>
+            </div>
+            <h3 class="username">{isUser() ? 'You' : roleLabel(props.info)}</h3>
+          </div>
         </div>
       </Show>
-      <Show when={isUser()}>
-        <UserMessageContent parts={props.parts} />
-      </Show>
-      <Show when={!isUser() && assistant()}>
-        <AssistantMessageContent info={assistant()!} parts={props.parts} />
-      </Show>
-      <Show when={assistant() && assistant()!.error?.data?.message}>
-        <div class="mt-1 rounded border border-vscode-error/25 bg-vscode-error/5 px-3 py-2 text-[12px] text-vscode-error">
-          {assistant()!.error?.data?.message || 'error'}
-        </div>
-      </Show>
-      <Show when={assistant() && (diffs() || []).length > 0}>
-        <DiffSummary diffs={diffs()!} />
-      </Show>
-    </article>
+
+      <div class="value">
+        <Show when={isUser()}>
+          <UserMessageContent parts={props.parts} />
+        </Show>
+        <Show when={!isUser() && assistant()}>
+          <AssistantMessageContent info={assistant()!} parts={props.parts} />
+        </Show>
+        <Show when={assistant() && assistant()!.error?.data?.message}>
+          <div class="interactive-response-error-details">
+            <svg class="error-icon" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+            </svg>
+            <div class="rendered-markdown">
+              <p class="error-message-text">
+                {assistant()!.error?.data?.message || 'error'}
+              </p>
+            </div>
+          </div>
+        </Show>
+        <Show when={assistant() && (diffs() || []).length > 0}>
+          <DiffSummary diffs={diffs()!} />
+        </Show>
+      </div>
+    </>
   );
 }
 
@@ -72,17 +96,17 @@ function UserMessageContent(props: { parts: Part[] }) {
         p.type === 'file'
     );
   return (
-    <div class="rounded-lg bg-vscode-hover/50 px-3 py-2 text-[13px] leading-[1.5] text-vscode-fg">
+    <div class="rendered-markdown">
       <For each={visibleParts()}>
         {(part) => {
           if (part.type === 'text') {
-            return <div class="whitespace-pre-wrap wrap-break-word">{(part as TextPart).text}</div>;
+            return <p class="user-message-text">{(part as TextPart).text}</p>;
           }
           return <MessagePart part={part} />;
         }}
       </For>
       <Show when={visibleParts().length === 0}>
-        <span class="text-vscode-muted italic">(no content)</span>
+        <p class="user-message-empty">(no content)</p>
       </Show>
     </div>
   );
@@ -103,7 +127,7 @@ function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] 
   );
 
   return (
-    <div class="space-y-1.5 text-[13px] leading-[1.5] text-vscode-fg">
+    <div>
       <For each={props.parts}>
         {(part) => {
           const matchedRun = part.type === 'subtask' ? childRuns()[subtaskIndex++] : undefined;
@@ -124,10 +148,10 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
   );
 
   return (
-    <div class="mt-1">
+    <div class="diff-summary">
       <button
         onClick={() => setExpanded((v) => !v)}
-        class="flex items-center gap-1 text-[11px] text-vscode-muted/40 transition-colors hover:text-vscode-muted"
+        class="diff-summary-btn"
       >
         <svg
           class={`h-3 w-3 transition-transform ${expanded() ? 'rotate-90' : ''}`}
@@ -138,12 +162,12 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
         </svg>
         <span>
           {props.diffs.length} file{props.diffs.length !== 1 ? 's' : ''} changed ·{' '}
-          <span class="text-vscode-success">+{summary().add}</span>{' '}
-          <span class="text-vscode-error">-{summary().del}</span>
+          <span class="diff-lines-added">+{summary().add}</span>{' '}
+          <span class="diff-lines-removed">-{summary().del}</span>
         </span>
       </button>
       <Show when={expanded()}>
-        <div class="mt-1 animate-fade-in">
+        <div class="diff-summary-content animate-fade-in">
           <DiffView diffs={props.diffs} />
         </div>
       </Show>

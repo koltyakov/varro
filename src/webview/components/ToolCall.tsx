@@ -6,16 +6,16 @@ export function ToolCall(props: { part: ToolPart }) {
   const tool = () => props.part;
   const state = () => tool().state;
 
-  const statusDot = () => {
+  const statusClass = () => {
     switch (state().status) {
       case 'pending':
-        return 'bg-vscode-muted/30';
+        return 'tool-status-pending';
       case 'running':
-        return 'bg-vscode-accent animate-pulse-soft';
+        return 'tool-status-running';
       case 'completed':
-        return 'bg-vscode-success';
+        return 'tool-status-completed';
       case 'error':
-        return 'bg-vscode-error';
+        return 'tool-status-error';
     }
   };
 
@@ -37,33 +37,31 @@ export function ToolCall(props: { part: ToolPart }) {
   };
 
   return (
-    <div class="my-0.5">
+    <div class="chat-tool-invocation-part">
       <button
-        class="flex w-full items-center gap-1.5 rounded py-0.5 text-left transition-colors hover:bg-vscode-hover/20"
+        class="tool-invocation-header"
         onClick={() => setExpanded(!expanded())}
       >
-        <span class={`h-[5px] w-[5px] shrink-0 rounded-full ${statusDot()}`} />
-        <span class="min-w-0 flex-1 truncate text-[12px] text-vscode-muted">
-          {title()}
-          <Show when={state().status === 'completed'}>
-            {(() => {
-              const s = state() as ToolStateCompleted;
-              return (
-                <span class="ml-1.5 text-[10px] tabular-nums text-vscode-muted/30">
-                  {formatDuration(s.time.end - s.time.start)}
-                </span>
-              );
-            })()}
-          </Show>
-          <Show when={state().status === 'running'}>
-            <span class="ml-1.5 text-[10px] text-vscode-accent/40">running</span>
-          </Show>
-          <Show when={state().status === 'error'}>
-            <span class="ml-1.5 text-[10px] text-vscode-error/40">error</span>
-          </Show>
-        </span>
+        <span class={`tool-status-dot ${statusClass()}`} />
+        <span class="tool-invocation-title">{title()}</span>
+        <Show when={state().status === 'completed'}>
+          {(() => {
+            const s = state() as ToolStateCompleted;
+            return (
+              <span class="tool-invocation-duration">
+                {formatDuration(s.time.end - s.time.start)}
+              </span>
+            );
+          })()}
+        </Show>
+        <Show when={state().status === 'running'}>
+          <span class="tool-invocation-running-label">running</span>
+        </Show>
+        <Show when={state().status === 'error'}>
+          <span class="tool-invocation-error-label">error</span>
+        </Show>
         <svg
-          class={`h-2.5 w-2.5 shrink-0 text-vscode-muted/20 transition-transform ${expanded() ? 'rotate-90' : ''}`}
+          class={`tool-invocation-chevron ${expanded() ? 'expanded' : ''}`}
           viewBox="0 0 16 16"
           fill="currentColor"
         >
@@ -71,29 +69,25 @@ export function ToolCall(props: { part: ToolPart }) {
         </svg>
       </button>
       <Show when={preview() && !expanded()}>
-        <div class="ml-[11px] truncate font-mono text-[10px] text-vscode-muted/25">{preview()}</div>
+        <div class="tool-invocation-preview">{preview()}</div>
       </Show>
 
       <Show when={expanded()}>
-        <div class="ml-[11px] border-l border-vscode-border/10 pl-2.5 py-1.5 text-[11px] animate-fade-in">
+        <div class="tool-invocation-detail animate-fade-in">
           <Show when={Object.keys(state().input || {}).length > 0}>
-            <div class="mb-1.5">
-              <pre class="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-[1.5] text-vscode-muted/50">
-                {JSON.stringify(state().input, null, 2)}
-              </pre>
+            <div class="tool-invocation-input">
+              <pre class="tool-invocation-pre">{JSON.stringify(state().input, null, 2)}</pre>
             </div>
           </Show>
           <Show when={state().status === 'completed'}>
-            <pre class="max-h-[160px] overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-[1.5] text-vscode-fg/60">
-              {(state() as ToolStateCompleted).output || '(empty)'}
-            </pre>
+            <pre class="tool-invocation-output">{(state() as ToolStateCompleted).output || '(empty)'}</pre>
           </Show>
           <Show when={state().status === 'error'}>
-            <div class="text-[11px] text-vscode-error/70">{(state() as ToolStateError).error}</div>
+            <div class="tool-invocation-error">{(state() as ToolStateError).error}</div>
           </Show>
           <Show when={state().status === 'running'}>
-            <div class="flex items-center gap-1.5 text-[11px] text-vscode-muted/30">
-              <span class="h-1 w-1 rounded-full bg-vscode-accent animate-pulse-soft" />
+            <div class="tool-invocation-running">
+              <span class="tool-status-dot tool-status-running" />
               Running...
             </div>
           </Show>
