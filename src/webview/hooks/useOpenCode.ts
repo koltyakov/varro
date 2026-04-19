@@ -7,6 +7,7 @@ import {
   setSelectedModel,
   resolveSelectedModel,
   setTheme,
+  isLoading,
   setIsLoading,
   setError,
   clearClipboardImages,
@@ -361,7 +362,12 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     state.providers,
     state.providerDefaults
   );
-  if (effectiveModel) body.model = effectiveModel;
+  if (effectiveModel) {
+    body.model = {
+      providerID: effectiveModel.providerID,
+      modelID: effectiveModel.modelID,
+    };
+  }
   if (effectiveModel?.variant) {
     body.variant = effectiveModel.variant;
   } else if (body.model) {
@@ -379,11 +385,16 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   postMessage({ type: 'files/clear' });
 
   try {
-    await sendPromptWithFallback(sessionId, body);
+    await client.session.sendAsync(sessionId, body);
     await Promise.all([syncSession(sessionId), syncSessionMessages(sessionId)]).catch(() => {});
   } catch (err) {
     setIsLoading(false);
-    setError(err instanceof Error ? err.message : 'Failed to send message');
+    const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
+    if (body.model) {
+      setError(`Failed to send with ${body.model.providerID}/${body.model.modelID}: ${baseMessage}`);
+      return;
+    }
+    setError(baseMessage);
   }
 }
 
@@ -397,28 +408,6 @@ function getAttachmentReference(
     return `@${normalizedPath === '.' ? './' : `${normalizedPath}/`}`;
   }
   return `@${normalizedPath}`;
-}
-
-async function sendPromptWithFallback(
-  sessionId: string,
-  body: {
-    parts: Array<{ type: string; text?: string; [key: string]: unknown }>;
-    model?: { providerID: string; modelID: string };
-    agent?: string;
-    noReply?: boolean;
-    variant?: string;
-  }
-) {
-  try {
-    await client.session.sendAsync(sessionId, body);
-  } catch (err) {
-    if (!body.model) throw err;
-
-    const retryBody = { ...body };
-    delete retryBody.model;
-    delete retryBody.variant;
-    await client.session.sendAsync(sessionId, retryBody);
-  }
 }
 
 export async function abortSession() {

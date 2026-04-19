@@ -38,6 +38,14 @@ export function apiCall<T = unknown>(method: string, path: string, body?: unknow
   const id = ++reqId;
   return new Promise<T>((resolve, reject) => {
     pending.set(id, { resolve, reject });
-    postMessage({ type: 'api/request', payload: { id, method, path, body } });
+    postMessage({
+      type: 'api/request',
+      payload: {
+        id,
+        method,
+        path,
+        body: body === undefined ? undefined : JSON.parse(JSON.stringify(body)),
+      },
+    });
   });
 }
