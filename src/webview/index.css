@@ -276,7 +276,7 @@ input:focus-visible {
 .assistant-message-flow {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .chat-turn-content > :last-child,
@@ -1013,13 +1013,13 @@ input:focus-visible {
   gap: 5px;
   font-size: 11px;
   font-weight: 500;
-  padding: 3px 8px 3px 6px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 25%, transparent);
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
   border-radius: 6px;
   height: auto;
   max-width: 100%;
   width: fit-content;
-  background: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
   color: var(--color-vscode-fg);
   transition:
     background-color 0.1s,
@@ -1027,14 +1027,14 @@ input:focus-visible {
 }
 
 .chat-attachment-chip:hover {
-  background: color-mix(in srgb, var(--color-vscode-accent) 12%, transparent);
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
 }
 
 .chat-attachment-chip .chip-icon {
   font-size: 12px;
-  color: var(--color-vscode-accent);
-  opacity: 0.7;
+  color: var(--color-vscode-muted);
+  opacity: 0.8;
   flex-shrink: 0;
 }
 
@@ -1046,7 +1046,7 @@ input:focus-visible {
 }
 
 .chat-attachment-chip .chip-detail {
-  color: var(--color-vscode-accent);
+  color: var(--color-vscode-muted);
   opacity: 0.6;
   font-size: 10px;
 }
@@ -1055,25 +1055,27 @@ input:focus-visible {
   display: flex;
   align-items: center;
   color: var(--color-vscode-muted);
+  opacity: 0.5;
   cursor: pointer;
-  padding: 0 1px;
+  padding: 0;
   border: none;
   background: none;
-  font-size: 12px;
-  transition: color 0.1s;
+  font-size: 10px;
+  transition: color 0.1s, opacity 0.1s;
 }
 
 .chat-attachment-chip .chip-remove:hover {
-  color: var(--color-vscode-error);
+  color: var(--color-vscode-fg);
+  opacity: 1;
 }
 
 .chat-thinking-box {
   outline: none;
   position: relative;
   color: var(--color-vscode-muted);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-widget-bg) 74%, transparent);
+  border: none;
+  border-radius: 6px;
+  background: none;
   overflow: hidden;
 }
 
@@ -1082,20 +1084,18 @@ input:focus-visible {
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: var(--color-vscode-muted);
+  color: var(--color-vscode-fg);
+  opacity: 0.7;
   cursor: pointer;
-  padding: 8px 8px;
+  padding: 4px 2px;
   border: none;
   background: transparent;
   width: 100%;
-  transition:
-    color 0.1s,
-    background-color 0.1s;
+  transition: opacity 0.1s;
 }
 
 .chat-thinking-box .thinking-header:hover {
-  color: var(--color-vscode-fg);
-  background: var(--color-vscode-toolbar-hover);
+  opacity: 1;
 }
 
 .chat-thinking-box .thinking-header .chevron {
@@ -1108,18 +1108,19 @@ input:focus-visible {
 }
 
 .chat-thinking-box .thinking-content {
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
+  border-top: none;
   padding: 0;
   max-height: 220px;
   overflow-y: auto;
 }
 
 .chat-thinking-box .thinking-content .thinking-item {
-  padding: 10px 10px;
+  padding: 6px 6px 6px 20px;
   position: relative;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--color-vscode-muted);
+  color: var(--color-vscode-fg);
+  opacity: 0.65;
 }
 
 .shimmer-progress {
@@ -1176,24 +1177,18 @@ input:focus-visible {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: color-mix(in srgb, var(--color-vscode-muted) 72%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-widget-bg) 70%, transparent);
+  color: var(--color-vscode-fg);
+  opacity: 0.65;
+  border: none;
+  background: none;
   cursor: pointer;
-  padding: 7px 10px;
-  border-radius: 9px;
-  transition:
-    color 0.1s,
-    background-color 0.1s;
+  padding: 4px 2px;
+  border-radius: 4px;
+  transition: opacity 0.1s;
 }
 
 .diff-summary .diff-summary-btn:hover {
-  color: var(--color-vscode-fg);
-  background: color-mix(
-    in srgb,
-    var(--color-vscode-toolbar-hover) 70%,
-    var(--color-vscode-widget-bg)
-  );
+  opacity: 1;
 }
 
 .diff-summary .diff-summary-content {
@@ -1219,14 +1214,14 @@ kbd {
 
 .chat-tool-invocation-part {
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-widget-bg) 76%, transparent);
+  border: none;
+  border-radius: 6px;
+  background: none;
   overflow: hidden;
 }
 
 .chat-tool-invocation-part:not(:last-child) {
-  margin-bottom: 8px;
+  margin-bottom: 2px;
 }
 
 .chat-tool-invocation-part .tool-invocation-header {
@@ -1234,21 +1229,18 @@ kbd {
   width: 100%;
   align-items: center;
   gap: 6px;
-  padding: 8px 9px;
+  padding: 3px 2px;
   border: none;
   background: transparent;
   cursor: pointer;
   font-size: 12px;
-  color: var(--color-vscode-muted);
+  color: var(--color-vscode-fg);
   text-align: left;
-  transition:
-    color 0.1s,
-    background-color 0.1s;
+  transition: opacity 0.1s;
 }
 
 .chat-tool-invocation-part .tool-invocation-header:hover {
-  background: color-mix(in srgb, var(--color-vscode-toolbar-hover) 70%, transparent);
-  color: var(--color-vscode-fg);
+  opacity: 1;
 }
 
 .chat-tool-invocation-part .tool-status-dot {
@@ -1281,49 +1273,55 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--color-vscode-fg);
 }
 
 .chat-tool-invocation-part .tool-invocation-duration {
-  font-size: 10px;
-  tabular-nums: true;
-  color: color-mix(in srgb, var(--color-vscode-muted) 60%, transparent);
-}
-
-.chat-tool-invocation-part .tool-invocation-running-label {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-vscode-fg);
+  opacity: 0.45;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .chat-tool-invocation-part .tool-invocation-error-label {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--color-vscode-error) 70%, transparent);
+  font-size: 11px;
+  color: var(--color-vscode-error);
 }
 
 .chat-tool-invocation-part .tool-invocation-chevron {
   width: 10px;
   height: 10px;
   flex-shrink: 0;
-  color: color-mix(in srgb, var(--color-vscode-muted) 50%, transparent);
-  transition: transform 0.1s;
+  color: var(--color-vscode-fg);
+  opacity: 0.35;
+  transition: transform 0.1s, opacity 0.1s;
+}
+
+.chat-tool-invocation-part .tool-invocation-header:hover .tool-invocation-chevron {
+  opacity: 0.7;
 }
 
 .chat-tool-invocation-part .tool-invocation-chevron.expanded {
   transform: rotate(90deg);
+  opacity: 0.7;
 }
 
 .chat-tool-invocation-part .tool-invocation-preview {
-  padding: 0 9px 10px 20px;
+  padding: 0 2px 4px 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: color-mix(in srgb, var(--color-vscode-muted) 55%, transparent);
+  font-size: 11px;
+  color: var(--color-vscode-fg);
+  opacity: 0.55;
 }
 
 .chat-tool-invocation-part .tool-invocation-detail {
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
-  padding: 10px 10px 12px 20px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 10%, transparent);
+  padding: 8px 8px 10px 18px;
   font-size: 11px;
 }
 
@@ -1342,10 +1340,11 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-input-key {
-  color: var(--color-vscode-muted);
+  color: var(--color-vscode-fg);
+  opacity: 0.6;
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .chat-tool-invocation-part .tool-input-key::after {
@@ -1356,7 +1355,7 @@ kbd {
   color: var(--color-vscode-fg);
   opacity: 0.75;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1368,18 +1367,20 @@ kbd {
   overflow: auto;
   white-space: pre-wrap;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.5;
-  color: color-mix(in srgb, var(--color-vscode-fg) 75%, transparent);
+  color: var(--color-vscode-fg);
+  opacity: 0.7;
   margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-vscode-bg) 84%, transparent);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
 }
 
 .chat-tool-invocation-part .tool-invocation-error {
   font-size: 11px;
-  color: color-mix(in srgb, var(--color-vscode-error) 85%, transparent);
+  color: var(--color-vscode-error);
+  opacity: 0.85;
 }
 
 .chat-tool-invocation-part .tool-invocation-running {
@@ -1387,135 +1388,84 @@ kbd {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: color-mix(in srgb, var(--color-vscode-muted) 60%, transparent);
-}
-
-.file-edit-card {
-  margin: 0;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-widget-bg) 76%, transparent);
-  overflow: hidden;
-}
-
-.file-edit-card:not(:last-child) {
-  margin-bottom: 8px;
-}
-
-.file-edit-header {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 9px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 11px;
-  color: var(--color-vscode-muted);
-  text-align: left;
-  transition:
-    color 0.1s,
-    background-color 0.1s;
-}
-
-.file-edit-header:hover {
-  background: color-mix(in srgb, var(--color-vscode-toolbar-hover) 70%, transparent);
   color: var(--color-vscode-fg);
+  opacity: 0.6;
 }
 
-.file-edit-status-icon {
+.file-edit-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.file-edit-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   flex-shrink: 0;
-  width: 12px;
-  height: 12px;
 }
 
-.file-edit-status-done {
-  color: var(--color-vscode-success);
+.file-edit-dot.done {
+  background: var(--color-vscode-success);
 }
 
-.file-edit-status-error {
-  color: var(--color-vscode-error);
+.file-edit-dot.running {
+  background: var(--color-vscode-accent);
+  animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
-.file-edit-file-icon {
-  flex-shrink: 0;
-  color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
+.file-edit-dot.error {
+  background: var(--color-vscode-error);
 }
 
 .file-edit-action-label {
-  font-size: 11px;
-  color: color-mix(in srgb, var(--color-vscode-muted) 80%, transparent);
+  font-size: 12px;
+  color: var(--color-vscode-fg);
   flex-shrink: 0;
 }
 
 .file-edit-path-link {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-vscode-fg) !important;
-  opacity: 0.85;
 }
 
 .file-edit-path-link:hover {
-  opacity: 1;
   text-decoration: underline;
 }
 
 .file-edit-diff-stats {
-  display: flex;
+  display: inline-flex;
   gap: 4px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   flex-shrink: 0;
-  margin-left: 2px;
-}
-
-.file-edit-done-badge {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--color-vscode-success) 70%, transparent);
-  flex-shrink: 0;
-  margin-left: 2px;
 }
 
 .file-edit-running-label {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
+  font-size: 11px;
+  color: var(--color-vscode-accent);
   flex-shrink: 0;
 }
 
-.file-edit-diff-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: color-mix(in srgb, var(--color-vscode-muted) 60%, transparent);
-  cursor: pointer;
+.file-edit-error-label {
+  font-size: 11px;
+  color: var(--color-vscode-error);
   flex-shrink: 0;
-  transition:
-    color 0.1s,
-    background-color 0.1s;
-}
-
-.file-edit-diff-btn:hover {
-  color: var(--color-vscode-fg);
-  background: color-mix(in srgb, var(--color-vscode-toolbar-hover) 70%, transparent);
 }
 
 .chat-subtask-part {
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-widget-bg) 72%, transparent);
-  padding: 8px 9px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 3px 2px;
 }
 
 .chat-subtask-part .subtask-header {
@@ -1523,7 +1473,8 @@ kbd {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--color-vscode-muted);
+  color: var(--color-vscode-fg);
+  opacity: 0.7;
 }
 
 .chat-subtask-part .subtask-dot {
@@ -1531,7 +1482,7 @@ kbd {
   height: 4px;
   border-radius: 50%;
   background: var(--color-vscode-muted);
-  opacity: 0.5;
+  opacity: 0.6;
   flex-shrink: 0;
 }
 
@@ -1540,14 +1491,15 @@ kbd {
   align-items: center;
   gap: 8px;
   margin-left: 8px;
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 11px;
-  color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
+  color: var(--color-vscode-fg);
+  opacity: 0.5;
 }
 
 .chat-subtask-part .subtask-agent-name {
   color: var(--color-vscode-fg);
-  opacity: 0.7;
+  opacity: 0.75;
 }
 
 .chat-subtask-part .subtask-check {
@@ -1556,14 +1508,14 @@ kbd {
 }
 
 .chat-retry-notice {
-  margin: 6px 0;
+  margin: 4px 0;
   font-size: 11px;
   color: var(--color-vscode-warning);
-  opacity: 0.65;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-warning) 7%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 16%, transparent);
+  opacity: 0.7;
+  padding: 4px 2px;
+  border-radius: 4px;
+  background: none;
+  border: none;
 }
 
 .chat-retry-notice .chat-retry-error {
@@ -1573,19 +1525,18 @@ kbd {
 }
 
 .chat-compaction-notice {
-  margin: 6px 0;
-  padding: 8px 10px;
-  font-size: 10px;
-  color: var(--color-vscode-muted);
-  opacity: 0.5;
-  border: 1px dashed color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
-  border-radius: 10px;
+  margin: 4px 0;
+  padding: 4px 2px;
+  font-size: 11px;
+  color: var(--color-vscode-fg);
+  opacity: 0.35;
+  border: none;
+  border-radius: 4px;
 }
 
 .chat-thinking-box .thinking-text {
   white-space: pre-wrap;
   line-height: 1.5;
-  font-style: italic;
 }
 
 .chat-image-figure {

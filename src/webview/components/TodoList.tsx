@@ -18,9 +18,13 @@ export function TodoList() {
         <svg
           class={`h-3 w-3 shrink-0 text-vscode-muted/70 transition-transform ${collapsed() ? '-rotate-90' : ''}`}
           viewBox="0 0 16 16"
-          fill="currentColor"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
-          <path d="M4.5 6.5l3.5 3.5 3.5-3.5z" />
+          <path d="M4 6l4 4 4-4" />
         </svg>
         <span class="font-medium">Todos</span>
         <span class="text-vscode-muted/70">

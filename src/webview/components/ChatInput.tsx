@@ -493,8 +493,8 @@ export function ChatInput() {
               isLoading()
                 ? busyPromptMode() === 'steer'
                   ? 'Steer current run...'
-                  : 'Ask anything...'
-                : 'Ask anything...'
+                  : 'Describe what to build'
+                : 'Describe what to build'
             }
             value={inputText()}
             onInput={(e) => {
@@ -516,16 +516,6 @@ export function ChatInput() {
 
         <div class="chat-input-toolbars">
           <div class="toolbar-left">
-            <button
-              class="toolbar-icon"
-              onClick={() => postMessage({ type: 'files/pick' })}
-              title="Attach file"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V6h4.25a.25.25 0 01.25.25v2.5a.25.25 0 01-.25.25H9.5v4.25a.25.25 0 01-.25.25h-2.5a.25.25 0 01-.25-.25V9H2.25a.25.25 0 01-.25-.25v-2.5a.25.25 0 01.25-.25H6.5V1.75z" />
-              </svg>
-            </button>
-
             <Show when={state.agents.length > 0}>
               <button
                 class="toolbar-picker"
@@ -640,191 +630,100 @@ export function ChatInput() {
           </div>
 
           <div class="toolbar-right">
-            <Show when={isLoading()}>
-              <div style={{ position: 'relative' }}>
-                <button
-                  class="chat-stop-button"
-                  onClick={() => {
-                    if (canSend()) {
-                      setShowBusyMenu(!showBusyMenu());
-                    } else {
-                      abortSession();
-                    }
-                  }}
-                  title={canSend() ? 'Send options' : 'Stop'}
-                >
-                  <Show
-                    when={canSend()}
-                    fallback={
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                        <rect x="4" y="4" width="8" height="8" rx="1" />
-                      </svg>
-                    }
-                  >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3 4l-4 6H5l2-3H5l4-6h2l-2 3h2z" />
-                    </svg>
-                  </Show>
-                </button>
-
-                <Show when={showBusyMenu() && canSend()}>
-                  <div
-                    style={{
-                      position: 'absolute',
-                      bottom: '100%',
-                      right: 0,
-                      'z-index': 50,
-                      'margin-bottom': '4px',
-                      width: '210px',
-                      overflow: 'hidden',
-                      'border-radius': '4px',
-                      border: '1px solid var(--color-vscode-widget-border)',
-                      background: 'var(--color-vscode-widget-bg)',
-                      'box-shadow': '0 -4px 16px rgba(0,0,0,0.3)',
-                    }}
-                    onClick={() => setShowBusyMenu(false)}
-                  >
-                    <button
-                      style={{
-                        display: 'flex',
-                        width: '100%',
-                        'align-items': 'center',
-                        gap: '8px',
-                        padding: '6px 10px',
-                        'text-align': 'left',
-                        'font-size': '12px',
-                        color: 'var(--color-vscode-fg)',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = 'var(--color-vscode-hover)')
-                      }
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                      onClick={() => {
-                        abortSession();
-                        handleSend();
-                      }}
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 16 16"
-                        fill="currentColor"
-                        style={{ color: 'var(--color-vscode-error)' }}
-                      >
-                        <path d="M1 1.91L1.78 1.5 15 8 1.78 14.5 1 14.09 3.61 8 1 1.91z" />
-                      </svg>
-                      Stop and Send
-                    </button>
-                    <button
-                      style={{
-                        display: 'flex',
-                        width: '100%',
-                        'align-items': 'center',
-                        'justify-content': 'space-between',
-                        padding: '6px 10px',
-                        'text-align': 'left',
-                        'font-size': '12px',
-                        color: 'var(--color-vscode-fg)',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = 'var(--color-vscode-hover)')
-                      }
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                      onClick={() => {
-                        setBusyPromptMode('queue');
-                        handleSend();
-                      }}
-                    >
-                      <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          style={{ color: 'var(--color-vscode-muted)' }}
-                        >
-                          <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
-                        </svg>
-                        Add to Queue
-                      </div>
-                      <span
-                        style={{
-                          'font-size': '11px',
-                          color: 'var(--color-vscode-muted)',
-                          opacity: 0.4,
-                        }}
-                      >
-                        Enter
-                      </span>
-                    </button>
-                    <button
-                      style={{
-                        display: 'flex',
-                        width: '100%',
-                        'align-items': 'center',
-                        'justify-content': 'space-between',
-                        padding: '6px 10px',
-                        'text-align': 'left',
-                        'font-size': '12px',
-                        color: 'var(--color-vscode-fg)',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = 'var(--color-vscode-hover)')
-                      }
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                      onClick={() => {
-                        setBusyPromptMode('steer');
-                        handleSend();
-                      }}
-                    >
-                      <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          style={{ color: 'var(--color-vscode-muted)' }}
-                        >
-                          <path d="M7.5 1L9 5h4l-3.5 3 1.5 4.5L7.5 10 4 12.5 5.5 8 2 5h4l1.5-4z" />
-                        </svg>
-                        Steer with Message
-                      </div>
-                      <span
-                        style={{
-                          'font-size': '11px',
-                          color: 'var(--color-vscode-muted)',
-                          opacity: 0.4,
-                        }}
-                      >
-                        {'\u2303'}Enter
-                      </span>
-                    </button>
-                  </div>
-                </Show>
-              </div>
-            </Show>
-
-            <Show when={!isLoading()}>
+            <Show when={isLoading() && !canSend()}>
               <button
-                class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
-                onClick={handleSend}
-                disabled={!canSend()}
-                title="Send (Enter)"
+                class="toolbar-icon"
+                onClick={() => abortSession()}
+                title="Stop"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M3 3l10 5-10 5V9.5l6-1.5-6-1.5V3z" />
+                  <rect x="4" y="4" width="8" height="8" rx="1" />
                 </svg>
               </button>
             </Show>
+
+            <div style={{ position: 'relative' }}>
+              <button
+                class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
+                onClick={() => {
+                  if (!canSend()) return;
+                  if (isLoading()) {
+                    setShowBusyMenu(!showBusyMenu());
+                  } else {
+                    handleSend();
+                  }
+                }}
+                disabled={!canSend()}
+                title={isLoading() ? 'Send options' : 'Send (Enter)'}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
+                </svg>
+              </button>
+
+              <Show when={showBusyMenu() && canSend() && isLoading()}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '100%',
+                    right: 0,
+                    'z-index': 50,
+                    'margin-bottom': '4px',
+                    width: '210px',
+                  }}
+                  onClick={() => setShowBusyMenu(false)}
+                >
+                  <div class="dropdown-menu">
+                    <div class="py-1">
+                      <button
+                        class="dropdown-item"
+                        onClick={() => {
+                          setBusyPromptMode('queue');
+                          handleSend();
+                        }}
+                      >
+                        <span class="dropdown-check">
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)' }}>
+                            <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
+                          </svg>
+                        </span>
+                        <span class="min-w-0 flex-1">Add to Queue</span>
+                        <span class="dropdown-hint">Enter</span>
+                      </button>
+                      <button
+                        class="dropdown-item"
+                        onClick={() => {
+                          setBusyPromptMode('steer');
+                          handleSend();
+                        }}
+                      >
+                        <span class="dropdown-check">
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)' }}>
+                            <path d="M7.5 1L9 5h4l-3.5 3 1.5 4.5L7.5 10 4 12.5 5.5 8 2 5h4l1.5-4z" />
+                          </svg>
+                        </span>
+                        <span class="min-w-0 flex-1">Steer with Message</span>
+                        <span class="dropdown-hint">{'\u2303'}Enter</span>
+                      </button>
+                      <button
+                        class="dropdown-item"
+                        onClick={() => {
+                          abortSession();
+                          handleSend();
+                        }}
+                      >
+                        <span class="dropdown-check">
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-error)' }}>
+                            <path d="M1 1.91L1.78 1.5 15 8 1.78 14.5 1 14.09 3.61 8 1 1.91z" />
+                          </svg>
+                        </span>
+                        <span class="min-w-0 flex-1">Stop and Send</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Show>
+            </div>
           </div>
         </div>
       </div>
@@ -982,6 +881,13 @@ function AttachmentChip(props: {
 }) {
   return (
     <span class="chat-attachment-chip">
+      <Show when={props.onRemove}>
+        <button class="chip-remove" onClick={() => props.onRemove?.()}>
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+          </svg>
+        </button>
+      </Show>
       <Show when={props.icon === 'image'}>
         <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
           <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
@@ -1000,13 +906,6 @@ function AttachmentChip(props: {
       <span class="chip-label">{props.label}</span>
       <Show when={props.detail}>
         <span class="chip-detail">{props.detail}</span>
-      </Show>
-      <Show when={props.onRemove}>
-        <button class="chip-remove" onClick={() => props.onRemove?.()}>
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-          </svg>
-        </button>
       </Show>
     </span>
   );

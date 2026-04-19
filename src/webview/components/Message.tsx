@@ -1,7 +1,7 @@
 import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
 import { client } from '../lib/client';
 import { isAssistantMessage } from '../lib/message-metrics';
-import type { AssistantMessage, FileDiff, Message as MessageType, Part, TextPart } from '../types';
+import type { AssistantMessage, FileDiff, Message as MessageType, Part, TextPart, ToolPart } from '../types';
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
 import { state } from '../lib/state';
@@ -90,6 +90,45 @@ function UserMessageContent(props: { parts: Part[] }) {
   );
 }
 
+function getToolFilePath(part: Part): string | null {
+  if (part.type !== 'tool') return null;
+  const input = ((part as ToolPart).state.input || {}) as Record<string, unknown>;
+  for (const key of ['file_path', 'filePath', 'path', 'filename']) {
+    if (typeof input[key] === 'string' && (input[key] as string).length > 0) {
+      return input[key] as string;
+    }
+  }
+  return null;
+}
+
+function isFileEditPart(part: Part): boolean {
+  if (part.type !== 'tool') return false;
+  const name = (part as ToolPart).tool.toLowerCase();
+  return (
+    ['edit', 'write', 'create', 'file_edit', 'file_write', 'file_create',
+     'update_file', 'replace', 'insert', 'apply_edit', 'apply_diff'].includes(name) &&
+    getToolFilePath(part) !== null
+  );
+}
+
+function deduplicateFileEdits(parts: Part[]): Part[] {
+  const result: Part[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!isFileEditPart(parts[i])) {
+      result.push(parts[i]);
+      continue;
+    }
+    const path = getToolFilePath(parts[i]);
+    let last = i;
+    while (last + 1 < parts.length && isFileEditPart(parts[last + 1]) && getToolFilePath(parts[last + 1]) === path) {
+      last++;
+    }
+    result.push(parts[last]);
+    i = last;
+  }
+  return result;
+}
+
 function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] }) {
   let subtaskIndex = 0;
 
@@ -104,9 +143,11 @@ function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] 
       .sort((a, b) => a.info.time.created - b.info.time.created)
   );
 
+  const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
+
   return (
     <div class="assistant-message-flow">
-      <For each={props.parts}>
+      <For each={dedupedParts()}>
         {(part) => {
           const matchedRun = part.type === 'subtask' ? childRuns()[subtaskIndex++] : undefined;
           return <MessagePart part={part} messageInfo={props.info} subtaskRun={matchedRun?.info} />;
