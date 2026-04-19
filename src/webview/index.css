@@ -145,18 +145,25 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
-::-webkit-scrollbar {
-  width: 5px;
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent) transparent;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+/* Narrow scrollbars for inline widgets */
+.tool-invocation-output,
+.interactive-result-code-block pre.code-block,
+.toolbar-popover,
+.tool-invocation-params {
+  scrollbar-width: none;
 }
-::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--color-vscode-fg) 22%, transparent);
+
+.tool-invocation-output:hover,
+.interactive-result-code-block pre.code-block:hover,
+.toolbar-popover:hover,
+.tool-invocation-params:hover {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent) transparent;
 }
 
 input,
