@@ -1,4 +1,4 @@
-import { onMount, onCleanup } from 'solid-js';
+import { onMount, onCleanup, createEffect } from 'solid-js';
 import { client, serverEvents } from '../lib/client';
 import {
   state,
@@ -132,12 +132,47 @@ export function useOpenCode() {
 
     postMessage({ type: 'ready' });
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isLoading() && state.activeSessionId) {
+        recheckSessionStatus(state.activeSessionId);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     onCleanup(() => {
       disposeBridge();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     });
   });
 
+  // Periodic staleness recovery: when loading, poll server every 8s to detect missed idle events
+  createEffect(() => {
+    const loading = isLoading();
+    const sessionId = state.activeSessionId;
+    if (!loading || !sessionId) return;
+
+    const timer = setInterval(() => {
+      if (!isLoading() || !state.activeSessionId) return;
+      recheckSessionStatus(state.activeSessionId);
+    }, 8000);
+
+    onCleanup(() => clearInterval(timer));
+  });
+
   return { client };
+}
+
+export async function recheckSessionStatus(sessionId: string) {
+  try {
+    const statuses = await client.session.status();
+    const status = statuses[sessionId];
+    if (!status || status.type === 'idle') {
+      setIsLoading(false);
+      if (sessionId === state.activeSessionId) {
+        await syncSessionMessages(sessionId).catch(() => {});
+      }
+    }
+  } catch {}
 }
 
 async function initConnection() {
