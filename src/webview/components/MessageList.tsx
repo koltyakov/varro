@@ -22,20 +22,40 @@ export function MessageList() {
     }
     return null;
   });
-  let scrollRaf = 0;
+  let scrollTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let lastScrollAt = 0;
+  let suppressScrollUntil = 0;
+  const SCROLL_INTERVAL_MS = 120;
+
+  function performScroll() {
+    if (!containerRef) return;
+    suppressScrollUntil = performance.now() + 200;
+    containerRef.scrollTop = containerRef.scrollHeight;
+    lastScrollAt = performance.now();
+  }
 
   function scrollToBottom() {
     if (!containerRef || !autoScroll()) return;
-    if (scrollRaf) cancelAnimationFrame(scrollRaf);
-    scrollRaf = requestAnimationFrame(() => {
-      scrollRaf = 0;
-      if (!containerRef) return;
-      containerRef.scrollTop = containerRef.scrollHeight;
-    });
+    const now = performance.now();
+    const elapsed = now - lastScrollAt;
+    if (elapsed >= SCROLL_INTERVAL_MS) {
+      if (scrollTimer) {
+        clearTimeout(scrollTimer);
+        scrollTimer = 0;
+      }
+      performScroll();
+      return;
+    }
+    if (scrollTimer) return;
+    scrollTimer = setTimeout(() => {
+      scrollTimer = 0;
+      performScroll();
+    }, SCROLL_INTERVAL_MS - elapsed);
   }
 
   function onScroll() {
     if (!containerRef) return;
+    if (performance.now() < suppressScrollUntil) return;
     const near =
       containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight < 60;
     setAutoScroll(near);
@@ -47,14 +67,14 @@ export function MessageList() {
     observer.observe(trackRef);
     onCleanup(() => {
       observer.disconnect();
-      if (scrollRaf) cancelAnimationFrame(scrollRaf);
+      if (scrollTimer) clearTimeout(scrollTimer);
     });
   });
 
   return (
     <div
       ref={containerRef}
-      class="interactive-list min-h-0 flex-1 overflow-y-auto scroll-smooth"
+      class="interactive-list min-h-0 flex-1 overflow-y-auto"
       onScroll={onScroll}
     >
       <div ref={trackRef} class="interactive-list-track">

@@ -84,7 +84,7 @@ export function ChatInput() {
     const file = activeFile();
     if (!file) return null;
     const selectedLines = selection();
-    const displayPath = file.relativePath || getLeafPathName(file.path);
+    const displayPath = getLeafPathName(file.relativePath || file.path);
     if (!selectedLines) {
       return {
         filename: displayPath,
@@ -823,6 +823,44 @@ export function ChatInput() {
         <div class="chat-drop-overlay" aria-hidden="true" />
       </Show>
 
+      <Show when={queuedForSession().length > 0}>
+        <div class="chat-queue-container" role="list" aria-label="Queued messages">
+          <For each={queuedForSession()}>
+            {(item) => (
+              <div class="chat-queue-item" role="listitem" title={item.text}>
+                <span class="chat-queue-icon" aria-hidden="true">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 4h10M3 8h10M3 12h6" />
+                  </svg>
+                </span>
+                <span class="chat-queue-label">{item.text}</span>
+                <button
+                  class="chat-queue-action"
+                  onClick={() => sendQueuedAsSteer(item.id, item.text)}
+                  title="Send now as Steer"
+                  aria-label="Send as Steer"
+                >
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 13V3M4 7l4-4 4 4" />
+                  </svg>
+                  <span class="chat-queue-action-label">Steer</span>
+                </button>
+                <button
+                  class="chat-queue-remove"
+                  onClick={() => removeQueuedMessage(item.id)}
+                  title="Remove from queue"
+                  aria-label="Remove from queue"
+                >
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
       <div
         ref={containerRef}
         class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
@@ -846,44 +884,6 @@ export function ChatInput() {
       >
         <Show when={state.todos.length > 0}>
           <TodoList />
-        </Show>
-
-        <Show when={queuedForSession().length > 0}>
-          <div class="chat-queue-container" role="list" aria-label="Queued messages">
-            <For each={queuedForSession()}>
-              {(item) => (
-                <div class="chat-queue-item" role="listitem" title={item.text}>
-                  <span class="chat-queue-icon" aria-hidden="true">
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M3 4h10M3 8h10M3 12h6" />
-                    </svg>
-                  </span>
-                  <span class="chat-queue-label">{item.text}</span>
-                  <button
-                    class="chat-queue-action"
-                    onClick={() => sendQueuedAsSteer(item.id, item.text)}
-                    title="Send now as Steer"
-                    aria-label="Send as Steer"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M8 2l1.8 4.8H15l-4 3.4 1.6 5L8 12l-4.6 3.2 1.6-5-4-3.4h5.2z" />
-                    </svg>
-                    <span class="chat-queue-action-label">Steer</span>
-                  </button>
-                  <button
-                    class="chat-queue-remove"
-                    onClick={() => removeQueuedMessage(item.id)}
-                    title="Remove from queue"
-                    aria-label="Remove from queue"
-                  >
-                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-            </For>
-          </div>
         </Show>
 
         <Show when={hasContext()}>

@@ -1097,6 +1097,7 @@ input:focus-visible {
 
 .toolbar-picker.stop-button {
   color: var(--color-vscode-muted);
+  height: 28px;
 }
 .toolbar-picker.stop-button svg {
   color: var(--color-vscode-error);
