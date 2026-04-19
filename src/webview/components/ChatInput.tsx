@@ -364,40 +364,13 @@ export function ChatInput() {
         />
       </Show>
 
-      <Show when={showAgentPicker()}>
-        <AgentPicker
-          onSelect={(agent) => {
-            setSelectedAgent(agent);
-            setShowAgentPicker(false);
-          }}
-          onClose={() => setShowAgentPicker(false)}
-        />
-      </Show>
-
-      <Show when={showVariantPicker() && availableVariants().length > 0}>
-        <VariantPicker
-          variants={availableVariants()}
-          selected={effectiveVariant()}
-          onSelect={(v) => {
-            const m = currentModel();
-            setSelectedModel({
-              providerID: m.providerID!,
-              modelID: m.modelID!,
-              variant: v,
-            });
-            setShowVariantPicker(false);
-          }}
-          onClose={() => setShowVariantPicker(false)}
-        />
-      </Show>
-
       <Show when={isDraggingOver()}>
         <div class="chat-drop-overlay" aria-hidden="true" />
       </Show>
 
       <div
         ref={containerRef}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() ? 'showing-context-popup' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -515,23 +488,43 @@ export function ChatInput() {
         </div>
 
         <div class="chat-input-toolbars">
-          <div class={`toolbar-left${showContextPopup() ? ' showing-context-popup' : ''}`}>
+          <div class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() ? ' showing-context-popup' : ''}`}>
             <Show when={state.agents.length > 0}>
-              <button
-                class="toolbar-picker"
-                onClick={() => {
-                  setShowAgentPicker(!showAgentPicker());
-                  setShowModelPicker(false);
-                  setShowVariantPicker(false);
-                  setShowBusyMenu(false);
-                }}
-                title="Select agent"
-              >
-                <span class="toolbar-picker-label">{selectedAgentLabel()}</span>
-                <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 6l4 4 4-4" />
-                </svg>
-              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  class="toolbar-picker"
+                  onClick={() => {
+                    setShowAgentPicker(!showAgentPicker());
+                    setShowModelPicker(false);
+                    setShowVariantPicker(false);
+                    setShowContextPopup(false);
+                    setShowBusyMenu(false);
+                  }}
+                  title="Select agent"
+                >
+                  <span class="toolbar-picker-label">{selectedAgentLabel()}</span>
+                  <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 6l4 4 4-4" />
+                  </svg>
+                </button>
+                <Show when={showAgentPicker()}>
+                  <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                    <For each={state.agents}>
+                      {(agent) => (
+                        <button
+                          class={`toolbar-popover-item ${state.selectedAgent === agent.name ? 'selected' : ''}`}
+                          onClick={() => {
+                            setSelectedAgent(agent.name);
+                            setShowAgentPicker(false);
+                          }}
+                        >
+                          {agent.name}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
             </Show>
 
             <button
@@ -557,21 +550,46 @@ export function ChatInput() {
             </button>
 
             <Show when={availableVariants().length > 0}>
-              <button
-                class="toolbar-picker"
-                onClick={() => {
-                  setShowVariantPicker(!showVariantPicker());
-                  setShowAgentPicker(false);
-                  setShowModelPicker(false);
-                  setShowBusyMenu(false);
-                }}
-                title="Thinking level"
-              >
-                <span class="toolbar-picker-label">{formatThinkingLabel(effectiveVariant()!)}</span>
-                <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 6l4 4 4-4" />
-                </svg>
-              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  class="toolbar-picker"
+                  onClick={() => {
+                    setShowVariantPicker(!showVariantPicker());
+                    setShowAgentPicker(false);
+                    setShowModelPicker(false);
+                    setShowContextPopup(false);
+                    setShowBusyMenu(false);
+                  }}
+                  title="Thinking level"
+                >
+                  <span class="toolbar-picker-label">{formatThinkingLabel(effectiveVariant()!)}</span>
+                  <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 6l4 4 4-4" />
+                  </svg>
+                </button>
+                <Show when={showVariantPicker()}>
+                  <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                    <For each={availableVariants()}>
+                      {(v) => (
+                        <button
+                          class={`toolbar-popover-item ${effectiveVariant() === v ? 'selected' : ''}`}
+                          onClick={() => {
+                            const m = currentModel();
+                            setSelectedModel({
+                              providerID: m.providerID!,
+                              modelID: m.modelID!,
+                              variant: v,
+                            });
+                            setShowVariantPicker(false);
+                          }}
+                        >
+                          {formatThinkingLabel(v)}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
             </Show>
 
             <Show when={contextUsage()}>
@@ -792,75 +810,6 @@ function ContextPopup(props: {
           {props.model.providerName} / {props.model.modelName}
         </div>
       </Show>
-    </div>
-  );
-}
-
-function AgentPicker(props: { onSelect: (agent: string) => void; onClose: () => void }) {
-  return (
-    <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
-      <div class="dropdown-menu w-full" onClick={(e) => e.stopPropagation()}>
-        <div class="py-1">
-          <For each={state.agents}>
-            {(agent) => (
-              <button
-                class={`dropdown-item ${state.selectedAgent === agent.name ? 'selected' : ''}`}
-                onClick={() => props.onSelect(agent.name)}
-              >
-                <span class="dropdown-check">
-                  <Show when={state.selectedAgent === agent.name}>
-                    <svg class="h-3 w-3 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                    </svg>
-                  </Show>
-                </span>
-                <span class="min-w-0 flex-1 truncate">{agent.name}</span>
-                <Show when={agent.description}>
-                  <span class="dropdown-hint">{agent.description}</span>
-                </Show>
-              </button>
-            )}
-          </For>
-          <Show when={state.agents.length === 0}>
-            <div class="px-3 py-4 text-center text-[11px] text-vscode-muted">
-              No agents available
-            </div>
-          </Show>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function VariantPicker(props: {
-  variants: string[];
-  selected: string | null;
-  onSelect: (v: string) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
-      <div class="dropdown-menu w-full" onClick={(e) => e.stopPropagation()}>
-        <div class="py-1">
-          <For each={props.variants}>
-            {(v) => (
-              <button
-                class={`dropdown-item ${props.selected === v ? 'selected' : ''}`}
-                onClick={() => props.onSelect(v)}
-              >
-                <span class="dropdown-check">
-                  <Show when={props.selected === v}>
-                    <svg class="h-3 w-3 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                    </svg>
-                  </Show>
-                </span>
-                <span class="min-w-0 flex-1">{formatThinkingLabel(v)}</span>
-              </button>
-            )}
-          </For>
-        </div>
-      </div>
     </div>
   );
 }

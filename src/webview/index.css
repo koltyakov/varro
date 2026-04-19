@@ -655,7 +655,7 @@ input:focus-visible {
   gap: 4px;
   min-width: 0;
   flex: 1;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .interactive-session .chat-input-toolbars .toolbar-right {
@@ -946,6 +946,48 @@ input:focus-visible {
   font-size: 10px;
   margin-left: 1px;
   opacity: 0.5;
+}
+
+.toolbar-popover {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 50;
+  margin-bottom: 4px;
+  min-width: 120px;
+  max-height: 200px;
+  overflow-y: auto;
+  border-radius: 6px;
+  border: 1px solid var(--color-vscode-border);
+  background: var(--color-vscode-widget-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  padding: 3px;
+}
+
+.toolbar-popover-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--color-vscode-fg);
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: background-color 0.08s;
+}
+
+.toolbar-popover-item:hover {
+  background: var(--color-vscode-hover);
+}
+
+.toolbar-popover-item.selected {
+  background: color-mix(in srgb, var(--color-vscode-accent) 12%, transparent);
+  color: var(--color-vscode-accent);
 }
 
 .chat-send-button {
