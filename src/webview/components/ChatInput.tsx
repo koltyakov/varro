@@ -1,4 +1,4 @@
-import { Show, For, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { Show, For, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import {
   state,
   inputText,
@@ -26,6 +26,7 @@ import {
 } from '../lib/message-metrics';
 import { getLeafPathName } from '../lib/path-display';
 import { TodoList } from './TodoList';
+import type { Part, TextPart } from '../types';
 
 export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -38,6 +39,8 @@ export function ChatInput() {
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [showContextPopup, setShowContextPopup] = createSignal(false);
   const [isFocused, setIsFocused] = createSignal(false);
+  const [historyIndex, setHistoryIndex] = createSignal<number | null>(null);
+  const [historyDraft, setHistoryDraft] = createSignal('');
 
   const files = () => state.droppedFiles;
   const clipboardImages = () => state.clipboardImages;
@@ -66,6 +69,15 @@ export function ChatInput() {
   };
 
   function handleKeydown(e: KeyboardEvent) {
+    if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.isComposing) {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (navigateMessageHistory(e.key === 'ArrowUp' ? -1 : 1)) {
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       if ((e.ctrlKey || e.metaKey) && isLoading()) {
@@ -80,9 +92,63 @@ export function ChatInput() {
     const text = inputText();
     if (!text.trim() && state.droppedFiles.length === 0 && state.clipboardImages.length === 0)
       return;
+    setHistoryIndex(null);
+    setHistoryDraft('');
     setInputText('');
     if (textareaRef) textareaRef.style.height = 'auto';
     await sendMessage(text, { noReply: mode === 'steer' });
+  }
+
+  function setComposerValue(value: string) {
+    setInputText(value);
+    queueMicrotask(() => {
+      autoResize();
+      if (!textareaRef) return;
+      textareaRef.focus();
+      textareaRef.setSelectionRange(value.length, value.length);
+    });
+  }
+
+  const messageHistory = createMemo(() =>
+    state.messages
+      .filter((entry) => entry.info.role === 'user')
+      .map((entry) => getUserMessageHistoryText(entry.parts))
+      .filter((text): text is string => !!text)
+  );
+
+  function navigateMessageHistory(direction: -1 | 1) {
+    const history = messageHistory();
+    if (history.length === 0) return false;
+
+    const currentIndex = historyIndex();
+    if (currentIndex === null && inputText().length > 0) return false;
+
+    if (currentIndex === null) {
+      setHistoryDraft(inputText());
+    }
+
+    const nextIndex =
+      currentIndex === null
+        ? direction === -1
+          ? history.length - 1
+          : null
+        : currentIndex + direction;
+
+    if (nextIndex === null) return false;
+
+    if (nextIndex < 0) {
+      return false;
+    }
+
+    if (nextIndex >= history.length) {
+      setHistoryIndex(null);
+      setComposerValue(historyDraft());
+      return true;
+    }
+
+    setHistoryIndex(nextIndex);
+    setComposerValue(history[nextIndex]);
+    return true;
   }
 
   function autoResize() {
@@ -219,6 +285,12 @@ export function ChatInput() {
       window.removeEventListener('drop', handleWindowDrop, true);
       window.removeEventListener('dragleave', handleWindowDragLeave, true);
     });
+  });
+
+  createEffect(() => {
+    state.activeSessionId;
+    setHistoryIndex(null);
+    setHistoryDraft('');
   });
 
   const canSend = () =>
@@ -471,6 +543,8 @@ export function ChatInput() {
             }
             value={inputText()}
             onInput={(e) => {
+              setHistoryIndex(null);
+              setHistoryDraft('');
               setInputText(e.currentTarget.value);
               autoResize();
             }}
@@ -841,6 +915,23 @@ function getDroppedFileLabel(file: { path: string; relativePath: string }) {
     return getLeafPathName(file.path);
   }
   return getLeafPathName(file.relativePath);
+}
+
+function getUserMessageHistoryText(parts: Part[]) {
+  const text = parts
+    .filter((part): part is TextPart => part.type === 'text')
+    .filter((part) => !part.synthetic && !part.ignored)
+    .map((part) => part.text.trim())
+    .filter(
+      (value) =>
+        value.length > 0 &&
+        !value.startsWith('[Working directory:') &&
+        !value.startsWith('[Selection from')
+    )
+    .join('\n\n')
+    .trim();
+
+  return text.length > 0 ? text : null;
 }
 
 async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<string[]> {
