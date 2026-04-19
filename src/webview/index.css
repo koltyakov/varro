@@ -1238,6 +1238,27 @@ input:focus-visible {
   color: var(--color-vscode-muted);
 }
 
+.model-change-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px var(--chat-horizontal-padding);
+}
+
+.model-change-indicator::before,
+.model-change-indicator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
+}
+
+.model-change-label {
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+  white-space: nowrap;
+}
+
 .loading-indicator {
   display: flex;
   align-items: center;

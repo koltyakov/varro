@@ -3,6 +3,8 @@ import { state, isLoading, setIsLoading } from '../lib/state';
 import { isAssistantMessage } from '../lib/message-metrics';
 import { Message } from './Message';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
+import type { AssistantMessage } from '../types';
+import { formatThinkingLabel } from './ModelPicker';
 
 const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
 
@@ -71,15 +73,47 @@ export function MessageList() {
           }
         >
           <For each={visibleMessages()}>
-            {(msg) => (
-              <div
-                class={`interactive-item-container ${
-                  msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
-                }`}
-              >
-                <Message info={msg.info} parts={msg.parts} isLastAssistant={msg.info.id === lastAssistantID()} />
-              </div>
-            )}
+            {(msg, index) => {
+              const modelChange = createMemo(() => {
+                if (!isAssistantMessage(msg.info)) return null;
+                const cur = msg.info as AssistantMessage;
+                if (cur.mode === 'subagent') return null;
+                const msgs = visibleMessages();
+                for (let i = index() - 1; i >= 0; i--) {
+                  if (!isAssistantMessage(msgs[i].info)) continue;
+                  const prev = msgs[i].info as AssistantMessage;
+                  if (prev.mode === 'subagent') continue;
+                  const modelChanged = prev.providerID !== cur.providerID || prev.modelID !== cur.modelID;
+                  const variantChanged = (prev.variant || '') !== (cur.variant || '');
+                  if (!modelChanged && !variantChanged) return null;
+                  const provider = state.providers.find((p) => p.id === cur.providerID);
+                  const modelName = provider?.models[cur.modelID]?.name || cur.modelID;
+                  const parts: string[] = [];
+                  if (modelChanged) parts.push(modelName);
+                  if (cur.variant) parts.push(formatThinkingLabel(cur.variant));
+                  else if (variantChanged) parts.push('No thinking');
+                  return parts.join(' · ');
+                }
+                return null;
+              });
+
+              return (
+                <>
+                  <Show when={modelChange()}>
+                    <div class="model-change-indicator">
+                      <span class="model-change-label">Switched to {modelChange()}</span>
+                    </div>
+                  </Show>
+                  <div
+                    class={`interactive-item-container ${
+                      msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
+                    }`}
+                  >
+                    <Message info={msg.info} parts={msg.parts} isLastAssistant={msg.info.id === lastAssistantID()} />
+                  </div>
+                </>
+              );
+            }}
           </For>
         </Show>
         <Show when={isLoading()}>
