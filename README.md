@@ -1,163 +1,75 @@
-# OpenCode VSCode Extension
+# OpenCode for VS Code
 
-AI-powered agentic coding assistant for VSCode, powered by [OpenCode](https://opencode.ai).
+Use [OpenCode](https://opencode.ai) inside VS Code without leaving the editor. The extension adds a dedicated sidebar chat that connects to your local OpenCode CLI/server and keeps your current workspace context close to the conversation.
+
+## What It Does
+
+- Opens OpenCode in a VS Code sidebar view
+- Uses the active file, current selection, and diagnostics as live editor context
+- Lets you attach extra files and folders from the Explorer
+- Supports pasted image attachments in chat
+- Lets you switch available models and thinking levels from your OpenCode setup
+- Shows permission prompts, session history, share actions, and generated diffs in the editor workflow
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org) >= 18
-- [VSCode](https://code.visualstudio.com) >= 1.85
-- [OpenCode CLI](https://github.com/anomalyco/opencode) installed globally (`npm install -g opencode-ai`)
+Before using the extension, make sure you have:
 
-## Quick Start
-
-```sh
-# 1. Install dependencies
-npm install
-
-# 2. Build the extension
-npm run build
-```
-
-Then see below for how to load it into VSCode.
-
-## Installing the Extension in VSCode
-
-There are two ways to load the extension:
-
-### Option A: Install from VSIX (for regular use)
+- [VS Code](https://code.visualstudio.com/) 1.91 or newer
+- [Node.js](https://nodejs.org/) 18 or newer
+- The OpenCode CLI installed and available on your `PATH`
 
 ```sh
-# Package the extension into a .vsix file
-npm run package
+npm install -g opencode-ai
 ```
 
-This produces `vscode-opencode-0.1.0.vsix` in the project root. Install it:
+The extension talks to a local OpenCode server on port `4096` by default and will try to start it automatically. If your CLI lives somewhere custom, set `opencode.server.command` in VS Code settings.
 
-```sh
-code --install-extension vscode-opencode-0.1.0.vsix
-```
+## Getting Started
 
-Or via the VSCode UI: open the **Extensions** view (`Cmd+Shift+X`), click the `…` menu, select **"Install from VSIX..."**, and pick the `.vsix` file.
-
-Reload the window after installing (`Cmd+Shift+P` → **"Developer: Reload Window"**).
-
-### Option B: Run in Extension Development Host (for development/debugging)
-
-1. Open this project in VSCode:
+1. Install the extension.
+2. Install the OpenCode CLI:
 
    ```sh
-   code /path/to/vschat
+   npm install -g opencode-ai
    ```
 
-2. Press **F5** to launch a new **Extension Development Host** window with the extension loaded. (If prompted, select **"VS Code Extension Development"** as the debug configuration.)
+3. Open VS Code and launch the chat:
+   - Click the **OpenCode** icon in the Activity Bar, or
+   - Run **OpenCode: Focus Chat**
+4. Start a prompt. The extension automatically makes the active file and current selection available as context.
+5. Add more context when needed:
+   - Right-click a file or folder in Explorer and choose **OpenCode: Add to Context**
+   - Press `Cmd+Shift+K` / `Ctrl+Shift+K`
+   - Drag files or folders into the chat
+   - Paste an image into the input box
+6. If OpenCode asks for permission to run a tool or action, approve or deny it directly in the chat panel.
 
-3. The extension is now running in the new window. Look for the **OpenCode** icon in the sidebar, or press `Cmd+Shift+O`.
+## Commands
 
-4. To make changes and see them reflected, run the watchers in a terminal:
+- `OpenCode: Focus Chat` opens the sidebar chat. Shortcut: `Cmd+Shift+O` / `Ctrl+Shift+O`
+- `OpenCode: Add to Context` attaches the current file, or selected Explorer items, as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K`
+- `OpenCode: New Session` starts a fresh chat session
+- `OpenCode: Share Session` triggers OpenCode's session sharing flow
+- `OpenCode: Abort Session` stops the current run
 
-   ```sh
-   npm run dev
-   ```
+## Settings
 
-   Then reload the Extension Development Host window (`Cmd+Shift+P` → **"Developer: Reload Window"** or the restart button in the debug toolbar).
+The extension contributes these user-facing settings:
 
-## Debugging
+- `opencode.server.autoStart`: automatically start the local OpenCode server when the extension activates
+- `opencode.server.port`: port used to connect to OpenCode, default `4096`
+- `opencode.server.command`: optional full path to the OpenCode CLI executable
+- `opencode.context.autoAttachFile`: context attachment preference exposed in settings
+- `opencode.context.autoAttachSelection`: selection attachment preference exposed in settings
 
-### Debug the extension host (Node.js)
+## Troubleshooting
 
-- **Breakpoints**: Set breakpoints in any `src/extension/*.ts` file. The Extension Development Host will pause at them.
-- **Debug Console**: Logs from `src/extension/logger.ts` appear in the Debug Console of the parent VSCode window.
-- **Attach manually**: Use the **"Attach to Node Process"** command from the command palette.
+- If you see **OpenCode unavailable**, confirm the CLI is installed and that `opencode` works in a terminal.
+- If you already run OpenCode yourself, point the extension at the correct port with `opencode.server.port`, or disable `opencode.server.autoStart`.
+- If the CLI is not on your `PATH`, set `opencode.server.command` to the full executable path.
+- If no models appear, check your OpenCode configuration and available providers in your local OpenCode setup.
 
-### Debug the webview (browser)
+## Development
 
-The webview runs in an iframe inside VSCode. To debug it:
-
-1. In the **Extension Development Host** window, run **"Developer: Open Webview Developer Tools"** from the command palette (`Cmd+Shift+P`)
-2. This opens Chrome DevTools for the webview. Inspect elements, view console logs, and set breakpoints.
-
-The webview build produces source maps (`dist/webview/webview.js.map`). Enable source maps in DevTools settings for the best experience.
-
-## Connecting to an Existing OpenCode Server
-
-1. Go to the **Run and Debug** view (`Cmd+Shift+D` / `Ctrl+Shift+D`)
-2. If there is no existing launch configuration, create one:
-   - Click **"create a launch.json file"**
-   - Select **VS Code Extensions** as the environment
-   - This will generate `.vscode/launch.json` automatically
-3. Set the **launch program** field to `${workspaceFolder}` (the default for extension debugging)
-4. Press **F5** (or click **Run > Start Debugging**)
-
-A new VSCode **Extension Development Host** window will open with the extension loaded.
-
-If you don't have a `launch.json`, you can also press F5 directly — VSCode will prompt you to select the extension to debug.
-
-### 5. Verify the extension is running
-
-- Open the sidebar and look for the **OpenCode** icon in the auxiliary bar (right sidebar)
-- Or press `Cmd+Shift+O` / `Ctrl+Shift+O` to focus the chat
-- Check the **Debug Console** in the original VSCode window for extension logs
-
-### 6. Debug the extension host (Node.js)
-
-- **Breakpoints**: Set breakpoints in any `src/extension/*.ts` file. The Extension Development Host will pause at them.
-- **Debug Console**: Logs from `src/extension/logger.ts` appear in the Debug Console of the parent VSCode window.
-- **Attach manually**: If you need to attach the debugger to a running Extension Development Host, use the **"Attach to Node Process"** command from the command palette.
-
-### 7. Debug the webview (browser)
-
-The webview runs in an iframe inside VSCode. To debug it:
-
-1. In the **Extension Development Host** window, run the command **"Developer: Open Webview Developer Tools"** from the command palette (`Cmd+Shift+P`)
-2. This opens Chrome DevTools for the webview. You can inspect elements, view console logs, and set breakpoints in the webview JavaScript.
-
-For source-mapped debugging of the SolidJS webview (`src/webview/`):
-
-- The webview build produces source maps (`dist/webview/webview.js.map`). Enable source maps in DevTools settings for the best experience.
-
-## Connecting to an Existing OpenCode Server
-
-By default, the extension auto-starts the OpenCode server on port **4096**. You can also connect to an already-running server:
-
-1. Start the server manually:
-
-   ```sh
-   opencode serve --port 4096
-   ```
-
-2. In VSCode settings, configure:
-   - `opencode.server.port` — the port the server is running on (default: `4096`)
-   - `opencode.server.autoStart` — set to `false` to prevent the extension from spawning its own server process
-
-3. Reload the VSCode window (`Cmd+Shift+P` → **"Developer: Reload Window"**)
-
-The extension will discover the running server via its health check endpoint (`http://127.0.0.1:<port>/global/health`).
-
-## Project Structure
-
-```
-src/
-  extension/          # VSCode extension (Node.js, runs in extension host)
-    extension.ts      # Entry point — activates the extension
-    server.ts         # Spawns/manages the OpenCode CLI server process
-    sidebar-provider.ts  # Webview view provider for the sidebar panel
-    context-provider.ts # Manages editor context (active file, selection)
-    commands.ts       # VSCode command registrations
-    file-drop.ts      # File drop handling
-    logger.ts         # Extension-side logging
-  webview/            # Chat UI (SolidJS, runs in webview iframe)
-  shared/             # Shared protocol types between extension and webview
-```
-
-## Scripts
-
-| Command                  | Description                                  |
-| ------------------------ | -------------------------------------------- |
-| `npm run build`          | Build extension and webview                  |
-| `npm run build:extension`| Build extension only                         |
-| `npm run build:webview`  | Build webview only                           |
-| `npm run watch:extension`| Watch and rebuild extension on changes       |
-| `npm run watch:webview`  | Watch and rebuild webview on changes         |
-| `npm run dev`            | Watch both extension and webview             |
-| `npm run lint`           | Type-check extension and webview             |
-| `npm run package`        | Build and package as VSIX                    |
+Packaging, source installs, debugging, scripts, and project structure are documented in [docs/development.md](docs/development.md).
