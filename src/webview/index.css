@@ -437,15 +437,19 @@ input:focus-visible {
   opacity: 0.5;
 }
 .rendered-markdown ol {
-  padding-inline-start: 22px;
+  list-style: none;
+  padding-inline-start: 18px;
   margin: 0 0 18px 0;
 }
 .rendered-markdown ol > li {
-  padding-left: 2px;
+  position: relative;
 }
-.rendered-markdown ol > li::marker {
+.rendered-markdown ol > li::before {
+  content: '–';
+  position: absolute;
+  left: -16px;
   color: var(--color-vscode-muted);
-  font-size: 0.9em;
+  opacity: 0.5;
 }
 .rendered-markdown li {
   margin: 6px 0;

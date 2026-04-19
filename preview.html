@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenCode Webview Preview</title>
+  <style>
+    body { margin: 0; padding: 0; background: #1e1e1e; color: #cccccc; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    #root { width: 400px; height: 100vh; margin: 0 auto; border-left: 1px solid #333; border-right: 1px solid #333; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const SERVER_URL = new URLSearchParams(location.search).get('server') || 'http://127.0.0.1:4096';
+    const DIRECTORY = new URLSearchParams(location.search).get('dir') || '';
+    const directoryHeaders = DIRECTORY ? { 'x-opencode-directory': encodeURIComponent(DIRECTORY) } : {};
+
+    function scopeUrl(path) {
+      const url = new URL(path, SERVER_URL);
+      if (DIRECTORY && !url.pathname.startsWith('/global/') && !url.searchParams.has('directory')) {
+        url.searchParams.set('directory', DIRECTORY);
+      }
+      return url.toString();
+    }
+
+    function postToWebview(msg) {
+      window.postMessage(msg, '*');
+    }
+
+    window.__sendToExtension = async function(msg) {
+      if (msg.type === 'api/request') {
+        try {
+          const { id, method, path, body } = msg.payload;
+          const init = { method, headers: { 'Content-Type': 'application/json', ...directoryHeaders } };
+          if (body !== undefined && method !== 'GET' && method !== 'HEAD') init.body = JSON.stringify(body);
+          const res = await fetch(scopeUrl(path), init);
+          const text = await res.text();
+          let data = text;
+          try { data = text ? JSON.parse(text) : null; } catch {}
+          if (!res.ok) {
+            const errMsg = typeof data === 'object' && data && 'message' in data ? data.message : res.statusText;
+            postToWebview({ type: 'api/response', payload: { id, error: `${res.status} ${errMsg}` } });
+          } else {
+            postToWebview({ type: 'api/response', payload: { id, data } });
+          }
+        } catch (err) {
+          postToWebview({ type: 'api/response', payload: { id: msg.payload.id, error: err.message } });
+        }
+        return;
+      }
+      if (msg.type === 'ready') {
+        postToWebview({ type: 'server/status', payload: { state: 'running', url: SERVER_URL } });
+        postToWebview({ type: 'theme/update', payload: { theme: 'dark' } });
+        postToWebview({
+          type: 'context/update',
+          payload: {
+            workspacePath: DIRECTORY || null,
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
+          }
+        });
+        startEventStream();
+        return;
+      }
+      console.log('[bridge]', msg.type, msg);
+    };
+
+    async function startEventStream() {
+      try {
+        const res = await fetch(scopeUrl('/event'), {
+          headers: { Accept: 'text/event-stream', ...directoryHeaders }
+        });
+        if (!res.ok || !res.body) throw new Error(`SSE ${res.status}`);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf('\n\n')) !== -1) {
+            const chunk = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            const dataLines = [];
+            for (const line of chunk.split('\n')) {
+              if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+            }
+            if (dataLines.length) {
+              try {
+                const parsed = JSON.parse(dataLines.join('\n'));
+                postToWebview({ type: 'server/event', payload: { type: 'event', ...parsed } });
+              } catch {}
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[sse]', err.message);
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/dist/webview/webview.css" />
+  <script src="/dist/webview/webview.js"></script>
+</body>
+</html>
