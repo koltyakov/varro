@@ -215,11 +215,11 @@ input:focus-visible {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 10px var(--chat-horizontal-padding) 20px;
+  padding: 14px var(--chat-horizontal-padding) 24px;
 }
 
 .interactive-item-container {
-  padding: 4px 0;
+  padding: 6px 0;
   display: flex;
   flex-direction: column;
   color: var(--color-vscode-session-fg);
@@ -230,12 +230,12 @@ input:focus-visible {
 
 .interactive-item-container.interactive-request {
   align-items: flex-end;
-  padding: 8px 0 4px 0;
+  padding: 10px 0 6px 0;
 }
 
 .interactive-item-container.interactive-response {
   align-items: flex-start;
-  padding: 2px 0 8px 0;
+  padding: 4px 0 12px 0;
 }
 
 .chat-turn {
@@ -260,7 +260,7 @@ input:focus-visible {
 .chat-turn-card {
   max-width: min(78%, 720px);
   border-radius: 16px;
-  padding: 11px 14px;
+  padding: 12px 15px;
   background: var(--color-vscode-request-bubble);
 }
 
@@ -270,13 +270,18 @@ input:focus-visible {
 }
 
 .assistant-turn-content {
-  padding-top: 0;
+  width: min(100%, 820px);
+  padding: 12px 14px 14px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 24%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 78%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
 }
 
 .assistant-message-flow {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .chat-turn-content > :last-child,
@@ -341,13 +346,14 @@ input:focus-visible {
 }
 
 .rendered-markdown {
-  line-height: 1.5;
-  font-size: 13px;
+  line-height: 1.65;
+  font-size: 13.5px;
   font-family: var(--font-sans);
+  color: var(--color-vscode-session-fg);
 }
 
 .rendered-markdown p {
-  margin: 0 0 16px 0;
+  margin: 0 0 14px 0;
 }
 
 .rendered-markdown > p:first-child {
@@ -363,12 +369,12 @@ input:focus-visible {
 
 .rendered-markdown blockquote {
   position: relative;
-  margin: -8px 0 24px 0;
-  padding: 0 8px 0 4px;
+  margin: 0 0 18px 0;
+  padding: 2px 4px 2px 14px;
   border: none;
-  border-radius: 0;
+  border-radius: 0 8px 8px 0;
   background: none;
-  color: color-mix(in srgb, var(--color-vscode-fg) 80%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-fg) 88%, transparent);
 }
 
 .rendered-markdown blockquote::before {
@@ -388,26 +394,31 @@ input:focus-visible {
 }
 
 .rendered-markdown h1 {
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 600;
-  margin: 1.5em 0 0.875em;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  margin: 1.4em 0 0.7em;
 }
 .rendered-markdown h2 {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
-  margin: 1.5em 0 0.875em;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  margin: 1.35em 0 0.68em;
 }
 .rendered-markdown h3 {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
-  margin: 1.5em 0 0.875em;
+  line-height: 1.4;
+  margin: 1.25em 0 0.65em;
 }
 
 .rendered-markdown ul {
   position: relative;
   list-style: none;
-  padding-inline-start: 16px;
-  margin: -4px 0 20px 0;
+  padding-inline-start: 18px;
+  margin: 0 0 18px 0;
 }
 .rendered-markdown ul::before {
   content: '';
@@ -425,11 +436,11 @@ input:focus-visible {
   );
 }
 .rendered-markdown ol {
-  padding-inline-start: 16px;
-  margin: -4px 0 20px 0;
+  padding-inline-start: 22px;
+  margin: 0 0 18px 0;
 }
 .rendered-markdown li {
-  margin: 4px 0;
+  margin: 6px 0;
 }
 .rendered-markdown li > p {
   margin: 0;
@@ -463,11 +474,11 @@ input:focus-visible {
 
 .rendered-markdown code {
   font-family: var(--font-mono);
-  font-size: 0.846em;
+  font-size: 0.89em;
   color: var(--color-vscode-fg);
-  background-color: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
-  padding: 2px 5px;
-  border-radius: 4px;
+  background-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
+  padding: 2px 6px;
+  border-radius: 5px;
   border: none;
   white-space: pre-wrap;
   font-weight: 500;
@@ -475,13 +486,14 @@ input:focus-visible {
 
 .rendered-markdown table {
   text-align: left;
-  border-radius: 4px;
+  border-radius: 8px;
   overflow: hidden;
   border-collapse: separate;
   border-spacing: 0;
   border: 1px solid var(--color-vscode-request-border);
   width: 100%;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 75%, transparent);
 }
 
 .rendered-markdown table td,
@@ -489,7 +501,7 @@ input:focus-visible {
   border: 1px solid var(--color-vscode-request-border);
   border-top: none;
   border-left: none;
-  padding: 4px 6px;
+  padding: 7px 9px;
 }
 
 .rendered-markdown table th {
@@ -509,19 +521,20 @@ input:focus-visible {
 
 .interactive-result-code-block {
   position: relative;
-  margin: 0 0 16px 0;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
+  margin: 2px 0 18px 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 34%, transparent);
   background-color: var(--color-vscode-result-editor-bg);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
 }
 
 .interactive-result-code-block .code-block-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 10px;
-  font-size: 11px;
+  padding: 7px 12px;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-fg) 4%, var(--color-vscode-widget-bg));
@@ -538,14 +551,14 @@ input:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
   color: var(--color-vscode-icon-fg);
   cursor: pointer;
   border: none;
   background: none;
-  opacity: 0.3;
+  opacity: 0.5;
   transition:
     opacity 0.15s,
     background-color 0.15s;
@@ -570,11 +583,11 @@ input:focus-visible {
 
 .interactive-result-code-block pre.code-block {
   margin: 0;
-  padding: 8px 12px;
+  padding: 12px 14px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.65;
   tab-size: 2;
   background: var(--color-vscode-result-editor-bg) !important;
 }
@@ -589,21 +602,13 @@ input:focus-visible {
   white-space: pre;
 }
 
-.interactive-result-code-block pre.code-block.shiki {
-  color: var(--color-vscode-fg);
-}
-
-.interactive-result-code-block pre.code-block.shiki code {
-  display: block;
-}
-
 .interactive-session .chat-input-container {
   box-sizing: border-box;
   cursor: text;
   background-color: var(--color-vscode-input-bg);
   border: 1px solid var(--color-vscode-input-border, transparent);
-  border-radius: 10px;
-  padding: 8px 10px;
+  border-radius: 12px;
+  padding: 10px 12px;
   width: 100%;
   position: relative;
   overflow: hidden;
@@ -624,10 +629,10 @@ input:focus-visible {
 
 .interactive-session .interactive-input-part {
   margin: 0 var(--chat-horizontal-padding) 12px;
-  padding: 6px 0;
+  padding: 8px 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   position: relative;
 }
 
@@ -635,9 +640,9 @@ input:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 10%, transparent);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
 }
 
 .interactive-session .chat-input-toolbars .toolbar-left {
@@ -873,13 +878,13 @@ input:focus-visible {
 }
 
 .interactive-session .chat-editor-container textarea {
-  min-height: 36px;
+  min-height: 40px;
   width: 100%;
   resize: none;
   background: transparent;
   padding: 2px 6px;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.6;
   color: var(--color-vscode-input-fg);
   outline: none;
   font-family: inherit;
@@ -888,7 +893,7 @@ input:focus-visible {
 
 .interactive-session .chat-editor-container textarea::placeholder {
   color: var(--color-vscode-muted);
-  opacity: 0.6;
+  opacity: 0.8;
 }
 
 .toolbar-icon {
@@ -913,8 +918,8 @@ input:focus-visible {
   display: flex;
   align-items: center;
   gap: 3px;
-  height: 24px;
-  padding: 0 8px;
+  height: 26px;
+  padding: 0 9px;
   border-radius: 6px;
   color: var(--color-vscode-fg);
   cursor: pointer;
@@ -923,7 +928,7 @@ input:focus-visible {
   transition:
     background-color 0.12s,
     border-color 0.12s;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -1011,11 +1016,11 @@ input:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
-  padding: 3px 8px;
+  padding: 4px 9px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
-  border-radius: 6px;
+  border-radius: 7px;
   height: auto;
   max-width: 100%;
   width: fit-content;
@@ -1073,21 +1078,21 @@ input:focus-visible {
   outline: none;
   position: relative;
   color: var(--color-vscode-muted);
-  border: none;
-  border-radius: 6px;
-  background: none;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
   overflow: hidden;
 }
 
 .chat-thinking-box .thinking-header {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 12.5px;
   color: var(--color-vscode-fg);
-  opacity: 0.7;
+  opacity: 0.84;
   cursor: pointer;
-  padding: 4px 2px;
+  padding: 8px 10px;
   border: none;
   background: transparent;
   width: 100%;
@@ -1108,19 +1113,19 @@ input:focus-visible {
 }
 
 .chat-thinking-box .thinking-content {
-  border-top: none;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
   padding: 0;
   max-height: 220px;
   overflow-y: auto;
 }
 
 .chat-thinking-box .thinking-content .thinking-item {
-  padding: 6px 6px 6px 20px;
+  padding: 10px 12px 12px;
   position: relative;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 12.5px;
+  line-height: 1.65;
   color: var(--color-vscode-fg);
-  opacity: 0.65;
+  opacity: 0.82;
 }
 
 .shimmer-progress {
@@ -1154,9 +1159,9 @@ input:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 0 2px 0;
+  padding: 10px 2px 2px 2px;
   color: var(--color-vscode-muted);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .loading-indicator .loading-spinner {
@@ -1169,21 +1174,21 @@ input:focus-visible {
 }
 
 .diff-summary {
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 .diff-summary .diff-summary-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: 6px;
+  font-size: 12px;
   color: var(--color-vscode-fg);
-  opacity: 0.65;
+  opacity: 0.8;
   border: none;
   background: none;
   cursor: pointer;
-  padding: 4px 2px;
-  border-radius: 4px;
+  padding: 6px 4px;
+  border-radius: 6px;
   transition: opacity 0.1s;
 }
 
@@ -1214,26 +1219,26 @@ kbd {
 
 .chat-tool-invocation-part {
   margin: 0;
-  border: none;
-  border-radius: 6px;
-  background: none;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
   overflow: hidden;
 }
 
 .chat-tool-invocation-part:not(:last-child) {
-  margin-bottom: 2px;
+  margin-bottom: 6px;
 }
 
 .chat-tool-invocation-part .tool-invocation-header {
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 6px;
-  padding: 3px 2px;
+  gap: 8px;
+  padding: 8px 10px;
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--color-vscode-fg);
   text-align: left;
   transition: opacity 0.1s;
@@ -1277,10 +1282,10 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-duration {
-  font-size: 11px;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   color: var(--color-vscode-fg);
-  opacity: 0.6;
+  opacity: 0.72;
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -1309,42 +1314,42 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-preview {
-  padding: 0 2px 4px 18px;
+  padding: 0 10px 8px 24px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--color-vscode-fg);
-  opacity: 0.55;
+  opacity: 0.72;
 }
 
 .chat-tool-invocation-part .tool-invocation-detail {
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 10%, transparent);
-  padding: 8px 8px 10px 18px;
-  font-size: 11px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
+  padding: 10px 12px 12px 24px;
+  font-size: 11.5px;
 }
 
 .chat-tool-invocation-part .tool-invocation-input {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  margin-bottom: 6px;
+  gap: 3px;
+  margin-bottom: 8px;
 }
 
 .chat-tool-invocation-part .tool-input-entry {
   display: flex;
   gap: 6px;
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .chat-tool-invocation-part .tool-input-key {
   color: var(--color-vscode-fg);
-  opacity: 0.6;
+  opacity: 0.72;
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
 .chat-tool-invocation-part .tool-input-key::after {
@@ -1353,9 +1358,9 @@ kbd {
 
 .chat-tool-invocation-part .tool-input-value {
   color: var(--color-vscode-fg);
-  opacity: 0.75;
+  opacity: 0.88;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 11.5px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1363,18 +1368,18 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-output {
-  max-height: 160px;
+  max-height: 200px;
   overflow: auto;
   white-space: pre-wrap;
   font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 11.5px;
+  line-height: 1.6;
   color: var(--color-vscode-fg);
-  opacity: 0.7;
+  opacity: 0.9;
   margin: 0;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 5%, transparent);
 }
 
 .chat-tool-invocation-part .tool-invocation-error {
@@ -1462,19 +1467,19 @@ kbd {
 
 .chat-subtask-part {
   margin: 0;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  padding: 3px 2px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 2.5%, transparent);
+  padding: 8px 10px;
 }
 
 .chat-subtask-part .subtask-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 8px;
+  font-size: 12.5px;
   color: var(--color-vscode-fg);
-  opacity: 0.7;
+  opacity: 0.88;
 }
 
 .chat-subtask-part .subtask-dot {
@@ -1490,11 +1495,11 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: 8px;
-  margin-top: 4px;
-  font-size: 11px;
+  margin-left: 12px;
+  margin-top: 6px;
+  font-size: 11.5px;
   color: var(--color-vscode-fg);
-  opacity: 0.5;
+  opacity: 0.68;
 }
 
 .chat-subtask-part .subtask-agent-name {
@@ -1509,29 +1514,30 @@ kbd {
 
 .chat-retry-notice {
   margin: 4px 0;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--color-vscode-warning);
-  opacity: 0.7;
-  padding: 4px 2px;
-  border-radius: 4px;
-  background: none;
-  border: none;
+  opacity: 0.88;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-vscode-warning) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 16%, transparent);
 }
 
 .chat-retry-notice .chat-retry-error {
   margin-left: 4px;
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 11px;
+  opacity: 0.82;
 }
 
 .chat-compaction-notice {
   margin: 4px 0;
-  padding: 4px 2px;
-  font-size: 11px;
+  padding: 7px 10px;
+  font-size: 11.5px;
   color: var(--color-vscode-fg);
-  opacity: 0.35;
-  border: none;
-  border-radius: 4px;
+  opacity: 0.58;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 2%, transparent);
 }
 
 .chat-thinking-box .thinking-text {
@@ -1541,9 +1547,9 @@ kbd {
 
 .chat-image-figure {
   margin: 6px 0;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-widget-border) 70%, transparent);
-  padding: 8px;
+  padding: 10px;
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 72%, transparent);
 }
 
@@ -1555,8 +1561,8 @@ kbd {
 }
 
 .chat-image-figure .chat-image-caption {
-  margin-top: 4px;
-  font-size: 10px;
+  margin-top: 6px;
+  font-size: 11px;
   color: var(--color-vscode-muted);
 }
 
@@ -1567,10 +1573,10 @@ kbd {
 .interactive-response-error-details {
   display: flex;
   align-items: start;
-  gap: 6px;
-  margin-top: 4px;
+  gap: 8px;
+  margin-top: 6px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-error) 18%, transparent);
   background: color-mix(in srgb, var(--color-vscode-error) 7%, transparent);
 }
@@ -1586,7 +1592,7 @@ kbd {
 .interactive-response-error-details .error-message-text {
   color: var(--color-vscode-error);
   margin: 0;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .interactive-loading-row {
@@ -1597,6 +1603,7 @@ kbd {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
+  line-height: 1.6;
 }
 
 .user-message-empty {
