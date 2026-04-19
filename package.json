@@ -39,6 +39,7 @@
     "views": {
       "opencode": [
         {
+          "icon": "assets/icon.png",
           "type": "webview",
           "id": "opencode.chat",
           "name": "OpenCode"
