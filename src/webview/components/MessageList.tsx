@@ -1,5 +1,6 @@
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { state, isLoading } from '../lib/state';
+import { isAssistantMessage } from '../lib/message-metrics';
 import { Message } from './Message';
 
 const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
@@ -11,6 +12,13 @@ export function MessageList() {
   let trackRef: HTMLDivElement | undefined;
   const [autoScroll, setAutoScroll] = createSignal(true);
   const visibleMessages = createMemo(() => state.messages);
+  const lastAssistantID = createMemo(() => {
+    const msgs = visibleMessages();
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (isAssistantMessage(msgs[i].info)) return msgs[i].info.id;
+    }
+    return null;
+  });
   let scrollRaf = 0;
 
   function scrollToBottom() {
@@ -68,7 +76,7 @@ export function MessageList() {
                   msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
                 }`}
               >
-                <Message info={msg.info} parts={msg.parts} />
+                <Message info={msg.info} parts={msg.parts} isLastAssistant={msg.info.id === lastAssistantID()} />
               </div>
             )}
           </For>

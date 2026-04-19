@@ -6,7 +6,7 @@ import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
 import { state } from '../lib/state';
 
-export function Message(props: { info: MessageType; parts: Part[] }) {
+export function Message(props: { info: MessageType; parts: Part[]; isLastAssistant?: boolean }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
   const isSubagent = () => assistant()?.mode === 'subagent';
@@ -18,11 +18,11 @@ export function Message(props: { info: MessageType; parts: Part[] }) {
     () => {
       const info = assistant();
       if (!info?.time.completed) return null;
-      return `${info.sessionID}:${info.id}`;
+      if (!props.isLastAssistant) return null;
+      return info.sessionID;
     },
-    async (key) => {
-      const [sessionID, messageID] = key.split(':');
-      return client.session.diff(sessionID, messageID).catch(() => [] as FileDiff[]);
+    async (sessionID) => {
+      return client.session.diff(sessionID).catch(() => [] as FileDiff[]);
     }
   );
   const shouldRender = () =>

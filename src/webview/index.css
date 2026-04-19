@@ -1707,7 +1707,7 @@ kbd {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-vscode-fg);
-  max-width: 220px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

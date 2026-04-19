@@ -34,16 +34,7 @@ export function MessagePart(props: {
           </div>
         );
       case 'patch':
-        return (
-          <div class="chat-subtask-part">
-            <div class="subtask-header">
-              <span class="subtask-check">✓</span>
-              <span>
-                Applied patch to {part.files.length} file{part.files.length === 1 ? '' : 's'}
-              </span>
-            </div>
-          </div>
-        );
+        return null;
       case 'retry':
         return (
           <div class="chat-retry-notice">
