@@ -528,14 +528,8 @@ export function ChatInput() {
                 title="Select agent"
               >
                 <span class="toolbar-picker-label">{selectedAgentLabel()}</span>
-                <svg
-                  class="codicon-chevron"
-                  width="10"
-                  height="10"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                >
-                  <path d="M4.5 6l3.5 4 3.5-4z" />
+                <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 6l4 4 4-4" />
                 </svg>
               </button>
             </Show>
@@ -557,14 +551,8 @@ export function ChatInput() {
               <Show when={currentModel().modelName} fallback={<span>Model</span>}>
                 <span class="toolbar-picker-label model-name">{currentModel().modelName}</span>
               </Show>
-              <svg
-                class="codicon-chevron"
-                width="10"
-                height="10"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d="M4.5 6l3.5 4 3.5-4z" />
+              <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 6l4 4 4-4" />
               </svg>
             </button>
 
@@ -580,14 +568,8 @@ export function ChatInput() {
                 title="Thinking level"
               >
                 <span class="toolbar-picker-label">{formatThinkingLabel(effectiveVariant()!)}</span>
-                <svg
-                  class="codicon-chevron"
-                  width="10"
-                  height="10"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                >
-                  <path d="M4.5 6l3.5 4 3.5-4z" />
+                <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 6l4 4 4-4" />
                 </svg>
               </button>
             </Show>
@@ -670,8 +652,8 @@ export function ChatInput() {
                     onClick={() => setShowBusyMenu(!showBusyMenu())}
                     title="More send options"
                   >
-                    <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M4.5 10l3.5-4 3.5 4z" />
+                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 10l4-4 4 4" />
                     </svg>
                   </button>
                 </div>

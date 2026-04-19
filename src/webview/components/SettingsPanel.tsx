@@ -69,9 +69,13 @@ function ProviderSection(props: { provider: (typeof state.providers)[0] }) {
           <svg
             class={`settings-chevron ${expanded() ? 'expanded' : ''}`}
             viewBox="0 0 16 16"
-            fill="currentColor"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
           >
-            <path d="M6 4l4 4-4 4z" />
+            <path d="M6 4l4 4-4 4" />
           </svg>
           <span class="settings-provider-name">{props.provider.name}</span>
           <span class="settings-provider-count">

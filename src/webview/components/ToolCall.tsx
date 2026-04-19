@@ -216,9 +216,13 @@ function GenericToolCall(props: {
         <svg
           class={`tool-invocation-chevron ${props.expanded ? 'expanded' : ''}`}
           viewBox="0 0 16 16"
-          fill="currentColor"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
-          <path d="M6 4l4 4-4 4z" />
+          <path d="M6 4l4 4-4 4" />
         </svg>
       </button>
       <Show when={props.preview && !props.expanded && props.preview.text !== props.title}>

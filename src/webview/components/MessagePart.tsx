@@ -75,11 +75,15 @@ function ReasoningBlock(props: { text: string }) {
         <svg
           class={`chevron ${expanded() ? 'expanded' : ''}`}
           viewBox="0 0 16 16"
-          fill="currentColor"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
           width="12"
           height="12"
         >
-          <path d="M6 4l4 4-4 4z" />
+          <path d="M6 4l4 4-4 4" />
         </svg>
         <Show when={isStreaming()} fallback={<span class="thinking-label">Thinking</span>}>
           <span class="thinking-label shimmer-progress">Thinking</span>
