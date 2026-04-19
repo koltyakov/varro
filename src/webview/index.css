@@ -1390,6 +1390,126 @@ kbd {
   color: color-mix(in srgb, var(--color-vscode-muted) 60%, transparent);
 }
 
+.file-edit-card {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 76%, transparent);
+  overflow: hidden;
+}
+
+.file-edit-card:not(:last-child) {
+  margin-bottom: 8px;
+}
+
+.file-edit-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+  text-align: left;
+  transition:
+    color 0.1s,
+    background-color 0.1s;
+}
+
+.file-edit-header:hover {
+  background: color-mix(in srgb, var(--color-vscode-toolbar-hover) 70%, transparent);
+  color: var(--color-vscode-fg);
+}
+
+.file-edit-status-icon {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+}
+
+.file-edit-status-done {
+  color: var(--color-vscode-success);
+}
+
+.file-edit-status-error {
+  color: var(--color-vscode-error);
+}
+
+.file-edit-file-icon {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
+}
+
+.file-edit-action-label {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-vscode-muted) 80%, transparent);
+  flex-shrink: 0;
+}
+
+.file-edit-path-link {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-vscode-fg) !important;
+  opacity: 0.85;
+}
+
+.file-edit-path-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.file-edit-diff-stats {
+  display: flex;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.file-edit-done-badge {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--color-vscode-success) 70%, transparent);
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.file-edit-running-label {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
+  flex-shrink: 0;
+}
+
+.file-edit-diff-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-vscode-muted) 60%, transparent);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 0.1s,
+    background-color 0.1s;
+}
+
+.file-edit-diff-btn:hover {
+  color: var(--color-vscode-fg);
+  background: color-mix(in srgb, var(--color-vscode-toolbar-hover) 70%, transparent);
+}
+
 .chat-subtask-part {
   margin: 0;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);

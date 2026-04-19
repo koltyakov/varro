@@ -306,8 +306,17 @@ export function ChatInput() {
   const contextUsage = createMemo(() => {
     const assistants = assistantMessages();
     if (assistants.length === 0) return null;
-    const last = assistants[assistants.length - 1];
-    const ctx = getContextWindow(last, state.providers);
+    let best = null;
+    for (let i = assistants.length - 1; i >= 0; i--) {
+      const msg = assistants[i];
+      const hasTokens = (msg.tokens.input || 0) + (msg.tokens.output || 0) > 0;
+      if (hasTokens) {
+        best = msg;
+        break;
+      }
+    }
+    if (!best) return null;
+    const ctx = getContextWindow(best, state.providers);
     if (!ctx) return null;
     return ctx;
   });

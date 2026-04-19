@@ -382,7 +382,6 @@ async function sendPromptWithFallback(
     const retryBody = { ...body };
     delete retryBody.model;
     delete retryBody.variant;
-    setSelectedModel(null);
     await client.session.sendAsync(sessionId, retryBody);
   }
 }
