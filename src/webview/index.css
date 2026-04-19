@@ -622,6 +622,10 @@ input:focus-visible {
   z-index: 2;
 }
 
+.interactive-session .chat-input-toolbars .toolbar-left.showing-context-popup {
+  overflow: visible;
+}
+
 .interactive-session .chat-input-container.focused {
   border-color: var(--color-vscode-accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-vscode-accent) 30%, transparent);

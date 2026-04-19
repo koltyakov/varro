@@ -515,7 +515,7 @@ export function ChatInput() {
         </div>
 
         <div class="chat-input-toolbars">
-          <div class="toolbar-left">
+          <div class={`toolbar-left${showContextPopup() ? ' showing-context-popup' : ''}`}>
             <Show when={state.agents.length > 0}>
               <button
                 class="toolbar-picker"
