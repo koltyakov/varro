@@ -438,15 +438,30 @@ export function ChatInput() {
     await sendMessage(text, { noReply: true });
   }
 
+  let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
   createEffect(() => {
     const sessionId = state.activeSessionId;
-    if (!sessionId) return;
-    if (isLoading()) return;
-    if (hasActiveQuestion()) return;
-    const next = state.queuedMessages.find((item) => item.sessionId === sessionId);
-    if (!next) return;
-    removeQueuedMessage(next.id);
-    void sendMessage(next.text);
+    const loading = isLoading();
+    const activeQuestion = hasActiveQuestion();
+    const hasQueued = state.queuedMessages.some((item) => item.sessionId === sessionId);
+    if (queueDispatchTimer) {
+      clearTimeout(queueDispatchTimer);
+      queueDispatchTimer = 0;
+    }
+    if (!sessionId || loading || activeQuestion || !hasQueued) return;
+    queueDispatchTimer = setTimeout(() => {
+      queueDispatchTimer = 0;
+      if (isLoading() || hasActiveQuestion()) return;
+      const sid = state.activeSessionId;
+      if (!sid) return;
+      const next = state.queuedMessages.find((item) => item.sessionId === sid);
+      if (!next) return;
+      removeQueuedMessage(next.id);
+      void sendMessage(next.text);
+    }, 250);
+  });
+  onCleanup(() => {
+    if (queueDispatchTimer) clearTimeout(queueDispatchTimer);
   });
 
   function setComposerValue(value: string) {

@@ -106,10 +106,12 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                           </Show>
                         </div>
                       </Show>
-                      <span class="question-option-label">{option.label}</span>
-                      <Show when={option.description}>
-                        <span class="question-option-desc">{option.description}</span>
-                      </Show>
+                      <div class="question-option-text">
+                        <span class="question-option-label">{option.label}</span>
+                        <Show when={option.description}>
+                          <span class="question-option-desc">{option.description}</span>
+                        </Show>
+                      </div>
                     </button>
                   );
                 }}

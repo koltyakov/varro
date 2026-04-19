@@ -24,14 +24,22 @@ export function MessageList() {
   });
   let scrollTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let lastScrollAt = 0;
-  let suppressScrollUntil = 0;
-  const SCROLL_INTERVAL_MS = 120;
+  let expectedScrollTop = -1;
+  const SCROLL_INTERVAL_MS = 700;
 
   function performScroll() {
     if (!containerRef) return;
-    suppressScrollUntil = performance.now() + 200;
-    containerRef.scrollTop = containerRef.scrollHeight;
+    const target = containerRef.scrollHeight - containerRef.clientHeight;
+    expectedScrollTop = target;
+    containerRef.scrollTop = target;
     lastScrollAt = performance.now();
+  }
+
+  function cancelPendingScroll() {
+    if (scrollTimer) {
+      clearTimeout(scrollTimer);
+      scrollTimer = 0;
+    }
   }
 
   function scrollToBottom() {
@@ -39,25 +47,28 @@ export function MessageList() {
     const now = performance.now();
     const elapsed = now - lastScrollAt;
     if (elapsed >= SCROLL_INTERVAL_MS) {
-      if (scrollTimer) {
-        clearTimeout(scrollTimer);
-        scrollTimer = 0;
-      }
+      cancelPendingScroll();
       performScroll();
       return;
     }
     if (scrollTimer) return;
     scrollTimer = setTimeout(() => {
       scrollTimer = 0;
+      if (!autoScroll()) return;
       performScroll();
     }, SCROLL_INTERVAL_MS - elapsed);
   }
 
   function onScroll() {
     if (!containerRef) return;
-    if (performance.now() < suppressScrollUntil) return;
+    if (expectedScrollTop !== -1 && Math.abs(containerRef.scrollTop - expectedScrollTop) < 2) {
+      expectedScrollTop = -1;
+      return;
+    }
+    expectedScrollTop = -1;
     const near =
       containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight < 60;
+    if (!near) cancelPendingScroll();
     setAutoScroll(near);
   }
 
@@ -69,6 +80,19 @@ export function MessageList() {
       observer.disconnect();
       if (scrollTimer) clearTimeout(scrollTimer);
     });
+  });
+
+  let prevLoading = isLoading();
+  createEffect(() => {
+    const loading = isLoading();
+    if (prevLoading && !loading && autoScroll()) {
+      if (scrollTimer) {
+        clearTimeout(scrollTimer);
+        scrollTimer = 0;
+      }
+      queueMicrotask(() => performScroll());
+    }
+    prevLoading = loading;
   });
 
   return (
@@ -136,7 +160,7 @@ export function MessageList() {
             }}
           </For>
         </Show>
-        <Show when={isLoading() && !hasActiveQuestion()}>
+        <Show when={isLoading() && !hasActiveQuestion() && !state.streamingPartId}>
           <LoadingRow />
         </Show>
       </div>
@@ -160,6 +184,18 @@ function LoadingRow() {
 
   const isStale = () => elapsed() >= STALE_THRESHOLD;
 
+  const verbs = [
+    'Thinking',
+    'Cogitating',
+    'Pondering',
+    'Musing',
+    'Ruminating',
+    'Weaving thoughts',
+    'Scheming',
+    'Synthesizing',
+  ];
+  const verb = () => verbs[Math.floor(elapsed() / 3) % verbs.length];
+
   const formatElapsed = () => {
     const s = elapsed();
     if (s < 10) return null;
@@ -172,14 +208,11 @@ function LoadingRow() {
   return (
     <div class="interactive-item-container interactive-response interactive-loading-row">
       <div class={`loading-indicator ${isStale() ? 'stale' : ''}`}>
-        <Show when={!isStale()}>
-          <div class="loading-spinner" />
-        </Show>
         <Show when={isStale()} fallback={
-          <>
-            <span>Generating</span>
+          <span class="shimmer-progress loading-verb">
+            {verb()}
             <span class="chat-animated-ellipsis" />
-          </>
+          </span>
         }>
           <span>Session may be stale</span>
         </Show>
