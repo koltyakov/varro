@@ -15,6 +15,7 @@ import {
   setShowSettings,
   composerFocusKey,
   removeClipboardImage,
+  addContextFile,
   removeContextFile,
   clearClipboardImages,
   clearContextFiles,
@@ -160,7 +161,8 @@ export function ChatInput() {
       type: 'file' as const,
       label: `@${file.relativePath}`,
       detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
-      value: `@${file.relativePath}${file.type === 'directory' ? '/' : ''}`,
+      value: `${file.relativePath}${file.type === 'directory' ? '/' : ''}`,
+      file,
     }));
 
     return [...files, ...agents].slice(0, 10);
@@ -299,6 +301,11 @@ export function ChatInput() {
     }
 
     if (!('value' in item)) return;
+
+    if ('file' in item && item.type === 'file') {
+      addContextFile(item.file as DroppedFile);
+    }
+
     applyMentionValue(completion, item.value);
   }
 

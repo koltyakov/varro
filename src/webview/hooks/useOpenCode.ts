@@ -452,9 +452,9 @@ function getAttachmentReference(
   const relativePath = getWorkspaceRelativePath(file.path, workspacePath) ?? file.path;
   const normalizedPath = relativePath.replace(/\\/g, '/').replace(/\/+$/, '');
   if (file.type === 'directory') {
-    return `@${normalizedPath === '.' ? './' : `${normalizedPath}/`}`;
+    return normalizedPath === '.' ? './' : `${normalizedPath}/`;
   }
-  return `@${normalizedPath}`;
+  return normalizedPath;
 }
 
 export async function abortSession() {
