@@ -25,14 +25,26 @@ export function MessageList() {
   let scrollTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let lastScrollAt = 0;
   let expectedScrollTop = -1;
+  let ignoreScrollUntil = 0;
+  let lastObservedScrollTop = 0;
   const SCROLL_INTERVAL_MS = 700;
+  const AUTO_SCROLL_THRESHOLD_PX = 60;
+  const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
+
+  function distanceFromBottom() {
+    if (!containerRef) return Number.POSITIVE_INFINITY;
+    return Math.max(0, containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight);
+  }
 
   function performScroll() {
     if (!containerRef) return;
-    const target = containerRef.scrollHeight - containerRef.clientHeight;
+    const now = performance.now();
+    const target = Math.max(0, containerRef.scrollHeight - containerRef.clientHeight);
     expectedScrollTop = target;
+    ignoreScrollUntil = now + PROGRAMMATIC_SCROLL_WINDOW_MS;
     containerRef.scrollTop = target;
-    lastScrollAt = performance.now();
+    lastObservedScrollTop = target;
+    lastScrollAt = now;
   }
 
   function cancelPendingScroll() {
@@ -61,19 +73,41 @@ export function MessageList() {
 
   function onScroll() {
     if (!containerRef) return;
-    if (expectedScrollTop !== -1 && Math.abs(containerRef.scrollTop - expectedScrollTop) < 2) {
+    const top = containerRef.scrollTop;
+    const near = distanceFromBottom() < AUTO_SCROLL_THRESHOLD_PX;
+    const delta = top - lastObservedScrollTop;
+    const now = performance.now();
+    lastObservedScrollTop = top;
+
+    const matchesExpected =
+      expectedScrollTop !== -1 &&
+      (Math.abs(top - expectedScrollTop) < 2 ||
+        (near && top >= expectedScrollTop - AUTO_SCROLL_THRESHOLD_PX));
+
+    if (matchesExpected) {
       expectedScrollTop = -1;
       return;
     }
+
+    if (now <= ignoreScrollUntil) return;
+
     expectedScrollTop = -1;
-    const near =
-      containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight < 60;
-    if (!near) cancelPendingScroll();
-    setAutoScroll(near);
+    if (near) {
+      setAutoScroll(true);
+      return;
+    }
+
+    // Content growth can emit scroll events while the user is still pinned to the bottom.
+    // Only treat movement away from the bottom as intent when the viewport actually moved up.
+    if (autoScroll() && delta >= 0) return;
+
+    cancelPendingScroll();
+    setAutoScroll(false);
   }
 
   onMount(() => {
     if (!trackRef) return;
+    lastObservedScrollTop = containerRef?.scrollTop ?? 0;
     const observer = new ResizeObserver(() => scrollToBottom());
     observer.observe(trackRef);
     onCleanup(() => {
