@@ -181,6 +181,18 @@ export function getVariantsForModel(
   return Object.keys(model.variants);
 }
 
+export function modelSupportsReasoning(
+  providerID: string | null,
+  modelID: string | null,
+  providers: { id: string; models: { [key: string]: { capabilities?: { reasoning?: boolean }; variants?: { [key: string]: unknown } } } }[]
+): boolean {
+  if (!providerID || !modelID) return false;
+  const provider = providers.find((p) => p.id === providerID);
+  const model = provider?.models[modelID];
+  if (!model) return false;
+  return !!model.capabilities?.reasoning || (model.variants != null && Object.keys(model.variants).length > 0);
+}
+
 export function formatThinkingLabel(variant: string) {
   return variant
     .split(/[-_]/g)

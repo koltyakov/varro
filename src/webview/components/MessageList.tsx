@@ -4,7 +4,7 @@ import { isAssistantMessage } from '../lib/message-metrics';
 import { Message } from './Message';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import type { AssistantMessage } from '../types';
-import { formatThinkingLabel } from './ModelPicker';
+import { formatThinkingLabel, modelSupportsReasoning } from './ModelPicker';
 
 const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
 
@@ -91,7 +91,7 @@ export function MessageList() {
                   const parts: string[] = [];
                   if (modelChanged) parts.push(modelName);
                   if (cur.variant) parts.push(formatThinkingLabel(cur.variant));
-                  else if (variantChanged) parts.push('No thinking');
+                  else if (variantChanged && !modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)) parts.push('No thinking');
                   return parts.join(' · ');
                 }
                 return null;
