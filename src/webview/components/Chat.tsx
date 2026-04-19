@@ -5,7 +5,7 @@ import {
   showSettings,
   isSessionUnread,
 } from '../lib/state';
-import { Show, For } from 'solid-js';
+import { Show, For, createSignal, onCleanup, createEffect } from 'solid-js';
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -84,6 +84,47 @@ export function Chat() {
 }
 
 function SessionListView() {
+  const [focusedIndex, setFocusedIndex] = createSignal(-1);
+
+  function handleKeydown(e: KeyboardEvent) {
+    const sessions = state.sessions;
+    if (sessions.length === 0) return;
+
+    if (e.key === 'ArrowDown' || e.key === 'j') {
+      e.preventDefault();
+      setFocusedIndex((i) => (i + 1) % sessions.length);
+      return;
+    }
+
+    if (e.key === 'ArrowUp' || e.key === 'k') {
+      e.preventDefault();
+      setFocusedIndex((i) => (i <= 0 ? sessions.length - 1 : i - 1));
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const idx = focusedIndex();
+      if (idx >= 0 && idx < sessions.length) {
+        selectSession(sessions[idx].id);
+        setShowSessionPicker(false);
+      }
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowSessionPicker(false);
+    }
+  }
+
+  createEffect(() => {
+    if (!showSessionPicker()) return;
+    setFocusedIndex(-1);
+    window.addEventListener('keydown', handleKeydown, true);
+    onCleanup(() => window.removeEventListener('keydown', handleKeydown, true));
+  });
+
   return (
     <div class="session-list-view">
       <Show
@@ -91,8 +132,9 @@ function SessionListView() {
         fallback={<div class="session-empty">No sessions yet</div>}
       >
         <For each={state.sessions}>
-          {(session) => {
+          {(session, index) => {
             const isActive = () => session.id === state.activeSessionId;
+            const isFocused = () => focusedIndex() === index();
             const status = () => state.sessionStatus[session.id];
             const isRunning = () => {
               const t = status()?.type;
@@ -105,7 +147,10 @@ function SessionListView() {
               return '';
             };
             return (
-              <div class={`session-item ${isActive() ? 'active' : ''}`}>
+              <div
+                class={`session-item ${isActive() ? 'active' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
+                onMouseEnter={() => setFocusedIndex(index())}
+              >
                 <button
                   type="button"
                   class="session-item-main"

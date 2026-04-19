@@ -66,9 +66,10 @@ export function ChatInput() {
     const file = activeFile();
     if (!file) return null;
     const selectedLines = selection();
+    const displayPath = file.relativePath || getLeafPathName(file.path);
     if (!selectedLines) {
       return {
-        filename: getLeafPathName(file.relativePath),
+        filename: displayPath,
         lineRange: null as string | null,
       };
     }
@@ -77,7 +78,7 @@ export function ChatInput() {
         ? `L${selectedLines.startLine}`
         : `L${selectedLines.startLine}-${selectedLines.endLine}`;
     return {
-      filename: getLeafPathName(file.relativePath),
+      filename: displayPath,
       lineRange,
     };
   };
@@ -760,6 +761,11 @@ export function ChatInput() {
               <AttachmentChip
                 label={activeContext()!.filename}
                 detail={activeContext()!.lineRange}
+                title={
+                  activeContext()!.lineRange
+                    ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
+                    : activeContext()!.filename
+                }
               />
             </Show>
             <Show when={terminalSelection()}>
@@ -767,6 +773,7 @@ export function ChatInput() {
                 label={terminalSelection()!.terminalName}
                 detail="terminal"
                 icon="terminal"
+                title={`Terminal: ${terminalSelection()!.terminalName}`}
                 onRemove={() => postMessage({ type: 'terminal-selection/clear' })}
               />
             </Show>
@@ -775,6 +782,7 @@ export function ChatInput() {
                 <AttachmentChip
                   label={getDroppedFileLabel(file)}
                   icon={file.type === 'directory' ? 'folder' : 'file'}
+                  title={file.relativePath || file.path}
                   onRemove={() => {
                     removeContextFile(file.path);
                     postMessage({ type: 'files/remove', payload: { path: file.path } });
@@ -787,6 +795,7 @@ export function ChatInput() {
                 <AttachmentChip
                   label={image.filename}
                   icon="image"
+                  title={image.filename}
                   onRemove={() => removeClipboardImage(image.id)}
                 />
               )}
@@ -1263,9 +1272,10 @@ function AttachmentChip(props: {
   detail?: string | null;
   icon?: 'file' | 'folder' | 'image' | 'terminal';
   onRemove?: () => void;
+  title?: string;
 }) {
   return (
-    <span class="chat-attachment-chip">
+    <span class="chat-attachment-chip" title={props.title}>
       <Show when={props.onRemove}>
         <button class="chip-remove" onClick={() => props.onRemove?.()}>
           <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
