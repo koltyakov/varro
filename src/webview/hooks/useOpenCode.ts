@@ -312,9 +312,11 @@ export async function createSession(title?: string): Promise<string | null> {
     const session = await client.session.create(title ? { title } : undefined);
     upsertSession(session);
     setState('activeSessionId', session.id);
+    setState('sessionStatus', { ...state.sessionStatus, [session.id]: { type: 'idle' } });
     persistActiveSessionId(session.id);
     markSessionSeen(session.id);
     clearMessages();
+    setIsLoading(false);
     return session.id;
   } catch (err) {
     setError(err instanceof Error ? err.message : 'Failed to create session');
