@@ -40,6 +40,7 @@ export type ExtensionMessage =
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'files/dropped'; payload: DroppedFile[] }
   | { type: 'files/removed'; payload: { path: string } }
+  | { type: 'files/search-results'; payload: { requestId: number; query: string; files: DroppedFile[] } }
   | { type: 'theme/update'; payload: { theme: 'dark' | 'light' } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session' }
@@ -52,6 +53,7 @@ export type WebviewMessage =
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }
   | { type: 'files/pick' }
+  | { type: 'files/search'; payload: { requestId: number; query: string; limit?: number } }
   | { type: 'file/read'; payload: { path: string } }
   | { type: 'vscode/open'; payload: { path: string; line?: number } }
   | { type: 'vscode/diff'; payload: { path: string } }

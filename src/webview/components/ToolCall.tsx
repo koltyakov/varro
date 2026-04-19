@@ -3,6 +3,7 @@ import type { ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState } from '../lib/state';
 import { formatDisplayPath } from '../lib/path-display';
+import { QuestionPrompt } from './QuestionPrompt';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 
@@ -37,6 +38,13 @@ export function ToolCall(props: { part: ToolPart }) {
   const [expanded, setExpanded] = createSignal(false);
   const tool = () => props.part;
   const state = () => tool().state;
+  const questionRequest = () =>
+    appState.questions.find(
+      (request) =>
+        request.sessionID === tool().sessionID &&
+        request.tool?.messageID === tool().messageID &&
+        request.tool?.callID === tool().callID
+    );
 
   const filePath = () => {
     const input = (state().input || {}) as Record<string, unknown>;
@@ -94,24 +102,30 @@ export function ToolCall(props: { part: ToolPart }) {
   };
 
   return (
-    <Show when={isEdit()} fallback={
-      <GenericToolCall
-        tool={tool()}
-        state={state()}
-        statusClass={statusClass()}
-        title={title()}
-        preview={preview()}
-        expanded={expanded()}
-        toggleExpand={() => setExpanded(!expanded())}
-        inputEntries={inputEntries()}
-        truncatedOutput={truncatedOutput()}
-      />
-    }>
-      <FileEditCard
-        toolName={tool().tool}
-        toolState={state()}
-        filePath={filePath()!}
-      />
+    <Show
+      when={questionRequest()}
+      fallback={
+        <Show
+          when={isEdit()}
+          fallback={
+            <GenericToolCall
+              tool={tool()}
+              state={state()}
+              statusClass={statusClass()}
+              title={title()}
+              preview={preview()}
+              expanded={expanded()}
+              toggleExpand={() => setExpanded(!expanded())}
+              inputEntries={inputEntries()}
+              truncatedOutput={truncatedOutput()}
+            />
+          }
+        >
+          <FileEditCard toolName={tool().tool} toolState={state()} filePath={filePath()!} />
+        </Show>
+      }
+    >
+      <QuestionPrompt request={questionRequest()!} />
     </Show>
   );
 }
@@ -303,4 +317,3 @@ function formatValue(value: unknown): string {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value);
 }
-

@@ -264,6 +264,31 @@ export type Permission = {
   time: { created: number };
 };
 
+export type QuestionOption = {
+  label: string;
+  description: string;
+};
+
+export type QuestionInfo = {
+  question: string;
+  header: string;
+  options: Array<QuestionOption>;
+  multiple?: boolean;
+  custom?: boolean;
+};
+
+export type QuestionTool = {
+  messageID: string;
+  callID: string;
+};
+
+export type QuestionRequest = {
+  id: string;
+  sessionID: string;
+  questions: Array<QuestionInfo>;
+  tool?: QuestionTool;
+};
+
 export type Todo = {
   content: string;
   status: string;
@@ -276,6 +301,7 @@ export type Agent = {
   description?: string;
   mode: 'subagent' | 'primary' | 'all';
   builtIn: boolean;
+  hidden?: boolean;
   color?: string;
   permission: {
     edit: 'ask' | 'allow' | 'deny';

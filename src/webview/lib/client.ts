@@ -1,5 +1,14 @@
 import { apiCall, onMessage } from './bridge';
-import type { Session, Message, Part, SessionStatus, Agent, Provider, FileDiff } from '../types';
+import type {
+  Session,
+  Message,
+  Part,
+  SessionStatus,
+  Agent,
+  Provider,
+  FileDiff,
+  QuestionRequest,
+} from '../types';
 
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
@@ -85,6 +94,18 @@ export const client = {
   agent: {
     async list(): Promise<Agent[]> {
       return apiCall('GET', '/agent');
+    },
+  },
+
+  question: {
+    async list(): Promise<QuestionRequest[]> {
+      return apiCall('GET', '/question');
+    },
+    async reply(requestID: string, answers: Array<Array<string>>): Promise<boolean> {
+      return apiCall('POST', `/question/${requestID}/reply`, { answers });
+    },
+    async reject(requestID: string): Promise<boolean> {
+      return apiCall('POST', `/question/${requestID}/reject`);
     },
   },
 };

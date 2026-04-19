@@ -5,6 +5,7 @@ import type {
   Message,
   Part,
   Permission,
+  QuestionRequest,
   Todo,
   SessionStatus,
   FileDiff,
@@ -19,6 +20,7 @@ const STORAGE_KEYS = {
   hiddenProviders: 'opencode.hiddenProviders',
   hiddenModels: 'opencode.hiddenModels',
   lastSeenSessions: 'opencode.lastSeenSessions',
+  lastActiveSessionId: 'opencode.lastActiveSessionId',
 } as const;
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
@@ -53,10 +55,12 @@ interface AppState {
   messages: Array<{ info: Message; parts: Part[] }>;
   todos: Todo[];
   permissions: Permission[];
+  questions: QuestionRequest[];
   diffs: FileDiff[];
   streamingPartId: string | null;
   streamingText: string;
   agents: Agent[];
+  allAgents: Agent[];
   providers: Provider[];
   providerDefaults: Record<string, string>;
   selectedAgent: string | null;
@@ -85,10 +89,12 @@ export const [state, setState] = createStore<AppState>({
   messages: [],
   todos: [],
   permissions: [],
+  questions: [],
   diffs: [],
   streamingPartId: null,
   streamingText: '',
   agents: [],
+  allAgents: [],
   providers: [],
   providerDefaults: {},
   selectedAgent: readStored<string>(STORAGE_KEYS.selectedAgent),
@@ -97,6 +103,14 @@ export const [state, setState] = createStore<AppState>({
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
   lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
 });
+
+export function persistActiveSessionId(id: string | null) {
+  writeStored(STORAGE_KEYS.lastActiveSessionId, id);
+}
+
+export function getPersistedActiveSessionId(): string | null {
+  return readStored<string>(STORAGE_KEYS.lastActiveSessionId);
+}
 
 export function markSessionSeen(id: string) {
   const next = { ...state.lastSeenSessions, [id]: Date.now() };
@@ -112,6 +126,11 @@ export function isSessionUnread(sessionId: string, updatedAt: number) {
 
 export const [inputText, setInputText] = createSignal('');
 export const [isLoading, setIsLoading] = createSignal(false);
+
+export function hasActiveQuestion() {
+  const sid = state.activeSessionId;
+  return sid ? state.questions.some((q) => q.sessionID === sid) : false;
+}
 export const [error, setError] = createSignal<string | null>(null);
 export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
@@ -168,6 +187,31 @@ export function removeClipboardImage(id: string) {
 
 export function clearClipboardImages() {
   setState('clipboardImages', []);
+}
+
+export function setQuestions(questions: QuestionRequest[]) {
+  setState('questions', questions);
+}
+
+export function upsertQuestion(question: QuestionRequest) {
+  setState(
+    'questions',
+    produce((questions) => {
+      const idx = questions.findIndex((item) => item.id === question.id);
+      if (idx !== -1) questions[idx] = question;
+      else questions.push(question);
+    })
+  );
+}
+
+export function removeQuestion(requestID: string) {
+  setState(
+    'questions',
+    produce((questions) => {
+      const idx = questions.findIndex((item) => item.id === requestID);
+      if (idx !== -1) questions.splice(idx, 1);
+    })
+  );
 }
 
 export function setSelectedAgent(agent: string | null) {

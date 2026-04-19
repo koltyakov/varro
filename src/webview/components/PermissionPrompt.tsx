@@ -1,9 +1,8 @@
-import { Show, createSignal } from 'solid-js';
+import { Show } from 'solid-js';
 import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
 
 export function PermissionPrompt(props: { permission: Permission }) {
-  const [remember, setRemember] = createSignal(false);
   const sessionId = () => props.permission.sessionID;
 
   return (
@@ -22,30 +21,28 @@ export function PermissionPrompt(props: { permission: Permission }) {
           </pre>
         </div>
       </Show>
-      <div class="flex items-center justify-between">
-        <label class="flex items-center gap-1.5 text-[10px] text-vscode-muted cursor-pointer">
-          <input
-            type="checkbox"
-            checked={remember()}
-            onChange={(e) => setRemember(e.currentTarget.checked)}
-            class="accent-vscode-accent"
-          />
-          Remember
-        </label>
-        <div class="flex gap-1.5">
-          <button
-            class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-hover text-vscode-fg transition-colors hover:bg-vscode-hover/80"
-            onClick={() => respondPermission(sessionId(), props.permission.id, 'deny', remember())}
-          >
-            Deny
-          </button>
-          <button
-            class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-accent text-white transition-colors hover:opacity-80"
-            onClick={() => respondPermission(sessionId(), props.permission.id, 'allow', remember())}
-          >
-            Allow
-          </button>
-        </div>
+      <div class="mb-2 text-[10px] leading-[1.4] text-vscode-muted">
+        Approve once, remember a safe allow rule for this session, or reject the request.
+      </div>
+      <div class="flex flex-wrap justify-end gap-1.5">
+        <button
+          class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-hover text-vscode-fg transition-colors hover:bg-vscode-hover/80"
+          onClick={() => respondPermission(sessionId(), props.permission.id, 'deny')}
+        >
+          Reject
+        </button>
+        <button
+          class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-hover text-vscode-fg transition-colors hover:bg-vscode-hover/80"
+          onClick={() => respondPermission(sessionId(), props.permission.id, 'allow')}
+        >
+          Once
+        </button>
+        <button
+          class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-accent text-white transition-colors hover:opacity-80"
+          onClick={() => respondPermission(sessionId(), props.permission.id, 'allow', true)}
+        >
+          Always
+        </button>
       </div>
     </div>
   );

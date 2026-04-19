@@ -4,19 +4,22 @@ import {
   inputText,
   setInputText,
   isLoading,
+  hasActiveQuestion,
   setSelectedAgent,
   setSelectedModel,
   resolveSelectedModel,
   addClipboardImage,
   showModelPicker,
   setShowModelPicker,
+  setShowSessionPicker,
+  setShowSettings,
   removeClipboardImage,
   removeContextFile,
   clearClipboardImages,
   clearContextFiles,
 } from '../lib/state';
-import { postMessage } from '../lib/bridge';
-import { sendMessage, abortSession } from '../hooks/useOpenCode';
+import { onMessage, postMessage } from '../lib/bridge';
+import { sendMessage, abortSession, shareSession, unshareSession, createSession } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel, formatThinkingLabel } from './ModelPicker';
 import {
   isAssistantMessage,
@@ -26,7 +29,8 @@ import {
 } from '../lib/message-metrics';
 import { getLeafPathName } from '../lib/path-display';
 import { TodoList } from './TodoList';
-import type { Part, TextPart } from '../types';
+import type { Agent, Part, TextPart } from '../types';
+import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
 
 export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -41,6 +45,12 @@ export function ChatInput() {
   const [isFocused, setIsFocused] = createSignal(false);
   const [historyIndex, setHistoryIndex] = createSignal<number | null>(null);
   const [historyDraft, setHistoryDraft] = createSignal('');
+  const [caretPosition, setCaretPosition] = createSignal(0);
+  const [completionIndex, setCompletionIndex] = createSignal(0);
+  const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
+  const [fileSearchQuery, setFileSearchQuery] = createSignal('');
+  const [suppressCompletion, setSuppressCompletion] = createSignal(false);
+  let latestFileSearchRequestId = 0;
 
   const files = () => state.droppedFiles;
   const clipboardImages = () => state.clipboardImages;
@@ -68,7 +78,179 @@ export function ChatInput() {
     };
   };
 
+  const mentionAgents = createMemo(() =>
+    state.allAgents
+      .filter((agent) => agent.mode === 'subagent' || agent.mode === 'all')
+      .toSorted((a, b) => a.name.localeCompare(b.name))
+  );
+
+  const slashCommands = createMemo(() =>
+    getSlashCommands({
+      canShare: !!state.activeSessionId,
+      canUnshare: !!state.sessions.find((session) => session.id === state.activeSessionId)?.share,
+      isBusy: isLoading(),
+      onOpenSessions: () => setShowSessionPicker(true),
+      onOpenModels: () => setShowModelPicker(true),
+      onOpenAgents: () => setShowAgentPicker(true),
+      onOpenFiles: () => postMessage({ type: 'files/pick' }),
+      onOpenSettings: () => setShowSettings(true),
+    })
+  );
+
+  const activeCompletion = createMemo(() =>
+    getActiveCompletion(inputText(), textareaRef?.selectionStart ?? caretPosition())
+  );
+
+  createEffect(() => {
+    const completion = activeCompletion();
+    if (completion?.type !== 'mention') {
+      setFileSearchResults([]);
+      setFileSearchQuery('');
+      return;
+    }
+
+    if (!completion.query.trim()) {
+      setFileSearchResults([]);
+      setFileSearchQuery('');
+      return;
+    }
+
+    latestFileSearchRequestId += 1;
+    setFileSearchQuery(completion.query);
+    postMessage({
+      type: 'files/search',
+      payload: { requestId: latestFileSearchRequestId, query: completion.query, limit: 12 },
+    });
+  });
+
+  const mentionCompletions = createMemo(() => {
+    const completion = activeCompletion();
+    if (completion?.type !== 'mention') return [];
+
+    const rawQuery = completion.query.trim();
+    const query = rawQuery.toLowerCase();
+    const fileLike = looksLikeFileMentionQuery(rawQuery);
+    const exactAgentMatch = mentionAgents().some((agent) => agent.name.toLowerCase() === query);
+    const exactFileMatch = fileSearchResults().some(
+      (file) => normalizeMentionPath(file.relativePath) === normalizeMentionPath(rawQuery)
+    );
+    if (query && (exactAgentMatch || exactFileMatch)) return [];
+
+    const agents = (fileLike ? [] : mentionAgents())
+      .filter((agent) => {
+        if (!query) return true;
+        return (
+          agent.name.toLowerCase().includes(query) ||
+          agent.description?.toLowerCase().includes(query)
+        );
+      })
+      .map((agent) => ({
+        key: `agent:${agent.name}`,
+        type: 'agent' as const,
+        label: `@${agent.name}`,
+        detail: agent.description || getAgentBadgeLine(agent),
+        value: `@${agent.name} `,
+      }));
+
+    const files = (rawQuery ? fileSearchResults() : []).map((file) => ({
+      key: `file:${file.path}`,
+      type: 'file' as const,
+      label: `@${file.relativePath}`,
+      detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
+      value: `@${file.relativePath}${file.type === 'directory' ? '/' : ''}`,
+    }));
+
+    return [...files, ...agents].slice(0, 10);
+  });
+
+  const slashCompletions = createMemo(() => {
+    const completion = activeCompletion();
+    if (completion?.type !== 'slash') return [];
+
+    const query = completion.query.toLowerCase();
+    return slashCommands()
+      .filter((command) => {
+        if (!query) return true;
+        return (
+          command.name.includes(query) ||
+          command.aliases.some((alias) => alias.includes(query)) ||
+          command.description.toLowerCase().includes(query)
+        );
+      })
+      .map((command) => ({
+        ...command,
+        key: `slash:${command.name}`,
+        type: 'slash' as const,
+      }));
+  });
+
+  const composerCompletions = createMemo(() => {
+    const completion = activeCompletion();
+    if (!completion) return [];
+    return completion.type === 'slash' ? slashCompletions() : mentionCompletions();
+  });
+
+  createEffect(() => {
+    const length = composerCompletions().length;
+    if (length === 0) {
+      setCompletionIndex(0);
+      return;
+    }
+    setCompletionIndex((current) => Math.max(0, Math.min(current, length - 1)));
+  });
+
   function handleKeydown(e: KeyboardEvent) {
+    const showingCompletions = composerCompletions().length > 0 && !suppressCompletion();
+
+    if (showingCompletions && !e.altKey && !e.ctrlKey && !e.metaKey && !e.isComposing) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveCompletionSelection(e.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        applyActiveCompletion();
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setCompletionIndex(0);
+        if (activeCompletion()?.type === 'slash') {
+          setInputText('');
+        } else {
+          setSuppressCompletion(true);
+        }
+        return;
+      }
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      if (showingCompletions) {
+        const completion = activeCompletion();
+        const selected = composerCompletions()[Math.min(completionIndex(), composerCompletions().length - 1)];
+
+        if (completion?.type === 'slash' && selected && 'name' in selected) {
+          e.preventDefault();
+          runSlashCommand(`/${selected.name}`);
+          return;
+        }
+
+        e.preventDefault();
+        applyActiveCompletion();
+        return;
+      }
+
+      const completion = activeCompletion();
+      if (completion?.type === 'slash') {
+        e.preventDefault();
+        runSlashCommand(inputText());
+        return;
+      }
+    }
+
     if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.isComposing) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         if (navigateMessageHistory(e.key === 'ArrowUp' ? -1 : 1)) {
@@ -88,12 +270,82 @@ export function ChatInput() {
     }
   }
 
+  function moveCompletionSelection(direction: 1 | -1) {
+    const items = composerCompletions();
+    if (items.length === 0) return;
+    setCompletionIndex((current) => {
+      const next = current + direction;
+      if (next < 0) return items.length - 1;
+      if (next >= items.length) return 0;
+      return next;
+    });
+  }
+
+  function applyActiveCompletion() {
+    const completion = activeCompletion();
+    if (!completion) return;
+
+    const items = composerCompletions();
+    const item = items[Math.min(completionIndex(), items.length - 1)];
+    if (!item) return;
+
+    if (completion.type === 'slash') {
+      if (!('name' in item)) return;
+      setComposerValue(`/${item.name}`);
+      return;
+    }
+
+    if (!('value' in item)) return;
+    applyMentionValue(completion, item.value);
+  }
+
+  function applyMentionValue(
+    completion: Extract<ReturnType<typeof getActiveCompletion>, { type: 'mention' }>,
+    value: string
+  ) {
+    const text = inputText();
+    const nextValue = `${text.slice(0, completion.start)}${value}${text.slice(completion.end)}`;
+    setInputText(nextValue);
+    setCompletionIndex(0);
+    setFileSearchResults([]);
+    setFileSearchQuery('');
+
+    queueMicrotask(() => {
+      autoResize();
+      if (!textareaRef) return;
+      const nextCursor = completion.start + value.length;
+      textareaRef.focus();
+      textareaRef.setSelectionRange(nextCursor, nextCursor);
+      setCaretPosition(nextCursor);
+    });
+  }
+
+  async function runSlashCommand(raw: string) {
+    const normalized = raw.trim().replace(/^\/+/, '');
+    const [name] = normalized.split(/\s+/, 1);
+    const command = slashCommands().find(
+      (item) => item.name === name || item.aliases.includes(name)
+    );
+    if (!command) {
+      await handleSend();
+      return;
+    }
+
+    setHistoryIndex(null);
+    setHistoryDraft('');
+    setInputText('');
+    setCompletionIndex(0);
+    if (textareaRef) textareaRef.style.height = 'auto';
+    command.action();
+  }
+
   async function handleSend(mode?: 'queue' | 'steer') {
     const text = inputText();
     if (!text.trim() && state.droppedFiles.length === 0 && state.clipboardImages.length === 0)
       return;
     setHistoryIndex(null);
     setHistoryDraft('');
+    setCompletionIndex(0);
     setInputText('');
     if (textareaRef) textareaRef.style.height = 'auto';
     await sendMessage(text, { noReply: mode === 'steer' });
@@ -101,11 +353,13 @@ export function ChatInput() {
 
   function setComposerValue(value: string) {
     setInputText(value);
+    setCompletionIndex(0);
     queueMicrotask(() => {
       autoResize();
       if (!textareaRef) return;
       textareaRef.focus();
       textareaRef.setSelectionRange(value.length, value.length);
+      setCaretPosition(value.length);
     });
   }
 
@@ -231,6 +485,13 @@ export function ChatInput() {
   }
 
   onMount(() => {
+    const disposeBridge = onMessage((msg: ExtensionMessage) => {
+      if (msg.type !== 'files/search-results') return;
+      if (msg.payload.requestId !== latestFileSearchRequestId) return;
+      if (msg.payload.query !== fileSearchQuery()) return;
+      setFileSearchResults(msg.payload.files);
+    });
+
     const handleWindowClick = (e: MouseEvent) => {
       if (!containerRef?.contains(e.target as Node | null)) {
         setShowAgentPicker(false);
@@ -238,6 +499,7 @@ export function ChatInput() {
         setShowVariantPicker(false);
         setShowBusyMenu(false);
         setShowContextPopup(false);
+        setCompletionIndex(0);
       }
     };
 
@@ -275,6 +537,7 @@ export function ChatInput() {
     window.addEventListener('dragleave', handleWindowDragLeave, true);
 
     onCleanup(() => {
+      disposeBridge();
       window.removeEventListener('click', handleWindowClick, true);
       document.removeEventListener('dragenter', beginDropTarget, true);
       document.removeEventListener('dragover', handleWindowDragOver, true);
@@ -291,12 +554,14 @@ export function ChatInput() {
     state.activeSessionId;
     setHistoryIndex(null);
     setHistoryDraft('');
+    setCompletionIndex(0);
   });
 
   const canSend = () =>
-    inputText().trim().length > 0 ||
+    !hasActiveQuestion() &&
+    (inputText().trim().length > 0 ||
     state.droppedFiles.length > 0 ||
-    state.clipboardImages.length > 0;
+    state.clipboardImages.length > 0);
 
   const currentModel = () => {
     const selected = resolveSelectedModel(
@@ -442,7 +707,7 @@ export function ChatInput() {
 
       <div
         ref={containerRef}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showBusyMenu() ? 'showing-context-popup' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -537,28 +802,57 @@ export function ChatInput() {
             }}
             rows={1}
             placeholder={
-              isLoading()
-                ? 'Queue a follow-up or steer with \u2303Enter...'
-                : 'Describe what to build'
+              hasActiveQuestion()
+                ? 'Answer the question above to continue...'
+                : isLoading()
+                  ? 'Queue a follow-up or steer with \u2303Enter...'
+                  : 'Describe what to build'
             }
             value={inputText()}
             onInput={(e) => {
               setHistoryIndex(null);
               setHistoryDraft('');
               setInputText(e.currentTarget.value);
+              setCaretPosition(e.currentTarget.selectionStart || 0);
+              setCompletionIndex(0);
+              setSuppressCompletion(false);
               autoResize();
             }}
             onKeyDown={handleKeydown}
             onPaste={handlePaste}
-            onFocus={() => setIsFocused(true)}
+            onFocus={(e) => {
+              setIsFocused(true);
+              setCaretPosition(e.currentTarget.selectionStart || 0);
+            }}
             onBlur={() => setIsFocused(false)}
-            onClick={() => {
+            onClick={(e) => {
+              setCaretPosition(e.currentTarget.selectionStart || 0);
               setShowAgentPicker(false);
               setShowModelPicker(false);
               setShowVariantPicker(false);
               setShowBusyMenu(false);
             }}
+            onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
+            onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
           />
+
+          <Show when={isFocused() && composerCompletions().length > 0 && !suppressCompletion()}>
+            <CompletionMenu
+              items={composerCompletions()}
+              selectedIndex={completionIndex()}
+              onSelect={(item) => {
+                const completion = activeCompletion();
+                if (!completion) return;
+                if (completion.type === 'slash') {
+                  if (!('name' in item)) return;
+                  setComposerValue(`/${item.name}`);
+                  return;
+                }
+                if (!('value' in item)) return;
+                applyMentionValue(completion, item.value);
+              }}
+            />
+          </Show>
         </div>
 
         <div class="chat-input-toolbars">
@@ -592,7 +886,12 @@ export function ChatInput() {
                             setShowAgentPicker(false);
                           }}
                         >
-                          {agent.name}
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate">{agent.name}</span>
+                            <span class="block truncate text-[10px] text-vscode-muted/80">
+                              {agent.description || getAgentBadgeLine(agent)}
+                            </span>
+                          </span>
                         </button>
                       )}
                     </For>
@@ -704,7 +1003,7 @@ export function ChatInput() {
           </div>
 
           <div class="toolbar-right">
-            <Show when={isLoading()}>
+            <Show when={isLoading() && !hasActiveQuestion()}>
               <button
                 class="toolbar-picker stop-button"
                 onClick={() => abortSession()}
@@ -718,7 +1017,7 @@ export function ChatInput() {
             </Show>
 
             <div style={{ position: 'relative' }}>
-              <Show when={isLoading() && canSend()} fallback={
+              <Show when={isLoading() && !hasActiveQuestion() && canSend()} fallback={
                 <button
                   class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
                   onClick={() => canSend() && handleSend()}
@@ -752,7 +1051,7 @@ export function ChatInput() {
                 </div>
               </Show>
 
-              <Show when={showBusyMenu() && canSend() && isLoading()}>
+              <Show when={showBusyMenu() && canSend() && isLoading() && !hasActiveQuestion()}>
                 <div class="toolbar-popover busy-menu" onClick={(e) => e.stopPropagation()}>
                   <button
                     class="toolbar-popover-item"
@@ -872,6 +1171,58 @@ function ContextPopup(props: {
   );
 }
 
+type SlashCommand = {
+  name: string;
+  aliases: string[];
+  description: string;
+  action: () => void;
+};
+
+type CompletionItem =
+  | (SlashCommand & { key: string; type: 'slash' })
+  | { key: string; type: 'agent' | 'file'; label: string; detail: string; value: string };
+
+function CompletionMenu(props: {
+  items: CompletionItem[];
+  selectedIndex: number;
+  onSelect: (item: CompletionItem) => void;
+}) {
+  return (
+    <div class="composer-completion-menu">
+      <For each={props.items}>
+        {(item, index) => {
+          const isSlash = item.type === 'slash';
+          const title = 'name' in item ? `/${item.name}` : item.label;
+          const detail = 'description' in item ? item.description : item.detail;
+          return (
+            <button
+              class={`composer-completion-item ${props.selectedIndex === index() ? 'selected' : ''}`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => props.onSelect(item)}
+            >
+              <Show when={!isSlash}>
+                <span class="composer-completion-icon">
+                  <Show when={item.type === 'agent'} fallback={
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
+                    </svg>
+                  }>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M2.5 1h3.4l.6.5.5.5H14l.5.5v10l-.5.5H2l-.5-.5v-11L2.5 1zm0 1v3h4l.5.5.5.5h4v-3H8.5L8 2.5l-.5-.5H2.5zm0 10h11V6h-4l-.5-.5L8.5 5h-6v7z" />
+                    </svg>
+                  </Show>
+                </span>
+              </Show>
+              <span class="composer-completion-title">{title}</span>
+              <span class="composer-completion-detail">{detail}</span>
+            </button>
+          );
+        }}
+      </For>
+    </div>
+  );
+}
+
 function AttachmentChip(props: {
   label: string;
   detail?: string | null;
@@ -915,6 +1266,142 @@ function getDroppedFileLabel(file: { path: string; relativePath: string }) {
     return getLeafPathName(file.path);
   }
   return getLeafPathName(file.relativePath);
+}
+
+function getSlashCommands(props: {
+  canShare: boolean;
+  canUnshare: boolean;
+  isBusy: boolean;
+  onOpenSessions: () => void;
+  onOpenModels: () => void;
+  onOpenAgents: () => void;
+  onOpenFiles: () => void;
+  onOpenSettings: () => void;
+}): SlashCommand[] {
+  const commands: SlashCommand[] = [
+    {
+      name: 'new',
+      aliases: ['clear'],
+      description: 'Start a new chat session',
+      action: () => {
+        createSession();
+      },
+    },
+    {
+      name: 'sessions',
+      aliases: ['resume'],
+      description: 'Open the session list',
+      action: props.onOpenSessions,
+    },
+    {
+      name: 'models',
+      aliases: [],
+      description: 'Open the model picker',
+      action: props.onOpenModels,
+    },
+    {
+      name: 'agents',
+      aliases: [],
+      description: 'Open the agent picker',
+      action: props.onOpenAgents,
+    },
+    {
+      name: 'attach',
+      aliases: ['files'],
+      description: 'Pick files or folders to attach',
+      action: props.onOpenFiles,
+    },
+    {
+      name: 'settings',
+      aliases: [],
+      description: 'Open model visibility settings',
+      action: props.onOpenSettings,
+    },
+  ];
+
+  if (props.canShare) {
+    commands.push({
+      name: 'share',
+      aliases: [],
+      description: 'Share the current session',
+      action: () => {
+        shareSession();
+      },
+    });
+  }
+
+  if (props.canUnshare) {
+    commands.push({
+      name: 'unshare',
+      aliases: [],
+      description: 'Remove the session share link',
+      action: () => {
+        unshareSession();
+      },
+    });
+  }
+
+  if (props.isBusy) {
+    commands.push({
+      name: 'abort',
+      aliases: ['stop'],
+      description: 'Stop the current run',
+      action: () => {
+        abortSession();
+      },
+    });
+  }
+
+  return commands;
+}
+
+function getActiveCompletion(text: string, cursor: number) {
+  if (cursor < 0 || cursor > text.length) return null;
+
+  const prefix = text.slice(0, cursor);
+  const slashMatch = prefix.match(/^\/([^\s]*)$/);
+  if (slashMatch) {
+    return {
+      type: 'slash' as const,
+      query: slashMatch[1] || '',
+      start: 0,
+      end: cursor,
+    };
+  }
+
+  const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
+  const token = prefix.slice(tokenStart);
+  if (!token.startsWith('@')) return null;
+
+  return {
+    type: 'mention' as const,
+    query: token.slice(1),
+    start: tokenStart,
+    end: cursor,
+  };
+}
+
+function getAgentBadgeLine(agent: Agent) {
+  const badges: string[] = [];
+  badges.push(agent.mode === 'subagent' ? 'Subagent' : 'Primary');
+  if (agent.permission.edit === 'allow') badges.push('Can edit');
+  else if (agent.permission.edit === 'ask') badges.push('Edits ask');
+  else badges.push('No edits');
+
+  const bashMode = agent.permission.bash['*'] || 'allow';
+  if (bashMode === 'deny') badges.push('No bash');
+  else if (bashMode === 'ask') badges.push('Bash asks');
+  else badges.push('Bash allowed');
+
+  return badges.join(' · ');
+}
+
+function looksLikeFileMentionQuery(query: string) {
+  return /[./\\]/.test(query);
+}
+
+function normalizeMentionPath(value: string) {
+  return value.replace(/^@/, '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
 function getUserMessageHistoryText(parts: Part[]) {

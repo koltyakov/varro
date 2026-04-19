@@ -13,6 +13,8 @@ import { logger } from './logger';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'opencode.chat';
+  private static readonly FILE_SEARCH_CACHE_TTL_MS = 15_000;
+  private static readonly FILE_SEARCH_MAX_CANDIDATES = 4_000;
   private view?: vscode.WebviewView;
   private contextProvider: ContextProvider;
   private server: OpenCodeServer;
@@ -20,6 +22,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private themeDisposable?: vscode.Disposable;
   private contextFiles: DroppedFile[] = [];
   private onContextFilesChanged?: () => void;
+  private workspaceFileCache: DroppedFile[] = [];
+  private workspaceFileCacheAt = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -102,6 +106,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
       case 'files/pick':
         this.pickFiles();
+        break;
+      case 'files/search':
+        this.searchFiles(msg.payload.requestId, msg.payload.query, msg.payload.limit);
         break;
       case 'file/read':
         this.contextProvider.readFile(msg.payload.path).then(() => {
@@ -288,6 +295,49 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'context/update', payload: this.contextProvider.context });
   }
 
+  private async searchFiles(requestId: number, query: string, limit = 12) {
+    const files = await this.getWorkspaceFiles();
+    const normalizedQuery = query.trim().toLowerCase();
+    const ranked = files
+      .map((file) => ({ file, score: getFileSearchScore(file.relativePath, normalizedQuery) }))
+      .filter((item) => item.score > Number.NEGATIVE_INFINITY)
+      .sort((a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath))
+      .slice(0, Math.max(1, Math.min(limit, 30)))
+      .map((item) => item.file);
+
+    this.post({
+      type: 'files/search-results',
+      payload: { requestId, query, files: ranked },
+    });
+  }
+
+  private async getWorkspaceFiles(): Promise<DroppedFile[]> {
+    const now = Date.now();
+    if (
+      this.workspaceFileCache.length > 0 &&
+      now - this.workspaceFileCacheAt < SidebarProvider.FILE_SEARCH_CACHE_TTL_MS
+    ) {
+      return this.workspaceFileCache;
+    }
+
+    const files = await vscode.workspace.findFiles(
+      '**/*',
+      '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/coverage/**}',
+      SidebarProvider.FILE_SEARCH_MAX_CANDIDATES
+    );
+
+    this.workspaceFileCache = files.map((uri) => {
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+      return {
+        path: uri.fsPath,
+        relativePath: getDroppedRelativePath(uri, workspaceFolder),
+        type: 'file' as const,
+      };
+    });
+    this.workspaceFileCacheAt = now;
+    return this.workspaceFileCache;
+  }
+
   postDroppedFiles(
     files: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>
   ) {
@@ -356,6 +406,31 @@ function getDroppedRelativePath(
 
   const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
   return relativePath || '.';
+}
+
+function getFileSearchScore(relativePath: string, query: string) {
+  if (!query) {
+    return 1 / Math.max(relativePath.length, 1);
+  }
+
+  const haystack = relativePath.toLowerCase();
+  const leaf = basename(relativePath).toLowerCase();
+  if (leaf === query) return 10_000;
+  if (haystack === query) return 9_000;
+  if (leaf.startsWith(query)) return 8_000 - leaf.length;
+  if (haystack.startsWith(query)) return 7_000 - haystack.length;
+  if (leaf.includes(query)) return 6_000 - leaf.indexOf(query) * 8 - leaf.length;
+  if (haystack.includes(query)) return 5_000 - haystack.indexOf(query) * 4 - haystack.length;
+
+  let score = 0;
+  let index = 0;
+  for (const char of query) {
+    const next = haystack.indexOf(char, index);
+    if (next === -1) return Number.NEGATIVE_INFINITY;
+    score += 12 - Math.min(next - index, 11);
+    index = next + 1;
+  }
+  return score - haystack.length;
 }
 
 function randomNonce(): string {

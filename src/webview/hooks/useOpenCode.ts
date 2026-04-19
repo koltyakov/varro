@@ -10,6 +10,8 @@ import {
   isLoading,
   setIsLoading,
   setError,
+  persistActiveSessionId,
+  getPersistedActiveSessionId,
   clearClipboardImages,
   clearMessages,
   upsertMessageInfo,
@@ -18,12 +20,24 @@ import {
   removeMessagePart,
   addPermission,
   removePermission,
+  setQuestions,
+  upsertQuestion,
+  removeQuestion,
   removeContextFile,
   markSessionSeen,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage } from '../../shared/protocol';
-import type { Session, SessionStatus, Message, Part, Permission, Todo, FileDiff } from '../types';
+import type {
+  Session,
+  SessionStatus,
+  Message,
+  Part,
+  Permission,
+  QuestionRequest,
+  Todo,
+  FileDiff,
+} from '../types';
 import { getWorkspaceRelativePath } from '../lib/path-display';
 
 let initialized = false;
@@ -57,6 +71,7 @@ function applySessions(sessions: Session[]) {
     !nextSessions.some((session) => session.id === state.activeSessionId)
   ) {
     setState('activeSessionId', null);
+    persistActiveSessionId(null);
     clearMessages();
     setIsLoading(false);
   }
@@ -179,18 +194,31 @@ export async function recheckSessionStatus(sessionId: string) {
 async function initConnection() {
   try {
     await client.health();
-    await Promise.all([loadSessions(), loadAgents(), loadProviders()]);
+    await Promise.all([loadSessions(), loadAgents(), loadProviders(), loadQuestions()]);
+    if (!state.activeSessionId) {
+      const lastId = getPersistedActiveSessionId();
+      if (lastId && state.sessions.some((s) => s.id === lastId)) {
+        await selectSession(lastId);
+      }
+    }
   } catch (_err) {
     setError('Failed to connect to OpenCode server');
   }
 }
 
+async function loadQuestions() {
+  try {
+    const questions = await client.question.list();
+    setQuestions(questions);
+  } catch {}
+}
+
 async function loadAgents() {
   try {
     const agents = await client.agent.list();
-    const primaries = agents.filter(
-      (a) => a.mode !== 'subagent' && !('hidden' in a && (a as { hidden?: boolean }).hidden)
-    );
+    const visible = agents.filter((a) => !a.hidden);
+    const primaries = visible.filter((a) => a.mode !== 'subagent');
+    setState('allAgents', visible);
     setState('agents', primaries);
     if (state.selectedAgent && !primaries.some((agent) => agent.name === state.selectedAgent)) {
       setSelectedAgent(null);
@@ -242,12 +270,14 @@ async function loadSessions() {
 
 export async function selectSession(id: string) {
   setState('activeSessionId', id);
+  persistActiveSessionId(id);
   markSessionSeen(id);
   clearMessages();
   try {
     const [session, msgs] = await Promise.all([client.session.get(id), client.session.messages(id)]);
     upsertSession(session);
     setState('messages', msgs);
+    await loadQuestions().catch(() => {});
     const statuses = await client.session
       .status()
       .catch(() => ({}) as Record<string, SessionStatus>);
@@ -275,6 +305,7 @@ export async function createSession(title?: string): Promise<string | null> {
     const session = await client.session.create(title ? { title } : undefined);
     upsertSession(session);
     setState('activeSessionId', session.id);
+    persistActiveSessionId(session.id);
     markSessionSeen(session.id);
     clearMessages();
     return session.id;
@@ -293,6 +324,7 @@ export async function deleteSession(id: string) {
     );
     if (state.activeSessionId === id) {
       setState('activeSessionId', null);
+      persistActiveSessionId(null);
       clearMessages();
       if (state.sessions.length > 0) {
         await selectSession(state.sessions[0].id);
@@ -432,6 +464,17 @@ export async function shareSession() {
   } catch {}
 }
 
+export async function unshareSession() {
+  if (!state.activeSessionId) return;
+  try {
+    const session = await client.session.unshare(state.activeSessionId);
+    setState(
+      'sessions',
+      state.sessions.map((s) => (s.id === session.id ? session : s))
+    );
+  } catch {}
+}
+
 export async function respondPermission(
   sessionId: string,
   permissionId: string,
@@ -442,6 +485,24 @@ export async function respondPermission(
     await client.session.respondPermission(sessionId, permissionId, response, remember);
     removePermission(permissionId);
   } catch {}
+}
+
+export async function respondQuestion(requestID: string, answers: Array<Array<string>>) {
+  try {
+    await client.question.reply(requestID, answers);
+    removeQuestion(requestID);
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Failed to answer question');
+  }
+}
+
+export async function rejectQuestion(requestID: string) {
+  try {
+    await client.question.reject(requestID);
+    removeQuestion(requestID);
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Failed to reject question');
+  }
 }
 
 type EventData = { properties?: Record<string, unknown> };
@@ -540,6 +601,21 @@ function registerEventHandlers() {
   serverEvents.on('permission.replied', (data) => {
     const pid = getProps(data)?.permissionID as string | undefined;
     if (pid) removePermission(pid);
+  });
+
+  serverEvents.on('question.asked', (data) => {
+    const props = getProps(data);
+    if (props) upsertQuestion(props as QuestionRequest);
+  });
+
+  serverEvents.on('question.replied', (data) => {
+    const requestID = getProps(data)?.requestID as string | undefined;
+    if (requestID) removeQuestion(requestID);
+  });
+
+  serverEvents.on('question.rejected', (data) => {
+    const requestID = getProps(data)?.requestID as string | undefined;
+    if (requestID) removeQuestion(requestID);
   });
 
   serverEvents.on('todo.updated', (data) => {
