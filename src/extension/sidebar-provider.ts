@@ -19,6 +19,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _status: ServerStatus = { state: 'stopped' };
   private themeDisposable?: vscode.Disposable;
   private contextFiles: DroppedFile[] = [];
+  private onContextFilesChanged?: () => void;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -97,6 +98,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
       case 'files/clear':
         this.clearContextFiles();
+        this.onContextFilesChanged?.();
+        break;
+      case 'files/pick':
+        this.pickFiles();
         break;
       case 'file/read':
         this.contextProvider.readFile(msg.payload.path).then(() => {
@@ -224,13 +229,59 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return null;
   }
 
+  setOnContextFilesChanged(fn: () => void) {
+    this.onContextFilesChanged = fn;
+  }
+
   removeContextFile(path: string) {
     this.contextFiles = this.contextFiles.filter((f) => f.path !== path);
     this.post({ type: 'files/removed', payload: { path } });
+    this.onContextFilesChanged?.();
+  }
+
+  getContextFiles() {
+    return this.contextFiles;
   }
 
   clearContextFiles() {
     this.contextFiles = [];
+  }
+
+  private async pickFiles() {
+    const result = await vscode.window.showOpenDialog({
+      canSelectMany: true,
+      canSelectFiles: true,
+      canSelectFolders: true,
+      title: 'Add files to context',
+    });
+    if (!result || result.length === 0) return;
+
+    const files = await Promise.all(
+      result.map(async (uri) => {
+        try {
+          const stat = await vscode.workspace.fs.stat(uri);
+          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+          const relativePath = getDroppedRelativePath(uri, workspaceFolder);
+          return {
+            path: uri.fsPath,
+            relativePath,
+            type:
+              stat.type & vscode.FileType.Directory
+                ? ('directory' as const)
+                : ('file' as const),
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    const valid = files.filter(
+      (f): f is { path: string; relativePath: string; type: 'file' | 'directory' } => f !== null
+    );
+    if (valid.length > 0) {
+      this.postDroppedFiles(valid);
+    }
   }
 
   private postContext() {
@@ -247,6 +298,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     this.contextFiles.push(...next);
     this.post({ type: 'files/dropped', payload: next });
+    this.onContextFilesChanged?.();
   }
 
   postCommand(cmd: 'new-session' | 'abort' | 'share') {

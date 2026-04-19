@@ -1,8 +1,9 @@
-import { createMemo, onMount, onCleanup } from 'solid-js';
+import { createMemo, createEffect, onMount, onCleanup } from 'solid-js';
 import { marked } from 'marked';
 import { postMessage } from '../lib/bridge';
 import { state } from '../lib/state';
 import { formatDisplayPath } from '../lib/path-display';
+import { getHighlighter, resolveLang, getTheme } from '../lib/highlight';
 
 interface MarkdownProps {
   content: string;
@@ -19,7 +20,8 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const langLabel = lang ? `<span class="code-block-lang">${lang}</span>` : '';
   const copyBtn = `<button class="code-block-copy-btn" data-copy title="Copy code">${copySvg}</button>`;
-  return `<div class="interactive-result-code-block"><div class="code-block-header">${langLabel}${copyBtn}</div><pre class="code-block"><code>${escaped}</code></pre></div>`;
+  const langAttr = lang ? ` data-lang="${lang.replace(/"/g, '&quot;')}"` : '';
+  return `<div class="interactive-result-code-block"${langAttr}><div class="code-block-header">${langLabel}${copyBtn}</div><pre class="code-block"><code>${escaped}</code></pre></div>`;
 };
 
 marked.setOptions({
@@ -118,5 +120,50 @@ export function MarkdownRenderer(props: MarkdownProps) {
     ref?.removeEventListener('click', handleClick);
   });
 
+  createEffect(() => {
+    html();
+    const root = ref;
+    if (!root) return;
+    queueMicrotask(() => highlightCodeBlocks(root));
+  });
+
   return <div ref={ref} class="rendered-markdown" innerHTML={html()} />;
+}
+
+async function highlightCodeBlocks(root: HTMLElement) {
+  const blocks = root.querySelectorAll<HTMLElement>(
+    '.interactive-result-code-block:not([data-hl])'
+  );
+  if (!blocks.length) return;
+  let hl;
+  try {
+    hl = await getHighlighter();
+  } catch {
+    return;
+  }
+  const theme = getTheme();
+  blocks.forEach((block) => {
+    if (block.dataset.hl) return;
+    const oldPre = block.querySelector<HTMLElement>('pre.code-block');
+    const code = oldPre?.querySelector('code');
+    if (!oldPre || !code) return;
+    const source = code.textContent || '';
+    const lang = resolveLang(block.dataset.lang, hl);
+    if (!lang) {
+      block.dataset.hl = '1';
+      return;
+    }
+    try {
+      const highlighted = hl.codeToHtml(source, { lang, theme });
+      const tmp = document.createElement('div');
+      tmp.innerHTML = highlighted;
+      const newPre = tmp.querySelector('pre');
+      if (!newPre) return;
+      newPre.className = 'code-block shiki';
+      oldPre.replaceWith(newPre);
+      block.dataset.hl = '1';
+    } catch {
+      block.dataset.hl = '1';
+    }
+  });
 }

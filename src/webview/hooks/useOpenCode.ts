@@ -18,6 +18,7 @@ import {
   addPermission,
   removePermission,
   removeContextFile,
+  markSessionSeen,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage } from '../../shared/protocol';
@@ -205,9 +206,11 @@ async function loadSessions() {
 
 export async function selectSession(id: string) {
   setState('activeSessionId', id);
+  markSessionSeen(id);
   clearMessages();
   try {
-    const msgs = await client.session.messages(id);
+    const [session, msgs] = await Promise.all([client.session.get(id), client.session.messages(id)]);
+    upsertSession(session);
     setState('messages', msgs);
     const statuses = await client.session
       .status()
@@ -226,11 +229,17 @@ async function syncSessionMessages(sessionId: string) {
   }
 }
 
+async function syncSession(sessionId: string) {
+  const session = await client.session.get(sessionId);
+  upsertSession(session);
+}
+
 export async function createSession(title?: string): Promise<string | null> {
   try {
     const session = await client.session.create(title ? { title } : undefined);
     upsertSession(session);
     setState('activeSessionId', session.id);
+    markSessionSeen(session.id);
     clearMessages();
     return session.id;
   } catch (err) {
@@ -336,7 +345,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
 
   try {
     await sendPromptWithFallback(sessionId, body);
-    await syncSessionMessages(sessionId).catch(() => {});
+    await Promise.all([syncSession(sessionId), syncSessionMessages(sessionId)]).catch(() => {});
   } catch (err) {
     setIsLoading(false);
     setError(err instanceof Error ? err.message : 'Failed to send message');
@@ -454,6 +463,8 @@ function registerEventHandlers() {
     const sid = getProps(data)?.sessionID as string | undefined;
     if (!sid || sid === state.activeSessionId) setIsLoading(false);
     if (sid && sid === state.activeSessionId) {
+      markSessionSeen(sid);
+      syncSession(sid).catch(() => {});
       syncSessionMessages(sid).catch(() => {});
     }
   });

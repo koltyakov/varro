@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { state, isLoading } from '../lib/state';
 import { Message } from './Message';
 
@@ -7,8 +7,21 @@ const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).h
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let trackRef: HTMLDivElement | undefined;
   const [autoScroll, setAutoScroll] = createSignal(true);
   const visibleMessages = createMemo(() => state.messages);
+  let scrollRaf = 0;
+
+  function scrollToBottom() {
+    if (!containerRef || !autoScroll()) return;
+    if (scrollRaf) cancelAnimationFrame(scrollRaf);
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      if (!containerRef) return;
+      containerRef.scrollTop = containerRef.scrollHeight;
+    });
+  }
 
   function onScroll() {
     if (!containerRef) return;
@@ -17,14 +30,13 @@ export function MessageList() {
     setAutoScroll(near);
   }
 
-  createEffect(() => {
-    const _len = visibleMessages().length;
-    const _parts = visibleMessages().reduce((acc, m) => acc + m.parts.length, 0);
-    void _len;
-    void _parts;
-    if (!containerRef || !autoScroll()) return;
-    requestAnimationFrame(() => {
-      containerRef!.scrollTop = containerRef!.scrollHeight;
+  onMount(() => {
+    if (!trackRef) return;
+    const observer = new ResizeObserver(() => scrollToBottom());
+    observer.observe(trackRef);
+    onCleanup(() => {
+      observer.disconnect();
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
     });
   });
 
@@ -34,7 +46,7 @@ export function MessageList() {
       class="interactive-list min-h-0 flex-1 overflow-y-auto scroll-smooth"
       onScroll={onScroll}
     >
-      <div class="interactive-list-track">
+      <div ref={trackRef} class="interactive-list-track">
         <Show
           when={visibleMessages().length > 0}
           fallback={

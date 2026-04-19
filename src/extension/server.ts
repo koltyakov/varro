@@ -61,6 +61,51 @@ export class OpenCodeServer extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       this.setStatus({ state: 'starting' });
+      const stderrLines: string[] = [];
+      let settled = false;
+
+      const rememberStderr = (text: string) => {
+        for (const line of text
+          .split(/\r?\n/)
+          .map((item) => item.trim())
+          .filter(Boolean)) {
+          stderrLines.push(line);
+        }
+        if (stderrLines.length > 8) {
+          stderrLines.splice(0, stderrLines.length - 8);
+        }
+      };
+
+      const describeStartupFailure = (fallback: string) => {
+        const recent = stderrLines[stderrLines.length - 1];
+        return recent ? `${fallback}: ${recent}` : fallback;
+      };
+
+      const failStartup = (message: string, err?: Error) => {
+        if (settled) return;
+        settled = true;
+        this.setStatus({ state: 'error', message });
+        reject(err || new Error(message));
+      };
+
+      const finishStartup = (url: string) => {
+        if (settled) return;
+        settled = true;
+        resolve(url);
+      };
+
+      const recoverOrFailStartup = async (fallback: string) => {
+        const healthyNow = await this.checkHealth();
+        if (healthyNow) {
+          this.setStatus({ state: 'running', url: this.url });
+          this.retries = 0;
+          this.startEventStream();
+          finishStartup(this.url);
+          return;
+        }
+
+        failStartup(describeStartupFailure(fallback));
+      };
 
       try {
         const command = this.resolveCommand();
@@ -78,11 +123,14 @@ export class OpenCodeServer extends EventEmitter {
         });
 
         this.process.stderr?.on('data', (data: Buffer) => {
-          logger.error(`[server] ${data.toString().trim()}`);
+          const text = data.toString().trim();
+          rememberStderr(text);
+          logger.error(`[server] ${text}`);
         });
 
-        this.process.on('exit', (code) => {
+        this.process.on('exit', (code, signal) => {
           logger.info(`Server process exited with code ${code}`);
+          this.process = null;
           this.stopEventStream();
           if (this._status.state === 'running') {
             this.setStatus({ state: 'stopped' });
@@ -91,27 +139,37 @@ export class OpenCodeServer extends EventEmitter {
               logger.info(`Restarting server (attempt ${this.retries})`);
               this.start().then(resolve).catch(reject);
             }
+            return;
           }
+
+          void recoverOrFailStartup(
+            `OpenCode server exited during startup${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
+          );
         });
 
         this.process.on('error', (err) => {
           logger.error(`Server process error: ${err.message}`);
           if (err.message.includes('ENOENT')) {
-            this.setStatus({
-              state: 'error',
-              message: 'OpenCode CLI not found. Install it with: npm install -g opencode-ai',
-            });
-            reject(new Error((this._status as { message: string }).message));
+            failStartup('OpenCode CLI not found. Install it with: npm install -g opencode-ai');
             return;
           }
+
+          void recoverOrFailStartup(`OpenCode server failed to spawn: ${err.message}`);
         });
       } catch (err) {
-        this.setStatus({ state: 'error', message: String(err) });
-        reject(err);
+        failStartup(String(err), err instanceof Error ? err : new Error(String(err)));
         return;
       }
 
-      this.pollHealth(resolve, reject);
+      this.pollHealth(
+        (url) => {
+          this.retries = 0;
+          finishStartup(url);
+        },
+        (err) => {
+          failStartup(describeStartupFailure(err.message), err);
+        }
+      );
     });
   }
 
@@ -149,14 +207,18 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async request(method: string, path: string, body?: unknown): Promise<unknown> {
+    const scoped = this.scopedUrl(path);
     const init: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.directoryHeaders(scoped.directory),
+      },
     };
     if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
       init.body = JSON.stringify(body);
     }
-    const res = await fetch(`${this.url}${path}`, init);
+    const res = await fetch(scoped.url, init);
     const text = await res.text();
     let data: unknown = text;
     try {
@@ -175,11 +237,15 @@ export class OpenCodeServer extends EventEmitter {
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
+    const scoped = this.scopedUrl('/event');
 
     try {
-      const res = await fetch(`${this.url}/event`, {
+      const res = await fetch(scoped.url, {
         signal: controller.signal,
-        headers: { Accept: 'text/event-stream' },
+        headers: {
+          Accept: 'text/event-stream',
+          ...this.directoryHeaders(scoped.directory),
+        },
       });
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
       const reader = res.body.getReader();
@@ -251,6 +317,22 @@ export class OpenCodeServer extends EventEmitter {
       return folders[0].uri.fsPath;
     }
     return undefined;
+  }
+
+  private scopedUrl(path: string): { url: string; directory?: string } {
+    const url = new URL(path, this.url);
+    const directory = this.getWorkspaceCwd();
+
+    if (directory && !url.pathname.startsWith('/global/') && !url.searchParams.has('directory')) {
+      url.searchParams.set('directory', directory);
+    }
+
+    return { url: url.toString(), directory };
+  }
+
+  private directoryHeaders(directory?: string): Record<string, string> {
+    if (!directory) return {};
+    return { 'x-opencode-directory': encodeURIComponent(directory) };
   }
 
   private resolveCommand(): string {

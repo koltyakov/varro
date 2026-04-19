@@ -362,11 +362,29 @@ input:focus-visible {
 }
 
 .rendered-markdown blockquote {
-  margin: 0 0 8px 0;
-  padding: 2px 12px 2px 10px;
-  border-left: 2px solid color-mix(in srgb, var(--color-vscode-muted) 30%, transparent);
+  position: relative;
+  margin: 0 0 16px 0;
+  padding: 0 8px 0 8px;
+  border: none;
   border-radius: 0;
   background: none;
+  color: color-mix(in srgb, var(--color-vscode-fg) 80%, transparent);
+}
+
+.rendered-markdown blockquote::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-vscode-muted) 28%, transparent) 0%,
+    color-mix(in srgb, var(--color-vscode-muted) 14%, transparent) 55%,
+    color-mix(in srgb, var(--color-vscode-muted) 2%, transparent) 100%
+  );
 }
 
 .rendered-markdown h1 {
@@ -523,14 +541,23 @@ input:focus-visible {
   background: var(--color-vscode-toolbar-hover);
 }
 
+.interactive-result-code-block .code-block-copy-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  fill: currentColor;
+  pointer-events: none;
+}
+
 .interactive-result-code-block pre.code-block {
   margin: 0;
   padding: 8px 12px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.5;
   tab-size: 2;
+  background: var(--color-vscode-result-editor-bg) !important;
 }
 
 .interactive-result-code-block pre.code-block code {
@@ -541,6 +568,14 @@ input:focus-visible {
   font-size: inherit;
   color: var(--color-vscode-fg);
   white-space: pre;
+}
+
+.interactive-result-code-block pre.code-block.shiki {
+  color: var(--color-vscode-fg);
+}
+
+.interactive-result-code-block pre.code-block.shiki code {
+  display: block;
 }
 
 .interactive-session .chat-input-container {
@@ -1025,7 +1060,7 @@ input:focus-visible {
   font-size: 12px;
   color: var(--color-vscode-muted);
   cursor: pointer;
-  padding: 8px 10px;
+  padding: 8px 8px;
   border: none;
   background: transparent;
   width: 100%;
@@ -1056,7 +1091,7 @@ input:focus-visible {
 }
 
 .chat-thinking-box .thinking-content .thinking-item {
-  padding: 10px 12px;
+  padding: 10px 10px;
   position: relative;
   font-size: 12px;
   line-height: 1.5;
@@ -1175,7 +1210,7 @@ kbd {
   width: 100%;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 8px 9px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -1253,7 +1288,7 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-preview {
-  padding: 0 10px 10px 26px;
+  padding: 0 9px 10px 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1264,7 +1299,7 @@ kbd {
 
 .chat-tool-invocation-part .tool-invocation-detail {
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
-  padding: 10px 12px 12px 26px;
+  padding: 10px 10px 12px 20px;
   font-size: 11px;
 }
 
@@ -1336,7 +1371,7 @@ kbd {
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
   border-radius: 10px;
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 72%, transparent);
-  padding: 8px 10px;
+  padding: 8px 9px;
 }
 
 .chat-subtask-part .subtask-header {
@@ -1360,7 +1395,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: 10px;
+  margin-left: 8px;
   margin-top: 6px;
   font-size: 11px;
   color: color-mix(in srgb, var(--color-vscode-muted) 70%, transparent);
@@ -1669,6 +1704,42 @@ kbd {
   min-width: 0;
   flex: 1;
   gap: 2px;
+}
+
+.session-item-indicator,
+.session-item-indicator-spacer {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.session-item-indicator-spacer {
+  background: transparent;
+}
+
+.session-item-indicator.is-running {
+  background: var(--color-vscode-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-vscode-accent) 60%, transparent);
+  animation: session-indicator-pulse 1.6s ease-out infinite;
+}
+
+.session-item-indicator.is-unread {
+  background: var(--color-vscode-success, #4ec9b0);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-success, #4ec9b0) 55%, transparent);
+}
+
+@keyframes session-indicator-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-vscode-accent) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-vscode-accent) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-vscode-accent) 0%, transparent);
+  }
 }
 
 .session-item-title {

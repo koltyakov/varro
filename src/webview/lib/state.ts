@@ -18,6 +18,7 @@ const STORAGE_KEYS = {
   selectedModel: 'opencode.selectedModel',
   hiddenProviders: 'opencode.hiddenProviders',
   hiddenModels: 'opencode.hiddenModels',
+  lastSeenSessions: 'opencode.lastSeenSessions',
 } as const;
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
@@ -62,6 +63,7 @@ interface AppState {
   selectedModel: SelectedModel | null;
   hiddenProviders: string[];
   hiddenModels: string[];
+  lastSeenSessions: Record<string, number>;
 }
 
 export interface ClipboardImage {
@@ -93,7 +95,20 @@ export const [state, setState] = createStore<AppState>({
   selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
+  lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
 });
+
+export function markSessionSeen(id: string) {
+  const next = { ...state.lastSeenSessions, [id]: Date.now() };
+  setState('lastSeenSessions', next);
+  writeStored(STORAGE_KEYS.lastSeenSessions, next);
+}
+
+export function isSessionUnread(sessionId: string, updatedAt: number) {
+  if (sessionId === state.activeSessionId) return false;
+  const seen = state.lastSeenSessions[sessionId] ?? 0;
+  return updatedAt > seen;
+}
 
 export const [inputText, setInputText] = createSignal('');
 export const [isLoading, setIsLoading] = createSignal(false);

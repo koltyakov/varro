@@ -34,7 +34,7 @@ export function ToolCall(props: { part: ToolPart }) {
   const preview = () => {
     const s = state();
     const input: Record<string, unknown> = (s.input || {}) as Record<string, unknown>;
-    const keys = ['file_path', 'path', 'command', 'query', 'pattern'];
+    const keys = ['file_path', 'pattern', 'query', 'command', 'path'];
     for (const k of keys) {
       if (typeof input[k] === 'string') return { text: String(input[k]).slice(0, 100), key: k };
     }

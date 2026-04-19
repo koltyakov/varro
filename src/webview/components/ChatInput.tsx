@@ -176,9 +176,7 @@ export function ChatInput() {
     const beginDropTarget = (e: DragEvent) => {
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-      if (isPathDrop(e.dataTransfer) || hasAnyData(e.dataTransfer)) {
-        setIsDraggingOver(true);
-      }
+      setIsDraggingOver(true);
     };
 
     const handleWindowDragOver = (e: DragEvent) => {
@@ -415,7 +413,7 @@ export function ChatInput() {
         onDrop={handleDrop}
       >
         <Show when={state.todos.length > 0}>
-          <TodoList placement="composer" />
+          <TodoList />
         </Show>
 
         <Show when={hasContext()}>
@@ -516,6 +514,16 @@ export function ChatInput() {
 
         <div class="chat-input-toolbars">
           <div class="toolbar-left">
+            <button
+              class="toolbar-icon"
+              onClick={() => postMessage({ type: 'files/pick' })}
+              title="Attach file"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V6h4.25a.25.25 0 01.25.25v2.5a.25.25 0 01-.25.25H9.5v4.25a.25.25 0 01-.25.25h-2.5a.25.25 0 01-.25-.25V9H2.25a.25.25 0 01-.25-.25v-2.5a.25.25 0 01.25-.25H6.5V1.75z" />
+              </svg>
+            </button>
+
             <Show when={state.agents.length > 0}>
               <button
                 class="toolbar-picker"
@@ -1014,13 +1022,23 @@ async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<s
 
   const paths = new Set<string>();
 
-  // Collect all types that might contain paths, including VS Code internal types
-  const knownTypes = ['text/uri-list', 'ResourceURLs', 'text/plain'];
+  const knownTypes = [
+    'CodeEditors',
+    'CodeFiles',
+    'text/uri-list',
+    'ResourceURLs',
+    'application/vnd.code.uri-list',
+    'text/plain',
+  ];
   const allTypes = Array.from(dataTransfer.types || []);
   for (const t of allTypes) {
     if (t.startsWith('application/vnd.code.') || !knownTypes.includes(t)) {
       knownTypes.push(t);
     }
+  }
+
+  for (const path of collectVSCodeDroppedPaths(dataTransfer)) {
+    paths.add(path);
   }
 
   for (const type of knownTypes) {
@@ -1058,21 +1076,94 @@ async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<s
   return Array.from(paths);
 }
 
-function hasAnyData(dataTransfer: DataTransfer | null): boolean {
-  if (!dataTransfer) return false;
-  const types = Array.from(dataTransfer.types || []);
-  return types.length > 0 || dataTransfer.files.length > 0;
+function collectVSCodeDroppedPaths(dataTransfer: DataTransfer): string[] {
+  const paths = new Set<string>();
+
+  for (const path of parseCodeEditorsDrop(dataTransfer.getData('CodeEditors'))) {
+    paths.add(path);
+  }
+
+  for (const path of parseCodeFilesDrop(dataTransfer.getData('CodeFiles'))) {
+    paths.add(path);
+  }
+
+  for (const path of parseResourceListDrop(dataTransfer.getData('ResourceURLs'))) {
+    paths.add(path);
+  }
+
+  for (const path of parseUriListDrop(dataTransfer.getData('application/vnd.code.uri-list'))) {
+    paths.add(path);
+  }
+
+  return Array.from(paths);
 }
 
-function isPathDrop(dataTransfer: DataTransfer | null): boolean {
-  if (!dataTransfer) return false;
-  const types = Array.from(dataTransfer.types || []);
-  return (
-    types.includes('Files') ||
-    types.includes('text/uri-list') ||
-    types.includes('ResourceURLs') ||
-    types.some((t) => t.startsWith('application/vnd.code.'))
-  );
+function parseCodeEditorsDrop(value: string): string[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value) as unknown[];
+    const paths = new Set<string>();
+    for (const item of parsed) {
+      if (!item) continue;
+      if (typeof item === 'string') {
+        const decoded = decodeDroppedCandidate(item);
+        if (decoded) paths.add(decoded);
+        continue;
+      }
+      if (typeof item !== 'object') continue;
+      const resource = 'resource' in item ? (item.resource as string | undefined) : undefined;
+      const uri = resource ? decodeDroppedCandidate(resource) : null;
+      if (uri) paths.add(uri);
+    }
+    return Array.from(paths);
+  } catch {
+    return [];
+  }
+}
+
+function parseCodeFilesDrop(value: string): string[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value) as unknown[];
+    const paths = new Set<string>();
+    for (const item of parsed) {
+      if (typeof item !== 'string') continue;
+      const decoded = decodeDroppedCandidate(item);
+      if (decoded) paths.add(decoded);
+    }
+    return Array.from(paths);
+  } catch {
+    return [];
+  }
+}
+
+function parseResourceListDrop(value: string): string[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value) as unknown[];
+    const paths = new Set<string>();
+    for (const item of parsed) {
+      if (typeof item !== 'string') continue;
+      const decoded = decodeDroppedCandidate(item);
+      if (decoded) paths.add(decoded);
+    }
+    return Array.from(paths);
+  } catch {
+    return parseUriListDrop(value);
+  }
+}
+
+function parseUriListDrop(value: string): string[] {
+  if (!value) return [];
+  const paths = new Set<string>();
+  for (const entry of value.split(/\r?\n/)) {
+    const decoded = decodeDroppedCandidate(entry.trim());
+    if (decoded) paths.add(decoded);
+  }
+  return Array.from(paths);
 }
 
 function readItemByType(dataTransfer: DataTransfer, type: string): Promise<string> {

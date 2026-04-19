@@ -1,4 +1,10 @@
-import { state, showSessionPicker, setShowSessionPicker, showSettings } from '../lib/state';
+import {
+  state,
+  showSessionPicker,
+  setShowSessionPicker,
+  showSettings,
+  isSessionUnread,
+} from '../lib/state';
 import { Show, For } from 'solid-js';
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { MessageList } from './MessageList';
@@ -87,6 +93,17 @@ function SessionListView() {
         <For each={state.sessions}>
           {(session) => {
             const isActive = () => session.id === state.activeSessionId;
+            const status = () => state.sessionStatus[session.id];
+            const isRunning = () => {
+              const t = status()?.type;
+              return t === 'busy' || t === 'retry';
+            };
+            const isUnread = () => !isRunning() && isSessionUnread(session.id, session.time.updated);
+            const indicatorTitle = () => {
+              if (isRunning()) return status()?.type === 'retry' ? 'Retrying' : 'Running';
+              if (isUnread()) return 'Updated since last viewed';
+              return '';
+            };
             return (
               <button
                 class={`session-item ${isActive() ? 'active' : ''}`}
@@ -95,6 +112,16 @@ function SessionListView() {
                   setShowSessionPicker(false);
                 }}
               >
+                <Show
+                  when={isRunning() || isUnread()}
+                  fallback={<span class="session-item-indicator-spacer" />}
+                >
+                  <span
+                    class={`session-item-indicator ${isRunning() ? 'is-running' : 'is-unread'}`}
+                    title={indicatorTitle()}
+                    aria-label={indicatorTitle()}
+                  />
+                </Show>
                 <div class="session-item-content">
                   <span class="session-item-title">{session.title || 'Untitled'}</span>
                   <span class="session-item-meta">

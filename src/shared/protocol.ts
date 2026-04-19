@@ -51,6 +51,7 @@ export type WebviewMessage =
   | { type: 'files/drop'; payload: { paths: string[] } }
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }
+  | { type: 'files/pick' }
   | { type: 'file/read'; payload: { path: string } }
   | { type: 'vscode/open'; payload: { path: string; line?: number } }
   | { type: 'vscode/diff'; payload: { path: string } }

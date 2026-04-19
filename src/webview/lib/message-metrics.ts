@@ -70,7 +70,12 @@ export function getContextWindow(message: AssistantMessage, providers: Provider[
   const contextLimit = model?.limit?.context;
   if (!contextLimit) return null;
 
-  const used = message.tokens.input || 0;
+  const used =
+    (message.tokens.input || 0) +
+    (message.tokens.output || 0) +
+    (message.tokens.reasoning || 0) +
+    (message.tokens.cache?.read || 0) +
+    (message.tokens.cache?.write || 0);
   return {
     used,
     limit: contextLimit,
