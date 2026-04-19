@@ -1335,7 +1335,7 @@ kbd {
 }
 
 .chat-tool-invocation-part:not(:last-child) {
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
 
 .chat-tool-invocation-part .tool-invocation-header {
