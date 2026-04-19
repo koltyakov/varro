@@ -363,8 +363,8 @@ input:focus-visible {
 
 .rendered-markdown blockquote {
   position: relative;
-  margin: 0 0 16px 0;
-  padding: 0 8px 0 8px;
+  margin: -8px 0 24px 0;
+  padding: 0 8px 0 4px;
   border: none;
   border-radius: 0;
   background: none;
@@ -404,10 +404,29 @@ input:focus-visible {
 }
 
 .rendered-markdown ul {
-  padding-inline-start: 24px;
+  position: relative;
+  list-style: none;
+  padding-inline-start: 16px;
+  margin: -4px 0 20px 0;
+}
+.rendered-markdown ul::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-vscode-muted) 28%, transparent) 0%,
+    color-mix(in srgb, var(--color-vscode-muted) 14%, transparent) 55%,
+    color-mix(in srgb, var(--color-vscode-muted) 2%, transparent) 100%
+  );
 }
 .rendered-markdown ol {
-  padding-inline-start: 28px;
+  padding-inline-start: 16px;
+  margin: -4px 0 20px 0;
 }
 .rendered-markdown li {
   margin: 4px 0;
@@ -591,6 +610,11 @@ input:focus-visible {
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
+}
+
+.interactive-session .chat-input-container.showing-context-popup {
+  overflow: visible;
+  z-index: 2;
 }
 
 .interactive-session .chat-input-container.focused {
@@ -1511,28 +1535,15 @@ kbd {
 }
 
 .chat-drop-overlay {
-  position: fixed;
-  inset: 0;
+  position: absolute;
+  inset: 36px 0 0;
   z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--color-vscode-sidebar) 85%, transparent);
-  border: 2px dashed var(--color-vscode-accent);
-  border-radius: 8px;
-  margin: 4px;
+  background: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-vscode-accent) 55%, transparent),
+    inset 0 0 0 10px color-mix(in srgb, var(--color-vscode-accent) 5%, transparent);
   pointer-events: none;
   animation: fade-in 0.1s ease-out;
-}
-
-.chat-drop-overlay-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-vscode-accent);
-  font-size: 12px;
-  font-weight: 500;
 }
 
 /* Unified dropdown menus */

@@ -26,6 +26,11 @@ export function TodoList() {
         <span class="text-vscode-muted/70">
           ({completed()}/{total()})
         </span>
+        <span class="ml-auto flex items-center text-vscode-muted/70">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round">
+            <path d="M3 5h10M3 8h10M3 11h6" />
+          </svg>
+        </span>
       </button>
       {!collapsed() && (
         <ul class="mt-1.5 space-y-0.5">
@@ -41,33 +46,36 @@ function TodoItem(props: { todo: Todo }) {
     switch (props.todo.status) {
       case 'completed':
         return (
-          <svg
-            class="h-3.5 w-3.5 text-vscode-success"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-          >
-            <circle cx="8" cy="8" r="6.25" />
-            <path d="M5 8.25l2.25 2.25L11 6.5" stroke-linecap="round" stroke-linejoin="round" />
+          <svg class="h-3.5 w-3.5 text-vscode-success" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="8" cy="8" r="6.5" />
+            <path
+              d="M5 8.25l2.25 2.25L11 6.5"
+              fill="none"
+              stroke="var(--vscode-editor-background, #1e1e1e)"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         );
       case 'in_progress':
         return (
-          <svg class="h-3.5 w-3.5 text-vscode-accent" viewBox="0 0 16 16" fill="currentColor">
-            <circle cx="8" cy="8" r="4" />
+          <svg class="h-3.5 w-3.5 text-vscode-accent" viewBox="0 0 16 16">
+            <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.25" opacity="0.45" />
+            <circle cx="8" cy="8" r="3" fill="currentColor" />
           </svg>
         );
       default:
         return (
           <svg
-            class="h-3.5 w-3.5 text-vscode-muted/55"
+            class="h-3.5 w-3.5 text-vscode-muted/60"
             viewBox="0 0 16 16"
             fill="none"
             stroke="currentColor"
             stroke-width="1.25"
+            stroke-dasharray="2 1.6"
           >
-            <circle cx="8" cy="8" r="5" />
+            <circle cx="8" cy="8" r="5.5" />
           </svg>
         );
     }

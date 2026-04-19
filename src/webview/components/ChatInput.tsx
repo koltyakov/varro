@@ -381,19 +381,12 @@ export function ChatInput() {
       </Show>
 
       <Show when={isDraggingOver()}>
-        <div class="chat-drop-overlay">
-          <div class="chat-drop-overlay-content">
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
-            </svg>
-            <span>Drop to add context</span>
-          </div>
-        </div>
+        <div class="chat-drop-overlay" aria-hidden="true" />
       </Show>
 
       <div
         ref={containerRef}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${isDraggingOver() ? 'focused' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
