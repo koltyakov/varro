@@ -322,7 +322,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const ranked = files
       .map((file) => ({ file, score: getFileSearchScore(file.relativePath, normalizedQuery) }))
       .filter((item) => item.score > Number.NEGATIVE_INFINITY)
-      .sort((a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath))
+      .toSorted((a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath))
       .slice(0, Math.max(1, Math.min(limit, 30)))
       .map((item) => item.file);
 

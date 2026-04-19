@@ -19,9 +19,13 @@ import {
   removeContextFile,
   clearClipboardImages,
   clearContextFiles,
+  showThinking,
+  toggleThinking,
+  enqueueMessage,
+  removeQueuedMessage,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
-import { sendMessage, abortSession, shareSession, unshareSession, createSession } from '../hooks/useOpenCode';
+import { sendMessage, abortSession, shareSession, unshareSession, createSession, compactSession } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel, formatThinkingLabel } from './ModelPicker';
 import {
   isAssistantMessage,
@@ -41,9 +45,20 @@ export function ChatInput() {
   let containerRef: HTMLDivElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
+  const [agentFocusIndex, setAgentFocusIndex] = createSignal(0);
   const [showBusyMenu, setShowBusyMenu] = createSignal(false);
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [showContextPopup, setShowContextPopup] = createSignal(false);
+
+  type PopupKind = 'agent' | 'variant' | 'model' | 'context' | 'busy';
+  const closePopups = (except?: PopupKind) => {
+    if (except !== 'agent') setShowAgentPicker(false);
+    if (except !== 'variant') setShowVariantPicker(false);
+    if (except !== 'model') setShowModelPicker(false);
+    if (except !== 'context') setShowContextPopup(false);
+    if (except !== 'busy') setShowBusyMenu(false);
+  };
+
   const [isFocused, setIsFocused] = createSignal(false);
   const [historyIndex, setHistoryIndex] = createSignal<number | null>(null);
   const [historyDraft, setHistoryDraft] = createSignal('');
@@ -60,7 +75,10 @@ export function ChatInput() {
   const terminalSelection = () => state.terminalSelection;
   const activeFile = () => state.editorContext.activeFile;
   const hasContext = () =>
-    files().length > 0 || clipboardImages().length > 0 || !!activeFile() || !!terminalSelection();
+    !!activeFile() || !!terminalSelection();
+
+  const hasMentions = () =>
+    files().length > 0 || clipboardImages().length > 0;
 
   const activeContext = () => {
     const file = activeFile();
@@ -162,7 +180,9 @@ export function ChatInput() {
       type: 'file' as const,
       label: `@${file.relativePath}`,
       detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
-      value: `${file.relativePath}${file.type === 'directory' ? '/' : ''}`,
+      value: file.type === 'directory'
+        ? `@${getLeafPathName(file.relativePath)}/`
+        : `@${getLeafPathName(file.relativePath)}`,
       file,
     }));
 
@@ -207,6 +227,34 @@ export function ChatInput() {
 
   function handleKeydown(e: KeyboardEvent) {
     const showingCompletions = composerCompletions().length > 0 && !suppressCompletion();
+
+    if (showAgentPicker() && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      const agents = state.agents;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setAgentFocusIndex((i) => (i + 1) % agents.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setAgentFocusIndex((i) => (i <= 0 ? agents.length - 1 : i - 1));
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const agent = agents[agentFocusIndex()];
+        if (agent) {
+          setSelectedAgent(agent.name);
+          setShowAgentPicker(false);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowAgentPicker(false);
+        return;
+      }
+    }
 
     if (showingCompletions && !e.altKey && !e.ctrlKey && !e.metaKey && !e.isComposing) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -354,6 +402,29 @@ export function ChatInput() {
     const text = inputText();
     if (!text.trim() && state.droppedFiles.length === 0 && state.clipboardImages.length === 0)
       return;
+
+    if (
+      mode !== 'steer' &&
+      isLoading() &&
+      !hasActiveQuestion() &&
+      state.activeSessionId &&
+      text.trim() &&
+      state.droppedFiles.length === 0 &&
+      state.clipboardImages.length === 0
+    ) {
+      enqueueMessage({
+        id: createAttachmentID(),
+        sessionId: state.activeSessionId,
+        text,
+      });
+      setHistoryIndex(null);
+      setHistoryDraft('');
+      setCompletionIndex(0);
+      setInputText('');
+      if (textareaRef) textareaRef.style.height = 'auto';
+      return;
+    }
+
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
@@ -361,6 +432,22 @@ export function ChatInput() {
     if (textareaRef) textareaRef.style.height = 'auto';
     await sendMessage(text, { noReply: mode === 'steer' });
   }
+
+  async function sendQueuedAsSteer(id: string, text: string) {
+    removeQueuedMessage(id);
+    await sendMessage(text, { noReply: true });
+  }
+
+  createEffect(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+    if (isLoading()) return;
+    if (hasActiveQuestion()) return;
+    const next = state.queuedMessages.find((item) => item.sessionId === sessionId);
+    if (!next) return;
+    removeQueuedMessage(next.id);
+    void sendMessage(next.text);
+  });
 
   function setComposerValue(value: string) {
     setInputText(value);
@@ -702,6 +789,12 @@ export function ChatInput() {
       : variants[0];
   });
 
+  const queuedForSession = createMemo(() =>
+    state.activeSessionId
+      ? state.queuedMessages.filter((item) => item.sessionId === state.activeSessionId)
+      : []
+  );
+
   const selectedAgentLabel = () => {
     const name = state.selectedAgent;
     if (!name) return 'Agent';
@@ -755,6 +848,44 @@ export function ChatInput() {
           <TodoList />
         </Show>
 
+        <Show when={queuedForSession().length > 0}>
+          <div class="chat-queue-container" role="list" aria-label="Queued messages">
+            <For each={queuedForSession()}>
+              {(item) => (
+                <div class="chat-queue-item" role="listitem" title={item.text}>
+                  <span class="chat-queue-icon" aria-hidden="true">
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 4h10M3 8h10M3 12h6" />
+                    </svg>
+                  </span>
+                  <span class="chat-queue-label">{item.text}</span>
+                  <button
+                    class="chat-queue-action"
+                    onClick={() => sendQueuedAsSteer(item.id, item.text)}
+                    title="Send now as Steer"
+                    aria-label="Send as Steer"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M8 2l1.8 4.8H15l-4 3.4 1.6 5L8 12l-4.6 3.2 1.6-5-4-3.4h5.2z" />
+                    </svg>
+                    <span class="chat-queue-action-label">Steer</span>
+                  </button>
+                  <button
+                    class="chat-queue-remove"
+                    onClick={() => removeQueuedMessage(item.id)}
+                    title="Remove from queue"
+                    aria-label="Remove from queue"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+
         <Show when={hasContext()}>
           <div class="chat-attachments-container">
             <Show when={activeContext()}>
@@ -777,54 +908,67 @@ export function ChatInput() {
                 onRemove={() => postMessage({ type: 'terminal-selection/clear' })}
               />
             </Show>
+          </div>
+        </Show>
+
+        <Show when={hasMentions()}>
+          <div class="chat-mentions-container">
             <For each={files()}>
               {(file) => (
-                <AttachmentChip
-                  label={getDroppedFileLabel(file)}
-                  icon={file.type === 'directory' ? 'folder' : 'file'}
-                  title={file.relativePath || file.path}
-                  onRemove={() => {
-                    removeContextFile(file.path);
-                    postMessage({ type: 'files/remove', payload: { path: file.path } });
-                  }}
-                />
+                <span class="chat-mention-tag" title={file.relativePath || file.path}>
+                  <Show when={file.type === 'directory'}>
+                    <svg class="mention-tag-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
+                      <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
+                    </svg>
+                  </Show>
+                  <Show when={file.type !== 'directory'}>
+                    <svg class="mention-tag-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
+                      <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
+                    </svg>
+                  </Show>
+                  <span class="mention-tag-label">{getDroppedFileLabel(file)}</span>
+                  <button
+                    class="mention-tag-remove"
+                    onClick={() => {
+                      removeContextFile(file.path);
+                      postMessage({ type: 'files/remove', payload: { path: file.path } });
+                    }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                    </svg>
+                  </button>
+                </span>
               )}
             </For>
             <For each={clipboardImages()}>
               {(image) => (
-                <AttachmentChip
-                  label={image.filename}
-                  icon="image"
-                  title={image.filename}
-                  onRemove={() => removeClipboardImage(image.id)}
-                />
+                <span class="chat-mention-tag" title={image.filename}>
+                  <svg class="mention-tag-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
+                    <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+                  </svg>
+                  <span class="mention-tag-label">{image.filename}</span>
+                  <button class="mention-tag-remove" onClick={() => removeClipboardImage(image.id)}>
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                    </svg>
+                  </button>
+                </span>
               )}
             </For>
-            <Show when={files().length > 0 || clipboardImages().length > 0 || terminalSelection()}>
-              <button
-                class="chat-attachment-chip"
-                style={{
-                  cursor: 'pointer',
-                  border: 'none',
-                  background: 'none',
-                  opacity: 0.4,
-                  'font-size': '10px',
-                }}
-                onClick={() => {
-                  clearContextFiles();
-                  clearClipboardImages();
-                  if (terminalSelection()) {
-                    postMessage({ type: 'terminal-selection/clear' });
-                  }
-                  postMessage({ type: 'files/clear' });
-                }}
-                title="Clear all"
-              >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-                </svg>
-              </button>
-            </Show>
+            <button
+              class="mention-tag-clear"
+              onClick={() => {
+                clearContextFiles();
+                clearClipboardImages();
+                postMessage({ type: 'files/clear' });
+              }}
+              title="Clear all"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+              </svg>
+            </button>
           </div>
         </Show>
 
@@ -906,11 +1050,10 @@ export function ChatInput() {
                 <button
                   class="toolbar-picker"
                   onClick={() => {
-                    setShowAgentPicker(!showAgentPicker());
-                    setShowModelPicker(false);
-                    setShowVariantPicker(false);
-                    setShowContextPopup(false);
-                    setShowBusyMenu(false);
+                    const next = !showAgentPicker();
+                    closePopups(next ? 'agent' : undefined);
+                    setShowAgentPicker(next);
+                    if (next) setAgentFocusIndex(0);
                   }}
                   title="Select agent"
                 >
@@ -921,14 +1064,16 @@ export function ChatInput() {
                 </button>
                 <Show when={showAgentPicker()}>
                   <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                    <div class="toolbar-popover-header">Agent</div>
                     <For each={state.agents}>
-                      {(agent) => (
+                      {(agent, index) => (
                         <button
-                          class={`toolbar-popover-item ${state.selectedAgent === agent.name ? 'selected' : ''}`}
+                          class={`toolbar-popover-item ${state.selectedAgent === agent.name ? 'selected' : ''} ${agentFocusIndex() === index() ? 'keyboard-focus' : ''}`}
                           onClick={() => {
                             setSelectedAgent(agent.name);
                             setShowAgentPicker(false);
                           }}
+                          onMouseEnter={() => setAgentFocusIndex(index())}
                         >
                           <span class="min-w-0 flex-1">
                             <span class="block truncate">{agent.name}</span>
@@ -947,10 +1092,9 @@ export function ChatInput() {
             <button
               class="toolbar-picker model-picker-btn"
               onClick={() => {
-                setShowModelPicker(!showModelPicker());
-                setShowAgentPicker(false);
-                setShowVariantPicker(false);
-                setShowBusyMenu(false);
+                const next = !showModelPicker();
+                closePopups(next ? 'model' : undefined);
+                setShowModelPicker(next);
               }}
               title={
                 currentModel().modelName
@@ -971,11 +1115,9 @@ export function ChatInput() {
                 <button
                   class="toolbar-picker"
                   onClick={() => {
-                    setShowVariantPicker(!showVariantPicker());
-                    setShowAgentPicker(false);
-                    setShowModelPicker(false);
-                    setShowContextPopup(false);
-                    setShowBusyMenu(false);
+                    const next = !showVariantPicker();
+                    closePopups(next ? 'variant' : undefined);
+                    setShowVariantPicker(next);
                   }}
                   title="Thinking level"
                 >
@@ -986,6 +1128,7 @@ export function ChatInput() {
                 </button>
                 <Show when={showVariantPicker()}>
                   <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                    <div class="toolbar-popover-header">Reasoning</div>
                     <For each={availableVariants()}>
                       {(v) => (
                         <button
@@ -1014,11 +1157,9 @@ export function ChatInput() {
                 <button
                   class={`chat-context-usage ${contextUsage()!.percent >= 75 ? (contextUsage()!.percent >= 90 ? 'error' : 'warning') : ''}`}
                   onClick={() => {
-                    setShowContextPopup(!showContextPopup());
-                    setShowAgentPicker(false);
-                    setShowModelPicker(false);
-                    setShowVariantPicker(false);
-                    setShowBusyMenu(false);
+                    const next = !showContextPopup();
+                    closePopups(next ? 'context' : undefined);
+                    setShowContextPopup(next);
                   }}
                   title="Context usage"
                 >
@@ -1085,7 +1226,11 @@ export function ChatInput() {
                   </button>
                   <button
                     class="send-mode-chevron"
-                    onClick={() => setShowBusyMenu(!showBusyMenu())}
+                    onClick={() => {
+                      const next = !showBusyMenu();
+                      closePopups(next ? 'busy' : undefined);
+                      setShowBusyMenu(next);
+                    }}
                     title="More send options"
                   >
                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1231,8 +1376,26 @@ function CompletionMenu(props: {
   selectedIndex: number;
   onSelect: (item: CompletionItem) => void;
 }) {
+  let menuRef: HTMLDivElement | undefined;
+  const itemRefs: HTMLButtonElement[] = [];
+
+  createEffect(() => {
+    const idx = props.selectedIndex;
+    const el = itemRefs[idx];
+    if (!el || !menuRef) return;
+    const elTop = el.offsetTop;
+    const elBottom = elTop + el.offsetHeight;
+    const viewTop = menuRef.scrollTop;
+    const viewBottom = viewTop + menuRef.clientHeight;
+    if (elTop < viewTop) {
+      menuRef.scrollTop = elTop;
+    } else if (elBottom > viewBottom) {
+      menuRef.scrollTop = elBottom - menuRef.clientHeight;
+    }
+  });
+
   return (
-    <div class="composer-completion-menu">
+    <div class="composer-completion-menu" ref={menuRef}>
       <For each={props.items}>
         {(item, index) => {
           const isSlash = item.type === 'slash';
@@ -1240,6 +1403,7 @@ function CompletionMenu(props: {
           const detail = 'description' in item ? item.description : item.detail;
           return (
             <button
+              ref={(el) => (itemRefs[index()] = el)}
               class={`composer-completion-item ${props.selectedIndex === index() ? 'selected' : ''}`}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => props.onSelect(item)}
@@ -1366,6 +1530,22 @@ function getSlashCommands(props: {
       aliases: [],
       description: 'Open model visibility settings',
       action: props.onOpenSettings,
+    },
+    {
+      name: 'thinking',
+      aliases: ['reasoning'],
+      description: showThinking() ? 'Hide thinking blocks' : 'Show thinking blocks',
+      action: () => {
+        toggleThinking();
+      },
+    },
+    {
+      name: 'compact',
+      aliases: ['summarize'],
+      description: 'Compact conversation context',
+      action: () => {
+        compactSession();
+      },
     },
   ];
 

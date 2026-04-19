@@ -1,5 +1,5 @@
 import { Show, createMemo, createSignal } from 'solid-js';
-import { state } from '../lib/state';
+import { state, showThinking } from '../lib/state';
 import { formatDuration, getAssistantDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, SubtaskPart, TextPart } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -21,7 +21,7 @@ export function MessagePart(props: {
       case 'tool':
         return <ToolCall part={part} />;
       case 'reasoning':
-        return <ReasoningBlock text={part.text} />;
+        return <Show when={showThinking()}><ReasoningBlock text={part.text} /></Show>;
       case 'agent':
         return (
           <div class="chat-subtask-part">

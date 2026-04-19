@@ -465,6 +465,19 @@ export async function abortSession() {
   } catch {}
 }
 
+export async function compactSession() {
+  if (!state.activeSessionId) return;
+  try {
+    setIsLoading(true);
+    await client.session.compact(state.activeSessionId);
+    await Promise.all([syncSession(state.activeSessionId), syncSessionMessages(state.activeSessionId)]);
+    setIsLoading(false);
+  } catch (err) {
+    setIsLoading(false);
+    setError(err instanceof Error ? err.message : 'Failed to compact session');
+  }
+}
+
 export async function shareSession() {
   if (!state.activeSessionId) return;
   try {

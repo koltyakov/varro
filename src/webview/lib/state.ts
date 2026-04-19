@@ -69,6 +69,13 @@ interface AppState {
   hiddenProviders: string[];
   hiddenModels: string[];
   lastSeenSessions: Record<string, number>;
+  queuedMessages: QueuedMessage[];
+}
+
+export interface QueuedMessage {
+  id: string;
+  sessionId: string;
+  text: string;
 }
 
 export interface ClipboardImage {
@@ -119,7 +126,34 @@ export const [state, setState] = createStore<AppState>({
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
   lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
+  queuedMessages: [],
 });
+
+export function enqueueMessage(message: QueuedMessage) {
+  setState(
+    'queuedMessages',
+    produce((items) => {
+      items.push(message);
+    })
+  );
+}
+
+export function removeQueuedMessage(id: string) {
+  setState(
+    'queuedMessages',
+    produce((items) => {
+      const idx = items.findIndex((item) => item.id === id);
+      if (idx !== -1) items.splice(idx, 1);
+    })
+  );
+}
+
+export function clearQueuedMessagesForSession(sessionId: string) {
+  setState(
+    'queuedMessages',
+    (items) => items.filter((item) => item.sessionId !== sessionId)
+  );
+}
 
 export function persistActiveSessionId(id: string | null) {
   writeStored(STORAGE_KEYS.lastActiveSessionId, id);
@@ -139,6 +173,25 @@ export function isSessionUnread(sessionId: string, updatedAt: number) {
   if (sessionId === state.activeSessionId) return false;
   const seen = state.lastSeenSessions[sessionId] ?? 0;
   return updatedAt > seen;
+}
+
+export const [showThinking, setShowThinking] = createSignal(readShowThinking());
+
+export function toggleThinking() {
+  const next = !showThinking();
+  setShowThinking(next);
+  try {
+    window.localStorage.setItem('opencode.showThinking', JSON.stringify(next));
+  } catch {}
+}
+
+function readShowThinking(): boolean {
+  try {
+    const raw = window.localStorage.getItem('opencode.showThinking');
+    return raw ? JSON.parse(raw) : true;
+  } catch {
+    return true;
+  }
 }
 
 export const [inputText, setInputText] = createSignal('');

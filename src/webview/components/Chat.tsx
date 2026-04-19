@@ -5,7 +5,7 @@ import {
   showSettings,
   isSessionUnread,
 } from '../lib/state';
-import { Show, For, createSignal, onCleanup, createEffect } from 'solid-js';
+import { Show, For, createSignal, onCleanup, onMount } from 'solid-js';
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -85,20 +85,29 @@ export function Chat() {
 
 function SessionListView() {
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
+  let containerRef: HTMLDivElement | undefined;
 
   function handleKeydown(e: KeyboardEvent) {
     const sessions = state.sessions;
     if (sessions.length === 0) return;
 
-    if (e.key === 'ArrowDown' || e.key === 'j') {
+    if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setFocusedIndex((i) => (i + 1) % sessions.length);
+      e.stopPropagation();
+      setFocusedIndex((i) => {
+        const next = i + 1;
+        return next >= sessions.length ? 0 : next;
+      });
       return;
     }
 
-    if (e.key === 'ArrowUp' || e.key === 'k') {
+    if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setFocusedIndex((i) => (i <= 0 ? sessions.length - 1 : i - 1));
+      e.stopPropagation();
+      setFocusedIndex((i) => {
+        const next = i - 1;
+        return next < 0 ? sessions.length - 1 : next;
+      });
       return;
     }
 
@@ -118,15 +127,18 @@ function SessionListView() {
     }
   }
 
-  createEffect(() => {
-    if (!showSessionPicker()) return;
-    setFocusedIndex(-1);
-    window.addEventListener('keydown', handleKeydown, true);
-    onCleanup(() => window.removeEventListener('keydown', handleKeydown, true));
+  onMount(() => {
+    requestAnimationFrame(() => containerRef?.focus());
   });
 
   return (
-    <div class="session-list-view">
+    // oxlint-disable-next-line solid/no-react-specific-props
+    <div
+      ref={containerRef}
+      class="session-list-view"
+      tabindex="-1"
+      onKeyDown={handleKeydown}
+    >
       <Show
         when={state.sessions.length > 0}
         fallback={<div class="session-empty">No sessions yet</div>}

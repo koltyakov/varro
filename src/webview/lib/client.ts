@@ -80,6 +80,9 @@ export const client = {
     async revert(id: string, messageID: string): Promise<boolean> {
       return apiCall('POST', `/session/${id}/revert`, { messageID });
     },
+    async compact(id: string): Promise<boolean> {
+      return apiCall('POST', `/session/${id}/compact`);
+    },
   },
 
   config: {
