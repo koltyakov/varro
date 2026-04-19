@@ -966,9 +966,9 @@ input:focus-visible {
   max-height: 200px;
   overflow-y: auto;
   border-radius: 6px;
-  border: 1px solid var(--color-vscode-border);
-  background: var(--color-vscode-widget-bg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 50%, transparent);
+  background: var(--color-vscode-input-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   padding: 3px;
 }
 
