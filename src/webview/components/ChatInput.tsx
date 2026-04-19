@@ -33,7 +33,6 @@ export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
-  const [busyPromptMode, setBusyPromptMode] = createSignal<'queue' | 'steer'>('queue');
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
   const [showBusyMenu, setShowBusyMenu] = createSignal(false);
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
@@ -69,18 +68,21 @@ export function ChatInput() {
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      handleSend();
+      if ((e.ctrlKey || e.metaKey) && isLoading()) {
+        handleSend('steer');
+      } else {
+        handleSend();
+      }
     }
   }
 
-  async function handleSend() {
+  async function handleSend(mode?: 'queue' | 'steer') {
     const text = inputText();
     if (!text.trim() && state.droppedFiles.length === 0 && state.clipboardImages.length === 0)
       return;
-    const sendMode = isLoading() ? busyPromptMode() : 'queue';
     setInputText('');
     if (textareaRef) textareaRef.style.height = 'auto';
-    await sendMessage(text, { noReply: sendMode === 'steer' });
+    await sendMessage(text, { noReply: mode === 'steer' });
   }
 
   function autoResize() {
@@ -491,9 +493,7 @@ export function ChatInput() {
             rows={1}
             placeholder={
               isLoading()
-                ? busyPromptMode() === 'steer'
-                  ? 'Steer current run...'
-                  : 'Describe what to build'
+                ? 'Queue a follow-up or steer with \u2303Enter...'
                 : 'Describe what to build'
             }
             value={inputText()}
@@ -630,7 +630,7 @@ export function ChatInput() {
           </div>
 
           <div class="toolbar-right">
-            <Show when={isLoading() && !canSend()}>
+            <Show when={isLoading()}>
               <button
                 class="toolbar-icon"
                 onClick={() => abortSession()}
@@ -643,23 +643,39 @@ export function ChatInput() {
             </Show>
 
             <div style={{ position: 'relative' }}>
-              <button
-                class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
-                onClick={() => {
-                  if (!canSend()) return;
-                  if (isLoading()) {
-                    setShowBusyMenu(!showBusyMenu());
-                  } else {
-                    handleSend();
-                  }
-                }}
-                disabled={!canSend()}
-                title={isLoading() ? 'Send options' : 'Send (Enter)'}
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
-                </svg>
-              </button>
+              <Show when={isLoading() && canSend()} fallback={
+                <button
+                  class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
+                  onClick={() => canSend() && handleSend()}
+                  disabled={!canSend()}
+                  title="Send (Enter)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
+                  </svg>
+                </button>
+              }>
+                <div class="send-button-group">
+                  <button
+                    class="chat-send-button enabled send-main"
+                    onClick={() => handleSend()}
+                    title="Add to queue (Enter)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
+                    </svg>
+                  </button>
+                  <button
+                    class="send-mode-chevron"
+                    onClick={() => setShowBusyMenu(!showBusyMenu())}
+                    title="More send options"
+                  >
+                    <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M4.5 10l3.5-4 3.5 4z" />
+                    </svg>
+                  </button>
+                </div>
+              </Show>
 
               <Show when={showBusyMenu() && canSend() && isLoading()}>
                 <div
@@ -677,10 +693,7 @@ export function ChatInput() {
                     <div class="py-1">
                       <button
                         class="dropdown-item"
-                        onClick={() => {
-                          setBusyPromptMode('queue');
-                          handleSend();
-                        }}
+                        onClick={() => handleSend()}
                       >
                         <span class="dropdown-check">
                           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)' }}>
@@ -692,10 +705,7 @@ export function ChatInput() {
                       </button>
                       <button
                         class="dropdown-item"
-                        onClick={() => {
-                          setBusyPromptMode('steer');
-                          handleSend();
-                        }}
+                        onClick={() => handleSend('steer')}
                       >
                         <span class="dropdown-check">
                           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)' }}>

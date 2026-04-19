@@ -983,6 +983,36 @@ input:focus-visible {
   cursor: default;
 }
 
+.send-button-group {
+  display: flex;
+  align-items: center;
+}
+
+.send-button-group .send-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  width: 26px;
+}
+
+.send-mode-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 28px;
+  border: none;
+  cursor: pointer;
+  background: var(--color-vscode-accent);
+  color: #fff;
+  border-radius: 0 8px 8px 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  transition: background-color 0.15s;
+}
+
+.send-mode-chevron:hover {
+  background: color-mix(in srgb, var(--color-vscode-accent) 75%, white);
+}
+
 .chat-stop-button {
   display: flex;
   align-items: center;
