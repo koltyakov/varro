@@ -170,11 +170,17 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
     <div class="diff-summary">
       <button onClick={() => setExpanded((v) => !v)} class="diff-summary-btn">
         <svg
-          class={`h-3 w-3 transition-transform ${expanded() ? 'rotate-90' : ''}`}
+          class={`transition-transform ${expanded() ? 'rotate-90' : ''}`}
+          width="10"
+          height="10"
           viewBox="0 0 16 16"
-          fill="currentColor"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
-          <path d="M6 4l4 4-4 4z" />
+          <path d="M6 4l4 4-4 4" />
         </svg>
         <span>
           {props.diffs.length} file{props.diffs.length !== 1 ? 's' : ''} changed ·{' '}

@@ -422,29 +422,30 @@ input:focus-visible {
 }
 
 .rendered-markdown ul {
-  position: relative;
   list-style: none;
   padding-inline-start: 18px;
   margin: 0 0 18px 0;
 }
-.rendered-markdown ul::before {
-  content: '';
+.rendered-markdown ul > li {
+  position: relative;
+}
+.rendered-markdown ul > li::before {
+  content: '–';
   position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  border-radius: 1px;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--color-vscode-muted) 28%, transparent) 0%,
-    color-mix(in srgb, var(--color-vscode-muted) 14%, transparent) 55%,
-    color-mix(in srgb, var(--color-vscode-muted) 2%, transparent) 100%
-  );
+  left: -16px;
+  color: var(--color-vscode-muted);
+  opacity: 0.5;
 }
 .rendered-markdown ol {
   padding-inline-start: 22px;
   margin: 0 0 18px 0;
+}
+.rendered-markdown ol > li {
+  padding-left: 2px;
+}
+.rendered-markdown ol > li::marker {
+  color: var(--color-vscode-muted);
+  font-size: 0.9em;
 }
 .rendered-markdown li {
   margin: 6px 0;
@@ -1327,7 +1328,49 @@ input:focus-visible {
 }
 
 .diff-summary .diff-summary-content {
-  margin-top: 8px;
+  margin-top: 4px;
+}
+
+.diff-view-widget {
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
+  overflow: hidden;
+}
+
+.diff-view-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+}
+
+.diff-view-item + .diff-view-item {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+}
+
+.diff-view-icon {
+  flex-shrink: 0;
+  color: var(--color-vscode-muted);
+  opacity: 0.5;
+}
+
+.diff-view-filename {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-vscode-fg);
+  opacity: 0.8;
+}
+
+.diff-view-stats {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .diff-lines-added {
