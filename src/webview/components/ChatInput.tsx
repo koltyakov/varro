@@ -370,7 +370,7 @@ export function ChatInput() {
 
       <div
         ref={containerRef}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() ? 'showing-context-popup' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showBusyMenu() ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -632,13 +632,14 @@ export function ChatInput() {
           <div class="toolbar-right">
             <Show when={isLoading()}>
               <button
-                class="toolbar-icon"
+                class="toolbar-picker stop-button"
                 onClick={() => abortSession()}
                 title="Stop"
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                  <rect x="4" y="4" width="8" height="8" rx="1" />
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="3" y="3" width="10" height="10" rx="1.5" />
                 </svg>
+                <span class="toolbar-picker-label">Stop</span>
               </button>
             </Show>
 
@@ -678,59 +679,42 @@ export function ChatInput() {
               </Show>
 
               <Show when={showBusyMenu() && canSend() && isLoading()}>
-                <div
-                  style={{
-                    position: 'absolute',
-                    bottom: '100%',
-                    right: 0,
-                    'z-index': 50,
-                    'margin-bottom': '4px',
-                    width: '210px',
-                  }}
-                  onClick={() => setShowBusyMenu(false)}
-                >
-                  <div class="dropdown-menu">
-                    <div class="py-1">
-                      <button
-                        class="dropdown-item"
-                        onClick={() => handleSend()}
-                      >
-                        <span class="dropdown-check">
-                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)' }}>
-                            <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
-                          </svg>
-                        </span>
-                        <span class="min-w-0 flex-1">Add to Queue</span>
-                        <span class="dropdown-hint">Enter</span>
-                      </button>
-                      <button
-                        class="dropdown-item"
-                        onClick={() => handleSend('steer')}
-                      >
-                        <span class="dropdown-check">
-                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-muted)' }}>
-                            <path d="M7.5 1L9 5h4l-3.5 3 1.5 4.5L7.5 10 4 12.5 5.5 8 2 5h4l1.5-4z" />
-                          </svg>
-                        </span>
-                        <span class="min-w-0 flex-1">Steer with Message</span>
-                        <span class="dropdown-hint">{'\u2303'}Enter</span>
-                      </button>
-                      <button
-                        class="dropdown-item"
-                        onClick={() => {
-                          abortSession();
-                          handleSend();
-                        }}
-                      >
-                        <span class="dropdown-check">
-                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: 'var(--color-vscode-error)' }}>
-                            <path d="M1 1.91L1.78 1.5 15 8 1.78 14.5 1 14.09 3.61 8 1 1.91z" />
-                          </svg>
-                        </span>
-                        <span class="min-w-0 flex-1">Stop and Send</span>
-                      </button>
-                    </div>
-                  </div>
+                <div class="toolbar-popover busy-menu" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    class="toolbar-popover-item"
+                    onClick={() => { handleSend(); setShowBusyMenu(false); }}
+                  >
+                    <span class="busy-menu-icon">
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M8 3v10M3 8h10" />
+                      </svg>
+                    </span>
+                    <span class="busy-menu-label">Add to Queue</span>
+                    <span class="busy-menu-hint">Enter</span>
+                  </button>
+                  <button
+                    class="toolbar-popover-item"
+                    onClick={() => { handleSend('steer'); setShowBusyMenu(false); }}
+                  >
+                    <span class="busy-menu-icon">
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M8 2l1.8 4.8H15l-4 3.4 1.6 5L8 12l-4.6 3.2 1.6-5-4-3.4h5.2z" />
+                      </svg>
+                    </span>
+                    <span class="busy-menu-label">Steer with Message</span>
+                    <span class="busy-menu-hint">{'\u2303'}Enter</span>
+                  </button>
+                  <button
+                    class="toolbar-popover-item"
+                    onClick={() => { abortSession(); handleSend(); setShowBusyMenu(false); }}
+                  >
+                    <span class="busy-menu-icon" style={{ color: 'var(--color-vscode-error)' }}>
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2 3l12 10M14 3L2 13" />
+                      </svg>
+                    </span>
+                    <span class="busy-menu-label">Stop and Send</span>
+                  </button>
                 </div>
               </Show>
             </div>
