@@ -60,6 +60,10 @@
         "title": "OpenCode: Add to Context"
       },
       {
+        "command": "opencode.chat.addTerminalSelectionToContext",
+        "title": "OpenCode: Add Terminal Selection to Context"
+      },
+      {
         "command": "opencode.chat.share",
         "title": "OpenCode: Share Session"
       },
@@ -78,6 +82,9 @@
       "commandPalette": [
         {
           "command": "opencode.chat.addToContext"
+        },
+        {
+          "command": "opencode.chat.addTerminalSelectionToContext"
         }
       ]
     },
@@ -94,7 +101,16 @@
         "key": "cmd+shift+k",
         "mac": "cmd+shift+k",
         "win": "ctrl+shift+k",
-        "linux": "ctrl+shift+k"
+        "linux": "ctrl+shift+k",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "opencode.chat.addTerminalSelectionToContext",
+        "key": "cmd+shift+k",
+        "mac": "cmd+shift+k",
+        "win": "ctrl+shift+k",
+        "linux": "ctrl+shift+k",
+        "when": "terminalFocus"
       }
     ],
     "configuration": {

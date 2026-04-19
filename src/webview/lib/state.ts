@@ -47,6 +47,7 @@ function writeStored(key: string, value: unknown) {
 interface AppState {
   serverStatus: ServerStatus;
   editorContext: EditorContext;
+  terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
   sessions: Session[];
@@ -78,10 +79,26 @@ export interface ClipboardImage {
   size: number;
 }
 
+type InitialWebviewState = Partial<
+  Pick<AppState, 'serverStatus' | 'editorContext' | 'terminalSelection' | 'droppedFiles'>
+> & {
+  theme?: 'dark' | 'light';
+};
+
+const defaultEditorContext: EditorContext = {
+  workspacePath: null,
+  activeFile: null,
+  selection: null,
+  diagnostics: [],
+};
+
+const initialWebviewState = readInitialWebviewState();
+
 export const [state, setState] = createStore<AppState>({
-  serverStatus: { state: 'stopped' },
-  editorContext: { workspacePath: null, activeFile: null, selection: null, diagnostics: [] },
-  droppedFiles: [],
+  serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
+  editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
+  terminalSelection: initialWebviewState.terminalSelection ?? null,
+  droppedFiles: initialWebviewState.droppedFiles ?? [],
   clipboardImages: [],
   sessions: [],
   activeSessionId: null,
@@ -135,9 +152,16 @@ export const [error, setError] = createSignal<string | null>(null);
 export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
+export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
 export const [theme, setTheme] = createSignal<'dark' | 'light'>(
-  ((window as unknown as Record<string, string>).__initialTheme as 'dark' | 'light') || 'dark'
+  initialWebviewState.theme ||
+    ((window as unknown as Record<string, string>).__initialTheme as 'dark' | 'light') ||
+    'dark'
 );
+
+export function requestComposerFocus() {
+  setComposerFocusKey((value) => value + 1);
+}
 
 export function addContextFile(file: DroppedFile) {
   setState(
@@ -230,6 +254,12 @@ export function modelVisibilityKey(providerID: string, modelID: string) {
 
 export function isProviderVisible(providerID: string) {
   return !state.hiddenProviders.includes(providerID);
+}
+
+function readInitialWebviewState(): InitialWebviewState {
+  const value = (window as unknown as { __initialWebviewState?: InitialWebviewState })
+    .__initialWebviewState;
+  return value && typeof value === 'object' ? value : {};
 }
 
 export function isModelVisible(providerID: string, modelID: string) {

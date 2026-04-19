@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { resolve, join, basename, isAbsolute } from 'path';
 import type {
   DroppedFile,
+  EditorContext,
   ExtensionMessage,
   ServerStatus,
   WebviewMessage,
@@ -24,6 +25,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private onContextFilesChanged?: () => void;
   private workspaceFileCache: DroppedFile[] = [];
   private workspaceFileCacheAt = 0;
+  private pendingInputFocus = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -59,15 +61,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.onDidReceiveMessage((msg: WebviewMessage) => {
-      this.handleMessage(msg);
+      void this.handleMessage(msg);
     });
 
     webviewView.webview.html = this.getHtml();
 
-    webviewView.onDidChangeVisibility(() => {
+    webviewView.onDidChangeVisibility(async () => {
       if (webviewView.visible) {
         this.postContext();
+        this.postTerminalSelection(this.contextProvider.terminalSelection);
         this.post({ type: 'server/status', payload: this._status });
+        this.flushPendingInputFocus();
       }
     });
 
@@ -84,15 +88,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       : 'light';
   }
 
-  handleMessage(msg: WebviewMessage) {
+  async handleMessage(msg: WebviewMessage) {
     switch (msg.type) {
       case 'ready':
         this.postContext();
+        this.postTerminalSelection(this.contextProvider.terminalSelection);
+        this.postContextFiles();
         this.post({ type: 'server/status', payload: this._status });
         this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
+        this.flushPendingInputFocus();
         break;
       case 'context/request':
         this.postContext();
+        this.postTerminalSelection(this.contextProvider.terminalSelection);
+        break;
+      case 'terminal-selection/clear':
+        this.contextProvider.clearTerminalSelection();
+        this.postTerminalSelection(this.contextProvider.terminalSelection);
         break;
       case 'files/drop':
         this.handleDroppedPaths(msg.payload.paths);
@@ -295,6 +307,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'context/update', payload: this.contextProvider.context });
   }
 
+  postTerminalSelection(selection: { text: string; terminalName: string } | null) {
+    this.post({ type: 'terminal-selection/update', payload: selection });
+  }
+
+  private postContextFiles() {
+    if (this.contextFiles.length === 0) return;
+    this.post({ type: 'files/dropped', payload: this.contextFiles });
+  }
+
   private async searchFiles(requestId: number, query: string, limit = 12) {
     const files = await this.getWorkspaceFiles();
     const normalizedQuery = query.trim().toLowerCase();
@@ -355,6 +376,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: `command/${cmd}` } as ExtensionMessage);
   }
 
+  requestInputFocus() {
+    this.pendingInputFocus = true;
+    this.flushPendingInputFocus();
+  }
+
+  private flushPendingInputFocus() {
+    if (!this.pendingInputFocus || !this.view?.visible) return;
+    this.pendingInputFocus = false;
+    this.post({ type: 'command/focus-input' });
+  }
+
   private getHtml(): string {
     const distDir = resolve(this.extensionUri.fsPath, 'dist', 'webview');
     let scriptContent = '';
@@ -370,6 +402,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     } catch {}
 
     const nonce = randomNonce();
+    const initialState = serializeForInlineScript({
+      theme: this.currentTheme(),
+      serverStatus: this._status,
+      editorContext: this.contextProvider.context,
+      terminalSelection: this.contextProvider.terminalSelection,
+      droppedFiles: this.contextFiles,
+    } satisfies InitialWebviewState);
 
     return /*html*/ `<!DOCTYPE html>
 <html lang="en">
@@ -385,7 +424,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   <div id="root"></div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    window.__initialTheme = ${JSON.stringify(this.currentTheme())};
+    window.__initialWebviewState = ${initialState};
+    window.__initialTheme = window.__initialWebviewState.theme;
     window.__sendToExtension = function(msg) { vscode.postMessage(msg); };
   </script>
   <script nonce="${nonce}">${scriptContent}</script>
@@ -440,4 +480,31 @@ function randomNonce(): string {
     result += chars[Math.floor(Math.random() * chars.length)];
   }
   return result;
+}
+
+type InitialWebviewState = {
+  theme: 'dark' | 'light';
+  serverStatus: ServerStatus;
+  editorContext: EditorContext;
+  terminalSelection: { text: string; terminalName: string } | null;
+  droppedFiles: DroppedFile[];
+};
+
+function serializeForInlineScript(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (char) => {
+    switch (char) {
+      case '<':
+        return '\\u003C';
+      case '>':
+        return '\\u003E';
+      case '&':
+        return '\\u0026';
+      case '\u2028':
+        return '\\u2028';
+      case '\u2029':
+        return '\\u2029';
+      default:
+        return char;
+    }
+  });
 }

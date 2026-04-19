@@ -105,49 +105,50 @@ function SessionListView() {
               return '';
             };
             return (
-              <button
-                class={`session-item ${isActive() ? 'active' : ''}`}
-                onClick={() => {
-                  selectSession(session.id);
-                  setShowSessionPicker(false);
-                }}
-              >
-                <Show
-                  when={isRunning() || isUnread()}
-                  fallback={<span class="session-item-indicator-spacer" />}
+              <div class={`session-item ${isActive() ? 'active' : ''}`}>
+                <button
+                  type="button"
+                  class="session-item-main"
+                  onClick={() => {
+                    selectSession(session.id);
+                    setShowSessionPicker(false);
+                  }}
                 >
-                  <span
-                    class={`session-item-indicator ${isRunning() ? 'is-running' : 'is-unread'}`}
-                    title={indicatorTitle()}
-                    aria-label={indicatorTitle()}
-                  />
-                </Show>
-                <div class="session-item-content">
-                  <span class="session-item-title">{session.title || 'Untitled'}</span>
-                  <span class="session-item-meta">
-                    <Show when={session.summary} fallback={formatTimeAgo(session.time.updated)}>
-                      {session.summary!.files} file{session.summary!.files !== 1 ? 's' : ''}
-                      {' · '}
-                      <span class="diff-lines-added">+{session.summary!.additions}</span>{' '}
-                      <span class="diff-lines-removed">-{session.summary!.deletions}</span>
-                    </Show>
-                  </span>
-                </div>
-                <Show when={!isActive()}>
-                  <button
-                    class="session-item-archive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteSession(session.id);
-                    }}
-                    title="Archive"
+                  <Show
+                    when={isRunning() || isUnread()}
+                    fallback={<span class="session-item-indicator-spacer" />}
                   >
-                    <svg viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M14.5 1h-13a.5.5 0 00-.5.5V4h14V1.5a.5.5 0 00-.5-.5zM1 5v9.5a.5.5 0 00.5.5h13a.5.5 0 00.5-.5V5H1zm5 3h4v1H6V8z" />
-                    </svg>
-                  </button>
-                </Show>
-              </button>
+                    <span
+                      class={`session-item-indicator ${isRunning() ? 'is-running' : 'is-unread'}`}
+                      title={indicatorTitle()}
+                      aria-label={indicatorTitle()}
+                    />
+                  </Show>
+                  <div class="session-item-content">
+                    <span class="session-item-title">{session.title || 'Untitled'}</span>
+                    <span class="session-item-meta">
+                      <Show when={session.summary} fallback={formatTimeAgo(session.time.updated)}>
+                        {session.summary!.files} file{session.summary!.files !== 1 ? 's' : ''}
+                        {' · '}
+                        <span class="diff-lines-added">+{session.summary!.additions}</span>{' '}
+                        <span class="diff-lines-removed">-{session.summary!.deletions}</span>
+                      </Show>
+                    </span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  class="session-item-archive"
+                  onClick={() => {
+                    deleteSession(session.id);
+                  }}
+                  title="Archive"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M14.5 1h-13a.5.5 0 00-.5.5V4h14V1.5a.5.5 0 00-.5-.5zM1 5v9.5a.5.5 0 00.5.5h13a.5.5 0 00.5-.5V5H1zm5 3h4v1H6V8z" />
+                  </svg>
+                </button>
+              </div>
             );
           }}
         </For>

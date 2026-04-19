@@ -5,7 +5,7 @@ Use [OpenCode](https://opencode.ai) inside VS Code without leaving the editor. T
 ## What It Does
 
 - Opens OpenCode in a VS Code sidebar view
-- Uses the active file, current selection, and diagnostics as live editor context
+- Uses the active file, current selection, terminal selection, and diagnostics as live editor context
 - Lets you attach extra files and folders from the Explorer
 - Supports pasted image attachments in chat
 - Lets you switch available models and thinking levels from your OpenCode setup
@@ -40,6 +40,7 @@ The extension talks to a local OpenCode server on port `4096` by default and wil
 4. Start a prompt. The extension automatically makes the active file and current selection available as context.
 5. Add more context when needed:
    - Right-click a file or folder in Explorer and choose **OpenCode: Add to Context**
+   - Select text in the integrated terminal and run **OpenCode: Add Terminal Selection to Context**
    - Press `Cmd+Shift+K` / `Ctrl+Shift+K`
    - Drag files or folders into the chat
    - Paste an image into the input box
@@ -49,6 +50,7 @@ The extension talks to a local OpenCode server on port `4096` by default and wil
 
 - `OpenCode: Focus Chat` opens the sidebar chat. Shortcut: `Cmd+Shift+O` / `Ctrl+Shift+O`
 - `OpenCode: Add to Context` attaches the current file, or selected Explorer items, as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K`
+- `OpenCode: Add Terminal Selection to Context` attaches the selected terminal text as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K` when terminal focus is active
 - `OpenCode: New Session` starts a fresh chat session
 - `OpenCode: Share Session` triggers OpenCode's session sharing flow
 - `OpenCode: Abort Session` stops the current run

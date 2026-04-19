@@ -30,7 +30,7 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  registerCommands(context, sidebarProvider);
+  registerCommands(context, sidebarProvider, contextProvider);
 
   vscode.commands.executeCommand('setContext', 'opencode:activated', true);
   logger.info('OpenCode extension activated');

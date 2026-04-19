@@ -1,11 +1,18 @@
 import * as vscode from 'vscode';
 import { basename } from 'path';
 import type { SidebarProvider } from './sidebar-provider';
+import type { ContextProvider } from './context-provider';
 
-export function registerCommands(context: vscode.ExtensionContext, sidebar: SidebarProvider) {
+export function registerCommands(
+  context: vscode.ExtensionContext,
+  sidebar: SidebarProvider,
+  contextProvider: ContextProvider
+) {
   context.subscriptions.push(
-    vscode.commands.registerCommand('opencode.chat.focus', () => {
-      vscode.commands.executeCommand('workbench.view.extension.opencode');
+    vscode.commands.registerCommand('opencode.chat.focus', async () => {
+      await captureTerminalSelectionForContext(sidebar, contextProvider, { silent: true });
+      await vscode.commands.executeCommand('workbench.view.extension.opencode');
+      sidebar.requestInputFocus();
     }),
 
     vscode.commands.registerCommand('opencode.chat.newSession', () => {
@@ -18,6 +25,14 @@ export function registerCommands(context: vscode.ExtensionContext, sidebar: Side
 
     vscode.commands.registerCommand('opencode.chat.abort', () => {
       sidebar.postCommand('abort');
+    }),
+
+    vscode.commands.registerCommand('opencode.chat.addTerminalSelectionToContext', async () => {
+      const ok = await captureTerminalSelectionForContext(sidebar, contextProvider);
+      if (!ok) {
+        return;
+      }
+      vscode.commands.executeCommand('workbench.view.extension.opencode');
     }),
 
     vscode.commands.registerCommand(
@@ -61,6 +76,27 @@ export function registerCommands(context: vscode.ExtensionContext, sidebar: Side
       }
     )
   );
+}
+
+async function captureTerminalSelectionForContext(
+  sidebar: SidebarProvider,
+  contextProvider: ContextProvider,
+  options?: { silent?: boolean }
+) {
+  const result = await contextProvider.captureTerminalSelection();
+  if (!result.ok) {
+    if (!options?.silent) {
+      const message =
+        result.reason === 'no-terminal'
+          ? 'Open and focus a terminal first.'
+          : 'Select text in the terminal first.';
+      vscode.window.showWarningMessage(`OpenCode: ${message}`);
+    }
+    return false;
+  }
+
+  sidebar.postTerminalSelection(contextProvider.terminalSelection);
+  return true;
 }
 
 function getDroppedRelativePath(

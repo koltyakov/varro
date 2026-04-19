@@ -7,13 +7,16 @@ import {
   clearContextFiles,
 } from '../lib/state';
 import { getLeafPathName } from '../lib/path-display';
+import { postMessage } from '../lib/bridge';
 
 export function ContextBar() {
   const files = () => state.droppedFiles;
   const clipboardImages = () => state.clipboardImages;
   const selection = () => state.editorContext.selection;
+  const terminalSelection = () => state.terminalSelection;
   const activeFile = () => state.editorContext.activeFile;
-  const hasContext = () => files().length > 0 || clipboardImages().length > 0 || !!selection();
+  const hasContext = () =>
+    files().length > 0 || clipboardImages().length > 0 || !!selection() || !!terminalSelection();
   const activeContext = () => {
     const file = activeFile();
     if (!file) return null;
@@ -44,6 +47,15 @@ export function ContextBar() {
                   ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
                   : activeContext()!.filename
               }
+            />
+          </Show>
+          <Show when={terminalSelection()}>
+            <ContextChip
+              label={terminalSelection()!.terminalName}
+              detail="terminal"
+              title={`Terminal selection from ${terminalSelection()!.terminalName}`}
+              icon="terminal"
+              onRemove={() => postMessage({ type: 'terminal-selection/clear' })}
             />
           </Show>
           <For each={files()}>
@@ -95,7 +107,7 @@ function ContextChip(props: {
   label: string;
   detail?: string | null;
   title?: string;
-  icon?: 'file' | 'folder';
+  icon?: 'file' | 'folder' | 'terminal';
   onRemove?: () => void;
 }) {
   return (
@@ -106,13 +118,26 @@ function ContextChip(props: {
       <Show
         when={props.icon === 'folder'}
         fallback={
-          <svg
-            class="h-3 w-3 shrink-0 text-vscode-muted/60"
-            viewBox="0 0 16 16"
-            fill="currentColor"
+          <Show
+            when={props.icon === 'terminal'}
+            fallback={
+              <svg
+                class="h-3 w-3 shrink-0 text-vscode-muted/60"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
+              </svg>
+            }
           >
-            <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-          </svg>
+            <svg
+              class="h-3 w-3 shrink-0 text-vscode-muted/60"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path d="M1.75 2h12.5c.97 0 1.75.78 1.75 1.75v8.5c0 .97-.78 1.75-1.75 1.75H1.75A1.75 1.75 0 010 12.25v-8.5C0 2.78.78 2 1.75 2zm0 1a.75.75 0 00-.75.75v8.5c0 .41.34.75.75.75h12.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75H1.75zm2.03 2.22a.75.75 0 011.06 0L6.56 6.94 4.84 8.66a.75.75 0 11-1.06-1.06L4.44 7 3.78 6.28a.75.75 0 010-1.06zM8 8.25h4a.75.75 0 010 1.5H8a.75.75 0 010-1.5z" />
+            </svg>
+          </Show>
         }
       >
         <svg class="h-3 w-3 shrink-0 text-vscode-muted/60" viewBox="0 0 16 16" fill="currentColor">

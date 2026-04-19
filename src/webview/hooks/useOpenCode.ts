@@ -10,6 +10,7 @@ import {
   isLoading,
   setIsLoading,
   setError,
+  requestComposerFocus,
   persistActiveSessionId,
   getPersistedActiveSessionId,
   clearClipboardImages,
@@ -123,6 +124,9 @@ export function useOpenCode() {
             }
           }
           break;
+        case 'terminal-selection/update':
+          setState('terminalSelection', msg.payload);
+          break;
         case 'files/dropped':
           for (const file of msg.payload) {
             setState('droppedFiles', (prev) => {
@@ -136,6 +140,9 @@ export function useOpenCode() {
           break;
         case 'command/new-session':
           createSession();
+          break;
+        case 'command/focus-input':
+          requestComposerFocus();
           break;
         case 'command/abort':
           abortSession();
@@ -360,6 +367,14 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     parts.push({
       type: 'text',
       text: `[Selection from ${af.relativePath} lines ${sel.startLine}-${sel.endLine}]\n\`\`\`${af.language}\n${sel.text}\n\`\`\``,
+    });
+  }
+
+  const terminalSelection = state.terminalSelection;
+  if (terminalSelection) {
+    parts.push({
+      type: 'text',
+      text: `[Selection from terminal ${terminalSelection.terminalName}]\n\`\`\`text\n${terminalSelection.text}\n\`\`\``,
     });
   }
 

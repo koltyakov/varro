@@ -2045,11 +2045,22 @@ kbd {
   gap: 10px;
   width: 100%;
   padding: 8px 12px;
+  background: none;
+  transition: background-color 0.08s;
+}
+
+.session-item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  padding: 0;
   border: none;
   background: none;
+  color: inherit;
   cursor: pointer;
   text-align: left;
-  transition: background-color 0.08s;
 }
 
 .session-item:hover {

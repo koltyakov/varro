@@ -38,17 +38,20 @@ export type ExtensionMessage =
       payload: { type: string; properties?: Record<string, unknown>; [k: string]: unknown };
     }
   | { type: 'context/update'; payload: EditorContext }
+  | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }
   | { type: 'files/removed'; payload: { path: string } }
   | { type: 'files/search-results'; payload: { requestId: number; query: string; files: DroppedFile[] } }
   | { type: 'theme/update'; payload: { theme: 'dark' | 'light' } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session' }
+  | { type: 'command/focus-input' }
   | { type: 'command/abort' }
   | { type: 'command/share' };
 
 export type WebviewMessage =
   | { type: 'context/request' }
+  | { type: 'terminal-selection/clear' }
   | { type: 'files/drop'; payload: { paths: string[] } }
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }

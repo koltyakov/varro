@@ -13,6 +13,7 @@ import {
   setShowModelPicker,
   setShowSessionPicker,
   setShowSettings,
+  composerFocusKey,
   removeClipboardImage,
   removeContextFile,
   clearClipboardImages,
@@ -55,8 +56,10 @@ export function ChatInput() {
   const files = () => state.droppedFiles;
   const clipboardImages = () => state.clipboardImages;
   const selection = () => state.editorContext.selection;
+  const terminalSelection = () => state.terminalSelection;
   const activeFile = () => state.editorContext.activeFile;
-  const hasContext = () => files().length > 0 || clipboardImages().length > 0 || !!activeFile();
+  const hasContext = () =>
+    files().length > 0 || clipboardImages().length > 0 || !!activeFile() || !!terminalSelection();
 
   const activeContext = () => {
     const file = activeFile();
@@ -557,6 +560,20 @@ export function ChatInput() {
     setCompletionIndex(0);
   });
 
+  createEffect(() => {
+    const focusKey = composerFocusKey();
+    if (focusKey === 0) return;
+
+    queueMicrotask(() => {
+      if (!textareaRef) return;
+      const cursor = textareaRef.value.length;
+      textareaRef.focus();
+      textareaRef.setSelectionRange(cursor, cursor);
+      setCaretPosition(cursor);
+      setIsFocused(true);
+    });
+  });
+
   const canSend = () =>
     !hasActiveQuestion() &&
     (inputText().trim().length > 0 ||
@@ -738,6 +755,14 @@ export function ChatInput() {
                 detail={activeContext()!.lineRange}
               />
             </Show>
+            <Show when={terminalSelection()}>
+              <AttachmentChip
+                label={terminalSelection()!.terminalName}
+                detail="terminal"
+                icon="terminal"
+                onRemove={() => postMessage({ type: 'terminal-selection/clear' })}
+              />
+            </Show>
             <For each={files()}>
               {(file) => (
                 <AttachmentChip
@@ -759,7 +784,7 @@ export function ChatInput() {
                 />
               )}
             </For>
-            <Show when={files().length > 1 || clipboardImages().length > 1}>
+            <Show when={files().length > 0 || clipboardImages().length > 0 || terminalSelection()}>
               <button
                 class="chat-attachment-chip"
                 style={{
@@ -772,6 +797,9 @@ export function ChatInput() {
                 onClick={() => {
                   clearContextFiles();
                   clearClipboardImages();
+                  if (terminalSelection()) {
+                    postMessage({ type: 'terminal-selection/clear' });
+                  }
                   postMessage({ type: 'files/clear' });
                 }}
                 title="Clear all"
@@ -1226,7 +1254,7 @@ function CompletionMenu(props: {
 function AttachmentChip(props: {
   label: string;
   detail?: string | null;
-  icon?: 'file' | 'folder' | 'image';
+  icon?: 'file' | 'folder' | 'image' | 'terminal';
   onRemove?: () => void;
 }) {
   return (
@@ -1248,7 +1276,12 @@ function AttachmentChip(props: {
           <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
         </svg>
       </Show>
-      <Show when={props.icon !== 'image' && props.icon !== 'folder'}>
+      <Show when={props.icon === 'terminal'}>
+        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+          <path d="M1.75 2h12.5c.97 0 1.75.78 1.75 1.75v8.5c0 .97-.78 1.75-1.75 1.75H1.75A1.75 1.75 0 010 12.25v-8.5C0 2.78.78 2 1.75 2zm0 1a.75.75 0 00-.75.75v8.5c0 .41.34.75.75.75h12.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75H1.75zm2.03 2.22a.75.75 0 011.06 0L6.56 6.94 4.84 8.66a.75.75 0 11-1.06-1.06L4.44 7 3.78 6.28a.75.75 0 010-1.06zM8 8.25h4a.75.75 0 010 1.5H8a.75.75 0 010-1.5z" />
+        </svg>
+      </Show>
+      <Show when={props.icon !== 'image' && props.icon !== 'folder' && props.icon !== 'terminal'}>
         <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
           <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
         </svg>

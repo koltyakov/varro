@@ -3,6 +3,7 @@ import type { EditorContext } from '../shared/protocol';
 import { logger } from './logger';
 
 export class ContextProvider implements vscode.Disposable {
+  private static readonly TERMINAL_COPY_DELAY_MS = 40;
   private disposables: vscode.Disposable[] = [];
   private _context: EditorContext = {
     workspacePath: null,
@@ -10,6 +11,7 @@ export class ContextProvider implements vscode.Disposable {
     selection: null,
     diagnostics: [],
   };
+  private _terminalSelection: { text: string; terminalName: string } | null = null;
   private onChange: (ctx: EditorContext) => void;
 
   constructor(onChange: (ctx: EditorContext) => void) {
@@ -27,6 +29,49 @@ export class ContextProvider implements vscode.Disposable {
 
   get context(): EditorContext {
     return this._context;
+  }
+
+  get terminalSelection() {
+    return this._terminalSelection;
+  }
+
+  async captureTerminalSelection(): Promise<
+    | { ok: true; terminalName: string }
+    | { ok: false; reason: 'no-terminal' | 'empty-selection' }
+  > {
+    const terminal = vscode.window.activeTerminal;
+    if (!terminal) {
+      return { ok: false, reason: 'no-terminal' };
+    }
+
+    const previousClipboard = await vscode.env.clipboard.readText();
+    let selectionText = '';
+    let clipboardChanged = false;
+
+    try {
+      await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+      await delay(ContextProvider.TERMINAL_COPY_DELAY_MS);
+      selectionText = await vscode.env.clipboard.readText();
+      clipboardChanged = selectionText !== previousClipboard;
+    } finally {
+      if (clipboardChanged) {
+        await vscode.env.clipboard.writeText(previousClipboard);
+      }
+    }
+
+    if (!clipboardChanged || !selectionText.trim()) {
+      return { ok: false, reason: 'empty-selection' };
+    }
+
+    this._terminalSelection = {
+      text: selectionText,
+      terminalName: terminal.name,
+    };
+    return { ok: true, terminalName: terminal.name };
+  }
+
+  clearTerminalSelection() {
+    this._terminalSelection = null;
   }
 
   private update() {
@@ -122,4 +167,8 @@ export class ContextProvider implements vscode.Disposable {
   dispose() {
     this.disposables.forEach((d) => d.dispose());
   }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
