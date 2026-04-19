@@ -4,6 +4,8 @@ import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
 
 export function QuestionPrompt(props: { request: QuestionRequest }) {
   const questions = () => props.request.questions || [];
+  const isCustomEnabled = (questionIndex: number) =>
+    questions()[questionIndex]?.custom !== false;
   const [selected, setSelected] = createSignal<Array<Array<string>>>(
     questions().map(() => [])
   );
@@ -16,8 +18,8 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     questions().map((question, index) => {
       const picks = selected()[index] || [];
       const custom = (customValues()[index] || '').trim();
-      if (!question.custom || !custom) return picks;
-      return [...picks.filter((item) => item !== custom), custom];
+      if (!isCustomEnabled(index) || !custom) return picks;
+      return question.multiple ? [...picks.filter((item) => item !== custom), custom] : [custom];
     })
   );
 
@@ -37,10 +39,16 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
         return entry[0] === label ? [] : [label];
       })
     );
+    if (!multiple && isCustomEnabled(questionIndex)) {
+      setCustomValues((prev) => prev.map((entry, index) => (index === questionIndex ? '' : entry)));
+    }
   };
 
   const updateCustom = (questionIndex: number, value: string) => {
     setCustomValues((prev) => prev.map((entry, index) => (index === questionIndex ? value : entry)));
+    if (value.trim() && !questions()[questionIndex]?.multiple) {
+      setSelected((prev) => prev.map((entry, index) => (index === questionIndex ? [] : entry)));
+    }
   };
 
   const submit = async () => {
@@ -143,6 +151,12 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                   placeholder="Other..."
                   class="question-custom-input"
                   onInput={(e) => updateCustom(questionIndex(), e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.isComposing) {
+                      e.preventDefault();
+                      void submit();
+                    }
+                  }}
                 />
               </div>
             </Show>

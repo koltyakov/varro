@@ -17,8 +17,6 @@ import {
   removeClipboardImage,
   addContextFile,
   removeContextFile,
-  clearClipboardImages,
-  clearContextFiles,
   showThinking,
   toggleThinking,
   enqueueMessage,
@@ -901,7 +899,7 @@ export function ChatInput() {
           <TodoList />
         </Show>
 
-        <Show when={hasContext()}>
+        <Show when={hasContext() || hasMentions()}>
           <div class="chat-attachments-container">
             <Show when={activeContext()}>
               <AttachmentChip
@@ -923,67 +921,29 @@ export function ChatInput() {
                 onRemove={() => postMessage({ type: 'terminal-selection/clear' })}
               />
             </Show>
-          </div>
-        </Show>
-
-        <Show when={hasMentions()}>
-          <div class="chat-mentions-container">
             <For each={files()}>
               {(file) => (
-                <span class="chat-mention-tag" title={file.relativePath || file.path}>
-                  <Show when={file.type === 'directory'}>
-                    <svg class="mention-tag-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
-                      <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
-                    </svg>
-                  </Show>
-                  <Show when={file.type !== 'directory'}>
-                    <svg class="mention-tag-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
-                      <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-                    </svg>
-                  </Show>
-                  <span class="mention-tag-label">{getDroppedFileLabel(file)}</span>
-                  <button
-                    class="mention-tag-remove"
-                    onClick={() => {
-                      removeContextFile(file.path);
-                      postMessage({ type: 'files/remove', payload: { path: file.path } });
-                    }}
-                  >
-                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-                    </svg>
-                  </button>
-                </span>
+                <AttachmentChip
+                  label={getDroppedFileLabel(file)}
+                  icon={file.type === 'directory' ? 'folder' : 'file'}
+                  title={file.relativePath || file.path}
+                  onRemove={() => {
+                    removeContextFile(file.path);
+                    postMessage({ type: 'files/remove', payload: { path: file.path } });
+                  }}
+                />
               )}
             </For>
             <For each={clipboardImages()}>
               {(image) => (
-                <span class="chat-mention-tag" title={image.filename}>
-                  <svg class="mention-tag-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
-                    <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
-                  </svg>
-                  <span class="mention-tag-label">{image.filename}</span>
-                  <button class="mention-tag-remove" onClick={() => removeClipboardImage(image.id)}>
-                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-                    </svg>
-                  </button>
-                </span>
+                <AttachmentChip
+                  label={image.filename}
+                  icon="image"
+                  title={image.filename}
+                  onRemove={() => removeClipboardImage(image.id)}
+                />
               )}
             </For>
-            <button
-              class="mention-tag-clear"
-              onClick={() => {
-                clearContextFiles();
-                clearClipboardImages();
-                postMessage({ type: 'files/clear' });
-              }}
-              title="Clear all"
-            >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-              </svg>
-            </button>
           </div>
         </Show>
 
