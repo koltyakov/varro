@@ -76,12 +76,10 @@ export const client = {
     async respondPermission(
       sessionId: string,
       permissionId: string,
-      response: string,
-      remember?: boolean
+      response: 'once' | 'always' | 'reject'
     ): Promise<boolean> {
       return apiCall('POST', `/session/${sessionId}/permissions/${permissionId}`, {
         response,
-        remember,
       });
     },
     async revert(id: string, messageID: string): Promise<boolean> {

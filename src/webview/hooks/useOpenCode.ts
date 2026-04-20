@@ -74,11 +74,13 @@ const FULL_ACCESS_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NA
     action: 'allow',
   })
 );
-const DEFAULT_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.map((permission) => ({
-  permission,
-  pattern: '*',
-  action: 'ask',
-}));
+const DEFAULT_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.map(
+  (permission) => ({
+    permission,
+    pattern: '*',
+    action: 'ask',
+  })
+);
 
 function shouldAutoApprovePermissions(sessionId: string) {
   return getPermissionModeForSession(sessionId) === 'full';
@@ -577,13 +579,14 @@ export async function unshareSession() {
 export async function respondPermission(
   sessionId: string,
   permissionId: string,
-  response: string,
-  remember?: boolean
+  response: 'once' | 'always' | 'reject'
 ) {
   try {
-    await client.session.respondPermission(sessionId, permissionId, response, remember);
+    await client.session.respondPermission(sessionId, permissionId, response);
     removePermission(permissionId);
-  } catch {}
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Failed to respond to permission');
+  }
 }
 
 export async function respondQuestion(requestID: string, answers: Array<Array<string>>) {
@@ -598,7 +601,7 @@ export async function respondQuestion(requestID: string, answers: Array<Array<st
 async function autoApprovePermissionsForSession(permissions: Permission[]) {
   await Promise.all(
     permissions.map((permission) =>
-      respondPermission(permission.sessionID, permission.id, 'allow').catch(() => {})
+      respondPermission(permission.sessionID, permission.id, 'always').catch(() => {})
     )
   );
 }
@@ -727,19 +730,47 @@ function registerEventHandlers() {
     }
   });
 
-  serverEvents.on('permission.updated', (data) => {
-    const props = getProps(data);
-    if (!props) return;
-    const permission = props as Permission;
+  function handlePermissionEvent(props: Record<string, unknown>) {
+    let permission: Permission;
+    if ('title' in props && 'time' in props) {
+      permission = props as Permission;
+    } else {
+      const tool = props.tool as { messageID?: string; callID?: string } | undefined;
+      permission = {
+        id: props.id as string,
+        type: (props.permission as string) || '',
+        pattern: props.patterns as string[] | undefined,
+        sessionID: props.sessionID as string,
+        messageID: tool?.messageID || '',
+        callID: tool?.callID,
+        title: [props.permission, Array.isArray(props.patterns) ? props.patterns.join(', ') : '']
+          .filter(Boolean)
+          .join(' '),
+        metadata: (props.metadata as { [key: string]: unknown }) || {},
+        time: { created: Date.now() / 1000 },
+      };
+    }
     if (shouldAutoApprovePermissions(permission.sessionID)) {
-      void respondPermission(permission.sessionID, permission.id, 'allow');
+      void respondPermission(permission.sessionID, permission.id, 'always');
       return;
     }
     addPermission(permission);
+  }
+
+  serverEvents.on('permission.updated', (data) => {
+    const props = getProps(data);
+    if (props) handlePermissionEvent(props);
+  });
+
+  serverEvents.on('permission.asked', (data) => {
+    const props = getProps(data);
+    if (props) handlePermissionEvent(props);
   });
 
   serverEvents.on('permission.replied', (data) => {
-    const pid = getProps(data)?.permissionID as string | undefined;
+    const props = getProps(data);
+    if (!props) return;
+    const pid = (props.permissionID || props.requestID) as string | undefined;
     if (pid) removePermission(pid);
   });
 

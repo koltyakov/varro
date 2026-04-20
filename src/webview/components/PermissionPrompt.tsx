@@ -27,19 +27,19 @@ export function PermissionPrompt(props: { permission: Permission }) {
       <div class="flex flex-wrap justify-end gap-1.5">
         <button
           class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-hover text-vscode-fg transition-colors hover:bg-vscode-hover/80"
-          onClick={() => respondPermission(sessionId(), props.permission.id, 'deny')}
+          onClick={() => respondPermission(sessionId(), props.permission.id, 'reject')}
         >
           Reject
         </button>
         <button
           class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-hover text-vscode-fg transition-colors hover:bg-vscode-hover/80"
-          onClick={() => respondPermission(sessionId(), props.permission.id, 'allow')}
+          onClick={() => respondPermission(sessionId(), props.permission.id, 'once')}
         >
           Once
         </button>
         <button
           class="rounded px-2.5 py-1 text-[11px] font-medium bg-vscode-accent text-white transition-colors hover:opacity-80"
-          onClick={() => respondPermission(sessionId(), props.permission.id, 'allow', true)}
+          onClick={() => respondPermission(sessionId(), props.permission.id, 'always')}
         >
           Always
         </button>

@@ -213,10 +213,9 @@ export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
-export const [draftPermissionMode, setDraftPermissionMode] =
-  createSignal<PermissionMode>(
-    readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default'
-  );
+export const [draftPermissionMode, setDraftPermissionMode] = createSignal<PermissionMode>(
+  readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default'
+);
 export const [theme, setTheme] = createSignal<'dark' | 'light'>(
   initialWebviewState.theme ||
     ((window as unknown as Record<string, string>).__initialTheme as 'dark' | 'light') ||
