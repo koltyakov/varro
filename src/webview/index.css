@@ -242,7 +242,7 @@ input:focus-visible {
 }
 
 .interactive-item-container.interactive-response {
-  align-items: flex-start;
+  align-items: stretch;
   padding: 4px 0 12px 0;
 }
 
@@ -278,7 +278,7 @@ input:focus-visible {
 }
 
 .assistant-turn-content {
-  width: min(100%, 820px);
+  width: 100%;
   padding: 12px 14px 14px;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 24%, transparent);

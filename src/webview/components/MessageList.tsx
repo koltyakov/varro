@@ -133,7 +133,10 @@ export function MessageList() {
   function updateScrollbarInset() {
     if (!containerRef) return;
     const scrollbarInset = Math.max(0, containerRef.offsetWidth - containerRef.clientWidth);
-    containerRef.style.setProperty('--interactive-list-scrollbar-inset', `${scrollbarInset}px`);
+    containerRef.parentElement?.style.setProperty(
+      '--interactive-list-scrollbar-inset',
+      `${scrollbarInset}px`
+    );
   }
 
   function distanceFromBottom() {
