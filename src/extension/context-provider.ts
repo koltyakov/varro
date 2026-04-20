@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { isAbsolute, join } from 'path';
 import type { EditorContext } from '../shared/protocol';
 import { logger } from './logger';
 
@@ -137,7 +138,8 @@ export class ContextProvider implements vscode.Disposable {
 
   async readFile(path: string): Promise<string | null> {
     try {
-      const uri = vscode.Uri.file(path);
+      const uri = await this.resolveWorkspaceUri(path);
+      if (!uri) return null;
       const doc = await vscode.workspace.openTextDocument(uri);
       return doc.getText();
     } catch (err) {
@@ -148,7 +150,11 @@ export class ContextProvider implements vscode.Disposable {
 
   async openFile(path: string, line?: number) {
     try {
-      const uri = vscode.Uri.file(path);
+      const uri = await this.resolveWorkspaceUri(path);
+      if (!uri) {
+        logger.warn(`Could not resolve file path: ${path}`);
+        return;
+      }
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
       if (line !== undefined) {
@@ -162,6 +168,34 @@ export class ContextProvider implements vscode.Disposable {
     } catch (err) {
       logger.error(`Failed to open file ${path}:`, err);
     }
+  }
+
+  private async resolveWorkspaceUri(rawPath: string): Promise<vscode.Uri | null> {
+    const input = rawPath.trim();
+    if (!input) return null;
+
+    if (isAbsolute(input)) {
+      const uri = vscode.Uri.file(input);
+      try {
+        await vscode.workspace.fs.stat(uri);
+        return uri;
+      } catch {
+        return null;
+      }
+    }
+
+    const relativePath = input.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+    if (!relativePath) return null;
+
+    for (const folder of vscode.workspace.workspaceFolders || []) {
+      const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
+      try {
+        await vscode.workspace.fs.stat(candidate);
+        return candidate;
+      } catch {}
+    }
+
+    return null;
   }
 
   dispose() {

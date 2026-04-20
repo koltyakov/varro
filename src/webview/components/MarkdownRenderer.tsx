@@ -15,12 +15,102 @@ const checkSvg =
 
 const renderer = new marked.Renderer();
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function normalizePath(value: string) {
+  return value.replace(/\\/g, '/');
+}
+
+function trimTrailingSlashes(value: string) {
+  return value.replace(/\/+$/, '');
+}
+
+function isAbsolutePath(path: string) {
+  const normalizedPath = normalizePath(path);
+  return normalizedPath.startsWith('/') || /^[A-Za-z]:\//.test(normalizedPath);
+}
+
+function splitPathReference(raw: string): { path: string; line?: number; lineSuffix?: string } | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/^(.*):(\d+(?:-\d+)?)$/);
+  if (!match) return { path: trimmed };
+
+  return {
+    path: match[1],
+    line: parseInt(match[2], 10),
+    lineSuffix: match[2],
+  };
+}
+
+function toAbsolutePath(path: string) {
+  if (isAbsolutePath(path)) return normalizePath(path);
+
+  const workspacePath = state.editorContext.workspacePath;
+  if (!workspacePath) return normalizePath(path);
+
+  const relativePath = normalizePath(path).replace(/^\.\//, '');
+  return `${trimTrailingSlashes(normalizePath(workspacePath))}/${relativePath}`;
+}
+
+function buildFileLink(raw: string, label?: string) {
+  const parsed = splitPathReference(raw);
+  if (!parsed) return null;
+
+  const absolutePath = toAbsolutePath(parsed.path);
+  const displayBase = formatDisplayPath(absolutePath, state.editorContext.workspacePath);
+  const displayPath = parsed.lineSuffix ? `${displayBase}:${parsed.lineSuffix}` : displayBase;
+  const visibleLabel =
+    !label || label.trim() === '' || normalizePath(label.trim()) === normalizePath(raw.trim())
+      ? displayPath
+      : label.trim();
+  const payload = JSON.stringify(
+    parsed.line != null ? { path: absolutePath, line: parsed.line } : { path: absolutePath }
+  );
+  const href = parsed.line != null ? `${absolutePath}:${parsed.line}` : absolutePath;
+
+  return {
+    href: escapeHtml(href),
+    payload: escapeHtml(payload),
+    label: escapeHtml(visibleLabel),
+  };
+}
+
 renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const langLabel = lang ? `<span class="code-block-lang">${lang}</span>` : '';
   const copyBtn = `<button class="code-block-copy-btn" data-copy title="Copy code">${copySvg}</button>`;
   const langAttr = lang ? ` data-lang="${lang.replace(/"/g, '&quot;')}"` : '';
   return `<div class="interactive-result-code-block"${langAttr}><div class="code-block-header">${langLabel}${copyBtn}</div><pre class="code-block"><code>${escaped}</code></pre></div>`;
+};
+
+renderer.link = function ({
+  href,
+  text,
+  title,
+}: {
+  href: string;
+  text: string;
+  title?: string | null;
+}) {
+  if (isLocalFileHref(href)) {
+    const link = buildFileLink(href, text);
+    if (link) {
+      const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+      return `<a href="${link.href}" class="file-path-link" data-file="${link.payload}"${titleAttr}>${link.label}</a>`;
+    }
+  }
+
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+  return `<a href="${escapeHtml(href)}"${titleAttr}>${text}</a>`;
 };
 
 marked.setOptions({
@@ -32,6 +122,12 @@ marked.setOptions({
 const FILE_PATH_RE =
   /(?:^|[\s(])(\.?\/?(?:[\w.-]+\/)*[\w.-]+\.[\w]+(?::\d+(?:-\d+)?)?)(?=[\s),.]|$)/g;
 const ANCHOR_RE = /(<a[\s\S]*?<\/a>)/gi;
+
+function isLocalFileHref(href: string | null): boolean {
+  if (!href) return false;
+  if (href.startsWith('#')) return false;
+  return !/^[a-z][a-z0-9+.-]*:/i.test(href);
+}
 
 function linkifyPaths(html: string): string {
   const preserved: string[] = [];
@@ -47,25 +143,11 @@ function linkifyPaths(html: string): string {
   protect(ANCHOR_RE);
 
   html = html.replace(FILE_PATH_RE, (full, path: string) => {
-    const lineMatch = path.match(/^(.+?):(\d+(?:-\d+)?)$/);
-    let filePath: string;
-    let line: number | undefined;
-    let displayPath: string;
-    if (lineMatch) {
-      filePath = lineMatch[1];
-      line = parseInt(lineMatch[2], 10);
-      displayPath = `${formatDisplayPath(filePath, state.editorContext.workspacePath)}:${lineMatch[2]}`;
-    } else {
-      filePath = path;
-      displayPath = formatDisplayPath(filePath, state.editorContext.workspacePath);
-    }
-    const payload =
-      line != null
-        ? `{&quot;path&quot;:&quot;${filePath}&quot;,&quot;line&quot;:${line}}`
-        : `{&quot;path&quot;:&quot;${filePath}&quot;}`;
+    const link = buildFileLink(path);
+    if (!link) return full;
     return full.replace(
       path,
-      `<a href="#" class="file-path-link" data-file='${payload}'>${displayPath}</a>`
+      `<a href="${link.href}" class="file-path-link" data-file="${link.payload}">${link.label}</a>`
     );
   });
 
@@ -109,6 +191,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
         const payload = JSON.parse(link.dataset.file || '{}');
         postMessage({ type: 'vscode/open', payload: { path: payload.path, line: payload.line } });
       } catch {}
+      return;
+    }
+
+    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href]');
+    if (anchor && isLocalFileHref(anchor.getAttribute('href'))) {
+      e.preventDefault();
+      const payload = splitPathReference(anchor.getAttribute('href') || '');
+      if (payload?.path) {
+        postMessage({ type: 'vscode/open', payload: { path: payload.path, line: payload.line } });
+      }
     }
   }
 

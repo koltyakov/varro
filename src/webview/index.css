@@ -2524,8 +2524,16 @@ kbd {
 .question-prompt-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.question-prompt-header-main {
+  display: flex;
+  align-items: flex-start;
   gap: 6px;
-  margin-bottom: 6px;
+  min-width: 0;
 }
 
 .question-prompt-icon {
@@ -2533,6 +2541,14 @@ kbd {
   height: 14px;
   flex-shrink: 0;
   color: var(--color-vscode-accent);
+  margin-top: 1px;
+}
+
+.question-prompt-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .question-prompt-label {
@@ -2541,10 +2557,24 @@ kbd {
   color: var(--color-vscode-accent);
 }
 
-.question-prompt-separator {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 15%, transparent);
+.question-prompt-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-vscode-fg);
+}
+
+.question-prompt-step {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+}
+
+.question-prompt-panel {
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 55%, transparent);
+  padding: 8px;
 }
 
 .question-prompt-text {

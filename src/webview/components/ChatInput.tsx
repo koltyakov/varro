@@ -178,9 +178,10 @@ export function ChatInput() {
       type: 'file' as const,
       label: `@${file.relativePath}`,
       detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
-      value: file.type === 'directory'
-        ? `@${getLeafPathName(file.relativePath)}/`
-        : `@${getLeafPathName(file.relativePath)}`,
+      value:
+        file.type === 'directory'
+          ? `@${formatMentionPath(file.relativePath)}/`
+          : `@${formatMentionPath(file.relativePath)}`,
       file,
     }));
 
@@ -1607,6 +1608,10 @@ function looksLikeFileMentionQuery(query: string) {
 
 function normalizeMentionPath(value: string) {
   return value.replace(/^@/, '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function formatMentionPath(value: string) {
+  return value.replace(/^@/, '').replace(/\\/g, '/').replace(/\/+$/, '');
 }
 
 function getUserMessageHistoryText(parts: Part[]) {
