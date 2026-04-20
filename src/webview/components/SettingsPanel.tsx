@@ -2,7 +2,6 @@ import { For, Show, createSignal, createEffect } from 'solid-js';
 import {
   isModelVisible,
   isProviderVisible,
-  resetModelVisibility,
   setModelVisible,
   setProviderVisible,
   setShowSettings,
@@ -21,9 +20,6 @@ export function SettingsPanel() {
           </button>
           <span class="settings-header-title">Models</span>
         </div>
-        <button class="settings-reset-btn" onClick={resetModelVisibility} title="Reset all">
-          Reset
-        </button>
       </div>
 
       <div class="settings-body">
@@ -54,6 +50,9 @@ function ProviderSection(props: { provider: (typeof state.providers)[0] }) {
   function toggleProvider() {
     if (allEnabled()) {
       setProviderVisible(props.provider.id, false);
+      for (const model of models()) {
+        setModelVisible(props.provider.id, model.id, false);
+      }
     } else {
       setProviderVisible(props.provider.id, true);
       for (const model of models()) {

@@ -406,6 +406,22 @@ export function setModelVisible(providerID: string, modelID: string, visible: bo
   setState('hiddenModels', next);
   writeStored(STORAGE_KEYS.hiddenModels, next);
 
+  if (visible && !isProviderVisible(providerID)) {
+    const nextProviders = state.hiddenProviders.filter((item) => item !== providerID);
+    setState('hiddenProviders', nextProviders);
+    writeStored(STORAGE_KEYS.hiddenProviders, nextProviders);
+
+    const provider = state.providers.find((p) => p.id === providerID);
+    if (provider) {
+      const otherKeys = Object.keys(provider.models)
+        .filter((id) => id !== modelID)
+        .map((id) => modelVisibilityKey(providerID, id));
+      const nextHidden = [...next, ...otherKeys.filter((k) => !next.includes(k))];
+      setState('hiddenModels', nextHidden);
+      writeStored(STORAGE_KEYS.hiddenModels, nextHidden);
+    }
+  }
+
   if (
     !visible &&
     state.selectedModel?.providerID === providerID &&
