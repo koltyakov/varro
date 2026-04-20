@@ -15,7 +15,8 @@ import { isAssistantMessage } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part } from '../types';
 import { Message as MessageComponent, type AssistantFileEditStackGroup } from './Message';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
-import { formatThinkingLabel, modelSupportsReasoning } from './ModelPicker';
+import { modelSupportsReasoning } from './ModelPicker';
+import { formatVariantInitial } from '../lib/format';
 import {
   collapseLeadingDuplicateFileEvents,
   getTrailingFileEventSignature,
@@ -265,7 +266,9 @@ export function MessageList() {
     if (!trackRef) return;
     lastTrackHeight = trackRef.getBoundingClientRect().height;
     const observer = new ResizeObserver(() => {
+      if (!containerRef) return;
       updateScrollbarInset();
+      setViewportHeight(containerRef.clientHeight);
       const previousTrackHeight = lastTrackHeight;
       measureVisibleItems();
       lastTrackHeight = trackRef?.getBoundingClientRect().height ?? previousTrackHeight;
@@ -273,6 +276,7 @@ export function MessageList() {
         scrollToBottom();
       }
     });
+    observer.observe(containerRef);
     observer.observe(trackRef);
     onCleanup(() => {
       observer.disconnect();
@@ -362,7 +366,7 @@ export function MessageList() {
         const modelName = provider?.models[cur.modelID]?.name || cur.modelID;
         const parts: string[] = [];
         if (modelChanged) parts.push(modelName);
-        if (cur.variant) parts.push(formatThinkingLabel(cur.variant));
+        if (cur.variant) parts.push(formatVariantInitial(cur.variant));
         else if (
           variantChanged &&
           !modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)

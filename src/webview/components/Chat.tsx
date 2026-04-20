@@ -103,6 +103,7 @@ export function Chat() {
 }
 
 function SessionListView(props: { focusRunningSessions: boolean }) {
+  const MAX_SURFACED_OTHER_SESSIONS = 10;
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), 60_000);
   onCleanup(() => clearInterval(clock));
@@ -112,13 +113,30 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
 
+  const isSessionNeedingAttention = (sessionId: string) =>
+    !isRunningSession(sessionId) &&
+    (state.permissions.some((permission) => permission.sessionID === sessionId) ||
+      state.questions.some((question) => question.sessionID === sessionId));
   const runningSessions = () => state.sessions.filter((session) => isRunningSession(session.id));
-  const otherSessions = () => state.sessions.filter((session) => !isRunningSession(session.id));
+  const attentionSessions = () =>
+    state.sessions.filter(
+      (session) => !isRunningSession(session.id) && isSessionNeedingAttention(session.id)
+    );
+  const recentOtherSessions = () =>
+    state.sessions.filter(
+      (session) =>
+        !isRunningSession(session.id) && !isSessionNeedingAttention(session.id)
+    );
+  const surfacedOtherSessions = () => recentOtherSessions().slice(0, MAX_SURFACED_OTHER_SESSIONS);
+  const overflowOtherSessions = () => recentOtherSessions().slice(MAX_SURFACED_OTHER_SESSIONS);
+  const surfacedSessions = () => [
+    ...runningSessions(),
+    ...attentionSessions(),
+    ...surfacedOtherSessions(),
+  ];
   const visibleSessions = () => {
-    const active = runningSessions();
-    const others = otherSessions();
-    if (showOtherSessions() || active.length === 0) return [...active, ...others];
-    return active;
+    if (showOtherSessions()) return [...surfacedSessions(), ...overflowOtherSessions()];
+    return surfacedSessions();
   };
 
   createEffect(() => {
@@ -197,30 +215,40 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
             )}
           </For>
         </Show>
-        <Show when={otherSessions().length > 0}>
-          <Show
-            when={runningSessions().length > 0}
-            fallback={
-              <For each={otherSessions()}>
-                {(session, index) => (
-                  <SessionListItem
-                    session={session}
-                    itemIndex={() => index()}
-                    focusedIndex={focusedIndex}
-                    setFocusedIndex={setFocusedIndex}
-                    now={now}
-                  />
-                )}
-              </For>
-            }
-          >
+        <Show when={attentionSessions().length > 0}>
+          <For each={attentionSessions()}>
+            {(session, index) => (
+              <SessionListItem
+                session={session}
+                itemIndex={() => runningSessions().length + index()}
+                focusedIndex={focusedIndex}
+                setFocusedIndex={setFocusedIndex}
+                now={now}
+              />
+            )}
+          </For>
+        </Show>
+        <Show when={surfacedOtherSessions().length > 0}>
+          <For each={surfacedOtherSessions()}>
+            {(session, index) => (
+              <SessionListItem
+                session={session}
+                itemIndex={() => runningSessions().length + attentionSessions().length + index()}
+                focusedIndex={focusedIndex}
+                setFocusedIndex={setFocusedIndex}
+                now={now}
+              />
+            )}
+          </For>
+        </Show>
+        <Show when={overflowOtherSessions().length > 0}>
             <button
               type="button"
               class="session-list-section-toggle"
               onClick={() => setShowOtherSessions((value) => !value)}
             >
               <span class="session-list-section-title">Other sessions</span>
-              <span class="session-list-section-count">{otherSessions().length}</span>
+              <span class="session-list-section-count">{overflowOtherSessions().length}</span>
               <svg
                 viewBox="0 0 16 16"
                 fill="currentColor"
@@ -231,11 +259,11 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
               </svg>
             </button>
             <Show when={showOtherSessions()}>
-              <For each={otherSessions()}>
+              <For each={overflowOtherSessions()}>
                 {(session, index) => (
                   <SessionListItem
                     session={session}
-                    itemIndex={() => runningSessions().length + index()}
+                    itemIndex={() => surfacedSessions().length + index()}
                     focusedIndex={focusedIndex}
                     setFocusedIndex={setFocusedIndex}
                     now={now}
@@ -243,7 +271,6 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
                 )}
               </For>
             </Show>
-          </Show>
         </Show>
       </Show>
     </div>
@@ -346,15 +373,11 @@ function formatSessionAge(timestamp: number, now: number): string {
   if (totalMinutes < 1) return '0m';
 
   const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
-  const parts: string[] = [];
+  const hours = Math.floor(totalMinutes / 60);
 
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`);
-
-  return parts.slice(0, 2).join(' ');
+  if (days > 0) return `${days}d`;
+  if (hours > 0) return `${hours}h`;
+  return `${totalMinutes}m`;
 }
 
 function RunningSessionsBadge(props: { count: number; onClick: () => void }) {

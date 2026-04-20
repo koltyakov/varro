@@ -185,6 +185,18 @@ function UserMessageContent(props: { parts: Part[] }) {
         }
       }
 
+      if (text.startsWith('[Active file:')) {
+        const match = text.match(/^\[Active file: (.+?)\]/);
+        if (match) {
+          attachments.push({
+            type: 'file-reference',
+            path: match[1],
+            isDirectory: false,
+          });
+          continue;
+        }
+      }
+
       if (isStandaloneFileReference(text)) {
         attachments.push({
           type: 'file-reference',

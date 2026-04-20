@@ -1,7 +1,7 @@
 import { Show, createMemo, createSignal } from 'solid-js';
 import { state, showThinking } from '../lib/state';
 import { formatDuration, getAssistantDuration } from '../lib/message-metrics';
-import { formatVariantLabel } from '../lib/format';
+import { formatAgentLabel, formatVariantLabel } from '../lib/format';
 import type { AssistantMessage, Part, SubtaskPart, TextPart } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ToolCall } from './ToolCall';
@@ -33,7 +33,7 @@ export function MessagePart(props: {
             <div class="subtask-header">
               <span class="subtask-dot" />
               <span>
-                Handing off to <span class="subtask-agent-name">{part.name}</span>
+                Handing off to <span class="subtask-agent-name">{formatAgentLabel(part.name)}</span>
               </span>
             </div>
           </div>
@@ -140,7 +140,7 @@ function SubtaskBlock(props: { part: SubtaskPart; run?: AssistantMessage }) {
       <Show when={selectedModel() || run()}>
         <div class="subtask-meta">
           <Show when={props.part.agent}>
-            <span>{props.part.agent}</span>
+            <span>{formatAgentLabel(props.part.agent)}</span>
           </Show>
           <Show when={run()}>
             <span>{formatDuration(getAssistantDuration(run()!))}</span>

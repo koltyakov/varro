@@ -202,9 +202,6 @@ input:focus-visible {
 .interactive-session {
   --chat-horizontal-padding: 14px;
   --interactive-list-scrollbar-inset: 0px;
-  --chat-response-right-bleed: calc(
-    var(--chat-horizontal-padding) + var(--interactive-list-scrollbar-inset)
-  );
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -247,8 +244,6 @@ input:focus-visible {
 .interactive-item-container.interactive-response {
   align-items: flex-start;
   padding: 4px 0 12px 0;
-  width: calc(100% + var(--chat-response-right-bleed));
-  margin-right: calc(var(--chat-response-right-bleed) * -1);
 }
 
 .chat-turn {
@@ -734,7 +729,8 @@ input:focus-visible {
 }
 
 .interactive-session .interactive-input-part {
-  margin: 0 var(--chat-horizontal-padding) 12px;
+  margin: 0 calc(var(--chat-horizontal-padding) + var(--interactive-list-scrollbar-inset)) 12px
+    var(--chat-horizontal-padding);
   padding: 8px 0;
   display: flex;
   flex-direction: column;
@@ -745,10 +741,14 @@ input:focus-visible {
 .interactive-session .chat-input-toolbars {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: visible;
 }
 
 .interactive-session .chat-input-toolbars .toolbar-left {
@@ -758,14 +758,17 @@ input:focus-visible {
   min-width: 0;
   flex: 1;
   overflow: visible;
+  flex-wrap: nowrap;
 }
 
 .interactive-session .chat-input-toolbars .toolbar-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 4px;
   margin-left: auto;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .toolbar-picker-label {
@@ -775,7 +778,8 @@ input:focus-visible {
 }
 
 .toolbar-picker-label.model-name {
-  max-width: none;
+  display: block;
+  max-width: 100%;
 }
 
 .toolbar-picker-detail {
@@ -1094,6 +1098,8 @@ input:focus-visible {
   gap: 3px;
   height: 26px;
   padding: 0 9px;
+  min-width: 0;
+  max-width: 100%;
   border-radius: 6px;
   color: var(--color-vscode-fg);
   cursor: pointer;
@@ -1105,6 +1111,29 @@ input:focus-visible {
   font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.toolbar-picker.model-picker-btn {
+  flex: 0 0 auto;
+  max-width: fit-content;
+}
+
+.toolbar-picker.model-picker-btn .toolbar-picker-label {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.toolbar-picker.model-picker-btn.model-ellipsis {
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.toolbar-picker.model-picker-btn.model-ellipsis .toolbar-picker-label.model-name {
+  flex: 1 1 auto;
+  min-width: 3ch;
+  max-width: 100%;
 }
 
 .toolbar-picker:hover {
@@ -1210,6 +1239,56 @@ input:focus-visible {
 .toolbar-picker.stop-button {
   color: var(--color-vscode-muted);
   height: 28px;
+  min-width: 28px;
+}
+
+.toolbar-picker.stop-button.compact {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+.toolbar-picker.stop-button:not(.compact) {
+  padding-right: 8px;
+}
+
+.toolbar-picker.stop-button:not(.compact) .toolbar-picker-label {
+  margin-left: 1px;
+}
+
+.chat-input-toolbars.compact-tight {
+  gap: 4px;
+}
+
+.chat-input-toolbars.compact-tight .toolbar-left,
+.chat-input-toolbars.compact-tight .toolbar-right,
+.chat-input-toolbars.compact-tight .send-button-group {
+  gap: 3px;
+}
+
+.chat-input-toolbars.compact-tight .toolbar-picker {
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+.chat-input-toolbars.compact-tight .toolbar-picker.icon-only,
+.chat-input-toolbars.compact-tight .toolbar-picker.stop-button.compact {
+  width: 26px;
+  min-width: 26px;
+}
+
+.chat-input-toolbars.compact-tight .chat-send-button {
+  width: 26px;
+  height: 26px;
+}
+
+.chat-input-toolbars.compact-tight .send-button-group .send-main {
+  width: 24px;
+}
+
+.chat-input-toolbars.compact-tight .send-mode-chevron {
+  width: 16px;
+  height: 26px;
 }
 .toolbar-picker.stop-button svg {
   color: var(--color-vscode-error);
@@ -1282,6 +1361,7 @@ input:focus-visible {
 .send-button-group {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .send-button-group .send-main {
@@ -2747,6 +2827,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
   flex-shrink: 0;
 }
 
@@ -2804,12 +2885,12 @@ kbd {
 .session-item-age {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   width: 56px;
   flex-shrink: 0;
   font-size: 10px;
   color: var(--color-vscode-muted);
-  text-align: center;
+  text-align: right;
   white-space: nowrap;
 }
 

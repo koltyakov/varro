@@ -571,11 +571,12 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   const sel = state.editorContext.selection;
   const af = state.editorContext.activeFile;
   if (af) {
+    const activeFilePath = getAttachmentReference({ path: af.path, type: 'file' }, wp);
     parts.push({
       type: 'text',
       text: sel
-        ? `[Selection from ${af.relativePath} lines ${sel.startLine}-${sel.endLine}]\n\`\`\`${af.language}\n${sel.text}\n\`\`\``
-        : `[Active file: ${af.relativePath}]\n\`\`\`${af.language}\n${af.content}\n\`\`\``,
+        ? `[Selection from ${activeFilePath} lines ${sel.startLine}-${sel.endLine}]`
+        : `[Active file: ${activeFilePath}]`,
     });
   }
 

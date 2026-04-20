@@ -107,6 +107,7 @@ export class ContextProvider implements vscode.Disposable {
     if (!editor) {
       this._context.activeFile = null;
       this._context.selection = null;
+      this.onChange(this._context);
       if (this._lastContentHash !== null) {
         this._lastContentHash = null;
         this.updateDiagnostics();

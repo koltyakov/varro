@@ -40,7 +40,8 @@ import {
   reviewSession,
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
-import { ModelPicker, getVariantsForModel, formatThinkingLabel } from './ModelPicker';
+import { ModelPicker, getVariantsForModel } from './ModelPicker';
+import { formatAgentInitial, formatAgentLabel, formatVariantInitial, formatVariantLabel } from '../lib/format';
 import {
   isAssistantMessage,
   getContextWindow,
@@ -57,6 +58,12 @@ export function ChatInput() {
   let textareaRef: HTMLTextAreaElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let toolbarRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let toolbarLeftRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let toolbarRightRef: HTMLDivElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
   const [agentFocusIndex, setAgentFocusIndex] = createSignal(0);
@@ -83,7 +90,20 @@ export function ChatInput() {
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
   const [fileSearchQuery, setFileSearchQuery] = createSignal('');
   const [suppressCompletion, setSuppressCompletion] = createSignal(false);
+  const [toolbarCompactMode, setToolbarCompactMode] = createSignal<
+    'full' | 'compact-agent-stop' | 'compact-reasoning' | 'truncate-model' | 'tight'
+  >('full');
   let latestFileSearchRequestId = 0;
+  let toolbarFitRaf = 0;
+  let toolbarFitRequestId = 0;
+
+  const toolbarCompactModes = [
+    'full',
+    'compact-agent-stop',
+    'compact-reasoning',
+    'truncate-model',
+    'tight',
+  ] as const;
 
   const files = () => state.droppedFiles;
   const clipboardImages = () => state.clipboardImages;
@@ -577,6 +597,41 @@ export function ChatInput() {
     textareaRef.style.height = Math.min(textareaRef.scrollHeight, 200) + 'px';
   }
 
+  function getToolbarGap() {
+    if (!toolbarRef) return 0;
+    const styles = window.getComputedStyle(toolbarRef);
+    const rawGap = styles.columnGap || styles.gap || '0';
+    const gap = Number.parseFloat(rawGap);
+    return Number.isFinite(gap) ? gap : 0;
+  }
+
+  function isToolbarOverflowing() {
+    if (!toolbarRef || !toolbarLeftRef || !toolbarRightRef) return false;
+    const leftWidth = toolbarLeftRef.scrollWidth;
+    const rightWidth = toolbarRightRef.getBoundingClientRect().width;
+    return leftWidth + rightWidth + getToolbarGap() > toolbarRef.clientWidth + 1;
+  }
+
+  function fitToolbar(modeIndex: number, requestId: number) {
+    if (requestId !== toolbarFitRequestId) return;
+    const nextMode = toolbarCompactModes[Math.min(modeIndex, toolbarCompactModes.length - 1)];
+    setToolbarCompactMode(nextMode);
+    queueMicrotask(() => {
+      if (requestId !== toolbarFitRequestId) return;
+      if (!isToolbarOverflowing() || modeIndex >= toolbarCompactModes.length - 1) return;
+      fitToolbar(modeIndex + 1, requestId);
+    });
+  }
+
+  function scheduleToolbarFit() {
+    if (toolbarFitRaf) cancelAnimationFrame(toolbarFitRaf);
+    const requestId = ++toolbarFitRequestId;
+    toolbarFitRaf = requestAnimationFrame(() => {
+      toolbarFitRaf = 0;
+      fitToolbar(0, requestId);
+    });
+  }
+
   async function handleDrop(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -724,6 +779,23 @@ export function ChatInput() {
       document.removeEventListener('dragover', handleWindowDragOver, true);
       document.removeEventListener('drop', handleWindowDrop, true);
       document.removeEventListener('dragleave', handleWindowDragLeave, true);
+    });
+  });
+
+  onMount(() => {
+    if (!toolbarRef) return;
+    const observer = new ResizeObserver(() => {
+      if (showAgentPicker() || showVariantPicker() || showModelPicker() || showPermissionModePicker())
+        return;
+      if (showBusyMenu() || showContextPopup()) return;
+      scheduleToolbarFit();
+    });
+    observer.observe(toolbarRef);
+
+    onCleanup(() => {
+      observer.disconnect();
+      toolbarFitRequestId += 1;
+      if (toolbarFitRaf) cancelAnimationFrame(toolbarFitRaf);
     });
   });
 
@@ -885,10 +957,48 @@ export function ChatInput() {
 
   const selectedAgentLabel = () => {
     const name = state.selectedAgent;
-    if (!name) return 'Agent';
+    const compactMode = toolbarCompactMode();
+    const compactAgent = compactMode !== 'full';
+    if (!name) return compactAgent ? 'A' : 'Agent';
     const agent = state.agents.find((a) => a.name === name);
-    return agent?.name || name;
+    const label = formatAgentLabel(agent?.name || name);
+    return compactAgent ? formatAgentInitial(label) : label;
   };
+
+  const selectedVariantLabel = () => {
+    const variant = effectiveVariant();
+    if (!variant) return '';
+    const compactMode = toolbarCompactMode();
+    return compactMode === 'compact-reasoning' ||
+      compactMode === 'truncate-model' ||
+      compactMode === 'tight'
+      ? formatVariantInitial(variant)
+      : formatVariantLabel(variant);
+  };
+
+  const modelCanEllipsize = () => {
+    const compactMode = toolbarCompactMode();
+    return compactMode === 'truncate-model' || compactMode === 'tight';
+  };
+
+  createEffect(() => {
+    void state.agents.length;
+    void state.selectedAgent;
+    void currentModel().providerName;
+    void currentModel().modelName;
+    void effectiveVariant();
+    void !!contextUsage();
+    void isLoading();
+    void hasActiveQuestion();
+    void hasActivePermission();
+    void canSend();
+
+    if (showAgentPicker() || showVariantPicker() || showModelPicker() || showPermissionModePicker())
+      return;
+    if (showBusyMenu() || showContextPopup()) return;
+
+    scheduleToolbarFit();
+  });
 
   return (
     <div class="interactive-input-part">
@@ -1112,8 +1222,12 @@ export function ChatInput() {
           </Show>
         </div>
 
-        <div class="chat-input-toolbars">
+        <div
+          ref={toolbarRef}
+          class={`chat-input-toolbars ${toolbarCompactMode() === 'tight' ? 'compact-tight' : ''}`}
+        >
           <div
+            ref={toolbarLeftRef}
             class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
           >
             <div style={{ position: 'relative' }}>
@@ -1199,7 +1313,7 @@ export function ChatInput() {
                           onMouseEnter={() => setAgentFocusIndex(index())}
                         >
                           <span class="min-w-0 flex-1">
-                            <span class="block truncate">{agent.name}</span>
+                            <span class="block truncate">{formatAgentLabel(agent.name)}</span>
                             <span class="block truncate text-[10px] text-vscode-muted/80">
                               {agent.description || getAgentBadgeLine(agent)}
                             </span>
@@ -1213,7 +1327,7 @@ export function ChatInput() {
             </Show>
 
             <button
-              class="toolbar-picker model-picker-btn"
+              class={`toolbar-picker model-picker-btn ${modelCanEllipsize() ? 'model-ellipsis' : ''}`}
               onClick={() => {
                 const next = !showModelPicker();
                 closePopups(next ? 'model' : undefined);
@@ -1225,7 +1339,10 @@ export function ChatInput() {
                   : 'Choose model'
               }
             >
-              <Show when={currentModel().modelName} fallback={<span>Model</span>}>
+              <Show
+                when={currentModel().modelName}
+                fallback={<span class="toolbar-picker-label model-name">Model</span>}
+              >
                 <span class="toolbar-picker-label model-name">{currentModel().modelName}</span>
               </Show>
               <svg
@@ -1254,9 +1371,7 @@ export function ChatInput() {
                   }}
                   title="Thinking level"
                 >
-                  <span class="toolbar-picker-label">
-                    {formatThinkingLabel(effectiveVariant()!)}
-                  </span>
+                  <span class="toolbar-picker-label">{selectedVariantLabel()}</span>
                   <svg
                     class="codicon-chevron"
                     width="10"
@@ -1288,7 +1403,7 @@ export function ChatInput() {
                             setShowVariantPicker(false);
                           }}
                         >
-                          {formatThinkingLabel(v)}
+                          {formatVariantLabel(v)}
                         </button>
                       )}
                     </For>
@@ -1332,17 +1447,20 @@ export function ChatInput() {
             </Show>
           </div>
 
-          <div class="toolbar-right">
+          <div ref={toolbarRightRef} class="toolbar-right">
             <Show when={isLoading() && !hasActiveQuestion() && !hasActivePermission()}>
               <button
-                class="toolbar-picker stop-button"
+                class={`toolbar-picker stop-button ${toolbarCompactMode() === 'full' ? '' : 'compact'}`}
                 onClick={() => abortSession()}
                 title="Stop"
+                aria-label="Stop"
               >
                 <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                   <rect x="3" y="3" width="10" height="10" rx="1.5" />
                 </svg>
-                <span class="toolbar-picker-label">Stop</span>
+                <Show when={toolbarCompactMode() === 'full'}>
+                  <span class="toolbar-picker-label">Stop</span>
+                </Show>
               </button>
             </Show>
 
@@ -1868,7 +1986,8 @@ function getUserMessageHistoryText(parts: Part[]) {
       (value) =>
         value.length > 0 &&
         !value.startsWith('[Working directory:') &&
-        !value.startsWith('[Selection from')
+        !value.startsWith('[Selection from') &&
+        !value.startsWith('[Active file:')
     )
     .join('\n\n')
     .trim();
