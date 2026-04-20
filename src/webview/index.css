@@ -2767,8 +2767,8 @@ kbd {
 }
 
 .session-item-indicator.is-running {
-  border: 1.5px solid color-mix(in srgb, var(--color-vscode-accent) 24%, transparent);
-  border-top-color: var(--color-vscode-accent);
+  border: 1.5px solid color-mix(in srgb, var(--color-vscode-fg) 24%, transparent);
+  border-top-color: var(--color-vscode-fg);
   background: transparent;
   animation: spin 0.85s linear infinite;
 }

@@ -98,7 +98,7 @@ export interface ClipboardImage {
   size: number;
 }
 
-const MAX_CLIPBOARD_IMAGES = 5;
+export const MAX_CLIPBOARD_IMAGES = 5;
 const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
 
 const defaultEditorContext: EditorContext = {
@@ -225,6 +225,7 @@ function readShowThinking(): boolean {
 }
 
 export const [inputText, setInputText] = createSignal('');
+export const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
 export const [isLoading, setIsLoading] = createSignal(false);
 export const [loadingStartedAt, setLoadingStartedAt] = createSignal<number | null>(null);
 export const [loadingLastActivityAt, setLoadingLastActivityAt] = createSignal<number | null>(
@@ -269,6 +270,7 @@ export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
+export const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
 let permissionWorkspace: string | null =
   initialWebviewState.editorContext?.workspacePath ?? null;
 
@@ -292,6 +294,10 @@ export const [theme, setTheme] = createSignal<'dark' | 'light'>(
 
 export function requestComposerFocus() {
   setComposerFocusKey((value) => value + 1);
+}
+
+export function requestMessageListScrollToBottom() {
+  setMessageListScrollRequestKey((value) => value + 1);
 }
 
 export function getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode {
@@ -392,6 +398,7 @@ export function addClipboardImage(image: ClipboardImage) {
 }
 
 export function removeClipboardImage(id: string) {
+  const image = state.clipboardImages.find((item) => item.id === id);
   setState(
     'clipboardImages',
     produce((images) => {
@@ -399,10 +406,27 @@ export function removeClipboardImage(id: string) {
       if (idx !== -1) images.splice(idx, 1);
     })
   );
+  if (image) replaceClipboardImagePlaceholder(image.filename);
 }
 
 export function clearClipboardImages() {
+  for (const image of state.clipboardImages) {
+    replaceClipboardImagePlaceholder(image.filename);
+  }
   setState('clipboardImages', []);
+  if (inputText().trim().length === 0) setNextPastedImageIndex(1);
+}
+
+function replaceClipboardImagePlaceholder(filename: string) {
+  const placeholder = `[${filename}]`;
+  const text = inputText();
+  const index = text.indexOf(placeholder);
+  if (index === -1) return;
+  setInputText(`${text.slice(0, index)}_____${text.slice(index + placeholder.length)}`);
+}
+
+export function resetPastedImageIndex() {
+  setNextPastedImageIndex(1);
 }
 
 export function setQuestions(questions: QuestionRequest[]) {

@@ -34,6 +34,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
   private serverEventHandler: ((event: unknown) => void) | undefined;
   private webviewDisposables: vscode.Disposable[] = [];
+  private windowStateDisposable?: vscode.Disposable;
+  private readonly statusBarItem: vscode.StatusBarItem;
+  private readonly busySessions = new Set<string>();
+  private readonly completedSessions = new Set<string>();
+  private readonly pendingAttention = new Map<
+    string,
+    { sessionID: string; kind: 'permission' | 'question'; label: string }
+  >();
+  private readonly sessionTitles = new Map<string, string>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -42,6 +51,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   ) {
     this.contextProvider = contextProvider;
     this.server = server;
+    this.statusBarItem = vscode.window.createStatusBarItem(
+      'varro.session-status',
+      vscode.StatusBarAlignment.Left,
+      1000
+    );
+    this.statusBarItem.name = 'Varro Session Status';
+    this.statusBarItem.command = 'varro.chat.focus';
+    this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
+      this.updateStatusBarItem();
+    });
 
     this.serverStatusHandler = (status: ServerStatus) => {
       this._status = status;
@@ -49,6 +68,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
     this.serverEventHandler = (event: unknown) => {
       const evt = event as Record<string, unknown>;
+      this.handleServerEvent(evt);
       this.post({
         type: 'server/event',
         payload: {
@@ -60,6 +80,213 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     this.server.on('status', this.serverStatusHandler);
     this.server.on('event', this.serverEventHandler);
+    this.updateStatusBarItem();
+  }
+
+  private handleServerEvent(event: Record<string, unknown>) {
+    const type = typeof event.type === 'string' ? event.type : undefined;
+    const props = asRecord(event.properties);
+    if (!type) return;
+
+    switch (type) {
+      case 'session.created':
+      case 'session.updated': {
+        this.rememberSessionTitle(asRecord(props?.info));
+        break;
+      }
+      case 'session.deleted': {
+        const sessionID = getString(asRecord(props?.info)?.id);
+        if (!sessionID) break;
+        this.busySessions.delete(sessionID);
+        this.completedSessions.delete(sessionID);
+        this.sessionTitles.delete(sessionID);
+        for (const [requestID, request] of this.pendingAttention.entries()) {
+          if (request.sessionID === sessionID) {
+            this.pendingAttention.delete(requestID);
+          }
+        }
+        break;
+      }
+      case 'session.status': {
+        const sessionID = getString(props?.sessionID);
+        const statusType = getString(asRecord(props?.status)?.type);
+        if (!sessionID || !statusType) break;
+        if (statusType === 'busy' || statusType === 'retry') {
+          this.busySessions.add(sessionID);
+          this.completedSessions.delete(sessionID);
+        }
+        if (statusType === 'idle') {
+          this.busySessions.delete(sessionID);
+        }
+        break;
+      }
+      case 'session.idle': {
+        const sessionID = getString(props?.sessionID);
+        if (!sessionID) break;
+        const wasBusy = this.busySessions.delete(sessionID);
+        if (wasBusy && !this.hasPendingAttentionForSession(sessionID)) {
+          this.completedSessions.add(sessionID);
+          this.showCompletionNotification(sessionID);
+        }
+        break;
+      }
+      case 'permission.asked': {
+        if (props) this.trackBlockingRequest('permission', props);
+        break;
+      }
+      case 'permission.replied': {
+        this.clearBlockingRequest(getString(props?.permissionID) || getString(props?.requestID));
+        break;
+      }
+      case 'question.asked': {
+        if (props) this.trackBlockingRequest('question', props);
+        break;
+      }
+      case 'question.replied':
+      case 'question.rejected': {
+        this.clearBlockingRequest(getString(props?.requestID) || getString(props?.id));
+        break;
+      }
+    }
+
+    this.updateStatusBarItem();
+  }
+
+  private rememberSessionTitle(info: Record<string, unknown> | undefined) {
+    const sessionID = getString(info?.id);
+    const title = getString(info?.title)?.trim();
+    if (sessionID && title) {
+      this.sessionTitles.set(sessionID, title);
+    }
+  }
+
+  private trackBlockingRequest(kind: 'permission' | 'question', props: Record<string, unknown>) {
+    const requestID =
+      getString(props.id) || getString(props.permissionID) || getString(props.requestID);
+    const sessionID = getString(props.sessionID);
+    if (!requestID || !sessionID || this.pendingAttention.has(requestID)) return;
+
+    const label =
+      kind === 'question' ? this.describeQuestionRequest(props) : this.describePermissionRequest(props);
+    this.pendingAttention.set(requestID, { sessionID, kind, label });
+    this.completedSessions.delete(sessionID);
+    this.showBlockingNotification(kind, sessionID, label);
+  }
+
+  private clearBlockingRequest(requestID: string | undefined) {
+    if (!requestID) return;
+    this.pendingAttention.delete(requestID);
+  }
+
+  private hasPendingAttentionForSession(sessionID: string) {
+    for (const request of this.pendingAttention.values()) {
+      if (request.sessionID === sessionID) return true;
+    }
+    return false;
+  }
+
+  private describeQuestionRequest(props: Record<string, unknown>) {
+    const questions = Array.isArray(props.questions) ? props.questions : [];
+    const firstQuestion = asRecord(questions[0]);
+    return (
+      getString(firstQuestion?.header) ||
+      getString(firstQuestion?.question) ||
+      'User input required'
+    );
+  }
+
+  private describePermissionRequest(props: Record<string, unknown>) {
+    const title = getString(props.title)?.trim();
+    if (title) return title;
+
+    const permission = getString(props.permission);
+    const patterns = Array.isArray(props.patterns)
+      ? props.patterns.map((item) => getString(item)).filter((item): item is string => Boolean(item))
+      : [];
+    return [permission, patterns.join(', ')].filter(Boolean).join(' ').trim() || 'Permission required';
+  }
+
+  private showBlockingNotification(
+    kind: 'permission' | 'question',
+    sessionID: string,
+    label: string
+  ) {
+    if (!this.shouldShowNotification()) return;
+
+    const prefix = kind === 'question' ? 'Varro is waiting for your input' : 'Varro needs permission approval';
+    const message = `${prefix}${this.describeSessionSuffix(sessionID)}.`;
+
+    void vscode.window.showWarningMessage(message, 'Open Chat').then((action) => {
+      if (action === 'Open Chat') {
+        void vscode.commands.executeCommand('varro.chat.focus');
+      }
+    });
+
+    if (label) {
+      this.statusBarItem.tooltip = `${message}\n${label}\n\nClick to open chat.`;
+    }
+  }
+
+  private showCompletionNotification(sessionID: string) {
+    if (!this.shouldShowNotification()) return;
+
+    const message = `Varro completed a background session${this.describeSessionSuffix(sessionID)}.`;
+    void vscode.window.showInformationMessage(message, 'Open Chat').then((action) => {
+      if (action === 'Open Chat') {
+        void vscode.commands.executeCommand('varro.chat.focus');
+      }
+    });
+  }
+
+  private shouldShowNotification() {
+    return !this.view?.visible || !vscode.window.state.focused;
+  }
+
+  private describeSessionSuffix(sessionID: string) {
+    const title = this.sessionTitles.get(sessionID)?.trim();
+    return title ? ` for "${title}"` : '';
+  }
+
+  private updateStatusBarItem() {
+    if (this.view?.visible) {
+      this.statusBarItem.hide();
+      return;
+    }
+
+    const pendingRequests = [...this.pendingAttention.values()];
+    if (pendingRequests.length > 0) {
+      this.statusBarItem.text = `$(bell-dot) Varro: ${pendingRequests.length} waiting`;
+      this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      this.statusBarItem.tooltip = [
+        'Varro is waiting for your input.',
+        ...pendingRequests.slice(0, 3).map((request) => {
+          const title = this.sessionTitles.get(request.sessionID);
+          return title ? `${title}: ${request.label}` : request.label;
+        }),
+        ...(pendingRequests.length > 3 ? [`+${pendingRequests.length - 3} more`] : []),
+        '',
+        'Click to open chat.',
+      ].join('\n');
+      this.statusBarItem.show();
+      return;
+    }
+
+    const completedSessions = [...this.completedSessions];
+    if (completedSessions.length > 0) {
+      this.statusBarItem.text = `$(check-all) Varro: ${completedSessions.length} completed`;
+      this.statusBarItem.backgroundColor = undefined;
+      this.statusBarItem.tooltip = [
+        'Varro finished background work.',
+        ...completedSessions.slice(0, 3).map((sessionID) => this.sessionTitles.get(sessionID) || sessionID),
+        ...(completedSessions.length > 3 ? [`+${completedSessions.length - 3} more`] : []),
+        '',
+        'Click to open chat.',
+      ].join('\n');
+      this.statusBarItem.show();
+      return;
+    }
+
+    this.statusBarItem.hide();
   }
 
   resolveWebviewView(
@@ -93,11 +320,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewDisposables.push(
       webviewView.onDidChangeVisibility(() => {
         if (webviewView.visible) {
+          this.completedSessions.clear();
           this.postContext();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.post({ type: 'server/status', payload: this._status });
           this.flushPendingInputFocus();
         }
+        this.updateStatusBarItem();
       })
     );
 
@@ -500,9 +729,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     for (const d of this.webviewDisposables) d.dispose();
     this.webviewDisposables = [];
     this.themeDisposable?.dispose();
+    this.windowStateDisposable?.dispose();
+    this.statusBarItem.dispose();
     if (this.fileSearchDebounceTimer) clearTimeout(this.fileSearchDebounceTimer);
     this.fileSearchCts?.dispose();
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 function getFileSearchScore(relativePath: string, query: string) {

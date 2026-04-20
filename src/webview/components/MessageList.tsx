@@ -9,6 +9,7 @@ import {
   loadingStartedAt,
   loadingLastActivityAt,
   getChildRunsByParentId,
+  messageListScrollRequestKey,
 } from '../lib/state';
 import { isAssistantMessage } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part } from '../types';
@@ -303,6 +304,18 @@ export function MessageList() {
         performScroll();
         scrollToBottomUntilStable(sessionId);
       }
+    });
+  });
+
+  createEffect(() => {
+    const sessionId = state.activeSessionId;
+    messageListScrollRequestKey();
+    if (!sessionId || !containerRef) return;
+    setAutoScroll(true);
+    queueMicrotask(() => {
+      if (state.activeSessionId !== sessionId) return;
+      performScroll();
+      scrollToBottomUntilStable(sessionId);
     });
   });
 

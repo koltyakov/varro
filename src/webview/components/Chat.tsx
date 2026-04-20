@@ -22,9 +22,9 @@ export function Chat() {
 
   const runningSessionsCount = () =>
     state.sessions.reduce((count, session) => {
-      if (session.id === state.activeSessionId) return count;
-      const type = state.sessionStatus[session.id]?.type;
-      return type === 'busy' || type === 'retry' ? count + 1 : count;
+      if (!isRunningSession(session.id)) return count;
+      if (!showSessionPicker() && session.id === state.activeSessionId) return count;
+      return count + 1;
     }, 0);
 
   const openAllSessions = () => {
@@ -112,8 +112,8 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
 
-  const runningSessions = () => state.sessions.filter((session) => isBackgroundRunning(session.id));
-  const otherSessions = () => state.sessions.filter((session) => !isBackgroundRunning(session.id));
+  const runningSessions = () => state.sessions.filter((session) => isRunningSession(session.id));
+  const otherSessions = () => state.sessions.filter((session) => !isRunningSession(session.id));
   const visibleSessions = () => {
     const active = runningSessions();
     const others = otherSessions();
@@ -377,8 +377,7 @@ function RunningSessionsBadge(props: { count: number; onClick: () => void }) {
   );
 }
 
-function isBackgroundRunning(sessionId: string) {
-  if (sessionId === state.activeSessionId) return false;
+function isRunningSession(sessionId: string) {
   const type = state.sessionStatus[sessionId]?.type;
   return type === 'busy' || type === 'retry';
 }

@@ -3,6 +3,9 @@ import {
   state,
   inputText,
   setInputText,
+  nextPastedImageIndex,
+  setNextPastedImageIndex,
+  resetPastedImageIndex,
   isLoading,
   hasActiveQuestion,
   hasActivePermission,
@@ -10,6 +13,7 @@ import {
   setSelectedModel,
   resolveSelectedModel,
   addClipboardImage,
+  MAX_CLIPBOARD_IMAGES,
   showModelPicker,
   setShowModelPicker,
   setShowSessionPicker,
@@ -24,6 +28,7 @@ import {
   removeQueuedMessage,
   getPermissionModeForSession,
   error,
+  requestMessageListScrollToBottom,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import {
@@ -404,6 +409,7 @@ export function ChatInput() {
     setHistoryIndex(null);
     setHistoryDraft('');
     setInputText('');
+    resetPastedImageIndex();
     setCompletionIndex(0);
     if (textareaRef) textareaRef.style.height = 'auto';
     command.action();
@@ -413,6 +419,8 @@ export function ChatInput() {
     const text = inputText();
     if (!text.trim() && state.droppedFiles.length === 0 && state.clipboardImages.length === 0)
       return;
+
+    requestMessageListScrollToBottom();
 
     if (
       mode !== 'steer' &&
@@ -433,6 +441,7 @@ export function ChatInput() {
       setHistoryDraft('');
       setCompletionIndex(0);
       setInputText('');
+      resetPastedImageIndex();
       if (textareaRef) textareaRef.style.height = 'auto';
       return;
     }
@@ -442,6 +451,7 @@ export function ChatInput() {
     setCompletionIndex(0);
     const prevError = error();
     setInputText('');
+    resetPastedImageIndex();
     if (textareaRef) textareaRef.style.height = 'auto';
     await sendMessage(text, { noReply: mode === 'steer' });
     if (error() && error() !== prevError) {
@@ -483,6 +493,7 @@ export function ChatInput() {
 
   function setComposerValue(value: string) {
     setInputText(value);
+    if (value.trim().length === 0 && state.clipboardImages.length === 0) resetPastedImageIndex();
     setCompletionIndex(0);
     queueMicrotask(() => {
       autoResize();
@@ -490,6 +501,31 @@ export function ChatInput() {
       textareaRef.focus();
       textareaRef.setSelectionRange(value.length, value.length);
       setCaretPosition(value.length);
+    });
+  }
+
+  function replaceComposerSelection(value: string, padWithSpaces = false) {
+    const text = inputText();
+    const selectionStart = textareaRef?.selectionStart ?? caretPosition();
+    const selectionEnd = textareaRef?.selectionEnd ?? selectionStart;
+    const prefix = padWithSpaces && shouldPadInlineInsertion(text[selectionStart - 1]) ? ' ' : '';
+    const suffix = padWithSpaces && shouldPadInlineInsertion(text[selectionEnd]) ? ' ' : '';
+    const insertedValue = `${prefix}${value}${suffix}`;
+    const nextValue = `${text.slice(0, selectionStart)}${insertedValue}${text.slice(selectionEnd)}`;
+    const nextCaret = selectionStart + insertedValue.length;
+
+    setHistoryIndex(null);
+    setHistoryDraft('');
+    setInputText(nextValue);
+    setCompletionIndex(0);
+    setSuppressCompletion(false);
+
+    queueMicrotask(() => {
+      autoResize();
+      if (!textareaRef) return;
+      textareaRef.focus();
+      textareaRef.setSelectionRange(nextCaret, nextCaret);
+      setCaretPosition(nextCaret);
     });
   }
 
@@ -598,20 +634,38 @@ export function ChatInput() {
 
     e.preventDefault();
 
-    for (const [index, item] of imageItems.entries()) {
+    const availableSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - state.clipboardImages.length);
+    if (availableSlots === 0) return;
+
+    const filenames: string[] = [];
+    const attachableItems = imageItems.slice(0, availableSlots);
+    let nextIndex = nextPastedImageIndex();
+
+    for (const [index, item] of attachableItems.entries()) {
       const file = item.getAsFile();
       if (!file) continue;
+
+      const filename = getPastedImageFilename(nextIndex + index);
+      filenames.push(filename);
 
       const url = await readFileAsDataUrl(file);
       addClipboardImage({
         id: createAttachmentID(),
         url,
         mime: file.type || 'image/png',
-        filename:
-          file.name || `pasted-image-${Date.now()}-${index + 1}.${extensionForMime(file.type)}`,
+        filename,
         size: file.size,
       });
     }
+
+    setNextPastedImageIndex(nextIndex + attachableItems.length);
+
+    if (filenames.length === 0 || inputText().trim().length === 0) return;
+
+    replaceComposerSelection(
+      filenames.map((filename) => `[${filename}]`).join(' '),
+      true
+    );
   }
 
   onMount(() => {
@@ -678,6 +732,12 @@ export function ChatInput() {
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
+  });
+
+  createEffect(() => {
+    if (inputText().trim().length === 0 && state.clipboardImages.length === 0) {
+      resetPastedImageIndex();
+    }
   });
 
   createEffect(() => {
@@ -2125,6 +2185,14 @@ function readFileAsDataUrl(file: File): Promise<string> {
     );
     reader.readAsDataURL(file);
   });
+}
+
+function shouldPadInlineInsertion(value: string | undefined) {
+  return !!value && !/\s/.test(value);
+}
+
+function getPastedImageFilename(index: number) {
+  return index <= 1 ? 'Image' : `Image ${index}`;
 }
 
 function createAttachmentID() {
