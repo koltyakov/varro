@@ -43,3 +43,10 @@ export function formatDisplayPath(path: string, workspacePath: string | null | u
   if (isAbsolutePath(path)) return getLeafPathName(path);
   return path;
 }
+
+export function getDroppedFileLabel(file: { path: string; relativePath: string }) {
+  if (!file.relativePath || file.relativePath === '.') {
+    return getLeafPathName(file.path);
+  }
+  return getLeafPathName(file.relativePath);
+}

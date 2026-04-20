@@ -11,10 +11,12 @@ import type {
   FileDiff,
   Agent,
   Provider,
+  AssistantMessage,
 } from '../types';
 import type {
   EditorContext,
   DroppedFile,
+  InitialWebviewState,
   PermissionMode,
   ServerStatus,
 } from '../../shared/protocol';
@@ -24,6 +26,7 @@ const STORAGE_KEYS = {
   selectedModel: 'varro.selectedModel',
   draftPermissionMode: 'varro.draftPermissionMode',
   sessionPermissionModes: 'varro.sessionPermissionModes',
+  projectPermissionModes: 'varro.projectPermissionModes',
   hiddenProviders: 'varro.hiddenProviders',
   hiddenModels: 'varro.hiddenModels',
   lastSeenSessions: 'varro.lastSeenSessions',
@@ -77,6 +80,7 @@ interface AppState {
   hiddenProviders: string[];
   hiddenModels: string[];
   lastSeenSessions: Record<string, number>;
+  compactingSessionIds: string[];
   queuedMessages: QueuedMessage[];
 }
 
@@ -93,12 +97,6 @@ export interface ClipboardImage {
   filename: string;
   size: number;
 }
-
-type InitialWebviewState = Partial<
-  Pick<AppState, 'serverStatus' | 'editorContext' | 'terminalSelection' | 'droppedFiles'>
-> & {
-  theme?: 'dark' | 'light';
-};
 
 const defaultEditorContext: EditorContext = {
   workspacePath: null,
@@ -136,6 +134,7 @@ export const [state, setState] = createStore<AppState>({
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
   lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
+  compactingSessionIds: [],
   queuedMessages: [],
 });
 
@@ -182,6 +181,26 @@ export function isSessionUnread(sessionId: string, updatedAt: number) {
   return updatedAt > seen;
 }
 
+export function setSessionCompacting(sessionId: string, compacting: boolean) {
+  setState(
+    'compactingSessionIds',
+    produce((ids) => {
+      const idx = ids.indexOf(sessionId);
+      if (compacting) {
+        if (idx === -1) ids.push(sessionId);
+        return;
+      }
+      if (idx !== -1) ids.splice(idx, 1);
+    })
+  );
+}
+
+export function isSessionCompacting(sessionId = state.activeSessionId) {
+  if (!sessionId) return false;
+  if (state.compactingSessionIds.includes(sessionId)) return true;
+  return !!state.sessions.find((session) => session.id === sessionId)?.time.compacting;
+}
+
 export const [showThinking, setShowThinking] = createSignal(readShowThinking());
 
 export function toggleThinking() {
@@ -203,6 +222,34 @@ function readShowThinking(): boolean {
 
 export const [inputText, setInputText] = createSignal('');
 export const [isLoading, setIsLoading] = createSignal(false);
+export const [loadingStartedAt, setLoadingStartedAt] = createSignal<number | null>(null);
+export const [loadingLastActivityAt, setLoadingLastActivityAt] = createSignal<number | null>(
+  null
+);
+
+export function startLoading(now = Date.now()) {
+  if (!isLoading()) {
+    setLoadingStartedAt(now);
+  } else if (loadingStartedAt() === null) {
+    setLoadingStartedAt(now);
+  }
+  setLoadingLastActivityAt(now);
+  setIsLoading(true);
+}
+
+export function stopLoading() {
+  setIsLoading(false);
+  setLoadingStartedAt(null);
+  setLoadingLastActivityAt(null);
+}
+
+export function markLoadingActivity(now = Date.now()) {
+  if (!isLoading()) return;
+  if (loadingStartedAt() === null) {
+    setLoadingStartedAt(now);
+  }
+  setLoadingLastActivityAt(now);
+}
 
 export function hasActiveQuestion() {
   const sid = state.activeSessionId;
@@ -218,8 +265,20 @@ export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
+let permissionWorkspace: string | null =
+  initialWebviewState.editorContext?.workspacePath ?? null;
+
+function resolveInitialDraftMode(): PermissionMode {
+  if (permissionWorkspace) {
+    const modes =
+      readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+    if (modes[permissionWorkspace]) return modes[permissionWorkspace];
+  }
+  return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default';
+}
+
 export const [draftPermissionMode, setDraftPermissionMode] = createSignal<PermissionMode>(
-  readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default'
+  resolveInitialDraftMode()
 );
 export const [theme, setTheme] = createSignal<'dark' | 'light'>(
   initialWebviewState.theme ||
@@ -242,6 +301,7 @@ export function setPermissionModeForSession(
 ) {
   if (!sessionId) {
     setDraftPermissionMode(mode);
+    saveProjectPermissionMode(mode);
     writeStored(STORAGE_KEYS.draftPermissionMode, mode === 'default' ? null : mode);
     return;
   }
@@ -262,8 +322,31 @@ export function removePermissionModeForSession(sessionId: string) {
 }
 
 export function resetDraftPermissionMode() {
-  setDraftPermissionMode('default');
+  const modes =
+    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+  const projectMode = permissionWorkspace && modes[permissionWorkspace];
+  setDraftPermissionMode(projectMode || 'default');
   writeStored(STORAGE_KEYS.draftPermissionMode, null);
+}
+
+export function syncDraftPermissionForWorkspace(workspacePath: string | null) {
+  permissionWorkspace = workspacePath;
+  const modes =
+    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+  const mode = workspacePath && modes[workspacePath] ? modes[workspacePath] : 'default';
+  setDraftPermissionMode(mode);
+}
+
+export function saveProjectPermissionMode(mode: PermissionMode) {
+  if (!permissionWorkspace) return;
+  const modes =
+    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+  if (mode === 'default') {
+    delete modes[permissionWorkspace];
+  } else {
+    modes[permissionWorkspace] = mode;
+  }
+  writeStored(STORAGE_KEYS.projectPermissionModes, modes);
 }
 
 export function addContextFile(file: DroppedFile) {
@@ -359,7 +442,7 @@ export function isProviderVisible(providerID: string) {
   return !state.hiddenProviders.includes(providerID);
 }
 
-function readInitialWebviewState(): InitialWebviewState {
+function readInitialWebviewState(): Partial<InitialWebviewState> {
   const value = (window as unknown as { __initialWebviewState?: InitialWebviewState })
     .__initialWebviewState;
   return value && typeof value === 'object' ? value : {};
@@ -456,16 +539,46 @@ export function resolveSelectedModel(
   return candidate;
 }
 
+let messageIndexVersion = 0;
+let indexedVersion = -1;
+let messageById: Map<string, number> = new Map();
+let partById: Map<string, { msgIdx: number; partIdx: number }> = new Map();
+
+function ensureIndex(msgs: Array<{ info: Message; parts: Part[] }>) {
+  if (indexedVersion === messageIndexVersion) return;
+  messageById = new Map();
+  partById = new Map();
+  for (let i = 0; i < msgs.length; i++) {
+    messageById.set(msgs[i].info.id, i);
+    for (let j = 0; j < msgs[i].parts.length; j++) {
+      partById.set(msgs[i].parts[j].id, { msgIdx: i, partIdx: j });
+    }
+  }
+  indexedVersion = messageIndexVersion;
+}
+
+function invalidateIndex() {
+  messageIndexVersion++;
+}
+
+function findMessageIndex(msgs: Array<{ info: Message; parts: Part[] }>, id: string): number {
+  ensureIndex(msgs);
+  const idx = messageById.get(id);
+  if (idx !== undefined && idx < msgs.length && msgs[idx].info.id === id) return idx;
+  return msgs.findIndex((m) => m.info.id === id);
+}
+
 export function upsertMessage(msg: { info: Message; parts: Part[] }) {
   setState(
     'messages',
     produce((msgs) => {
-      const idx = msgs.findIndex((m) => m.info.id === msg.info.id);
+      const idx = findMessageIndex(msgs, msg.info.id);
       if (idx !== -1) {
         msgs[idx] = msg;
       } else {
         msgs.push(msg);
       }
+      invalidateIndex();
     })
   );
 }
@@ -474,36 +587,48 @@ export function upsertMessageInfo(info: Message) {
   setState(
     'messages',
     produce((msgs) => {
-      const idx = msgs.findIndex((m) => m.info.id === info.id);
+      const idx = findMessageIndex(msgs, info.id);
       if (idx !== -1) {
         msgs[idx].info = info;
       } else {
         msgs.push({ info, parts: [] });
       }
+      invalidateIndex();
     })
   );
 }
 
 export function upsertPart(part: Part) {
+  const msgId = (part as { messageID: string }).messageID;
   setState(
     'messages',
     produce((msgs) => {
-      const msgId = (part as { messageID: string }).messageID;
-      const msg = msgs.find((m) => m.info.id === msgId);
-      if (!msg) return;
-      const idx = msg.parts.findIndex((p) => p.id === part.id);
-      if (idx !== -1) msg.parts[idx] = part;
-      else msg.parts.push(part);
+      const idx = findMessageIndex(msgs, msgId);
+      if (idx === -1) return;
+      const partIdx = msgs[idx].parts.findIndex((p) => p.id === part.id);
+      if (partIdx !== -1) msgs[idx].parts[partIdx] = part;
+      else msgs[idx].parts.push(part);
+      invalidateIndex();
     })
   );
 }
 
 export function updateMessagePart(part: Part) {
+  const partId = part.id;
   setState(
     'messages',
     produce((msgs) => {
+      ensureIndex(msgs);
+      const loc = partById.get(partId);
+      if (loc && loc.msgIdx < msgs.length) {
+        const msg = msgs[loc.msgIdx];
+        if (loc.partIdx < msg.parts.length && msg.parts[loc.partIdx].id === partId) {
+          msg.parts[loc.partIdx] = part;
+          return;
+        }
+      }
       for (const msg of msgs) {
-        const idx = msg.parts.findIndex((p) => p.id === part.id);
+        const idx = msg.parts.findIndex((p) => p.id === partId);
         if (idx !== -1) {
           msg.parts[idx] = part;
           break;
@@ -525,8 +650,9 @@ export function applyMessagePartDelta(
   setState(
     'messages',
     produce((msgs) => {
-      const msg = msgs.find((item) => item.info.id === messageId);
-      if (!msg) return;
+      const msgIdx = findMessageIndex(msgs, messageId);
+      if (msgIdx === -1) return;
+      const msg = msgs[msgIdx];
 
       let part = msg.parts.find(
         (item): item is Part & { type: 'text'; text: string } =>
@@ -542,6 +668,7 @@ export function applyMessagePartDelta(
           text: '',
         };
         msg.parts.push(part);
+        invalidateIndex();
       }
 
       part.text += delta;
@@ -553,12 +680,11 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
   setState(
     'messages',
     produce((msgs) => {
-      for (const msg of msgs) {
-        if (msg.info.sessionID === sessionId && msg.info.id === messageId) {
-          const idx = msg.parts.findIndex((p) => p.id === partId);
-          if (idx !== -1) msg.parts.splice(idx, 1);
-          break;
-        }
+      const idx = findMessageIndex(msgs, messageId);
+      if (idx !== -1 && msgs[idx].info.sessionID === sessionId) {
+        const partIdx = msgs[idx].parts.findIndex((p) => p.id === partId);
+        if (partIdx !== -1) msgs[idx].parts.splice(partIdx, 1);
+        invalidateIndex();
       }
     })
   );
@@ -587,9 +713,86 @@ export function removePermission(permissionId: string) {
 
 export function clearMessages() {
   setState('messages', []);
+  invalidateIndex();
   setState('permissions', []);
   setState('todos', []);
   setState('diffs', []);
   setState('streamingPartId', null);
   setState('streamingText', '');
+}
+
+export function setMessagesIncremental(
+  incoming: Array<{ info: Message; parts: Part[] }>
+) {
+  const current = state.messages;
+  if (current.length === 0 || incoming.length === 0) {
+    setState('messages', incoming);
+    invalidateIndex();
+    return;
+  }
+
+  if (current.length !== incoming.length) {
+    let prefixMatch = true;
+    const minLen = Math.min(current.length, incoming.length);
+    for (let i = 0; i < minLen && prefixMatch; i++) {
+      if (current[i].info.id !== incoming[i].info.id) prefixMatch = false;
+    }
+    if (prefixMatch) {
+      setState(
+        'messages',
+        produce((msgs) => {
+          for (let i = 0; i < incoming.length; i++) {
+            if (i < msgs.length) {
+              msgs[i] = incoming[i];
+            } else {
+              msgs.push(incoming[i]);
+            }
+          }
+          msgs.length = incoming.length;
+          invalidateIndex();
+        })
+      );
+      return;
+    }
+  }
+
+  if (current.length === incoming.length) {
+    let identical = true;
+    for (let i = 0; i < current.length && identical; i++) {
+      if (current[i].info.id !== incoming[i].info.id) identical = false;
+    }
+    if (identical) {
+      setState(
+        'messages',
+        produce((msgs) => {
+          for (let i = 0; i < incoming.length; i++) {
+            msgs[i] = incoming[i];
+          }
+          invalidateIndex();
+        })
+      );
+      return;
+    }
+  }
+
+  setState('messages', incoming);
+  invalidateIndex();
+}
+
+export function getChildRunsByParentId(
+  messages: Array<{ info: Message; parts: Part[] }>
+): Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> {
+  const map = new Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>();
+  for (const entry of messages) {
+    if (entry.info.role !== 'assistant') continue;
+    const a = entry.info as AssistantMessage;
+    if (a.mode !== 'subagent') continue;
+    const children = map.get(a.parentID);
+    if (children) children.push(entry as { info: AssistantMessage; parts: Part[] });
+    else map.set(a.parentID, [entry as { info: AssistantMessage; parts: Part[] }]);
+  }
+  for (const children of map.values()) {
+    children.sort((a, b) => a.info.time.created - b.info.time.created);
+  }
+  return map;
 }

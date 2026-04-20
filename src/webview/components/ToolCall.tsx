@@ -1,38 +1,77 @@
-import { Show, For, createSignal } from 'solid-js';
-import type { ToolPart, ToolStateCompleted, ToolStateError } from '../types';
+import { Show, For, createSignal, createResource } from 'solid-js';
+import type { RepoFileStatus, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState } from '../lib/state';
-import { formatDisplayPath } from '../lib/path-display';
+import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
+import { formatCommandDisplay } from '../lib/command-display';
+import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
+import { client } from '../lib/client';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 
-const FILE_EDIT_TOOLS = new Set([
-  'edit',
-  'write',
-  'create',
-  'file_edit',
-  'file_write',
-  'file_create',
-  'update_file',
-  'replace',
-  'insert',
-  'apply_edit',
-  'apply_diff',
-]);
-
-function isFileEditTool(toolName: string): boolean {
-  return FILE_EDIT_TOOLS.has(toolName.toLowerCase());
+function normalizePath(value: string): string {
+  if (!value) return value;
+  const normalized = value.replace(/\\/g, '/');
+  const trimmed = normalized.replace(/\/+$/, '');
+  return trimmed || normalized;
 }
 
-function extractFilePath(input: Record<string, unknown>): string | null {
-  for (const key of ['file_path', 'filePath', 'path', 'filename']) {
-    if (typeof input[key] === 'string' && (input[key] as string).length > 0) {
-      return input[key] as string;
+function parseIntLike(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value, 10);
+  return null;
+}
+
+function extractReadRange(
+  input: Record<string, unknown>,
+  metadata: Record<string, unknown> | undefined
+): { start: number; end: number } | null {
+  const source = { ...metadata, ...input };
+  let start = null as number | null;
+  let end = null as number | null;
+
+  for (const key of [
+    'start_line',
+    'startLine',
+    'line_start',
+    'lineStart',
+    'from_line',
+    'fromLine',
+  ]) {
+    const value = parseIntLike(source[key]);
+    if (value !== null) {
+      start = value;
+      break;
     }
   }
-  return null;
+
+  if (start === null) {
+    const offset = parseIntLike(source.offset);
+    if (offset !== null) start = offset + 1;
+  }
+
+  for (const key of ['end_line', 'endLine', 'line_end', 'lineEnd', 'to_line', 'toLine']) {
+    const value = parseIntLike(source[key]);
+    if (value !== null) {
+      end = value;
+      break;
+    }
+  }
+
+  const limit = parseIntLike(source.limit);
+  if (start !== null && end === null && limit !== null) end = start + limit - 1;
+  if (start === null && end === null && limit !== null) return { start: 1, end: limit };
+  if (start === null || end === null) return null;
+  if (start <= 0 || end < start) return null;
+  return { start, end };
+}
+
+function isDirectoryOutput(toolState: ToolPart['state']): boolean {
+  if (toolState.status !== 'completed') return false;
+  const output = (toolState as ToolStateCompleted).output || '';
+  return /<type>\s*directory\s*<\/type>/i.test(output) || /<entries>/i.test(output);
 }
 
 export function ToolCall(props: { part: ToolPart }) {
@@ -56,11 +95,11 @@ export function ToolCall(props: { part: ToolPart }) {
     );
 
   const filePath = () => {
-    const input = (state().input || {}) as Record<string, unknown>;
-    return extractFilePath(input);
+    return getToolReadPath(tool().tool, state());
   };
 
-  const isEdit = () => isFileEditTool(tool().tool) && !!filePath();
+  const fileChange = () => getToolFileChange(tool().tool, state());
+  const isRead = () => filePath() !== null;
 
   const statusClass = () => {
     switch (state().status) {
@@ -118,22 +157,33 @@ export function ToolCall(props: { part: ToolPart }) {
           when={permissionRequest()}
           fallback={
             <Show
-              when={isEdit()}
+              when={fileChange()}
               fallback={
-                <GenericToolCall
-                  tool={tool()}
-                  state={state()}
-                  statusClass={statusClass()}
-                  title={title()}
-                  preview={preview()}
-                  expanded={expanded()}
-                  toggleExpand={() => setExpanded(!expanded())}
-                  inputEntries={inputEntries()}
-                  truncatedOutput={truncatedOutput()}
-                />
+                <Show
+                  when={isRead()}
+                  fallback={
+                    <GenericToolCall
+                      tool={tool()}
+                      state={state()}
+                      statusClass={statusClass()}
+                      title={title()}
+                      preview={preview()}
+                      expanded={expanded()}
+                      toggleExpand={() => setExpanded(!expanded())}
+                      inputEntries={inputEntries()}
+                      truncatedOutput={truncatedOutput()}
+                    />
+                  }
+                >
+                  <ReadToolCard
+                    toolState={state()}
+                    filePath={filePath()!}
+                    sessionID={tool().sessionID}
+                  />
+                </Show>
               }
             >
-              <FileEditCard toolName={tool().tool} toolState={state()} filePath={filePath()!} />
+              <FileChangeCard toolState={state()} change={fileChange()!} />
             </Show>
           }
         >
@@ -146,16 +196,148 @@ export function ToolCall(props: { part: ToolPart }) {
   );
 }
 
-function FileEditCard(props: { toolName: string; toolState: ToolPart['state']; filePath: string }) {
+function ReadToolCard(props: {
+  toolState: ToolPart['state'];
+  filePath: string;
+  sessionID: string;
+}) {
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
   const isRunning = () => s().status === 'running';
   const isError = () => s().status === 'error';
+  const statusClass = () => {
+    switch (s().status) {
+      case 'pending':
+        return 'tool-status-pending';
+      case 'running':
+        return 'tool-status-running';
+      case 'completed':
+        return 'tool-status-completed';
+      case 'error':
+        return 'tool-status-error';
+    }
+  };
+  const metadata = () => {
+    const state = s();
+    if (state.status === 'completed' || state.status === 'running' || state.status === 'error') {
+      return state.metadata;
+    }
+    return undefined;
+  };
+
+  const sessionDirectory = () =>
+    appState.sessions.find((session) => session.id === props.sessionID)?.directory ||
+    appState.editorContext.workspacePath;
+
+  const normalizedPath = () => normalizePath(props.filePath);
+  const normalizedSessionDirectory = () =>
+    sessionDirectory() ? normalizePath(sessionDirectory() as string) : null;
+
+  const isCurrentDirectory = () =>
+    props.filePath === '.' ||
+    props.filePath === './' ||
+    (normalizedSessionDirectory() !== null && normalizedPath() === normalizedSessionDirectory());
+
+  const isDirectory = () => isCurrentDirectory() || isDirectoryOutput(s());
+  const lineRange = () =>
+    extractReadRange((s().input || {}) as Record<string, unknown>, metadata());
+
+  const openFile = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    postMessage({ type: 'vscode/open', payload: { path: props.filePath } });
+  };
+
+  const displayName = () => {
+    if (isCurrentDirectory()) return 'current directory';
+    if (isDirectory())
+      return formatDisplayPath(props.filePath, appState.editorContext.workspacePath);
+    return getLeafPathName(formatDisplayPath(props.filePath, appState.editorContext.workspacePath));
+  };
+
+  return (
+    <div class="chat-tool-invocation-part file-read-card">
+      <div class="file-read-card-header">
+        <span class={`tool-status-dot ${statusClass()}`} />
+        <span class="file-read-action-label">Read</span>
+        <Show
+          when={!isCurrentDirectory()}
+          fallback={<span class="file-read-target file-read-target-text">{displayName()}</span>}
+        >
+          <a href="#" class="file-path-link file-read-target" onClick={openFile}>
+            {displayName()}
+          </a>
+        </Show>
+        <Show when={!isDirectory() && lineRange()}>
+          <span class="file-read-range">
+            (L{lineRange()!.start}-{lineRange()!.end})
+          </span>
+        </Show>
+        <Show when={isDirectory() && !isCurrentDirectory()}>
+          <span class="file-read-meta">directory</span>
+        </Show>
+        <Show when={isCompleted()}>
+          <span class="tool-invocation-duration file-read-duration">
+            {formatDuration(
+              (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
+            )}
+          </span>
+        </Show>
+        <Show when={isRunning()}>
+          <span class="file-read-running-label">reading…</span>
+        </Show>
+        <Show when={isError()}>
+          <span class="file-read-error-label">failed</span>
+        </Show>
+      </div>
+    </div>
+  );
+}
+
+function FileChangeCard(props: {
+  toolState: ToolPart['state'];
+  change: ReturnType<typeof getToolFileChange>;
+}) {
+  const s = () => props.toolState;
+  const isCompleted = () => s().status === 'completed';
+  const isRunning = () => s().status === 'running';
+  const isError = () => s().status === 'error';
+  const change = () => props.change!;
+  const [repoStatuses] = createResource(
+    () => (change().kind === 'moved' ? null : change().path),
+    async () => client.file.status().catch(() => [] as RepoFileStatus[])
+  );
+
+  const repoStatus = () => {
+    const targetPath = normalizePath(change().path);
+    return repoStatuses()?.find((entry) => normalizePath(entry.path) === targetPath);
+  };
+
+  const effectiveKind = () => {
+    if (change().kind === 'moved') return 'moved' as const;
+    switch (repoStatus()?.status) {
+      case 'added':
+        return 'added' as const;
+      case 'deleted':
+        return 'removed' as const;
+      case 'modified':
+        return 'edited' as const;
+      default:
+        return change().kind;
+    }
+  };
 
   const action = () => {
-    const lower = props.toolName.toLowerCase();
-    if (lower === 'create' || lower === 'file_create') return 'Created';
-    return 'Edited';
+    switch (effectiveKind()) {
+      case 'added':
+        return 'Added';
+      case 'removed':
+        return 'Removed';
+      case 'moved':
+        return 'Moved';
+      default:
+        return 'Edited';
+    }
   };
 
   const diffStats = () => {
@@ -179,21 +361,45 @@ function FileEditCard(props: { toolName: string; toolState: ToolPart['state']; f
     return null;
   };
 
-  const openFile = (e: Event) => {
+  const openPath = (path: string) => (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    postMessage({ type: 'vscode/open', payload: { path: props.filePath } });
+    postMessage({ type: 'vscode/open', payload: { path } });
   };
 
-  const displayName = () => formatDisplayPath(props.filePath, appState.editorContext.workspacePath);
+  const displayName = (path: string | undefined) =>
+    path ? formatDisplayPath(path, appState.editorContext.workspacePath) : '';
 
   return (
     <div class="file-edit-line">
+      <span class={`file-edit-dot ${isRunning() ? 'running' : isError() ? 'error' : 'done'}`} aria-label={isRunning() ? 'Running' : isError() ? 'Error' : 'Done'} />
       <span class="file-edit-action-label">{action()}</span>
-      <span class={`file-edit-dot ${isRunning() ? 'running' : isError() ? 'error' : 'done'}`} />
-      <a href="#" class="file-path-link file-edit-path-link" onClick={openFile}>
-        {displayName()}
-      </a>
+      <Show
+        when={effectiveKind() !== 'moved'}
+        fallback={
+          <span class="file-edit-move-paths">
+            <a
+              href="#"
+              class="file-path-link file-edit-path-link"
+              onClick={openPath(change().fromPath || change().path)}
+            >
+              {displayName(change().fromPath || change().path)}
+            </a>
+            <span class="file-edit-move-arrow">→</span>
+            <a
+              href="#"
+              class="file-path-link file-edit-path-link"
+              onClick={openPath(change().toPath || change().path)}
+            >
+              {displayName(change().toPath || change().path)}
+            </a>
+          </span>
+        }
+      >
+        <a href="#" class="file-path-link file-edit-path-link" onClick={openPath(change().path)}>
+          {displayName(change().path)}
+        </a>
+      </Show>
       <Show when={isCompleted() && diffStats()}>
         <span class="file-edit-diff-stats">
           <span class="diff-lines-added">+{diffStats()!.additions}</span>
@@ -269,7 +475,7 @@ function GenericToolCall(props: {
                 {formatDisplayPath(p.text, appState.editorContext.workspacePath)}
               </a>
             ) : (
-              p.text
+              formatPreviewValue(p.key, p.text)
             );
           })()}
         </div>
@@ -295,7 +501,7 @@ function GenericToolCall(props: {
                         {formatDisplayPath(String(value), appState.editorContext.workspacePath)}
                       </a>
                     ) : (
-                      <span class="tool-input-value">{formatValue(value)}</span>
+                      <span class="tool-input-value">{formatValue(key, value)}</span>
                     )}
                   </div>
                 )}
@@ -326,8 +532,18 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function formatValue(value: unknown): string {
-  if (typeof value === 'string') return value.length > 200 ? value.slice(0, 200) + '...' : value;
+function formatPreviewValue(key: string, value: string): string {
+  return key === 'command'
+    ? formatCommandDisplay(value, appState.editorContext.workspacePath)
+    : value;
+}
+
+function formatValue(key: string, value: unknown): string {
+  if (typeof value === 'string') {
+    const formatted =
+      key === 'command' ? formatCommandDisplay(value, appState.editorContext.workspacePath) : value;
+    return formatted.length > 200 ? formatted.slice(0, 200) + '...' : formatted;
+  }
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value);
 }

@@ -1,4 +1,4 @@
-import { Show } from 'solid-js';
+import { Show, createSignal } from 'solid-js';
 import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
 
@@ -10,6 +10,17 @@ function formatMetadataValue(value: unknown): string {
 
 export function PermissionPrompt(props: { permission: Permission }) {
   const sessionId = () => props.permission.sessionID;
+  const [responding, setResponding] = createSignal(false);
+
+  const handleRespond = async (response: 'once' | 'always' | 'reject') => {
+    if (responding()) return;
+    setResponding(true);
+    try {
+      await respondPermission(sessionId(), props.permission.id, response);
+    } finally {
+      setResponding(false);
+    }
+  };
 
   const metadataEntries = () => {
     const meta = props.permission.metadata;
@@ -42,19 +53,22 @@ export function PermissionPrompt(props: { permission: Permission }) {
       <div class="permission-prompt-actions">
         <button
           class="question-btn question-btn-secondary"
-          onClick={() => respondPermission(sessionId(), props.permission.id, 'reject')}
+          disabled={responding()}
+          onClick={() => handleRespond('reject')}
         >
           Reject
         </button>
         <button
           class="question-btn question-btn-secondary"
-          onClick={() => respondPermission(sessionId(), props.permission.id, 'once')}
+          disabled={responding()}
+          onClick={() => handleRespond('once')}
         >
           Once
         </button>
         <button
           class="question-btn question-btn-primary"
-          onClick={() => respondPermission(sessionId(), props.permission.id, 'always')}
+          disabled={responding()}
+          onClick={() => handleRespond('always')}
         >
           Always
         </button>

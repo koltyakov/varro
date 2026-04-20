@@ -41,16 +41,27 @@ export async function activate(context: vscode.ExtensionContext) {
       logger.info(`OpenCode server running at ${url}`);
     })
     .catch((err) => {
-      logger.error(
-        `Failed to start OpenCode server: ${err instanceof Error ? err.message : String(err)}`
-      );
+      const message = `Failed to start OpenCode server: ${err instanceof Error ? err.message : String(err)}`;
+      logger.error(message);
+      vscode.window.showErrorMessage(message);
     });
 }
 
 export async function deactivate() {
-  await server?.dispose();
-  contextProvider?.dispose();
-  sidebarProvider?.dispose();
-  vscode.commands.executeCommand('setContext', 'varro:activated', false);
+  const disposeSafe = async (fn: () => Promise<void> | void, label: string) => {
+    try {
+      await fn();
+    } catch (err) {
+      logger.error(`Error during ${label}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  await disposeSafe(() => server?.dispose(), 'server dispose');
+  await disposeSafe(() => contextProvider?.dispose(), 'contextProvider dispose');
+  await disposeSafe(() => sidebarProvider?.dispose(), 'sidebarProvider dispose');
+  try {
+    vscode.commands.executeCommand('setContext', 'varro:activated', false);
+  } catch {}
   logger.info('Varro extension deactivated');
+  logger.dispose();
 }

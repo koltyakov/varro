@@ -1,8 +1,9 @@
-import { createMemo, onMount, onCleanup } from 'solid-js';
+import { createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import { marked } from 'marked';
 import { postMessage } from '../lib/bridge';
 import { state } from '../lib/state';
 import { formatDisplayPath } from '../lib/path-display';
+import { formatCommandDisplay } from '../lib/command-display';
 
 interface MarkdownProps {
   content: string;
@@ -14,6 +15,8 @@ const checkSvg =
   '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
 
 const renderer = new marked.Renderer();
+const SHELL_LANGS = new Set(['', 'bash', 'console', 'shell', 'sh', 'zsh']);
+const COMPACT_FIRST_COLUMN_HEADERS = new Set(['#', 'no', 'no.', 'num', 'id']);
 
 function escapeHtml(value: string) {
   return value
@@ -22,6 +25,18 @@ function escapeHtml(value: string) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function encodeCopyPayload(value: string) {
+  return encodeURIComponent(value);
+}
+
+function decodeCopyPayload(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function normalizePath(value: string) {
@@ -87,9 +102,19 @@ function buildFileLink(raw: string, label?: string) {
 }
 
 renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const normalizedText = SHELL_LANGS.has((lang || '').toLowerCase())
+    ? formatCommandDisplay(text, state.editorContext.workspacePath)
+    : text;
+  const escaped = normalizedText
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const copyPayload = encodeCopyPayload(normalizedText);
   const langLabel = lang ? `<span class="code-block-lang">${lang}</span>` : '';
-  const copyBtn = `<button class="code-block-copy-btn" data-copy title="Copy code">${copySvg}</button>`;
+  const copyBtn =
+    `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${copyPayload}" aria-label="Copy code" title="Copy code">` +
+    copySvg +
+    '</button>';
   const langAttr = lang ? ` data-lang="${lang.replace(/"/g, '&quot;')}"` : '';
   return `<div class="interactive-result-code-block"${langAttr}><div class="code-block-header">${langLabel}${copyBtn}</div><pre class="code-block"><code>${escaped}</code></pre></div>`;
 };
@@ -124,6 +149,8 @@ marked.setOptions({
 const FILE_PATH_RE =
   /(?:^|[\s(])(\.?\/?(?:[\w.-]+\/)*[\w.-]+\.[\w]+(?::\d+(?:-\d+)?)?)(?=[\s),.]|$)/g;
 const ANCHOR_RE = /(<a[\s\S]*?<\/a>)/gi;
+const SVG_RE = /(<svg[\s\S]*?<\/svg>)/gi;
+const BUTTON_RE = /(<button[\s\S]*?<\/button>)/gi;
 
 function isLocalFileHref(href: string | null): boolean {
   if (!href) return false;
@@ -142,6 +169,8 @@ function linkifyPaths(html: string): string {
     });
   };
 
+  protect(SVG_RE);
+  protect(BUTTON_RE);
   protect(ANCHOR_RE);
 
   html = html.replace(FILE_PATH_RE, (full, path: string) => {
@@ -159,16 +188,93 @@ function linkifyPaths(html: string): string {
   return html;
 }
 
+function normalizeCellText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function isCompactFirstColumnValue(value: string): boolean {
+  const normalized = normalizeCellText(value);
+  if (!normalized) return true;
+  if (normalized.length > 6) return false;
+  if (/[\\/]/.test(normalized)) return false;
+  if (/[():[\]{}]/.test(normalized)) return false;
+  if (/\.[a-z0-9]{1,4}$/i.test(normalized)) return false;
+  if (/^\d+(?:\.\d+)?$/.test(normalized)) return true;
+  if (/^[a-z]{0,3}\d{1,3}[a-z0-9-]*$/i.test(normalized)) return true;
+  return false;
+}
+
+function shouldUseCompactFirstColumn(table: HTMLTableElement): boolean {
+  const headerCell = table.querySelector('thead th:first-child, tr:first-child > th:first-child');
+  const headerText = normalizeCellText(headerCell?.textContent || '');
+  if (COMPACT_FIRST_COLUMN_HEADERS.has(headerText)) return true;
+
+  const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
+  const fallbackRows = bodyRows.length > 0 ? bodyRows : Array.from(table.querySelectorAll('tr')).slice(1);
+  const firstColumnValues = fallbackRows
+    .map((row) => row.querySelector('td:first-child, th:first-child')?.textContent || '')
+    .map(normalizeCellText)
+    .filter((value) => value.length > 0)
+    .slice(0, 8);
+
+  if (firstColumnValues.length === 0) return false;
+  return firstColumnValues.every(isCompactFirstColumnValue);
+}
+
+function applyTableColumnClasses(root: HTMLDivElement | undefined) {
+  if (!root) return;
+  const tables = root.querySelectorAll<HTMLTableElement>('table');
+  for (const table of tables) {
+    table.classList.toggle('table-first-col-compact', shouldUseCompactFirstColumn(table));
+  }
+}
+
 export function MarkdownRenderer(props: MarkdownProps) {
   // oxlint-disable-next-line no-unassigned-vars
   let ref: HTMLDivElement | undefined;
 
-  const html = createMemo(() => {
+  let pendingContent: string | null = null;
+  let rafId: number | null = null;
+
+  const [renderedHtml, setRenderedHtml] = createSignal(parseMarkdown(props.content || ''));
+
+  function parseMarkdown(content: string): string {
     try {
-      const parsed = marked.parse(props.content || '') as string;
+      const parsed = marked.parse(content) as string;
       return linkifyPaths(parsed);
     } catch {
-      return props.content;
+      return `<p>${escapeHtml(content)}</p>`;
+    }
+  }
+
+  function flushPending() {
+    rafId = null;
+    if (pendingContent !== null) {
+      const content = pendingContent;
+      pendingContent = null;
+      setRenderedHtml(parseMarkdown(content));
+    }
+  }
+
+  createEffect(() => {
+    const content = props.content || '';
+    if (rafId !== null) {
+      pendingContent = content;
+      return;
+    }
+    pendingContent = content;
+    rafId = requestAnimationFrame(flushPending);
+  });
+
+  createEffect(() => {
+    renderedHtml();
+    queueMicrotask(() => applyTableColumnClasses(ref));
+  });
+
+  onCleanup(() => {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
     }
   });
 
@@ -178,7 +284,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const block = btn.closest('.interactive-result-code-block');
       const code = block?.querySelector('code');
       if (!code) return;
-      navigator.clipboard.writeText(code.textContent || '');
+      const copyText = btn.dataset.copyText
+        ? decodeCopyPayload(btn.dataset.copyText)
+        : (code.textContent ?? '');
+      navigator.clipboard.writeText(copyText).catch(() => {});
       btn.innerHTML = checkSvg;
       setTimeout(() => {
         btn.innerHTML = copySvg;
@@ -213,5 +322,5 @@ export function MarkdownRenderer(props: MarkdownProps) {
     ref?.removeEventListener('click', handleClick);
   });
 
-  return <div ref={ref} class="rendered-markdown" innerHTML={html()} />;
+  return <div ref={ref} class="rendered-markdown" innerHTML={renderedHtml()} />;
 }

@@ -13,9 +13,11 @@ export function isAssistantMessage(message: Message): message is AssistantMessag
   return message.role === 'assistant';
 }
 
+const numberFormatter = new Intl.NumberFormat('en-US');
+
 export function formatNumber(value: number | undefined): string {
   if (!value) return '0';
-  return new Intl.NumberFormat('en-US').format(Math.round(value));
+  return numberFormatter.format(Math.round(value));
 }
 
 export function formatDuration(ms: number | undefined): string {
@@ -112,8 +114,9 @@ export function getDescendantAssistants(
     (a, b) => a.info.time.created - b.info.time.created
   );
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
+  let queueIdx = 0;
+  while (queueIdx < queue.length) {
+    const current = queue[queueIdx++];
     results.push(current);
     const children = byParent.get(current.info.id) || [];
     children.sort((a, b) => a.info.time.created - b.info.time.created);

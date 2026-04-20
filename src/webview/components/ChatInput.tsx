@@ -23,6 +23,7 @@ import {
   enqueueMessage,
   removeQueuedMessage,
   getPermissionModeForSession,
+  error,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import {
@@ -41,7 +42,7 @@ import {
   sumAssistantTokens,
   formatNumber,
 } from '../lib/message-metrics';
-import { getLeafPathName } from '../lib/path-display';
+import { getLeafPathName, getDroppedFileLabel } from '../lib/path-display';
 import { TodoList } from './TodoList';
 import type { Agent, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
@@ -237,6 +238,13 @@ export function ChatInput() {
 
     if (showAgentPicker() && !e.altKey && !e.ctrlKey && !e.metaKey) {
       const agents = state.agents;
+      if (agents.length === 0) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setShowAgentPicker(false);
+        }
+        return;
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setAgentFocusIndex((i) => (i + 1) % agents.length);
@@ -437,9 +445,13 @@ export function ChatInput() {
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
+    const prevError = error();
     setInputText('');
     if (textareaRef) textareaRef.style.height = 'auto';
     await sendMessage(text, { noReply: mode === 'steer' });
+    if (error() && error() !== prevError) {
+      setInputText(text);
+    }
   }
 
   async function sendQueuedAsSteer(id: string, text: string) {
@@ -655,10 +667,6 @@ export function ChatInput() {
     document.addEventListener('dragover', handleWindowDragOver, true);
     document.addEventListener('drop', handleWindowDrop, true);
     document.addEventListener('dragleave', handleWindowDragLeave, true);
-    window.addEventListener('dragenter', beginDropTarget, true);
-    window.addEventListener('dragover', handleWindowDragOver, true);
-    window.addEventListener('drop', handleWindowDrop, true);
-    window.addEventListener('dragleave', handleWindowDragLeave, true);
 
     onCleanup(() => {
       disposeBridge();
@@ -667,10 +675,6 @@ export function ChatInput() {
       document.removeEventListener('dragover', handleWindowDragOver, true);
       document.removeEventListener('drop', handleWindowDrop, true);
       document.removeEventListener('dragleave', handleWindowDragLeave, true);
-      window.removeEventListener('dragenter', beginDropTarget, true);
-      window.removeEventListener('dragover', handleWindowDragOver, true);
-      window.removeEventListener('drop', handleWindowDrop, true);
-      window.removeEventListener('dragleave', handleWindowDragLeave, true);
     });
   });
 
@@ -908,6 +912,10 @@ export function ChatInput() {
         </div>
       </Show>
 
+      <Show when={state.todos.length > 0}>
+        <TodoList />
+      </Show>
+
       <div
         ref={containerRef}
         class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
@@ -929,10 +937,6 @@ export function ChatInput() {
         }}
         onDrop={handleDrop}
       >
-        <Show when={state.todos.length > 0}>
-          <TodoList />
-        </Show>
-
         <Show when={hasContext() || hasMentions()}>
           <div class="chat-attachments-container">
             <Show when={activeContext()}>
@@ -1521,11 +1525,19 @@ function CompletionMenu(props: {
 }) {
   // oxlint-disable-next-line no-unassigned-vars
   let menuRef: HTMLDivElement | undefined;
-  const itemRefs: HTMLButtonElement[] = [];
+  const itemRefs = new Map<number, HTMLButtonElement>();
+
+  createEffect(() => {
+    const items = props.items;
+    const activeIndices = new Set(items.map((_, i) => i));
+    for (const key of itemRefs.keys()) {
+      if (!activeIndices.has(key)) itemRefs.delete(key);
+    }
+  });
 
   createEffect(() => {
     const idx = props.selectedIndex;
-    const el = itemRefs[idx];
+    const el = itemRefs.get(idx);
     if (!el || !menuRef) return;
     const elTop = el.offsetTop;
     const elBottom = elTop + el.offsetHeight;
@@ -1547,7 +1559,7 @@ function CompletionMenu(props: {
           const detail = 'description' in item ? item.description : item.detail;
           return (
             <button
-              ref={(el) => (itemRefs[index()] = el)}
+              ref={(el) => itemRefs.set(index(), el)}
               class={`composer-completion-item ${props.selectedIndex === index() ? 'selected' : ''}`}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => props.onSelect(item)}
@@ -1644,13 +1656,6 @@ function PermissionModeIcon(props: { mode: PermissionMode }) {
       </Show>
     </span>
   );
-}
-
-function getDroppedFileLabel(file: { path: string; relativePath: string }) {
-  if (!file.relativePath || file.relativePath === '.') {
-    return getLeafPathName(file.path);
-  }
-  return getLeafPathName(file.relativePath);
 }
 
 function getSlashCommands(props: {

@@ -4,8 +4,10 @@ import type { EditorContext } from '../shared/protocol';
 import { logger } from './logger';
 
 export class ContextProvider implements vscode.Disposable {
+  private static readonly MAX_CONTENT_LENGTH = 100_000;
   private static readonly TERMINAL_COPY_DELAY_MS = 40;
   private disposables: vscode.Disposable[] = [];
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _context: EditorContext = {
     workspacePath: null,
     activeFile: null,
@@ -20,7 +22,7 @@ export class ContextProvider implements vscode.Disposable {
 
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.update()),
-      vscode.window.onDidChangeTextEditorSelection(() => this.update()),
+      vscode.window.onDidChangeTextEditorSelection(() => this.debouncedUpdate()),
       vscode.languages.onDidChangeDiagnostics(() => this.updateDiagnostics()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.update())
     );
@@ -55,7 +57,11 @@ export class ContextProvider implements vscode.Disposable {
       clipboardChanged = selectionText !== previousClipboard;
     } finally {
       if (clipboardChanged) {
-        await vscode.env.clipboard.writeText(previousClipboard);
+        try {
+          await vscode.env.clipboard.writeText(previousClipboard);
+        } catch {
+          logger.warn('Failed to restore clipboard after terminal selection capture');
+        }
       }
     }
 
@@ -72,6 +78,14 @@ export class ContextProvider implements vscode.Disposable {
 
   clearTerminalSelection() {
     this._terminalSelection = null;
+  }
+
+  private debouncedUpdate() {
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.update();
+    }, 150);
   }
 
   private update() {
@@ -96,7 +110,12 @@ export class ContextProvider implements vscode.Disposable {
       path: doc.uri.fsPath,
       relativePath,
       language: doc.languageId,
-      content: doc.getText(),
+      content: (() => {
+        const full = doc.getText();
+        return full.length > ContextProvider.MAX_CONTENT_LENGTH
+          ? full.slice(0, ContextProvider.MAX_CONTENT_LENGTH)
+          : full;
+      })(),
     };
 
     const selection = editor.selection;
@@ -156,7 +175,7 @@ export class ContextProvider implements vscode.Disposable {
       }
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-      if (line !== undefined) {
+      if (line !== undefined && line >= 1) {
         const position = new vscode.Position(line - 1, 0);
         editor.selection = new vscode.Selection(position, position);
         editor.revealRange(
@@ -198,6 +217,7 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   dispose() {
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.disposables.forEach((d) => d.dispose());
   }
 }

@@ -7,6 +7,7 @@ import {
   setShowSettings,
   state,
 } from '../lib/state';
+import { formatContextLimit } from '../lib/format';
 
 export function SettingsPanel() {
   return (
@@ -137,10 +138,4 @@ function ProviderCheckbox(props: {
       />
     </label>
   );
-}
-
-function formatContextLimit(value: number) {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
-  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
-  return String(value);
 }

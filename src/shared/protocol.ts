@@ -33,11 +33,39 @@ export type ServerStatus =
   | { state: 'stopped' }
   | { state: 'error'; message: string };
 
+export type ServerEventName =
+  | 'session.created'
+  | 'session.updated'
+  | 'session.deleted'
+  | 'session.status'
+  | 'session.idle'
+  | 'session.diff'
+  | 'message.updated'
+  | 'message.part.updated'
+  | 'message.part.delta'
+  | 'message.part.removed'
+  | 'message.removed'
+  | 'permission.updated'
+  | 'permission.asked'
+  | 'permission.replied'
+  | 'question.asked'
+  | 'question.replied'
+  | 'question.rejected'
+  | 'todo.updated';
+
+export type InitialWebviewState = {
+  theme: 'dark' | 'light';
+  serverStatus: ServerStatus;
+  editorContext: EditorContext;
+  terminalSelection: { text: string; terminalName: string } | null;
+  droppedFiles: DroppedFile[];
+};
+
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
   | {
       type: 'server/event';
-      payload: { type: string; properties?: Record<string, unknown>; [k: string]: unknown };
+      payload: { type: ServerEventName; properties?: Record<string, unknown> };
     }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }

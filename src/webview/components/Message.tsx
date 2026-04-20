@@ -3,6 +3,7 @@ import { client } from '../lib/client';
 import { isAssistantMessage } from '../lib/message-metrics';
 import type {
   AssistantMessage,
+  CompactionPart,
   FileDiff,
   FilePart,
   Message as MessageType,
@@ -12,16 +13,37 @@ import type {
 } from '../types';
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
-import { state } from '../lib/state';
+import { showThinking, state, getChildRunsByParentId } from '../lib/state';
 import { getLeafPathName } from '../lib/path-display';
 import { postMessage } from '../lib/bridge';
+import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
+import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 
-export function Message(props: { info: MessageType; parts: Part[]; isLastAssistant?: boolean }) {
+export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
+
+export function Message(props: {
+  info: MessageType;
+  parts: Part[];
+  isLastAssistant?: boolean;
+  previousTrailingFileEventSignature?: string | null;
+  fileEditStackGroup?: AssistantFileEditStackGroup | null;
+}) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
   const isSubagent = () => assistant()?.mode === 'subagent';
+  const normalizedParts = createMemo(() =>
+    assistant()
+      ? collapseLeadingDuplicateFileEvents(
+          props.parts,
+          props.previousTrailingFileEventSignature ?? null
+        )
+      : props.parts
+  );
   const visibleAssistantParts = createMemo(() =>
-    assistant() ? props.parts.filter(shouldShowAssistantPartInline) : props.parts
+    assistant() ? normalizedParts().filter(shouldShowAssistantPartInline) : normalizedParts()
+  );
+  const layoutAssistantParts = createMemo(() =>
+    assistant() ? deduplicateFileEdits(visibleAssistantParts()) : []
   );
 
   const [diffs] = createResource(
@@ -35,22 +57,55 @@ export function Message(props: { info: MessageType; parts: Part[]; isLastAssista
       return client.session.diff(sessionID).catch(() => [] as FileDiff[]);
     }
   );
+  const compactionDivider = createMemo<CompactionPart | null>(() => {
+    const parts = normalizedParts();
+    const compactions = parts.filter((p): p is CompactionPart => p.type === 'compaction');
+    if (compactions.length === 0) return null;
+    const hasOtherVisibleContent = parts.some((p) => {
+      if (p.type === 'compaction') return false;
+      if (p.type === 'text') return p.text.trim().length > 0;
+      if (p.type === 'file') return true;
+      return false;
+    });
+    return hasOtherVisibleContent ? null : compactions[compactions.length - 1];
+  });
   const shouldRender = () =>
+    !!compactionDivider() ||
     isUser() ||
     visibleAssistantParts().length > 0 ||
     !!assistant()?.error?.data?.message ||
     (diffs() || []).length > 0;
+  const useBareAssistantContainer = () => {
+    if (isUser()) return false;
+    if (assistant()?.error?.data?.message) return false;
+    if ((diffs() || []).length > 0) return false;
+    if (props.fileEditStackGroup) return false;
+    const parts = layoutAssistantParts();
+    if (parts.length === 0) return false;
+    if (parts.every(isFileReadPart)) return false;
+    return parts.length === 1 && parts[0]?.type === 'tool' && !isFileEditPart(parts[0]);
+  };
 
   return (
     <Show when={shouldRender()}>
+      <Show
+        when={!compactionDivider()}
+        fallback={<CompactionDivider part={compactionDivider()!} />}
+      >
       <div class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}`}>
         <div
           class={`value chat-turn-content ${
-            isUser() ? 'chat-turn-card user-message-card' : 'assistant-turn-content'
-          } ${isSubagent() ? 'chat-turn-subagent' : ''}`}
+            isUser()
+              ? 'chat-turn-card user-message-card'
+              : `assistant-turn-content${useBareAssistantContainer() ? ' assistant-turn-content-bare' : ''}`
+          } ${isSubagent() ? 'chat-turn-subagent' : ''} ${
+            props.fileEditStackGroup
+              ? `assistant-turn-file-edit-group-${props.fileEditStackGroup}`
+              : ''
+          }`}
         >
           <Show when={isUser()}>
-            <UserMessageContent parts={props.parts} />
+            <UserMessageContent parts={normalizedParts()} />
           </Show>
           <Show when={!isUser() && assistant()}>
             <AssistantMessageContent info={assistant()!} parts={visibleAssistantParts()} />
@@ -70,7 +125,22 @@ export function Message(props: { info: MessageType; parts: Part[]; isLastAssista
           </Show>
         </div>
       </div>
+      </Show>
     </Show>
+  );
+}
+
+function CompactionDivider(props: { part: CompactionPart }) {
+  const label = () => {
+    const kind = props.part.auto ? 'auto' : 'manual';
+    return props.part.overflow
+      ? `Context compacted (${kind}, after overflow)`
+      : `Context compacted (${kind})`;
+  };
+  return (
+    <div class="message-compaction-divider">
+      <span class="message-compaction-label">{label()}</span>
+    </div>
   );
 }
 
@@ -269,35 +339,14 @@ function getAttachmentTitle(att: MessageAttachment): string {
   }
 }
 
-function getToolFilePath(part: Part): string | null {
-  if (part.type !== 'tool') return null;
-  const input = ((part as ToolPart).state.input || {}) as Record<string, unknown>;
-  for (const key of ['file_path', 'filePath', 'path', 'filename']) {
-    if (typeof input[key] === 'string' && (input[key] as string).length > 0) {
-      return input[key] as string;
-    }
-  }
-  return null;
-}
-
 function isFileEditPart(part: Part): boolean {
   if (part.type !== 'tool') return false;
-  const name = (part as ToolPart).tool.toLowerCase();
-  return (
-    [
-      'edit',
-      'write',
-      'create',
-      'file_edit',
-      'file_write',
-      'file_create',
-      'update_file',
-      'replace',
-      'insert',
-      'apply_edit',
-      'apply_diff',
-    ].includes(name) && getToolFilePath(part) !== null
-  );
+  return getToolFileChange((part as ToolPart).tool, (part as ToolPart).state) !== null;
+}
+
+function isFileReadPart(part: Part): boolean {
+  if (part.type !== 'tool') return false;
+  return getToolReadPath((part as ToolPart).tool, (part as ToolPart).state) !== null;
 }
 
 function deduplicateFileEdits(parts: Part[]): Part[] {
@@ -307,12 +356,16 @@ function deduplicateFileEdits(parts: Part[]): Part[] {
       result.push(parts[i]);
       continue;
     }
-    const path = getToolFilePath(parts[i]);
+    const currentChange = getToolFileChange(
+      (parts[i] as ToolPart).tool,
+      (parts[i] as ToolPart).state
+    );
     let last = i;
     while (
       last + 1 < parts.length &&
       isFileEditPart(parts[last + 1]) &&
-      getToolFilePath(parts[last + 1]) === path
+      getToolFileChange((parts[last + 1] as ToolPart).tool, (parts[last + 1] as ToolPart).state)
+        ?.dedupeKey === currentChange?.dedupeKey
     ) {
       last++;
     }
@@ -323,28 +376,59 @@ function deduplicateFileEdits(parts: Part[]): Part[] {
 }
 
 function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] }) {
-  let subtaskIndex = 0;
-
-  const childRuns = createMemo(() =>
-    state.messages
-      .filter(
-        (entry): entry is { info: AssistantMessage; parts: Part[] } =>
-          isAssistantMessage(entry.info) &&
-          entry.info.parentID === props.info.id &&
-          entry.info.mode === 'subagent'
-      )
-      .sort((a, b) => a.info.time.created - b.info.time.created)
-  );
+  const childRunsMap = createMemo(() => getChildRunsByParentId(state.messages));
+  const childRuns = createMemo(() => childRunsMap().get(props.info.id) || []);
 
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
+  const renderItems = createMemo(() => {
+    const items: Array<
+      | { kind: 'part'; part: Part; matchedRun?: AssistantMessage }
+      | { kind: 'file-edit-stack'; parts: ToolPart[] }
+    > = [];
+    const parts = dedupedParts();
+    let subtaskRank = 0;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+
+      if (isFileEditPart(part)) {
+        const fileEditParts: ToolPart[] = [part as ToolPart];
+        while (i + 1 < parts.length && isFileEditPart(parts[i + 1])) {
+          fileEditParts.push(parts[++i] as ToolPart);
+        }
+        items.push({ kind: 'file-edit-stack', parts: fileEditParts });
+        continue;
+      }
+
+      if (part.type === 'subtask') {
+        items.push({
+          kind: 'part',
+          part,
+          matchedRun: childRuns()[subtaskRank++]?.info,
+        });
+        continue;
+      }
+
+      items.push({ kind: 'part', part });
+    }
+
+    return items;
+  });
 
   return (
     <div class="assistant-message-flow">
-      <For each={dedupedParts()}>
-        {(part) => {
-          const matchedRun = part.type === 'subtask' ? childRuns()[subtaskIndex++] : undefined;
-          return <MessagePart part={part} messageInfo={props.info} subtaskRun={matchedRun?.info} />;
-        }}
+      <For each={renderItems()}>
+        {(item) =>
+          item.kind === 'file-edit-stack' ? (
+            <div class="assistant-file-edit-stack">
+              <For each={item.parts}>
+                {(part) => <MessagePart part={part} messageInfo={props.info} />}
+              </For>
+            </div>
+          ) : (
+            <MessagePart part={item.part} messageInfo={props.info} subtaskRun={item.matchedRun} />
+          )
+        }
       </For>
     </div>
   );
@@ -361,7 +445,7 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
 
   return (
     <div class="diff-summary">
-      <button onClick={() => setExpanded((v) => !v)} class="diff-summary-btn">
+      <button onClick={() => setExpanded((v) => !v)} class="diff-summary-btn" aria-expanded={expanded()}>
         <svg
           class={`transition-transform ${expanded() ? 'rotate-90' : ''}`}
           width="10"
@@ -391,7 +475,22 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
 }
 
 function shouldShowAssistantPartInline(part: Part) {
-  return !(part.type === 'tool' && isTodoToolPart(part));
+  if (part.type === 'tool') return !isTodoToolPart(part);
+
+  switch (part.type) {
+    case 'text':
+      return part.text.trim().length > 0;
+    case 'reasoning':
+      return showThinking();
+    case 'agent':
+    case 'retry':
+    case 'compaction':
+    case 'subtask':
+    case 'file':
+      return true;
+    default:
+      return false;
+  }
 }
 
 function isTodoToolPart(part: Extract<Part, { type: 'tool' }>) {

@@ -8,13 +8,16 @@ import {
   resolveSelectedModel,
   setTheme,
   isLoading,
-  setIsLoading,
+  startLoading,
+  stopLoading,
+  markLoadingActivity,
   setError,
   requestComposerFocus,
   persistActiveSessionId,
   getPersistedActiveSessionId,
   clearClipboardImages,
   clearMessages,
+  setMessagesIncremental,
   upsertMessageInfo,
   upsertPart,
   applyMessagePartDelta,
@@ -26,13 +29,26 @@ import {
   removeQuestion,
   removeContextFile,
   markSessionSeen,
+  setSessionCompacting,
   getPermissionModeForSession,
   removePermissionModeForSession,
   resetDraftPermissionMode,
   setPermissionModeForSession,
+  syncDraftPermissionForWorkspace,
+  saveProjectPermissionMode,
+  draftPermissionMode,
+  setDraftPermissionMode,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage } from '../../shared/protocol';
+
+function logError(context: string, err: unknown) {
+  postMessage({
+    type: 'log',
+    payload: { msg: context, error: err instanceof Error ? err.message : String(err), level: 'warn' },
+  });
+}
+
 import type {
   Session,
   SessionStatus,
@@ -47,8 +63,9 @@ import type {
 import { getWorkspaceRelativePath } from '../lib/path-display';
 
 let initialized = false;
-let handlersRegistered = false;
+let eventHandlerCleanups: (() => void)[] = [];
 let currentWorkspacePath: string | null = null;
+let todoStateAuthority: 'messages' | 'event' = 'messages';
 const FULL_ACCESS_PERMISSION_NAMES = [
   'read',
   'edit',
@@ -121,10 +138,11 @@ function applySessions(sessions: Session[]) {
     state.activeSessionId &&
     !nextSessions.some((session) => session.id === state.activeSessionId)
   ) {
+    resetTodoSync();
     setState('activeSessionId', null);
     persistActiveSessionId(null);
     clearMessages();
-    setIsLoading(false);
+    stopLoading();
   }
 }
 
@@ -139,10 +157,86 @@ function upsertSession(session: Session) {
   applySessions([session, ...state.sessions.filter((item) => item.id !== session.id)]);
 }
 
+const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
+
+function normalizeTodo(raw: unknown): Todo | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const record = raw as Record<string, unknown>;
+  const content =
+    typeof record.content === 'string'
+      ? record.content.trim()
+      : typeof record.title === 'string'
+        ? record.title.trim()
+        : '';
+
+  if (!content) return null;
+
+  const id =
+    typeof record.id === 'string' || typeof record.id === 'number'
+      ? String(record.id)
+      : content;
+
+  return {
+    content,
+    status: typeof record.status === 'string' ? record.status : 'pending',
+    priority: typeof record.priority === 'string' ? record.priority : 'medium',
+    id,
+  };
+}
+
+function extractTodos(raw: unknown): Todo[] | null {
+  if (Array.isArray(raw)) {
+    return raw.map(normalizeTodo).filter((todo): todo is Todo => Boolean(todo));
+  }
+
+  if (!raw || typeof raw !== 'object') return null;
+
+  const record = raw as Record<string, unknown>;
+  for (const key of ['todos', 'items', 'plan']) {
+    const todos = extractTodos(record[key]);
+    if (todos) return todos;
+  }
+
+  return null;
+}
+
+function extractTodosFromPart(part: Part): Todo[] | null {
+  if (part.type !== 'tool') return null;
+
+  const toolName = part.tool.trim().toLowerCase();
+  if (!toolName.includes('todo') && !TODO_TOOL_NAMES.has(toolName)) {
+    return null;
+  }
+
+  const toolState = part.state as Record<string, unknown>;
+  return extractTodos(toolState.input) || extractTodos(toolState.metadata) || null;
+}
+
+function deriveTodosFromMessages(messages: Array<{ info: Message; parts: Part[] }>): Todo[] {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const parts = messages[messageIndex].parts;
+    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const todos = extractTodosFromPart(parts[partIndex]);
+      if (todos) return todos;
+    }
+  }
+
+  return [];
+}
+
+function resetTodoSync() {
+  todoStateAuthority = 'messages';
+}
+
+function syncTodosFromMessages(messages = state.messages) {
+  if (todoStateAuthority === 'event') return;
+  setState('todos', deriveTodosFromMessages(messages));
+}
+
 export function useOpenCode() {
   onMount(() => {
-    if (!handlersRegistered) {
-      handlersRegistered = true;
+    if (eventHandlerCleanups.length === 0) {
       registerEventHandlers();
     }
 
@@ -169,6 +263,9 @@ export function useOpenCode() {
             const workspaceChanged = nextWorkspacePath !== currentWorkspacePath;
             currentWorkspacePath = nextWorkspacePath;
             setState('editorContext', msg.payload);
+            if (workspaceChanged) {
+              syncDraftPermissionForWorkspace(nextWorkspacePath);
+            }
             if (workspaceChanged && initialized) {
               loadSessions().catch(() => {});
             }
@@ -212,6 +309,9 @@ export function useOpenCode() {
     onCleanup(() => {
       disposeBridge();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      for (const cleanup of eventHandlerCleanups) cleanup();
+      eventHandlerCleanups = [];
+      initialized = false;
     });
   });
 
@@ -221,12 +321,18 @@ export function useOpenCode() {
     const sessionId = state.activeSessionId;
     if (!loading || !sessionId) return;
 
-    const timer = setInterval(() => {
-      if (!isLoading() || !state.activeSessionId) return;
-      recheckSessionStatus(state.activeSessionId);
-    }, 8000);
+    let delay = 8000;
+    const schedulePoll = () => {
+      return setTimeout(() => {
+        if (!isLoading() || !state.activeSessionId) return;
+        recheckSessionStatus(state.activeSessionId);
+        delay = Math.min(delay * 2, 60_000);
+        timer = schedulePoll();
+      }, delay);
+    };
+    let timer = schedulePoll();
 
-    onCleanup(() => clearInterval(timer));
+    onCleanup(() => clearTimeout(timer));
   });
 
   return { client };
@@ -237,12 +343,16 @@ export async function recheckSessionStatus(sessionId: string) {
     const statuses = await client.session.status();
     const status = statuses[sessionId];
     if (!status || status.type === 'idle') {
-      setIsLoading(false);
+      stopLoading();
       if (sessionId === state.activeSessionId) {
         await syncSessionMessages(sessionId).catch(() => {});
       }
+    } else if (status.type === 'busy' || status.type === 'retry') {
+      startLoading();
     }
-  } catch {}
+  } catch (err) {
+    logError('recheckSessionStatus', err);
+  }
 }
 
 async function initConnection() {
@@ -264,7 +374,9 @@ async function loadQuestions() {
   try {
     const questions = await client.question.list();
     setQuestions(questions);
-  } catch {}
+  } catch (err) {
+    logError('loadQuestions', err);
+  }
 }
 
 async function loadAgents() {
@@ -281,7 +393,9 @@ async function loadAgents() {
       const def = primaries.find((a) => a.name === 'build') || primaries[0];
       if (def) setSelectedAgent(def.name);
     }
-  } catch {}
+  } catch (err) {
+    logError('loadAgents', err);
+  }
 }
 
 async function loadProviders() {
@@ -312,20 +426,25 @@ async function loadProviders() {
         setSelectedModel({ providerID: firstProvider.id, modelID });
       }
     }
-  } catch {}
+  } catch (err) {
+    logError('loadProviders', err);
+  }
 }
 
 async function loadSessions() {
   try {
     const sessions = await client.session.list();
     applySessions(sessions);
-  } catch {}
+  } catch (err) {
+    logError('loadSessions', err);
+  }
 }
 
 export async function selectSession(id: string) {
   setState('activeSessionId', id);
   persistActiveSessionId(id);
   markSessionSeen(id);
+  resetTodoSync();
   clearMessages();
   try {
     const [session, msgs] = await Promise.all([
@@ -333,13 +452,19 @@ export async function selectSession(id: string) {
       client.session.messages(id),
     ]);
     upsertSession(session);
-    setState('messages', msgs);
-    await loadQuestions().catch(() => {});
+    setMessagesIncremental(msgs);
+    syncTodosFromMessages(msgs);
+    await loadQuestions().catch((err) => logError('loadQuestions', err));
     const statuses = await client.session
       .status()
-      .catch(() => ({}) as Record<string, SessionStatus>);
+      .catch((err) => { logError('session.status', err); return {} as Record<string, SessionStatus>; });
     setState('sessionStatus', statuses);
-    setIsLoading(statuses[id]?.type === 'busy');
+    const statusType = statuses[id]?.type;
+    if (statusType === 'busy' || statusType === 'retry') {
+      startLoading();
+    } else {
+      stopLoading();
+    }
   } catch (_err) {
     setError('Failed to load messages');
   }
@@ -348,7 +473,8 @@ export async function selectSession(id: string) {
 async function syncSessionMessages(sessionId: string) {
   const msgs = await client.session.messages(sessionId);
   if (sessionId === state.activeSessionId) {
-    setState('messages', msgs);
+    setMessagesIncremental(msgs);
+    syncTodosFromMessages(msgs);
   }
 }
 
@@ -375,8 +501,9 @@ export async function createSession(
       setPermissionModeForSession(session.id, 'full');
     }
     resetDraftPermissionMode();
+    resetTodoSync();
     clearMessages();
-    setIsLoading(false);
+    stopLoading();
     return session.id;
   } catch (err) {
     setError(err instanceof Error ? err.message : 'Failed to create session');
@@ -393,6 +520,7 @@ export async function deleteSession(id: string) {
       state.sessions.filter((s) => s.id !== id)
     );
     if (state.activeSessionId === id) {
+      resetTodoSync();
       setState('activeSessionId', null);
       persistActiveSessionId(null);
       clearMessages();
@@ -400,14 +528,22 @@ export async function deleteSession(id: string) {
         await selectSession(state.sessions[0].id);
       }
     }
-  } catch {}
+  } catch (err) {
+    logError('deleteSession', err);
+  }
 }
 
 export async function sendMessage(text: string, options?: { noReply?: boolean }) {
   let sessionId = state.activeSessionId;
   if (!sessionId) {
-    sessionId = await createSession(undefined, getPermissionModeForSession(null));
-    if (!sessionId) return;
+    const createdId = await createSession(undefined, getPermissionModeForSession(null));
+    if (!createdId) return;
+    sessionId = createdId;
+  }
+
+  const currentSessionId = state.activeSessionId;
+  if (currentSessionId && currentSessionId !== sessionId) {
+    sessionId = currentSessionId;
   }
 
   const parts: Array<{
@@ -456,7 +592,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
 
   if (parts.length === 0) return;
 
-  setIsLoading(true);
+  startLoading();
   setError(null);
 
   const body: {
@@ -498,7 +634,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     await client.session.sendAsync(sessionId, body);
     await Promise.all([syncSession(sessionId), syncSessionMessages(sessionId)]).catch(() => {});
   } catch (err) {
-    setIsLoading(false);
+    stopLoading();
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
     if (body.model) {
       setError(
@@ -526,8 +662,10 @@ export async function abortSession() {
   if (!state.activeSessionId) return;
   try {
     await client.session.abort(state.activeSessionId);
-    setIsLoading(false);
-  } catch {}
+    stopLoading();
+  } catch (err) {
+    logError('abortSession', err);
+  }
 }
 
 export async function undoSession() {
@@ -535,15 +673,15 @@ export async function undoSession() {
   const lastAssistant = [...state.messages].toReversed().find((m) => m.info.role === 'assistant');
   if (!lastAssistant) return;
   try {
-    setIsLoading(true);
+    startLoading();
     await client.session.revert(state.activeSessionId, lastAssistant.info.id);
     await Promise.all([
       syncSession(state.activeSessionId),
       syncSessionMessages(state.activeSessionId),
     ]);
-    setIsLoading(false);
+    stopLoading();
   } catch (err) {
-    setIsLoading(false);
+    stopLoading();
     setError(err instanceof Error ? err.message : 'Failed to undo');
   }
 }
@@ -555,16 +693,30 @@ export async function reviewSession() {
 
 export async function compactSession() {
   if (!state.activeSessionId) return;
+  const sessionId = state.activeSessionId;
+  const effectiveModel = resolveSelectedModel(
+    state.selectedModel,
+    state.providers,
+    state.providerDefaults
+  );
+  if (!effectiveModel) {
+    setError('Select a model before compacting the session');
+    return;
+  }
   try {
-    setIsLoading(true);
-    await client.session.compact(state.activeSessionId);
-    await Promise.all([
-      syncSession(state.activeSessionId),
-      syncSessionMessages(state.activeSessionId),
-    ]);
-    setIsLoading(false);
+    setSessionCompacting(sessionId, true);
+    startLoading();
+    await client.session.compact(sessionId, {
+      providerID: effectiveModel.providerID,
+      modelID: effectiveModel.modelID,
+    });
+    await Promise.all([syncSession(sessionId), syncSessionMessages(sessionId)]);
+    const compacting = state.sessions.find((session) => session.id === sessionId)?.time.compacting;
+    if (!compacting) setSessionCompacting(sessionId, false);
+    stopLoading();
   } catch (err) {
-    setIsLoading(false);
+    stopLoading();
+    setSessionCompacting(sessionId, false);
     setError(err instanceof Error ? err.message : 'Failed to compact session');
   }
 }
@@ -604,7 +756,10 @@ export async function updatePermissionModeForSession(
   sessionId = state.activeSessionId
 ) {
   const previousMode = getPermissionModeForSession(sessionId);
+  const previousDraft = draftPermissionMode();
   setPermissionModeForSession(sessionId, mode);
+  setDraftPermissionMode(mode);
+  saveProjectPermissionMode(mode);
   if (!sessionId) return;
 
   try {
@@ -614,6 +769,8 @@ export async function updatePermissionModeForSession(
     upsertSession(session);
   } catch (err) {
     setPermissionModeForSession(sessionId, previousMode);
+    setDraftPermissionMode(previousDraft);
+    saveProjectPermissionMode(previousDraft);
     setError(err instanceof Error ? err.message : 'Failed to update permissions');
     return;
   }
@@ -640,88 +797,137 @@ function getProps(data: unknown): Record<string, unknown> | undefined {
 }
 
 function registerEventHandlers() {
-  serverEvents.on('session.created', (data) => {
-    const info = getProps(data)?.info as Session | undefined;
-    if (info) upsertSession(info);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('session.created', (data) => {
+      const info = getProps(data)?.info as Session | undefined;
+      if (info) upsertSession(info);
+    })
+  );
 
-  serverEvents.on('session.updated', (data) => {
-    const info = getProps(data)?.info as Session | undefined;
-    if (info) upsertSession(info);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('session.updated', (data) => {
+      const info = getProps(data)?.info as Session | undefined;
+      if (info) {
+        if (!info.time.compacting) setSessionCompacting(info.id, false);
+        upsertSession(info);
+      }
+    })
+  );
 
-  serverEvents.on('session.deleted', (data) => {
-    const id = (getProps(data)?.info as { id: string } | undefined)?.id;
-    if (id) {
-      removePermissionModeForSession(id);
-      setState(
-        'sessions',
-        state.sessions.filter((s) => s.id !== id)
-      );
-    }
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('session.deleted', (data) => {
+      const id = (getProps(data)?.info as { id: string } | undefined)?.id;
+      if (id) {
+        removePermissionModeForSession(id);
+        setState(
+          'sessions',
+          state.sessions.filter((s) => s.id !== id)
+        );
+      }
+    })
+  );
 
-  serverEvents.on('session.status', (data) => {
-    const props = getProps(data);
-    if (!props) return;
-    const sessionID = props.sessionID as string;
-    const status = props.status as SessionStatus;
-    setState('sessionStatus', { ...state.sessionStatus, [sessionID]: status });
-    if (sessionID === state.activeSessionId) {
-      const statusType = (status as { type: string }).type;
-      setIsLoading(statusType === 'busy' || statusType === 'retry');
-    }
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('session.status', (data) => {
+      const props = getProps(data);
+      if (!props) return;
+      const sessionID = props.sessionID as string;
+      const status = props.status as SessionStatus;
+      setState('sessionStatus', { ...state.sessionStatus, [sessionID]: status });
+      if (sessionID === state.activeSessionId) {
+        const statusType = (status as { type: string }).type;
+        if (statusType === 'busy' || statusType === 'retry') {
+          startLoading();
+        } else {
+          stopLoading();
+        }
+      }
+    })
+  );
 
-  serverEvents.on('session.idle', (data) => {
-    const sid = getProps(data)?.sessionID as string | undefined;
-    if (!sid || sid === state.activeSessionId) setIsLoading(false);
-    if (sid && sid === state.activeSessionId) {
-      markSessionSeen(sid);
-      syncSession(sid).catch(() => {});
-      syncSessionMessages(sid).catch(() => {});
-    }
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('session.idle', (data) => {
+      const sid = getProps(data)?.sessionID as string | undefined;
+      if (sid) setSessionCompacting(sid, false);
+      if (!sid || sid === state.activeSessionId) stopLoading();
+      if (sid && sid === state.activeSessionId) {
+        markSessionSeen(sid);
+        syncSession(sid).catch(() => {});
+        syncSessionMessages(sid).catch(() => {});
+      }
+    })
+  );
 
-  serverEvents.on('message.updated', (data) => {
-    const info = getProps(data)?.info as { sessionID?: string } | undefined;
-    if (info?.sessionID === state.activeSessionId) upsertMessageInfo(info as Message);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('message.updated', (data) => {
+      const info = getProps(data)?.info as { sessionID?: string } | undefined;
+      if (info?.sessionID === state.activeSessionId) {
+        markLoadingActivity();
+        upsertMessageInfo(info as Message);
+      }
+    })
+  );
 
-  serverEvents.on('message.part.updated', (data) => {
-    const part = getProps(data)?.part as { sessionID?: string } | undefined;
-    if (part?.sessionID === state.activeSessionId) upsertPart(part as Part);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('message.part.updated', (data) => {
+      const part = getProps(data)?.part as { sessionID?: string } | undefined;
+      if (part?.sessionID && (part as Part).type === 'compaction') {
+        setSessionCompacting(part.sessionID, false);
+      }
+      if (part?.sessionID === state.activeSessionId) {
+        markLoadingActivity();
+        upsertPart(part as Part);
+        if ((part as Part).type === 'tool') {
+          syncTodosFromMessages();
+        }
+      }
+    })
+  );
 
-  serverEvents.on('message.part.delta', (data) => {
-    const p = getProps(data);
-    if (!p) return;
-    if ((p.sessionID as string) === state.activeSessionId) {
-      applyMessagePartDelta(
-        p.messageID as string,
-        p.partID as string,
-        p.delta as string,
-        p.sessionID as string,
-        p.field as string
-      );
-    }
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('message.part.delta', (data) => {
+      const p = getProps(data);
+      if (!p) return;
+      if ((p.sessionID as string) === state.activeSessionId) {
+        markLoadingActivity();
+        applyMessagePartDelta(
+          p.messageID as string,
+          p.partID as string,
+          p.delta as string,
+          p.sessionID as string,
+          p.field as string
+        );
+      }
+    })
+  );
 
-  serverEvents.on('message.part.removed', (data) => {
-    const p = getProps(data);
-    if (p) removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('message.part.removed', (data) => {
+      const p = getProps(data);
+      if (p) {
+        if ((p.sessionID as string) === state.activeSessionId) {
+          markLoadingActivity();
+        }
+        removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
+        if ((p.sessionID as string) === state.activeSessionId) {
+          syncTodosFromMessages();
+        }
+      }
+    })
+  );
 
-  serverEvents.on('message.removed', (data) => {
-    const p = getProps(data);
-    if (!p) return;
-    if ((p.sessionID as string) === state.activeSessionId) {
-      setState(
-        'messages',
-        state.messages.filter((m) => m.info.id !== (p.messageID as string))
-      );
-    }
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('message.removed', (data) => {
+      const p = getProps(data);
+      if (!p) return;
+      if ((p.sessionID as string) === state.activeSessionId) {
+        markLoadingActivity();
+        const nextMessages = state.messages.filter((m) => m.info.id !== (p.messageID as string));
+        setState('messages', nextMessages);
+        syncTodosFromMessages(nextMessages);
+      }
+    })
+  );
 
   function handlePermissionEvent(props: Record<string, unknown>) {
     let permission: Permission;
@@ -750,46 +956,65 @@ function registerEventHandlers() {
     addPermission(permission);
   }
 
-  serverEvents.on('permission.updated', (data) => {
-    const props = getProps(data);
-    if (props) handlePermissionEvent(props);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('permission.updated', (data) => {
+      const props = getProps(data);
+      if (props) handlePermissionEvent(props);
+    })
+  );
 
-  serverEvents.on('permission.asked', (data) => {
-    const props = getProps(data);
-    if (props) handlePermissionEvent(props);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('permission.asked', (data) => {
+      const props = getProps(data);
+      if (props) handlePermissionEvent(props);
+    })
+  );
 
-  serverEvents.on('permission.replied', (data) => {
-    const props = getProps(data);
-    if (!props) return;
-    const pid = (props.permissionID || props.requestID) as string | undefined;
-    if (pid) removePermission(pid);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('permission.replied', (data) => {
+      const props = getProps(data);
+      if (!props) return;
+      const pid = (props.permissionID || props.requestID) as string | undefined;
+      if (pid) removePermission(pid);
+    })
+  );
 
-  serverEvents.on('question.asked', (data) => {
-    const props = getProps(data);
-    if (props) upsertQuestion(props as QuestionRequest);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('question.asked', (data) => {
+      const props = getProps(data);
+      if (props) upsertQuestion(props as QuestionRequest);
+    })
+  );
 
-  serverEvents.on('question.replied', (data) => {
-    const requestID = getProps(data)?.requestID as string | undefined;
-    if (requestID) removeQuestion(requestID);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('question.replied', (data) => {
+      const requestID = getProps(data)?.requestID as string | undefined;
+      if (requestID) removeQuestion(requestID);
+    })
+  );
 
-  serverEvents.on('question.rejected', (data) => {
-    const requestID = getProps(data)?.requestID as string | undefined;
-    if (requestID) removeQuestion(requestID);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('question.rejected', (data) => {
+      const requestID = getProps(data)?.requestID as string | undefined;
+      if (requestID) removeQuestion(requestID);
+    })
+  );
 
-  serverEvents.on('todo.updated', (data) => {
-    const p = getProps(data);
-    if ((p?.sessionID as string) === state.activeSessionId) setState('todos', p!.todos as Todo[]);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('todo.updated', (data) => {
+      const p = getProps(data);
+      if ((p?.sessionID as string) === state.activeSessionId) {
+        todoStateAuthority = 'event';
+        setState('todos', extractTodos(p?.todos) || []);
+      }
+    })
+  );
 
-  serverEvents.on('session.diff', (data) => {
-    const p = getProps(data);
-    if ((p?.sessionID as string) === state.activeSessionId)
-      setState('diffs', p!.diff as FileDiff[]);
-  });
+  eventHandlerCleanups.push(
+    serverEvents.on('session.diff', (data) => {
+      const p = getProps(data);
+      if ((p?.sessionID as string) === state.activeSessionId)
+        setState('diffs', p!.diff as FileDiff[]);
+    })
+  );
 }

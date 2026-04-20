@@ -1,4 +1,4 @@
-import { Show } from 'solid-js';
+import { ErrorBoundary, Show } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
 import { state, error, setError } from './lib/state';
 import { Chat } from './components/Chat';
@@ -9,9 +9,11 @@ export function App() {
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
-      <Show when={state.serverStatus.state === 'running'} fallback={<ServerStatus />}>
-        <Chat />
-      </Show>
+      <ErrorBoundary fallback={(err) => <ErrorFallback err={err} />}>
+        <Show when={state.serverStatus.state === 'running'} fallback={<ServerStatus />}>
+          <Chat />
+        </Show>
+      </ErrorBoundary>
       <Show when={error()}>
         <div class="flex items-start justify-between gap-2 border-t border-vscode-error/30 bg-vscode-error/6 px-4 py-2 text-[11px] text-vscode-error">
           <span class="break-words leading-relaxed">{error()}</span>
@@ -26,6 +28,24 @@ export function App() {
           </button>
         </div>
       </Show>
+    </div>
+  );
+}
+
+function ErrorFallback(props: { err: Error }) {
+  return (
+    <div class="flex flex-col items-center justify-center gap-3 p-6 text-center">
+      <svg class="h-8 w-8 text-vscode-error" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+      </svg>
+      <p class="text-sm text-vscode-error">Something went wrong</p>
+      <p class="max-w-full text-xs text-vscode-fg-muted break-words">{props.err?.message || 'Unknown error'}</p>
+      <button
+        class="rounded px-3 py-1 text-xs bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hoverBg"
+        onClick={() => window.location.reload()}
+      >
+        Reload
+      </button>
     </div>
   );
 }

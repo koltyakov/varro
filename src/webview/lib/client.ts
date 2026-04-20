@@ -1,4 +1,4 @@
-import { apiCall, onMessage } from './bridge';
+import { apiCall, onMessage, postMessage } from './bridge';
 import type {
   Session,
   Message,
@@ -7,9 +7,11 @@ import type {
   Agent,
   Provider,
   FileDiff,
+  RepoFileStatus,
   QuestionRequest,
   PermissionRule,
 } from '../types';
+import type { ServerEventName } from '../../shared/protocol';
 
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
@@ -79,8 +81,8 @@ export const client = {
     async revert(id: string, messageID: string): Promise<boolean> {
       return apiCall('POST', `/session/${id}/revert`, { messageID });
     },
-    async compact(id: string): Promise<boolean> {
-      return apiCall('POST', `/session/${id}/compact`);
+    async compact(id: string, model: { providerID: string; modelID: string }): Promise<boolean> {
+      return apiCall('POST', `/session/${id}/summarize`, model);
     },
   },
 
@@ -90,6 +92,12 @@ export const client = {
       default: Record<string, string>;
     }> {
       return apiCall('GET', '/config/providers');
+    },
+  },
+
+  file: {
+    async status(): Promise<RepoFileStatus[]> {
+      return getCachedFileStatus();
     },
   },
 
@@ -112,6 +120,24 @@ export const client = {
   },
 };
 
+let fileStatusCache:
+  | {
+      expiresAt: number;
+      promise: Promise<RepoFileStatus[]>;
+    }
+  | null = null;
+
+function getCachedFileStatus(): Promise<RepoFileStatus[]> {
+  const now = Date.now();
+  if (fileStatusCache && fileStatusCache.expiresAt > now) return fileStatusCache.promise;
+  const promise = apiCall<RepoFileStatus[]>('GET', '/file/status').catch((err) => {
+    if (fileStatusCache?.promise === promise) fileStatusCache = null;
+    throw err;
+  });
+  fileStatusCache = { expiresAt: now + 2_000, promise };
+  return promise;
+}
+
 type EventHandler = (data: unknown) => void;
 
 const eventListeners = new Map<string, Set<EventHandler>>();
@@ -121,16 +147,28 @@ onMessage((msg) => {
   const evt = msg.payload;
   const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
   if (handlers) {
-    for (const h of handlers) h(evt);
+    for (const h of handlers) {
+      try {
+        h(evt);
+      } catch (err) {
+        postMessage({ type: 'log', payload: { msg: 'event handler error', error: String(err), level: 'error' } });
+      }
+    }
   }
   const wildcard = eventListeners.get('*') as Set<EventHandler> | undefined;
   if (wildcard) {
-    for (const h of wildcard) h(evt);
+    for (const h of wildcard) {
+      try {
+        h(evt);
+      } catch (err) {
+        postMessage({ type: 'log', payload: { msg: 'wildcard handler error', error: String(err), level: 'error' } });
+      }
+    }
   }
 });
 
 export const serverEvents = {
-  on(type: string, handler: EventHandler): () => void {
+  on(type: ServerEventName | '*', handler: EventHandler): () => void {
     if (!eventListeners.has(type)) eventListeners.set(type, new Set());
     eventListeners.get(type)!.add(handler);
     return () => eventListeners.get(type)?.delete(handler);

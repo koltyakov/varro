@@ -1,6 +1,7 @@
 import { Show, createMemo, createSignal } from 'solid-js';
 import { state, showThinking } from '../lib/state';
 import { formatDuration, getAssistantDuration } from '../lib/message-metrics';
+import { formatVariantLabel } from '../lib/format';
 import type { AssistantMessage, Part, SubtaskPart, TextPart } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ToolCall } from './ToolCall';
@@ -152,13 +153,6 @@ function SubtaskBlock(props: { part: SubtaskPart; run?: AssistantMessage }) {
 
 function formatModelLabel(providerName: string, modelName: string, variant?: string) {
   return `${providerName} / ${modelName}${variant ? ` [${formatVariantLabel(variant)}]` : ''}`;
-}
-
-function formatVariantLabel(variant: string) {
-  return variant
-    .split(/[-_]/g)
-    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
-    .join(' ');
 }
 
 function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {

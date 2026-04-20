@@ -6,7 +6,7 @@ import {
   clearClipboardImages,
   clearContextFiles,
 } from '../lib/state';
-import { getLeafPathName } from '../lib/path-display';
+import { getLeafPathName, getDroppedFileLabel } from '../lib/path-display';
 import { postMessage } from '../lib/bridge';
 
 export function ContextBar() {
@@ -160,13 +160,6 @@ function ContextChip(props: {
       </Show>
     </span>
   );
-}
-
-function getDroppedFileLabel(file: { path: string; relativePath: string }) {
-  if (!file.relativePath || file.relativePath === '.') {
-    return getLeafPathName(file.path);
-  }
-  return getLeafPathName(file.relativePath);
 }
 
 function ImageContextChip(props: {

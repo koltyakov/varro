@@ -5,7 +5,7 @@ import {
   showSettings,
   isSessionUnread,
 } from '../lib/state';
-import { Show, For, createSignal, onMount } from 'solid-js';
+import { Show, For, createSignal, onMount, onCleanup } from 'solid-js';
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -81,6 +81,10 @@ export function Chat() {
 }
 
 function SessionListView() {
+  const [now, setNow] = createSignal(Date.now());
+  const clock = setInterval(() => setNow(Date.now()), 60_000);
+  onCleanup(() => clearInterval(clock));
+
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
@@ -177,7 +181,7 @@ function SessionListView() {
                   <div class="session-item-content">
                     <span class="session-item-title">{session.title || 'Untitled'}</span>
                     <span class="session-item-meta">
-                      <Show when={session.summary} fallback={formatTimeAgo(session.time.updated)}>
+                      <Show when={session.summary} fallback={formatTimeAgo(session.time.updated, now())}>
                         {session.summary!.files} file{session.summary!.files !== 1 ? 's' : ''}
                         {' · '}
                         <span class="diff-lines-added">+{session.summary!.additions}</span>{' '}
@@ -207,8 +211,8 @@ function SessionListView() {
   );
 }
 
-function formatTimeAgo(timestamp: number): string {
-  const diff = Date.now() - timestamp;
+function formatTimeAgo(timestamp: number, now: number): string {
+  const diff = now - timestamp;
   const seconds = Math.floor(diff / 1000);
   if (seconds < 60) return 'just now';
   const minutes = Math.floor(seconds / 60);

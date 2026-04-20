@@ -1,12 +1,24 @@
-import { For, Show, createMemo, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import type { QuestionRequest } from '../types';
 import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
 
 export function QuestionPrompt(props: { request: QuestionRequest }) {
   const questions = () => props.request.questions || [];
   const isCustomEnabled = (questionIndex: number) => questions()[questionIndex]?.custom !== false;
-  const [selected, setSelected] = createSignal<Array<Array<string>>>(questions().map(() => []));
-  const [customValues, setCustomValues] = createSignal<string[]>(questions().map(() => ''));
+  const [selected, setSelected] = createSignal<Array<Array<string>>>([]);
+  const [customValues, setCustomValues] = createSignal<string[]>([]);
+
+  createEffect(() => {
+    const count = questions().length;
+    setSelected((prev) => {
+      if (prev.length === count) return prev;
+      return Array.from({ length: count }, (_, i) => prev[i] || []);
+    });
+    setCustomValues((prev) => {
+      if (prev.length === count) return prev;
+      return Array.from({ length: count }, (_, i) => prev[i] || '');
+    });
+  });
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [currentStep, setCurrentStep] = createSignal(0);
 

@@ -258,6 +258,13 @@ export type FileDiff = {
   deletions: number;
 };
 
+export type RepoFileStatus = {
+  path: string;
+  added: number;
+  removed: number;
+  status: 'added' | 'deleted' | 'modified';
+};
+
 export type Permission = {
   id: string;
   type: string;

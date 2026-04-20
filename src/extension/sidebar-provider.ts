@@ -1,16 +1,19 @@
 import * as vscode from 'vscode';
-import { readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
+import { randomBytes } from 'crypto';
 import { resolve, join, basename, isAbsolute } from 'path';
 import type {
   DroppedFile,
-  EditorContext,
   ExtensionMessage,
+  InitialWebviewState,
+  ServerEventName,
   ServerStatus,
   WebviewMessage,
 } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
 import { logger } from './logger';
+import { getRelativePath } from './util/path';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -25,7 +28,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private onContextFilesChanged?: () => void;
   private workspaceFileCache: DroppedFile[] = [];
   private workspaceFileCacheAt = 0;
+  private fileSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private fileSearchCts: vscode.CancellationTokenSource | null = null;
   private pendingInputFocus = false;
+  private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
+  private serverEventHandler: ((event: unknown) => void) | undefined;
+  private webviewDisposables: vscode.Disposable[] = [];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -35,17 +43,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.contextProvider = contextProvider;
     this.server = server;
 
-    this.server.on('status', (status: ServerStatus) => {
+    this.serverStatusHandler = (status: ServerStatus) => {
       this._status = status;
       this.post({ type: 'server/status', payload: status });
-    });
-
-    this.server.on('event', (event: unknown) => {
+    };
+    this.serverEventHandler = (event: unknown) => {
+      const evt = event as Record<string, unknown>;
       this.post({
         type: 'server/event',
-        payload: { type: 'event', ...(event as Record<string, unknown>) },
+        payload: {
+          type: (evt.type ?? 'event') as ServerEventName,
+          properties: evt.properties as Record<string, unknown> | undefined,
+        },
       });
-    });
+    };
+
+    this.server.on('status', this.serverStatusHandler);
+    this.server.on('event', this.serverEventHandler);
   }
 
   resolveWebviewView(
@@ -60,20 +74,32 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this.extensionUri],
     };
 
-    webviewView.webview.onDidReceiveMessage((msg: WebviewMessage) => {
-      void this.handleMessage(msg);
+    for (const d of this.webviewDisposables) d.dispose();
+    this.webviewDisposables = [];
+
+    this.webviewDisposables.push(
+      webviewView.webview.onDidReceiveMessage((msg: WebviewMessage) => {
+        void this.handleMessage(msg);
+      })
+    );
+
+    void this.getHtml().then((html) => {
+      webviewView.webview.html = html;
+    }).catch((err) => {
+      logger.error(`getHtml failed: ${err instanceof Error ? err.message : String(err)}`);
+      webviewView.webview.html = '<p>Failed to load Varro webview. Please reload.</p>';
     });
 
-    webviewView.webview.html = this.getHtml();
-
-    webviewView.onDidChangeVisibility(async () => {
-      if (webviewView.visible) {
-        this.postContext();
-        this.postTerminalSelection(this.contextProvider.terminalSelection);
-        this.post({ type: 'server/status', payload: this._status });
-        this.flushPendingInputFocus();
-      }
-    });
+    this.webviewDisposables.push(
+      webviewView.onDidChangeVisibility(() => {
+        if (webviewView.visible) {
+          this.postContext();
+          this.postTerminalSelection(this.contextProvider.terminalSelection);
+          this.post({ type: 'server/status', payload: this._status });
+          this.flushPendingInputFocus();
+        }
+      })
+    );
 
     this.themeDisposable?.dispose();
     this.themeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
@@ -89,68 +115,73 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async handleMessage(msg: WebviewMessage) {
-    switch (msg.type) {
-      case 'ready':
-        this.postContext();
-        this.postTerminalSelection(this.contextProvider.terminalSelection);
-        this.postContextFiles();
-        this.post({ type: 'server/status', payload: this._status });
-        this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
-        this.flushPendingInputFocus();
-        break;
-      case 'context/request':
-        this.postContext();
-        this.postTerminalSelection(this.contextProvider.terminalSelection);
-        break;
-      case 'terminal-selection/clear':
-        this.contextProvider.clearTerminalSelection();
-        this.postTerminalSelection(this.contextProvider.terminalSelection);
-        break;
-      case 'files/drop':
-        this.handleDroppedPaths(msg.payload.paths);
-        break;
-      case 'files/remove':
-        this.removeContextFile(msg.payload.path);
-        break;
-      case 'files/clear':
-        this.clearContextFiles();
-        this.onContextFilesChanged?.();
-        break;
-      case 'files/pick':
-        this.pickFiles();
-        break;
-      case 'files/search':
-        this.searchFiles(msg.payload.requestId, msg.payload.query, msg.payload.limit);
-        break;
-      case 'file/read':
-        this.contextProvider.readFile(msg.payload.path).then(() => {
+    try {
+      switch (msg.type) {
+        case 'ready':
           this.postContext();
-        });
-        break;
-      case 'vscode/open':
-        this.contextProvider.openFile(msg.payload.path, msg.payload.line);
-        break;
-      case 'vscode/diff':
-        vscode.commands.executeCommand(
-          'vscode.diff',
-          vscode.Uri.parse(`varro-diff://${msg.payload.path}/before`),
-          vscode.Uri.parse(`varro-diff://${msg.payload.path}/after`),
-          `Varro: ${msg.payload.path}`
-        );
-        break;
-      case 'api/request':
-        this.handleApiRequest(msg.payload);
-        break;
-      case 'log':
-        {
-          const level = msg.payload.level || 'info';
-          const line =
-            `[webview] ${msg.payload.msg} ${msg.payload.data || ''} ${msg.payload.error || ''}`.trim();
-          if (level === 'error') logger.error(line);
-          else if (level === 'warn') logger.warn(line);
-          else logger.info(line);
-        }
-        break;
+          this.postTerminalSelection(this.contextProvider.terminalSelection);
+          this.postContextFiles();
+          this.post({ type: 'server/status', payload: this._status });
+          this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
+          this.flushPendingInputFocus();
+          break;
+        case 'context/request':
+          this.postContext();
+          this.postTerminalSelection(this.contextProvider.terminalSelection);
+          break;
+        case 'terminal-selection/clear':
+          this.contextProvider.clearTerminalSelection();
+          this.postTerminalSelection(this.contextProvider.terminalSelection);
+          break;
+        case 'files/drop':
+          await this.handleDroppedPaths(msg.payload.paths);
+          break;
+        case 'files/remove':
+          this.removeContextFile(msg.payload.path);
+          break;
+        case 'files/clear':
+          this.clearContextFiles();
+          this.onContextFilesChanged?.();
+          break;
+        case 'files/pick':
+          await this.pickFiles();
+          break;
+        case 'files/search':
+          await this.searchFiles(msg.payload.requestId, msg.payload.query, msg.payload.limit);
+          break;
+        case 'file/read':
+          await this.contextProvider.readFile(msg.payload.path);
+          this.postContext();
+          break;
+        case 'vscode/open':
+          await this.contextProvider.openFile(msg.payload.path, msg.payload.line);
+          break;
+        case 'vscode/diff':
+          vscode.commands.executeCommand(
+            'vscode.diff',
+            vscode.Uri.parse(`varro-diff://${msg.payload.path}/before`),
+            vscode.Uri.parse(`varro-diff://${msg.payload.path}/after`),
+            `Varro: ${msg.payload.path}`
+          );
+          break;
+        case 'api/request':
+          await this.handleApiRequest(msg.payload);
+          break;
+        case 'log':
+          {
+            const level = msg.payload.level || 'info';
+            const line =
+              `[webview] ${msg.payload.msg} ${msg.payload.data || ''} ${msg.payload.error || ''}`.trim();
+            if (level === 'error') logger.error(line);
+            else if (level === 'warn') logger.warn(line);
+            else logger.info(line);
+          }
+          break;
+      }
+    } catch (err) {
+      logger.error(
+        `handleMessage(${msg.type}) failed: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
@@ -193,7 +224,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           }
           const stat = await vscode.workspace.fs.stat(uri);
           const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-          const relativePath = getDroppedRelativePath(uri, workspaceFolder);
+          const relativePath = getRelativePath(uri, workspaceFolder);
 
           return {
             path: uri.fsPath,
@@ -280,7 +311,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         try {
           const stat = await vscode.workspace.fs.stat(uri);
           const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-          const relativePath = getDroppedRelativePath(uri, workspaceFolder);
+          const relativePath = getRelativePath(uri, workspaceFolder);
           return {
             path: uri.fsPath,
             relativePath,
@@ -314,25 +345,47 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'files/dropped', payload: this.contextFiles });
   }
 
-  private async searchFiles(requestId: number, query: string, limit = 12) {
-    const files = await this.getWorkspaceFiles();
-    const normalizedQuery = query.trim().toLowerCase();
-    const ranked = files
-      .map((file) => ({ file, score: getFileSearchScore(file.relativePath, normalizedQuery) }))
-      .filter((item) => item.score > Number.NEGATIVE_INFINITY)
-      .toSorted(
-        (a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath)
-      )
-      .slice(0, Math.max(1, Math.min(limit, 30)))
-      .map((item) => item.file);
-
-    this.post({
-      type: 'files/search-results',
-      payload: { requestId, query, files: ranked },
-    });
+  private searchFiles(requestId: number, query: string, limit = 12) {
+    if (this.fileSearchDebounceTimer) clearTimeout(this.fileSearchDebounceTimer);
+    this.fileSearchCts?.dispose();
+    this.fileSearchCts = new vscode.CancellationTokenSource();
+    const token = this.fileSearchCts.token;
+    this.fileSearchDebounceTimer = setTimeout(
+      () => this.executeFileSearch(requestId, query, limit, token),
+      200
+    );
   }
 
-  private async getWorkspaceFiles(): Promise<DroppedFile[]> {
+  private async executeFileSearch(requestId: number, query: string, limit: number, token: vscode.CancellationToken) {
+    this.fileSearchDebounceTimer = null;
+    try {
+      const files = await this.getWorkspaceFiles(token);
+      if (token.isCancellationRequested) return;
+      const normalizedQuery = query.trim().toLowerCase();
+      const ranked = files
+        .map((file) => ({ file, score: getFileSearchScore(file.relativePath, normalizedQuery) }))
+        .filter((item) => item.score > Number.NEGATIVE_INFINITY)
+        .toSorted(
+          (a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath)
+        )
+        .slice(0, Math.max(1, Math.min(limit, 30)))
+        .map((item) => item.file);
+
+      this.post({
+        type: 'files/search-results',
+        payload: { requestId, query, files: ranked },
+      });
+    } catch (err) {
+      if (token.isCancellationRequested) return;
+      this.post({
+        type: 'files/search-results',
+        payload: { requestId, query, files: [] },
+      });
+      logger.warn(`searchFiles failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private async getWorkspaceFiles(token?: vscode.CancellationToken): Promise<DroppedFile[]> {
     const now = Date.now();
     if (
       this.workspaceFileCache.length > 0 &&
@@ -344,14 +397,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const files = await vscode.workspace.findFiles(
       '**/*',
       '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/coverage/**}',
-      SidebarProvider.FILE_SEARCH_MAX_CANDIDATES
+      SidebarProvider.FILE_SEARCH_MAX_CANDIDATES,
+      token
     );
 
     this.workspaceFileCache = files.map((uri) => {
       const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
       return {
         path: uri.fsPath,
-        relativePath: getDroppedRelativePath(uri, workspaceFolder),
+        relativePath: getRelativePath(uri, workspaceFolder),
         type: 'file' as const,
       };
     });
@@ -362,9 +416,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   postDroppedFiles(
     files: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>
   ) {
-    const next = files.filter(
-      (file) => !this.contextFiles.find((existing) => existing.path === file.path)
-    );
+    const existing = new Set(this.contextFiles.map((f) => f.path));
+    const next = files.filter((file) => !existing.has(file.path));
     if (next.length === 0) return;
 
     this.contextFiles.push(...next);
@@ -387,18 +440,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'command/focus-input' });
   }
 
-  private getHtml(): string {
+  private async getHtml(): Promise<string> {
     const distDir = resolve(this.extensionUri.fsPath, 'dist', 'webview');
     let scriptContent = '';
     let cssContent = '';
 
     try {
-      scriptContent = readFileSync(join(distDir, 'webview.js'), 'utf-8');
+      scriptContent = await readFile(join(distDir, 'webview.js'), 'utf-8');
     } catch {
       logger.warn('webview.js not found — run `npm run build:webview` first');
     }
     try {
-      cssContent = readFileSync(join(distDir, 'webview.css'), 'utf-8');
+      cssContent = await readFile(join(distDir, 'webview.css'), 'utf-8');
     } catch {}
 
     const nonce = randomNonce();
@@ -434,18 +487,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   dispose() {
+    if (this.serverStatusHandler) this.server.off('status', this.serverStatusHandler);
+    if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
+    this.serverStatusHandler = undefined;
+    this.serverEventHandler = undefined;
+    for (const d of this.webviewDisposables) d.dispose();
+    this.webviewDisposables = [];
     this.themeDisposable?.dispose();
+    if (this.fileSearchDebounceTimer) clearTimeout(this.fileSearchDebounceTimer);
+    this.fileSearchCts?.dispose();
   }
-}
-
-function getDroppedRelativePath(
-  uri: vscode.Uri,
-  workspaceFolder: vscode.WorkspaceFolder | undefined
-) {
-  if (!workspaceFolder) return basename(uri.fsPath);
-
-  const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
-  return relativePath || '.';
 }
 
 function getFileSearchScore(relativePath: string, query: string) {
@@ -474,21 +525,9 @@ function getFileSearchScore(relativePath: string, query: string) {
 }
 
 function randomNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < 32; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return result;
+  const bytes = randomBytes(24);
+  return bytes.toString('base64url');
 }
-
-type InitialWebviewState = {
-  theme: 'dark' | 'light';
-  serverStatus: ServerStatus;
-  editorContext: EditorContext;
-  terminalSelection: { text: string; terminalName: string } | null;
-  droppedFiles: DroppedFile[];
-};
 
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (char) => {

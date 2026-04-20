@@ -17,6 +17,7 @@ export class OpenCodeServer extends EventEmitter {
   private command: string;
   private eventController: AbortController | null = null;
   private eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private eventReconnectDelay = 1000;
 
   constructor(port: number, autoStart: boolean, command?: string) {
     super();
@@ -84,6 +85,7 @@ export class OpenCodeServer extends EventEmitter {
       const failStartup = (message: string, err?: Error) => {
         if (settled) return;
         settled = true;
+        this.cancelPollHealth();
         this.setStatus({ state: 'error', message });
         reject(err || new Error(message));
       };
@@ -91,6 +93,7 @@ export class OpenCodeServer extends EventEmitter {
       const finishStartup = (url: string) => {
         if (settled) return;
         settled = true;
+        this.cancelPollHealth();
         resolve(url);
       };
 
@@ -138,7 +141,9 @@ export class OpenCodeServer extends EventEmitter {
               this.retries++;
               logger.info(`Restarting server (attempt ${this.retries})`);
               this.start().then(resolve).catch(reject);
+              return;
             }
+            reject(new Error(`Server exited and max retries (${this.maxRetries}) exhausted`));
             return;
           }
 
@@ -173,22 +178,43 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
+  private pollHealthResolve: ((url: string) => void) | null = null;
+  private pollHealthReject: ((err: Error) => void) | null = null;
+  private pollHealthTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private cancelPollHealth() {
+    this.pollHealthResolve = null;
+    this.pollHealthReject = null;
+    if (this.pollHealthTimer) {
+      clearTimeout(this.pollHealthTimer);
+      this.pollHealthTimer = null;
+    }
+  }
+
   private pollHealth(resolve: (url: string) => void, reject: (err: Error) => void, attempt = 0) {
     if (attempt > 50) {
+      this.cancelPollHealth();
       this.setStatus({ state: 'error', message: 'Server failed to start within timeout' });
       reject(new Error('Server health check timeout'));
       return;
     }
 
-    setTimeout(async () => {
+    this.pollHealthResolve = resolve;
+    this.pollHealthReject = reject;
+
+    this.pollHealthTimer = setTimeout(async () => {
+      this.pollHealthTimer = null;
+      if (!this.pollHealthResolve || !this.pollHealthReject) return;
       const healthy = await this.checkHealth();
+      if (!this.pollHealthResolve || !this.pollHealthReject) return;
       if (healthy) {
+        this.cancelPollHealth();
         this.setStatus({ state: 'running', url: this.url });
         this.retries = 0;
         this.startEventStream();
-        resolve(this.url);
+        this.pollHealthResolve(this.url);
       } else {
-        this.pollHealth(resolve, reject, attempt + 1);
+        this.pollHealth(this.pollHealthResolve, this.pollHealthReject, attempt + 1);
       }
     }, 200);
   }
@@ -214,6 +240,7 @@ export class OpenCodeServer extends EventEmitter {
         'Content-Type': 'application/json',
         ...this.directoryHeaders(scoped.directory),
       },
+      signal: AbortSignal.timeout(30_000),
     };
     if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
       init.body = JSON.stringify(body);
@@ -234,6 +261,7 @@ export class OpenCodeServer extends EventEmitter {
 
   private async startEventStream() {
     this.stopEventStream();
+    this.eventReconnectDelay = 1000;
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
@@ -273,7 +301,9 @@ export class OpenCodeServer extends EventEmitter {
       shouldReconnect = true;
     } finally {
       if (shouldReconnect && !controller.signal.aborted && this._status.state === 'running') {
-        this.eventReconnectTimer = setTimeout(() => this.startEventStream(), 1000);
+        const delay = this.eventReconnectDelay;
+        this.eventReconnectDelay = Math.min(delay * 2, 30_000);
+        this.eventReconnectTimer = setTimeout(() => this.startEventStream(), delay);
       }
     }
   }
@@ -305,9 +335,22 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async dispose() {
+    this.cancelPollHealth();
     this.stopEventStream();
-    this.process?.kill('SIGTERM');
-    this.process = null;
+    this.removeAllListeners();
+    if (this.process) {
+      const proc = this.process;
+      this.process = null;
+      proc.kill('SIGTERM');
+      const exitPromise = new Promise<boolean>((resolve) => {
+        proc.on('exit', () => resolve(true));
+      });
+      const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000));
+      const exited = await Promise.race([exitPromise, timeoutPromise]);
+      if (!exited) {
+        proc.kill('SIGKILL');
+      }
+    }
     this.setStatus({ state: 'stopped' });
   }
 

@@ -1,5 +1,6 @@
-import { createMemo, createSignal, For, onMount, Show } from 'solid-js';
+import { createMemo, createSignal, For, onMount, Show, createEffect } from 'solid-js';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
+import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
 
 interface ModelSelection {
   providerID?: string;
@@ -46,7 +47,12 @@ export function ModelPicker(props: {
     return idx >= 0 ? idx : 0;
   };
 
-  const [focusIndex, setFocusIndex] = createSignal(initialIndex());
+  const [focusIndex, setFocusIndex] = createSignal(0);
+
+  createEffect(() => {
+    const idx = initialIndex();
+    setFocusIndex(idx);
+  });
 
   const isSelected = (providerID: string, modelID: string) => {
     const sel = state.selectedModel;
@@ -213,15 +219,5 @@ export function modelSupportsReasoning(
   );
 }
 
-export function formatThinkingLabel(variant: string) {
-  return variant
-    .split(/[-_]/g)
-    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
-    .join(' ');
-}
+export { formatThinkingLabel, formatContextLimit };
 
-function formatContextLimit(value: number) {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
-  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
-  return String(value);
-}
