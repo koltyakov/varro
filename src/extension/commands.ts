@@ -19,10 +19,6 @@ export function registerCommands(
       sidebar.postCommand('new-session');
     }),
 
-    vscode.commands.registerCommand('opencode.chat.share', () => {
-      sidebar.postCommand('share');
-    }),
-
     vscode.commands.registerCommand('opencode.chat.abort', () => {
       sidebar.postCommand('abort');
     }),

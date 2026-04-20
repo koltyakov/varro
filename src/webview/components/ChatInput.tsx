@@ -28,10 +28,10 @@ import { onMessage, postMessage } from '../lib/bridge';
 import {
   sendMessage,
   abortSession,
-  shareSession,
-  unshareSession,
   createSession,
   compactSession,
+  undoSession,
+  reviewSession,
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel, formatThinkingLabel } from './ModelPicker';
@@ -117,12 +117,10 @@ export function ChatInput() {
 
   const slashCommands = createMemo(() =>
     getSlashCommands({
-      canShare: !!state.activeSessionId,
-      canUnshare: !!state.sessions.find((session) => session.id === state.activeSessionId)?.share,
       isBusy: isLoading(),
+      canUndo: !!state.activeSessionId && state.messages.some((m) => m.info.role === 'assistant'),
       onOpenSessions: () => setShowSessionPicker(true),
       onOpenModels: () => setShowModelPicker(true),
-      onOpenAgents: () => setShowAgentPicker(true),
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
       onOpenSettings: () => setShowSettings(true),
     })
@@ -1340,7 +1338,15 @@ export function ChatInput() {
                 </div>
               </Show>
 
-              <Show when={showBusyMenu() && canSend() && isLoading() && !hasActiveQuestion() && !hasActivePermission()}>
+              <Show
+                when={
+                  showBusyMenu() &&
+                  canSend() &&
+                  isLoading() &&
+                  !hasActiveQuestion() &&
+                  !hasActivePermission()
+                }
+              >
                 <div class="toolbar-popover busy-menu" onClick={(e) => e.stopPropagation()}>
                   <button
                     class="toolbar-popover-item"
@@ -1648,12 +1654,10 @@ function getDroppedFileLabel(file: { path: string; relativePath: string }) {
 }
 
 function getSlashCommands(props: {
-  canShare: boolean;
-  canUnshare: boolean;
   isBusy: boolean;
+  canUndo: boolean;
   onOpenSessions: () => void;
   onOpenModels: () => void;
-  onOpenAgents: () => void;
   onOpenFiles: () => void;
   onOpenSettings: () => void;
 }): SlashCommand[] {
@@ -1677,12 +1681,6 @@ function getSlashCommands(props: {
       aliases: [],
       description: 'Open the model picker',
       action: props.onOpenModels,
-    },
-    {
-      name: 'agents',
-      aliases: [],
-      description: 'Open the agent picker',
-      action: props.onOpenAgents,
     },
     {
       name: 'attach',
@@ -1714,27 +1712,25 @@ function getSlashCommands(props: {
     },
   ];
 
-  if (props.canShare) {
+  if (props.canUndo) {
     commands.push({
-      name: 'share',
-      aliases: [],
-      description: 'Share the current session',
+      name: 'undo',
+      aliases: ['revert'],
+      description: 'Undo the last assistant response',
       action: () => {
-        shareSession();
+        undoSession();
       },
     });
   }
 
-  if (props.canUnshare) {
-    commands.push({
-      name: 'unshare',
-      aliases: [],
-      description: 'Remove the session share link',
-      action: () => {
-        unshareSession();
-      },
-    });
-  }
+  commands.push({
+    name: 'review',
+    aliases: [],
+    description: 'Review current code changes',
+    action: () => {
+      reviewSession();
+    },
+  });
 
   if (props.isBusy) {
     commands.push({

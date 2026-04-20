@@ -372,7 +372,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.onContextFilesChanged?.();
   }
 
-  postCommand(cmd: 'new-session' | 'abort' | 'share') {
+  postCommand(cmd: 'new-session' | 'abort') {
     this.post({ type: `command/${cmd}` } as ExtensionMessage);
   }
 

@@ -74,9 +74,7 @@ const FULL_ACCESS_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NA
     action: 'allow',
   })
 );
-const READ_ONLY_PERMISSIONS = new Set([
-  'read', 'glob', 'grep', 'list', 'codesearch', 'lsp',
-]);
+const READ_ONLY_PERMISSIONS = new Set(['read', 'glob', 'grep', 'list', 'codesearch', 'lsp']);
 const DEFAULT_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.map(
   (permission) => ({
     permission,
@@ -198,9 +196,6 @@ export function useOpenCode() {
           break;
         case 'command/abort':
           abortSession();
-          break;
-        case 'command/share':
-          shareSession();
           break;
       }
     });
@@ -535,6 +530,29 @@ export async function abortSession() {
   } catch {}
 }
 
+export async function undoSession() {
+  if (!state.activeSessionId) return;
+  const lastAssistant = [...state.messages].toReversed().find((m) => m.info.role === 'assistant');
+  if (!lastAssistant) return;
+  try {
+    setIsLoading(true);
+    await client.session.revert(state.activeSessionId, lastAssistant.info.id);
+    await Promise.all([
+      syncSession(state.activeSessionId),
+      syncSessionMessages(state.activeSessionId),
+    ]);
+    setIsLoading(false);
+  } catch (err) {
+    setIsLoading(false);
+    setError(err instanceof Error ? err.message : 'Failed to undo');
+  }
+}
+
+export async function reviewSession() {
+  if (!state.activeSessionId) return;
+  await sendMessage('review the current changes in my code and provide feedback');
+}
+
 export async function compactSession() {
   if (!state.activeSessionId) return;
   try {
@@ -549,31 +567,6 @@ export async function compactSession() {
     setIsLoading(false);
     setError(err instanceof Error ? err.message : 'Failed to compact session');
   }
-}
-
-export async function shareSession() {
-  if (!state.activeSessionId) return;
-  try {
-    const session = await client.session.share(state.activeSessionId);
-    setState(
-      'sessions',
-      state.sessions.map((s) => (s.id === session.id ? session : s))
-    );
-    if (session.share?.url) {
-      await navigator.clipboard.writeText(session.share.url).catch(() => {});
-    }
-  } catch {}
-}
-
-export async function unshareSession() {
-  if (!state.activeSessionId) return;
-  try {
-    const session = await client.session.unshare(state.activeSessionId);
-    setState(
-      'sessions',
-      state.sessions.map((s) => (s.id === session.id ? session : s))
-    );
-  } catch {}
 }
 
 export async function respondPermission(

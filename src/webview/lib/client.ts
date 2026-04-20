@@ -38,12 +38,6 @@ export const client = {
     async abort(id: string): Promise<boolean> {
       return apiCall('POST', `/session/${id}/abort`);
     },
-    async share(id: string): Promise<Session> {
-      return apiCall('POST', `/session/${id}/share`);
-    },
-    async unshare(id: string): Promise<Session> {
-      return apiCall('DELETE', `/session/${id}/share`);
-    },
     async diff(id: string, messageID?: string): Promise<FileDiff[]> {
       const query = messageID ? `?messageID=${messageID}` : '';
       return apiCall('GET', `/session/${id}/diff${query}`);

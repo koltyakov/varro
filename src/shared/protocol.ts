@@ -51,8 +51,7 @@ export type ExtensionMessage =
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session' }
   | { type: 'command/focus-input' }
-  | { type: 'command/abort' }
-  | { type: 'command/share' };
+  | { type: 'command/abort' };
 
 export type WebviewMessage =
   | { type: 'context/request' }

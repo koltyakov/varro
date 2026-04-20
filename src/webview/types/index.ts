@@ -238,7 +238,6 @@ export type Session = {
     files: number;
     diffs?: FileDiff[];
   };
-  share?: { url: string };
   title: string;
   version: string;
   time: { created: number; updated: number; compacting?: number };

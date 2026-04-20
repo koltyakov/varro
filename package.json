@@ -64,10 +64,6 @@
         "title": "OpenCode: Add Terminal Selection to Context"
       },
       {
-        "command": "opencode.chat.share",
-        "title": "OpenCode: Share Session"
-      },
-      {
         "command": "opencode.chat.abort",
         "title": "OpenCode: Abort Session"
       }

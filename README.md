@@ -9,7 +9,7 @@ Use [OpenCode](https://opencode.ai) inside VS Code without leaving the editor. T
 - Lets you attach extra files and folders from the Explorer
 - Supports pasted image attachments in chat
 - Lets you switch available models and thinking levels from your OpenCode setup
-- Shows permission prompts, session history, share actions, and generated diffs in the editor workflow
+- Shows permission prompts, session history, and generated diffs in the editor workflow
 
 ## Prerequisites
 
@@ -52,7 +52,6 @@ The extension talks to a local OpenCode server on port `4096` by default and wil
 - `OpenCode: Add to Context` attaches the current file, or selected Explorer items, as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K`
 - `OpenCode: Add Terminal Selection to Context` attaches the selected terminal text as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K` when terminal focus is active
 - `OpenCode: New Session` starts a fresh chat session
-- `OpenCode: Share Session` triggers OpenCode's session sharing flow
 - `OpenCode: Abort Session` stops the current run
 
 ## Settings

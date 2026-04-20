@@ -1,5 +1,11 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import { state, isLoading, setIsLoading, hasActiveQuestion, hasActivePermission } from '../lib/state';
+import {
+  state,
+  isLoading,
+  setIsLoading,
+  hasActiveQuestion,
+  hasActivePermission,
+} from '../lib/state';
 import { isAssistantMessage } from '../lib/message-metrics';
 import { Message } from './Message';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
@@ -206,7 +212,11 @@ export function MessageList() {
             }}
           </For>
         </Show>
-        <Show when={isLoading() && !hasActiveQuestion() && !hasActivePermission() && !state.streamingPartId}>
+        <Show
+          when={
+            isLoading() && !hasActiveQuestion() && !hasActivePermission() && !state.streamingPartId
+          }
+        >
           <LoadingRow />
         </Show>
       </div>
