@@ -40,8 +40,7 @@ export class ContextTreeProvider
     return this.sidebar.getContextFiles().map((f) => {
       const item = new ContextItem(f.relativePath, vscode.TreeItemCollapsibleState.None);
       item.description = f.type === 'directory' ? 'folder' : undefined;
-      item.iconPath =
-        f.type === 'directory' ? vscode.ThemeIcon.Folder : vscode.ThemeIcon.File;
+      item.iconPath = f.type === 'directory' ? vscode.ThemeIcon.Folder : vscode.ThemeIcon.File;
       item.contextValue = 'contextFile';
       item.tooltip = f.path;
       item.command = {
@@ -77,9 +76,7 @@ export class ContextTreeProvider
             path: uri.fsPath,
             relativePath,
             type:
-              stat.type & vscode.FileType.Directory
-                ? ('directory' as const)
-                : ('file' as const),
+              stat.type & vscode.FileType.Directory ? ('directory' as const) : ('file' as const),
           };
         } catch {
           return null;

@@ -26,6 +26,10 @@ import {
   removeQuestion,
   removeContextFile,
   markSessionSeen,
+  getPermissionModeForSession,
+  removePermissionModeForSession,
+  resetDraftPermissionMode,
+  setPermissionModeForSession,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage } from '../../shared/protocol';
@@ -44,6 +48,10 @@ import { getWorkspaceRelativePath } from '../lib/path-display';
 let initialized = false;
 let handlersRegistered = false;
 let currentWorkspacePath: string | null = null;
+
+function shouldAutoApprovePermissions(sessionId: string) {
+  return getPermissionModeForSession(sessionId) === 'full';
+}
 
 function normalizeProjectPath(path: string | null | undefined): string | null {
   if (!path) return null;
@@ -281,7 +289,10 @@ export async function selectSession(id: string) {
   markSessionSeen(id);
   clearMessages();
   try {
-    const [session, msgs] = await Promise.all([client.session.get(id), client.session.messages(id)]);
+    const [session, msgs] = await Promise.all([
+      client.session.get(id),
+      client.session.messages(id),
+    ]);
     upsertSession(session);
     setState('messages', msgs);
     await loadQuestions().catch(() => {});
@@ -307,7 +318,10 @@ async function syncSession(sessionId: string) {
   upsertSession(session);
 }
 
-export async function createSession(title?: string): Promise<string | null> {
+export async function createSession(
+  title?: string,
+  initialPermissionMode?: 'default' | 'full'
+): Promise<string | null> {
   try {
     const session = await client.session.create(title ? { title } : undefined);
     upsertSession(session);
@@ -315,6 +329,10 @@ export async function createSession(title?: string): Promise<string | null> {
     setState('sessionStatus', { ...state.sessionStatus, [session.id]: { type: 'idle' } });
     persistActiveSessionId(session.id);
     markSessionSeen(session.id);
+    if (initialPermissionMode === 'full') {
+      setPermissionModeForSession(session.id, 'full');
+    }
+    resetDraftPermissionMode();
     clearMessages();
     setIsLoading(false);
     return session.id;
@@ -327,6 +345,7 @@ export async function createSession(title?: string): Promise<string | null> {
 export async function deleteSession(id: string) {
   try {
     await client.session.delete(id);
+    removePermissionModeForSession(id);
     setState(
       'sessions',
       state.sessions.filter((s) => s.id !== id)
@@ -345,7 +364,7 @@ export async function deleteSession(id: string) {
 export async function sendMessage(text: string, options?: { noReply?: boolean }) {
   let sessionId = state.activeSessionId;
   if (!sessionId) {
-    sessionId = await createSession();
+    sessionId = await createSession(undefined, getPermissionModeForSession(null));
     if (!sessionId) return;
   }
 
@@ -440,7 +459,9 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     setIsLoading(false);
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
     if (body.model) {
-      setError(`Failed to send with ${body.model.providerID}/${body.model.modelID}: ${baseMessage}`);
+      setError(
+        `Failed to send with ${body.model.providerID}/${body.model.modelID}: ${baseMessage}`
+      );
       return;
     }
     setError(baseMessage);
@@ -472,7 +493,10 @@ export async function compactSession() {
   try {
     setIsLoading(true);
     await client.session.compact(state.activeSessionId);
-    await Promise.all([syncSession(state.activeSessionId), syncSessionMessages(state.activeSessionId)]);
+    await Promise.all([
+      syncSession(state.activeSessionId),
+      syncSessionMessages(state.activeSessionId),
+    ]);
     setIsLoading(false);
   } catch (err) {
     setIsLoading(false);
@@ -526,6 +550,25 @@ export async function respondQuestion(requestID: string, answers: Array<Array<st
   }
 }
 
+async function autoApprovePermissionsForSession(permissions: Permission[]) {
+  await Promise.all(
+    permissions.map((permission) =>
+      respondPermission(permission.sessionID, permission.id, 'allow').catch(() => {})
+    )
+  );
+}
+
+export async function updatePermissionModeForSession(
+  mode: 'default' | 'full',
+  sessionId = state.activeSessionId
+) {
+  setPermissionModeForSession(sessionId, mode);
+  if (mode !== 'full' || !sessionId) return;
+  await autoApprovePermissionsForSession(
+    state.permissions.filter((permission) => permission.sessionID === sessionId)
+  );
+}
+
 export async function rejectQuestion(requestID: string) {
   try {
     await client.question.reject(requestID);
@@ -554,11 +597,13 @@ function registerEventHandlers() {
 
   serverEvents.on('session.deleted', (data) => {
     const id = (getProps(data)?.info as { id: string } | undefined)?.id;
-    if (id)
+    if (id) {
+      removePermissionModeForSession(id);
       setState(
         'sessions',
         state.sessions.filter((s) => s.id !== id)
       );
+    }
   });
 
   serverEvents.on('session.status', (data) => {
@@ -625,7 +670,13 @@ function registerEventHandlers() {
 
   serverEvents.on('permission.updated', (data) => {
     const props = getProps(data);
-    if (props) addPermission(props as Permission);
+    if (!props) return;
+    const permission = props as Permission;
+    if (shouldAutoApprovePermissions(permission.sessionID)) {
+      void respondPermission(permission.sessionID, permission.id, 'allow');
+      return;
+    }
+    addPermission(permission);
   });
 
   serverEvents.on('permission.replied', (data) => {

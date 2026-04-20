@@ -37,8 +37,7 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   async captureTerminalSelection(): Promise<
-    | { ok: true; terminalName: string }
-    | { ok: false; reason: 'no-terminal' | 'empty-selection' }
+    { ok: true; terminalName: string } | { ok: false; reason: 'no-terminal' | 'empty-selection' }
   > {
     const terminal = vscode.window.activeTerminal;
     if (!terminal) {

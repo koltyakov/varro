@@ -5,7 +5,7 @@ import {
   showSettings,
   isSessionUnread,
 } from '../lib/state';
-import { Show, For, createSignal, onCleanup, onMount } from 'solid-js';
+import { Show, For, createSignal, onMount } from 'solid-js';
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -85,6 +85,7 @@ export function Chat() {
 
 function SessionListView() {
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
+  // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
 
   function handleKeydown(e: KeyboardEvent) {
@@ -132,13 +133,7 @@ function SessionListView() {
   });
 
   return (
-    // oxlint-disable-next-line solid/no-react-specific-props
-    <div
-      ref={containerRef}
-      class="session-list-view"
-      tabindex="-1"
-      onKeyDown={handleKeydown}
-    >
+    <div ref={containerRef} class="session-list-view" tabindex="-1" onKeyDown={handleKeydown}>
       <Show
         when={state.sessions.length > 0}
         fallback={<div class="session-empty">No sessions yet</div>}
@@ -152,7 +147,8 @@ function SessionListView() {
               const t = status()?.type;
               return t === 'busy' || t === 'retry';
             };
-            const isUnread = () => !isRunning() && isSessionUnread(session.id, session.time.updated);
+            const isUnread = () =>
+              !isRunning() && isSessionUnread(session.id, session.time.updated);
             const indicatorTitle = () => {
               if (isRunning()) return status()?.type === 'retry' ? 'Retrying' : 'Running';
               if (isUnread()) return 'Updated since last viewed';

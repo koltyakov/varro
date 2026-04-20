@@ -1022,10 +1022,30 @@ input:focus-visible {
   border-color: color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
 }
 
+.toolbar-picker.icon-only {
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+}
+
 .toolbar-picker .codicon-chevron {
   font-size: 10px;
   margin-left: 1px;
   opacity: 0.5;
+}
+
+.permission-mode-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--color-vscode-muted);
+}
+
+.permission-mode-icon.full {
+  color: var(--color-vscode-warning);
 }
 
 .toolbar-popover {
@@ -1078,8 +1098,10 @@ input:focus-visible {
   flex-shrink: 0;
   margin-left: 6px;
   background: currentColor;
-  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z'/></svg>") center / contain no-repeat;
-  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z'/></svg>") center / contain no-repeat;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z'/></svg>")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z'/></svg>")
+    center / contain no-repeat;
 }
 
 .toolbar-popover-header {
@@ -1269,7 +1291,10 @@ input:focus-visible {
   padding: 2px 7px;
   border-radius: 999px;
   cursor: pointer;
-  transition: color 0.1s, background-color 0.1s, border-color 0.1s;
+  transition:
+    color 0.1s,
+    background-color 0.1s,
+    border-color 0.1s;
   flex-shrink: 0;
 }
 
@@ -1293,7 +1318,9 @@ input:focus-visible {
   opacity: 0.5;
   padding: 2px;
   cursor: pointer;
-  transition: color 0.1s, opacity 0.1s;
+  transition:
+    color 0.1s,
+    opacity 0.1s;
   flex-shrink: 0;
 }
 
@@ -1365,7 +1392,9 @@ input:focus-visible {
   border: none;
   background: none;
   font-size: 10px;
-  transition: color 0.1s, opacity 0.1s;
+  transition:
+    color 0.1s,
+    opacity 0.1s;
 }
 
 .chat-attachment-chip .chip-remove:hover {
@@ -1693,7 +1722,9 @@ kbd {
   flex-shrink: 0;
   color: var(--color-vscode-fg);
   opacity: 0.35;
-  transition: transform 0.1s, opacity 0.1s;
+  transition:
+    transform 0.1s,
+    opacity 0.1s;
 }
 
 .chat-tool-invocation-part .tool-invocation-header:hover .tool-invocation-chevron {
@@ -2649,7 +2680,9 @@ kbd {
   justify-content: center;
   border-radius: 3px;
   border: 1.5px solid color-mix(in srgb, var(--color-vscode-muted) 50%, transparent);
-  transition: border-color 0.1s, background-color 0.1s;
+  transition:
+    border-color 0.1s,
+    background-color 0.1s;
 }
 
 .question-option:hover .question-checkbox {

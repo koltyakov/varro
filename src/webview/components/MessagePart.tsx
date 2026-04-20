@@ -21,7 +21,11 @@ export function MessagePart(props: {
       case 'tool':
         return <ToolCall part={part} />;
       case 'reasoning':
-        return <Show when={showThinking()}><ReasoningBlock text={part.text} /></Show>;
+        return (
+          <Show when={showThinking()}>
+            <ReasoningBlock text={part.text} />
+          </Show>
+        );
       case 'agent':
         return (
           <div class="chat-subtask-part">

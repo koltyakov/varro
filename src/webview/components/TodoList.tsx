@@ -31,7 +31,14 @@ export function TodoList() {
           ({completed()}/{total()})
         </span>
         <span class="ml-auto flex items-center text-vscode-muted/70">
-          <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round">
+          <svg
+            class="h-3.5 w-3.5"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.25"
+            stroke-linecap="round"
+          >
             <path d="M3 5h10M3 8h10M3 11h6" />
           </svg>
         </span>
@@ -65,7 +72,15 @@ function TodoItem(props: { todo: Todo }) {
       case 'in_progress':
         return (
           <svg class="h-3.5 w-3.5 text-vscode-accent" viewBox="0 0 16 16">
-            <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.25" opacity="0.45" />
+            <circle
+              cx="8"
+              cy="8"
+              r="6.25"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.25"
+              opacity="0.45"
+            />
             <circle cx="8" cy="8" r="3" fill="currentColor" />
           </svg>
         );

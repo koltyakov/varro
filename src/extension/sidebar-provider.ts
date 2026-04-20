@@ -285,9 +285,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             path: uri.fsPath,
             relativePath,
             type:
-              stat.type & vscode.FileType.Directory
-                ? ('directory' as const)
-                : ('file' as const),
+              stat.type & vscode.FileType.Directory ? ('directory' as const) : ('file' as const),
           };
         } catch {
           return null;
@@ -322,7 +320,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const ranked = files
       .map((file) => ({ file, score: getFileSearchScore(file.relativePath, normalizedQuery) }))
       .filter((item) => item.score > Number.NEGATIVE_INFINITY)
-      .toSorted((a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath))
+      .toSorted(
+        (a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath)
+      )
       .slice(0, Math.max(1, Math.min(limit, 30)))
       .map((item) => item.file);
 

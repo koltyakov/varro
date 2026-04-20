@@ -33,7 +33,10 @@ export function MessageList() {
 
   function distanceFromBottom() {
     if (!containerRef) return Number.POSITIVE_INFINITY;
-    return Math.max(0, containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight);
+    return Math.max(
+      0,
+      containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight
+    );
   }
 
   function performScroll() {
@@ -161,7 +164,8 @@ export function MessageList() {
                   if (!isAssistantMessage(msgs[i].info)) continue;
                   const prev = msgs[i].info as AssistantMessage;
                   if (prev.mode === 'subagent') continue;
-                  const modelChanged = prev.providerID !== cur.providerID || prev.modelID !== cur.modelID;
+                  const modelChanged =
+                    prev.providerID !== cur.providerID || prev.modelID !== cur.modelID;
                   const variantChanged = (prev.variant || '') !== (cur.variant || '');
                   if (!modelChanged && !variantChanged) return null;
                   const provider = state.providers.find((p) => p.id === cur.providerID);
@@ -169,7 +173,11 @@ export function MessageList() {
                   const parts: string[] = [];
                   if (modelChanged) parts.push(modelName);
                   if (cur.variant) parts.push(formatThinkingLabel(cur.variant));
-                  else if (variantChanged && !modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)) parts.push('No thinking');
+                  else if (
+                    variantChanged &&
+                    !modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
+                  )
+                    parts.push('No thinking');
                   return parts.join(' · ');
                 }
                 return null;
@@ -187,7 +195,11 @@ export function MessageList() {
                       msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
                     }`}
                   >
-                    <Message info={msg.info} parts={msg.parts} isLastAssistant={msg.info.id === lastAssistantID()} />
+                    <Message
+                      info={msg.info}
+                      parts={msg.parts}
+                      isLastAssistant={msg.info.id === lastAssistantID()}
+                    />
                   </div>
                 </>
               );
@@ -242,12 +254,15 @@ function LoadingRow() {
   return (
     <div class="interactive-item-container interactive-response interactive-loading-row">
       <div class={`loading-indicator ${isStale() ? 'stale' : ''}`}>
-        <Show when={isStale()} fallback={
-          <span class="shimmer-progress loading-verb">
-            {verb()}
-            <span class="chat-animated-ellipsis" />
-          </span>
-        }>
+        <Show
+          when={isStale()}
+          fallback={
+            <span class="shimmer-progress loading-verb">
+              {verb()}
+              <span class="chat-animated-ellipsis" />
+            </span>
+          }
+        >
           <span>Session may be stale</span>
         </Show>
         <Show when={formatElapsed()}>

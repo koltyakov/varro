@@ -130,11 +130,7 @@ export function ToolCall(props: { part: ToolPart }) {
   );
 }
 
-function FileEditCard(props: {
-  toolName: string;
-  toolState: ToolPart['state'];
-  filePath: string;
-}) {
+function FileEditCard(props: { toolName: string; toolState: ToolPart['state']; filePath: string }) {
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
   const isRunning = () => s().status === 'running';
@@ -173,8 +169,7 @@ function FileEditCard(props: {
     postMessage({ type: 'vscode/open', payload: { path: props.filePath } });
   };
 
-  const displayName = () =>
-    formatDisplayPath(props.filePath, appState.editorContext.workspacePath);
+  const displayName = () => formatDisplayPath(props.filePath, appState.editorContext.workspacePath);
 
   return (
     <div class="file-edit-line">
@@ -221,7 +216,10 @@ function GenericToolCall(props: {
         <span class="tool-invocation-title">{props.title}</span>
         <Show when={props.state.status === 'completed'}>
           <span class="tool-invocation-duration">
-            {formatDuration((props.state as ToolStateCompleted).time.end - (props.state as ToolStateCompleted).time.start)}
+            {formatDuration(
+              (props.state as ToolStateCompleted).time.end -
+                (props.state as ToolStateCompleted).time.start
+            )}
           </span>
         </Show>
         <Show when={props.state.status === 'error'}>

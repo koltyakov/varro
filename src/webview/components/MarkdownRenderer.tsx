@@ -37,7 +37,9 @@ function isAbsolutePath(path: string) {
   return normalizedPath.startsWith('/') || /^[A-Za-z]:\//.test(normalizedPath);
 }
 
-function splitPathReference(raw: string): { path: string; line?: number; lineSuffix?: string } | null {
+function splitPathReference(
+  raw: string
+): { path: string; line?: number; lineSuffix?: string } | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
 

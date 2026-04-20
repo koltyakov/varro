@@ -21,9 +21,18 @@ import {
   toggleThinking,
   enqueueMessage,
   removeQueuedMessage,
+  getPermissionModeForSession,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
-import { sendMessage, abortSession, shareSession, unshareSession, createSession, compactSession } from '../hooks/useOpenCode';
+import {
+  sendMessage,
+  abortSession,
+  shareSession,
+  unshareSession,
+  createSession,
+  compactSession,
+  updatePermissionModeForSession,
+} from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel, formatThinkingLabel } from './ModelPicker';
 import {
   isAssistantMessage,
@@ -34,7 +43,7 @@ import {
 import { getLeafPathName } from '../lib/path-display';
 import { TodoList } from './TodoList';
 import type { Agent, Part, TextPart } from '../types';
-import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
+import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
 
 export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -46,13 +55,15 @@ export function ChatInput() {
   const [agentFocusIndex, setAgentFocusIndex] = createSignal(0);
   const [showBusyMenu, setShowBusyMenu] = createSignal(false);
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
+  const [showPermissionModePicker, setShowPermissionModePicker] = createSignal(false);
   const [showContextPopup, setShowContextPopup] = createSignal(false);
 
-  type PopupKind = 'agent' | 'variant' | 'model' | 'context' | 'busy';
+  type PopupKind = 'agent' | 'variant' | 'model' | 'permission' | 'context' | 'busy';
   const closePopups = (except?: PopupKind) => {
     if (except !== 'agent') setShowAgentPicker(false);
     if (except !== 'variant') setShowVariantPicker(false);
     if (except !== 'model') setShowModelPicker(false);
+    if (except !== 'permission') setShowPermissionModePicker(false);
     if (except !== 'context') setShowContextPopup(false);
     if (except !== 'busy') setShowBusyMenu(false);
   };
@@ -72,11 +83,9 @@ export function ChatInput() {
   const selection = () => state.editorContext.selection;
   const terminalSelection = () => state.terminalSelection;
   const activeFile = () => state.editorContext.activeFile;
-  const hasContext = () =>
-    !!activeFile() || !!terminalSelection();
+  const hasContext = () => !!activeFile() || !!terminalSelection();
 
-  const hasMentions = () =>
-    files().length > 0 || clipboardImages().length > 0;
+  const hasMentions = () => files().length > 0 || clipboardImages().length > 0;
 
   const activeContext = () => {
     const file = activeFile();
@@ -173,7 +182,7 @@ export function ChatInput() {
         value: `@${agent.name} `,
       }));
 
-    const files = (rawQuery ? fileSearchResults() : []).map((file) => ({
+    const completionFiles = (rawQuery ? fileSearchResults() : []).map((file) => ({
       key: `file:${file.path}`,
       type: 'file' as const,
       label: `@${file.relativePath}`,
@@ -185,7 +194,7 @@ export function ChatInput() {
       file,
     }));
 
-    return [...files, ...agents].slice(0, 10);
+    return [...completionFiles, ...agents].slice(0, 10);
   });
 
   const slashCompletions = createMemo(() => {
@@ -283,7 +292,8 @@ export function ChatInput() {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       if (showingCompletions) {
         const completion = activeCompletion();
-        const selected = composerCompletions()[Math.min(completionIndex(), composerCompletions().length - 1)];
+        const selected =
+          composerCompletions()[Math.min(completionIndex(), composerCompletions().length - 1)];
 
         if (completion?.type === 'slash' && selected && 'name' in selected) {
           e.preventDefault();
@@ -609,6 +619,7 @@ export function ChatInput() {
         setShowAgentPicker(false);
         setShowModelPicker(false);
         setShowVariantPicker(false);
+        setShowPermissionModePicker(false);
         setShowBusyMenu(false);
         setShowContextPopup(false);
         setCompletionIndex(0);
@@ -663,7 +674,7 @@ export function ChatInput() {
   });
 
   createEffect(() => {
-    state.activeSessionId;
+    void state.activeSessionId;
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
@@ -686,8 +697,8 @@ export function ChatInput() {
   const canSend = () =>
     !hasActiveQuestion() &&
     (inputText().trim().length > 0 ||
-    state.droppedFiles.length > 0 ||
-    state.clipboardImages.length > 0);
+      state.droppedFiles.length > 0 ||
+      state.clipboardImages.length > 0);
 
   const currentModel = () => {
     const selected = resolveSelectedModel(
@@ -803,6 +814,8 @@ export function ChatInput() {
       : variants[0];
   });
 
+  const activePermissionMode = createMemo(() => getPermissionModeForSession(state.activeSessionId));
+
   const queuedForSession = createMemo(() =>
     state.activeSessionId
       ? state.queuedMessages.filter((item) => item.sessionId === state.activeSessionId)
@@ -843,7 +856,16 @@ export function ChatInput() {
             {(item) => (
               <div class="chat-queue-item" role="listitem" title={item.text}>
                 <span class="chat-queue-icon" aria-hidden="true">
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
                     <path d="M3 4h10M3 8h10M3 12h6" />
                   </svg>
                 </span>
@@ -854,7 +876,16 @@ export function ChatInput() {
                   title="Send now as Steer"
                   aria-label="Send as Steer"
                 >
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
                     <path d="M8 13V3M4 7l4-4 4 4" />
                   </svg>
                   <span class="chat-queue-action-label">Steer</span>
@@ -877,7 +908,7 @@ export function ChatInput() {
 
       <div
         ref={containerRef}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -994,6 +1025,7 @@ export function ChatInput() {
               setShowAgentPicker(false);
               setShowModelPicker(false);
               setShowVariantPicker(false);
+              setShowPermissionModePicker(false);
               setShowBusyMenu(false);
             }}
             onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
@@ -1020,7 +1052,9 @@ export function ChatInput() {
         </div>
 
         <div class="chat-input-toolbars">
-          <div class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() ? ' showing-context-popup' : ''}`}>
+          <div
+            class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
+          >
             <Show when={state.agents.length > 0}>
               <div style={{ position: 'relative' }}>
                 <button
@@ -1034,7 +1068,17 @@ export function ChatInput() {
                   title="Select agent"
                 >
                   <span class="toolbar-picker-label">{selectedAgentLabel()}</span>
-                  <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <svg
+                    class="codicon-chevron"
+                    width="10"
+                    height="10"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
                     <path d="M4 6l4 4 4-4" />
                   </svg>
                 </button>
@@ -1081,7 +1125,17 @@ export function ChatInput() {
               <Show when={currentModel().modelName} fallback={<span>Model</span>}>
                 <span class="toolbar-picker-label model-name">{currentModel().modelName}</span>
               </Show>
-              <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <svg
+                class="codicon-chevron"
+                width="10"
+                height="10"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
                 <path d="M4 6l4 4 4-4" />
               </svg>
             </button>
@@ -1097,8 +1151,20 @@ export function ChatInput() {
                   }}
                   title="Thinking level"
                 >
-                  <span class="toolbar-picker-label">{formatThinkingLabel(effectiveVariant()!)}</span>
-                  <svg class="codicon-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <span class="toolbar-picker-label">
+                    {formatThinkingLabel(effectiveVariant()!)}
+                  </span>
+                  <svg
+                    class="codicon-chevron"
+                    width="10"
+                    height="10"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
                     <path d="M4 6l4 4 4-4" />
                   </svg>
                 </button>
@@ -1127,6 +1193,48 @@ export function ChatInput() {
                 </Show>
               </div>
             </Show>
+
+            <div style={{ position: 'relative' }}>
+              <button
+                class="toolbar-picker icon-only"
+                onClick={() => {
+                  const next = !showPermissionModePicker();
+                  closePopups(next ? 'permission' : undefined);
+                  setShowPermissionModePicker(next);
+                }}
+                title={
+                  activePermissionMode() === 'full'
+                    ? 'Full access permissions'
+                    : 'Default permissions'
+                }
+                aria-label={
+                  activePermissionMode() === 'full'
+                    ? 'Full access permissions'
+                    : 'Default permissions'
+                }
+              >
+                <PermissionModeIcon mode={activePermissionMode()} />
+              </button>
+              <Show when={showPermissionModePicker()}>
+                <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                  <div class="toolbar-popover-header">Permissions</div>
+                  <For each={PERMISSION_MODE_OPTIONS}>
+                    {(option) => (
+                      <button
+                        class={`toolbar-popover-item ${activePermissionMode() === option.mode ? 'selected' : ''}`}
+                        onClick={() => {
+                          void updatePermissionModeForSession(option.mode);
+                          setShowPermissionModePicker(false);
+                        }}
+                      >
+                        <PermissionModeIcon mode={option.mode} />
+                        <span class="min-w-0 flex-1">{option.label}</span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
 
             <Show when={contextUsage()}>
               <div style={{ position: 'relative' }}>
@@ -1178,18 +1286,21 @@ export function ChatInput() {
             </Show>
 
             <div style={{ position: 'relative' }}>
-              <Show when={isLoading() && !hasActiveQuestion() && canSend()} fallback={
-                <button
-                  class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
-                  onClick={() => canSend() && handleSend()}
-                  disabled={!canSend()}
-                  title="Send (Enter)"
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
-                  </svg>
-                </button>
-              }>
+              <Show
+                when={isLoading() && !hasActiveQuestion() && canSend()}
+                fallback={
+                  <button
+                    class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
+                    onClick={() => canSend() && handleSend()}
+                    disabled={!canSend()}
+                    title="Send (Enter)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
+                    </svg>
+                  </button>
+                }
+              >
                 <div class="send-button-group">
                   <button
                     class="chat-send-button enabled send-main"
@@ -1209,7 +1320,16 @@ export function ChatInput() {
                     }}
                     title="More send options"
                   >
-                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg
+                      width="8"
+                      height="8"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
                       <path d="M4 10l4-4 4 4" />
                     </svg>
                   </button>
@@ -1220,10 +1340,22 @@ export function ChatInput() {
                 <div class="toolbar-popover busy-menu" onClick={(e) => e.stopPropagation()}>
                   <button
                     class="toolbar-popover-item"
-                    onClick={() => { handleSend(); setShowBusyMenu(false); }}
+                    onClick={() => {
+                      handleSend();
+                      setShowBusyMenu(false);
+                    }}
                   >
                     <span class="busy-menu-icon">
-                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
                         <path d="M8 3v10M3 8h10" />
                       </svg>
                     </span>
@@ -1232,10 +1364,22 @@ export function ChatInput() {
                   </button>
                   <button
                     class="toolbar-popover-item"
-                    onClick={() => { handleSend('steer'); setShowBusyMenu(false); }}
+                    onClick={() => {
+                      handleSend('steer');
+                      setShowBusyMenu(false);
+                    }}
                   >
                     <span class="busy-menu-icon">
-                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
                         <path d="M8 2l1.8 4.8H15l-4 3.4 1.6 5L8 12l-4.6 3.2 1.6-5-4-3.4h5.2z" />
                       </svg>
                     </span>
@@ -1244,10 +1388,23 @@ export function ChatInput() {
                   </button>
                   <button
                     class="toolbar-popover-item"
-                    onClick={() => { abortSession(); handleSend(); setShowBusyMenu(false); }}
+                    onClick={() => {
+                      abortSession();
+                      handleSend();
+                      setShowBusyMenu(false);
+                    }}
                   >
                     <span class="busy-menu-icon" style={{ color: 'var(--color-vscode-error)' }}>
-                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
                         <path d="M2 3l12 10M14 3L2 13" />
                       </svg>
                     </span>
@@ -1352,6 +1509,7 @@ function CompletionMenu(props: {
   selectedIndex: number;
   onSelect: (item: CompletionItem) => void;
 }) {
+  // oxlint-disable-next-line no-unassigned-vars
   let menuRef: HTMLDivElement | undefined;
   const itemRefs: HTMLButtonElement[] = [];
 
@@ -1386,11 +1544,14 @@ function CompletionMenu(props: {
             >
               <Show when={!isSlash}>
                 <span class="composer-completion-icon">
-                  <Show when={item.type === 'agent'} fallback={
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-                    </svg>
-                  }>
+                  <Show
+                    when={item.type === 'agent'}
+                    fallback={
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
+                      </svg>
+                    }
+                  >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                       <path d="M2.5 1h3.4l.6.5.5.5H14l.5.5v10l-.5.5H2l-.5-.5v-11L2.5 1zm0 1v3h4l.5.5.5.5h4v-3H8.5L8 2.5l-.5-.5H2.5zm0 10h11V6h-4l-.5-.5L8.5 5h-6v7z" />
                     </svg>
@@ -1446,6 +1607,30 @@ function AttachmentChip(props: {
       <span class="chip-label">{props.label}</span>
       <Show when={props.detail}>
         <span class="chip-detail">{props.detail}</span>
+      </Show>
+    </span>
+  );
+}
+
+const PERMISSION_MODE_OPTIONS: Array<{ mode: PermissionMode; label: string }> = [
+  { mode: 'default', label: 'Default' },
+  { mode: 'full', label: 'Full access' },
+];
+
+function PermissionModeIcon(props: { mode: PermissionMode }) {
+  return (
+    <span class={`permission-mode-icon ${props.mode}`} aria-hidden="true">
+      <Show
+        when={props.mode === 'full'}
+        fallback={
+          <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+            <path d="M4.75 1.75c.41 0 .75.34.75.75V7h.5V1.75a.75.75 0 011.5 0V7h.5V2.25a.75.75 0 011.5 0V7H10V3.25a.75.75 0 011.5 0v5.1l1.05-.87a1.2 1.2 0 011.64.06c.35.35.39.9.1 1.3l-2.9 3.94a2.75 2.75 0 01-2.21 1.12H7.4a3.9 3.9 0 01-3.06-1.48L2.6 10.2a1.1 1.1 0 01.1-1.48c.43-.37 1.08-.36 1.49.02l.56.53V2.5c0-.41.34-.75.75-.75z" />
+          </svg>
+        }
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+          <path d="M8 1.5l4.75 1.8v3.64c0 2.96-1.84 5.4-4.75 7.56C5.09 12.34 3.25 9.9 3.25 6.94V3.3L8 1.5zm0 1.6L4.75 4.33v2.6c0 2.32 1.34 4.33 3.25 5.9 1.91-1.57 3.25-3.58 3.25-5.9v-2.6L8 3.1z" />
+        </svg>
       </Show>
     </span>
   );

@@ -12,11 +12,17 @@ import type {
   Agent,
   Provider,
 } from '../types';
-import type { EditorContext, DroppedFile, ServerStatus } from '../../shared/protocol';
+import type {
+  EditorContext,
+  DroppedFile,
+  PermissionMode,
+  ServerStatus,
+} from '../../shared/protocol';
 
 const STORAGE_KEYS = {
   selectedAgent: 'opencode.selectedAgent',
   selectedModel: 'opencode.selectedModel',
+  sessionPermissionModes: 'opencode.sessionPermissionModes',
   hiddenProviders: 'opencode.hiddenProviders',
   hiddenModels: 'opencode.hiddenModels',
   lastSeenSessions: 'opencode.lastSeenSessions',
@@ -64,6 +70,7 @@ interface AppState {
   allAgents: Agent[];
   providers: Provider[];
   providerDefaults: Record<string, string>;
+  sessionPermissionModes: Record<string, PermissionMode>;
   selectedAgent: string | null;
   selectedModel: SelectedModel | null;
   hiddenProviders: string[];
@@ -121,6 +128,8 @@ export const [state, setState] = createStore<AppState>({
   allAgents: [],
   providers: [],
   providerDefaults: {},
+  sessionPermissionModes:
+    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
   selectedAgent: readStored<string>(STORAGE_KEYS.selectedAgent),
   selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
@@ -149,10 +158,7 @@ export function removeQueuedMessage(id: string) {
 }
 
 export function clearQueuedMessagesForSession(sessionId: string) {
-  setState(
-    'queuedMessages',
-    (items) => items.filter((item) => item.sessionId !== sessionId)
-  );
+  setState('queuedMessages', (items) => items.filter((item) => item.sessionId !== sessionId));
 }
 
 export function persistActiveSessionId(id: string | null) {
@@ -206,6 +212,8 @@ export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
+export const [draftPermissionMode, setDraftPermissionMode] =
+  createSignal<PermissionMode>('default');
 export const [theme, setTheme] = createSignal<'dark' | 'light'>(
   initialWebviewState.theme ||
     ((window as unknown as Record<string, string>).__initialTheme as 'dark' | 'light') ||
@@ -214,6 +222,44 @@ export const [theme, setTheme] = createSignal<'dark' | 'light'>(
 
 export function requestComposerFocus() {
   setComposerFocusKey((value) => value + 1);
+}
+
+export function getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode {
+  if (!sessionId) return draftPermissionMode();
+  return state.sessionPermissionModes[sessionId] || 'default';
+}
+
+export function setPermissionModeForSession(
+  sessionId: string | null | undefined,
+  mode: PermissionMode
+) {
+  if (!sessionId) {
+    setDraftPermissionMode(mode);
+    return;
+  }
+
+  const nextModes =
+    mode === 'default'
+      ? Object.fromEntries(
+          Object.entries(state.sessionPermissionModes).filter(([id]) => id !== sessionId)
+        )
+      : { ...state.sessionPermissionModes, [sessionId]: mode };
+
+  setState('sessionPermissionModes', nextModes);
+  writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+}
+
+export function removePermissionModeForSession(sessionId: string) {
+  if (!state.sessionPermissionModes[sessionId]) return;
+  const nextModes = Object.fromEntries(
+    Object.entries(state.sessionPermissionModes).filter(([id]) => id !== sessionId)
+  );
+  setState('sessionPermissionModes', nextModes);
+  writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+}
+
+export function resetDraftPermissionMode() {
+  setDraftPermissionMode('default');
 }
 
 export function addContextFile(file: DroppedFile) {

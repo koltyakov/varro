@@ -1,7 +1,15 @@
 import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
 import { client } from '../lib/client';
 import { isAssistantMessage } from '../lib/message-metrics';
-import type { AssistantMessage, FileDiff, FilePart, Message as MessageType, Part, TextPart, ToolPart } from '../types';
+import type {
+  AssistantMessage,
+  FileDiff,
+  FilePart,
+  Message as MessageType,
+  Part,
+  TextPart,
+  ToolPart,
+} from '../types';
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
 import { state } from '../lib/state';
@@ -135,9 +143,7 @@ function UserMessageContent(props: { parts: Part[] }) {
 
   return (
     <div class="rendered-markdown">
-      <For each={parsed().messageTexts}>
-        {(text) => <p class="user-message-text">{text}</p>}
-      </For>
+      <For each={parsed().messageTexts}>{(text) => <p class="user-message-text">{text}</p>}</For>
       <Show when={!hasContent()}>
         <p class="user-message-empty">(no content)</p>
       </Show>
@@ -148,9 +154,7 @@ function UserMessageContent(props: { parts: Part[] }) {
           </For>
         </div>
       </Show>
-      <For each={parsed().imageParts}>
-        {(part) => <MessagePart part={part} />}
-      </For>
+      <For each={parsed().imageParts}>{(part) => <MessagePart part={part} />}</For>
     </div>
   );
 }
@@ -166,7 +170,9 @@ function isStandaloneFileReference(text: string): boolean {
 
 function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const att = () => props.attachment;
-  const isFolder = () => att().type === 'file-reference' && (att() as Extract<MessageAttachment, { type: 'file-reference' }>).isDirectory;
+  const isFolder = () =>
+    att().type === 'file-reference' &&
+    (att() as Extract<MessageAttachment, { type: 'file-reference' }>).isDirectory;
   const isTerminal = () => att().type === 'terminal-selection';
 
   const handleClick = () => {
@@ -205,7 +211,11 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const detail = () => {
     const a = att();
     if (a.type === 'file-selection') {
-      return <span class="chip-detail">L{a.startLine}-{a.endLine}</span>;
+      return (
+        <span class="chip-detail">
+          L{a.startLine}-{a.endLine}
+        </span>
+      );
     }
     if (a.type === 'terminal-selection') {
       return <span class="chip-detail">terminal</span>;
@@ -274,9 +284,19 @@ function isFileEditPart(part: Part): boolean {
   if (part.type !== 'tool') return false;
   const name = (part as ToolPart).tool.toLowerCase();
   return (
-    ['edit', 'write', 'create', 'file_edit', 'file_write', 'file_create',
-     'update_file', 'replace', 'insert', 'apply_edit', 'apply_diff'].includes(name) &&
-    getToolFilePath(part) !== null
+    [
+      'edit',
+      'write',
+      'create',
+      'file_edit',
+      'file_write',
+      'file_create',
+      'update_file',
+      'replace',
+      'insert',
+      'apply_edit',
+      'apply_diff',
+    ].includes(name) && getToolFilePath(part) !== null
   );
 }
 
@@ -289,7 +309,11 @@ function deduplicateFileEdits(parts: Part[]): Part[] {
     }
     const path = getToolFilePath(parts[i]);
     let last = i;
-    while (last + 1 < parts.length && isFileEditPart(parts[last + 1]) && getToolFilePath(parts[last + 1]) === path) {
+    while (
+      last + 1 < parts.length &&
+      isFileEditPart(parts[last + 1]) &&
+      getToolFilePath(parts[last + 1]) === path
+    ) {
       last++;
     }
     result.push(parts[last]);

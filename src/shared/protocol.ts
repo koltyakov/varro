@@ -25,6 +25,8 @@ export interface DroppedFile {
   type: 'file' | 'directory';
 }
 
+export type PermissionMode = 'default' | 'full';
+
 export type ServerStatus =
   | { state: 'starting' }
   | { state: 'running'; url: string }
@@ -41,7 +43,10 @@ export type ExtensionMessage =
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }
   | { type: 'files/removed'; payload: { path: string } }
-  | { type: 'files/search-results'; payload: { requestId: number; query: string; files: DroppedFile[] } }
+  | {
+      type: 'files/search-results';
+      payload: { requestId: number; query: string; files: DroppedFile[] };
+    }
   | { type: 'theme/update'; payload: { theme: 'dark' | 'light' } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session' }

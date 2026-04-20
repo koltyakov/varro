@@ -16,9 +16,16 @@ export function ModelPicker(props: {
   const visibleProviders = createMemo(() => getVisibleProviders(state.providers));
 
   const flatItems = createMemo(() => {
-    const items: Array<{ providerID: string; modelID: string; name: string; contextLimit?: number }> = [];
+    const items: Array<{
+      providerID: string;
+      modelID: string;
+      name: string;
+      contextLimit?: number;
+    }> = [];
     for (const provider of visibleProviders()) {
-      for (const model of Object.values(provider.models).toSorted((a, b) => a.name.localeCompare(b.name))) {
+      for (const model of Object.values(provider.models).toSorted((a, b) =>
+        a.name.localeCompare(b.name)
+      )) {
         items.push({
           providerID: provider.id,
           modelID: model.id,
@@ -33,7 +40,9 @@ export function ModelPicker(props: {
   const initialIndex = () => {
     const sel = state.selectedModel;
     if (!sel) return 0;
-    const idx = flatItems().findIndex((i) => i.providerID === sel.providerID && i.modelID === sel.modelID);
+    const idx = flatItems().findIndex(
+      (i) => i.providerID === sel.providerID && i.modelID === sel.modelID
+    );
     return idx >= 0 ? idx : 0;
   };
 
@@ -184,13 +193,24 @@ export function getVariantsForModel(
 export function modelSupportsReasoning(
   providerID: string | null,
   modelID: string | null,
-  providers: { id: string; models: { [key: string]: { capabilities?: { reasoning?: boolean }; variants?: { [key: string]: unknown } } } }[]
+  providers: {
+    id: string;
+    models: {
+      [key: string]: {
+        capabilities?: { reasoning?: boolean };
+        variants?: { [key: string]: unknown };
+      };
+    };
+  }[]
 ): boolean {
   if (!providerID || !modelID) return false;
   const provider = providers.find((p) => p.id === providerID);
   const model = provider?.models[modelID];
   if (!model) return false;
-  return !!model.capabilities?.reasoning || (model.variants != null && Object.keys(model.variants).length > 0);
+  return (
+    !!model.capabilities?.reasoning ||
+    (model.variants != null && Object.keys(model.variants).length > 0)
+  );
 }
 
 export function formatThinkingLabel(variant: string) {

@@ -12,7 +12,17 @@ export function DiffView(props: { diffs: FileDiff[] }) {
 function DiffItem(props: { diff: FileDiff }) {
   return (
     <div class="diff-view-item">
-      <svg class="diff-view-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <svg
+        class="diff-view-icon"
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
         <path d="M9 1H4.5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V4.5L9 1z" />
         <path d="M9 1v4h3.5" />
       </svg>

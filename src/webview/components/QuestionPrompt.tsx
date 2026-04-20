@@ -4,14 +4,9 @@ import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
 
 export function QuestionPrompt(props: { request: QuestionRequest }) {
   const questions = () => props.request.questions || [];
-  const isCustomEnabled = (questionIndex: number) =>
-    questions()[questionIndex]?.custom !== false;
-  const [selected, setSelected] = createSignal<Array<Array<string>>>(
-    questions().map(() => [])
-  );
-  const [customValues, setCustomValues] = createSignal<string[]>(
-    questions().map(() => '')
-  );
+  const isCustomEnabled = (questionIndex: number) => questions()[questionIndex]?.custom !== false;
+  const [selected, setSelected] = createSignal<Array<Array<string>>>(questions().map(() => []));
+  const [customValues, setCustomValues] = createSignal<string[]>(questions().map(() => ''));
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [currentStep, setCurrentStep] = createSignal(0);
 
@@ -24,9 +19,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     })
   );
 
-  const canSubmit = createMemo(() =>
-    normalizedAnswers().every((answer) => answer.length > 0)
-  );
+  const canSubmit = createMemo(() => normalizedAnswers().every((answer) => answer.length > 0));
   const currentQuestion = createMemo(() => questions()[currentStep()]);
   const currentAnswer = createMemo(() => normalizedAnswers()[currentStep()] || []);
   const isLastStep = createMemo(() => currentStep() >= questions().length - 1);
@@ -37,9 +30,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       prev.map((entry, index) => {
         if (index !== questionIndex) return entry;
         if (multiple) {
-          return entry.includes(label)
-            ? entry.filter((item) => item !== label)
-            : [...entry, label];
+          return entry.includes(label) ? entry.filter((item) => item !== label) : [...entry, label];
         }
         return entry[0] === label ? [] : [label];
       })
@@ -50,7 +41,9 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
   };
 
   const updateCustom = (questionIndex: number, value: string) => {
-    setCustomValues((prev) => prev.map((entry, index) => (index === questionIndex ? value : entry)));
+    setCustomValues((prev) =>
+      prev.map((entry, index) => (index === questionIndex ? value : entry))
+    );
     if (value.trim() && !questions()[questionIndex]?.multiple) {
       setSelected((prev) => prev.map((entry, index) => (index === questionIndex ? [] : entry)));
     }
@@ -100,7 +93,11 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       <div class="question-prompt-header">
         <div class="question-prompt-header-main">
           <svg class="question-prompt-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M8 15A7 7 0 108 1a7 7 0 000 14zm0-1A6 6 0 108 2a6 6 0 000 12zM7.25 4.5a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zM8 11a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+            <path
+              fill-rule="evenodd"
+              clip-rule="evenodd"
+              d="M8 15A7 7 0 108 1a7 7 0 000 14zm0-1A6 6 0 108 2a6 6 0 000 12zM7.25 4.5a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zM8 11a.75.75 0 100 1.5.75.75 0 000-1.5z"
+            />
           </svg>
           <div class="question-prompt-heading">
             <span class="question-prompt-label">Input Needed</span>
@@ -125,7 +122,8 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
               <div class="question-prompt-options">
                 <For each={question().options}>
                   {(option) => {
-                    const checked = () => (selected()[questionIndex()] || []).includes(option.label);
+                    const checked = () =>
+                      (selected()[questionIndex()] || []).includes(option.label);
                     const isMultiple = () => question().multiple;
                     return (
                       <button
