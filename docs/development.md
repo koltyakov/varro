@@ -1,6 +1,6 @@
 # Development Guide
 
-This document covers source setup, packaging, and debugging for the VS Code extension.
+This document covers source setup, packaging, and debugging for the Varro VS Code extension.
 
 ## Prerequisites
 
@@ -36,12 +36,12 @@ Package the extension:
 npm run package
 ```
 
-This produces `vscode-opencode-0.1.0.vsix` in the project root.
+This produces `varro-0.1.0.vsix` in the project root.
 
 Install it with the VS Code CLI:
 
 ```sh
-code --install-extension vscode-opencode-0.1.0.vsix
+code --install-extension varro-0.1.0.vsix
 ```
 
 You can also install it from the VS Code UI through **Extensions** -> `...` -> **Install from VSIX...**.
@@ -85,7 +85,7 @@ The webview build outputs source maps in `dist/webview/webview.js.map`.
 
 ## Connect to an Existing OpenCode Server
 
-By default, the extension tries to auto-start OpenCode on port `4096`. You can connect to an already running server instead.
+By default, Varro tries to auto-start OpenCode on port `4096`. You can connect to an already running server instead.
 
 Start OpenCode manually:
 
@@ -95,11 +95,11 @@ opencode serve --port 4096
 
 Then configure these VS Code settings as needed:
 
-- `opencode.server.port`
-- `opencode.server.autoStart`
-- `opencode.server.command`
+- `varro.server.port`
+- `varro.server.autoStart`
+- `varro.server.command`
 
-The extension checks `http://127.0.0.1:<port>/global/health` to verify the server.
+Varro checks `http://127.0.0.1:<port>/global/health` to verify the server.
 
 ## Project Structure
 

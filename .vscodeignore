@@ -12,3 +12,5 @@ tsconfig.json
 tsconfig.extension.json
 tsconfig.webview.json
 **/*.map
+docs/
+preview.html

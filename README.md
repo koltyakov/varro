@@ -1,10 +1,10 @@
-# OpenCode for VS Code
+# Varro for VS Code
 
-Use [OpenCode](https://opencode.ai) inside VS Code without leaving the editor. The extension adds a dedicated sidebar chat that connects to your local OpenCode CLI/server and keeps your current workspace context close to the conversation.
+Use [OpenCode](https://opencode.ai) inside VS Code without leaving the editor. Varro adds a dedicated sidebar chat that connects to your local OpenCode CLI/server and keeps your current workspace context close to the conversation.
 
 ## What It Does
 
-- Opens OpenCode in a VS Code sidebar view
+- Opens Varro in a VS Code sidebar view powered by OpenCode
 - Uses the active file, current selection, terminal selection, and diagnostics as live editor context
 - Lets you attach extra files and folders from the Explorer
 - Supports pasted image attachments in chat
@@ -13,7 +13,7 @@ Use [OpenCode](https://opencode.ai) inside VS Code without leaving the editor. T
 
 ## Prerequisites
 
-Before using the extension, make sure you have:
+Before using Varro, make sure you have:
 
 - [VS Code](https://code.visualstudio.com/) 1.91 or newer
 - [Node.js](https://nodejs.org/) 18 or newer
@@ -23,7 +23,7 @@ Before using the extension, make sure you have:
 npm install -g opencode-ai
 ```
 
-The extension talks to a local OpenCode server on port `4096` by default and will try to start it automatically. If your CLI lives somewhere custom, set `opencode.server.command` in VS Code settings.
+Varro talks to a local OpenCode server on port `4096` by default and will try to start it automatically. If your CLI lives somewhere custom, set `varro.server.command` in VS Code settings.
 
 ## Getting Started
 
@@ -35,12 +35,12 @@ The extension talks to a local OpenCode server on port `4096` by default and wil
    ```
 
 3. Open VS Code and launch the chat:
-   - Click the **OpenCode** icon in the Activity Bar, or
-   - Run **OpenCode: Focus Chat**
-4. Start a prompt. The extension automatically makes the active file and current selection available as context.
+   - Click the **Varro** icon in the Activity Bar, or
+   - Run **Varro: Focus Chat**
+4. Start a prompt. Varro automatically makes the active file and current selection available as context.
 5. Add more context when needed:
-   - Right-click a file or folder in Explorer and choose **OpenCode: Add to Context**
-   - Select text in the integrated terminal and run **OpenCode: Add Terminal Selection to Context**
+   - Right-click a file or folder in Explorer and choose **Varro: Add to Context**
+   - Select text in the integrated terminal and run **Varro: Add Terminal Selection to Context**
    - Press `Cmd+Shift+K` / `Ctrl+Shift+K`
    - Drag files or folders into the chat
    - Paste an image into the input box
@@ -48,27 +48,27 @@ The extension talks to a local OpenCode server on port `4096` by default and wil
 
 ## Commands
 
-- `OpenCode: Focus Chat` opens the sidebar chat. Shortcut: `Cmd+Shift+O` / `Ctrl+Shift+O`
-- `OpenCode: Add to Context` attaches the current file, or selected Explorer items, as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K`
-- `OpenCode: Add Terminal Selection to Context` attaches the selected terminal text as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K` when terminal focus is active
-- `OpenCode: New Session` starts a fresh chat session
-- `OpenCode: Abort Session` stops the current run
+- `Varro: Focus Chat` opens the sidebar chat. Shortcut: `Cmd+Shift+O` / `Ctrl+Shift+O`
+- `Varro: Add to Context` attaches the current file, or selected Explorer items, as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K`
+- `Varro: Add Terminal Selection to Context` attaches the selected terminal text as context. Shortcut: `Cmd+Shift+K` / `Ctrl+Shift+K` when terminal focus is active
+- `Varro: New Session` starts a fresh chat session
+- `Varro: Abort Session` stops the current run
 
 ## Settings
 
-The extension contributes these user-facing settings:
+Varro contributes these user-facing settings:
 
-- `opencode.server.autoStart`: automatically start the local OpenCode server when the extension activates
-- `opencode.server.port`: port used to connect to OpenCode, default `4096`
-- `opencode.server.command`: optional full path to the OpenCode CLI executable
-- `opencode.context.autoAttachFile`: context attachment preference exposed in settings
-- `opencode.context.autoAttachSelection`: selection attachment preference exposed in settings
+- `varro.server.autoStart`: automatically start the local OpenCode server when the extension activates
+- `varro.server.port`: port used to connect to OpenCode, default `4096`
+- `varro.server.command`: optional full path to the OpenCode CLI executable
+- `varro.context.autoAttachFile`: context attachment preference exposed in settings
+- `varro.context.autoAttachSelection`: selection attachment preference exposed in settings
 
 ## Troubleshooting
 
-- If you see **OpenCode unavailable**, confirm the CLI is installed and that `opencode` works in a terminal.
-- If you already run OpenCode yourself, point the extension at the correct port with `opencode.server.port`, or disable `opencode.server.autoStart`.
-- If the CLI is not on your `PATH`, set `opencode.server.command` to the full executable path.
+- If you see **Varro unavailable**, confirm the OpenCode CLI is installed and that `opencode` works in a terminal.
+- If you already run OpenCode yourself, point Varro at the correct port with `varro.server.port`, or disable `varro.server.autoStart`.
+- If the CLI is not on your `PATH`, set `varro.server.command` to the full executable path.
 - If no models appear, check your OpenCode configuration and available providers in your local OpenCode setup.
 
 ## Development

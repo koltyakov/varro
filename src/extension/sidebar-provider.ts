@@ -13,7 +13,7 @@ import type { OpenCodeServer } from './server';
 import { logger } from './logger';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'opencode.chat';
+  public static readonly viewType = 'varro.chat';
   private static readonly FILE_SEARCH_CACHE_TTL_MS = 15_000;
   private static readonly FILE_SEARCH_MAX_CANDIDATES = 4_000;
   private view?: vscode.WebviewView;
@@ -133,9 +133,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case 'vscode/diff':
         vscode.commands.executeCommand(
           'vscode.diff',
-          vscode.Uri.parse(`opencode-diff://${msg.payload.path}/before`),
-          vscode.Uri.parse(`opencode-diff://${msg.payload.path}/after`),
-          `OpenCode: ${msg.payload.path}`
+          vscode.Uri.parse(`varro-diff://${msg.payload.path}/before`),
+          vscode.Uri.parse(`varro-diff://${msg.payload.path}/after`),
+          `Varro: ${msg.payload.path}`
         );
         break;
       case 'api/request':
@@ -417,7 +417,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none'; img-src data: https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
-  <title>OpenCode</title>
+  <title>Varro</title>
   <style>${cssContent}</style>
 </head>
 <body>

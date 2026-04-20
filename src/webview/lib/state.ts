@@ -20,14 +20,14 @@ import type {
 } from '../../shared/protocol';
 
 const STORAGE_KEYS = {
-  selectedAgent: 'opencode.selectedAgent',
-  selectedModel: 'opencode.selectedModel',
-  draftPermissionMode: 'opencode.draftPermissionMode',
-  sessionPermissionModes: 'opencode.sessionPermissionModes',
-  hiddenProviders: 'opencode.hiddenProviders',
-  hiddenModels: 'opencode.hiddenModels',
-  lastSeenSessions: 'opencode.lastSeenSessions',
-  lastActiveSessionId: 'opencode.lastActiveSessionId',
+  selectedAgent: 'varro.selectedAgent',
+  selectedModel: 'varro.selectedModel',
+  draftPermissionMode: 'varro.draftPermissionMode',
+  sessionPermissionModes: 'varro.sessionPermissionModes',
+  hiddenProviders: 'varro.hiddenProviders',
+  hiddenModels: 'varro.hiddenModels',
+  lastSeenSessions: 'varro.lastSeenSessions',
+  lastActiveSessionId: 'varro.lastActiveSessionId',
 } as const;
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
@@ -188,13 +188,13 @@ export function toggleThinking() {
   const next = !showThinking();
   setShowThinking(next);
   try {
-    window.localStorage.setItem('opencode.showThinking', JSON.stringify(next));
+    window.localStorage.setItem('varro.showThinking', JSON.stringify(next));
   } catch {}
 }
 
 function readShowThinking(): boolean {
   try {
-    const raw = window.localStorage.getItem('opencode.showThinking');
+    const raw = window.localStorage.getItem('varro.showThinking');
     return raw ? JSON.parse(raw) : true;
   } catch {
     return true;

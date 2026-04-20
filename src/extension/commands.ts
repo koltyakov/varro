@@ -9,30 +9,30 @@ export function registerCommands(
   contextProvider: ContextProvider
 ) {
   context.subscriptions.push(
-    vscode.commands.registerCommand('opencode.chat.focus', async () => {
+    vscode.commands.registerCommand('varro.chat.focus', async () => {
       await captureTerminalSelectionForContext(sidebar, contextProvider, { silent: true });
-      await vscode.commands.executeCommand('workbench.view.extension.opencode');
+      await vscode.commands.executeCommand('workbench.view.extension.varro');
       sidebar.requestInputFocus();
     }),
 
-    vscode.commands.registerCommand('opencode.chat.newSession', () => {
+    vscode.commands.registerCommand('varro.chat.newSession', () => {
       sidebar.postCommand('new-session');
     }),
 
-    vscode.commands.registerCommand('opencode.chat.abort', () => {
+    vscode.commands.registerCommand('varro.chat.abort', () => {
       sidebar.postCommand('abort');
     }),
 
-    vscode.commands.registerCommand('opencode.chat.addTerminalSelectionToContext', async () => {
+    vscode.commands.registerCommand('varro.chat.addTerminalSelectionToContext', async () => {
       const ok = await captureTerminalSelectionForContext(sidebar, contextProvider);
       if (!ok) {
         return;
       }
-      vscode.commands.executeCommand('workbench.view.extension.opencode');
+      vscode.commands.executeCommand('workbench.view.extension.varro');
     }),
 
     vscode.commands.registerCommand(
-      'opencode.chat.addToContext',
+      'varro.chat.addToContext',
       async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
         const targets = uris && uris.length > 0 ? uris : uri ? [uri] : [];
 
@@ -67,7 +67,7 @@ export function registerCommands(
         );
         if (valid.length > 0) {
           sidebar.postDroppedFiles(valid);
-          vscode.commands.executeCommand('workbench.view.extension.opencode');
+          vscode.commands.executeCommand('workbench.view.extension.varro');
         }
       }
     )
@@ -86,7 +86,7 @@ async function captureTerminalSelectionForContext(
         result.reason === 'no-terminal'
           ? 'Open and focus a terminal first.'
           : 'Select text in the terminal first.';
-      vscode.window.showWarningMessage(`OpenCode: ${message}`);
+      vscode.window.showWarningMessage(`Varro: ${message}`);
     }
     return false;
   }

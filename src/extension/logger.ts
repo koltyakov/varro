@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-const channel = vscode.window.createOutputChannel('OpenCode');
+const channel = vscode.window.createOutputChannel('Varro');
 
 export const logger = {
   info(msg: string, ...args: unknown[]) {

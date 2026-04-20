@@ -50,7 +50,7 @@ export class OpenCodeServer extends EventEmitter {
     if (!this.autoStart) {
       this.setStatus({
         state: 'error',
-        message: `No server at ${this.url}. Start one with "opencode serve --port ${this.port}" or enable opencode.server.autoStart.`,
+        message: `No server at ${this.url}. Start one with "opencode serve --port ${this.port}" or enable varro.server.autoStart.`,
       });
       throw new Error(
         this._status.state === 'error'

@@ -1,10 +1,10 @@
 {
-  "name": "vscode-opencode",
-  "displayName": "OpenCode",
+  "name": "varro",
+  "displayName": "Varro",
   "description": "AI-powered agentic coding assistant powered by OpenCode",
   "version": "0.1.0",
   "publisher": "koltyakov",
-  "repository": "https://github.com/koltyakov/vschat",
+  "repository": "https://github.com/koltyakov/varro",
   "license": "MIT",
   "engines": {
     "vscode": "^1.91.0"
@@ -18,7 +18,7 @@
     "ai",
     "chat",
     "copilot",
-    "opencode",
+    "varro",
     "agent"
   ],
   "activationEvents": [
@@ -30,70 +30,70 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "opencode",
-          "title": "OpenCode",
+          "id": "varro",
+          "title": "Varro",
           "icon": "assets/icon.png"
         }
       ]
     },
     "views": {
-      "opencode": [
+      "varro": [
         {
           "icon": "assets/icon.png",
           "type": "webview",
-          "id": "opencode.chat",
-          "name": "OpenCode"
+          "id": "varro.chat",
+          "name": "Varro"
         }
       ]
     },
     "commands": [
       {
-        "command": "opencode.chat.focus",
-        "title": "OpenCode: Focus Chat"
+        "command": "varro.chat.focus",
+        "title": "Varro: Focus Chat"
       },
       {
-        "command": "opencode.chat.newSession",
-        "title": "OpenCode: New Session"
+        "command": "varro.chat.newSession",
+        "title": "Varro: New Session"
       },
       {
-        "command": "opencode.chat.addToContext",
-        "title": "OpenCode: Add to Context"
+        "command": "varro.chat.addToContext",
+        "title": "Varro: Add to Context"
       },
       {
-        "command": "opencode.chat.addTerminalSelectionToContext",
-        "title": "OpenCode: Add Terminal Selection to Context"
+        "command": "varro.chat.addTerminalSelectionToContext",
+        "title": "Varro: Add Terminal Selection to Context"
       },
       {
-        "command": "opencode.chat.abort",
-        "title": "OpenCode: Abort Session"
+        "command": "varro.chat.abort",
+        "title": "Varro: Abort Session"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "opencode.chat.addToContext",
-          "group": "z_opencode"
+          "command": "varro.chat.addToContext",
+          "group": "z_varro"
         }
       ],
       "commandPalette": [
         {
-          "command": "opencode.chat.addToContext"
+          "command": "varro.chat.addToContext"
         },
         {
-          "command": "opencode.chat.addTerminalSelectionToContext"
+          "command": "varro.chat.addTerminalSelectionToContext"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "opencode.chat.focus",
+        "command": "varro.chat.focus",
         "key": "cmd+shift+o",
         "mac": "cmd+shift+o",
         "win": "ctrl+shift+o",
         "linux": "ctrl+shift+o"
       },
       {
-        "command": "opencode.chat.addToContext",
+        "command": "varro.chat.addToContext",
         "key": "cmd+shift+k",
         "mac": "cmd+shift+k",
         "win": "ctrl+shift+k",
@@ -101,7 +101,7 @@
         "when": "!terminalFocus"
       },
       {
-        "command": "opencode.chat.addTerminalSelectionToContext",
+        "command": "varro.chat.addTerminalSelectionToContext",
         "key": "cmd+shift+k",
         "mac": "cmd+shift+k",
         "win": "ctrl+shift+k",
@@ -110,29 +110,29 @@
       }
     ],
     "configuration": {
-      "title": "OpenCode",
+      "title": "Varro",
       "properties": {
-        "opencode.server.port": {
+        "varro.server.port": {
           "type": "number",
           "default": 4096,
           "description": "Port for the OpenCode server"
         },
-        "opencode.server.command": {
+        "varro.server.command": {
           "type": "string",
           "default": "",
           "description": "Optional path to the OpenCode CLI executable used to start the server"
         },
-        "opencode.server.autoStart": {
+        "varro.server.autoStart": {
           "type": "boolean",
           "default": true,
           "description": "Automatically start the OpenCode server when the extension activates"
         },
-        "opencode.context.autoAttachFile": {
+        "varro.context.autoAttachFile": {
           "type": "boolean",
           "default": true,
           "description": "Automatically attach the active file as context"
         },
-        "opencode.context.autoAttachSelection": {
+        "varro.context.autoAttachSelection": {
           "type": "boolean",
           "default": true,
           "description": "Automatically attach the current selection as context"

@@ -10,9 +10,9 @@ let contextProvider: ContextProvider;
 let sidebarProvider: SidebarProvider;
 
 export async function activate(context: vscode.ExtensionContext) {
-  logger.info('Activating OpenCode extension');
+  logger.info('Activating Varro extension');
 
-  const config = vscode.workspace.getConfiguration('opencode');
+  const config = vscode.workspace.getConfiguration('varro');
   const port = config.get<number>('server.port', 4096);
   const autoStart = config.get<boolean>('server.autoStart', true);
   const command = config.get<string>('server.command', '');
@@ -32,8 +32,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
   registerCommands(context, sidebarProvider, contextProvider);
 
-  vscode.commands.executeCommand('setContext', 'opencode:activated', true);
-  logger.info('OpenCode extension activated');
+  vscode.commands.executeCommand('setContext', 'varro:activated', true);
+  logger.info('Varro extension activated');
 
   server
     .start()
@@ -51,6 +51,6 @@ export async function deactivate() {
   await server?.dispose();
   contextProvider?.dispose();
   sidebarProvider?.dispose();
-  vscode.commands.executeCommand('setContext', 'opencode:activated', false);
-  logger.info('OpenCode extension deactivated');
+  vscode.commands.executeCommand('setContext', 'varro:activated', false);
+  logger.info('Varro extension deactivated');
 }
