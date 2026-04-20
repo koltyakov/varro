@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
+import type { OpenCodeServer } from './server';
 import { getRelativePath } from './util/path';
 import { logger } from './logger';
 
 export function registerCommands(
   context: vscode.ExtensionContext,
   sidebar: SidebarProvider,
-  contextProvider: ContextProvider
+  contextProvider: ContextProvider,
+  server: OpenCodeServer
 ) {
   context.subscriptions.push(
     vscode.commands.registerCommand('varro.chat.focus', async () => {
@@ -26,6 +28,21 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.chat.abort', () => {
       sidebar.postCommand('abort');
+    }),
+
+    vscode.commands.registerCommand('varro.server.restart', async () => {
+      try {
+        await server.dispose();
+        server.start().then((url) => {
+          logger.info(`OpenCode server restarted at ${url}`);
+        }).catch((err) => {
+          const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
+          logger.error(message);
+          vscode.window.showErrorMessage(message);
+        });
+      } catch (err) {
+        logger.error(`varro.server.restart: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }),
 
     vscode.commands.registerCommand('varro.chat.addTerminalSelectionToContext', async () => {

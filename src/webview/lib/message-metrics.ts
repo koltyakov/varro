@@ -85,47 +85,6 @@ export function getContextWindow(message: AssistantMessage, providers: Provider[
   };
 }
 
-export function getDirectChildAssistants(
-  parentID: string,
-  messages: Array<{ info: Message; parts: Part[] }>
-) {
-  return messages
-    .filter((entry): entry is { info: AssistantMessage; parts: Part[] } => {
-      return isAssistantMessage(entry.info) && entry.info.parentID === parentID;
-    })
-    .toSorted((a, b) => a.info.time.created - b.info.time.created);
-}
-
-export function getDescendantAssistants(
-  parentID: string,
-  messages: Array<{ info: Message; parts: Part[] }>
-) {
-  const byParent = new Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>();
-
-  for (const entry of messages) {
-    if (!isAssistantMessage(entry.info)) continue;
-    const key = entry.info.parentID;
-    if (!byParent.has(key)) byParent.set(key, []);
-    byParent.get(key)!.push(entry as { info: AssistantMessage; parts: Part[] });
-  }
-
-  const results: Array<{ info: AssistantMessage; parts: Part[] }> = [];
-  const queue = (byParent.get(parentID) || []).toSorted(
-    (a, b) => a.info.time.created - b.info.time.created
-  );
-
-  let queueIdx = 0;
-  while (queueIdx < queue.length) {
-    const current = queue[queueIdx++];
-    results.push(current);
-    const children = byParent.get(current.info.id) || [];
-    children.sort((a, b) => a.info.time.created - b.info.time.created);
-    queue.push(...children);
-  }
-
-  return results;
-}
-
 export function getStepFinishParts(parts: Part[]): StepFinishPart[] {
   return parts.filter((part): part is StepFinishPart => part.type === 'step-finish');
 }

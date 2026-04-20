@@ -49,6 +49,10 @@ function logError(context: string, err: unknown) {
   });
 }
 
+function getDefaultPrimaryAgentName() {
+  return state.agents.find((agent) => agent.name === 'build')?.name || state.agents[0]?.name || null;
+}
+
 import type {
   Session,
   SessionStatus,
@@ -390,8 +394,8 @@ async function loadAgents() {
       setSelectedAgent(null);
     }
     if (!state.selectedAgent) {
-      const def = primaries.find((a) => a.name === 'build') || primaries[0];
-      if (def) setSelectedAgent(def.name);
+      const def = getDefaultPrimaryAgentName();
+      if (def) setSelectedAgent(def);
     }
   } catch (err) {
     logError('loadAgents', err);
@@ -451,13 +455,16 @@ export async function selectSession(id: string) {
       client.session.get(id),
       client.session.messages(id),
     ]);
+    if (state.activeSessionId !== id) return;
     upsertSession(session);
     setMessagesIncremental(msgs);
     syncTodosFromMessages(msgs);
     await loadQuestions().catch((err) => logError('loadQuestions', err));
+    if (state.activeSessionId !== id) return;
     const statuses = await client.session
       .status()
       .catch((err) => { logError('session.status', err); return {} as Record<string, SessionStatus>; });
+    if (state.activeSessionId !== id) return;
     setState('sessionStatus', statuses);
     const statusType = statuses[id]?.type;
     if (statusType === 'busy' || statusType === 'retry') {
@@ -497,6 +504,7 @@ export async function createSession(
     setState('sessionStatus', { ...state.sessionStatus, [session.id]: { type: 'idle' } });
     persistActiveSessionId(session.id);
     markSessionSeen(session.id);
+    setSelectedAgent(getDefaultPrimaryAgentName());
     if (initialPermissionMode === 'full') {
       setPermissionModeForSession(session.id, 'full');
     }
@@ -562,10 +570,12 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
 
   const sel = state.editorContext.selection;
   const af = state.editorContext.activeFile;
-  if (sel && af) {
+  if (af) {
     parts.push({
       type: 'text',
-      text: `[Selection from ${af.relativePath} lines ${sel.startLine}-${sel.endLine}]\n\`\`\`${af.language}\n${sel.text}\n\`\`\``,
+      text: sel
+        ? `[Selection from ${af.relativePath} lines ${sel.startLine}-${sel.endLine}]\n\`\`\`${af.language}\n${sel.text}\n\`\`\``
+        : `[Active file: ${af.relativePath}]\n\`\`\`${af.language}\n${af.content}\n\`\`\``,
     });
   }
 

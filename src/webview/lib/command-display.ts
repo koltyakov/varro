@@ -1,6 +1,4 @@
-function normalizePath(value: string) {
-  return value.replace(/\\/g, '/');
-}
+import { normalizePath } from './path-display';
 
 function trimTrailingSlashes(value: string) {
   return value.replace(/\/+$/, '');

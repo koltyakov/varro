@@ -8,6 +8,7 @@ import {
   isSessionCompacting,
   loadingStartedAt,
   loadingLastActivityAt,
+  getChildRunsByParentId,
 } from '../lib/state';
 import { isAssistantMessage } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part } from '../types';
@@ -18,7 +19,11 @@ import {
   collapseLeadingDuplicateFileEvents,
   getTrailingFileEventSignature,
 } from '../lib/message-event-collapse';
-import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
+import {
+  isFileEditPart,
+  isFileReadPart,
+  shouldShowAssistantPartInline,
+} from '../lib/part-utils';
 
 const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
 
@@ -57,6 +62,8 @@ export function MessageList() {
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
 
   const messages = createMemo(() => state.messages);
+
+  const childRunsMap = createMemo(() => getChildRunsByParentId(messages()));
 
   const shouldVirtualize = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
 
@@ -119,6 +126,12 @@ export function MessageList() {
       setMeasurementVersion((version) => version + 1);
     }
     return changed;
+  }
+
+  function updateScrollbarInset() {
+    if (!containerRef) return;
+    const scrollbarInset = Math.max(0, containerRef.offsetWidth - containerRef.clientWidth);
+    containerRef.style.setProperty('--interactive-list-scrollbar-inset', `${scrollbarInset}px`);
   }
 
   function distanceFromBottom() {
@@ -244,12 +257,14 @@ export function MessageList() {
 
   onMount(() => {
     if (!containerRef) return;
+    updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
     setScrollTop(containerRef.scrollTop);
     lastObservedScrollTop = containerRef.scrollTop ?? 0;
     if (!trackRef) return;
     lastTrackHeight = trackRef.getBoundingClientRect().height;
     const observer = new ResizeObserver(() => {
+      updateScrollbarInset();
       const previousTrackHeight = lastTrackHeight;
       measureVisibleItems();
       lastTrackHeight = trackRef?.getBoundingClientRect().height ?? previousTrackHeight;
@@ -267,6 +282,7 @@ export function MessageList() {
 
   createEffect(() => {
     const sessionId = state.activeSessionId;
+    measuredHeights.clear();
     pendingInitialScrollSessionId = sessionId;
     cancelPendingScroll();
     expectedScrollTop = -1;
@@ -463,6 +479,7 @@ export function MessageList() {
                           previousTrailingFileEventSignatureMap().get(msg.info.id) ?? null
                         }
                         fileEditStackGroup={assistantStackGroupMap().get(msg.info.id) ?? null}
+                        childRunsMap={childRunsMap()}
                       />
                     </div>
                   );
@@ -476,6 +493,7 @@ export function MessageList() {
               lastAssistantID={lastAssistantID()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               fileEditStackGroupMap={assistantStackGroupMap()}
+              childRunsMap={childRunsMap()}
               visibleRange={visibleRange()}
             />
           </Show>
@@ -501,6 +519,7 @@ function VirtualizedContent(props: {
   lastAssistantID: string | null;
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
+  childRunsMap: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>;
   visibleRange: { start: number; end: number; topPad: number; bottomPad: number };
 }) {
   const visible = createMemo(() =>
@@ -539,6 +558,7 @@ function VirtualizedContent(props: {
                   props.previousTrailingFileEventSignatureMap.get(msg.info.id) ?? null
                 }
                 fileEditStackGroup={props.fileEditStackGroupMap.get(msg.info.id) ?? null}
+                childRunsMap={props.childRunsMap}
               />
             </div>
           );
@@ -551,61 +571,12 @@ function VirtualizedContent(props: {
   );
 }
 
-function isFileEditPart(part: Part): boolean {
-  return part.type === 'tool' && getToolFileChange(part.tool, part.state) !== null;
-}
-
-function isFileReadPart(part: Part): boolean {
-  return part.type === 'tool' && getToolReadPath(part.tool, part.state) !== null;
-}
-
-function isTodoToolPart(part: Extract<Part, { type: 'tool' }>) {
-  const toolName = part.tool.trim().toLowerCase();
-  if (
-    toolName.includes('todo') ||
-    toolName === 'update_plan' ||
-    toolName === 'updateplan' ||
-    toolName === 'todowrite'
-  ) {
-    return true;
-  }
-
-  const title =
-    (part.state.status === 'running' || part.state.status === 'completed'
-      ? part.state.title
-      : undefined) || '';
-  const normalizedTitle = title.trim().toLowerCase();
-  return (
-    normalizedTitle.includes('todo') ||
-    normalizedTitle === 'update plan' ||
-    normalizedTitle === 'updating plan'
-  );
-}
-
-function shouldShowAssistantPartInline(part: Part) {
-  if (part.type === 'tool') return !isTodoToolPart(part);
-
-  switch (part.type) {
-    case 'text':
-      return part.text.trim().length > 0;
-    case 'reasoning':
-    case 'agent':
-    case 'retry':
-    case 'compaction':
-    case 'subtask':
-    case 'file':
-      return true;
-    default:
-      return false;
-  }
-}
-
 function isFileEditOnlyAssistantMessage(
   parts: Part[],
   previousTrailingSignature: string | null
 ): boolean {
   const visibleParts = collapseLeadingDuplicateFileEvents(parts, previousTrailingSignature).filter(
-    shouldShowAssistantPartInline
+    (p) => shouldShowAssistantPartInline(p, false)
   );
   return visibleParts.length > 0 && visibleParts.every(isFileEditPart);
 }
@@ -615,7 +586,7 @@ function isFileReadOnlyAssistantMessage(
   previousTrailingSignature: string | null
 ): boolean {
   const visibleParts = collapseLeadingDuplicateFileEvents(parts, previousTrailingSignature).filter(
-    shouldShowAssistantPartInline
+    (p) => shouldShowAssistantPartInline(p, false)
   );
   return visibleParts.length > 0 && visibleParts.every(isFileReadPart);
 }

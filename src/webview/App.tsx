@@ -40,6 +40,7 @@ function ErrorFallback(props: { err: Error }) {
       </svg>
       <p class="text-sm text-vscode-error">Something went wrong</p>
       <p class="max-w-full text-xs text-vscode-fg-muted break-words">{props.err?.message || 'Unknown error'}</p>
+      <pre class="max-h-40 max-w-full overflow-auto text-left text-[10px] text-vscode-fg-muted">{props.err?.stack || ''}</pre>
       <button
         class="rounded px-3 py-1 text-xs bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hoverBg"
         onClick={() => window.location.reload()}

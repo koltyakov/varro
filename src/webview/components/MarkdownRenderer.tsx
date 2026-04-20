@@ -2,7 +2,7 @@ import { createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import { marked } from 'marked';
 import { postMessage } from '../lib/bridge';
 import { state } from '../lib/state';
-import { formatDisplayPath } from '../lib/path-display';
+import { formatDisplayPath, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 
 interface MarkdownProps {
@@ -37,10 +37,6 @@ function decodeCopyPayload(value: string) {
   } catch {
     return value;
   }
-}
-
-function normalizePath(value: string) {
-  return value.replace(/\\/g, '/');
 }
 
 function trimTrailingSlashes(value: string) {
@@ -271,11 +267,15 @@ export function MarkdownRenderer(props: MarkdownProps) {
     queueMicrotask(() => applyTableColumnClasses(ref));
   });
 
+  const copyTimeouts = new Set<ReturnType<typeof setTimeout>>();
+
   onCleanup(() => {
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;
     }
+    for (const id of copyTimeouts) clearTimeout(id);
+    copyTimeouts.clear();
   });
 
   function handleClick(e: MouseEvent) {
@@ -289,9 +289,11 @@ export function MarkdownRenderer(props: MarkdownProps) {
         : (code.textContent ?? '');
       navigator.clipboard.writeText(copyText).catch(() => {});
       btn.innerHTML = checkSvg;
-      setTimeout(() => {
+      const tid = setTimeout(() => {
+        copyTimeouts.delete(tid);
         btn.innerHTML = copySvg;
       }, 1500);
+      copyTimeouts.add(tid);
       return;
     }
 

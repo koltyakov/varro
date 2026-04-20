@@ -16,20 +16,21 @@ export function ContextBar() {
   const terminalSelection = () => state.terminalSelection;
   const activeFile = () => state.editorContext.activeFile;
   const hasContext = () =>
-    files().length > 0 || clipboardImages().length > 0 || !!selection() || !!terminalSelection();
+    files().length > 0 ||
+    clipboardImages().length > 0 ||
+    !!activeFile() ||
+    !!selection() ||
+    !!terminalSelection();
   const activeContext = () => {
     const file = activeFile();
+    const selectedLines = selection();
     if (!file) return null;
 
-    const selectedLines = selection();
-    if (!selectedLines) {
-      return { filename: getLeafPathName(file.relativePath), lineRange: null as string | null };
-    }
-
-    const lineRange =
-      selectedLines.startLine === selectedLines.endLine
+    const lineRange = selectedLines
+      ? selectedLines.startLine === selectedLines.endLine
         ? `L${selectedLines.startLine}`
-        : `L${selectedLines.startLine}-${selectedLines.endLine}`;
+        : `L${selectedLines.startLine}-${selectedLines.endLine}`
+      : null;
 
     return { filename: getLeafPathName(file.relativePath), lineRange };
   };

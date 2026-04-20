@@ -85,25 +85,20 @@ export function ChatInput() {
   const selection = () => state.editorContext.selection;
   const terminalSelection = () => state.terminalSelection;
   const activeFile = () => state.editorContext.activeFile;
-  const hasContext = () => !!activeFile() || !!terminalSelection();
+  const hasContext = () => !!activeFile() || !!selection() || !!terminalSelection();
 
   const hasMentions = () => files().length > 0 || clipboardImages().length > 0;
 
   const activeContext = () => {
     const file = activeFile();
-    if (!file) return null;
     const selectedLines = selection();
+    if (!file) return null;
     const displayPath = getLeafPathName(file.relativePath || file.path);
-    if (!selectedLines) {
-      return {
-        filename: displayPath,
-        lineRange: null as string | null,
-      };
-    }
-    const lineRange =
-      selectedLines.startLine === selectedLines.endLine
+    const lineRange = selectedLines
+      ? selectedLines.startLine === selectedLines.endLine
         ? `L${selectedLines.startLine}`
-        : `L${selectedLines.startLine}-${selectedLines.endLine}`;
+        : `L${selectedLines.startLine}-${selectedLines.endLine}`
+      : null;
     return {
       filename: displayPath,
       lineRange,

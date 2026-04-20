@@ -18,6 +18,9 @@ export class OpenCodeServer extends EventEmitter {
   private eventController: AbortController | null = null;
   private eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private eventReconnectDelay = 1000;
+  private eventReconnectCount = 0;
+  private static readonly MAX_EVENT_RECONNECTS = 10;
+  private startAttemptId = 0;
 
   constructor(port: number, autoStart: boolean, command?: string) {
     super();
@@ -62,6 +65,7 @@ export class OpenCodeServer extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       this.setStatus({ state: 'starting' });
+      const attemptId = ++this.startAttemptId;
       const stderrLines: string[] = [];
       let settled = false;
 
@@ -83,7 +87,7 @@ export class OpenCodeServer extends EventEmitter {
       };
 
       const failStartup = (message: string, err?: Error) => {
-        if (settled) return;
+        if (settled || attemptId !== this.startAttemptId) return;
         settled = true;
         this.cancelPollHealth();
         this.setStatus({ state: 'error', message });
@@ -91,7 +95,7 @@ export class OpenCodeServer extends EventEmitter {
       };
 
       const finishStartup = (url: string) => {
-        if (settled) return;
+        if (settled || attemptId !== this.startAttemptId) return;
         settled = true;
         this.cancelPollHealth();
         resolve(url);
@@ -135,6 +139,7 @@ export class OpenCodeServer extends EventEmitter {
           logger.info(`Server process exited with code ${code}`);
           this.process = null;
           this.stopEventStream();
+          if (attemptId !== this.startAttemptId) return;
           if (this._status.state === 'running') {
             this.setStatus({ state: 'stopped' });
             if (this.retries < this.maxRetries) {
@@ -262,6 +267,7 @@ export class OpenCodeServer extends EventEmitter {
   private async startEventStream() {
     this.stopEventStream();
     this.eventReconnectDelay = 1000;
+    this.eventReconnectCount = 0;
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
@@ -301,9 +307,15 @@ export class OpenCodeServer extends EventEmitter {
       shouldReconnect = true;
     } finally {
       if (shouldReconnect && !controller.signal.aborted && this._status.state === 'running') {
-        const delay = this.eventReconnectDelay;
-        this.eventReconnectDelay = Math.min(delay * 2, 30_000);
-        this.eventReconnectTimer = setTimeout(() => this.startEventStream(), delay);
+        this.eventReconnectCount++;
+        if (this.eventReconnectCount > OpenCodeServer.MAX_EVENT_RECONNECTS) {
+          logger.warn(`Event stream reconnect limit (${OpenCodeServer.MAX_EVENT_RECONNECTS}) reached`);
+          this.setStatus({ state: 'error', message: 'Event stream connection lost' });
+        } else {
+          const delay = this.eventReconnectDelay;
+          this.eventReconnectDelay = Math.min(delay * 2, 30_000);
+          this.eventReconnectTimer = setTimeout(() => this.startEventStream(), delay);
+        }
       }
     }
   }

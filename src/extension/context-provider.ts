@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createHash } from 'crypto';
 import { isAbsolute, join } from 'path';
 import type { EditorContext } from '../shared/protocol';
 import { logger } from './logger';
@@ -8,6 +9,7 @@ export class ContextProvider implements vscode.Disposable {
   private static readonly TERMINAL_COPY_DELAY_MS = 40;
   private disposables: vscode.Disposable[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private diagnosticsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _context: EditorContext = {
     workspacePath: null,
     activeFile: null,
@@ -15,6 +17,7 @@ export class ContextProvider implements vscode.Disposable {
     diagnostics: [],
   };
   private _terminalSelection: { text: string; terminalName: string } | null = null;
+  private _lastContentHash: string | null = null;
   private onChange: (ctx: EditorContext) => void;
 
   constructor(onChange: (ctx: EditorContext) => void) {
@@ -23,7 +26,7 @@ export class ContextProvider implements vscode.Disposable {
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.update()),
       vscode.window.onDidChangeTextEditorSelection(() => this.debouncedUpdate()),
-      vscode.languages.onDidChangeDiagnostics(() => this.updateDiagnostics()),
+      vscode.languages.onDidChangeDiagnostics(() => this.debouncedDiagnosticsUpdate()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.update())
     );
 
@@ -88,6 +91,14 @@ export class ContextProvider implements vscode.Disposable {
     }, 150);
   }
 
+  private debouncedDiagnosticsUpdate() {
+    if (this.diagnosticsDebounceTimer) clearTimeout(this.diagnosticsDebounceTimer);
+    this.diagnosticsDebounceTimer = setTimeout(() => {
+      this.diagnosticsDebounceTimer = null;
+      this.updateDiagnostics();
+    }, 150);
+  }
+
   private update() {
     const folders = vscode.workspace.workspaceFolders;
     this._context.workspacePath = folders && folders.length > 0 ? folders[0].uri.fsPath : null;
@@ -96,7 +107,10 @@ export class ContextProvider implements vscode.Disposable {
     if (!editor) {
       this._context.activeFile = null;
       this._context.selection = null;
-      this.onChange(this._context);
+      if (this._lastContentHash !== null) {
+        this._lastContentHash = null;
+        this.updateDiagnostics();
+      }
       return;
     }
 
@@ -106,16 +120,17 @@ export class ContextProvider implements vscode.Disposable {
       ? vscode.workspace.asRelativePath(doc.uri)
       : doc.uri.fsPath;
 
+    const full = doc.getText();
+    const content =
+      full.length > ContextProvider.MAX_CONTENT_LENGTH
+        ? full.slice(0, ContextProvider.MAX_CONTENT_LENGTH)
+        : full;
+
     this._context.activeFile = {
       path: doc.uri.fsPath,
       relativePath,
       language: doc.languageId,
-      content: (() => {
-        const full = doc.getText();
-        return full.length > ContextProvider.MAX_CONTENT_LENGTH
-          ? full.slice(0, ContextProvider.MAX_CONTENT_LENGTH)
-          : full;
-      })(),
+      content,
     };
 
     const selection = editor.selection;
@@ -129,8 +144,16 @@ export class ContextProvider implements vscode.Disposable {
       this._context.selection = null;
     }
 
+    const hash = createHash('sha1')
+      .update(doc.uri.fsPath)
+      .update(content)
+      .update(JSON.stringify(this._context.selection))
+      .digest('hex');
+
+    if (hash === this._lastContentHash) return;
+    this._lastContentHash = hash;
+
     this.updateDiagnostics();
-    this.onChange(this._context);
   }
 
   private updateDiagnostics() {
@@ -152,6 +175,7 @@ export class ContextProvider implements vscode.Disposable {
       message: d.message,
       line: d.range.start.line + 1,
     }));
+    this.onChange(this._context);
   }
 
   async readFile(path: string): Promise<string | null> {
@@ -218,6 +242,7 @@ export class ContextProvider implements vscode.Disposable {
 
   dispose() {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    if (this.diagnosticsDebounceTimer) clearTimeout(this.diagnosticsDebounceTimer);
     this.disposables.forEach((d) => d.dispose());
   }
 }

@@ -416,8 +416,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   postDroppedFiles(
     files: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>
   ) {
+    const seen = new Set<string>();
+    const unique = files.filter((file) => {
+      if (seen.has(file.path)) return false;
+      seen.add(file.path);
+      return true;
+    });
     const existing = new Set(this.contextFiles.map((f) => f.path));
-    const next = files.filter((file) => !existing.has(file.path));
+    const next = unique.filter((file) => !existing.has(file.path));
     if (next.length === 0) return;
 
     this.contextFiles.push(...next);

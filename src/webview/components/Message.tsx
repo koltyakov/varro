@@ -13,11 +13,16 @@ import type {
 } from '../types';
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
-import { showThinking, state, getChildRunsByParentId } from '../lib/state';
+import { state } from '../lib/state';
 import { getLeafPathName } from '../lib/path-display';
 import { postMessage } from '../lib/bridge';
-import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
+import { getToolFileChange } from '../lib/tool-file-change';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
+import {
+  isFileEditPart,
+  isFileReadPart,
+  shouldShowAssistantPartInline,
+} from '../lib/part-utils';
 
 export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
 
@@ -27,6 +32,7 @@ export function Message(props: {
   isLastAssistant?: boolean;
   previousTrailingFileEventSignature?: string | null;
   fileEditStackGroup?: AssistantFileEditStackGroup | null;
+  childRunsMap?: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>;
 }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
@@ -40,7 +46,7 @@ export function Message(props: {
       : props.parts
   );
   const visibleAssistantParts = createMemo(() =>
-    assistant() ? normalizedParts().filter(shouldShowAssistantPartInline) : normalizedParts()
+    assistant() ? normalizedParts().filter((p) => shouldShowAssistantPartInline(p)) : normalizedParts()
   );
   const layoutAssistantParts = createMemo(() =>
     assistant() ? deduplicateFileEdits(visibleAssistantParts()) : []
@@ -73,11 +79,9 @@ export function Message(props: {
     !!compactionDivider() ||
     isUser() ||
     visibleAssistantParts().length > 0 ||
-    !!assistant()?.error?.data?.message ||
     (diffs() || []).length > 0;
   const useBareAssistantContainer = () => {
     if (isUser()) return false;
-    if (assistant()?.error?.data?.message) return false;
     if ((diffs() || []).length > 0) return false;
     if (props.fileEditStackGroup) return false;
     const parts = layoutAssistantParts();
@@ -108,17 +112,7 @@ export function Message(props: {
             <UserMessageContent parts={normalizedParts()} />
           </Show>
           <Show when={!isUser() && assistant()}>
-            <AssistantMessageContent info={assistant()!} parts={visibleAssistantParts()} />
-          </Show>
-          <Show when={assistant() && assistant()!.error?.data?.message}>
-            <div class="interactive-response-error-details">
-              <svg class="error-icon" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-              </svg>
-              <div class="rendered-markdown">
-                <p class="error-message-text">{assistant()!.error?.data?.message || 'error'}</p>
-              </div>
-            </div>
+            <AssistantMessageContent info={assistant()!} parts={visibleAssistantParts()} childRunsMap={props.childRunsMap ?? new Map()} />
           </Show>
           <Show when={assistant() && (diffs() || []).length > 0}>
             <DiffSummary diffs={diffs()!} />
@@ -339,16 +333,6 @@ function getAttachmentTitle(att: MessageAttachment): string {
   }
 }
 
-function isFileEditPart(part: Part): boolean {
-  if (part.type !== 'tool') return false;
-  return getToolFileChange((part as ToolPart).tool, (part as ToolPart).state) !== null;
-}
-
-function isFileReadPart(part: Part): boolean {
-  if (part.type !== 'tool') return false;
-  return getToolReadPath((part as ToolPart).tool, (part as ToolPart).state) !== null;
-}
-
 function deduplicateFileEdits(parts: Part[]): Part[] {
   const result: Part[] = [];
   for (let i = 0; i < parts.length; i++) {
@@ -375,9 +359,12 @@ function deduplicateFileEdits(parts: Part[]): Part[] {
   return result;
 }
 
-function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] }) {
-  const childRunsMap = createMemo(() => getChildRunsByParentId(state.messages));
-  const childRuns = createMemo(() => childRunsMap().get(props.info.id) || []);
+function AssistantMessageContent(props: {
+  info: AssistantMessage;
+  parts: Part[];
+  childRunsMap: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>;
+}) {
+  const childRuns = createMemo(() => props.childRunsMap.get(props.info.id) || []);
 
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const renderItems = createMemo(() => {
@@ -471,47 +458,5 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
         </div>
       </Show>
     </div>
-  );
-}
-
-function shouldShowAssistantPartInline(part: Part) {
-  if (part.type === 'tool') return !isTodoToolPart(part);
-
-  switch (part.type) {
-    case 'text':
-      return part.text.trim().length > 0;
-    case 'reasoning':
-      return showThinking();
-    case 'agent':
-    case 'retry':
-    case 'compaction':
-    case 'subtask':
-    case 'file':
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isTodoToolPart(part: Extract<Part, { type: 'tool' }>) {
-  const toolName = part.tool.trim().toLowerCase();
-  if (
-    toolName.includes('todo') ||
-    toolName === 'update_plan' ||
-    toolName === 'updateplan' ||
-    toolName === 'todowrite'
-  ) {
-    return true;
-  }
-
-  const title =
-    (part.state.status === 'running' || part.state.status === 'completed'
-      ? part.state.title
-      : undefined) || '';
-  const normalizedTitle = title.trim().toLowerCase();
-  return (
-    normalizedTitle.includes('todo') ||
-    normalizedTitle === 'update plan' ||
-    normalizedTitle === 'updating plan'
   );
 }

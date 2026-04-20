@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { createMemo, createSignal } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
 import type {
   Session,
@@ -98,6 +98,9 @@ export interface ClipboardImage {
   size: number;
 }
 
+const MAX_CLIPBOARD_IMAGES = 5;
+const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
+
 const defaultEditorContext: EditorContext = {
   workspacePath: null,
   activeFile: null,
@@ -195,11 +198,12 @@ export function setSessionCompacting(sessionId: string, compacting: boolean) {
   );
 }
 
-export function isSessionCompacting(sessionId = state.activeSessionId) {
-  if (!sessionId) return false;
-  if (state.compactingSessionIds.includes(sessionId)) return true;
-  return !!state.sessions.find((session) => session.id === sessionId)?.time.compacting;
-}
+export const isSessionCompacting = createMemo(() => {
+  const sid = state.activeSessionId;
+  if (!sid) return false;
+  if (state.compactingSessionIds.includes(sid)) return true;
+  return !!state.sessions.find((session) => session.id === sid)?.time.compacting;
+});
 
 export const [showThinking, setShowThinking] = createSignal(readShowThinking());
 
@@ -251,15 +255,15 @@ export function markLoadingActivity(now = Date.now()) {
   setLoadingLastActivityAt(now);
 }
 
-export function hasActiveQuestion() {
+export const hasActiveQuestion = createMemo(() => {
   const sid = state.activeSessionId;
   return sid ? state.questions.some((q) => q.sessionID === sid) : false;
-}
+});
 
-export function hasActivePermission() {
+export const hasActivePermission = createMemo(() => {
   const sid = state.activeSessionId;
   return sid ? state.permissions.some((p) => p.sessionID === sid) : false;
-}
+});
 export const [error, setError] = createSignal<string | null>(null);
 export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
@@ -375,9 +379,11 @@ export function clearContextFiles() {
 }
 
 export function addClipboardImage(image: ClipboardImage) {
+  if (image.size > MAX_CLIPBOARD_IMAGE_SIZE) return;
   setState(
     'clipboardImages',
     produce((images) => {
+      if (images.length >= MAX_CLIPBOARD_IMAGES) images.shift();
       if (!images.find((item) => item.id === image.id)) {
         images.push(image);
       }

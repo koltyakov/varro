@@ -66,6 +66,10 @@
       {
         "command": "varro.chat.abort",
         "title": "Varro: Abort Session"
+      },
+      {
+        "command": "varro.server.restart",
+        "title": "Varro: Restart Server"
       }
     ],
     "menus": {

@@ -1,8 +1,8 @@
-import { Show, For, createSignal, createResource } from 'solid-js';
+import { Show, For, createMemo, createSignal, createResource } from 'solid-js';
 import type { RepoFileStatus, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState } from '../lib/state';
-import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
+import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
 import { client } from '../lib/client';
@@ -10,13 +10,6 @@ import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
-
-function normalizePath(value: string): string {
-  if (!value) return value;
-  const normalized = value.replace(/\\/g, '/');
-  const trimmed = normalized.replace(/\/+$/, '');
-  return trimmed || normalized;
-}
 
 function parseIntLike(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
@@ -303,8 +296,12 @@ function FileChangeCard(props: {
   const isRunning = () => s().status === 'running';
   const isError = () => s().status === 'error';
   const change = () => props.change!;
+  const changePath = createMemo(() => {
+    const c = change();
+    return c.kind === 'moved' ? null : c.path;
+  });
   const [repoStatuses] = createResource(
-    () => (change().kind === 'moved' ? null : change().path),
+    changePath,
     async () => client.file.status().catch(() => [] as RepoFileStatus[])
   );
 
@@ -371,47 +368,59 @@ function FileChangeCard(props: {
     path ? formatDisplayPath(path, appState.editorContext.workspacePath) : '';
 
   return (
-    <div class="file-edit-line">
-      <span class={`file-edit-dot ${isRunning() ? 'running' : isError() ? 'error' : 'done'}`} aria-label={isRunning() ? 'Running' : isError() ? 'Error' : 'Done'} />
-      <span class="file-edit-action-label">{action()}</span>
-      <Show
-        when={effectiveKind() !== 'moved'}
-        fallback={
-          <span class="file-edit-move-paths">
-            <a
-              href="#"
-              class="file-path-link file-edit-path-link"
-              onClick={openPath(change().fromPath || change().path)}
-            >
-              {displayName(change().fromPath || change().path)}
-            </a>
-            <span class="file-edit-move-arrow">→</span>
-            <a
-              href="#"
-              class="file-path-link file-edit-path-link"
-              onClick={openPath(change().toPath || change().path)}
-            >
-              {displayName(change().toPath || change().path)}
-            </a>
+    <div class="chat-tool-invocation-part file-change-card">
+      <div class="file-change-card-header">
+        <span
+          class={`file-edit-dot ${isRunning() ? 'running' : isError() ? 'error' : 'done'}`}
+          aria-label={isRunning() ? 'Running' : isError() ? 'Error' : 'Done'}
+        />
+        <span class="file-edit-action-label">{action()}</span>
+        <Show
+          when={effectiveKind() !== 'moved'}
+          fallback={
+            <span class="file-edit-move-paths">
+              <a
+                href="#"
+                class="file-path-link file-edit-path-link"
+                onClick={openPath(change().fromPath || change().path)}
+              >
+                {displayName(change().fromPath || change().path)}
+              </a>
+              <span class="file-edit-move-arrow">→</span>
+              <a
+                href="#"
+                class="file-path-link file-edit-path-link"
+                onClick={openPath(change().toPath || change().path)}
+              >
+                {displayName(change().toPath || change().path)}
+              </a>
+            </span>
+          }
+        >
+          <a href="#" class="file-path-link file-edit-path-link" onClick={openPath(change().path)}>
+            {displayName(change().path)}
+          </a>
+        </Show>
+        <Show when={isCompleted() && diffStats()}>
+          <span class="file-edit-diff-stats">
+            <span class="diff-lines-added">+{diffStats()!.additions}</span>
+            <span class="diff-lines-removed">-{diffStats()!.deletions}</span>
           </span>
-        }
-      >
-        <a href="#" class="file-path-link file-edit-path-link" onClick={openPath(change().path)}>
-          {displayName(change().path)}
-        </a>
-      </Show>
-      <Show when={isCompleted() && diffStats()}>
-        <span class="file-edit-diff-stats">
-          <span class="diff-lines-added">+{diffStats()!.additions}</span>
-          <span class="diff-lines-removed">-{diffStats()!.deletions}</span>
-        </span>
-      </Show>
-      <Show when={isRunning()}>
-        <span class="file-edit-running-label">editing…</span>
-      </Show>
-      <Show when={isError()}>
-        <span class="file-edit-error-label">failed</span>
-      </Show>
+        </Show>
+        <Show when={isRunning()}>
+          <span class="file-edit-running-label">editing…</span>
+        </Show>
+        <Show when={isError()}>
+          <span class="file-edit-error-label">failed</span>
+        </Show>
+        <Show when={isCompleted()}>
+          <span class="tool-invocation-duration file-edit-duration">
+            {formatDuration(
+              (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
+            )}
+          </span>
+        </Show>
+      </div>
     </div>
   );
 }

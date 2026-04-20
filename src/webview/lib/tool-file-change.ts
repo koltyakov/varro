@@ -1,4 +1,5 @@
 import type { ToolPart, ToolState } from '../types';
+import { normalizePath } from './path-display';
 
 export type FileChangeKind = 'added' | 'edited' | 'removed' | 'moved';
 
@@ -116,13 +117,6 @@ function parseTitleFileChange(title: string): Omit<FileChange, 'dedupeKey'> | nu
   };
 }
 
-function normalizePath(value: string): string {
-  if (!value) return value;
-  const normalized = value.replace(/\\/g, '/');
-  const trimmed = normalized.replace(/\/+$/, '');
-  return trimmed || normalized;
-}
-
 function firstString(source: Record<string, unknown>, keys: readonly string[]): string | undefined {
   for (const key of keys) {
     const value = source[key];
@@ -168,7 +162,18 @@ function kindFromText(value: string | undefined): FileChangeKind | null {
   return null;
 }
 
+const toolFileChangeCache = new WeakMap<ToolState, FileChange | null>();
+
 export function getToolFileChange(toolName: string, toolState: ToolState): FileChange | null {
+  const cached = toolFileChangeCache.get(toolState);
+  if (cached !== undefined) return cached;
+
+  const result = computeToolFileChange(toolName, toolState);
+  toolFileChangeCache.set(toolState, result);
+  return result;
+}
+
+function computeToolFileChange(toolName: string, toolState: ToolState): FileChange | null {
   const input = (toolState.input || {}) as Record<string, unknown>;
   const metadata = getToolMetadata(toolState) || {};
   const title =

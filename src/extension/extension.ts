@@ -5,9 +5,9 @@ import { ContextProvider } from './context-provider';
 import { registerCommands } from './commands';
 import { logger } from './logger';
 
-let server: OpenCodeServer;
-let contextProvider: ContextProvider;
-let sidebarProvider: SidebarProvider;
+let server: OpenCodeServer | null = null;
+let contextProvider: ContextProvider | null = null;
+let sidebarProvider: SidebarProvider | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
@@ -30,7 +30,7 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  registerCommands(context, sidebarProvider, contextProvider);
+  registerCommands(context, sidebarProvider!, contextProvider!, server!);
 
   vscode.commands.executeCommand('setContext', 'varro:activated', true);
   logger.info('Varro extension activated');
@@ -56,9 +56,12 @@ export async function deactivate() {
     }
   };
 
-  await disposeSafe(() => server?.dispose(), 'server dispose');
-  await disposeSafe(() => contextProvider?.dispose(), 'contextProvider dispose');
   await disposeSafe(() => sidebarProvider?.dispose(), 'sidebarProvider dispose');
+  await disposeSafe(() => contextProvider?.dispose(), 'contextProvider dispose');
+  await disposeSafe(() => server?.dispose(), 'server dispose');
+  server = null;
+  contextProvider = null;
+  sidebarProvider = null;
   try {
     vscode.commands.executeCommand('setContext', 'varro:activated', false);
   } catch {}
