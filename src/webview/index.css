@@ -2794,3 +2794,72 @@ kbd {
 .question-btn-primary:hover:not(:disabled) {
   opacity: 0.85;
 }
+
+/* Permission Prompt */
+.permission-prompt {
+  margin: 0;
+  padding: 10px 12px 6px 0;
+}
+
+.permission-prompt-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.permission-prompt-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-vscode-warning);
+}
+
+.permission-prompt-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-vscode-warning);
+}
+
+.permission-prompt-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-vscode-fg);
+  padding: 4px 0 8px;
+}
+
+.permission-prompt-meta {
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.permission-meta-entry {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.permission-meta-key {
+  color: var(--color-vscode-muted);
+  flex-shrink: 0;
+}
+
+.permission-meta-key::after {
+  content: ':';
+}
+
+.permission-meta-value {
+  color: var(--color-vscode-fg);
+  word-break: break-all;
+}
+
+.permission-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}

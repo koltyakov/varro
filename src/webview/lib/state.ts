@@ -208,6 +208,11 @@ export function hasActiveQuestion() {
   const sid = state.activeSessionId;
   return sid ? state.questions.some((q) => q.sessionID === sid) : false;
 }
+
+export function hasActivePermission() {
+  const sid = state.activeSessionId;
+  return sid ? state.permissions.some((p) => p.sessionID === sid) : false;
+}
 export const [error, setError] = createSignal<string | null>(null);
 export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);

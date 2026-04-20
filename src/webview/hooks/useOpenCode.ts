@@ -74,11 +74,14 @@ const FULL_ACCESS_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NA
     action: 'allow',
   })
 );
+const READ_ONLY_PERMISSIONS = new Set([
+  'read', 'glob', 'grep', 'list', 'codesearch', 'lsp',
+]);
 const DEFAULT_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.map(
   (permission) => ({
     permission,
     pattern: '*',
-    action: 'ask',
+    action: READ_ONLY_PERMISSIONS.has(permission) ? 'allow' : 'ask',
   })
 );
 
@@ -88,11 +91,10 @@ function shouldAutoApprovePermissions(sessionId: string) {
 
 function getSessionPermissionRulesForMode(
   mode: 'default' | 'full',
-  target: 'create' | 'update'
-): PermissionRule[] | undefined {
+  _target: 'create' | 'update'
+): PermissionRule[] {
   if (mode === 'full') return FULL_ACCESS_PERMISSION_RULES;
-  if (target === 'update') return DEFAULT_PERMISSION_RULES;
-  return undefined;
+  return DEFAULT_PERMISSION_RULES;
 }
 
 function normalizeProjectPath(path: string | null | undefined): string | null {
@@ -367,9 +369,7 @@ export async function createSession(
   try {
     const session = await client.session.create({
       ...(title ? { title } : {}),
-      ...(initialPermissionMode === 'full'
-        ? { permission: getSessionPermissionRulesForMode(initialPermissionMode, 'create') }
-        : {}),
+      permission: getSessionPermissionRulesForMode(initialPermissionMode, 'create'),
     });
     upsertSession(session);
     setState('activeSessionId', session.id);

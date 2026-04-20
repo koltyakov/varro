@@ -4,6 +4,7 @@ import { postMessage } from '../lib/bridge';
 import { state as appState } from '../lib/state';
 import { formatDisplayPath } from '../lib/path-display';
 import { QuestionPrompt } from './QuestionPrompt';
+import { PermissionPrompt } from './PermissionPrompt';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 
@@ -44,6 +45,14 @@ export function ToolCall(props: { part: ToolPart }) {
         request.sessionID === tool().sessionID &&
         request.tool?.messageID === tool().messageID &&
         request.tool?.callID === tool().callID
+    );
+
+  const permissionRequest = () =>
+    appState.permissions.find(
+      (perm) =>
+        perm.sessionID === tool().sessionID &&
+        perm.messageID === tool().messageID &&
+        perm.callID === tool().callID
     );
 
   const filePath = () => {
@@ -106,22 +115,29 @@ export function ToolCall(props: { part: ToolPart }) {
       when={questionRequest()}
       fallback={
         <Show
-          when={isEdit()}
+          when={permissionRequest()}
           fallback={
-            <GenericToolCall
-              tool={tool()}
-              state={state()}
-              statusClass={statusClass()}
-              title={title()}
-              preview={preview()}
-              expanded={expanded()}
-              toggleExpand={() => setExpanded(!expanded())}
-              inputEntries={inputEntries()}
-              truncatedOutput={truncatedOutput()}
-            />
+            <Show
+              when={isEdit()}
+              fallback={
+                <GenericToolCall
+                  tool={tool()}
+                  state={state()}
+                  statusClass={statusClass()}
+                  title={title()}
+                  preview={preview()}
+                  expanded={expanded()}
+                  toggleExpand={() => setExpanded(!expanded())}
+                  inputEntries={inputEntries()}
+                  truncatedOutput={truncatedOutput()}
+                />
+              }
+            >
+              <FileEditCard toolName={tool().tool} toolState={state()} filePath={filePath()!} />
+            </Show>
           }
         >
-          <FileEditCard toolName={tool().tool} toolState={state()} filePath={filePath()!} />
+          <PermissionPrompt permission={permissionRequest()!} />
         </Show>
       }
     >

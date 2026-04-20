@@ -5,6 +5,7 @@ import {
   setInputText,
   isLoading,
   hasActiveQuestion,
+  hasActivePermission,
   setSelectedAgent,
   setSelectedModel,
   resolveSelectedModel,
@@ -416,6 +417,7 @@ export function ChatInput() {
       mode !== 'steer' &&
       isLoading() &&
       !hasActiveQuestion() &&
+      !hasActivePermission() &&
       state.activeSessionId &&
       text.trim() &&
       state.droppedFiles.length === 0 &&
@@ -452,15 +454,16 @@ export function ChatInput() {
     const sessionId = state.activeSessionId;
     const loading = isLoading();
     const activeQuestion = hasActiveQuestion();
+    const activePermission = hasActivePermission();
     const hasQueued = state.queuedMessages.some((item) => item.sessionId === sessionId);
     if (queueDispatchTimer) {
       clearTimeout(queueDispatchTimer);
       queueDispatchTimer = 0;
     }
-    if (!sessionId || loading || activeQuestion || !hasQueued) return;
+    if (!sessionId || loading || activeQuestion || activePermission || !hasQueued) return;
     queueDispatchTimer = setTimeout(() => {
       queueDispatchTimer = 0;
-      if (isLoading() || hasActiveQuestion()) return;
+      if (isLoading() || hasActiveQuestion() || hasActivePermission()) return;
       const sid = state.activeSessionId;
       if (!sid) return;
       const next = state.queuedMessages.find((item) => item.sessionId === sid);
@@ -696,6 +699,7 @@ export function ChatInput() {
 
   const canSend = () =>
     !hasActiveQuestion() &&
+    !hasActivePermission() &&
     (inputText().trim().length > 0 ||
       state.droppedFiles.length > 0 ||
       state.clipboardImages.length > 0);
@@ -997,8 +1001,8 @@ export function ChatInput() {
             }}
             rows={1}
             placeholder={
-              hasActiveQuestion()
-                ? 'Answer the question above to continue...'
+              hasActiveQuestion() || hasActivePermission()
+                ? 'Respond to the prompt above to continue...'
                 : isLoading()
                   ? 'Queue a follow-up or steer with \u2303Enter...'
                   : 'Describe what to build'
@@ -1272,7 +1276,7 @@ export function ChatInput() {
           </div>
 
           <div class="toolbar-right">
-            <Show when={isLoading() && !hasActiveQuestion()}>
+            <Show when={isLoading() && !hasActiveQuestion() && !hasActivePermission()}>
               <button
                 class="toolbar-picker stop-button"
                 onClick={() => abortSession()}
@@ -1287,7 +1291,7 @@ export function ChatInput() {
 
             <div style={{ position: 'relative' }}>
               <Show
-                when={isLoading() && !hasActiveQuestion() && canSend()}
+                when={isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()}
                 fallback={
                   <button
                     class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
@@ -1336,7 +1340,7 @@ export function ChatInput() {
                 </div>
               </Show>
 
-              <Show when={showBusyMenu() && canSend() && isLoading() && !hasActiveQuestion()}>
+              <Show when={showBusyMenu() && canSend() && isLoading() && !hasActiveQuestion() && !hasActivePermission()}>
                 <div class="toolbar-popover busy-menu" onClick={(e) => e.stopPropagation()}>
                   <button
                     class="toolbar-popover-item"

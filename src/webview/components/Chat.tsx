@@ -9,7 +9,6 @@ import { Show, For, createSignal, onMount } from 'solid-js';
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
-import { PermissionPrompt } from './PermissionPrompt';
 import { SettingsPanel } from './SettingsPanel';
 
 export function Chat() {
@@ -74,8 +73,6 @@ export function Chat() {
         </Show>
 
         <MessageList />
-
-        <For each={state.permissions}>{(perm) => <PermissionPrompt permission={perm} />}</For>
 
         <ChatInput />
       </Show>
