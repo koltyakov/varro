@@ -221,6 +221,12 @@ export type Part =
   | RetryPart
   | CompactionPart;
 
+export type PermissionRule = {
+  permission: string;
+  pattern: string;
+  action: 'allow' | 'deny' | 'ask';
+};
+
 export type Session = {
   id: string;
   projectID: string;
@@ -236,6 +242,7 @@ export type Session = {
   title: string;
   version: string;
   time: { created: number; updated: number; compacting?: number };
+  permission?: PermissionRule[];
   revert?: { messageID: string; partID?: string; snapshot?: string; diff?: string };
 };
 

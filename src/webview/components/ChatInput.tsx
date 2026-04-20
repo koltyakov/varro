@@ -1055,6 +1055,48 @@ export function ChatInput() {
           <div
             class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
           >
+            <div style={{ position: 'relative' }}>
+              <button
+                class="toolbar-picker icon-only"
+                onClick={() => {
+                  const next = !showPermissionModePicker();
+                  closePopups(next ? 'permission' : undefined);
+                  setShowPermissionModePicker(next);
+                }}
+                title={
+                  activePermissionMode() === 'full'
+                    ? 'Full access permissions'
+                    : 'Default permissions'
+                }
+                aria-label={
+                  activePermissionMode() === 'full'
+                    ? 'Full access permissions'
+                    : 'Default permissions'
+                }
+              >
+                <PermissionModeIcon mode={activePermissionMode()} />
+              </button>
+              <Show when={showPermissionModePicker()}>
+                <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                  <div class="toolbar-popover-header">Permissions</div>
+                  <For each={PERMISSION_MODE_OPTIONS}>
+                    {(option) => (
+                      <button
+                        class={`toolbar-popover-item ${activePermissionMode() === option.mode ? 'selected' : ''}`}
+                        onClick={() => {
+                          void updatePermissionModeForSession(option.mode);
+                          setShowPermissionModePicker(false);
+                        }}
+                      >
+                        <PermissionModeIcon mode={option.mode} />
+                        <span class="min-w-0 flex-1">{option.label}</span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+
             <Show when={state.agents.length > 0}>
               <div style={{ position: 'relative' }}>
                 <button
@@ -1193,48 +1235,6 @@ export function ChatInput() {
                 </Show>
               </div>
             </Show>
-
-            <div style={{ position: 'relative' }}>
-              <button
-                class="toolbar-picker icon-only"
-                onClick={() => {
-                  const next = !showPermissionModePicker();
-                  closePopups(next ? 'permission' : undefined);
-                  setShowPermissionModePicker(next);
-                }}
-                title={
-                  activePermissionMode() === 'full'
-                    ? 'Full access permissions'
-                    : 'Default permissions'
-                }
-                aria-label={
-                  activePermissionMode() === 'full'
-                    ? 'Full access permissions'
-                    : 'Default permissions'
-                }
-              >
-                <PermissionModeIcon mode={activePermissionMode()} />
-              </button>
-              <Show when={showPermissionModePicker()}>
-                <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
-                  <div class="toolbar-popover-header">Permissions</div>
-                  <For each={PERMISSION_MODE_OPTIONS}>
-                    {(option) => (
-                      <button
-                        class={`toolbar-popover-item ${activePermissionMode() === option.mode ? 'selected' : ''}`}
-                        onClick={() => {
-                          void updatePermissionModeForSession(option.mode);
-                          setShowPermissionModePicker(false);
-                        }}
-                      >
-                        <PermissionModeIcon mode={option.mode} />
-                        <span class="min-w-0 flex-1">{option.label}</span>
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </div>
 
             <Show when={contextUsage()}>
               <div style={{ position: 'relative' }}>
@@ -1624,12 +1624,12 @@ function PermissionModeIcon(props: { mode: PermissionMode }) {
         when={props.mode === 'full'}
         fallback={
           <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
-            <path d="M4.75 1.75c.41 0 .75.34.75.75V7h.5V1.75a.75.75 0 011.5 0V7h.5V2.25a.75.75 0 011.5 0V7H10V3.25a.75.75 0 011.5 0v5.1l1.05-.87a1.2 1.2 0 011.64.06c.35.35.39.9.1 1.3l-2.9 3.94a2.75 2.75 0 01-2.21 1.12H7.4a3.9 3.9 0 01-3.06-1.48L2.6 10.2a1.1 1.1 0 01.1-1.48c.43-.37 1.08-.36 1.49.02l.56.53V2.5c0-.41.34-.75.75-.75z" />
+            <path d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1zm4 6c0 2.8-1.8 5.2-4 6.2C5.8 12.2 4 9.8 4 7V4l4-1.5L12 4v3z" />
           </svg>
         }
       >
         <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
-          <path d="M8 1.5l4.75 1.8v3.64c0 2.96-1.84 5.4-4.75 7.56C5.09 12.34 3.25 9.9 3.25 6.94V3.3L8 1.5zm0 1.6L4.75 4.33v2.6c0 2.32 1.34 4.33 3.25 5.9 1.91-1.57 3.25-3.58 3.25-5.9v-2.6L8 3.1z" />
+          <path d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1z" />
         </svg>
       </Show>
     </span>

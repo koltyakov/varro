@@ -39,6 +39,7 @@ import type {
   Message,
   Part,
   Permission,
+  PermissionRule,
   QuestionRequest,
   Todo,
   FileDiff,
@@ -48,9 +49,48 @@ import { getWorkspaceRelativePath } from '../lib/path-display';
 let initialized = false;
 let handlersRegistered = false;
 let currentWorkspacePath: string | null = null;
+const FULL_ACCESS_PERMISSION_NAMES = [
+  'read',
+  'edit',
+  'glob',
+  'grep',
+  'list',
+  'bash',
+  'task',
+  'external_directory',
+  'todowrite',
+  'question',
+  'webfetch',
+  'websearch',
+  'codesearch',
+  'lsp',
+  'doom_loop',
+  'skill',
+] as const;
+const FULL_ACCESS_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.map(
+  (permission) => ({
+    permission,
+    pattern: '*',
+    action: 'allow',
+  })
+);
+const DEFAULT_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.map((permission) => ({
+  permission,
+  pattern: '*',
+  action: 'ask',
+}));
 
 function shouldAutoApprovePermissions(sessionId: string) {
   return getPermissionModeForSession(sessionId) === 'full';
+}
+
+function getSessionPermissionRulesForMode(
+  mode: 'default' | 'full',
+  target: 'create' | 'update'
+): PermissionRule[] | undefined {
+  if (mode === 'full') return FULL_ACCESS_PERMISSION_RULES;
+  if (target === 'update') return DEFAULT_PERMISSION_RULES;
+  return undefined;
 }
 
 function normalizeProjectPath(path: string | null | undefined): string | null {
@@ -320,10 +360,15 @@ async function syncSession(sessionId: string) {
 
 export async function createSession(
   title?: string,
-  initialPermissionMode?: 'default' | 'full'
+  initialPermissionMode = getPermissionModeForSession(null)
 ): Promise<string | null> {
   try {
-    const session = await client.session.create(title ? { title } : undefined);
+    const session = await client.session.create({
+      ...(title ? { title } : {}),
+      ...(initialPermissionMode === 'full'
+        ? { permission: getSessionPermissionRulesForMode(initialPermissionMode, 'create') }
+        : {}),
+    });
     upsertSession(session);
     setState('activeSessionId', session.id);
     setState('sessionStatus', { ...state.sessionStatus, [session.id]: { type: 'idle' } });
@@ -562,8 +607,22 @@ export async function updatePermissionModeForSession(
   mode: 'default' | 'full',
   sessionId = state.activeSessionId
 ) {
+  const previousMode = getPermissionModeForSession(sessionId);
   setPermissionModeForSession(sessionId, mode);
-  if (mode !== 'full' || !sessionId) return;
+  if (!sessionId) return;
+
+  try {
+    const session = await client.session.update(sessionId, {
+      permission: getSessionPermissionRulesForMode(mode, 'update'),
+    });
+    upsertSession(session);
+  } catch (err) {
+    setPermissionModeForSession(sessionId, previousMode);
+    setError(err instanceof Error ? err.message : 'Failed to update permissions');
+    return;
+  }
+
+  if (mode !== 'full') return;
   await autoApprovePermissionsForSession(
     state.permissions.filter((permission) => permission.sessionID === sessionId)
   );

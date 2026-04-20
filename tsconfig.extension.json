@@ -3,7 +3,7 @@
   "compilerOptions": {
     "outDir": "dist/extension",
     "types": ["vscode", "node"],
-    "lib": ["ES2022"]
+    "lib": ["ES2023"]
   },
   "include": ["src/extension/**/*", "src/shared/**/*"]
 }

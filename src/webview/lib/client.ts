@@ -8,6 +8,7 @@ import type {
   Provider,
   FileDiff,
   QuestionRequest,
+  PermissionRule,
 } from '../types';
 
 export const client = {
@@ -22,8 +23,14 @@ export const client = {
     async get(id: string): Promise<Session> {
       return apiCall('GET', `/session/${id}`);
     },
-    async create(body?: { title?: string }): Promise<Session> {
+    async create(body?: { title?: string; permission?: PermissionRule[] }): Promise<Session> {
       return apiCall('POST', '/session', body || {});
+    },
+    async update(
+      id: string,
+      body: { title?: string; permission?: PermissionRule[] }
+    ): Promise<Session> {
+      return apiCall('PATCH', `/session/${id}`, body);
     },
     async delete(id: string): Promise<boolean> {
       return apiCall('DELETE', `/session/${id}`);

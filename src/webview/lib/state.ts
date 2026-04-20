@@ -22,6 +22,7 @@ import type {
 const STORAGE_KEYS = {
   selectedAgent: 'opencode.selectedAgent',
   selectedModel: 'opencode.selectedModel',
+  draftPermissionMode: 'opencode.draftPermissionMode',
   sessionPermissionModes: 'opencode.sessionPermissionModes',
   hiddenProviders: 'opencode.hiddenProviders',
   hiddenModels: 'opencode.hiddenModels',
@@ -213,7 +214,9 @@ export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
 export const [draftPermissionMode, setDraftPermissionMode] =
-  createSignal<PermissionMode>('default');
+  createSignal<PermissionMode>(
+    readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default'
+  );
 export const [theme, setTheme] = createSignal<'dark' | 'light'>(
   initialWebviewState.theme ||
     ((window as unknown as Record<string, string>).__initialTheme as 'dark' | 'light') ||
@@ -235,15 +238,11 @@ export function setPermissionModeForSession(
 ) {
   if (!sessionId) {
     setDraftPermissionMode(mode);
+    writeStored(STORAGE_KEYS.draftPermissionMode, mode === 'default' ? null : mode);
     return;
   }
 
-  const nextModes =
-    mode === 'default'
-      ? Object.fromEntries(
-          Object.entries(state.sessionPermissionModes).filter(([id]) => id !== sessionId)
-        )
-      : { ...state.sessionPermissionModes, [sessionId]: mode };
+  const nextModes = { ...state.sessionPermissionModes, [sessionId]: mode };
 
   setState('sessionPermissionModes', nextModes);
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
@@ -260,6 +259,7 @@ export function removePermissionModeForSession(sessionId: string) {
 
 export function resetDraftPermissionMode() {
   setDraftPermissionMode('default');
+  writeStored(STORAGE_KEYS.draftPermissionMode, null);
 }
 
 export function addContextFile(file: DroppedFile) {
