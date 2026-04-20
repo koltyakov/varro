@@ -233,9 +233,14 @@ function LoadingRow() {
 
   // Reset elapsed when loading restarts (new message parts arrive)
   createEffect(() => {
-    // Track the latest part count to detect new activity
-    const partCount = state.messages.reduce((sum, m) => sum + m.parts.length, 0);
-    if (partCount) setElapsed(0);
+    let hasParts = false;
+    state.messages.forEach((m) =>
+      m.parts.forEach((p) => {
+        hasParts = true;
+        if ('text' in p) void (p as { text: string }).text.length;
+      })
+    );
+    if (hasParts) setElapsed(0);
   });
 
   const isStale = () => elapsed() >= STALE_THRESHOLD;
