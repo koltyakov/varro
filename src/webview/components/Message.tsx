@@ -14,7 +14,7 @@ import type {
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
 import { state } from '../lib/state';
-import { getLeafPathName } from '../lib/path-display';
+import { getLeafPathName, isAbsolutePath, normalizePath } from '../lib/path-display';
 import { postMessage } from '../lib/bridge';
 import { getToolFileChange } from '../lib/tool-file-change';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
@@ -253,10 +253,13 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const handleClick = () => {
     const a = att();
     if (a.type === 'terminal-selection') return;
+    const filePath = normalizePath(a.type === 'file-reference' ? a.path : a.filename);
     const wp = state.editorContext.workspacePath;
-    if (!wp) return;
-    const relativePath = a.type === 'file-reference' ? a.path : a.filename;
-    const absolutePath = `${wp}/${relativePath}`;
+    const absolutePath = isAbsolutePath(filePath)
+      ? filePath
+      : wp
+        ? `${normalizePath(wp).replace(/\/+$/, '')}/${filePath.replace(/^\.\//, '')}`
+        : filePath;
     const line = a.type === 'file-selection' ? a.startLine : undefined;
     postMessage({ type: 'vscode/open', payload: { path: absolutePath, line } });
   };

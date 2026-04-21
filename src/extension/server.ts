@@ -21,6 +21,7 @@ export class OpenCodeServer extends EventEmitter {
   private eventReconnectCount = 0;
   private static readonly MAX_EVENT_RECONNECTS = 10;
   private startAttemptId = 0;
+  private isDisposing = false;
 
   constructor(port: number, autoStart: boolean, command?: string) {
     super();
@@ -43,6 +44,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async start(): Promise<string> {
+    this.isDisposing = false;
     const healthy = await this.checkHealth();
     if (healthy) {
       logger.info(`Found existing OpenCode server at ${this.url}`);
@@ -139,6 +141,9 @@ export class OpenCodeServer extends EventEmitter {
           logger.info(`Server process exited with code ${code}`);
           this.process = null;
           this.stopEventStream();
+          if (this.isDisposing) {
+            return;
+          }
           if (attemptId !== this.startAttemptId) return;
           if (this._status.state === 'running') {
             this.setStatus({ state: 'stopped' });
@@ -266,8 +271,6 @@ export class OpenCodeServer extends EventEmitter {
 
   private async startEventStream() {
     this.stopEventStream();
-    this.eventReconnectDelay = 1000;
-    this.eventReconnectCount = 0;
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
@@ -282,6 +285,8 @@ export class OpenCodeServer extends EventEmitter {
         },
       });
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
+      this.eventReconnectDelay = 1000;
+      this.eventReconnectCount = 0;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -294,9 +299,10 @@ export class OpenCodeServer extends EventEmitter {
         }
         buffer += decoder.decode(value, { stream: true });
         let idx: number;
-        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        while ((idx = findSseChunkBoundary(buffer)) !== -1) {
           const chunk = buffer.slice(0, idx);
-          buffer = buffer.slice(idx + 2);
+          const separatorMatch = buffer.slice(idx).match(/^\r?\n\r?\n/);
+          buffer = buffer.slice(idx + (separatorMatch?.[0].length || 2));
           this.processSseChunk(chunk);
         }
       }
@@ -322,7 +328,7 @@ export class OpenCodeServer extends EventEmitter {
 
   private processSseChunk(chunk: string) {
     const dataLines: string[] = [];
-    for (const line of chunk.split('\n')) {
+    for (const line of chunk.split(/\r?\n/)) {
       if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
     }
     if (!dataLines.length) return;
@@ -347,9 +353,9 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async dispose() {
+    this.isDisposing = true;
     this.cancelPollHealth();
     this.stopEventStream();
-    this.removeAllListeners();
     if (this.process) {
       const proc = this.process;
       this.process = null;
@@ -433,4 +439,13 @@ export class OpenCodeServer extends EventEmitter {
 
     return [...new Set([...pathEntries, ...extras].filter(Boolean))];
   }
+}
+
+function findSseChunkBoundary(buffer: string) {
+  const lfBoundary = buffer.indexOf('\n\n');
+  const crlfBoundary = buffer.indexOf('\r\n\r\n');
+
+  if (lfBoundary === -1) return crlfBoundary;
+  if (crlfBoundary === -1) return lfBoundary;
+  return Math.min(lfBoundary, crlfBoundary);
 }

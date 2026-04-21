@@ -142,11 +142,30 @@ function applySessions(sessions: Session[]) {
     state.activeSessionId &&
     !nextSessions.some((session) => session.id === state.activeSessionId)
   ) {
-    resetTodoSync();
-    setState('activeSessionId', null);
-    persistActiveSessionId(null);
-    clearMessages();
-    stopLoading();
+    clearActiveSessionState();
+  }
+}
+
+function clearActiveSessionState() {
+  resetTodoSync();
+  setState('activeSessionId', null);
+  persistActiveSessionId(null);
+  clearMessages();
+  stopLoading();
+}
+
+function clearDeletedSessionState(id: string) {
+  removePermissionModeForSession(id);
+  setState('sessionStatus', (statuses) => {
+    const next = { ...statuses };
+    delete next[id];
+    return next;
+  });
+  setState('questions', (items) => items.filter((item) => item.sessionID !== id));
+  setState('permissions', (items) => items.filter((item) => item.sessionID !== id));
+
+  if (state.activeSessionId === id) {
+    clearActiveSessionState();
   }
 }
 
@@ -521,20 +540,18 @@ export async function createSession(
 
 export async function deleteSession(id: string) {
   try {
+    const wasActive = state.activeSessionId === id;
+    const nextActiveId = wasActive
+      ? state.sessions.filter((s) => s.id !== id)[0]?.id
+      : null;
     await client.session.delete(id);
-    removePermissionModeForSession(id);
     setState(
       'sessions',
       state.sessions.filter((s) => s.id !== id)
     );
-    if (state.activeSessionId === id) {
-      resetTodoSync();
-      setState('activeSessionId', null);
-      persistActiveSessionId(null);
-      clearMessages();
-      if (state.sessions.length > 0) {
-        await selectSession(state.sessions[0].id);
-      }
+    clearDeletedSessionState(id);
+    if (nextActiveId) {
+      await selectSession(nextActiveId);
     }
   } catch (err) {
     logError('deleteSession', err);
@@ -638,8 +655,8 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   if (options?.noReply) body.noReply = true;
 
   setState('droppedFiles', []);
-  clearClipboardImages();
-  postMessage({ type: 'files/clear' });
+    clearClipboardImages();
+    postMessage({ type: 'files/clear' });
 
   try {
     await client.session.sendAsync(sessionId, body);
@@ -829,11 +846,11 @@ function registerEventHandlers() {
     serverEvents.on('session.deleted', (data) => {
       const id = (getProps(data)?.info as { id: string } | undefined)?.id;
       if (id) {
-        removePermissionModeForSession(id);
         setState(
           'sessions',
           state.sessions.filter((s) => s.id !== id)
         );
+        clearDeletedSessionState(id);
       }
     })
   );

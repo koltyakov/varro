@@ -9,7 +9,7 @@ function trimTrailingSlashes(value: string) {
   return value.replace(/\/+$/, '');
 }
 
-function isAbsolutePath(path: string) {
+export function isAbsolutePath(path: string) {
   const normalizedPath = normalizePath(path);
   return normalizedPath.startsWith('/') || /^[A-Za-z]:\//.test(normalizedPath);
 }
