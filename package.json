@@ -148,7 +148,7 @@
           "description": "Debug only: make Varro behave as if the OpenCode CLI is not installed"
         },
         "varro.debug.simulateNoProviders": {
-          "hidden": false,
+          "hidden": true,
           "type": "boolean",
           "default": false,
           "description": "Debug only: make Varro behave as if no providers are configured"
