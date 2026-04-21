@@ -2874,6 +2874,7 @@ kbd {
 .session-item-indicator.is-attention {
   background: var(--color-vscode-accent);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-accent) 40%, transparent);
+  animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
 .session-item-indicator.is-completed {
@@ -2903,7 +2904,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  width: 56px;
+  min-width: 4ch;
   flex-shrink: 0;
   font-size: 10px;
   color: var(--color-vscode-muted);

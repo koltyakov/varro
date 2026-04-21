@@ -291,10 +291,7 @@ function SessionListItem(props: {
     state.permissions.some((permission) => permission.sessionID === props.session.id);
   const hasQuestionRequest = () =>
     state.questions.some((question) => question.sessionID === props.session.id);
-  const isRunning = () => {
-    const t = status()?.type;
-    return t === 'busy' || t === 'retry';
-  };
+  const isRunning = () => isRunningSession(props.session.id);
   const needsAttention = () => !isRunning() && (hasPermissionRequest() || hasQuestionRequest());
   const isNewlyCompleted = () =>
     !isRunning() && !needsAttention() && isSessionUnread(props.session.id, props.session.time.updated);
@@ -401,6 +398,14 @@ function RunningSessionsBadge(props: { count: number; onClick: () => void }) {
 }
 
 function isRunningSession(sessionId: string) {
+  if (hasPendingSessionPrompt(sessionId)) return false;
   const type = state.sessionStatus[sessionId]?.type;
   return type === 'busy' || type === 'retry';
+}
+
+function hasPendingSessionPrompt(sessionId: string) {
+  return (
+    state.permissions.some((permission) => permission.sessionID === sessionId) ||
+    state.questions.some((question) => question.sessionID === sessionId)
+  );
 }
