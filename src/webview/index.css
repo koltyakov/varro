@@ -3124,7 +3124,7 @@ kbd {
 /* Question Prompt */
 .question-prompt {
   margin: 0;
-  padding: 10px 12px 6px;
+  padding: 10px 0 6px;
 }
 
 .question-prompt-header {
