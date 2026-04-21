@@ -7,5 +7,6 @@
     "jsxImportSource": "solid-js",
     "types": []
   },
-  "include": ["src/webview/**/*", "src/shared/**/*"]
+  "include": ["src/webview/**/*", "src/shared/**/*"],
+  "exclude": ["src/webview/**/*.test.ts"]
 }
