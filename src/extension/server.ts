@@ -1,11 +1,12 @@
 import type { ChildProcess } from 'child_process';
 import { spawn } from 'child_process';
-import { delimiter, join } from 'path';
+import { join } from 'path';
 import { existsSync } from 'fs';
 import * as vscode from 'vscode';
 import { logger } from './logger';
 import { EventEmitter } from 'events';
 import type { ServerStatus } from '../shared/protocol';
+import { buildServerEnv, getServerPathEntries } from './util/server-path';
 
 export class OpenCodeServer extends EventEmitter {
   private static readonly MISSING_CLI_MESSAGE =
@@ -425,29 +426,11 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private buildServerEnv(): NodeJS.ProcessEnv {
-    return {
-      ...process.env,
-      PATH: this.serverPathEntries().join(delimiter),
-    };
+    return buildServerEnv();
   }
 
   private serverPathEntries(): string[] {
-    const home = process.env.HOME;
-    const pathEntries = (process.env.PATH || '').split(delimiter).filter(Boolean);
-    const extras =
-      process.platform === 'win32'
-        ? []
-        : [
-            ...(home ? [join(home, '.opencode', 'bin')] : []),
-            ...(home ? [join(home, '.npm-global', 'bin')] : []),
-            ...(home ? [join(home, '.local', 'bin')] : []),
-            ...(home ? [join(home, '.bun', 'bin')] : []),
-            ...(home ? [join(home, 'Library', 'pnpm')] : []),
-            '/opt/homebrew/bin',
-            '/usr/local/bin',
-          ];
-
-    return [...new Set([...pathEntries, ...extras].filter(Boolean))];
+    return getServerPathEntries();
   }
 }
 
