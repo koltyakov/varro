@@ -64,6 +64,10 @@
   --color-vscode-surface-soft: color-mix(in srgb, var(--color-vscode-fg) 4%, var(--color-vscode-widget-bg));
   --color-vscode-surface-softer: color-mix(in srgb, var(--color-vscode-fg) 2.5%, var(--color-vscode-widget-bg));
   --color-vscode-surface-hover: color-mix(in srgb, var(--color-vscode-fg) 8%, var(--color-vscode-widget-bg));
+  --color-vscode-surface-subtle: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-list-bg));
+  --color-vscode-surface-subtle-alt: color-mix(in srgb, var(--color-vscode-fg) 3.25%, var(--color-vscode-list-bg));
+  --color-vscode-input-surface: color-mix(in srgb, var(--color-vscode-fg) 4%, var(--color-vscode-input-bg));
+  --color-vscode-input-surface-hover: color-mix(in srgb, var(--color-vscode-fg) 9%, var(--color-vscode-input-bg));
   --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-border) 24%, transparent);
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
   --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 84%, transparent);
@@ -176,6 +180,10 @@ body.vscode-high-contrast-light {
   --color-vscode-surface-soft: color-mix(in srgb, var(--color-vscode-fg) 6%, var(--color-vscode-widget-bg));
   --color-vscode-surface-softer: color-mix(in srgb, var(--color-vscode-fg) 4.5%, var(--color-vscode-widget-bg));
   --color-vscode-surface-hover: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-widget-bg));
+  --color-vscode-surface-subtle: color-mix(in srgb, var(--color-vscode-fg) 3.25%, var(--color-vscode-list-bg));
+  --color-vscode-surface-subtle-alt: color-mix(in srgb, var(--color-vscode-fg) 5%, var(--color-vscode-list-bg));
+  --color-vscode-input-surface: color-mix(in srgb, var(--color-vscode-fg) 5.5%, var(--color-vscode-input-bg));
+  --color-vscode-input-surface-hover: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-input-bg));
   --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-border) 42%, transparent);
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 58%, transparent);
   --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 90%, transparent);
@@ -334,9 +342,8 @@ input:focus-visible {
   width: 100%;
   padding: 12px 14px 14px;
   border-radius: 16px;
-  border: 1px solid var(--color-vscode-border-soft);
-  background: var(--color-vscode-surface-soft);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
+  background: var(--color-vscode-surface-subtle);
 }
 
 .assistant-turn-content.assistant-turn-content-bare {
@@ -1201,7 +1208,7 @@ input:focus-visible {
   color: var(--color-vscode-fg);
   cursor: pointer;
   border: 1px solid var(--color-vscode-border-soft);
-  background: var(--color-vscode-surface-softer);
+  background: var(--color-vscode-input-surface);
   transition:
     background-color 0.12s,
     border-color 0.12s;
@@ -1234,7 +1241,7 @@ input:focus-visible {
 }
 
 .toolbar-picker:hover {
-  background: var(--color-vscode-surface-hover);
+  background: var(--color-vscode-input-surface-hover);
   border-color: var(--color-vscode-border-strong);
 }
 
@@ -1752,7 +1759,7 @@ input:focus-visible {
   height: auto;
   max-width: 100%;
   width: fit-content;
-  background: var(--color-vscode-surface-softer);
+  background: var(--color-vscode-input-surface);
   color: var(--color-vscode-fg);
   transition:
     background-color 0.1s,
@@ -1760,7 +1767,7 @@ input:focus-visible {
 }
 
 .chat-attachment-chip:hover {
-  background: var(--color-vscode-surface-hover);
+  background: var(--color-vscode-input-surface-hover);
   border-color: var(--color-vscode-border-strong);
 }
 
@@ -2070,9 +2077,9 @@ kbd {
 
 .chat-tool-invocation-part {
   margin: 0;
-  border: 1px solid var(--color-vscode-border-soft);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
   border-radius: 10px;
-  background: var(--color-vscode-surface-soft);
+  background: var(--color-vscode-surface-subtle-alt);
   overflow: hidden;
 }
 
@@ -2229,7 +2236,7 @@ kbd {
   margin: 0;
   padding: 8px 10px;
   border-radius: 8px;
-  background: var(--color-vscode-surface-softer);
+  background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-list-bg));
 }
 
 .chat-tool-invocation-part .tool-invocation-error {
