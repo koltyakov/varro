@@ -5,8 +5,162 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Varro Webview Preview</title>
   <style>
-    body { margin: 0; padding: 0; background: #1e1e1e; color: #cccccc; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-    #root { width: 400px; height: 100vh; margin: 0 auto; border-left: 1px solid #333; border-right: 1px solid #333; overflow: hidden; }
+    :root {
+      color-scheme: dark;
+      --preview-page-bg: #1e1e1e;
+      --preview-page-fg: #cccccc;
+      --preview-frame-border: #333333;
+      --vscode-sideBar-background: #252526;
+      --vscode-sideBar-foreground: #cccccc;
+      --vscode-editor-background: #1e1e1e;
+      --vscode-editor-foreground: #cccccc;
+      --vscode-panel-border: #474747;
+      --vscode-input-background: #3c3c3c;
+      --vscode-input-border: #3c3c3c;
+      --vscode-input-foreground: #cccccc;
+      --vscode-button-background: #0e639c;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-hoverBackground: #1177bb;
+      --vscode-button-secondaryBackground: #3a3d41;
+      --vscode-button-secondaryForeground: #ffffff;
+      --vscode-button-secondaryHoverBackground: #45494e;
+      --vscode-focusBorder: #007fd4;
+      --vscode-descriptionForeground: #8b8b8b;
+      --vscode-errorForeground: #f44747;
+      --vscode-editorWarning-foreground: #cca700;
+      --vscode-list-hoverBackground: #2a2d2e;
+      --vscode-toolbar-hoverBackground: rgba(90, 93, 94, 0.31);
+      --vscode-icon-foreground: #c5c5c5;
+      --vscode-widget-border: #474747;
+      --vscode-editorWidget-background: #252526;
+      --vscode-widget-shadow: rgba(0, 0, 0, 0.24);
+      --vscode-textLink-foreground: #3794ff;
+      --vscode-textLink-activeForeground: #4ca0ff;
+      --vscode-textSeparator-foreground: rgba(255, 255, 255, 0.18);
+      --vscode-contrastBorder: transparent;
+      --vscode-contrastActiveBorder: transparent;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--preview-page-bg);
+      color: var(--preview-page-fg);
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    body.theme-light {
+      color-scheme: light;
+      --preview-page-bg: #f3f3f3;
+      --preview-page-fg: #1f1f1f;
+      --preview-frame-border: #d4d4d4;
+      --vscode-sideBar-background: #f3f3f3;
+      --vscode-sideBar-foreground: #1f1f1f;
+      --vscode-editor-background: #ffffff;
+      --vscode-editor-foreground: #1f1f1f;
+      --vscode-panel-border: #d4d4d4;
+      --vscode-input-background: #ffffff;
+      --vscode-input-border: #cecece;
+      --vscode-input-foreground: #1f1f1f;
+      --vscode-button-background: #0f6cbd;
+      --vscode-button-hoverBackground: #115ea3;
+      --vscode-button-secondaryBackground: #e8e8e8;
+      --vscode-button-secondaryForeground: #1f1f1f;
+      --vscode-button-secondaryHoverBackground: #dcdcdc;
+      --vscode-focusBorder: #005fb8;
+      --vscode-descriptionForeground: #616161;
+      --vscode-errorForeground: #c72e0f;
+      --vscode-editorWarning-foreground: #855f00;
+      --vscode-list-hoverBackground: #e8e8e8;
+      --vscode-toolbar-hoverBackground: rgba(0, 0, 0, 0.06);
+      --vscode-icon-foreground: #424242;
+      --vscode-widget-border: #d4d4d4;
+      --vscode-editorWidget-background: #f8f8f8;
+      --vscode-widget-shadow: rgba(0, 0, 0, 0.16);
+      --vscode-textLink-foreground: #005fb8;
+      --vscode-textLink-activeForeground: #0f6cbd;
+      --vscode-textSeparator-foreground: rgba(0, 0, 0, 0.14);
+    }
+
+    body.theme-high-contrast {
+      --preview-page-bg: #000000;
+      --preview-page-fg: #ffffff;
+      --preview-frame-border: #ffffff;
+      --vscode-sideBar-background: #000000;
+      --vscode-sideBar-foreground: #ffffff;
+      --vscode-editor-background: #000000;
+      --vscode-editor-foreground: #ffffff;
+      --vscode-panel-border: #ffffff;
+      --vscode-input-background: #000000;
+      --vscode-input-border: #ffffff;
+      --vscode-input-foreground: #ffffff;
+      --vscode-button-background: #000000;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-hoverBackground: #0f0f0f;
+      --vscode-button-secondaryBackground: #000000;
+      --vscode-button-secondaryForeground: #ffffff;
+      --vscode-button-secondaryHoverBackground: #101010;
+      --vscode-focusBorder: #f38518;
+      --vscode-descriptionForeground: #d7d7d7;
+      --vscode-errorForeground: #ff99a4;
+      --vscode-editorWarning-foreground: #ffcc00;
+      --vscode-list-hoverBackground: #101010;
+      --vscode-toolbar-hoverBackground: #101010;
+      --vscode-icon-foreground: #ffffff;
+      --vscode-widget-border: #ffffff;
+      --vscode-editorWidget-background: #000000;
+      --vscode-widget-shadow: transparent;
+      --vscode-textLink-foreground: #3794ff;
+      --vscode-textLink-activeForeground: #4daafc;
+      --vscode-textSeparator-foreground: #ffffff;
+      --vscode-contrastBorder: #ffffff;
+      --vscode-contrastActiveBorder: #f38518;
+    }
+
+    body.theme-high-contrast-light {
+      color-scheme: light;
+      --preview-page-bg: #ffffff;
+      --preview-page-fg: #000000;
+      --preview-frame-border: #000000;
+      --vscode-sideBar-background: #ffffff;
+      --vscode-sideBar-foreground: #000000;
+      --vscode-editor-background: #ffffff;
+      --vscode-editor-foreground: #000000;
+      --vscode-panel-border: #000000;
+      --vscode-input-background: #ffffff;
+      --vscode-input-border: #000000;
+      --vscode-input-foreground: #000000;
+      --vscode-button-background: #ffffff;
+      --vscode-button-foreground: #000000;
+      --vscode-button-hoverBackground: #f3f3f3;
+      --vscode-button-secondaryBackground: #ffffff;
+      --vscode-button-secondaryForeground: #000000;
+      --vscode-button-secondaryHoverBackground: #f3f3f3;
+      --vscode-focusBorder: #0f4a85;
+      --vscode-descriptionForeground: #333333;
+      --vscode-errorForeground: #b5200d;
+      --vscode-editorWarning-foreground: #855f00;
+      --vscode-list-hoverBackground: #f3f3f3;
+      --vscode-toolbar-hoverBackground: #ececec;
+      --vscode-icon-foreground: #000000;
+      --vscode-widget-border: #000000;
+      --vscode-editorWidget-background: #ffffff;
+      --vscode-widget-shadow: transparent;
+      --vscode-textLink-foreground: #0f4a85;
+      --vscode-textLink-activeForeground: #005fb8;
+      --vscode-textSeparator-foreground: #000000;
+      --vscode-contrastBorder: #000000;
+      --vscode-contrastActiveBorder: #0f4a85;
+    }
+
+    #root {
+      width: 400px;
+      height: 100vh;
+      margin: 0 auto;
+      border-left: 1px solid var(--preview-frame-border);
+      border-right: 1px solid var(--preview-frame-border);
+      overflow: hidden;
+    }
   </style>
 </head>
 <body>
@@ -14,7 +168,18 @@
   <script>
     const SERVER_URL = new URLSearchParams(location.search).get('server') || 'http://127.0.0.1:4096';
     const DIRECTORY = new URLSearchParams(location.search).get('dir') || '';
+    const THEME = new URLSearchParams(location.search).get('theme') || 'dark';
     const directoryHeaders = DIRECTORY ? { 'x-opencode-directory': encodeURIComponent(DIRECTORY) } : {};
+
+    const themeClass = {
+      light: 'theme-light',
+      dark: 'theme-dark',
+      'high-contrast': 'theme-high-contrast',
+      'high-contrast-light': 'theme-high-contrast-light'
+    }[THEME] || 'theme-dark';
+
+    document.body.classList.add(themeClass);
+    document.body.dataset.vscodeThemeKind = THEME;
 
     function scopeUrl(path) {
       const url = new URL(path, SERVER_URL);
@@ -51,7 +216,7 @@
       }
       if (msg.type === 'ready') {
         postToWebview({ type: 'server/status', payload: { state: 'running', url: SERVER_URL } });
-        postToWebview({ type: 'theme/update', payload: { theme: 'dark' } });
+        postToWebview({ type: 'theme/update', payload: { theme: THEME } });
         postToWebview({
           type: 'context/update',
           payload: {

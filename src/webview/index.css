@@ -10,7 +10,13 @@
   --color-vscode-button-bg: var(--vscode-button-background, #0e639c);
   --color-vscode-button-fg: var(--vscode-button-foreground, #ffffff);
   --color-vscode-button-hover: var(--vscode-button-hoverBackground, #1177bb);
+  --color-vscode-button-separator: var(--vscode-button-separator, rgba(255, 255, 255, 0.2));
+  --color-vscode-button-secondary-bg: var(--vscode-button-secondaryBackground, #3a3d41);
+  --color-vscode-button-secondary-fg: var(--vscode-button-secondaryForeground, #ffffff);
+  --color-vscode-button-secondary-hover: var(--vscode-button-secondaryHoverBackground, #45494e);
   --color-vscode-border: var(--vscode-panel-border, #474747);
+  --color-vscode-contrast-border: var(--vscode-contrastBorder, transparent);
+  --color-vscode-contrast-active-border: var(--vscode-contrastActiveBorder, transparent);
   --color-vscode-link: var(--vscode-textLink-foreground, #3794ff);
   --color-vscode-link-active: var(--vscode-textLink-activeForeground, #4ca0ff);
   --color-vscode-muted: var(--vscode-descriptionForeground, #8b8b8b);
@@ -40,17 +46,28 @@
   --color-vscode-icon-fg: var(--vscode-icon-foreground, #c5c5c5);
   --color-vscode-widget-border: var(--vscode-widget-border, #474747);
   --color-vscode-widget-bg: var(--vscode-editorWidget-background, #252526);
+  --color-vscode-widget-shadow: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.24));
   --color-vscode-lines-add: var(--vscode-chat-linesAddedForeground, #73c991);
   --color-vscode-lines-del: var(--vscode-chat-linesRemovedForeground, #c74e39);
   --color-vscode-thinking-shimmer: var(--vscode-chat-thinkingShimmer, rgba(255, 255, 255, 0.6));
   --color-vscode-avatar-bg: var(--vscode-chat-avatarBackground, #37373d);
   --color-vscode-avatar-fg: var(--vscode-chat-avatarForeground, #c5c5c5);
-  --color-vscode-session-fg: var(--vscode-interactive-session-foreground, #e0e0e0);
+  --color-vscode-session-fg: var(
+    --vscode-interactive-session-foreground,
+    var(--vscode-editor-foreground, #333333)
+  );
   --color-vscode-diff-add: var(
     --vscode-diffEditor-insertedTextBackground,
     rgba(156, 204, 156, 0.2)
   );
   --color-vscode-diff-del: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
+  --color-vscode-surface-soft: color-mix(in srgb, var(--color-vscode-fg) 4%, var(--color-vscode-widget-bg));
+  --color-vscode-surface-softer: color-mix(in srgb, var(--color-vscode-fg) 2.5%, var(--color-vscode-widget-bg));
+  --color-vscode-surface-hover: color-mix(in srgb, var(--color-vscode-fg) 8%, var(--color-vscode-widget-bg));
+  --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-border) 24%, transparent);
+  --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
+  --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 84%, transparent);
+  --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 72%, transparent);
   --font-mono: var(
     --vscode-editor-font-family,
     'SF Mono',
@@ -145,6 +162,39 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+body.vscode-light,
+body.vscode-high-contrast-light {
+  --color-vscode-session-fg: var(--color-vscode-fg);
+  --color-vscode-request-bubble: var(
+    --vscode-chat-requestBubbleBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 10%, var(--color-vscode-widget-bg))
+  );
+  --color-vscode-request-bubble-hover: var(
+    --vscode-chat-requestBubbleHoverBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 14%, var(--color-vscode-widget-bg))
+  );
+  --color-vscode-surface-soft: color-mix(in srgb, var(--color-vscode-fg) 6%, var(--color-vscode-widget-bg));
+  --color-vscode-surface-softer: color-mix(in srgb, var(--color-vscode-fg) 4.5%, var(--color-vscode-widget-bg));
+  --color-vscode-surface-hover: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-widget-bg));
+  --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-border) 42%, transparent);
+  --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 58%, transparent);
+  --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 90%, transparent);
+  --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 80%, transparent);
+}
+
+body.vscode-light :is(.assistant-turn-content, .todo-block, .chat-tool-invocation-part, .chat-thinking-box) {
+  background: color-mix(in srgb, var(--color-vscode-fg) 1.25%, var(--color-vscode-sidebar));
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 7%, var(--color-vscode-sidebar));
+}
+
+body.vscode-light .assistant-turn-content {
+  box-shadow: none;
+}
+
+body.vscode-light :is(.chat-tool-invocation-part .tool-invocation-output, .chat-compaction-notice) {
+  background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-sidebar));
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent) transparent;
@@ -232,7 +282,7 @@ input:focus-visible {
   padding: 6px 0;
   display: flex;
   flex-direction: column;
-  color: var(--color-vscode-session-fg);
+  color: var(--color-vscode-fg);
   cursor: default;
   user-select: text;
   -webkit-user-select: text;
@@ -272,6 +322,7 @@ input:focus-visible {
   border-radius: 16px;
   padding: 12px 15px;
   background: var(--color-vscode-request-bubble);
+  color: var(--color-vscode-fg);
 }
 
 .user-message-card {
@@ -283,9 +334,9 @@ input:focus-visible {
   width: 100%;
   padding: 12px 14px 14px;
   border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 24%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-widget-bg) 78%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
+  background: var(--color-vscode-surface-soft);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
 }
 
 .assistant-turn-content.assistant-turn-content-bare {
@@ -305,8 +356,7 @@ input:focus-visible {
 .assistant-dialog-summary {
   font-size: 11.5px;
   line-height: 1.4;
-  color: var(--color-vscode-fg);
-  opacity: 0.66;
+  color: var(--color-vscode-fg-muted);
   font-variant-numeric: tabular-nums;
   padding-left: 14px;
   padding-top: 2px;
@@ -415,7 +465,7 @@ input:focus-visible {
   line-height: 1.65;
   font-size: 13.5px;
   font-family: var(--font-sans);
-  color: var(--color-vscode-session-fg);
+  color: var(--color-vscode-fg);
 }
 
 .rendered-markdown p {
@@ -622,7 +672,10 @@ input:focus-visible {
   border-bottom: none;
 }
 .rendered-markdown hr {
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(
+    --vscode-textSeparator-foreground,
+    color-mix(in srgb, var(--color-vscode-border) 26%, transparent)
+  );
 }
 
 .interactive-result-code-block {
@@ -731,6 +784,11 @@ input:focus-visible {
   z-index: 2;
 }
 
+.interactive-session .chat-input-container.showing-model-picker {
+  overflow: visible;
+  z-index: 2;
+}
+
 .interactive-session .chat-input-toolbars .toolbar-left.showing-context-popup {
   overflow: visible;
 }
@@ -748,6 +806,33 @@ input:focus-visible {
   flex-direction: column;
   gap: 6px;
   position: relative;
+}
+
+.interactive-session .model-selection-row {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 2px;
+  position: relative;
+  z-index: 3;
+}
+
+.interactive-session .model-selection-trigger {
+  max-width: min(100%, 280px);
+  gap: 6px;
+}
+
+.interactive-session .model-selection-trigger .toolbar-picker-label.model-name {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.interactive-session .model-selection-label {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-vscode-muted);
 }
 
 .interactive-session .chat-input-toolbars {
@@ -867,7 +952,7 @@ input:focus-visible {
   border-radius: 6px;
   border: 1px solid var(--color-vscode-border);
   background: var(--color-vscode-widget-bg);
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 -2px 12px color-mix(in srgb, var(--color-vscode-widget-shadow) 85%, transparent);
   padding: 10px;
   animation: fade-in 0.1s ease-out;
   font-size: 11px;
@@ -1032,9 +1117,9 @@ input:focus-visible {
   max-height: 220px;
   overflow-y: auto;
   border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
+  border: 1px solid var(--color-vscode-border-strong);
   background: var(--color-vscode-input-bg);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-vscode-widget-shadow) 100%, transparent);
   padding: 4px;
 }
 
@@ -1115,8 +1200,8 @@ input:focus-visible {
   border-radius: 6px;
   color: var(--color-vscode-fg);
   cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 25%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
+  background: var(--color-vscode-surface-softer);
   transition:
     background-color 0.12s,
     border-color 0.12s;
@@ -1149,8 +1234,8 @@ input:focus-visible {
 }
 
 .toolbar-picker:hover {
-  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
-  border-color: color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
+  background: var(--color-vscode-surface-hover);
+  border-color: var(--color-vscode-border-strong);
 }
 
 .toolbar-picker.icon-only {
@@ -1189,9 +1274,9 @@ input:focus-visible {
   max-height: 200px;
   overflow-y: auto;
   border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 50%, transparent);
+  border: 1px solid var(--color-vscode-border-strong);
   background: var(--color-vscode-input-bg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-vscode-widget-shadow) 90%, transparent);
   padding: 3px;
 }
 
@@ -1360,11 +1445,11 @@ input:focus-visible {
 
 .chat-send-button.enabled {
   background: var(--color-vscode-accent);
-  color: #fff;
+  color: var(--color-vscode-button-fg);
 }
 
 .chat-send-button.enabled:hover {
-  background: color-mix(in srgb, var(--color-vscode-accent) 85%, white);
+  background: var(--color-vscode-button-hover);
 }
 
 .chat-send-button.disabled {
@@ -1395,14 +1480,14 @@ input:focus-visible {
   border: none;
   cursor: pointer;
   background: var(--color-vscode-accent);
-  color: #fff;
+  color: var(--color-vscode-button-fg);
   border-radius: 0 8px 8px 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  border-left: 1px solid color-mix(in srgb, var(--color-vscode-button-separator) 100%, transparent);
   transition: background-color 0.15s;
 }
 
 .send-mode-chevron:hover {
-  background: color-mix(in srgb, var(--color-vscode-accent) 75%, white);
+  background: var(--color-vscode-button-hover);
 }
 
 .chat-stop-button {
@@ -1432,9 +1517,9 @@ input:focus-visible {
 .todo-block {
   margin: 0 2px 8px;
   padding: 7px 11px 8px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 26%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 3.5%, transparent);
+  background: var(--color-vscode-surface-soft);
   overflow: hidden;
 }
 
@@ -1446,7 +1531,7 @@ input:focus-visible {
   background: none;
   border: none;
   padding: 0;
-  color: color-mix(in srgb, var(--color-vscode-fg) 88%, transparent);
+  color: var(--color-vscode-fg-soft);
   cursor: pointer;
   text-align: left;
   font: inherit;
@@ -1473,7 +1558,7 @@ input:focus-visible {
   font-weight: 600;
   letter-spacing: 0.01em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-vscode-fg) 78%, transparent);
+  color: var(--color-vscode-fg-soft);
 }
 
 .todo-block-count {
@@ -1545,7 +1630,7 @@ input:focus-visible {
 }
 
 .todo-block-item.status-completed .todo-block-item-text {
-  color: color-mix(in srgb, var(--color-vscode-fg) 48%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-fg) 58%, transparent);
   text-decoration: line-through;
   text-decoration-color: color-mix(in srgb, var(--color-vscode-muted) 55%, transparent);
   text-decoration-thickness: 1px;
@@ -1557,7 +1642,7 @@ input:focus-visible {
 }
 
 .todo-block-item.status-pending .todo-block-item-text {
-  color: color-mix(in srgb, var(--color-vscode-fg) 78%, transparent);
+  color: var(--color-vscode-fg-soft);
 }
 
 .chat-queue-container {
@@ -1573,9 +1658,9 @@ input:focus-visible {
   gap: 6px;
   font-size: 11.5px;
   padding: 4px 4px 4px 8px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
   border-radius: 7px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 5%, transparent);
+  background: var(--color-vscode-surface-softer);
   color: var(--color-vscode-fg);
   min-width: 0;
 }
@@ -1593,7 +1678,7 @@ input:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: color-mix(in srgb, var(--color-vscode-fg) 85%, transparent);
+  color: var(--color-vscode-fg-soft);
 }
 
 .chat-queue-action {
@@ -1662,12 +1747,12 @@ input:focus-visible {
   font-size: 11.5px;
   font-weight: 500;
   padding: 4px 9px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
   border-radius: 7px;
   height: auto;
   max-width: 100%;
   width: fit-content;
-  background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
+  background: var(--color-vscode-surface-softer);
   color: var(--color-vscode-fg);
   transition:
     background-color 0.1s,
@@ -1675,8 +1760,8 @@ input:focus-visible {
 }
 
 .chat-attachment-chip:hover {
-  background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
-  border-color: color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+  background: var(--color-vscode-surface-hover);
+  border-color: var(--color-vscode-border-strong);
 }
 
 .chat-attachment-chip .chip-icon {
@@ -1723,9 +1808,9 @@ input:focus-visible {
   outline: none;
   position: relative;
   color: var(--color-vscode-muted);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
+  background: var(--color-vscode-surface-soft);
   overflow: hidden;
 }
 
@@ -1735,7 +1820,7 @@ input:focus-visible {
   gap: 6px;
   font-size: 12.5px;
   color: var(--color-vscode-fg);
-  opacity: 0.84;
+  opacity: 0.94;
   cursor: pointer;
   padding: 8px 10px;
   border: none;
@@ -1758,7 +1843,7 @@ input:focus-visible {
 }
 
 .chat-thinking-box .thinking-content {
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
+  border-top: 1px solid var(--color-vscode-border-soft);
   padding: 0;
   max-height: 220px;
   overflow-y: auto;
@@ -1770,7 +1855,7 @@ input:focus-visible {
   font-size: 12.5px;
   line-height: 1.65;
   color: var(--color-vscode-fg);
-  opacity: 0.82;
+  opacity: 0.92;
 }
 
 .shimmer-progress {
@@ -1985,9 +2070,9 @@ kbd {
 
 .chat-tool-invocation-part {
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
+  background: var(--color-vscode-surface-soft);
   overflow: hidden;
 }
 
@@ -2050,8 +2135,7 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-duration {
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
-  color: var(--color-vscode-fg);
-  opacity: 0.72;
+  color: var(--color-vscode-fg-muted);
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -2088,12 +2172,11 @@ kbd {
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 11.5px;
-  color: var(--color-vscode-fg);
-  opacity: 0.72;
+  color: var(--color-vscode-fg-muted);
 }
 
 .chat-tool-invocation-part .tool-invocation-detail {
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
+  border-top: 1px solid var(--color-vscode-border-soft);
   padding: 10px 12px 12px 24px;
   font-size: 11.5px;
 }
@@ -2113,8 +2196,7 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-input-key {
-  color: var(--color-vscode-fg);
-  opacity: 0.72;
+  color: var(--color-vscode-fg-muted);
   flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -2147,7 +2229,7 @@ kbd {
   margin: 0;
   padding: 8px 10px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 5%, transparent);
+  background: var(--color-vscode-surface-softer);
 }
 
 .chat-tool-invocation-part .tool-invocation-error {
@@ -2161,8 +2243,7 @@ kbd {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--color-vscode-fg);
-  opacity: 0.6;
+  color: var(--color-vscode-fg-muted);
 }
 
 .file-change-card {
@@ -2341,8 +2422,7 @@ kbd {
 .file-read-meta,
 .file-read-duration {
   font-family: var(--font-mono);
-  color: var(--color-vscode-fg);
-  opacity: 0.72;
+  color: var(--color-vscode-fg-muted);
 }
 
 .file-read-duration {
@@ -2359,9 +2439,9 @@ kbd {
 
 .chat-subtask-part {
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 2.5%, transparent);
+  background: var(--color-vscode-surface-softer);
   padding: 8px 10px;
 }
 
@@ -2391,8 +2471,7 @@ kbd {
   margin-left: 12px;
   margin-top: 6px;
   font-size: 11.5px;
-  color: var(--color-vscode-fg);
-  opacity: 0.68;
+  color: var(--color-vscode-fg-muted);
 }
 
 .chat-subtask-part .subtask-completion-summary {
@@ -2430,11 +2509,10 @@ kbd {
   margin: 4px 0;
   padding: 7px 10px;
   font-size: 11.5px;
-  color: var(--color-vscode-fg);
-  opacity: 0.58;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
+  color: var(--color-vscode-fg-muted);
+  border: 1px solid var(--color-vscode-border-soft);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 2%, transparent);
+  background: var(--color-vscode-surface-softer);
 }
 
 .chat-thinking-box .thinking-text {
@@ -2526,10 +2604,10 @@ kbd {
   font-size: 11px;
   font-weight: 500;
   padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 25%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 5%, transparent);
-  color: color-mix(in srgb, var(--color-vscode-fg) 85%, transparent);
+  background: var(--color-vscode-surface-softer);
+  color: var(--color-vscode-fg-soft);
   max-width: 100%;
   overflow: hidden;
 }
@@ -2560,8 +2638,8 @@ kbd {
 }
 
 .message-attachment-chip-clickable:hover {
-  background: color-mix(in srgb, var(--color-vscode-fg) 9%, transparent);
-  border-color: color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
+  background: var(--color-vscode-surface-hover);
+  border-color: var(--color-vscode-border-strong);
   color: var(--color-vscode-fg);
 }
 
@@ -2583,7 +2661,7 @@ kbd {
   border-radius: 6px;
   border: 1px solid var(--color-vscode-border);
   background: var(--color-vscode-widget-bg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-vscode-widget-shadow) 100%, transparent);
 }
 
 .dropdown-group-header {
@@ -2882,8 +2960,8 @@ kbd {
 }
 
 .session-item-indicator.is-completed {
-  background: var(--color-vscode-success, #4ec9b0);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-success, #4ec9b0) 55%, transparent);
+  background: var(--color-vscode-success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-success) 55%, transparent);
 }
 
 .session-item-title {
@@ -3235,8 +3313,8 @@ kbd {
 
 .question-prompt-panel {
   border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-widget-bg) 55%, transparent);
+  border: 1px solid var(--color-vscode-border-soft);
+  background: var(--color-vscode-surface-soft);
   padding: 8px;
 }
 
@@ -3349,8 +3427,7 @@ kbd {
 .question-option-desc {
   font-size: 11.5px;
   line-height: 1.35;
-  color: var(--color-vscode-fg);
-  opacity: 0.7;
+  color: var(--color-vscode-fg-muted);
   word-break: break-word;
 }
 
@@ -3414,21 +3491,43 @@ kbd {
 }
 
 .question-btn-secondary {
-  background: var(--color-vscode-hover);
-  color: var(--color-vscode-fg);
+  background: var(--color-vscode-button-secondary-bg);
+  color: var(--color-vscode-button-secondary-fg);
 }
 
 .question-btn-secondary:hover:not(:disabled) {
-  opacity: 0.8;
+  background: var(--color-vscode-button-secondary-hover);
 }
 
 .question-btn-primary {
   background: var(--color-vscode-accent);
-  color: white;
+  color: var(--color-vscode-button-fg);
 }
 
 .question-btn-primary:hover:not(:disabled) {
-  opacity: 0.85;
+  background: var(--color-vscode-button-hover);
+}
+
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --color-vscode-widget-shadow: transparent;
+}
+
+body.vscode-high-contrast :is(.assistant-turn-content, .todo-block, .chat-tool-invocation-part, .diff-view-widget, .composer-completion-menu, .toolbar-popover, .dropdown-menu, .context-popup),
+body.vscode-high-contrast-light :is(.assistant-turn-content, .todo-block, .chat-tool-invocation-part, .diff-view-widget, .composer-completion-menu, .toolbar-popover, .dropdown-menu, .context-popup) {
+  border-color: var(--color-vscode-contrast-border);
+  box-shadow: none;
+}
+
+body.vscode-high-contrast :is(.toolbar-picker, .chat-send-button.enabled, .send-mode-chevron, .question-btn, .chat-stop-button, .question-option),
+body.vscode-high-contrast-light :is(.toolbar-picker, .chat-send-button.enabled, .send-mode-chevron, .question-btn, .chat-stop-button, .question-option) {
+  outline: 1px solid var(--color-vscode-contrast-border);
+  outline-offset: -1px;
+}
+
+body.vscode-high-contrast :is(button:focus-visible, input:focus-visible, textarea:focus-visible),
+body.vscode-high-contrast-light :is(button:focus-visible, input:focus-visible, textarea:focus-visible) {
+  outline: 2px solid var(--color-vscode-contrast-active-border);
 }
 
 /* Permission Prompt */

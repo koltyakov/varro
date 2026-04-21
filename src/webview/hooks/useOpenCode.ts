@@ -6,6 +6,7 @@ import {
   setSelectedAgent,
   setSelectedModel,
   resolveSelectedModel,
+  theme,
   setTheme,
   isLoading,
   startLoading,
@@ -40,7 +41,7 @@ import {
   setDraftPermissionMode,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
-import type { ExtensionMessage } from '../../shared/protocol';
+import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
 
 function logError(context: string, err: unknown) {
   postMessage({
@@ -65,6 +66,7 @@ import type {
   FileDiff,
 } from '../types';
 import { getWorkspaceRelativePath } from '../lib/path-display';
+import { applyWebviewTheme } from '../lib/theme';
 
 let initialized = false;
 let eventHandlerCleanups: (() => void)[] = [];
@@ -252,6 +254,10 @@ function resetTodoSync() {
   todoStateAuthority = 'messages';
 }
 
+function applyTheme(theme: WebviewThemeKind) {
+  applyWebviewTheme(theme);
+}
+
 function syncTodosFromMessages(messages = state.messages) {
   if (todoStateAuthority === 'event') return;
   setState('todos', deriveTodosFromMessages(messages));
@@ -259,6 +265,8 @@ function syncTodosFromMessages(messages = state.messages) {
 
 export function useOpenCode() {
   onMount(() => {
+    applyTheme(theme());
+
     if (eventHandlerCleanups.length === 0) {
       registerEventHandlers();
     }
@@ -279,6 +287,7 @@ export function useOpenCode() {
           break;
         case 'theme/update':
           setTheme(msg.payload.theme);
+          applyTheme(msg.payload.theme);
           break;
         case 'context/update':
           {

@@ -8,6 +8,7 @@ import type {
   InitialWebviewState,
   ServerEventName,
   ServerStatus,
+  WebviewThemeKind,
   WebviewMessage,
 } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
@@ -336,11 +337,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private currentTheme(): 'dark' | 'light' {
+  private currentTheme(): WebviewThemeKind {
     const k = vscode.window.activeColorTheme.kind;
-    return k === vscode.ColorThemeKind.Dark || k === vscode.ColorThemeKind.HighContrast
-      ? 'dark'
-      : 'light';
+    switch (k) {
+      case vscode.ColorThemeKind.Light:
+        return 'light';
+      case vscode.ColorThemeKind.Dark:
+        return 'dark';
+      case vscode.ColorThemeKind.HighContrast:
+        return 'high-contrast';
+      case vscode.ColorThemeKind.HighContrastLight:
+        return 'high-contrast-light';
+      default:
+        return 'dark';
+    }
   }
 
   async handleMessage(msg: WebviewMessage) {

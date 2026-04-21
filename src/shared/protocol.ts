@@ -53,8 +53,10 @@ export type ServerEventName =
   | 'question.rejected'
   | 'todo.updated';
 
+export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light';
+
 export type InitialWebviewState = {
-  theme: 'dark' | 'light';
+  theme: WebviewThemeKind;
   serverStatus: ServerStatus;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
@@ -75,7 +77,7 @@ export type ExtensionMessage =
       type: 'files/search-results';
       payload: { requestId: number; query: string; files: DroppedFile[] };
     }
-  | { type: 'theme/update'; payload: { theme: 'dark' | 'light' } }
+  | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session' }
   | { type: 'command/focus-input' }

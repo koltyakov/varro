@@ -19,6 +19,7 @@ import type {
   InitialWebviewState,
   PermissionMode,
   ServerStatus,
+  WebviewThemeKind,
 } from '../../shared/protocol';
 
 const STORAGE_KEYS = {
@@ -286,9 +287,9 @@ function resolveInitialDraftMode(): PermissionMode {
 export const [draftPermissionMode, setDraftPermissionMode] = createSignal<PermissionMode>(
   resolveInitialDraftMode()
 );
-export const [theme, setTheme] = createSignal<'dark' | 'light'>(
+export const [theme, setTheme] = createSignal<WebviewThemeKind>(
   initialWebviewState.theme ||
-    ((window as unknown as Record<string, string>).__initialTheme as 'dark' | 'light') ||
+    ((window as unknown as Record<string, string>).__initialTheme as WebviewThemeKind) ||
     'dark'
 );
 

@@ -74,7 +74,7 @@ function TodoItem(props: { todo: Todo }) {
             <path
               d="M5 8.25l2.25 2.25L11 6.5"
               fill="none"
-              stroke="var(--vscode-editor-background, #1e1e1e)"
+              stroke="var(--vscode-button-foreground, #ffffff)"
               stroke-width="1.6"
               stroke-linecap="round"
               stroke-linejoin="round"

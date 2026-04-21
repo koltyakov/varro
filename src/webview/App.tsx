@@ -39,10 +39,10 @@ function ErrorFallback(props: { err: Error }) {
         <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
       </svg>
       <p class="text-sm text-vscode-error">Something went wrong</p>
-      <p class="max-w-full text-xs text-vscode-fg-muted break-words">{props.err?.message || 'Unknown error'}</p>
-      <pre class="max-h-40 max-w-full overflow-auto text-left text-[10px] text-vscode-fg-muted">{props.err?.stack || ''}</pre>
+      <p class="max-w-full break-words text-xs text-vscode-muted">{props.err?.message || 'Unknown error'}</p>
+      <pre class="max-h-40 max-w-full overflow-auto text-left text-[10px] text-vscode-muted">{props.err?.stack || ''}</pre>
       <button
-        class="rounded px-3 py-1 text-xs bg-vscode-button-bg text-vscode-button-fg hover:bg-vscode-button-hoverBg"
+        class="rounded bg-vscode-button-bg px-3 py-1 text-xs text-vscode-button-fg hover:bg-vscode-button-hover"
         onClick={() => window.location.reload()}
       >
         Reload

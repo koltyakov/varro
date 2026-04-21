@@ -156,7 +156,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                         >
                           <div class={`question-checkbox ${checked() ? 'checked' : ''}`}>
                             <Show when={checked()}>
-                              <svg width="10" height="10" viewBox="0 0 16 16" fill="white">
+                              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                                 <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
                               </svg>
                             </Show>
@@ -191,7 +191,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                       class={`question-checkbox ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
                     >
                       <Show when={(customValues()[questionIndex()] || '').trim()}>
-                        <svg width="10" height="10" viewBox="0 0 16 16" fill="white">
+                        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
                         </svg>
                       </Show>
