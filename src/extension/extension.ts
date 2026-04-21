@@ -17,13 +17,19 @@ export async function activate(context: vscode.ExtensionContext) {
   const autoStart = config.get<boolean>('server.autoStart', true);
   const command = config.get<string>('server.command', '');
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
+  const simulateNoProviders = config.get<boolean>('debug.simulateNoProviders', false);
 
   server = new OpenCodeServer(port, autoStart, command, simulateMissingCli);
   contextProvider = new ContextProvider((ctx) => {
     sidebarProvider?.post({ type: 'context/update', payload: ctx });
   });
 
-  sidebarProvider = new SidebarProvider(context.extensionUri, contextProvider, server);
+  sidebarProvider = new SidebarProvider(
+    context.extensionUri,
+    contextProvider,
+    server,
+    simulateNoProviders
+  );
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebarProvider, {

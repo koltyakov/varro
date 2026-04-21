@@ -49,7 +49,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     contextProvider: ContextProvider,
-    server: OpenCodeServer
+    server: OpenCodeServer,
+    private readonly simulateNoProviders = false
   ) {
     this.contextProvider = contextProvider;
     this.server = server;
@@ -380,6 +381,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.contextProvider.clearTerminalSelection();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           break;
+        case 'terminal/run':
+          this.runInTerminal(msg.payload.command, msg.payload.title);
+          break;
         case 'files/drop':
           await this.handleDroppedPaths(msg.payload.paths);
           break;
@@ -446,6 +450,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     try {
+      if (
+        this.simulateNoProviders &&
+        payload.method === 'GET' &&
+        payload.path === '/config/providers'
+      ) {
+        this.post({
+          type: 'api/response',
+          payload: { id: payload.id, data: { providers: [], default: {} } },
+        });
+        return;
+      }
+
       const data = await this.server.request(payload.method, payload.path, payload.body);
       this.post({ type: 'api/response', payload: { id: payload.id, data } });
     } catch (err) {
@@ -585,6 +601,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   postTerminalSelection(selection: { text: string; terminalName: string } | null) {
     this.post({ type: 'terminal-selection/update', payload: selection });
+  }
+
+  private runInTerminal(command: string, title = 'OpenCode') {
+    const text = command.trim();
+    if (!text) return;
+
+    const cwd = this.contextProvider.context.workspacePath || undefined;
+    const terminal = vscode.window.createTerminal({ name: title, cwd });
+    terminal.show(false);
+    terminal.sendText(text, true);
   }
 
   private postContextFiles() {

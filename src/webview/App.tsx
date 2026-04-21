@@ -7,10 +7,13 @@ import { ServerStatus } from './components/ServerStatus';
 export function App() {
   useOpenCode();
 
+  const showChat = () =>
+    state.serverStatus.state === 'running' && !(state.providersLoaded && state.providers.length === 0);
+
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
       <ErrorBoundary fallback={(err) => <ErrorFallback err={err} />}>
-        <Show when={state.serverStatus.state === 'running'} fallback={<ServerStatus />}>
+        <Show when={showChat()} fallback={<ServerStatus />}>
           <Chat />
         </Show>
       </ErrorBoundary>

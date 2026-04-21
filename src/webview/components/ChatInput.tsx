@@ -163,6 +163,11 @@ export function ChatInput() {
     getSlashCommands({
       isBusy: isLoading(),
       canUndo: !!state.activeSessionId && state.messages.some((m) => m.info.role === 'assistant'),
+      onConnectProvider: () =>
+        postMessage({
+          type: 'terminal/run',
+          payload: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
+        }),
       onOpenSessions: () => setShowSessionPicker(true),
       onOpenModels: () => setShowModelPicker(true),
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
@@ -1954,6 +1959,7 @@ function PermissionModeIcon(props: { mode: PermissionMode }) {
 function getSlashCommands(props: {
   isBusy: boolean;
   canUndo: boolean;
+  onConnectProvider: () => void;
   onOpenSessions: () => void;
   onOpenModels: () => void;
   onOpenFiles: () => void;
@@ -1979,6 +1985,12 @@ function getSlashCommands(props: {
       aliases: [],
       description: 'Open the model picker',
       action: props.onOpenModels,
+    },
+    {
+      name: 'connect',
+      aliases: [],
+      description: 'Open provider login in the terminal',
+      action: props.onConnectProvider,
     },
     {
       name: 'attach',

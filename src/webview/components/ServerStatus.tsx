@@ -1,8 +1,17 @@
 import { Show } from 'solid-js';
+import { postMessage } from '../lib/bridge';
 import { state } from '../lib/state';
 
 export function ServerStatus() {
   const status = () => state.serverStatus;
+  const noProvidersConfigured = () => status().state === 'running' && state.providersLoaded && state.providers.length === 0;
+
+  const openProviderSetup = () => {
+    postMessage({
+      type: 'terminal/run',
+      payload: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
+    });
+  };
 
   return (
     <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center">
@@ -82,6 +91,65 @@ export function ServerStatus() {
             class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
           >
             Learn more at opencode.ai
+          </a>
+        </div>
+      </Show>
+
+      <Show when={noProvidersConfigured()}>
+        <div class="flex w-full max-w-75 flex-col items-center gap-4 text-center">
+          <div
+            class="flex shrink-0 items-center justify-center rounded-full bg-vscode-accent/10"
+            style={{ width: '40px', height: '40px', 'aspect-ratio': '1 / 1' }}
+          >
+            <svg
+              width="20"
+              height="20"
+              class="text-vscode-accent"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 8V4H8" />
+              <rect width="16" height="12" x="4" y="8" rx="2" />
+              <path d="M2 14h2" />
+              <path d="M20 14h2" />
+              <path d="M15 13v2" />
+              <path d="M9 13v2" />
+            </svg>
+          </div>
+          <div class="flex flex-col gap-1.5 px-4">
+            <p class="text-[13px] font-medium text-vscode-fg">No providers configured</p>
+            <p class="text-[12px] leading-normal text-vscode-muted">
+              OpenCode is running, but it does not have any providers configured yet.
+              <br />
+              Add one with the provider login command, then restart Varro if models still do not appear.
+            </p>
+          </div>
+          <div class="w-full px-4">
+            <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
+              <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">
+                Setup
+              </p>
+              <code class="mt-1 block font-mono text-[12px] text-vscode-fg">
+                opencode auth login
+              </code>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="server-status-action-button"
+            onClick={openProviderSetup}
+          >
+            Open terminal and add a provider
+          </button>
+          <a
+            href="https://opencode.ai/docs/providers"
+            class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
+          >
+            Provider setup docs
           </a>
         </div>
       </Show>

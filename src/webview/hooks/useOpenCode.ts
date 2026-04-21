@@ -283,6 +283,7 @@ export function useOpenCode() {
               initConnection();
             }
           } else {
+            setState('providersLoaded', false);
             setError(null);
           }
           break;
@@ -448,10 +449,12 @@ async function loadAgents() {
 }
 
 async function loadProviders() {
+  setState('providersLoaded', false);
   try {
     const res = await client.config.providers();
     setState('providers', res.providers);
     setState('providerDefaults', res.default || {});
+    setState('providersLoaded', true);
     const effectiveModel = resolveSelectedModel(
       state.selectedModel,
       res.providers,

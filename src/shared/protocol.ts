@@ -85,6 +85,7 @@ export type WebviewMessage =
   | { type: 'context/request' }
   | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'terminal-selection/clear' }
+  | { type: 'terminal/run'; payload: { command: string; title?: string } }
   | { type: 'files/drop'; payload: { paths: string[] } }
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }

@@ -3506,6 +3506,29 @@ kbd {
   background: var(--color-vscode-button-secondary-hover);
 }
 
+.server-status-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  background: var(--color-vscode-button-bg);
+  color: var(--color-vscode-button-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+}
+
+.server-status-action-button:hover:not(:disabled) {
+  background: var(--color-vscode-button-hover);
+}
+
+.server-status-action-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 .question-btn-primary {
   background: var(--color-vscode-accent);
   color: var(--color-vscode-button-fg);
@@ -3526,8 +3549,8 @@ body.vscode-high-contrast-light :is(.assistant-turn-content, .todo-block, .chat-
   box-shadow: none;
 }
 
-body.vscode-high-contrast :is(.toolbar-picker, .chat-send-button.enabled, .send-mode-chevron, .question-btn, .chat-stop-button, .question-option),
-body.vscode-high-contrast-light :is(.toolbar-picker, .chat-send-button.enabled, .send-mode-chevron, .question-btn, .chat-stop-button, .question-option) {
+body.vscode-high-contrast :is(.toolbar-picker, .chat-send-button.enabled, .send-mode-chevron, .question-btn, .chat-stop-button, .question-option, .server-status-action-button),
+body.vscode-high-contrast-light :is(.toolbar-picker, .chat-send-button.enabled, .send-mode-chevron, .question-btn, .chat-stop-button, .question-option, .server-status-action-button) {
   outline: 1px solid var(--color-vscode-contrast-border);
   outline-offset: -1px;
 }

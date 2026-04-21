@@ -57,6 +57,7 @@ function writeStored(key: string, value: unknown) {
 
 interface AppState {
   serverStatus: ServerStatus;
+  providersLoaded: boolean;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
@@ -113,6 +114,7 @@ const initialWebviewState = readInitialWebviewState();
 
 export const [state, setState] = createStore<AppState>({
   serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
+  providersLoaded: false,
   editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
   terminalSelection: initialWebviewState.terminalSelection ?? null,
   droppedFiles: initialWebviewState.droppedFiles ?? [],
