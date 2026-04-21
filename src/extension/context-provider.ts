@@ -114,6 +114,16 @@ export class ContextProvider implements vscode.Disposable {
     }
 
     const doc = editor.document;
+    if (doc.isUntitled || doc.uri.scheme === 'untitled') {
+      this._context.activeFile = null;
+      this._context.selection = null;
+      const nextKey = this.getContextKey();
+      if (nextKey === this._lastContextKey) return;
+      this._lastContextKey = nextKey;
+      this.updateDiagnostics();
+      return;
+    }
+
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
     const relativePath = workspaceFolder
       ? vscode.workspace.asRelativePath(doc.uri)

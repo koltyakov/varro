@@ -19,3 +19,4 @@ docs/
 preview.html
 *.vsix
 .DS_Store
+assets/demo.png

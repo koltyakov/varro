@@ -6,7 +6,7 @@ This document covers source setup, packaging, and debugging for the Varro VS Cod
 
 - [Node.js](https://nodejs.org/) 18 or newer
 - [VS Code](https://code.visualstudio.com/) 1.91 or newer
-- [OpenCode CLI](https://github.com/anomalyco/opencode) installed globally
+- [OpenCode CLI](https://opencode.ai) installed globally
 
 ```sh
 npm install -g opencode-ai
@@ -36,15 +36,21 @@ Package the extension:
 npm run package
 ```
 
-This produces `varro-0.1.0.vsix` in the project root.
+This produces `varro-*.vsix` in the project root.
 
 Install it with the VS Code CLI:
 
 ```sh
-code --install-extension varro-0.1.0.vsix
+code --install-extension varro-*.vsix
 ```
 
 You can also install it from the VS Code UI through **Extensions** -> `...` -> **Install from VSIX...**.
+
+There is also a convenience script for this flow:
+
+```sh
+npm run vscode:install
+```
 
 After installation, reload the window:
 
