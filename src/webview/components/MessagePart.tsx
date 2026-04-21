@@ -1,7 +1,6 @@
-import { Show, createMemo, createSignal } from 'solid-js';
+import { Show, createSignal } from 'solid-js';
 import { state, showThinking } from '../lib/state';
-import { formatDuration, getAssistantDuration } from '../lib/message-metrics';
-import { formatAgentLabel, formatVariantLabel } from '../lib/format';
+import { formatAgentLabel } from '../lib/format';
 import type { AssistantMessage, Part, SubtaskPart, TextPart } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ToolCall } from './ToolCall';
@@ -10,7 +9,6 @@ import { formatDisplayPath } from '../lib/path-display';
 export function MessagePart(props: {
   part: Part;
   messageInfo?: AssistantMessage;
-  subtaskRun?: AssistantMessage;
 }) {
   const p = () => props.part;
 
@@ -57,7 +55,7 @@ export function MessagePart(props: {
           </div>
         );
       case 'subtask':
-        return <SubtaskBlock part={part} run={props.subtaskRun} />;
+        return <SubtaskBlock part={part} />;
       case 'step-finish':
         return null;
       case 'file':
@@ -105,54 +103,22 @@ function ReasoningBlock(props: { text: string }) {
   );
 }
 
-function SubtaskBlock(props: { part: SubtaskPart; run?: AssistantMessage }) {
-  const run = () => props.run;
-  const selectedModel = createMemo(() => {
-    if (run()) {
-      const provider = state.providers.find((item) => item.id === run()!.providerID);
-      const model = provider?.models[run()!.modelID];
-      return formatModelLabel(
-        provider?.name || run()!.providerID,
-        model?.name || run()!.modelID,
-        run()!.variant
-      );
-    }
-
-    if (props.part.model) {
-      const provider = state.providers.find((item) => item.id === props.part.model!.providerID);
-      const model = provider?.models[props.part.model!.modelID];
-      return formatModelLabel(
-        provider?.name || props.part.model!.providerID,
-        model?.name || props.part.model!.modelID,
-        (props.part.model as { variant?: string }).variant
-      );
-    }
-
-    return null;
-  });
-
+function SubtaskBlock(props: { part: SubtaskPart }) {
   return (
     <div class="chat-subtask-part">
       <div class="subtask-header">
         <div class="subtask-dot" />
         <span>{props.part.description}</span>
       </div>
-      <Show when={selectedModel() || run()}>
+      <Show when={props.part.agent}>
         <div class="subtask-meta">
           <Show when={props.part.agent}>
             <span>{formatAgentLabel(props.part.agent)}</span>
-          </Show>
-          <Show when={run()}>
-            <span>{formatDuration(getAssistantDuration(run()!))}</span>
           </Show>
         </div>
       </Show>
     </div>
   );
-}
-
-function formatModelLabel(providerName: string, modelName: string, variant?: string) {
-  return `${providerName} / ${modelName}${variant ? ` [${formatVariantLabel(variant)}]` : ''}`;
 }
 
 function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {

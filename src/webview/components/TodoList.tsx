@@ -1,4 +1,4 @@
-import { For, createSignal } from 'solid-js';
+import { For, createEffect, createSignal } from 'solid-js';
 import { state } from '../lib/state';
 import type { Todo } from '../types';
 
@@ -9,6 +9,18 @@ export function TodoList() {
   const progress = () => (total() > 0 ? (completed() / total()) * 100 : 0);
   const allDone = () => total() > 0 && completed() === total();
   const [collapsed, setCollapsed] = createSignal(allDone());
+  let previousTodoIds = new Set(todos().map((todo) => todo.id));
+
+  createEffect(() => {
+    const nextTodoIds = new Set(todos().map((todo) => todo.id));
+    const hasNewTodo = todos().some((todo) => !previousTodoIds.has(todo.id));
+
+    if (hasNewTodo) {
+      setCollapsed(false);
+    }
+
+    previousTodoIds = nextTodoIds;
+  });
 
   return (
     <div class="todo-block animate-fade-in">

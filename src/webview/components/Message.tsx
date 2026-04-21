@@ -32,7 +32,6 @@ export function Message(props: {
   isLastAssistant?: boolean;
   previousTrailingFileEventSignature?: string | null;
   fileEditStackGroup?: AssistantFileEditStackGroup | null;
-  childRunsMap?: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>;
 }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
@@ -112,7 +111,7 @@ export function Message(props: {
             <UserMessageContent parts={normalizedParts()} />
           </Show>
           <Show when={!isUser() && assistant()}>
-            <AssistantMessageContent info={assistant()!} parts={visibleAssistantParts()} childRunsMap={props.childRunsMap ?? new Map()} />
+            <AssistantMessageContent info={assistant()!} parts={visibleAssistantParts()} />
           </Show>
           <Show when={assistant() && (diffs() || []).length > 0}>
             <DiffSummary diffs={diffs()!} />
@@ -371,21 +370,11 @@ function deduplicateFileEdits(parts: Part[]): Part[] {
   return result;
 }
 
-function AssistantMessageContent(props: {
-  info: AssistantMessage;
-  parts: Part[];
-  childRunsMap: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>;
-}) {
-  const childRuns = createMemo(() => props.childRunsMap.get(props.info.id) || []);
-
+function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const renderItems = createMemo(() => {
-    const items: Array<
-      | { kind: 'part'; part: Part; matchedRun?: AssistantMessage }
-      | { kind: 'file-edit-stack'; parts: ToolPart[] }
-    > = [];
+    const items: Array<{ kind: 'part'; part: Part } | { kind: 'file-edit-stack'; parts: ToolPart[] }> = [];
     const parts = dedupedParts();
-    let subtaskRank = 0;
 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
@@ -396,15 +385,6 @@ function AssistantMessageContent(props: {
           fileEditParts.push(parts[++i] as ToolPart);
         }
         items.push({ kind: 'file-edit-stack', parts: fileEditParts });
-        continue;
-      }
-
-      if (part.type === 'subtask') {
-        items.push({
-          kind: 'part',
-          part,
-          matchedRun: childRuns()[subtaskRank++]?.info,
-        });
         continue;
       }
 
@@ -425,7 +405,7 @@ function AssistantMessageContent(props: {
               </For>
             </div>
           ) : (
-            <MessagePart part={item.part} messageInfo={props.info} subtaskRun={item.matchedRun} />
+            <MessagePart part={item.part} messageInfo={props.info} />
           )
         }
       </For>

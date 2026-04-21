@@ -8,13 +8,18 @@ import {
   isSessionCompacting,
   loadingStartedAt,
   loadingLastActivityAt,
-  getChildRunsByParentId,
   messageListScrollRequestKey,
 } from '../lib/state';
-import { isAssistantMessage } from '../lib/message-metrics';
+import {
+  formatDuration,
+  formatNumber,
+  isAssistantMessage,
+  sumAssistantTokens,
+} from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part } from '../types';
 import { Message as MessageComponent, type AssistantFileEditStackGroup } from './Message';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
+import { getChildRunsByParentId } from '../lib/state';
 import { modelSupportsReasoning } from './ModelPicker';
 import { formatVariantInitial } from '../lib/format';
 import {
@@ -26,6 +31,27 @@ import {
   isFileReadPart,
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
+
+function getAssistantTurnSubagentCount(messages: Array<{ info: Message; parts: Part[] }>): number {
+  let count = 0;
+
+  for (const message of messages) {
+    if (!isAssistantMessage(message.info) || message.info.mode === 'subagent') continue;
+
+    for (const part of message.parts) {
+      if (part.type === 'agent' && part.name.trim()) {
+        count++;
+        continue;
+      }
+
+      if (part.type === 'subtask') {
+        count++;
+      }
+    }
+  }
+
+  return count;
+}
 
 const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
 
@@ -64,8 +90,6 @@ export function MessageList() {
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
 
   const messages = createMemo(() => state.messages);
-
-  const childRunsMap = createMemo(() => getChildRunsByParentId(messages()));
 
   const shouldVirtualize = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
 
@@ -445,6 +469,8 @@ export function MessageList() {
     return result;
   });
 
+  const assistantDialogSummaryMap = createMemo(() => getAssistantDialogSummaryMap(messages()));
+
   return (
     <div
       ref={containerRef}
@@ -499,8 +525,10 @@ export function MessageList() {
                           previousTrailingFileEventSignatureMap().get(msg.info.id) ?? null
                         }
                         fileEditStackGroup={assistantStackGroupMap().get(msg.info.id) ?? null}
-                        childRunsMap={childRunsMap()}
                       />
+                      <Show when={assistantDialogSummaryMap().get(msg.info.id)}>
+                        {(summary) => <AssistantDialogSummary summary={summary()} />}
+                      </Show>
                     </div>
                   );
                 }}
@@ -513,7 +541,7 @@ export function MessageList() {
               lastAssistantID={lastAssistantID()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               fileEditStackGroupMap={assistantStackGroupMap()}
-              childRunsMap={childRunsMap()}
+              assistantDialogSummaryMap={assistantDialogSummaryMap()}
               visibleRange={visibleRange()}
             />
           </Show>
@@ -539,7 +567,7 @@ function VirtualizedContent(props: {
   lastAssistantID: string | null;
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
-  childRunsMap: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>;
+  assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
   visibleRange: { start: number; end: number; topPad: number; bottomPad: number };
 }) {
   const visible = createMemo(() =>
@@ -578,8 +606,10 @@ function VirtualizedContent(props: {
                   props.previousTrailingFileEventSignatureMap.get(msg.info.id) ?? null
                 }
                 fileEditStackGroup={props.fileEditStackGroupMap.get(msg.info.id) ?? null}
-                childRunsMap={props.childRunsMap}
               />
+              <Show when={props.assistantDialogSummaryMap.get(msg.info.id)}>
+                {(summary) => <AssistantDialogSummary summary={summary()} />}
+              </Show>
             </div>
           );
         }}
@@ -588,6 +618,80 @@ function VirtualizedContent(props: {
         <div style={{ height: `${props.visibleRange.bottomPad}px` }} />
       </Show>
     </>
+  );
+}
+
+type AssistantDialogSummaryInfo = {
+  durationMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  agentCount: number;
+};
+
+function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Part[] }>) {
+  const result = new Map<string, AssistantDialogSummaryInfo>();
+  let currentMessages: AssistantMessage[] = [];
+  let currentEntries: Array<{ info: Message; parts: Part[] }> = [];
+
+  const flush = () => {
+    if (currentMessages.length === 0) {
+      currentMessages = [];
+      currentEntries = [];
+      return;
+    }
+
+    const lastMessage = currentMessages[currentMessages.length - 1];
+    if (!lastMessage?.time.completed) {
+      currentMessages = [];
+      currentEntries = [];
+      return;
+    }
+
+    const completedMessages = currentMessages.filter((message) => !!message.time.completed);
+    const end = Math.max(...completedMessages.map((message) => message.time.completed || 0));
+    const tokens = sumAssistantTokens(currentMessages);
+    const childRunsByParentId = getChildRunsByParentId(currentEntries);
+    const primaryMessages = currentMessages.filter((message) => message.mode !== 'subagent');
+    const childRunCount = primaryMessages.reduce(
+      (count, message) => count + (childRunsByParentId.get(message.id)?.length || 0),
+      0
+    );
+    const handoffCount = getAssistantTurnSubagentCount(currentEntries);
+    const agentCount = Math.max(childRunCount, handoffCount);
+    result.set(lastMessage.id, {
+      durationMs: Math.max(0, end - currentMessages[0].time.created),
+      inputTokens: tokens.input,
+      outputTokens: tokens.output,
+      agentCount,
+    });
+
+    currentMessages = [];
+    currentEntries = [];
+  };
+
+  for (const entry of messages) {
+    if (!isAssistantMessage(entry.info)) {
+      flush();
+      continue;
+    }
+
+    const assistant = entry.info as AssistantMessage;
+    currentMessages.push(assistant);
+    currentEntries.push(entry);
+  }
+
+  flush();
+  return result;
+}
+
+function AssistantDialogSummary(props: { summary: AssistantDialogSummaryInfo }) {
+  const agentSuffix =
+    props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
+
+  return (
+    <div class="assistant-dialog-summary">
+      {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
+    </div>
   );
 }
 
