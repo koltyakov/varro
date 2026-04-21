@@ -46,6 +46,16 @@ Varro talks to a local OpenCode server on port `4096` by default and will try to
    - Paste an image into the input box
 6. If OpenCode asks for permission to run a tool or action, approve or deny it directly in the chat panel.
 
+## Recommended Layout
+
+Varro works well in VS Code's Secondary Sidebar so you can keep your editor visible while chatting on the right.
+
+1. Open **Varro** from the Activity Bar.
+2. Right-click the **Varro** view title.
+3. Choose **Move View** -> **Secondary Side Bar**.
+
+You can also drag the Varro view to the right edge of the window. VS Code keeps that placement until you move it again.
+
 ## Commands
 
 - `Varro: Focus Chat` opens the sidebar chat. Shortcut: `Cmd+Shift+O` / `Ctrl+Shift+O`

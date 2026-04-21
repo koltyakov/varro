@@ -642,6 +642,10 @@ export function upsertPart(part: Part) {
       invalidateIndex();
     })
   );
+  if (state.streamingPartId === part.id) {
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+  }
 }
 
 export function updateMessagePart(part: Part) {
@@ -678,31 +682,26 @@ export function applyMessagePartDelta(
 ) {
   if (field !== 'text' || !delta) return;
 
+  const currentStreamingText = state.streamingPartId === partId ? state.streamingText : '';
+  setState('streamingPartId', partId);
+  setState('streamingText', currentStreamingText + delta);
+
+  const message = state.messages.find((item) => item.info.id === messageId);
+  if (!message || message.parts.some((item) => item.id === partId)) return;
+
   setState(
     'messages',
     produce((msgs) => {
       const msgIdx = findMessageIndex(msgs, messageId);
       if (msgIdx === -1) return;
-      const msg = msgs[msgIdx];
-
-      let part = msg.parts.find(
-        (item): item is Part & { type: 'text'; text: string } =>
-          item.id === partId && item.type === 'text'
-      );
-
-      if (!part) {
-        part = {
-          id: partId,
-          messageID: messageId,
-          sessionID: sessionId || msg.info.sessionID,
-          type: 'text',
-          text: '',
-        };
-        msg.parts.push(part);
-        invalidateIndex();
-      }
-
-      part.text += delta;
+      msgs[msgIdx].parts.push({
+        id: partId,
+        messageID: messageId,
+        sessionID: sessionId || msgs[msgIdx].info.sessionID,
+        type: 'text',
+        text: currentStreamingText + delta,
+      });
+      invalidateIndex();
     })
   );
 }
@@ -719,6 +718,10 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
       }
     })
   );
+  if (state.streamingPartId === partId) {
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+  }
 }
 
 export function addPermission(permission: Permission) {
@@ -742,19 +745,24 @@ export function removePermission(permissionId: string) {
   );
 }
 
+export function clearStreamingState() {
+  setState('streamingPartId', null);
+  setState('streamingText', '');
+}
+
 export function clearMessages() {
   setState('messages', []);
   invalidateIndex();
   setState('permissions', []);
   setState('todos', []);
   setState('diffs', []);
-  setState('streamingPartId', null);
-  setState('streamingText', '');
+  clearStreamingState();
 }
 
 export function setMessagesIncremental(
   incoming: Array<{ info: Message; parts: Part[] }>
 ) {
+  clearStreamingState();
   const current = state.messages;
   if (current.length === 0 || incoming.length === 0) {
     setState('messages', incoming);

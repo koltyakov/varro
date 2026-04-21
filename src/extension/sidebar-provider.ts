@@ -37,6 +37,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private webviewDisposables: vscode.Disposable[] = [];
   private windowStateDisposable?: vscode.Disposable;
   private readonly statusBarItem: vscode.StatusBarItem;
+  private webviewHasFocus = false;
   private readonly busySessions = new Set<string>();
   private readonly completedSessions = new Set<string>();
   private readonly pendingAttention = new Map<
@@ -240,7 +241,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private shouldShowNotification() {
-    return !this.view?.visible || !vscode.window.state.focused;
+    return !this.view?.visible || !vscode.window.state.focused || !this.webviewHasFocus;
   }
 
   private describeSessionSuffix(sessionID: string) {
@@ -326,6 +327,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.post({ type: 'server/status', payload: this._status });
           this.flushPendingInputFocus();
+        } else {
+          this.webviewHasFocus = false;
         }
         this.updateStatusBarItem();
       })
@@ -357,12 +360,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     try {
       switch (msg.type) {
         case 'ready':
+          this.webviewHasFocus = false;
           this.postContext();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.postContextFiles();
           this.post({ type: 'server/status', payload: this._status });
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
           this.flushPendingInputFocus();
+          break;
+        case 'webview/focus':
+          this.webviewHasFocus = msg.payload.focused;
+          this.updateStatusBarItem();
           break;
         case 'context/request':
           this.postContext();

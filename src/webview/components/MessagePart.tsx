@@ -9,14 +9,15 @@ import { formatDisplayPath } from '../lib/path-display';
 export function MessagePart(props: {
   part: Part;
   messageInfo?: AssistantMessage;
+  streamedText?: string | null;
 }) {
   const p = () => props.part;
 
   const render = () => {
     const part = p();
-    switch (part.type) {
-      case 'text':
-        return <MarkdownRenderer content={(part as TextPart).text} />;
+      switch (part.type) {
+        case 'text':
+        return <MarkdownRenderer content={props.streamedText ?? (part as TextPart).text} />;
       case 'tool':
         return <ToolCall part={part} />;
       case 'reasoning':

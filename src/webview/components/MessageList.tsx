@@ -525,6 +525,8 @@ export function MessageList() {
                           previousTrailingFileEventSignatureMap().get(msg.info.id) ?? null
                         }
                         fileEditStackGroup={assistantStackGroupMap().get(msg.info.id) ?? null}
+                        streamingPartId={state.streamingPartId}
+                        streamingText={state.streamingText}
                       />
                       <Show when={assistantDialogSummaryMap().get(msg.info.id)}>
                         {(summary) => <AssistantDialogSummary summary={summary()} />}
@@ -606,6 +608,8 @@ function VirtualizedContent(props: {
                   props.previousTrailingFileEventSignatureMap.get(msg.info.id) ?? null
                 }
                 fileEditStackGroup={props.fileEditStackGroupMap.get(msg.info.id) ?? null}
+                streamingPartId={state.streamingPartId}
+                streamingText={state.streamingText}
               />
               <Show when={props.assistantDialogSummaryMap.get(msg.info.id)}>
                 {(summary) => <AssistantDialogSummary summary={summary()} />}

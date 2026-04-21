@@ -134,12 +134,12 @@
         "varro.context.autoAttachFile": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically attach the active file as context"
+          "description": "Automatically include the active file in live editor context"
         },
         "varro.context.autoAttachSelection": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically attach the current selection as context"
+          "description": "Automatically include the current selection in live editor context"
         }
       }
     }

@@ -298,11 +298,10 @@ export class OpenCodeServer extends EventEmitter {
           break;
         }
         buffer += decoder.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = findSseChunkBoundary(buffer)) !== -1) {
-          const chunk = buffer.slice(0, idx);
-          const separatorMatch = buffer.slice(idx).match(/^\r?\n\r?\n/);
-          buffer = buffer.slice(idx + (separatorMatch?.[0].length || 2));
+        let boundary: { index: number; length: number } | null;
+        while ((boundary = findSseChunkBoundary(buffer))) {
+          const chunk = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary.length);
           this.processSseChunk(chunk);
         }
       }
@@ -328,7 +327,7 @@ export class OpenCodeServer extends EventEmitter {
 
   private processSseChunk(chunk: string) {
     const dataLines: string[] = [];
-    for (const line of chunk.split(/\r?\n/)) {
+    for (const line of chunk.split(/\r\n|[\r\n]/)) {
       if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
     }
     if (!dataLines.length) return;
@@ -441,11 +440,10 @@ export class OpenCodeServer extends EventEmitter {
   }
 }
 
-function findSseChunkBoundary(buffer: string) {
-  const lfBoundary = buffer.indexOf('\n\n');
-  const crlfBoundary = buffer.indexOf('\r\n\r\n');
+const SSE_CHUNK_BOUNDARY_RE = /\r\n\r\n|\n\n|\r\r|\r\n\n|\n\r\n/;
 
-  if (lfBoundary === -1) return crlfBoundary;
-  if (crlfBoundary === -1) return lfBoundary;
-  return Math.min(lfBoundary, crlfBoundary);
+function findSseChunkBoundary(buffer: string): { index: number; length: number } | null {
+  const match = SSE_CHUNK_BOUNDARY_RE.exec(buffer);
+  if (!match || match.index === undefined) return null;
+  return { index: match.index, length: match[0].length };
 }

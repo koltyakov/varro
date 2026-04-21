@@ -4,10 +4,8 @@ export interface EditorContext {
     path: string;
     relativePath: string;
     language: string;
-    content: string;
   } | null;
   selection: {
-    text: string;
     startLine: number;
     endLine: number;
   } | null;
@@ -85,6 +83,7 @@ export type ExtensionMessage =
 
 export type WebviewMessage =
   | { type: 'context/request' }
+  | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'terminal-selection/clear' }
   | { type: 'files/drop'; payload: { paths: string[] } }
   | { type: 'files/remove'; payload: { path: string } }

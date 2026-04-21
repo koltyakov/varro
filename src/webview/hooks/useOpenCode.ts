@@ -18,6 +18,7 @@ import {
   getPersistedActiveSessionId,
   clearClipboardImages,
   clearMessages,
+  clearStreamingState,
   setMessagesIncremental,
   upsertMessageInfo,
   upsertPart,
@@ -331,16 +332,32 @@ export function useOpenCode() {
 
     postMessage({ type: 'ready' });
 
+    const postFocusState = () => {
+      postMessage({
+        type: 'webview/focus',
+        payload: { focused: document.visibilityState === 'visible' && document.hasFocus() },
+      });
+    };
+
+    postFocusState();
+
     const handleVisibilityChange = () => {
+      postFocusState();
       if (document.visibilityState === 'visible' && isLoading() && state.activeSessionId) {
         recheckSessionStatus(state.activeSessionId);
       }
     };
+    const handleFocus = () => postFocusState();
+    const handleBlur = () => postFocusState();
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
 
     onCleanup(() => {
       disposeBridge();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
       for (const cleanup of eventHandlerCleanups) cleanup();
       eventHandlerCleanups = [];
       initialized = false;
@@ -959,6 +976,7 @@ function registerEventHandlers() {
       if (!p) return;
       if ((p.sessionID as string) === state.activeSessionId) {
         markLoadingActivity();
+        clearStreamingState();
         const nextMessages = state.messages.filter((m) => m.info.id !== (p.messageID as string));
         setState('messages', nextMessages);
         syncTodosFromMessages(nextMessages);

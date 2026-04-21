@@ -32,6 +32,8 @@ export function Message(props: {
   isLastAssistant?: boolean;
   previousTrailingFileEventSignature?: string | null;
   fileEditStackGroup?: AssistantFileEditStackGroup | null;
+  streamingPartId?: string | null;
+  streamingText?: string;
 }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
@@ -44,8 +46,19 @@ export function Message(props: {
         )
       : props.parts
   );
+  const getEffectivePartText = (part: Part) =>
+    part.type === 'text' && part.id === props.streamingPartId
+      ? props.streamingText || part.text
+      : part.type === 'text'
+        ? part.text
+        : null;
   const visibleAssistantParts = createMemo(() =>
-    assistant() ? normalizedParts().filter((p) => shouldShowAssistantPartInline(p)) : normalizedParts()
+    assistant()
+      ? normalizedParts().filter((part) => {
+          if (part.type === 'text') return (getEffectivePartText(part) || '').trim().length > 0;
+          return shouldShowAssistantPartInline(part);
+        })
+      : normalizedParts()
   );
   const layoutAssistantParts = createMemo(() =>
     assistant() ? deduplicateFileEdits(visibleAssistantParts()) : []
@@ -68,7 +81,7 @@ export function Message(props: {
     if (compactions.length === 0) return null;
     const hasOtherVisibleContent = parts.some((p) => {
       if (p.type === 'compaction') return false;
-      if (p.type === 'text') return p.text.trim().length > 0;
+      if (p.type === 'text') return (getEffectivePartText(p) || '').trim().length > 0;
       if (p.type === 'file') return true;
       return false;
     });
@@ -88,6 +101,8 @@ export function Message(props: {
     if (parts.every(isFileReadPart)) return false;
     return parts.length === 1 && parts[0]?.type === 'tool' && !isFileEditPart(parts[0]);
   };
+  const streamedTextForPart = (part: Part) =>
+    part.type === 'text' && part.id === props.streamingPartId ? props.streamingText || part.text : null;
 
   return (
     <Show when={shouldRender()}>
@@ -111,7 +126,11 @@ export function Message(props: {
             <UserMessageContent parts={normalizedParts()} />
           </Show>
           <Show when={!isUser() && assistant()}>
-            <AssistantMessageContent info={assistant()!} parts={visibleAssistantParts()} />
+            <AssistantMessageContent
+              info={assistant()!}
+              parts={visibleAssistantParts()}
+              streamedTextForPart={streamedTextForPart}
+            />
           </Show>
           <Show when={assistant() && (diffs() || []).length > 0}>
             <DiffSummary diffs={diffs()!} />
@@ -373,7 +392,11 @@ function deduplicateFileEdits(parts: Part[]): Part[] {
   return result;
 }
 
-function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] }) {
+function AssistantMessageContent(props: {
+  info: AssistantMessage;
+  parts: Part[];
+  streamedTextForPart: (part: Part) => string | null;
+}) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const renderItems = createMemo(() => {
     const items: Array<{ kind: 'part'; part: Part } | { kind: 'file-edit-stack'; parts: ToolPart[] }> = [];
@@ -404,11 +427,21 @@ function AssistantMessageContent(props: { info: AssistantMessage; parts: Part[] 
           item.kind === 'file-edit-stack' ? (
             <div class="assistant-file-edit-stack">
               <For each={item.parts}>
-                {(part) => <MessagePart part={part} messageInfo={props.info} />}
+                {(part) => (
+                  <MessagePart
+                    part={part}
+                    messageInfo={props.info}
+                    streamedText={props.streamedTextForPart(part)}
+                  />
+                )}
               </For>
             </div>
           ) : (
-            <MessagePart part={item.part} messageInfo={props.info} />
+            <MessagePart
+              part={item.part}
+              messageInfo={props.info}
+              streamedText={props.streamedTextForPart(item.part)}
+            />
           )
         }
       </For>

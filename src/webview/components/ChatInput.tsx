@@ -116,6 +116,7 @@ export function ChatInput() {
     'full' | 'compact-agent-stop' | 'compact-reasoning' | 'truncate-model' | 'tight'
   >('full');
   let latestFileSearchRequestId = 0;
+  let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let toolbarFitRaf = 0;
   let toolbarFitRequestId = 0;
 
@@ -176,23 +177,47 @@ export function ChatInput() {
   createEffect(() => {
     const completion = activeCompletion();
     if (completion?.type !== 'mention') {
+      if (fileSearchTimer) {
+        clearTimeout(fileSearchTimer);
+        fileSearchTimer = null;
+      }
       setFileSearchResults([]);
       setFileSearchQuery('');
       return;
     }
 
-    if (!completion.query.trim()) {
+    const rawQuery = completion.query.trim();
+    if (!looksLikeFileMentionQuery(rawQuery)) {
+      if (fileSearchTimer) {
+        clearTimeout(fileSearchTimer);
+        fileSearchTimer = null;
+      }
+      setFileSearchResults([]);
+      setFileSearchQuery('');
+      return;
+    }
+
+    if (!rawQuery) {
+      if (fileSearchTimer) {
+        clearTimeout(fileSearchTimer);
+        fileSearchTimer = null;
+      }
       setFileSearchResults([]);
       setFileSearchQuery('');
       return;
     }
 
     latestFileSearchRequestId += 1;
-    setFileSearchQuery(completion.query);
-    postMessage({
-      type: 'files/search',
-      payload: { requestId: latestFileSearchRequestId, query: completion.query, limit: 12 },
-    });
+    const requestId = latestFileSearchRequestId;
+    setFileSearchQuery(rawQuery);
+    if (fileSearchTimer) clearTimeout(fileSearchTimer);
+    fileSearchTimer = setTimeout(() => {
+      fileSearchTimer = null;
+      postMessage({
+        type: 'files/search',
+        payload: { requestId, query: rawQuery, limit: 12 },
+      });
+    }, 120);
   });
 
   const mentionCompletions = createMemo(() => {
@@ -531,6 +556,7 @@ export function ChatInput() {
   });
   onCleanup(() => {
     if (queueDispatchTimer) clearTimeout(queueDispatchTimer);
+    if (fileSearchTimer) clearTimeout(fileSearchTimer);
   });
 
   function setComposerValue(value: string) {
@@ -653,6 +679,26 @@ export function ChatInput() {
       fitToolbar(0, requestId);
     });
   }
+
+  const toolbarFitDependencies = createMemo(() => ({
+    agents: state.agents.length,
+    selectedAgent: state.selectedAgent,
+    modelProvider: currentModel().providerID,
+    modelId: currentModel().modelID,
+    modelName: currentModel().modelName,
+    variant: effectiveVariant(),
+    hasContextUsage: !!contextUsage(),
+    loading: isLoading(),
+    hasQuestion: hasActiveQuestion(),
+    hasPermission: hasActivePermission(),
+    canSend: canSend(),
+    showAgentPicker: showAgentPicker(),
+    showVariantPicker: showVariantPicker(),
+    showModelPicker: showModelPicker(),
+    showPermissionModePicker: showPermissionModePicker(),
+    showBusyMenu: showBusyMenu(),
+    showContextPopup: showContextPopup(),
+  }));
 
   async function handleDrop(e: DragEvent) {
     e.preventDefault();
@@ -1037,20 +1083,15 @@ export function ChatInput() {
   };
 
   createEffect(() => {
-    void state.agents.length;
-    void state.selectedAgent;
-    void currentModel().providerName;
-    void currentModel().modelName;
-    void effectiveVariant();
-    void !!contextUsage();
-    void isLoading();
-    void hasActiveQuestion();
-    void hasActivePermission();
-    void canSend();
-
-    if (showAgentPicker() || showVariantPicker() || showModelPicker() || showPermissionModePicker())
+    const deps = toolbarFitDependencies();
+    if (
+      deps.showAgentPicker ||
+      deps.showVariantPicker ||
+      deps.showModelPicker ||
+      deps.showPermissionModePicker
+    )
       return;
-    if (showBusyMenu() || showContextPopup()) return;
+    if (deps.showBusyMenu || deps.showContextPopup) return;
 
     scheduleToolbarFit();
   });
