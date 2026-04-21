@@ -59,11 +59,33 @@ export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
+  let permissionPickerRef: HTMLButtonElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let permissionPopoverRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let agentPickerRef: HTMLButtonElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let agentPopoverRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let modelPickerRef: HTMLButtonElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
   let toolbarRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let toolbarLeftRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let toolbarRightRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let variantPickerRef: HTMLButtonElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let variantPopoverRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let contextButtonRef: HTMLButtonElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let contextPopupRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let busyMenuRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let busyToggleRef: HTMLButtonElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
   const [agentFocusIndex, setAgentFocusIndex] = createSignal(0);
@@ -731,8 +753,21 @@ export function ChatInput() {
       setFileSearchResults(msg.payload.files);
     });
 
+    const clickedOutside = (
+      target: Node | null,
+      trigger?: HTMLElement,
+      popup?: HTMLElement
+    ) => {
+      if (!target) return true;
+      if (trigger?.contains(target)) return false;
+      if (popup?.contains(target)) return false;
+      return true;
+    };
+
     const handleWindowClick = (e: MouseEvent) => {
-      if (!containerRef?.contains(e.target as Node | null)) {
+      const target = e.target as Node | null;
+
+      if (!containerRef?.contains(target)) {
         setShowAgentPicker(false);
         setShowModelPicker(false);
         setShowVariantPicker(false);
@@ -740,6 +775,26 @@ export function ChatInput() {
         setShowBusyMenu(false);
         setShowContextPopup(false);
         setCompletionIndex(0);
+        return;
+      }
+
+      if (showPermissionModePicker() && clickedOutside(target, permissionPickerRef, permissionPopoverRef)) {
+        setShowPermissionModePicker(false);
+      }
+      if (showAgentPicker() && clickedOutside(target, agentPickerRef, agentPopoverRef)) {
+        setShowAgentPicker(false);
+      }
+      if (showModelPicker() && clickedOutside(target, modelPickerRef)) {
+        setShowModelPicker(false);
+      }
+      if (showVariantPicker() && clickedOutside(target, variantPickerRef, variantPopoverRef)) {
+        setShowVariantPicker(false);
+      }
+      if (showBusyMenu() && clickedOutside(target, busyToggleRef, busyMenuRef)) {
+        setShowBusyMenu(false);
+      }
+      if (showContextPopup() && clickedOutside(target, contextButtonRef, contextPopupRef)) {
+        setShowContextPopup(false);
       }
     };
 
@@ -1232,6 +1287,7 @@ export function ChatInput() {
           >
             <div style={{ position: 'relative' }}>
               <button
+                ref={permissionPickerRef!}
                 class="toolbar-picker icon-only"
                 onClick={() => {
                   const next = !showPermissionModePicker();
@@ -1252,7 +1308,11 @@ export function ChatInput() {
                 <PermissionModeIcon mode={activePermissionMode()} />
               </button>
               <Show when={showPermissionModePicker()}>
-                <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                <div
+                  ref={permissionPopoverRef!}
+                  class="toolbar-popover"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div class="toolbar-popover-header">Permissions</div>
                   <For each={PERMISSION_MODE_OPTIONS}>
                     {(option) => (
@@ -1275,6 +1335,7 @@ export function ChatInput() {
             <Show when={state.agents.length > 0}>
               <div style={{ position: 'relative' }}>
                 <button
+                  ref={agentPickerRef!}
                   class="toolbar-picker"
                   onClick={() => {
                     const next = !showAgentPicker();
@@ -1300,7 +1361,11 @@ export function ChatInput() {
                   </svg>
                 </button>
                 <Show when={showAgentPicker()}>
-                  <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                  <div
+                    ref={agentPopoverRef!}
+                    class="toolbar-popover"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div class="toolbar-popover-header">Agent</div>
                     <For each={state.agents}>
                       {(agent, index) => (
@@ -1327,6 +1392,7 @@ export function ChatInput() {
             </Show>
 
             <button
+              ref={modelPickerRef!}
               class={`toolbar-picker model-picker-btn ${modelCanEllipsize() ? 'model-ellipsis' : ''}`}
               onClick={() => {
                 const next = !showModelPicker();
@@ -1363,6 +1429,7 @@ export function ChatInput() {
             <Show when={availableVariants().length > 0}>
               <div style={{ position: 'relative' }}>
                 <button
+                  ref={variantPickerRef!}
                   class="toolbar-picker"
                   onClick={() => {
                     const next = !showVariantPicker();
@@ -1387,7 +1454,11 @@ export function ChatInput() {
                   </svg>
                 </button>
                 <Show when={showVariantPicker()}>
-                  <div class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+                  <div
+                    ref={variantPopoverRef!}
+                    class="toolbar-popover"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div class="toolbar-popover-header">Reasoning</div>
                     <For each={availableVariants()}>
                       {(v) => (
@@ -1415,6 +1486,7 @@ export function ChatInput() {
             <Show when={contextUsage()}>
               <div style={{ position: 'relative' }}>
                 <button
+                  ref={contextButtonRef!}
                   class={`chat-context-usage ${contextUsage()!.percent >= 75 ? (contextUsage()!.percent >= 90 ? 'error' : 'warning') : ''}`}
                   onClick={() => {
                     const next = !showContextPopup();
@@ -1437,6 +1509,7 @@ export function ChatInput() {
                 </button>
                 <Show when={showContextPopup()}>
                   <ContextPopup
+                    ref={contextPopupRef!}
                     usage={contextUsage()!}
                     tokens={sessionTokens()}
                     model={currentModel()}
@@ -1491,6 +1564,7 @@ export function ChatInput() {
                     </svg>
                   </button>
                   <button
+                    ref={busyToggleRef!}
                     class="send-mode-chevron"
                     onClick={() => {
                       const next = !showBusyMenu();
@@ -1524,7 +1598,11 @@ export function ChatInput() {
                   !hasActivePermission()
                 }
               >
-                <div class="toolbar-popover busy-menu" onClick={(e) => e.stopPropagation()}>
+                <div
+                  ref={busyMenuRef!}
+                  class="toolbar-popover busy-menu"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <button
                     class="toolbar-popover-item"
                     onClick={() => {
@@ -1608,6 +1686,7 @@ export function ChatInput() {
 }
 
 function ContextPopup(props: {
+  ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
   usage: { used: number; limit: number; percent: number };
   tokens: {
     total: number;
@@ -1633,7 +1712,7 @@ function ContextPopup(props: {
   };
 
   return (
-    <div class="context-popup" onClick={(e) => e.stopPropagation()}>
+    <div ref={props.ref} class="context-popup" onClick={(e) => e.stopPropagation()}>
       <div class="context-popup-header">
         <span class="context-popup-title">Context Window</span>
         <span class="context-popup-pct">{Math.round(props.usage.percent)}%</span>
