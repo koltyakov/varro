@@ -2,6 +2,8 @@
 
 Use [OpenCode](https://opencode.ai) inside VS Code without leaving the editor. Varro adds a dedicated sidebar chat that connects to your local OpenCode CLI/server and keeps your current workspace context close to the conversation.
 
+![Varro in VS Code](https://raw.githubusercontent.com/koltyakov/varro/main/assets/demo.png)
+
 ## What It Does
 
 - Opens Varro in a VS Code sidebar view powered by OpenCode
