@@ -1,7 +1,6 @@
-import { For, Show, createSignal, createEffect } from 'solid-js';
+import { For, Show, createEffect, createSignal } from 'solid-js';
 import {
   isModelVisible,
-  isProviderVisible,
   setModelVisible,
   setProviderVisible,
   setShowSettings,
@@ -9,7 +8,39 @@ import {
 } from '../lib/state';
 import { formatContextLimit } from '../lib/format';
 
+type SettingsProvider = (typeof state.providers)[number];
+type SettingsModel = SettingsProvider['models'][string];
+
 export function SettingsPanel() {
+  const [query, setQuery] = createSignal('');
+
+  const normalizedQuery = () => query().trim().toLocaleLowerCase();
+
+  const filteredProviders = () => {
+    const search = normalizedQuery();
+
+    return state.providers
+      .map((provider) => {
+        const models = Object.values(provider.models).sort((a, b) => a.name.localeCompare(b.name));
+
+        if (!search) return { provider, models };
+
+        const providerMatches = [provider.name, provider.id].some((value) =>
+          value.toLocaleLowerCase().includes(search)
+        );
+
+        return {
+          provider,
+          models: providerMatches
+            ? models
+            : models.filter((model) =>
+                [model.name, model.id].some((value) => value.toLocaleLowerCase().includes(search))
+              ),
+        };
+      })
+      .filter((entry) => entry.models.length > 0);
+  };
+
   return (
     <div class="settings-panel">
       <div class="settings-header">
@@ -23,51 +54,98 @@ export function SettingsPanel() {
         </div>
       </div>
 
+      <Show when={state.providers.length > 0}>
+        <div class="settings-toolbar">
+          <div class="settings-search">
+            <input
+              type="text"
+              class="settings-search-input"
+              value={query()}
+              onInput={(e) => setQuery(e.currentTarget.value)}
+              placeholder="Filter providers or models"
+              aria-label="Filter providers or models"
+              spellcheck={false}
+            />
+            <Show when={query().length > 0}>
+              <button
+                type="button"
+                class="settings-search-clear"
+                onClick={() => setQuery('')}
+                aria-label="Clear filter"
+                title="Clear filter"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
+                </svg>
+              </button>
+            </Show>
+          </div>
+        </div>
+      </Show>
+
       <div class="settings-body">
         <Show
           when={state.providers.length > 0}
           fallback={<div class="settings-empty">No providers configured</div>}
         >
-          <For each={state.providers}>{(provider) => <ProviderSection provider={provider} />}</For>
+          <Show
+            when={filteredProviders().length > 0}
+            fallback={<div class="settings-empty">No matching models</div>}
+          >
+            <For each={filteredProviders()}>
+              {({ provider, models }) => (
+                <ProviderSection
+                  provider={provider}
+                  models={models}
+                  forceExpanded={normalizedQuery().length > 0}
+                />
+              )}
+            </For>
+          </Show>
         </Show>
       </div>
     </div>
   );
 }
 
-function ProviderSection(props: { provider: (typeof state.providers)[0] }) {
+function ProviderSection(props: {
+  provider: SettingsProvider;
+  models: SettingsModel[];
+  forceExpanded: boolean;
+}) {
   const [expanded, setExpanded] = createSignal(true);
 
-  const models = () =>
+  const allModels = () =>
     Object.values(props.provider.models).sort((a, b) => a.name.localeCompare(b.name));
 
-  const enabledCount = () => models().filter((m) => isModelVisible(props.provider.id, m.id)).length;
+  const enabledCount = () => props.models.filter((m) => isModelVisible(props.provider.id, m.id)).length;
 
-  const allEnabled = () =>
-    isProviderVisible(props.provider.id) && enabledCount() === models().length;
-  const someEnabled = () =>
-    isProviderVisible(props.provider.id) && enabledCount() > 0 && !allEnabled();
+  const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;
+  const someEnabled = () => enabledCount() > 0 && !allEnabled();
+  const isFullProviderView = () => props.models.length === allModels().length;
+  const isExpanded = () => props.forceExpanded || expanded();
 
   function toggleProvider() {
-    if (allEnabled()) {
-      setProviderVisible(props.provider.id, false);
-      for (const model of models()) {
-        setModelVisible(props.provider.id, model.id, false);
-      }
-    } else {
-      setProviderVisible(props.provider.id, true);
-      for (const model of models()) {
-        setModelVisible(props.provider.id, model.id, true);
-      }
+    const visible = !allEnabled();
+
+    if (isFullProviderView()) {
+      setProviderVisible(props.provider.id, visible);
+    }
+
+    for (const model of props.models) {
+      setModelVisible(props.provider.id, model.id, visible);
     }
   }
 
   return (
     <div class="settings-provider">
       <div class="settings-provider-header">
-        <button class="settings-provider-toggle" onClick={() => setExpanded((v) => !v)}>
+        <button
+          class="settings-provider-toggle"
+          onClick={() => !props.forceExpanded && setExpanded((v) => !v)}
+        >
           <svg
-            class={`settings-chevron ${expanded() ? 'expanded' : ''}`}
+            class={`settings-chevron ${isExpanded() ? 'expanded' : ''}`}
             viewBox="0 0 16 16"
             fill="none"
             stroke="currentColor"
@@ -79,7 +157,7 @@ function ProviderSection(props: { provider: (typeof state.providers)[0] }) {
           </svg>
           <span class="settings-provider-name">{props.provider.name}</span>
           <span class="settings-provider-count">
-            {enabledCount()}/{models().length}
+            {enabledCount()}/{props.models.length}
           </span>
         </button>
         <ProviderCheckbox
@@ -89,9 +167,9 @@ function ProviderSection(props: { provider: (typeof state.providers)[0] }) {
         />
       </div>
 
-      <Show when={expanded()}>
+      <Show when={isExpanded()}>
         <div class="settings-model-list">
-          <For each={models()}>
+          <For each={props.models}>
             {(model) => (
               <label class="settings-model-row">
                 <input

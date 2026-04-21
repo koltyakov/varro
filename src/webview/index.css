@@ -2987,6 +2987,59 @@ kbd {
   color: var(--color-vscode-fg);
 }
 
+.settings-toolbar {
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 10%, transparent);
+}
+
+.settings-search {
+  position: relative;
+}
+
+.settings-search-input {
+  width: 100%;
+  height: 30px;
+  padding: 6px 28px 6px 8px;
+  border: 1px solid var(--color-vscode-input-border, transparent);
+  border-radius: 6px;
+  background: var(--color-vscode-input-bg);
+  color: var(--color-vscode-input-fg);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.settings-search-input::placeholder {
+  color: color-mix(in srgb, var(--color-vscode-muted) 55%, transparent);
+}
+
+.settings-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  color: var(--color-vscode-fg);
+  opacity: 0.8;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-search-clear:hover {
+  opacity: 1;
+}
+
+.settings-search-clear svg {
+  width: 12px;
+  height: 12px;
+}
+
 .settings-reset-btn {
   padding: 2px 8px;
   border-radius: 4px;
