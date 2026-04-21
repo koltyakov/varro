@@ -37,7 +37,7 @@ Varro talks to a local OpenCode server on port `4096` by default and will try to
 3. Open VS Code and launch the chat:
    - Click the **Varro** icon in the Activity Bar, or
    - Run **Varro: Focus Chat**
-4. Start a prompt. Varro automatically makes the active file and current selection available as context.
+4. Start a prompt. Varro automatically makes the active file and current selection available as context by default.
 5. Add more context when needed:
    - Right-click a file or folder in Explorer and choose **Varro: Add to Context**
    - Select text in the integrated terminal and run **Varro: Add Terminal Selection to Context**
@@ -71,8 +71,8 @@ Varro contributes these user-facing settings:
 - `varro.server.autoStart`: automatically start the local OpenCode server when the extension activates
 - `varro.server.port`: port used to connect to OpenCode, default `4096`
 - `varro.server.command`: optional full path to the OpenCode CLI executable
-- `varro.context.autoAttachFile`: context attachment preference exposed in settings
-- `varro.context.autoAttachSelection`: selection attachment preference exposed in settings
+- `varro.context.autoAttachFile`: automatically include the active file in live editor context
+- `varro.context.autoAttachSelection`: automatically include the current selection in live editor context
 
 ## Troubleshooting
 

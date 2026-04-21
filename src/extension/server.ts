@@ -8,6 +8,8 @@ import { EventEmitter } from 'events';
 import type { ServerStatus } from '../shared/protocol';
 
 export class OpenCodeServer extends EventEmitter {
+  private static readonly MISSING_CLI_MESSAGE =
+    'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
   private process: ChildProcess | null = null;
   private _status: ServerStatus = { state: 'stopped' };
   private port: number;
@@ -15,6 +17,7 @@ export class OpenCodeServer extends EventEmitter {
   private maxRetries = 3;
   private autoStart: boolean;
   private command: string;
+  private simulateMissingCli: boolean;
   private eventController: AbortController | null = null;
   private eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private eventReconnectDelay = 1000;
@@ -23,11 +26,12 @@ export class OpenCodeServer extends EventEmitter {
   private startAttemptId = 0;
   private isDisposing = false;
 
-  constructor(port: number, autoStart: boolean, command?: string) {
+  constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
     super();
     this.port = port;
     this.autoStart = autoStart;
     this.command = command?.trim() || '';
+    this.simulateMissingCli = simulateMissingCli;
   }
 
   get status(): ServerStatus {
@@ -45,6 +49,13 @@ export class OpenCodeServer extends EventEmitter {
 
   async start(): Promise<string> {
     this.isDisposing = false;
+    if (this.simulateMissingCli) {
+      this.stopEventStream();
+      this.cancelPollHealth();
+      this.setStatus({ state: 'error', message: OpenCodeServer.MISSING_CLI_MESSAGE });
+      throw new Error(OpenCodeServer.MISSING_CLI_MESSAGE);
+    }
+
     const healthy = await this.checkHealth();
     if (healthy) {
       logger.info(`Found existing OpenCode server at ${this.url}`);
@@ -165,7 +176,7 @@ export class OpenCodeServer extends EventEmitter {
         this.process.on('error', (err) => {
           logger.error(`Server process error: ${err.message}`);
           if (err.message.includes('ENOENT')) {
-            failStartup('OpenCode CLI not found. Install it with: npm install -g opencode-ai');
+            failStartup(OpenCodeServer.MISSING_CLI_MESSAGE);
             return;
           }
 

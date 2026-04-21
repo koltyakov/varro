@@ -680,26 +680,6 @@ export function ChatInput() {
     });
   }
 
-  const toolbarFitDependencies = createMemo(() => ({
-    agents: state.agents.length,
-    selectedAgent: state.selectedAgent,
-    modelProvider: currentModel().providerID,
-    modelId: currentModel().modelID,
-    modelName: currentModel().modelName,
-    variant: effectiveVariant(),
-    hasContextUsage: !!contextUsage(),
-    loading: isLoading(),
-    hasQuestion: hasActiveQuestion(),
-    hasPermission: hasActivePermission(),
-    canSend: canSend(),
-    showAgentPicker: showAgentPicker(),
-    showVariantPicker: showVariantPicker(),
-    showModelPicker: showModelPicker(),
-    showPermissionModePicker: showPermissionModePicker(),
-    showBusyMenu: showBusyMenu(),
-    showContextPopup: showContextPopup(),
-  }));
-
   async function handleDrop(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -1047,6 +1027,26 @@ export function ChatInput() {
       ? currentModel().variant
       : variants[0];
   });
+
+  const toolbarFitDependencies = createMemo(() => ({
+    agents: state.agents.length,
+    selectedAgent: state.selectedAgent,
+    modelProvider: currentModel().providerID,
+    modelId: currentModel().modelID,
+    modelName: currentModel().modelName,
+    variant: effectiveVariant(),
+    hasContextUsage: !!contextUsage(),
+    loading: isLoading(),
+    hasQuestion: hasActiveQuestion(),
+    hasPermission: hasActivePermission(),
+    canSend: canSend(),
+    showAgentPicker: showAgentPicker(),
+    showVariantPicker: showVariantPicker(),
+    showModelPicker: showModelPicker(),
+    showPermissionModePicker: showPermissionModePicker(),
+    showBusyMenu: showBusyMenu(),
+    showContextPopup: showContextPopup(),
+  }));
 
   const activePermissionMode = createMemo(() => getPermissionModeForSession(state.activeSessionId));
 

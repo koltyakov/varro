@@ -16,8 +16,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const port = config.get<number>('server.port', 4096);
   const autoStart = config.get<boolean>('server.autoStart', true);
   const command = config.get<string>('server.command', '');
+  const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
 
-  server = new OpenCodeServer(port, autoStart, command);
+  server = new OpenCodeServer(port, autoStart, command, simulateMissingCli);
   contextProvider = new ContextProvider((ctx) => {
     sidebarProvider?.post({ type: 'context/update', payload: ctx });
   });
@@ -43,7 +44,9 @@ export async function activate(context: vscode.ExtensionContext) {
     .catch((err) => {
       const message = `Failed to start OpenCode server: ${err instanceof Error ? err.message : String(err)}`;
       logger.error(message);
-      vscode.window.showErrorMessage(message);
+      if (server?.status.state !== 'error') {
+        vscode.window.showErrorMessage(message);
+      }
     });
 }
 

@@ -18,3 +18,4 @@ tsconfig.webview.json
 docs/
 preview.html
 *.vsix
+.DS_Store

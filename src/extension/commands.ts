@@ -38,7 +38,9 @@ export function registerCommands(
         }).catch((err) => {
           const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
           logger.error(message);
-          vscode.window.showErrorMessage(message);
+          if (server.status.state !== 'error') {
+            vscode.window.showErrorMessage(message);
+          }
         });
       } catch (err) {
         logger.error(`varro.server.restart: ${err instanceof Error ? err.message : String(err)}`);

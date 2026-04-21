@@ -282,8 +282,8 @@ export function useOpenCode() {
               initialized = true;
               initConnection();
             }
-          } else if (msg.payload.state === 'error') {
-            setError(msg.payload.message);
+          } else {
+            setError(null);
           }
           break;
         case 'theme/update':
