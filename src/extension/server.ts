@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { logger } from './logger';
 import { EventEmitter } from 'events';
 import type { ServerStatus } from '../shared/protocol';
+import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 
 export class OpenCodeServer extends EventEmitter {
@@ -130,13 +131,17 @@ export class OpenCodeServer extends EventEmitter {
 
       try {
         const command = this.resolveCommand();
+        const args = ['serve', '--port', String(this.port)];
+        const launch = resolveServerLaunch(command, args);
         logger.info(`Starting OpenCode server with command: ${command}`);
 
-        this.process = spawn(command, ['serve', '--port', String(this.port)], {
+        this.process = spawn(launch.command, launch.args, {
           stdio: ['ignore', 'pipe', 'pipe'],
           detached: false,
           cwd: this.getWorkspaceCwd(),
           env: this.buildServerEnv(),
+          windowsHide: true,
+          ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         });
 
         this.process.stdout?.on('data', (data: Buffer) => {
