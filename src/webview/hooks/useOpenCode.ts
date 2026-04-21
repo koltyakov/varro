@@ -16,6 +16,7 @@ import {
   requestComposerFocus,
   persistActiveSessionId,
   getPersistedActiveSessionId,
+  getPersistedSelectedModel,
   clearClipboardImages,
   clearMessages,
   clearStreamingState,
@@ -32,6 +33,8 @@ import {
   removeContextFile,
   markSessionSeen,
   setSessionCompacting,
+  getSelectedModelForSession,
+  clearSelectedModelForSession,
   getPermissionModeForSession,
   removePermissionModeForSession,
   resetDraftPermissionMode,
@@ -69,6 +72,8 @@ import type {
 import { getWorkspaceRelativePath } from '../lib/path-display';
 import { applyWebviewTheme } from '../lib/theme';
 import { getPreferredVariant } from '../lib/model-variants';
+import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
+import { modelSupportsVision } from '../lib/model-capabilities';
 
 let initialized = false;
 let eventHandlerCleanups: (() => void)[] = [];
@@ -241,7 +246,15 @@ function extractTodosFromPart(part: Part): Todo[] | null {
 }
 
 function deriveTodosFromMessages(messages: Array<{ info: Message; parts: Part[] }>): Todo[] {
-  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+  let lastUserMessageIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].info.role === 'user') {
+      lastUserMessageIndex = index;
+      break;
+    }
+  }
+
+  for (let messageIndex = messages.length - 1; messageIndex > lastUserMessageIndex; messageIndex -= 1) {
     const parts = messages[messageIndex].parts;
     for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
       const todos = extractTodosFromPart(parts[partIndex]);
@@ -263,6 +276,23 @@ function applyTheme(theme: WebviewThemeKind) {
 function syncTodosFromMessages(messages = state.messages) {
   if (todoStateAuthority === 'event') return;
   setState('todos', deriveTodosFromMessages(messages));
+}
+
+function deriveSelectedModelFromMessages(messages: Array<{ info: Message; parts: Part[] }>) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role === 'user') {
+      return message.model;
+    }
+    return {
+      providerID: message.providerID,
+      modelID: message.modelID,
+      variant: message.variant,
+    };
+  }
+
+  return null;
 }
 
 export function useOpenCode() {
@@ -546,6 +576,14 @@ export async function selectSession(id: string) {
   setState('activeSessionId', id);
   persistActiveSessionId(id);
   markSessionSeen(id);
+  const persistedModel = resolveSelectedModel(
+    getSelectedModelForSession(id),
+    state.providers,
+    state.providerDefaults
+  );
+  if (persistedModel) {
+    setSelectedModel(persistedModel, { sessionId: id, persistGlobal: false });
+  }
   resetTodoSync();
   clearMessages();
   try {
@@ -556,6 +594,14 @@ export async function selectSession(id: string) {
     if (state.activeSessionId !== id) return;
     upsertSession(session);
     setMessagesIncremental(msgs);
+    const inferredModel = resolveSelectedModel(
+      deriveSelectedModelFromMessages(msgs),
+      state.providers,
+      state.providerDefaults
+    );
+    if (inferredModel) {
+      setSelectedModel(inferredModel, { sessionId: id, persistGlobal: false });
+    }
     syncTodosFromMessages(msgs);
     await loadQuestions().catch((err) => logError('loadQuestions', err));
     if (state.activeSessionId !== id) return;
@@ -602,6 +648,10 @@ export async function createSession(
     setState('sessionStatus', { ...state.sessionStatus, [session.id]: { type: 'idle' } });
     persistActiveSessionId(session.id);
     markSessionSeen(session.id);
+    const defaultModel = getPersistedSelectedModel();
+    if (defaultModel) {
+      setSelectedModel(defaultModel, { sessionId: session.id, persistGlobal: false });
+    }
     setSelectedAgent(getDefaultPrimaryAgentName());
     if (initialPermissionMode === 'full') {
       setPermissionModeForSession(session.id, 'full');
@@ -628,6 +678,7 @@ export async function deleteSession(id: string) {
       'sessions',
       state.sessions.filter((s) => s.id !== id)
     );
+    clearSelectedModelForSession(id);
     clearDeletedSessionState(id);
     if (nextActiveId) {
       await selectSession(nextActiveId);
@@ -650,6 +701,20 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     sessionId = currentSessionId;
   }
 
+  const effectiveModel = resolveSelectedModel(
+    state.selectedModel,
+    state.providers,
+    state.providerDefaults
+  );
+  const includeClipboardImages = effectiveModel
+    ? modelSupportsVision(effectiveModel.providerID, effectiveModel.modelID, state.providers)
+    : true;
+  const promptText = getPromptTextForClipboardImages(
+    text,
+    state.clipboardImages,
+    includeClipboardImages
+  );
+
   const parts: Array<{
     type: string;
     text?: string;
@@ -657,7 +722,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     filename?: string;
     url?: string;
   }> = [];
-  if (text.trim()) parts.push({ type: 'text', text });
+  if (promptText.trim()) parts.push({ type: 'text', text: promptText });
 
   const wp = state.editorContext.workspacePath;
   if (wp) {
@@ -688,13 +753,15 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     parts.push({ type: 'text', text: getAttachmentReference(file, wp) });
   }
 
-  for (const image of state.clipboardImages) {
-    parts.push({
-      type: 'file',
-      mime: image.mime,
-      filename: image.filename,
-      url: image.url,
-    });
+  if (includeClipboardImages) {
+    for (const image of state.clipboardImages) {
+      parts.push({
+        type: 'file',
+        mime: image.mime,
+        filename: image.filename,
+        url: image.url,
+      });
+    }
   }
 
   if (parts.length === 0) return;
@@ -710,12 +777,8 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     variant?: string;
   } = { parts };
   if (state.selectedAgent) body.agent = state.selectedAgent;
-  const effectiveModel = resolveSelectedModel(
-    state.selectedModel,
-    state.providers,
-    state.providerDefaults
-  );
   if (effectiveModel) {
+    setSelectedModel(effectiveModel, { sessionId });
     body.model = {
       providerID: effectiveModel.providerID,
       modelID: effectiveModel.modelID,
@@ -728,9 +791,12 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   }
   if (options?.noReply) body.noReply = true;
 
+  resetTodoSync();
+  setState('todos', []);
+
   setState('droppedFiles', []);
-    clearClipboardImages();
-    postMessage({ type: 'files/clear' });
+  clearClipboardImages();
+  postMessage({ type: 'files/clear' });
 
   try {
     await client.session.sendAsync(sessionId, body);

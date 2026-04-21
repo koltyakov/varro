@@ -272,6 +272,7 @@ input:focus-visible {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overflow-anchor: none;
   padding: 0 0 8px 0;
 }
@@ -1783,6 +1784,12 @@ input:focus-visible {
   padding: 4px 0 6px 2px;
 }
 
+.chat-attachment-note {
+  padding: 0 2px 6px;
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+}
+
 .chat-attachment-chip {
   display: inline-flex;
   align-items: center;
@@ -1805,6 +1812,22 @@ input:focus-visible {
 .chat-attachment-chip:hover {
   background: var(--color-vscode-input-surface-hover);
   border-color: var(--color-vscode-border-strong);
+}
+
+.chat-attachment-chip.disabled {
+  border-style: dashed;
+  background: var(--color-vscode-surface-soft);
+  color: var(--color-vscode-muted);
+  opacity: 0.78;
+}
+
+.chat-attachment-chip.disabled:hover {
+  background: var(--color-vscode-surface-soft);
+  border-color: var(--color-vscode-border-soft);
+}
+
+.chat-attachment-chip.disabled .chip-label {
+  text-decoration: line-through;
 }
 
 .chat-attachment-chip .chip-icon {

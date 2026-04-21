@@ -57,6 +57,8 @@ import {
   sumAssistantTokens,
   formatNumber,
 } from '../lib/message-metrics';
+import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
+import { modelSupportsVision } from '../lib/model-capabilities';
 import { getLeafPathName, getDroppedFileLabel } from '../lib/path-display';
 import { TodoList } from './TodoList';
 import type { Agent, Part, TextPart } from '../types';
@@ -500,7 +502,9 @@ export function ChatInput() {
 
   async function handleSend(mode?: 'queue' | 'steer') {
     const text = inputText();
-    if (!text.trim() && state.droppedFiles.length === 0 && state.clipboardImages.length === 0)
+    const sendableText = getSendableInputText(text);
+    const hasSendableImages = hasSendableClipboardImages();
+    if (!sendableText.trim() && state.droppedFiles.length === 0 && !hasSendableImages)
       return;
 
     requestMessageListScrollToBottom();
@@ -511,14 +515,14 @@ export function ChatInput() {
       !hasActiveQuestion() &&
       !hasActivePermission() &&
       state.activeSessionId &&
-      text.trim() &&
+      sendableText.trim() &&
       state.droppedFiles.length === 0 &&
-      state.clipboardImages.length === 0
+      !hasSendableImages
     ) {
       enqueueMessage({
         id: createAttachmentID(),
         sessionId: state.activeSessionId,
-        text,
+        text: sendableText,
       });
       setHistoryIndex(null);
       setHistoryDraft('');
@@ -928,9 +932,9 @@ export function ChatInput() {
   const canSend = () =>
     !hasActiveQuestion() &&
     !hasActivePermission() &&
-    (inputText().trim().length > 0 ||
+    (getSendableInputText().trim().length > 0 ||
       state.droppedFiles.length > 0 ||
-      state.clipboardImages.length > 0);
+      hasSendableClipboardImages());
 
   const currentModel = () => {
     const selected = resolveSelectedModel(
@@ -1006,6 +1010,22 @@ export function ChatInput() {
       contextLimit: null as number | null,
     };
   };
+
+  function currentModelSupportsVision() {
+    const current = currentModel();
+    if (!current.providerID || !current.modelID) return true;
+    return modelSupportsVision(current.providerID, current.modelID, state.providers);
+  }
+
+  function hasSendableClipboardImages() {
+    return currentModelSupportsVision() && state.clipboardImages.length > 0;
+  }
+
+  function getSendableInputText(text = inputText()) {
+    return getPromptTextForClipboardImages(text, state.clipboardImages, currentModelSupportsVision());
+  }
+
+  const clipboardImagesDisabled = () => clipboardImages().length > 0 && !currentModelSupportsVision();
 
   const assistantMessages = createMemo(() =>
     state.messages.map((entry) => entry.info).filter(isAssistantMessage)
@@ -1151,7 +1171,7 @@ export function ChatInput() {
                 providerID: sel.providerID,
                 modelID: sel.modelID,
                 variant: matchedVariant,
-              });
+              }, { sessionId: state.activeSessionId });
             }
           }}
           onClose={() => setShowModelPicker(false)}
@@ -1283,12 +1303,25 @@ export function ChatInput() {
               {(image) => (
                 <AttachmentChip
                   label={image.filename}
+                  detail={clipboardImagesDisabled() ? 'disabled' : null}
+                  disabled={clipboardImagesDisabled()}
                   icon="image"
-                  title={image.filename}
+                  title={
+                    clipboardImagesDisabled()
+                      ? `${image.filename} · Current model doesn't support vision, so this image will not be sent`
+                      : image.filename
+                  }
                   onRemove={() => removeClipboardImage(image.id)}
                 />
               )}
             </For>
+          </div>
+        </Show>
+
+        <Show when={clipboardImagesDisabled()}>
+          <div class="chat-attachment-note" role="status">
+            Current model doesn&apos;t support vision. Pasted images stay attached, but they
+            won&apos;t be sent until you switch models.
           </div>
         </Show>
 
@@ -1566,7 +1599,7 @@ export function ChatInput() {
                               providerID: m.providerID!,
                               modelID: m.modelID!,
                               variant: v,
-                            });
+                            }, { sessionId: state.activeSessionId });
                             setShowVariantPicker(false);
                           }}
                         >
@@ -1941,12 +1974,17 @@ function CompletionMenu(props: {
 function AttachmentChip(props: {
   label: string;
   detail?: string | null;
+  disabled?: boolean;
   icon?: 'file' | 'folder' | 'image' | 'terminal';
   onRemove?: () => void;
   title?: string;
 }) {
   return (
-    <span class="chat-attachment-chip" title={props.title}>
+    <span
+      class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}`}
+      title={props.title}
+      aria-disabled={props.disabled ? 'true' : undefined}
+    >
       <Show when={props.onRemove}>
         <button class="chip-remove" onClick={() => props.onRemove?.()}>
           <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">

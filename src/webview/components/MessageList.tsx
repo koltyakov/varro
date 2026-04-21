@@ -20,7 +20,7 @@ import type { AssistantMessage, Message, Part } from '../types';
 import { Message as MessageComponent, type AssistantFileEditStackGroup } from './Message';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { getChildRunsByParentId } from '../lib/state';
-import { modelSupportsReasoning } from './ModelPicker';
+import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import {
   collapseLeadingDuplicateFileEvents,

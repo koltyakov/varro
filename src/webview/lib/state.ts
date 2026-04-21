@@ -26,6 +26,7 @@ import type {
 const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
   selectedModel: 'varro.selectedModel',
+  sessionSelectedModels: 'varro.sessionSelectedModels',
   draftPermissionMode: 'varro.draftPermissionMode',
   sessionPermissionModes: 'varro.sessionPermissionModes',
   projectPermissionModes: 'varro.projectPermissionModes',
@@ -36,6 +37,7 @@ const STORAGE_KEYS = {
 } as const;
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
+export type SessionSelectedModels = Record<string, SelectedModel>;
 
 function readStored<T>(key: string): T | null {
   try {
@@ -81,6 +83,7 @@ interface AppState {
   sessionPermissionModes: Record<string, PermissionMode>;
   selectedAgent: string | null;
   selectedModel: SelectedModel | null;
+  sessionSelectedModels: SessionSelectedModels;
   hiddenProviders: string[];
   hiddenModels: string[];
   lastSeenSessions: Record<string, number>;
@@ -140,6 +143,8 @@ export const [state, setState] = createStore<AppState>({
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
   selectedAgent: readStored<string>(STORAGE_KEYS.selectedAgent),
   selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
+  sessionSelectedModels:
+    readStored<SessionSelectedModels>(STORAGE_KEYS.sessionSelectedModels) || {},
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
   lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
@@ -172,6 +177,10 @@ export function clearQueuedMessagesForSession(sessionId: string) {
 
 export function persistActiveSessionId(id: string | null) {
   writeStored(STORAGE_KEYS.lastActiveSessionId, id);
+}
+
+export function getPersistedSelectedModel(): SelectedModel | null {
+  return readStored<SelectedModel>(STORAGE_KEYS.selectedModel);
 }
 
 export function getPersistedActiveSessionId(): string | null {
@@ -337,6 +346,43 @@ export function removePermissionModeForSession(sessionId: string) {
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
 }
 
+export function getSelectedModelForSession(sessionId: string | null | undefined): SelectedModel | null {
+  if (!sessionId) return null;
+  return state.sessionSelectedModels[sessionId] || null;
+}
+
+export function setSelectedModel(
+  model: SelectedModel | null,
+  options?: { sessionId?: string | null; persistGlobal?: boolean }
+) {
+  const persistGlobal = options?.persistGlobal ?? true;
+  const sessionId = options?.sessionId;
+
+  setState('selectedModel', model);
+  if (persistGlobal) {
+    writeStored(STORAGE_KEYS.selectedModel, model);
+  }
+
+  if (sessionId) {
+    const nextSessionModels = model
+      ? { ...state.sessionSelectedModels, [sessionId]: model }
+      : Object.fromEntries(
+          Object.entries(state.sessionSelectedModels).filter(([id]) => id !== sessionId)
+        );
+    setState('sessionSelectedModels', reconcile(nextSessionModels));
+    writeStored(STORAGE_KEYS.sessionSelectedModels, nextSessionModels);
+  }
+}
+
+export function clearSelectedModelForSession(sessionId: string) {
+  if (!state.sessionSelectedModels[sessionId]) return;
+  const nextSessionModels = Object.fromEntries(
+    Object.entries(state.sessionSelectedModels).filter(([id]) => id !== sessionId)
+  );
+  setState('sessionSelectedModels', reconcile(nextSessionModels));
+  writeStored(STORAGE_KEYS.sessionSelectedModels, nextSessionModels);
+}
+
 export function resetDraftPermissionMode() {
   const modes =
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
@@ -463,11 +509,6 @@ export function removeQuestion(requestID: string) {
 export function setSelectedAgent(agent: string | null) {
   setState('selectedAgent', agent);
   writeStored(STORAGE_KEYS.selectedAgent, agent);
-}
-
-export function setSelectedModel(model: SelectedModel | null) {
-  setState('selectedModel', model);
-  writeStored(STORAGE_KEYS.selectedModel, model);
 }
 
 export function modelVisibilityKey(providerID: string, modelID: string) {

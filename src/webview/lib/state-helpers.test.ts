@@ -200,6 +200,26 @@ describe('state helpers', () => {
     expect(stateModule.nextPastedImageIndex()).toBe(1);
   });
 
+  it('tracks global and per-session selected models independently', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5' });
+    stateModule.setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-4o' },
+      { sessionId: 'session-1', persistGlobal: false }
+    );
+
+    expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+    });
+    expect(stateModule.getPersistedSelectedModel()).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
+
+    stateModule.clearSelectedModelForSession('session-1');
+    expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
+  });
+
   it('updates questions and model visibility state', async () => {
     const stateModule = await loadState();
     const providers = [provider('openai', ['gpt-4.1', 'gpt-4o']), provider('anthropic', ['claude'])];

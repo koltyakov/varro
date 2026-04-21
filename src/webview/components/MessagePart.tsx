@@ -6,7 +6,7 @@ import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } fro
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ToolCall } from './ToolCall';
 import { formatDisplayPath } from '../lib/path-display';
-import { modelSupportsReasoning } from './ModelPicker';
+import { modelSupportsReasoning } from '../lib/model-capabilities';
 
 export function MessagePart(props: {
   part: Part;
@@ -85,9 +85,7 @@ function ReasoningBlock(props: { part: ReasoningPart; messageInfo?: AssistantMes
     <div class="chat-thinking-box">
       <button class="thinking-header" onClick={() => setExpanded(!expanded())}>
         <span class="thinking-label">
-          <Show when={subjectLabel()}>
-            <BrainTopicIcon class={isStreaming() ? 'thinking-in-progress' : undefined} />
-          </Show>
+          <BrainTopicIcon class={isStreaming() ? 'thinking-in-progress' : undefined} />
           <span class={`thinking-label-text${isStreaming() ? ' shimmer-progress' : ''}`}>{headerLabel()}</span>
         </span>
         <Show when={durationLabel()}>

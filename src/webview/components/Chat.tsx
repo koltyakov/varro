@@ -125,7 +125,7 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
   onCleanup(() => clearInterval(clock));
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
-  const [showOtherSessions, setShowOtherSessions] = createSignal(!props.focusRunningSessions);
+  const [showOtherSessions, setShowOtherSessions] = createSignal(false);
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
 
@@ -156,7 +156,9 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
   };
 
   createEffect(() => {
-    setShowOtherSessions(!props.focusRunningSessions);
+    if (props.focusRunningSessions) {
+      setShowOtherSessions(false);
+    }
   });
 
   createEffect(() => {
