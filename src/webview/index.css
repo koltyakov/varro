@@ -1195,6 +1195,10 @@ input:focus-visible {
   padding: 3px;
 }
 
+.toolbar-popover.agent-popover {
+  width: min(288px, calc(100vw - 24px));
+}
+
 .toolbar-popover-item {
   display: flex;
   width: 100%;

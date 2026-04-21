@@ -1363,7 +1363,7 @@ export function ChatInput() {
                 <Show when={showAgentPicker()}>
                   <div
                     ref={agentPopoverRef!}
-                    class="toolbar-popover"
+                    class="toolbar-popover agent-popover"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div class="toolbar-popover-header">Agent</div>
