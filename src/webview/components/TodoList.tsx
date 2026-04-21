@@ -92,9 +92,8 @@ function TodoItem(props: { todo: Todo }) {
             fill="none"
             stroke="currentColor"
             stroke-width="1.25"
-            stroke-dasharray="2 1.6"
           >
-            <circle cx="8" cy="8" r="5.5" />
+            <circle cx="8" cy="8" r="5.5" opacity="0.55" />
           </svg>
         );
     }

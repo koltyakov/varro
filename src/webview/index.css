@@ -223,7 +223,9 @@ input:focus-visible {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 14px var(--chat-horizontal-padding) 24px;
+  padding: 14px
+    max(0px, calc(var(--chat-horizontal-padding) - var(--interactive-list-scrollbar-inset)))
+    24px var(--chat-horizontal-padding);
 }
 
 .interactive-item-container {
@@ -729,9 +731,9 @@ input:focus-visible {
 }
 
 .interactive-session .interactive-input-part {
-  margin: 0 calc(var(--chat-horizontal-padding) + var(--interactive-list-scrollbar-inset)) 12px
+  margin: 0 var(--chat-horizontal-padding) var(--chat-horizontal-padding)
     var(--chat-horizontal-padding);
-  padding: 8px 0;
+  padding: 8px 0 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
