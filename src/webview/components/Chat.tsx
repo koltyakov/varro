@@ -14,6 +14,16 @@ import { SettingsPanel } from './SettingsPanel';
 export function Chat() {
   const [focusRunningSessions, setFocusRunningSessions] = createSignal(false);
 
+  const shouldDiscardActiveBlankSession = () => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId || state.messages.length > 0) return false;
+    if (state.queuedMessages.some((item) => item.sessionId === sessionId)) return false;
+    if (state.permissions.some((permission) => permission.sessionID === sessionId)) return false;
+    if (state.questions.some((question) => question.sessionID === sessionId)) return false;
+    const statusType = state.sessionStatus[sessionId]?.type;
+    return statusType !== 'busy' && statusType !== 'retry';
+  };
+
   const activeTitle = () => {
     if (!state.activeSessionId) return 'New Chat';
     const session = state.sessions.find((s) => s.id === state.activeSessionId);
@@ -27,8 +37,14 @@ export function Chat() {
       return count + 1;
     }, 0);
 
-  const openAllSessions = () => {
+  const openAllSessions = async () => {
     setFocusRunningSessions(false);
+    const sessionId = state.activeSessionId;
+    if (sessionId && shouldDiscardActiveBlankSession()) {
+      setShowSessionPicker(true);
+      await deleteSession(sessionId);
+      return;
+    }
     setShowSessionPicker(true);
   };
 
@@ -48,7 +64,7 @@ export function Chat() {
               <div class="chat-header-left">
                 <button
                   class="chat-header-btn"
-                  onClick={openAllSessions}
+                  onClick={() => void openAllSessions()}
                   title="Back to sessions"
                 >
                   <svg viewBox="0 0 16 16" fill="currentColor">
