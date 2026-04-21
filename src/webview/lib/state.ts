@@ -1,5 +1,5 @@
 import { createMemo, createSignal } from 'solid-js';
-import { createStore, produce } from 'solid-js/store';
+import { createStore, produce, reconcile } from 'solid-js/store';
 import type {
   Session,
   Message,
@@ -18,6 +18,7 @@ import type {
   DroppedFile,
   InitialWebviewState,
   PermissionMode,
+  ProviderLimitStatus,
   ServerStatus,
   WebviewThemeKind,
 } from '../../shared/protocol';
@@ -75,6 +76,7 @@ interface AppState {
   agents: Agent[];
   allAgents: Agent[];
   providers: Provider[];
+  providerLimits: Record<string, ProviderLimitStatus | null>;
   providerDefaults: Record<string, string>;
   sessionPermissionModes: Record<string, PermissionMode>;
   selectedAgent: string | null;
@@ -132,6 +134,7 @@ export const [state, setState] = createStore<AppState>({
   agents: [],
   allAgents: [],
   providers: [],
+  providerLimits: {},
   providerDefaults: {},
   sessionPermissionModes:
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
@@ -330,7 +333,7 @@ export function removePermissionModeForSession(sessionId: string) {
   const nextModes = Object.fromEntries(
     Object.entries(state.sessionPermissionModes).filter(([id]) => id !== sessionId)
   );
-  setState('sessionPermissionModes', nextModes);
+  setState('sessionPermissionModes', reconcile(nextModes));
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
 }
 
@@ -684,24 +687,39 @@ export function applyMessagePartDelta(
 ) {
   if (field !== 'text' || !delta) return;
 
-  const currentStreamingText = state.streamingPartId === partId ? state.streamingText : '';
-  setState('streamingPartId', partId);
-  setState('streamingText', currentStreamingText + delta);
-
   const message = state.messages.find((item) => item.info.id === messageId);
-  if (!message || message.parts.some((item) => item.id === partId)) return;
+  if (!message) return;
+
+  const existingPart = message.parts.find((item) => item.id === partId);
+  const existingText =
+    existingPart && (existingPart.type === 'text' || existingPart.type === 'reasoning')
+      ? existingPart.text
+      : '';
+  const currentStreamingText = state.streamingPartId === partId ? state.streamingText : existingText;
+  const nextStreamingText = currentStreamingText + delta;
+
+  setState('streamingPartId', partId);
+  setState('streamingText', nextStreamingText);
 
   setState(
     'messages',
     produce((msgs) => {
       const msgIdx = findMessageIndex(msgs, messageId);
       if (msgIdx === -1) return;
+      const partIdx = msgs[msgIdx].parts.findIndex((item) => item.id === partId);
+      if (partIdx !== -1) {
+        const part = msgs[msgIdx].parts[partIdx];
+        if (part.type === 'text' || part.type === 'reasoning') {
+          part.text = nextStreamingText;
+        }
+        return;
+      }
       msgs[msgIdx].parts.push({
         id: partId,
         messageID: messageId,
         sessionID: sessionId || msgs[msgIdx].info.sessionID,
         type: 'text',
-        text: currentStreamingText + delta,
+        text: nextStreamingText,
       });
       invalidateIndex();
     })

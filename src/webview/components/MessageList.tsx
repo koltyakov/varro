@@ -21,7 +21,7 @@ import { Message as MessageComponent, type AssistantFileEditStackGroup } from '.
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { getChildRunsByParentId } from '../lib/state';
 import { modelSupportsReasoning } from './ModelPicker';
-import { formatVariantInitial } from '../lib/format';
+import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import {
   collapseLeadingDuplicateFileEvents,
   getTrailingFileEventSignature,
@@ -393,13 +393,16 @@ export function MessageList() {
         const modelName = provider?.models[cur.modelID]?.name || cur.modelID;
         const parts: string[] = [];
         if (modelChanged) parts.push(modelName);
-        if (cur.variant) parts.push(formatVariantInitial(cur.variant));
+        if (cur.variant) parts.push(formatVariantLabel(cur.variant));
         else if (
           variantChanged &&
           !modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
         )
           parts.push('No thinking');
-        result.set(msg.info.id, parts.join(' · '));
+        result.set(
+          msg.info.id,
+          formatLabelWithProvider(parts.join(' · '), provider?.name || cur.providerID)
+        );
       }
       prevProvider = cur.providerID;
       prevModel = cur.modelID;

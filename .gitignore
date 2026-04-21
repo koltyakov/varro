@@ -5,3 +5,4 @@ dist/
 src/webview/index.html
 tmp/
 .DS_Store
+coverage/

@@ -68,6 +68,7 @@ import type {
 } from '../types';
 import { getWorkspaceRelativePath } from '../lib/path-display';
 import { applyWebviewTheme } from '../lib/theme';
+import { getPreferredVariant } from '../lib/model-variants';
 
 let initialized = false;
 let eventHandlerCleanups: (() => void)[] = [];
@@ -284,6 +285,7 @@ export function useOpenCode() {
             }
           } else {
             setState('providersLoaded', false);
+            setState('providerLimits', {});
             setError(null);
           }
           break;
@@ -385,7 +387,55 @@ export function useOpenCode() {
     onCleanup(() => clearTimeout(timer));
   });
 
+  createEffect(() => {
+    if (state.serverStatus.state !== 'running' || !state.providersLoaded) return;
+
+    const active = getActiveProviderSelection();
+    if (!active) return;
+
+    let cancelled = false;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const limit = await client.config.providerLimit(active.providerID, active.modelID);
+        if (!cancelled) {
+          setState('providerLimits', active.providerID, limit);
+        }
+      } catch (err) {
+        logError('loadProviderLimit', err);
+      }
+    };
+
+    void refresh();
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 120_000);
+
+    onCleanup(() => {
+      cancelled = true;
+      window.clearInterval(timer);
+    });
+  });
+
   return { client };
+}
+
+function getActiveProviderSelection() {
+  const selected = resolveSelectedModel(state.selectedModel, state.providers, state.providerDefaults);
+  if (selected) {
+    return { providerID: selected.providerID, modelID: selected.modelID };
+  }
+
+  const firstProvider = state.providers[0];
+  if (!firstProvider) return null;
+
+  const defaultModelID = state.providerDefaults[firstProvider.id];
+  const fallbackModelID =
+    (defaultModelID && firstProvider.models[defaultModelID] ? defaultModelID : null) ||
+    Object.keys(firstProvider.models)[0];
+  if (!fallbackModelID) return null;
+
+  return { providerID: firstProvider.id, modelID: fallbackModelID };
 }
 
 export async function recheckSessionStatus(sessionId: string) {
@@ -674,12 +724,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   if (effectiveModel?.variant) {
     body.variant = effectiveModel.variant;
   } else if (body.model) {
-    const provider = state.providers.find((p) => p.id === body.model!.providerID);
-    const modelObj = provider?.models[body.model!.modelID];
-    if (modelObj?.variants) {
-      const realVariants = Object.keys(modelObj.variants).filter((v) => v !== 'none');
-      if (realVariants.length > 0) body.variant = realVariants[0];
-    }
+    body.variant = getPreferredVariant(body.model.providerID, body.model.modelID, state.providers) || undefined;
   }
   if (options?.noReply) body.noReply = true;
 

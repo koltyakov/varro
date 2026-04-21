@@ -42,7 +42,7 @@ export function shouldShowAssistantPartInline(part: Part, respectThinkingToggle 
     case 'text':
       return part.text.trim().length > 0;
     case 'reasoning':
-      return respectThinkingToggle ? showThinking() : true;
+      return respectThinkingToggle ? showThinking() && part.text.trim().length > 0 : true;
     case 'agent':
     case 'retry':
     case 'compaction':

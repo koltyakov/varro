@@ -1,10 +1,12 @@
-import { Show, createSignal } from 'solid-js';
+import { Show, createMemo, createSignal } from 'solid-js';
 import { state, showThinking } from '../lib/state';
-import { formatAgentLabel } from '../lib/format';
-import type { AssistantMessage, Part, SubtaskPart, TextPart } from '../types';
+import { formatAgentLabel, formatVariantLabel } from '../lib/format';
+import { formatDuration } from '../lib/message-metrics';
+import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ToolCall } from './ToolCall';
 import { formatDisplayPath } from '../lib/path-display';
+import { modelSupportsReasoning } from './ModelPicker';
 
 export function MessagePart(props: {
   part: Part;
@@ -23,7 +25,7 @@ export function MessagePart(props: {
       case 'reasoning':
         return (
           <Show when={showThinking()}>
-            <ReasoningBlock text={part.text} />
+            <ReasoningBlock part={part} messageInfo={props.messageInfo} />
           </Show>
         );
       case 'agent':
@@ -69,15 +71,30 @@ export function MessagePart(props: {
   return <>{render()}</>;
 }
 
-function ReasoningBlock(props: { text: string }) {
+function ReasoningBlock(props: { part: ReasoningPart; messageInfo?: AssistantMessage }) {
   const [expanded, setExpanded] = createSignal(false);
-  const isStreaming = () => !props.text || props.text.endsWith('…') || props.text.length < 50;
+  const parsedText = createMemo(() => splitReasoningText(props.part.text));
+  const isStreaming = () => props.part.time.end === undefined;
+  const hasBody = () => parsedText().body.trim().length > 0;
+  const detailLabel = () => getReasoningDetailLabel(props.messageInfo);
+  const subjectLabel = () => parsedText().subject;
+  const headerLabel = () => formatReasoningHeader(subjectLabel(), detailLabel());
+  const durationLabel = () => formatReasoningDuration(props.part.time);
 
   return (
     <div class="chat-thinking-box">
       <button class="thinking-header" onClick={() => setExpanded(!expanded())}>
+        <span class="thinking-label">
+          <Show when={subjectLabel()}>
+            <BrainTopicIcon class={isStreaming() ? 'thinking-in-progress' : undefined} />
+          </Show>
+          <span class={`thinking-label-text${isStreaming() ? ' shimmer-progress' : ''}`}>{headerLabel()}</span>
+        </span>
+        <Show when={durationLabel()}>
+          <span class="thinking-duration">{durationLabel()}</span>
+        </Show>
         <svg
-          class={`chevron ${expanded() ? 'expanded' : ''}`}
+          class={`thinking-chevron ${expanded() ? 'expanded' : ''}`}
           viewBox="0 0 16 16"
           fill="none"
           stroke="currentColor"
@@ -89,19 +106,98 @@ function ReasoningBlock(props: { text: string }) {
         >
           <path d="M6 4l4 4-4 4" />
         </svg>
-        <Show when={isStreaming()} fallback={<span class="thinking-label">Thinking</span>}>
-          <span class="thinking-label shimmer-progress">Thinking</span>
-        </Show>
       </button>
-      <Show when={expanded()}>
+      <Show when={expanded() && hasBody()}>
         <div class="thinking-content animate-fade-in">
           <div class="thinking-item">
-            <div class="thinking-text">{props.text}</div>
+            <div class="thinking-text">{parsedText().body}</div>
           </div>
         </div>
       </Show>
     </div>
   );
+}
+
+export function splitReasoningText(text: string) {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  let subjectIndex = 0;
+
+  while (subjectIndex < lines.length && lines[subjectIndex].trim().length === 0) {
+    subjectIndex += 1;
+  }
+
+  const subjectLine = lines[subjectIndex]?.trim();
+  const subjectMatch = subjectLine?.match(/^\*\*(.+?)\*\*$/);
+  if (!subjectMatch) return { subject: null, body: text };
+
+  const subject = subjectMatch[1].trim();
+  if (!subject) return { subject: null, body: text };
+
+  let bodyStart = subjectIndex + 1;
+  while (bodyStart < lines.length && lines[bodyStart].trim().length === 0) {
+    bodyStart += 1;
+  }
+
+  return {
+    subject,
+    body: lines.slice(bodyStart).join('\n'),
+  };
+}
+
+export function formatReasoningHeader(subject: string | null, detail?: string | null) {
+  const parts = [subject || 'Thinking'];
+  if (detail) parts.push(detail);
+  return parts.join(' · ');
+}
+
+export function formatReasoningDuration(time: ReasoningPart['time']) {
+  if (time.end === undefined) return null;
+  return formatDuration(time.end - time.start) || null;
+}
+
+function BrainTopicIcon(props: { class?: string }) {
+  return (
+    <svg
+      class={props.class ? `thinking-topic-icon ${props.class}` : 'thinking-topic-icon'}
+      viewBox="0 0 32 32"
+      width="15"
+      height="15"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M30,13A11,11,0,0,0,19,2H11a9,9,0,0,0-9,9v3a5,5,0,0,0,5,5H8.1A5,5,0,0,0,13,23h1.38l4,7,1.73-1-4-6.89A2,2,0,0,0,14.38,21H13a3,3,0,0,1,0-6h1V13H13a5,5,0,0,0-4.9,4H7a3,3,0,0,1-3-3V12H6A3,3,0,0,0,9,9V8H7V9a1,1,0,0,1-1,1H4.08A7,7,0,0,1,11,4h6V6a1,1,0,0,1-1,1H14V9h2a3,3,0,0,0,3-3V4a9,9,0,0,1,8.05,5H26a3,3,0,0,0-3,3v1h2V12a1,1,0,0,1,1-1h1.77A8.76,8.76,0,0,1,28,13v1a5,5,0,0,1-5,5H20v2h3a7,7,0,0,0,3-.68V21a3,3,0,0,1-3,3H22v2h1a5,5,0,0,0,5-5V18.89A7,7,0,0,0,30,14Z"
+      />
+    </svg>
+  );
+}
+
+function getReasoningDetailLabel(messageInfo?: AssistantMessage) {
+  if (!messageInfo || messageInfo.mode !== 'subagent') return null;
+
+  const parent = state.messages.find(
+    (entry): entry is { info: AssistantMessage; parts: Part[] } =>
+      entry.info.role === 'assistant' && entry.info.id === messageInfo.parentID
+  )?.info;
+
+  if (!parent) return null;
+
+  const modelChanged =
+    parent.providerID !== messageInfo.providerID || parent.modelID !== messageInfo.modelID;
+  const variantChanged = (parent.variant || '') !== (messageInfo.variant || '');
+  if (!modelChanged && !variantChanged) return null;
+
+  const provider = state.providers.find((item) => item.id === messageInfo.providerID);
+  const modelName = provider?.models[messageInfo.modelID]?.name || messageInfo.modelID;
+  const parts: string[] = [];
+
+  if (modelChanged) parts.push(modelName);
+  if (messageInfo.variant) parts.push(formatVariantLabel(messageInfo.variant));
+  else if (variantChanged && !modelSupportsReasoning(messageInfo.providerID, messageInfo.modelID, state.providers)) {
+    parts.push('No thinking');
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 function SubtaskBlock(props: { part: SubtaskPart }) {

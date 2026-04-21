@@ -9,6 +9,11 @@ export type TokenUsage = {
   cacheWrite: number;
 };
 
+export type AssistantDiffRequest = {
+  sessionID: string;
+  messageID: string;
+};
+
 export function isAssistantMessage(message: Message): message is AssistantMessage {
   return message.role === 'assistant';
 }
@@ -64,6 +69,14 @@ export function getAssistantDuration(message: AssistantMessage): number | undefi
   const end = message.time.completed;
   if (!end) return undefined;
   return end - message.time.created;
+}
+
+export function getAssistantDiffRequest(
+  message: Message,
+  isLastAssistant: boolean
+): AssistantDiffRequest | null {
+  if (!isLastAssistant || !isAssistantMessage(message) || !message.time.completed) return null;
+  return { sessionID: message.sessionID, messageID: message.id };
 }
 
 export function getContextWindow(message: AssistantMessage, providers: Provider[]) {

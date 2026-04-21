@@ -19,4 +19,5 @@ docs/
 preview.html
 *.vsix
 .DS_Store
+coverage/
 assets/demo.png

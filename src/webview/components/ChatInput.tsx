@@ -41,7 +41,16 @@ import {
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel } from './ModelPicker';
-import { formatAgentInitial, formatAgentLabel, formatVariantInitial, formatVariantLabel } from '../lib/format';
+import {
+  formatAgentInitial,
+  formatAgentLabel,
+  formatProviderLimitCompact,
+  formatProviderLimitTitle,
+  formatVariantInitial,
+  formatVariantLabel,
+  getProviderLimitTone,
+} from '../lib/format';
+import { getMatchingVariant, getPreferredVariant } from '../lib/model-variants';
 import {
   isAssistantMessage,
   getContextWindow,
@@ -68,6 +77,8 @@ export function ChatInput() {
   let agentPopoverRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let modelPickerRef: HTMLButtonElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let modelPopoverRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let toolbarRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
@@ -797,8 +808,10 @@ export function ChatInput() {
 
     const handleWindowClick = (e: MouseEvent) => {
       const target = e.target as Node | null;
+      const clickedInsideInteractiveArea =
+        !!target && (containerRef?.contains(target) || modelPopoverRef?.contains(target));
 
-      if (!containerRef?.contains(target)) {
+      if (!clickedInsideInteractiveArea) {
         setShowAgentPicker(false);
         setShowModelPicker(false);
         setShowVariantPicker(false);
@@ -815,7 +828,7 @@ export function ChatInput() {
       if (showAgentPicker() && clickedOutside(target, agentPickerRef, agentPopoverRef)) {
         setShowAgentPicker(false);
       }
-      if (showModelPicker() && clickedOutside(target, modelPickerRef)) {
+      if (showModelPicker() && clickedOutside(target, modelPickerRef, modelPopoverRef)) {
         setShowModelPicker(false);
       }
       if (showVariantPicker() && clickedOutside(target, variantPickerRef, variantPopoverRef)) {
@@ -1018,6 +1031,19 @@ export function ChatInput() {
 
   const sessionTokens = createMemo(() => sumAssistantTokens(assistantMessages()));
 
+  const currentProviderLimit = createMemo(() => {
+    const current = currentModel();
+    if (!current.providerID) return null;
+
+    const limit = state.providerLimits[current.providerID] || null;
+    if (limit?.modelID && current.modelID && limit.modelID !== current.modelID) return null;
+    return limit;
+  });
+
+  const currentProviderLimitCompact = createMemo(() => formatProviderLimitCompact(currentProviderLimit()));
+  const currentProviderLimitTitle = createMemo(() => formatProviderLimitTitle(currentProviderLimit()));
+  const currentProviderLimitTone = createMemo(() => getProviderLimitTone(currentProviderLimit()));
+
   const availableVariants = createMemo(() => {
     const model = currentModel();
     return getVariantsForModel(model.providerID, model.modelID, state.providers).filter(
@@ -1030,7 +1056,8 @@ export function ChatInput() {
     if (variants.length === 0) return null;
     return currentModel().variant && variants.includes(currentModel().variant!)
       ? currentModel().variant
-      : variants[0];
+      : getPreferredVariant(currentModel().providerID, currentModel().modelID, state.providers) ||
+          variants[0];
   });
 
   const toolbarFitDependencies = createMemo(() => ({
@@ -1039,6 +1066,7 @@ export function ChatInput() {
     modelProvider: currentModel().providerID,
     modelId: currentModel().modelID,
     modelName: currentModel().modelName,
+    providerLimit: currentProviderLimitCompact(),
     variant: effectiveVariant(),
     hasContextUsage: !!contextUsage(),
     loading: isLoading(),
@@ -1107,14 +1135,27 @@ export function ChatInput() {
         <ModelPicker
           onSelect={(sel) => {
             if (sel.providerID && sel.modelID) {
+              const matchedVariant =
+                sel.variant ||
+                getMatchingVariant(
+                  {
+                    providerID: state.selectedModel?.providerID,
+                    modelID: state.selectedModel?.modelID,
+                    variant: state.selectedModel?.variant,
+                  },
+                  { providerID: sel.providerID, modelID: sel.modelID },
+                  state.providers
+                ) ||
+                undefined;
               setSelectedModel({
                 providerID: sel.providerID,
                 modelID: sel.modelID,
-                variant: sel.variant,
+                variant: matchedVariant,
               });
             }
           }}
           onClose={() => setShowModelPicker(false)}
+          popoverRef={(el) => (modelPopoverRef = el)}
         />
       </Show>
 
@@ -1178,7 +1219,7 @@ export function ChatInput() {
         </div>
       </Show>
 
-      <Show when={state.todos.length > 0}>
+      <Show when={state.todos.length > 0 && !showModelPicker()}>
         <TodoList />
       </Show>
 
@@ -1471,6 +1512,15 @@ export function ChatInput() {
                 <path d="M4 6l4 4 4-4" />
               </svg>
             </button>
+
+            <Show when={currentProviderLimitCompact()}>
+              <span
+                class={`toolbar-limit-chip ${currentProviderLimitTone() !== 'default' ? currentProviderLimitTone() : ''}`}
+                title={currentProviderLimitTitle()}
+              >
+                {currentProviderLimitCompact()}
+              </span>
+            </Show>
 
             <Show when={availableVariants().length > 0}>
               <div style={{ position: 'relative' }}>

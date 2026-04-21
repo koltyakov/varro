@@ -10,6 +10,52 @@ import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
+const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
+type ToolPreview = { text: string; key: string };
+
+function normalizeToolName(toolName: string) {
+  const normalized = toolName.trim().toLowerCase();
+  const parts = normalized.split('.');
+  return parts[parts.length - 1] || normalized;
+}
+
+function getSearchPattern(input: Record<string, unknown>) {
+  for (const key of ['pattern', 'query']) {
+    const value = input[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function getStateTitle(state: ToolPart['state']) {
+  if (state.status !== 'running' && state.status !== 'completed') return '';
+  return state.title?.trim() || '';
+}
+
+export function formatToolTitle(toolName: string, state: ToolPart['state']) {
+  const input = (state.input || {}) as Record<string, unknown>;
+  const title = getStateTitle(state);
+
+  if (SEARCH_TOOL_NAMES.has(normalizeToolName(toolName))) {
+    const pattern = getSearchPattern(input);
+    if (pattern) return `Search: ${pattern}`;
+    return title || 'Search';
+  }
+
+  return title || toolName;
+}
+
+export function shouldShowToolPreview(title: string, preview: ToolPreview | null) {
+  if (!preview) return false;
+
+  const normalizedTitle = title.trim().toLowerCase();
+  const normalizedPreview = preview.text.trim().toLowerCase();
+
+  if (!normalizedPreview) return false;
+  if (normalizedTitle === normalizedPreview) return false;
+  if (normalizedTitle.endsWith(`: ${normalizedPreview}`)) return false;
+  return true;
+}
 
 function parseIntLike(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
@@ -108,13 +154,10 @@ export function ToolCall(props: { part: ToolPart }) {
   };
 
   const title = () => {
-    const s = state();
-    if (s.status === 'completed') return s.title || tool().tool;
-    if (s.status === 'running') return s.title || tool().tool;
-    return tool().tool;
+    return formatToolTitle(tool().tool, state());
   };
 
-  const preview = () => {
+  const preview = (): ToolPreview | null => {
     const s = state();
     const input: Record<string, unknown> = (s.input || {}) as Record<string, unknown>;
     const keys = ['file_path', 'pattern', 'query', 'command', 'path'];
@@ -468,7 +511,7 @@ function GenericToolCall(props: {
           <path d="M6 4l4 4-4 4" />
         </svg>
       </button>
-      <Show when={props.preview && !props.expanded && props.preview.text !== props.title}>
+      <Show when={!props.expanded && shouldShowToolPreview(props.title, props.preview)}>
         <div class="tool-invocation-preview">
           {(() => {
             const p = props.preview!;

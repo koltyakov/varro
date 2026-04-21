@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantMessage, FileDiff, Message, Part, Provider } from '../types';
 import {
+  getAssistantDiffRequest,
   formatDuration,
   formatNumber,
   getAssistantDuration,
@@ -109,6 +110,28 @@ describe('message metrics helpers', () => {
     expect(getAssistantDuration(message)).toBe(2_500);
     expect(getContextWindow(message, providers)).toEqual({ used: 190, limit: 200, percent: 95 });
     expect(getContextWindow(message, [])).toBeNull();
+  });
+
+  it('builds diff requests only for completed last assistant messages', () => {
+    expect(getAssistantDiffRequest(assistantMessage(), true)).toEqual({
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+    });
+    expect(getAssistantDiffRequest(assistantMessage(), false)).toBeNull();
+    expect(getAssistantDiffRequest(assistantMessage({ time: { created: 1_000 } }), true)).toBeNull();
+    expect(
+      getAssistantDiffRequest(
+        {
+          id: 'user-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 0 },
+          agent: 'coder',
+          model: { providerID: 'provider-1', modelID: 'model-1' },
+        },
+        true
+      )
+    ).toBeNull();
   });
 
   it('selects step finish parts and task diffs', () => {

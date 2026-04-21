@@ -6,6 +6,7 @@ import type {
   DroppedFile,
   ExtensionMessage,
   InitialWebviewState,
+  ProviderLimitStatus,
   ServerEventName,
   ServerStatus,
   WebviewThemeKind,
@@ -15,11 +16,21 @@ import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
 import { logger } from './logger';
 import { getRelativePath } from './util/path';
+import {
+  buildProviderLimitProbe,
+  extractOpenCodeConsoleLimit,
+  extractOpenCodeProviderLimit,
+  getOpenCodeAuthFilePath,
+  parseProviderAuthStore,
+  parseProviderLimitHeaders,
+  type ProviderMetadata,
+} from './util/provider-limit';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
   private static readonly FILE_SEARCH_CACHE_TTL_MS = 15_000;
   private static readonly FILE_SEARCH_MAX_CANDIDATES = 4_000;
+  private static readonly PROVIDER_LIMIT_CACHE_TTL_MS = 60_000;
   private view?: vscode.WebviewView;
   private contextProvider: ContextProvider;
   private server: OpenCodeServer;
@@ -45,6 +56,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     { sessionID: string; kind: 'permission' | 'question'; label: string }
   >();
   private readonly sessionTitles = new Map<string, string>();
+  private readonly providerLimitCache = new Map<
+    string,
+    { expiresAt: number; promise: Promise<ProviderLimitStatus> }
+  >();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -67,6 +82,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     this.serverStatusHandler = (status: ServerStatus) => {
       this._status = status;
+      this.providerLimitCache.clear();
       this.post({ type: 'server/status', payload: status });
     };
     this.serverEventHandler = (event: unknown) => {
@@ -450,6 +466,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     try {
+      const providerLimitRequest = this.parseProviderLimitRequest(payload.method, payload.path);
+      if (providerLimitRequest) {
+        const data = await this.getProviderLimit(
+          providerLimitRequest.providerID,
+          providerLimitRequest.modelID
+        );
+        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        return;
+      }
+
       if (
         this.simulateNoProviders &&
         payload.method === 'GET' &&
@@ -469,6 +495,132 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         type: 'api/response',
         payload: { id: payload.id, error: err instanceof Error ? err.message : String(err) },
       });
+    }
+  }
+
+  private parseProviderLimitRequest(method: string, path: string) {
+    if (method !== 'GET') return null;
+
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== '/varro/provider-limit') return null;
+
+    const providerID = url.searchParams.get('providerID')?.trim();
+    if (!providerID) return null;
+
+    return {
+      providerID,
+      modelID: url.searchParams.get('modelID')?.trim() || null,
+    };
+  }
+
+  private getProviderLimit(providerID: string, modelID: string | null) {
+    const cacheKey = `${providerID}:${modelID || ''}`;
+    const now = Date.now();
+    const cached = this.providerLimitCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) return cached.promise;
+
+    const promise = this.loadProviderLimit(providerID, modelID).catch((err) => {
+      if (this.providerLimitCache.get(cacheKey)?.promise === promise) {
+        this.providerLimitCache.delete(cacheKey);
+      }
+      throw err;
+    });
+
+    this.providerLimitCache.set(cacheKey, {
+      expiresAt: now + SidebarProvider.PROVIDER_LIMIT_CACHE_TTL_MS,
+      promise,
+    });
+    return promise;
+  }
+
+  private async loadProviderLimit(providerID: string, modelID: string | null): Promise<ProviderLimitStatus> {
+    const checkedAt = Date.now();
+    const rawConfig = (await this.server.request('GET', '/config/providers')) as unknown;
+    const config = asRecord(rawConfig);
+    const providers = Array.isArray(config?.providers)
+      ? config.providers.filter((item): item is ProviderMetadata => Boolean(asRecord(item)))
+      : [];
+    const provider = providers.find((item) => item.id === providerID);
+
+    if (!provider) {
+      return {
+        providerID,
+        modelID,
+        status: 'error',
+        source: 'opencode',
+        checkedAt,
+        note: 'Provider not found in OpenCode config',
+      };
+    }
+
+    const direct = extractOpenCodeProviderLimit(provider, modelID, checkedAt);
+    if (direct) return direct;
+
+    try {
+      const rawConsole = await this.server.request('GET', '/experimental/console');
+      const consoleLimit = extractOpenCodeConsoleLimit(rawConsole, providerID, modelID, checkedAt);
+      if (consoleLimit) return consoleLimit;
+    } catch {}
+
+    const authStore = await this.readProviderAuthStore();
+    const probe = buildProviderLimitProbe(provider, authStore);
+    if (!probe) {
+      return {
+        providerID,
+        modelID,
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt,
+        note: 'No zero-cost provider quota endpoint is known for this provider',
+      };
+    }
+
+    try {
+      const response = await fetch(probe.url, {
+        headers: probe.headers,
+        signal: AbortSignal.timeout(10_000),
+      });
+      const windows = parseProviderLimitHeaders(response.headers, checkedAt);
+      if (windows.length > 0) {
+        return {
+          providerID,
+          modelID,
+          status: 'available',
+          source: 'provider',
+          checkedAt,
+          windows,
+          note: 'Polled provider metadata headers',
+        };
+      }
+
+      return {
+        providerID,
+        modelID,
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt,
+        note: response.ok
+          ? 'Provider metadata endpoint did not expose remaining limits'
+          : `Provider metadata endpoint returned ${response.status}`,
+      };
+    } catch {
+      return {
+        providerID,
+        modelID,
+        status: 'error',
+        source: 'provider',
+        checkedAt,
+        note: 'Failed to poll the provider metadata endpoint',
+      };
+    }
+  }
+
+  private async readProviderAuthStore() {
+    try {
+      const raw = await readFile(getOpenCodeAuthFilePath(), 'utf-8');
+      return parseProviderAuthStore(raw);
+    } catch {
+      return {};
     }
   }
 

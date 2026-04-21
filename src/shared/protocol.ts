@@ -25,6 +25,36 @@ export interface DroppedFile {
 
 export type PermissionMode = 'default' | 'full';
 
+export type ProviderLimitUnit = 'requests' | 'tokens' | 'messages' | 'credits' | 'unknown';
+
+export type ProviderLimitWindow = {
+  id: string;
+  label: string;
+  unit: ProviderLimitUnit;
+  remaining: number;
+  limit: number | null;
+  resetAt: number | null;
+};
+
+export type ProviderLimitStatus =
+  | {
+      providerID: string;
+      modelID?: string | null;
+      status: 'available';
+      source: 'opencode' | 'provider';
+      checkedAt: number;
+      windows: ProviderLimitWindow[];
+      note?: string;
+    }
+  | {
+      providerID: string;
+      modelID?: string | null;
+      status: 'unsupported' | 'error';
+      source: 'opencode' | 'provider';
+      checkedAt: number;
+      note: string;
+    };
+
 export type ServerStatus =
   | { state: 'starting' }
   | { state: 'running'; url: string }

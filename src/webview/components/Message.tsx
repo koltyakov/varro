@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
 import { client } from '../lib/client';
-import { isAssistantMessage } from '../lib/message-metrics';
+import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import type {
   AssistantMessage,
   CompactionPart,
@@ -20,7 +20,6 @@ import { getToolFileChange } from '../lib/tool-file-change';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import {
   isFileEditPart,
-  isFileReadPart,
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
 
@@ -63,18 +62,17 @@ export function Message(props: {
   const layoutAssistantParts = createMemo(() =>
     assistant() ? deduplicateFileEdits(visibleAssistantParts()) : []
   );
+  const diffRequest = createMemo(() =>
+    getAssistantDiffRequest(props.info, props.isLastAssistant ?? false)
+  );
 
   const [diffs] = createResource(
-    () => {
-      const info = assistant();
-      if (!info?.time.completed) return null;
-      if (!props.isLastAssistant) return null;
-      return info.sessionID;
-    },
-    async (sessionID) => {
-      return client.session.diff(sessionID).catch(() => [] as FileDiff[]);
+    diffRequest,
+    async (request) => {
+      return client.session.diff(request.sessionID, request.messageID).catch(() => [] as FileDiff[]);
     }
   );
+  const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
   const compactionDivider = createMemo<CompactionPart | null>(() => {
     const parts = normalizedParts();
     const compactions = parts.filter((p): p is CompactionPart => p.type === 'compaction');
@@ -91,15 +89,17 @@ export function Message(props: {
     !!compactionDivider() ||
     isUser() ||
     visibleAssistantParts().length > 0 ||
-    (diffs() || []).length > 0;
+    visibleDiffs().length > 0;
   const useBareAssistantContainer = () => {
     if (isUser()) return false;
-    if ((diffs() || []).length > 0) return false;
+    if (visibleDiffs().length > 0) return false;
     if (props.fileEditStackGroup) return false;
     const parts = layoutAssistantParts();
     if (parts.length === 0) return false;
-    if (parts.every(isFileReadPart)) return false;
-    return parts.length === 1 && parts[0]?.type === 'tool' && !isFileEditPart(parts[0]);
+    if (parts.length !== 1) return false;
+    const part = parts[0];
+    if (part.type === 'reasoning') return true;
+    return part.type === 'tool' && !isFileEditPart(part);
   };
   const streamedTextForPart = (part: Part) =>
     part.type === 'text' && part.id === props.streamingPartId ? props.streamingText || part.text : null;
@@ -132,8 +132,8 @@ export function Message(props: {
               streamedTextForPart={streamedTextForPart}
             />
           </Show>
-          <Show when={assistant() && (diffs() || []).length > 0}>
-            <DiffSummary diffs={diffs()!} />
+          <Show when={assistant() && visibleDiffs().length > 0}>
+            <DiffSummary diffs={visibleDiffs()} />
           </Show>
         </div>
       </div>

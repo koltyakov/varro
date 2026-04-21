@@ -11,7 +11,7 @@ import type {
   QuestionRequest,
   PermissionRule,
 } from '../types';
-import type { ServerEventName } from '../../shared/protocol';
+import type { ProviderLimitStatus, ServerEventName } from '../../shared/protocol';
 
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
@@ -92,6 +92,11 @@ export const client = {
       default: Record<string, string>;
     }> {
       return apiCall('GET', '/config/providers');
+    },
+    async providerLimit(providerID: string, modelID?: string | null): Promise<ProviderLimitStatus> {
+      const params = new URLSearchParams({ providerID });
+      if (modelID) params.set('modelID', modelID);
+      return apiCall('GET', `/varro/provider-limit?${params.toString()}`);
     },
   },
 

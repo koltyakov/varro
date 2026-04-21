@@ -1,0 +1,124 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+declare global {
+  interface Window {
+    __sendToExtension?: (message: unknown) => void;
+  }
+}
+
+let cleanup: (() => void) | null = null;
+
+async function loadBridge() {
+  const bridge = await import('./bridge');
+  cleanup = bridge.cleanupBridge;
+  return bridge;
+}
+
+beforeEach(() => {
+  vi.resetModules();
+  cleanup = null;
+  delete window.__sendToExtension;
+});
+
+afterEach(() => {
+  cleanup?.();
+  cleanup = null;
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  delete window.__sendToExtension;
+});
+
+describe('bridge', () => {
+  it('subscribes and unsubscribes message handlers', async () => {
+    const bridge = await loadBridge();
+    const handler = vi.fn();
+    const stop = bridge.onMessage(handler);
+    const firstMessage = { type: 'command/focus-input' };
+
+    window.dispatchEvent(new MessageEvent('message', { data: firstMessage }));
+    stop();
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'command/abort' } }));
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(firstMessage);
+  });
+
+  it('sends cloned API request bodies and resolves matching responses', async () => {
+    const bridge = await loadBridge();
+    const send = vi.fn();
+    const body = { nested: { value: 1 } };
+
+    window.__sendToExtension = send;
+    const request = bridge.apiCall<{ ok: boolean }>('POST', '/session', body);
+    const message = send.mock.calls[0]?.[0] as {
+      payload: { id: number; body?: { nested: { value: number } } };
+    };
+    body.nested.value = 2;
+
+    expect(message).toEqual({
+      type: 'api/request',
+      payload: {
+        id: 1,
+        method: 'POST',
+        path: '/session',
+        body: { nested: { value: 1 } },
+      },
+    });
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'api/response',
+          payload: { id: message.payload.id, data: { ok: true } },
+        },
+      })
+    );
+
+    await expect(request).resolves.toEqual({ ok: true });
+    expect(message.payload.body).toEqual({ nested: { value: 1 } });
+  });
+
+  it('rejects API requests when the extension returns an error', async () => {
+    const bridge = await loadBridge();
+    const send = vi.fn();
+
+    window.__sendToExtension = send;
+    const request = bridge.apiCall('DELETE', '/session/1');
+    const rejection = expect(request).rejects.toThrow('permission denied');
+    const id = (send.mock.calls[0]?.[0] as { payload: { id: number } }).payload.id;
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'api/response',
+          payload: { id, error: 'permission denied' },
+        },
+      })
+    );
+
+    await rejection;
+  });
+
+  it('rejects pending API requests when the bridge is cleaned up', async () => {
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn();
+
+    const request = bridge.apiCall('GET', '/session');
+    const rejection = expect(request).rejects.toThrow('Bridge cleaned up');
+    bridge.cleanupBridge();
+
+    await rejection;
+  });
+
+  it('times out API requests that never receive a response', async () => {
+    vi.useFakeTimers();
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn();
+
+    const request = bridge.apiCall('GET', '/slow');
+    const rejection = expect(request).rejects.toThrow('API call timed out: GET /slow');
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await rejection;
+  });
+});
