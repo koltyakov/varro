@@ -1784,12 +1784,6 @@ input:focus-visible {
   padding: 4px 0 6px 2px;
 }
 
-.chat-attachment-note {
-  padding: 0 2px 6px;
-  font-size: 11px;
-  color: var(--color-vscode-muted);
-}
-
 .chat-attachment-chip {
   display: inline-flex;
   align-items: center;

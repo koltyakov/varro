@@ -1303,7 +1303,6 @@ export function ChatInput() {
               {(image) => (
                 <AttachmentChip
                   label={image.filename}
-                  detail={clipboardImagesDisabled() ? 'disabled' : null}
                   disabled={clipboardImagesDisabled()}
                   icon="image"
                   title={
@@ -1315,13 +1314,6 @@ export function ChatInput() {
                 />
               )}
             </For>
-          </div>
-        </Show>
-
-        <Show when={clipboardImagesDisabled()}>
-          <div class="chat-attachment-note" role="status">
-            Current model doesn&apos;t support vision. Pasted images stay attached, but they
-            won&apos;t be sent until you switch models.
           </div>
         </Show>
 
