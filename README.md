@@ -47,6 +47,7 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
 
 - Usage guide: [docs/usage.md](https://github.com/koltyakov/varro/blob/main/docs/usage.md)
 - Development guide: [docs/development.md](https://github.com/koltyakov/varro/blob/main/docs/development.md)
+- Architecture overview: [docs/architecture.md](https://github.com/koltyakov/varro/blob/main/docs/architecture.md)
 
 ## License
 
