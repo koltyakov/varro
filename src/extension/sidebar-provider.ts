@@ -802,7 +802,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const ranked = files
         .map((file) => ({ file, score: getFileSearchScore(file.relativePath, normalizedQuery) }))
         .filter((item) => item.score > Number.NEGATIVE_INFINITY)
-        .toSorted((a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath))
+        .toSorted(
+          (a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath)
+        )
         .slice(0, Math.max(1, Math.min(limit, 30)))
         .map((item) => item.file);
 
@@ -888,6 +890,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async getHtml(): Promise<string> {
     const distDir = resolve(this.extensionUri.fsPath, 'dist', 'webview');
+    const webview = this.view?.webview;
     let scriptContent = '';
     let cssContent = '';
 
@@ -901,12 +904,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     } catch {}
 
     const nonce = randomNonce();
+    const emptyStateLogoUri = webview?.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'assets', 'icon.png')
+    );
     const initialState = serializeForInlineScript({
       theme: this.currentTheme(),
       serverStatus: this._status,
       editorContext: this.contextProvider.context,
       terminalSelection: this.contextProvider.terminalSelection,
       droppedFiles: this.contextFiles,
+      emptyStateLogoUri: emptyStateLogoUri?.toString() || '',
     } satisfies InitialWebviewState);
 
     return /*html*/ `<!DOCTYPE html>
@@ -915,7 +922,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; img-src data: https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
+    content="default-src 'none'; img-src ${webview?.cspSource || ''} data: https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
   <title>Varro</title>
   <style>${cssContent}</style>
 </head>

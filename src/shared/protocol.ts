@@ -95,6 +95,7 @@ export type InitialWebviewState = {
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
+  emptyStateLogoUri: string;
 };
 
 export type ExtensionMessage =

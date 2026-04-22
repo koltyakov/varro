@@ -50,6 +50,27 @@ function userMessage(id: string) {
   };
 }
 
+function assistantMessage(id: string) {
+  return {
+    id,
+    sessionID: 'session-1',
+    role: 'assistant' as const,
+    time: { created: 0, completed: 1 },
+    parentID: 'parent-1',
+    providerID: 'provider-1',
+    modelID: 'model-1',
+    mode: 'default',
+    path: { cwd: '/workspace', root: '/workspace' },
+    cost: 0,
+    tokens: {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    },
+  };
+}
+
 describe('getAssistantContainerVariant', () => {
   it('renders intermediate text updates inline when mixed with structured parts', () => {
     expect(
@@ -170,5 +191,30 @@ describe('Message user prompt rendering', () => {
     expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
       'const value = 1;\nconst next = value + 1;\n'
     );
+  });
+});
+
+describe('Message assistant final answer rendering', () => {
+  it('marks the final text update inside a mixed assistant turn as a dedicated final answer block', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-2'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', 'Status update.'),
+            textPart('text-2', 'Final answer.'),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    const plainContainer = container?.querySelector('.assistant-turn-content-plain');
+    const finalItem = container?.querySelector('.assistant-message-flow-item-final');
+
+    expect(plainContainer).toBeInstanceOf(HTMLDivElement);
+    expect(finalItem).toBeInstanceOf(HTMLDivElement);
+    expect(finalItem?.textContent).toContain('Final answer.');
   });
 });

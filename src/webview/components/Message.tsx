@@ -190,6 +190,7 @@ export function Message(props: {
                 info={assistant()!}
                 parts={visibleAssistantParts()}
                 highlightFinalAnswer={props.highlightFinalAnswer}
+                highlightPlanningAnswer={props.highlightPlanningAnswer}
                 streamedTextForPart={streamedTextForPart}
               />
             </Show>
@@ -622,6 +623,7 @@ function AssistantMessageContent(props: {
   info: AssistantMessage;
   parts: Part[];
   highlightFinalAnswer?: boolean;
+  highlightPlanningAnswer?: boolean;
   streamedTextForPart: (part: Part) => string | null;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
@@ -671,7 +673,13 @@ function AssistantMessageContent(props: {
               </div>
             </div>
           ) : (
-            <div class={getAssistantFlowItemClass(item.part, finalTextPartId())}>
+            <div
+              class={getAssistantFlowItemClass(
+                item.part,
+                finalTextPartId(),
+                !!props.highlightPlanningAnswer
+              )}
+            >
               <MessagePart
                 part={item.part}
                 messageInfo={props.info}
@@ -685,11 +693,15 @@ function AssistantMessageContent(props: {
   );
 }
 
-function getAssistantFlowItemClass(part: Part, finalTextPartId: string | null) {
+function getAssistantFlowItemClass(
+  part: Part,
+  finalTextPartId: string | null,
+  highlightPlanningAnswer: boolean
+) {
   const className = 'assistant-message-flow-item';
   if (part.type !== 'text' || part.id !== finalTextPartId) return className;
 
-  return `${className} assistant-message-flow-item-final`;
+  return `${className} assistant-message-flow-item-final${highlightPlanningAnswer ? ' assistant-message-flow-item-final-planning' : ''}`;
 }
 
 function DiffSummary(props: { diffs: FileDiff[] }) {

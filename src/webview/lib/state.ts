@@ -66,6 +66,7 @@ interface AppState {
   providersLoaded: boolean;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
+  emptyStateLogoUri: string;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -128,6 +129,7 @@ export const [state, setState] = createStore<AppState>({
   providersLoaded: false,
   editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
   terminalSelection: initialWebviewState.terminalSelection ?? null,
+  emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
   draftCurrentDocumentEnabled: null,
   droppedFiles: initialWebviewState.droppedFiles ?? [],
   clipboardImages: [],

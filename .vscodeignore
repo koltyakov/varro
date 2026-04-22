@@ -5,6 +5,7 @@ node_modules/**
 package-lock.json
 .claude/**
 .gitignore
+.github/**
 .oxfmtrc.json
 .oxlintrc.json
 esbuild.config.mjs

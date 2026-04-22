@@ -74,8 +74,6 @@ export function getLatestPlanImplementationMessageId(
   return lastMessage.id;
 }
 
-const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
-
 const DEFAULT_ITEM_HEIGHT = 120;
 const OVERSCAN = 5;
 const VIRTUALIZE_THRESHOLD = 50;
@@ -515,7 +513,7 @@ export function MessageList() {
             <div class="chat-empty-state">
               <img
                 class="chat-empty-logo"
-                src={emptyStateLogoUrl}
+                src={state.emptyStateLogoUri}
                 alt=""
                 aria-hidden="true"
                 draggable="false"

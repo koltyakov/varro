@@ -470,6 +470,45 @@ input:focus-visible {
   background: transparent;
 }
 
+.assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-final {
+  padding: 12px 14px 14px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 26%, var(--color-vscode-border));
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-accent) 4%,
+    var(--color-vscode-surface-subtle-alt)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
+}
+
+.assistant-turn-content.assistant-turn-content-plain
+  .assistant-message-flow-item-final.assistant-message-flow-item-final-planning {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 16%, var(--color-vscode-border));
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-warning) 3%,
+    var(--color-vscode-surface-subtle-alt)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-warning) 6%, transparent);
+}
+
+body.vscode-light
+  .assistant-turn-content.assistant-turn-content-plain
+  .assistant-message-flow-item-final {
+  background: color-mix(in srgb, var(--color-vscode-accent) 8%, var(--color-vscode-widget-bg));
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 18%, var(--color-vscode-border));
+  box-shadow: none;
+}
+
+body.vscode-light
+  .assistant-turn-content.assistant-turn-content-plain
+  .assistant-message-flow-item-final.assistant-message-flow-item-final-planning {
+  background: color-mix(in srgb, var(--color-vscode-warning) 4%, var(--color-vscode-widget-bg));
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 12%, var(--color-vscode-border));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-warning) 6%, transparent);
+}
+
 .assistant-message-flow-item-final > .rendered-markdown > :first-child {
   margin-top: 0;
 }
