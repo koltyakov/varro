@@ -11,9 +11,9 @@ import {
 
 describe('provider limit helpers', () => {
   it('resolves the OpenCode auth path from XDG data home', () => {
-    expect(getOpenCodeAuthFilePath({ XDG_DATA_HOME: '/tmp/data' } as NodeJS.ProcessEnv, '/Users/test')).toBe(
-      '/tmp/data/opencode/auth.json'
-    );
+    expect(
+      getOpenCodeAuthFilePath({ XDG_DATA_HOME: '/tmp/data' } as NodeJS.ProcessEnv, '/Users/test')
+    ).toBe('/tmp/data/opencode/auth.json');
   });
 
   it('falls back to the standard local share data dir', () => {

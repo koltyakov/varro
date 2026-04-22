@@ -101,10 +101,7 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   const normalizedText = SHELL_LANGS.has((lang || '').toLowerCase())
     ? formatCommandDisplay(text, state.editorContext.workspacePath)
     : text;
-  const escaped = normalizedText
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  const escaped = normalizedText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const copyPayload = encodeCopyPayload(normalizedText);
   const langLabel = lang ? `<span class="code-block-lang">${lang}</span>` : '';
   const copyBtn =
@@ -206,7 +203,8 @@ function shouldUseCompactFirstColumn(table: HTMLTableElement): boolean {
   if (COMPACT_FIRST_COLUMN_HEADERS.has(headerText)) return true;
 
   const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
-  const fallbackRows = bodyRows.length > 0 ? bodyRows : Array.from(table.querySelectorAll('tr')).slice(1);
+  const fallbackRows =
+    bodyRows.length > 0 ? bodyRows : Array.from(table.querySelectorAll('tr')).slice(1);
   const firstColumnValues = fallbackRows
     .map((row) => row.querySelector('td:first-child, th:first-child')?.textContent || '')
     .map(normalizeCellText)

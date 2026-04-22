@@ -110,9 +110,12 @@ describe('context file helpers', () => {
         { startLine: 8, endLine: 10 },
       ],
     });
-    expect(formatContextLineRanges([{ startLine: 3, endLine: 3 }, { startLine: 8, endLine: 10 }])).toBe(
-      'L3, L8-10'
-    );
+    expect(
+      formatContextLineRanges([
+        { startLine: 3, endLine: 3 },
+        { startLine: 8, endLine: 10 },
+      ])
+    ).toBe('L3, L8-10');
   });
 
   it('finds explicit context by path and compares merged items', () => {

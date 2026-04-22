@@ -39,7 +39,9 @@ function toolPart(tool: string, state: ToolStateCompleted): ToolPart {
 describe('part utils', () => {
   it('detects file edit and read parts', () => {
     expect(isFileEditPart(toolPart('edit', completedState({ path: 'src/app.ts' })))).toBe(true);
-    expect(isFileReadPart(toolPart('file_read', completedState({ filePath: 'src/app.ts' })))).toBe(true);
+    expect(isFileReadPart(toolPart('file_read', completedState({ filePath: 'src/app.ts' })))).toBe(
+      true
+    );
     expect(
       isFileEditPart({
         id: 'text-1',

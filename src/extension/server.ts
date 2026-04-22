@@ -331,7 +331,9 @@ export class OpenCodeServer extends EventEmitter {
       if (shouldReconnect && !controller.signal.aborted && this._status.state === 'running') {
         this.eventReconnectCount++;
         if (this.eventReconnectCount > OpenCodeServer.MAX_EVENT_RECONNECTS) {
-          logger.warn(`Event stream reconnect limit (${OpenCodeServer.MAX_EVENT_RECONNECTS}) reached`);
+          logger.warn(
+            `Event stream reconnect limit (${OpenCodeServer.MAX_EVENT_RECONNECTS}) reached`
+          );
           this.setStatus({ state: 'error', message: 'Event stream connection lost' });
         } else {
           const delay = this.eventReconnectDelay;
@@ -379,7 +381,9 @@ export class OpenCodeServer extends EventEmitter {
       const exitPromise = new Promise<boolean>((resolve) => {
         proc.on('exit', () => resolve(true));
       });
-      const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000));
+      const timeoutPromise = new Promise<boolean>((resolve) =>
+        setTimeout(() => resolve(false), 5000)
+      );
       const exited = await Promise.race([exitPromise, timeoutPromise]);
       if (!exited) {
         proc.kill('SIGKILL');

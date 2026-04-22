@@ -1,6 +1,10 @@
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ProviderLimitStatus, ProviderLimitUnit, ProviderLimitWindow } from '../../shared/protocol';
+import type {
+  ProviderLimitStatus,
+  ProviderLimitUnit,
+  ProviderLimitWindow,
+} from '../../shared/protocol';
 
 type ProviderAuthRecord =
   | { type: 'oauth'; access: string }
@@ -62,7 +66,10 @@ export function parseRateLimitResetAt(value: unknown, checkedAt: number) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-export function parseProviderLimitHeaders(headers: Headers, checkedAt: number): ProviderLimitWindow[] {
+export function parseProviderLimitHeaders(
+  headers: Headers,
+  checkedAt: number
+): ProviderLimitWindow[] {
   const windows: ProviderLimitWindow[] = [];
 
   const requests = buildHeaderWindow(
@@ -241,7 +248,9 @@ function extractDirectLimitWindows(value: unknown, checkedAt: number) {
   if (!record) return windows;
 
   for (const def of DIRECT_WINDOW_DEFS) {
-    pushWindow(buildDirectWindow(def.key, def.label, def.unit, asRecord(record[def.key]), checkedAt));
+    pushWindow(
+      buildDirectWindow(def.key, def.label, def.unit, asRecord(record[def.key]), checkedAt)
+    );
   }
 
   pushWindow(buildDirectWindow('limit', 'Limit', 'unknown', record, checkedAt));
@@ -252,10 +261,17 @@ function extractDirectLimitWindows(value: unknown, checkedAt: number) {
       for (const item of container) {
         const itemRecord = asRecord(item);
         if (!itemRecord) continue;
-        const id = getString(itemRecord.id) || getString(itemRecord.name) || getString(itemRecord.type);
+        const id =
+          getString(itemRecord.id) || getString(itemRecord.name) || getString(itemRecord.type);
         const unit = inferLimitUnit(id);
         pushWindow(
-          buildDirectWindow(id || containerKey, toLabel(id || containerKey), unit, itemRecord, checkedAt)
+          buildDirectWindow(
+            id || containerKey,
+            toLabel(id || containerKey),
+            unit,
+            itemRecord,
+            checkedAt
+          )
         );
       }
       continue;
@@ -264,10 +280,20 @@ function extractDirectLimitWindows(value: unknown, checkedAt: number) {
     const containerRecord = asRecord(container);
     if (!containerRecord) continue;
 
-    pushWindow(buildDirectWindow(containerKey, toLabel(containerKey), inferLimitUnit(containerKey), containerRecord, checkedAt));
+    pushWindow(
+      buildDirectWindow(
+        containerKey,
+        toLabel(containerKey),
+        inferLimitUnit(containerKey),
+        containerRecord,
+        checkedAt
+      )
+    );
 
     for (const [key, nested] of Object.entries(containerRecord)) {
-      pushWindow(buildDirectWindow(key, toLabel(key), inferLimitUnit(key), asRecord(nested), checkedAt));
+      pushWindow(
+        buildDirectWindow(key, toLabel(key), inferLimitUnit(key), asRecord(nested), checkedAt)
+      );
     }
   }
 
@@ -324,8 +350,10 @@ function buildDirectWindow(
       parseFiniteNumber(record.total) ??
       parseFiniteNumber(record.quota) ??
       null,
-    resetAt:
-      parseRateLimitResetAt(record.resetAt ?? record.reset ?? record.resetsAt ?? record.reset_after, checkedAt),
+    resetAt: parseRateLimitResetAt(
+      record.resetAt ?? record.reset ?? record.resetsAt ?? record.reset_after,
+      checkedAt
+    ),
   } satisfies ProviderLimitWindow;
 }
 
@@ -402,8 +430,10 @@ function inferLimitUnit(value: string | null | undefined): ProviderLimitUnit {
 }
 
 function toLabel(value: string) {
-  return value
-    .replace(/[_-]+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit';
+  return (
+    value
+      .replace(/[_-]+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit'
+  );
 }

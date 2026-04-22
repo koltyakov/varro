@@ -56,7 +56,10 @@ export function areContextFilesEqual(a: DroppedFile, b: DroppedFile) {
   );
 }
 
-export function mergeContextFile(current: DroppedFile | undefined, incoming: DroppedFile): DroppedFile {
+export function mergeContextFile(
+  current: DroppedFile | undefined,
+  incoming: DroppedFile
+): DroppedFile {
   const next = normalizeContextFile(incoming);
   if (!current) return next;
 
@@ -87,7 +90,10 @@ export function formatContextLineRanges(
   return normalized.map((range) => `L${formatLineRangeValue(range)}`).join(', ');
 }
 
-export function formatSelectionReference(path: string, lineRanges: ContextLineRange[] | null | undefined) {
+export function formatSelectionReference(
+  path: string,
+  lineRanges: ContextLineRange[] | null | undefined
+) {
   const normalized = normalizeContextLineRanges(lineRanges);
   if (normalized.length === 0) return `[Active file: ${path}]`;
   return `[Selection from ${path} lines ${normalized.map(formatLineRangeValue).join(', ')}]`;
@@ -107,12 +113,18 @@ export function subtractContextLineRanges(
   for (const sourceRange of sourceRanges) {
     let cursor = sourceRange.startLine;
 
-    while (excludedIndex < excludedRanges.length && excludedRanges[excludedIndex].endLine < cursor) {
+    while (
+      excludedIndex < excludedRanges.length &&
+      excludedRanges[excludedIndex].endLine < cursor
+    ) {
       excludedIndex++;
     }
 
     let index = excludedIndex;
-    while (index < excludedRanges.length && excludedRanges[index].startLine <= sourceRange.endLine) {
+    while (
+      index < excludedRanges.length &&
+      excludedRanges[index].startLine <= sourceRange.endLine
+    ) {
       const excludedRange = excludedRanges[index];
       if (excludedRange.startLine > cursor) {
         result.push({ startLine: cursor, endLine: excludedRange.startLine - 1 });

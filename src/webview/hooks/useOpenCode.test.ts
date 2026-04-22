@@ -598,7 +598,10 @@ describe('sendMessage', () => {
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([
       {
-        info: userMessageForSession('user-1', 'session-1', { providerID: 'openai', modelID: 'gpt-4o' }),
+        info: userMessageForSession('user-1', 'session-1', {
+          providerID: 'openai',
+          modelID: 'gpt-4o',
+        }),
         parts: [],
       },
     ]);
@@ -610,7 +613,10 @@ describe('sendMessage', () => {
       providerID: 'openai',
       modelID: 'gpt-4o',
     });
-    expect(stateModule.getPersistedSelectedModel()).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
+    expect(stateModule.getPersistedSelectedModel()).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5',
+    });
   });
 
   it('restores the previously used agent when switching back to an existing session', async () => {
@@ -638,7 +644,10 @@ describe('sendMessage', () => {
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([
       {
-        info: userMessageForSession('user-1', 'session-1', { providerID: 'openai', modelID: 'gpt-4o' }),
+        info: userMessageForSession('user-1', 'session-1', {
+          providerID: 'openai',
+          modelID: 'gpt-4o',
+        }),
         parts: [],
       },
     ]);

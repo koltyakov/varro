@@ -343,9 +343,8 @@ function FileChangeCard(props: {
     const c = change();
     return c.kind === 'moved' ? null : c.path;
   });
-  const [repoStatuses] = createResource(
-    changePath,
-    async () => client.file.status().catch(() => [] as RepoFileStatus[])
+  const [repoStatuses] = createResource(changePath, async () =>
+    client.file.status().catch(() => [] as RepoFileStatus[])
   );
 
   const repoStatus = () => {

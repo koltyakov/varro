@@ -34,7 +34,10 @@ export function postMessage(msg: WebviewMessage): void {
 }
 
 let reqId = 0;
-const pending = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void; timer: ReturnType<typeof setTimeout> }>();
+const pending = new Map<
+  number,
+  { resolve(v: unknown): void; reject(e: unknown): void; timer: ReturnType<typeof setTimeout> }
+>();
 const API_CALL_TIMEOUT_MS = 30_000;
 
 onMessage((msg) => {

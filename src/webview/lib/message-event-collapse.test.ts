@@ -56,7 +56,10 @@ describe('message event collapse helpers', () => {
   it('collapses duplicate leading file events only while signatures match', () => {
     const duplicate = toolPart('p1', completedState('Edited src/app.ts', { path: 'src/app.ts' }));
     const kept = toolPart('p2', completedState('Edited src/other.ts', { path: 'src/other.ts' }));
-    const result = collapseLeadingDuplicateFileEvents([duplicate, duplicate, kept], 'completed:edited:src/app.ts');
+    const result = collapseLeadingDuplicateFileEvents(
+      [duplicate, duplicate, kept],
+      'completed:edited:src/app.ts'
+    );
     expect(result).toEqual([kept]);
   });
 

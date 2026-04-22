@@ -334,11 +334,11 @@ export type Provider = {
     [key: string]: {
       id: string;
       name: string;
-       capabilities: {
-         reasoning?: boolean;
-         vision?: boolean;
-         toolcall: boolean;
-       };
+      capabilities: {
+        reasoning?: boolean;
+        vision?: boolean;
+        toolcall: boolean;
+      };
       cost: {
         input: number;
         output: number;

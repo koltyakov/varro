@@ -58,12 +58,18 @@ import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
 function logError(context: string, err: unknown) {
   postMessage({
     type: 'log',
-    payload: { msg: context, error: err instanceof Error ? err.message : String(err), level: 'warn' },
+    payload: {
+      msg: context,
+      error: err instanceof Error ? err.message : String(err),
+      level: 'warn',
+    },
   });
 }
 
 function getDefaultPrimaryAgentName() {
-  return state.agents.find((agent) => agent.name === 'build')?.name || state.agents[0]?.name || null;
+  return (
+    state.agents.find((agent) => agent.name === 'build')?.name || state.agents[0]?.name || null
+  );
 }
 
 function getBuildAgentName() {
@@ -157,7 +163,7 @@ function isSessionInWorkspace(session: Session, workspacePath: string | null | u
 }
 
 function sortSessions(sessions: Session[]) {
-  return sessions.toSorted((a, b) => b.time.updated - a.time.updated);
+  return [...sessions].toSorted((a, b) => b.time.updated - a.time.updated);
 }
 
 function applySessions(sessions: Session[]) {
@@ -227,9 +233,7 @@ function normalizeTodo(raw: unknown): Todo | null {
   if (!content) return null;
 
   const id =
-    typeof record.id === 'string' || typeof record.id === 'number'
-      ? String(record.id)
-      : content;
+    typeof record.id === 'string' || typeof record.id === 'number' ? String(record.id) : content;
 
   return {
     content,
@@ -276,7 +280,11 @@ function deriveTodosFromMessages(messages: Array<{ info: Message; parts: Part[] 
     }
   }
 
-  for (let messageIndex = messages.length - 1; messageIndex > lastUserMessageIndex; messageIndex -= 1) {
+  for (
+    let messageIndex = messages.length - 1;
+    messageIndex > lastUserMessageIndex;
+    messageIndex -= 1
+  ) {
     const parts = messages[messageIndex].parts;
     for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
       const todos = extractTodosFromPart(parts[partIndex]);
@@ -492,7 +500,11 @@ export function useOpenCode() {
 }
 
 function getActiveProviderSelection() {
-  const selected = resolveSelectedModel(state.selectedModel, state.providers, state.providerDefaults);
+  const selected = resolveSelectedModel(
+    state.selectedModel,
+    state.providers,
+    state.providerDefaults
+  );
   if (selected) {
     return { providerID: selected.providerID, modelID: selected.modelID };
   }
@@ -566,7 +578,8 @@ async function loadAgents() {
       const sessionAgent = getSelectedAgentForSession(activeSessionId);
       const globalAgent = getPersistedSelectedAgent();
       const fallback = [sessionAgent, globalAgent, getDefaultPrimaryAgentName()].find(
-        (candidate): candidate is string => !!candidate && primaries.some((agent) => agent.name === candidate)
+        (candidate): candidate is string =>
+          !!candidate && primaries.some((agent) => agent.name === candidate)
       );
       if (fallback) {
         setSelectedAgent(fallback, { sessionId: activeSessionId, persistGlobal: !activeSessionId });
@@ -668,9 +681,10 @@ export async function selectSession(id: string) {
     syncTodosFromMessages(msgs);
     await loadQuestions().catch((err) => logError('loadQuestions', err));
     if (state.activeSessionId !== id) return;
-    const statuses = await client.session
-      .status()
-      .catch((err) => { logError('session.status', err); return {} as Record<string, SessionStatus>; });
+    const statuses = await client.session.status().catch((err) => {
+      logError('session.status', err);
+      return {} as Record<string, SessionStatus>;
+    });
     if (state.activeSessionId !== id) return;
     setState('sessionStatus', statuses);
     const statusType = statuses[id]?.type;
@@ -742,9 +756,7 @@ export async function createSession(
 export async function deleteSession(id: string) {
   try {
     const wasActive = state.activeSessionId === id;
-    const nextActiveId = wasActive
-      ? state.sessions.filter((s) => s.id !== id)[0]?.id
-      : null;
+    const nextActiveId = wasActive ? state.sessions.filter((s) => s.id !== id)[0]?.id : null;
     await client.session.delete(id);
     setState(
       'sessions',
@@ -807,7 +819,8 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     const activeFilePath = getAttachmentReference({ path: af.path, type: 'file' }, wp);
     const explicitContext = hasExplicitContextForPath(state.droppedFiles, af.path);
     const activeSelectionRanges = getSelectionRangesFromEditorContext(sel);
-    const explicitSelectionRanges = explicitContext?.type === 'file' ? explicitContext.lineRanges : undefined;
+    const explicitSelectionRanges =
+      explicitContext?.type === 'file' ? explicitContext.lineRanges : undefined;
     const uniqueActiveSelectionRanges = subtractContextLineRanges(
       activeSelectionRanges,
       explicitSelectionRanges
@@ -850,7 +863,9 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     const fileReference = getAttachmentReference(file, wp);
     parts.push({
       type: 'text',
-      text: file.lineRanges?.length ? formatSelectionReference(fileReference, file.lineRanges) : fileReference,
+      text: file.lineRanges?.length
+        ? formatSelectionReference(fileReference, file.lineRanges)
+        : fileReference,
     });
   }
 
@@ -888,7 +903,8 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   if (effectiveModel?.variant) {
     body.variant = effectiveModel.variant;
   } else if (body.model) {
-    body.variant = getPreferredVariant(body.model.providerID, body.model.modelID, state.providers) || undefined;
+    body.variant =
+      getPreferredVariant(body.model.providerID, body.model.modelID, state.providers) || undefined;
   }
   if (options?.noReply) body.noReply = true;
 

@@ -1,9 +1,6 @@
 type ClipboardImageLike = { filename: string };
 
-export function stripClipboardImagePlaceholders(
-  text: string,
-  images: ClipboardImageLike[]
-) {
+export function stripClipboardImagePlaceholders(text: string, images: ClipboardImageLike[]) {
   let next = text;
   for (const image of images) {
     next = next.replaceAll(`[${image.filename}]`, '');

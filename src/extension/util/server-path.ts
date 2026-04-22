@@ -18,7 +18,10 @@ export function getPathVariableKey(
   return existingKey || 'Path';
 }
 
-function getPathVariableValue(env: NodeJS.ProcessEnv = process.env, platform = process.platform): string {
+function getPathVariableValue(
+  env: NodeJS.ProcessEnv = process.env,
+  platform = process.platform
+): string {
   return env[getPathVariableKey(env, platform)] || '';
 }
 

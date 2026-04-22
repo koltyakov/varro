@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { AssistantMessage, Message, UserMessage } from '../types';
-import type { Part } from '../types';
+import type { AssistantMessage, Message, Part, UserMessage } from '../types';
 import { buildPlanImplementationPrompt, getLatestPlanImplementationMessageId } from './MessageList';
 
-function textPart(id: string, text: string, options?: { ignored?: boolean; synthetic?: boolean }): Part {
+function textPart(
+  id: string,
+  text: string,
+  options?: { ignored?: boolean; synthetic?: boolean }
+): Part {
   return {
     id,
     sessionID: 'session-1',

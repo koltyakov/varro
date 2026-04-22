@@ -63,7 +63,9 @@ describe('message metrics helpers', () => {
   });
 
   it('computes assistant token totals with and without explicit totals', () => {
-    const withExplicit = assistantMessage({ tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 }, total: 99 } });
+    const withExplicit = assistantMessage({
+      tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 }, total: 99 },
+    });
     const inferred = assistantMessage();
     expect(getAssistantTotalTokens(withExplicit)).toBe(99);
     expect(getAssistantTotalTokens(inferred)).toBe(190);
@@ -118,7 +120,9 @@ describe('message metrics helpers', () => {
       messageID: 'assistant-1',
     });
     expect(getAssistantDiffRequest(assistantMessage(), false)).toBeNull();
-    expect(getAssistantDiffRequest(assistantMessage({ time: { created: 1_000 } }), true)).toBeNull();
+    expect(
+      getAssistantDiffRequest(assistantMessage({ time: { created: 1_000 } }), true)
+    ).toBeNull();
     expect(
       getAssistantDiffRequest(
         {
@@ -154,7 +158,9 @@ describe('message metrics helpers', () => {
       },
       stepFinish,
     ];
-    const diffs: FileDiff[] = [{ file: 'src/app.ts', before: '', after: 'x', additions: 1, deletions: 0 }];
+    const diffs: FileDiff[] = [
+      { file: 'src/app.ts', before: '', after: 'x', additions: 1, deletions: 0 },
+    ];
 
     expect(getStepFinishParts(parts)).toEqual([stepFinish]);
     expect(

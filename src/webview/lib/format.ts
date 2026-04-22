@@ -28,7 +28,10 @@ export function formatContextLimit(value: number) {
   return String(value);
 }
 
-export function formatLabelWithProvider(label: string | null | undefined, provider: string | null | undefined) {
+export function formatLabelWithProvider(
+  label: string | null | undefined,
+  provider: string | null | undefined
+) {
   const base = label?.trim();
   if (!base) return '';
   const providerName = provider?.trim();
@@ -39,7 +42,7 @@ export function formatLabelWithProvider(label: string | null | undefined, provid
 export function getPrimaryProviderLimitWindow(limit: ProviderLimitStatus | null | undefined) {
   if (!limit || limit.status !== 'available' || limit.windows.length === 0) return null;
 
-  return limit.windows.toSorted((a, b) => compareProviderLimitWindows(a, b))[0] ?? null;
+  return [...limit.windows].toSorted((a, b) => compareProviderLimitWindows(a, b))[0] ?? null;
 }
 
 export function getProviderLimitTone(limit: ProviderLimitStatus | null | undefined) {
@@ -72,7 +75,10 @@ export function formatProviderLimitCompact(limit: ProviderLimitStatus | null | u
     : `${formatCompactValue(window.remaining)} ${suffix}`;
 }
 
-export function formatProviderLimitTitle(limit: ProviderLimitStatus | null | undefined, now = Date.now()) {
+export function formatProviderLimitTitle(
+  limit: ProviderLimitStatus | null | undefined,
+  now = Date.now()
+) {
   if (!limit) return '';
   if (limit.status !== 'available') return limit.note;
 

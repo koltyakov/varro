@@ -1,4 +1,4 @@
-import { createMemo, createSignal } from 'solid-js';
+import { createSignal } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
 import type {
   Session,
@@ -227,12 +227,12 @@ export function setSessionCompacting(sessionId: string, compacting: boolean) {
   );
 }
 
-export const isSessionCompacting = createMemo(() => {
+export function isSessionCompacting() {
   const sid = state.activeSessionId;
   if (!sid) return false;
   if (state.compactingSessionIds.includes(sid)) return true;
   return !!state.sessions.find((session) => session.id === sid)?.time.compacting;
-});
+}
 
 export const [showThinking, setShowThinking] = createSignal(readShowThinking());
 
@@ -250,9 +250,7 @@ export const [inputText, setInputText] = createSignal('');
 export const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
 export const [isLoading, setIsLoading] = createSignal(false);
 export const [loadingStartedAt, setLoadingStartedAt] = createSignal<number | null>(null);
-export const [loadingLastActivityAt, setLoadingLastActivityAt] = createSignal<number | null>(
-  null
-);
+export const [loadingLastActivityAt, setLoadingLastActivityAt] = createSignal<number | null>(null);
 
 export function startLoading(now = Date.now()) {
   if (!isLoading()) {
@@ -278,23 +276,22 @@ export function markLoadingActivity(now = Date.now()) {
   setLoadingLastActivityAt(now);
 }
 
-export const hasActiveQuestion = createMemo(() => {
+export function hasActiveQuestion() {
   const sid = state.activeSessionId;
   return sid ? state.questions.some((q) => q.sessionID === sid) : false;
-});
+}
 
-export const hasActivePermission = createMemo(() => {
+export function hasActivePermission() {
   const sid = state.activeSessionId;
   return sid ? state.permissions.some((p) => p.sessionID === sid) : false;
-});
+}
 export const [error, setError] = createSignal<string | null>(null);
 export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
 export const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
-let permissionWorkspace: string | null =
-  initialWebviewState.editorContext?.workspacePath ?? null;
+let permissionWorkspace: string | null = initialWebviewState.editorContext?.workspacePath ?? null;
 
 function resolveInitialDraftMode(): PermissionMode {
   if (permissionWorkspace) {
@@ -305,9 +302,8 @@ function resolveInitialDraftMode(): PermissionMode {
   return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default';
 }
 
-export const [draftPermissionMode, setDraftPermissionMode] = createSignal<PermissionMode>(
-  resolveInitialDraftMode()
-);
+export const [draftPermissionMode, setDraftPermissionMode] =
+  createSignal<PermissionMode>(resolveInitialDraftMode());
 export const [theme, setTheme] = createSignal<WebviewThemeKind>(
   initialWebviewState.theme ||
     ((window as unknown as Record<string, string>).__initialTheme as WebviewThemeKind) ||
@@ -330,7 +326,9 @@ export function getPermissionModeForSession(sessionId: string | null | undefined
 export function getCurrentDocumentEnabled(
   sessionId: string | null | undefined = state.activeSessionId
 ) {
-  return sessionId ? state.currentDocumentEnabledBySession[sessionId] ?? true : state.draftCurrentDocumentEnabled ?? true;
+  return sessionId
+    ? (state.currentDocumentEnabledBySession[sessionId] ?? true)
+    : (state.draftCurrentDocumentEnabled ?? true);
 }
 
 function readShowThinking(): boolean {
@@ -415,7 +413,9 @@ export function removePermissionModeForSession(sessionId: string) {
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
 }
 
-export function getSelectedModelForSession(sessionId: string | null | undefined): SelectedModel | null {
+export function getSelectedModelForSession(
+  sessionId: string | null | undefined
+): SelectedModel | null {
   if (!sessionId) return null;
   return state.sessionSelectedModels[sessionId] || null;
 }
@@ -840,7 +840,8 @@ export function applyMessagePartDelta(
     existingPart && (existingPart.type === 'text' || existingPart.type === 'reasoning')
       ? existingPart.text
       : '';
-  const currentStreamingText = state.streamingPartId === partId ? state.streamingText : existingText;
+  const currentStreamingText =
+    state.streamingPartId === partId ? state.streamingText : existingText;
   const nextStreamingText = currentStreamingText + delta;
 
   setState('streamingPartId', partId);
@@ -924,9 +925,7 @@ export function clearMessages() {
   clearStreamingState();
 }
 
-export function setMessagesIncremental(
-  incoming: Array<{ info: Message; parts: Part[] }>
-) {
+export function setMessagesIncremental(incoming: Array<{ info: Message; parts: Part[] }>) {
   clearStreamingState();
   const current = state.messages;
   if (current.length === 0 || incoming.length === 0) {

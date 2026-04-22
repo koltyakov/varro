@@ -83,7 +83,10 @@ export function Chat() {
                 <span class="chat-header-title-text">{activeTitle()}</span>
               </div>
               <div class="chat-header-actions">
-                <RunningSessionsBadge count={runningSessionsCount()} onClick={openRunningSessions} />
+                <RunningSessionsBadge
+                  count={runningSessionsCount()}
+                  onClick={openRunningSessions}
+                />
                 <button class="chat-header-btn" onClick={() => createSession()} title="New chat">
                   <svg viewBox="0 0 16 16" fill="currentColor">
                     <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
@@ -114,7 +117,10 @@ export function Chat() {
         </Show>
       </div>
 
-      <Show when={!showSessionPicker()} fallback={<SessionListView focusRunningSessions={focusRunningSessions()} />}>
+      <Show
+        when={!showSessionPicker()}
+        fallback={<SessionListView focusRunningSessions={focusRunningSessions()} />}
+      >
         <Show when={showSettings()}>
           <SettingsPanel />
         </Show>
@@ -350,7 +356,11 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
               {(session, index) => (
                 <SessionListItem
                   session={session}
-                  itemIndex={() => surfacedSessions().length + (showOtherSessions() ? overflowOtherSessions().length : 0) + index()}
+                  itemIndex={() =>
+                    surfacedSessions().length +
+                    (showOtherSessions() ? overflowOtherSessions().length : 0) +
+                    index()
+                  }
                   focusedIndex={focusedIndex}
                   setFocusedIndex={setFocusedIndex}
                   now={now}
@@ -381,7 +391,9 @@ function SessionListItem(props: {
   const isRunning = () => isRunningSession(props.session.id);
   const needsAttention = () => !isRunning() && (hasPermissionRequest() || hasQuestionRequest());
   const isNewlyCompleted = () =>
-    !isRunning() && !needsAttention() && isSessionUnread(props.session.id, props.session.time.updated);
+    !isRunning() &&
+    !needsAttention() &&
+    isSessionUnread(props.session.id, props.session.time.updated);
   const isCompletedPlanSession = () =>
     isNewlyCompleted() && getSelectedAgentForSession(props.session.id) === 'plan';
   const indicatorClass = () => {
@@ -447,7 +459,10 @@ function SessionListItem(props: {
             <path d="M14.5 1h-13a.5.5 0 00-.5.5V4h14V1.5a.5.5 0 00.5-.5zM1 5v9.5a.5.5 0 00.5.5h13a.5.5 0 00.5-.5V5H1zm5 3h4v1H6V8z" />
           </svg>
         </button>
-        <span class="session-item-age" title={new Date(props.session.time.updated).toLocaleString()}>
+        <span
+          class="session-item-age"
+          title={new Date(props.session.time.updated).toLocaleString()}
+        >
           {formatSessionAge(props.session.time.updated, props.now())}
         </span>
       </div>
@@ -469,8 +484,7 @@ function formatSessionAge(timestamp: number, now: number): string {
 }
 
 function RunningSessionsBadge(props: { count: number; onClick: () => void }) {
-  const label = () =>
-    `${props.count} running session${props.count === 1 ? '' : 's'}`;
+  const label = () => `${props.count} running session${props.count === 1 ? '' : 's'}`;
 
   return (
     <Show when={props.count > 0}>

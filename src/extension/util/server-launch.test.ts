@@ -3,7 +3,9 @@ import { resolveServerLaunch } from './server-launch';
 
 describe('server launch helpers', () => {
   it('spawns direct executables without a shell wrapper', () => {
-    expect(resolveServerLaunch('/usr/local/bin/opencode', ['serve', '--port', '4096'], {}, 'darwin')).toEqual({
+    expect(
+      resolveServerLaunch('/usr/local/bin/opencode', ['serve', '--port', '4096'], {}, 'darwin')
+    ).toEqual({
       command: '/usr/local/bin/opencode',
       args: ['serve', '--port', '4096'],
     });
@@ -19,12 +21,7 @@ describe('server launch helpers', () => {
       )
     ).toEqual({
       command: 'C:\\Windows\\System32\\cmd.exe',
-      args: [
-        '/d',
-        '/s',
-        '/c',
-        '"C:\\Program Files\\OpenCode\\opencode.cmd" serve --port 4096',
-      ],
+      args: ['/d', '/s', '/c', '"C:\\Program Files\\OpenCode\\opencode.cmd" serve --port 4096'],
       windowsVerbatimArguments: true,
     });
   });

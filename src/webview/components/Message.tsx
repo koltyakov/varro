@@ -18,7 +18,11 @@ import { getLeafPathName, isAbsolutePath, normalizePath } from '../lib/path-disp
 import { postMessage } from '../lib/bridge';
 import { getToolFileChange } from '../lib/tool-file-change';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
-import { formatContextLineRanges, getFirstContextLine, parseSelectionReference } from '../../shared/context-files';
+import {
+  formatContextLineRanges,
+  getFirstContextLine,
+  parseSelectionReference,
+} from '../../shared/context-files';
 import {
   getFinalAssistantTextPartId,
   isFileEditPart,
@@ -47,10 +51,18 @@ export function getAssistantContainerVariant(params: {
   if (parts.length === 0) return false;
   if (parts.length !== 1) {
     const textPartCount = parts.filter((part) => part.type === 'text').length;
-    if (!params.highlightFinalAnswer && textPartCount >= 1 && (params.hasStructuredAssistantParts || params.isSubagent)) {
+    if (
+      !params.highlightFinalAnswer &&
+      textPartCount >= 1 &&
+      (params.hasStructuredAssistantParts || params.isSubagent)
+    ) {
       return 'plain';
     }
-    if (params.highlightFinalAnswer && textPartCount > 1 && (params.hasStructuredAssistantParts || params.isSubagent)) {
+    if (
+      params.highlightFinalAnswer &&
+      textPartCount > 1 &&
+      (params.hasStructuredAssistantParts || params.isSubagent)
+    ) {
       return 'plain';
     }
     return false;
@@ -104,12 +116,9 @@ export function Message(props: {
     getAssistantDiffRequest(props.info, props.isLastAssistant ?? false)
   );
 
-  const [diffs] = createResource(
-    diffRequest,
-    async (request) => {
-      return client.session.diff(request.sessionID, request.messageID).catch(() => [] as FileDiff[]);
-    }
-  );
+  const [diffs] = createResource(diffRequest, async (request) => {
+    return client.session.diff(request.sessionID, request.messageID).catch(() => [] as FileDiff[]);
+  });
   const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
   const compactionDivider = createMemo<CompactionPart | null>(() => {
     const parts = normalizedParts();
@@ -144,7 +153,9 @@ export function Message(props: {
     });
   };
   const streamedTextForPart = (part: Part) =>
-    part.type === 'text' && part.id === props.streamingPartId ? props.streamingText || part.text : null;
+    part.type === 'text' && part.id === props.streamingPartId
+      ? props.streamingText || part.text
+      : null;
   const assistantContainerClass = () => {
     const variant = assistantContainerVariant();
     if (variant === 'bare') return 'assistant-turn-content assistant-turn-content-bare';
@@ -159,36 +170,34 @@ export function Message(props: {
         when={!compactionDivider()}
         fallback={<CompactionDivider part={compactionDivider()!} />}
       >
-      <div
-        class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}`}
-      >
         <div
-          class={`value chat-turn-content ${
-            isUser()
-              ? 'chat-turn-card user-message-card'
-              : assistantContainerClass()
-          } ${isSubagent() ? 'chat-turn-subagent' : ''} ${
-            props.fileEditStackGroup
-              ? `assistant-turn-file-edit-group-${props.fileEditStackGroup}`
-              : ''
-          }`}
+          class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}`}
         >
-          <Show when={isUser()}>
-            <UserMessageContent parts={normalizedParts()} />
-          </Show>
-          <Show when={!isUser() && assistant()}>
-            <AssistantMessageContent
-              info={assistant()!}
-              parts={visibleAssistantParts()}
-              highlightFinalAnswer={props.highlightFinalAnswer}
-              streamedTextForPart={streamedTextForPart}
-            />
-          </Show>
-          <Show when={assistant() && visibleDiffs().length > 0}>
-            <DiffSummary diffs={visibleDiffs()} />
-          </Show>
+          <div
+            class={`value chat-turn-content ${
+              isUser() ? 'chat-turn-card user-message-card' : assistantContainerClass()
+            } ${isSubagent() ? 'chat-turn-subagent' : ''} ${
+              props.fileEditStackGroup
+                ? `assistant-turn-file-edit-group-${props.fileEditStackGroup}`
+                : ''
+            }`}
+          >
+            <Show when={isUser()}>
+              <UserMessageContent parts={normalizedParts()} />
+            </Show>
+            <Show when={!isUser() && assistant()}>
+              <AssistantMessageContent
+                info={assistant()!}
+                parts={visibleAssistantParts()}
+                highlightFinalAnswer={props.highlightFinalAnswer}
+                streamedTextForPart={streamedTextForPart}
+              />
+            </Show>
+            <Show when={assistant() && visibleDiffs().length > 0}>
+              <DiffSummary diffs={visibleDiffs()} />
+            </Show>
+          </div>
         </div>
-      </div>
       </Show>
     </Show>
   );
@@ -285,7 +294,9 @@ function UserMessageContent(props: { parts: Part[] }) {
     return { messageTexts, attachments, fileParts };
   });
 
-  const imageParts = createMemo(() => parsed().fileParts.filter((part) => part.mime.startsWith('image/')));
+  const imageParts = createMemo(() =>
+    parsed().fileParts.filter((part) => part.mime.startsWith('image/'))
+  );
   const otherFileParts = createMemo(() =>
     parsed().fileParts.filter((part) => !part.mime.startsWith('image/'))
   );
@@ -299,7 +310,9 @@ function UserMessageContent(props: { parts: Part[] }) {
     <div class="rendered-markdown">
       <Show when={parsed().messageTexts.length > 0}>
         <div class="user-message-text-scroll">
-          <For each={parsed().messageTexts}>{(text) => <p class="user-message-text">{text}</p>}</For>
+          <For each={parsed().messageTexts}>
+            {(text) => <p class="user-message-text">{text}</p>}
+          </For>
         </div>
       </Show>
       <Show when={!hasContent()}>
@@ -312,7 +325,10 @@ function UserMessageContent(props: { parts: Part[] }) {
           </For>
         </div>
       </Show>
-      <Show when={imageParts().length > 1} fallback={<For each={imageParts()}>{(part) => <MessagePart part={part} />}</For>}>
+      <Show
+        when={imageParts().length > 1}
+        fallback={<For each={imageParts()}>{(part) => <MessagePart part={part} />}</For>}
+      >
         <UserImageCarousel imageParts={imageParts()} />
       </Show>
       <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
@@ -353,7 +369,14 @@ function UserImageCarousel(props: { imageParts: FilePart[] }) {
             aria-label="Previous image"
             title="Previous image"
           >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              width="14"
+              height="14"
+            >
               <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>
@@ -364,7 +387,14 @@ function UserImageCarousel(props: { imageParts: FilePart[] }) {
             aria-label="Next image"
             title="Next image"
           >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              width="14"
+              height="14"
+            >
               <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>
@@ -525,7 +555,9 @@ function AssistantMessageContent(props: {
     getFinalAssistantTextPartId(dedupedParts(), !!props.highlightFinalAnswer)
   );
   const renderItems = createMemo(() => {
-    const items: Array<{ kind: 'part'; part: Part } | { kind: 'file-edit-stack'; parts: ToolPart[] }> = [];
+    const items: Array<
+      { kind: 'part'; part: Part } | { kind: 'file-edit-stack'; parts: ToolPart[] }
+    > = [];
     const parts = dedupedParts();
 
     for (let i = 0; i < parts.length; i++) {
@@ -565,9 +597,7 @@ function AssistantMessageContent(props: {
               </div>
             </div>
           ) : (
-            <div
-              class={getAssistantFlowItemClass(item.part, finalTextPartId())}
-            >
+            <div class={getAssistantFlowItemClass(item.part, finalTextPartId())}>
               <MessagePart
                 part={item.part}
                 messageInfo={props.info}
@@ -581,11 +611,8 @@ function AssistantMessageContent(props: {
   );
 }
 
-function getAssistantFlowItemClass(
-  part: Part,
-  finalTextPartId: string | null
-) {
-  let className = 'assistant-message-flow-item';
+function getAssistantFlowItemClass(part: Part, finalTextPartId: string | null) {
+  const className = 'assistant-message-flow-item';
   if (part.type !== 'text' || part.id !== finalTextPartId) return className;
 
   return `${className} assistant-message-flow-item-final`;
@@ -602,7 +629,11 @@ function DiffSummary(props: { diffs: FileDiff[] }) {
 
   return (
     <div class="diff-summary">
-      <button onClick={() => setExpanded((v) => !v)} class="diff-summary-btn" aria-expanded={expanded()}>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        class="diff-summary-btn"
+        aria-expanded={expanded()}
+      >
         <svg
           class={`transition-transform ${expanded() ? 'rotate-90' : ''}`}
           width="10"

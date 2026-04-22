@@ -34,15 +34,18 @@ export function registerCommands(
     vscode.commands.registerCommand('varro.server.restart', async () => {
       try {
         await server.dispose();
-        server.start().then((url) => {
-          logger.info(`OpenCode server restarted at ${url}`);
-        }).catch((err) => {
-          const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
-          logger.error(message);
-          if (server.status.state !== 'error') {
-            vscode.window.showErrorMessage(message);
-          }
-        });
+        server
+          .start()
+          .then((url) => {
+            logger.info(`OpenCode server restarted at ${url}`);
+          })
+          .catch((err) => {
+            const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
+            logger.error(message);
+            if (server.status.state !== 'error') {
+              vscode.window.showErrorMessage(message);
+            }
+          });
       } catch (err) {
         logger.error(`varro.server.restart: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -56,7 +59,9 @@ export function registerCommands(
         }
         vscode.commands.executeCommand('workbench.view.extension.varro');
       } catch (err) {
-        logger.error(`varro.chat.addTerminalSelectionToContext: ${err instanceof Error ? err.message : String(err)}`);
+        logger.error(
+          `varro.chat.addTerminalSelectionToContext: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }),
 
@@ -106,14 +111,17 @@ export function registerCommands(
           );
 
           const valid = files.filter(
-            (f): f is { path: string; relativePath: string; type: 'file' | 'directory' } => f !== null
+            (f): f is { path: string; relativePath: string; type: 'file' | 'directory' } =>
+              f !== null
           );
           if (valid.length > 0) {
             sidebar.postDroppedFiles(valid);
             vscode.commands.executeCommand('workbench.view.extension.varro');
           }
         } catch (err) {
-          logger.error(`varro.chat.addToContext: ${err instanceof Error ? err.message : String(err)}`);
+          logger.error(
+            `varro.chat.addToContext: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
       }
     )

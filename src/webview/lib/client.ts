@@ -125,12 +125,10 @@ export const client = {
   },
 };
 
-let fileStatusCache:
-  | {
-      expiresAt: number;
-      promise: Promise<RepoFileStatus[]>;
-    }
-  | null = null;
+let fileStatusCache: {
+  expiresAt: number;
+  promise: Promise<RepoFileStatus[]>;
+} | null = null;
 
 function getCachedFileStatus(): Promise<RepoFileStatus[]> {
   const now = Date.now();
@@ -156,7 +154,10 @@ onMessage((msg) => {
       try {
         h(evt);
       } catch (err) {
-        postMessage({ type: 'log', payload: { msg: 'event handler error', error: String(err), level: 'error' } });
+        postMessage({
+          type: 'log',
+          payload: { msg: 'event handler error', error: String(err), level: 'error' },
+        });
       }
     }
   }
@@ -166,7 +167,10 @@ onMessage((msg) => {
       try {
         h(evt);
       } catch (err) {
-        postMessage({ type: 'log', payload: { msg: 'wildcard handler error', error: String(err), level: 'error' } });
+        postMessage({
+          type: 'log',
+          payload: { msg: 'wildcard handler error', error: String(err), level: 'error' },
+        });
       }
     }
   }

@@ -17,8 +17,8 @@ export function MessagePart(props: {
 
   const render = () => {
     const part = p();
-      switch (part.type) {
-        case 'text':
+    switch (part.type) {
+      case 'text':
         return <MarkdownRenderer content={props.streamedText ?? (part as TextPart).text} />;
       case 'tool':
         return <ToolCall part={part} />;
@@ -86,7 +86,9 @@ function ReasoningBlock(props: { part: ReasoningPart; messageInfo?: AssistantMes
       <button class="thinking-header" onClick={() => setExpanded(!expanded())}>
         <span class="thinking-label">
           <BrainTopicIcon class={isStreaming() ? 'thinking-in-progress' : undefined} />
-          <span class={`thinking-label-text${isStreaming() ? ' shimmer-progress' : ''}`}>{headerLabel()}</span>
+          <span class={`thinking-label-text${isStreaming() ? ' shimmer-progress' : ''}`}>
+            {headerLabel()}
+          </span>
         </span>
         <Show when={durationLabel()}>
           <span class="thinking-duration">{durationLabel()}</span>
@@ -191,7 +193,10 @@ function getReasoningDetailLabel(messageInfo?: AssistantMessage) {
 
   if (modelChanged) parts.push(modelName);
   if (messageInfo.variant) parts.push(formatVariantLabel(messageInfo.variant));
-  else if (variantChanged && !modelSupportsReasoning(messageInfo.providerID, messageInfo.modelID, state.providers)) {
+  else if (
+    variantChanged &&
+    !modelSupportsReasoning(messageInfo.providerID, messageInfo.modelID, state.providers)
+  ) {
     parts.push('No thinking');
   }
 

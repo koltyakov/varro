@@ -187,7 +187,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (!requestID || !sessionID || this.pendingAttention.has(requestID)) return;
 
     const label =
-      kind === 'question' ? this.describeQuestionRequest(props) : this.describePermissionRequest(props);
+      kind === 'question'
+        ? this.describeQuestionRequest(props)
+        : this.describePermissionRequest(props);
     this.pendingAttention.set(requestID, { sessionID, kind, label });
     this.completedSessions.delete(sessionID);
     this.showBlockingNotification(kind, sessionID, label);
@@ -221,9 +223,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const permission = getString(props.permission);
     const patterns = Array.isArray(props.patterns)
-      ? props.patterns.map((item) => getString(item)).filter((item): item is string => Boolean(item))
+      ? props.patterns
+          .map((item) => getString(item))
+          .filter((item): item is string => Boolean(item))
       : [];
-    return [permission, patterns.join(', ')].filter(Boolean).join(' ').trim() || 'Permission required';
+    return (
+      [permission, patterns.join(', ')].filter(Boolean).join(' ').trim() || 'Permission required'
+    );
   }
 
   private showBlockingNotification(
@@ -233,7 +239,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   ) {
     if (!this.shouldShowNotification()) return;
 
-    const prefix = kind === 'question' ? 'Varro is waiting for your input' : 'Varro needs permission approval';
+    const prefix =
+      kind === 'question' ? 'Varro is waiting for your input' : 'Varro needs permission approval';
     const message = `${prefix}${this.describeSessionSuffix(sessionID)}.`;
 
     void vscode.window.showWarningMessage(message, 'Open Chat').then((action) => {
@@ -297,7 +304,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.statusBarItem.backgroundColor = undefined;
       this.statusBarItem.tooltip = [
         'Varro finished background work.',
-        ...completedSessions.slice(0, 3).map((sessionID) => this.sessionTitles.get(sessionID) || sessionID),
+        ...completedSessions
+          .slice(0, 3)
+          .map((sessionID) => this.sessionTitles.get(sessionID) || sessionID),
         ...(completedSessions.length > 3 ? [`+${completedSessions.length - 3} more`] : []),
         '',
         'Click to open chat.',
@@ -330,12 +339,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       })
     );
 
-    void this.getHtml().then((html) => {
-      webviewView.webview.html = html;
-    }).catch((err) => {
-      logger.error(`getHtml failed: ${err instanceof Error ? err.message : String(err)}`);
-      webviewView.webview.html = '<p>Failed to load Varro webview. Please reload.</p>';
-    });
+    void this.getHtml()
+      .then((html) => {
+        webviewView.webview.html = html;
+      })
+      .catch((err) => {
+        logger.error(`getHtml failed: ${err instanceof Error ? err.message : String(err)}`);
+        webviewView.webview.html = '<p>Failed to load Varro webview. Please reload.</p>';
+      });
 
     this.webviewDisposables.push(
       webviewView.onDidChangeVisibility(() => {
@@ -526,7 +537,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return promise;
   }
 
-  private async loadProviderLimit(providerID: string, modelID: string | null): Promise<ProviderLimitStatus> {
+  private async loadProviderLimit(
+    providerID: string,
+    modelID: string | null
+  ): Promise<ProviderLimitStatus> {
     const checkedAt = Date.now();
     const rawConfig = (await this.server.request('GET', '/config/providers')) as unknown;
     const config = asRecord(rawConfig);
@@ -744,7 +758,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'context/update', payload: this.contextProvider.context });
   }
 
-
   postTerminalSelection(selection: { text: string; terminalName: string } | null) {
     this.post({ type: 'terminal-selection/update', payload: selection });
   }
@@ -775,7 +788,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  private async executeFileSearch(requestId: number, query: string, limit: number, token: vscode.CancellationToken) {
+  private async executeFileSearch(
+    requestId: number,
+    query: string,
+    limit: number,
+    token: vscode.CancellationToken
+  ) {
     this.fileSearchDebounceTimer = null;
     try {
       const files = await this.getWorkspaceFiles(token);

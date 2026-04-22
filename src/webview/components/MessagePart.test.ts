@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  formatReasoningDuration,
-  formatReasoningHeader,
-  splitReasoningText,
-} from './MessagePart';
+import { formatReasoningDuration, formatReasoningHeader, splitReasoningText } from './MessagePart';
 
 describe('formatReasoningDuration', () => {
   it('returns null while reasoning is still running', () => {
@@ -36,7 +32,9 @@ describe('formatReasoningHeader', () => {
 describe('splitReasoningText', () => {
   it('moves a bold first line into the thinking header', () => {
     expect(
-      splitReasoningText('**Considering layout options**\n\nI am weighing warning and error displays.')
+      splitReasoningText(
+        '**Considering layout options**\n\nI am weighing warning and error displays.'
+      )
     ).toEqual({
       subject: 'Considering layout options',
       body: 'I am weighing warning and error displays.',

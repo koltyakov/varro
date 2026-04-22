@@ -4,7 +4,8 @@ import { state } from '../lib/state';
 
 export function ServerStatus() {
   const status = () => state.serverStatus;
-  const noProvidersConfigured = () => status().state === 'running' && state.providersLoaded && state.providers.length === 0;
+  const noProvidersConfigured = () =>
+    status().state === 'running' && state.providersLoaded && state.providers.length === 0;
 
   const openProviderSetup = () => {
     postMessage({
@@ -69,21 +70,21 @@ export function ServerStatus() {
                 href="https://opencode.ai"
                 class="text-vscode-link hover:text-vscode-link-active hover:underline"
               >
-               OpenCode
-              </a>
-              {' '}a native UI.
+                OpenCode
+              </a>{' '}
+              a native UI.
               <br />
               Install the CLI to get started.
             </p>
           </div>
           <div class="w-full px-4">
             <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
-            <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">
-              Install
-            </p>
-            <code class="mt-1 block font-mono text-[12px] text-vscode-fg">
-              npm i -g opencode-ai
-            </code>
+              <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">
+                Install
+              </p>
+              <code class="mt-1 block font-mono text-[12px] text-vscode-fg">
+                npm i -g opencode-ai
+              </code>
             </div>
           </div>
           <a
@@ -125,7 +126,8 @@ export function ServerStatus() {
             <p class="text-[12px] leading-normal text-vscode-muted">
               OpenCode is running, but it does not have any providers configured yet.
               <br />
-              Add one with the provider login command, then restart Varro if models still do not appear.
+              Add one with the provider login command, then restart Varro if models still do not
+              appear.
             </p>
           </div>
           <div class="w-full px-4">
@@ -138,11 +140,7 @@ export function ServerStatus() {
               </code>
             </div>
           </div>
-          <button
-            type="button"
-            class="server-status-action-button"
-            onClick={openProviderSetup}
-          >
+          <button type="button" class="server-status-action-button" onClick={openProviderSetup}>
             Open terminal and add a provider
           </button>
           <a

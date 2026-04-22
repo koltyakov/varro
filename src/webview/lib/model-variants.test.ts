@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { getMatchingVariant, getPreferredVariant } from './model-variants';
 import type { Provider } from '../types';
 
-function providerWithVariants(variants: NonNullable<Provider['models'][string]['variants']>): Provider {
+function providerWithVariants(
+  variants: NonNullable<Provider['models'][string]['variants']>
+): Provider {
   return {
     id: 'provider',
     name: 'Provider',

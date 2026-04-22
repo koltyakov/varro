@@ -59,7 +59,10 @@ describe('getAssistantContainerVariant', () => {
         fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: true,
-        layoutParts: [reasoningPart('reason-1', 'Inspecting'), textPart('text-1', 'Fixing it now.')],
+        layoutParts: [
+          reasoningPart('reason-1', 'Inspecting'),
+          textPart('text-1', 'Fixing it now.'),
+        ],
         highlightFinalAnswer: false,
       })
     ).toBe('plain');

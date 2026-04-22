@@ -27,11 +27,7 @@ import {
   collapseLeadingDuplicateFileEvents,
   getTrailingFileEventSignature,
 } from '../lib/message-event-collapse';
-import {
-  isFileEditPart,
-  isFileReadPart,
-  shouldShowAssistantPartInline,
-} from '../lib/part-utils';
+import { isFileEditPart, isFileReadPart, shouldShowAssistantPartInline } from '../lib/part-utils';
 
 function getAssistantTurnSubagentCount(messages: Array<{ info: Message; parts: Part[] }>): number {
   let count = 0;
@@ -63,9 +59,15 @@ export function buildPlanImplementationPrompt(parts: Part[]) {
   return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
 }
 
-export function getLatestPlanImplementationMessageId(messages: Array<{ info: Message }>): string | null {
+export function getLatestPlanImplementationMessageId(
+  messages: Array<{ info: Message }>
+): string | null {
   const lastMessage = messages[messages.length - 1]?.info;
-  if (!lastMessage || !isAssistantMessage(lastMessage) || !isPlanningAssistantMessage(lastMessage)) {
+  if (
+    !lastMessage ||
+    !isAssistantMessage(lastMessage) ||
+    !isPlanningAssistantMessage(lastMessage)
+  ) {
     return null;
   }
 
@@ -680,7 +682,10 @@ function VirtualizedContent(props: {
                       msg.info.id === props.latestPlanImplementationMessageId
                     }
                     onImplementPlan={() =>
-                      void implementPlan(buildPlanImplementationPrompt(msg.parts), msg.info.sessionID)
+                      void implementPlan(
+                        buildPlanImplementationPrompt(msg.parts),
+                        msg.info.sessionID
+                      )
                     }
                   />
                 )}

@@ -51,7 +51,9 @@ export function getMatchingVariant(
 
   const sourceKind = getVariantKind(source.variant);
   if (sourceKind) {
-    const sameKindVariant = targetVariants.find((variant) => getVariantKind(variant) === sourceKind);
+    const sameKindVariant = targetVariants.find(
+      (variant) => getVariantKind(variant) === sourceKind
+    );
     if (sameKindVariant) return sameKindVariant;
   }
 

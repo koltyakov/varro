@@ -26,10 +26,16 @@ describe('tool file change helpers', () => {
   it('detects file read tools and extracts read paths', () => {
     expect(isToolFileRead(' read ')).toBe(true);
     expect(isToolFileRead('bash')).toBe(false);
-    expect(getToolReadPath('file_read', { status: 'pending', input: { filePath: 'src/app.ts' }, raw: '' })).toBe(
-      'src/app.ts'
-    );
-    expect(getToolReadPath('bash', { status: 'pending', input: { filePath: 'src/app.ts' }, raw: '' })).toBeNull();
+    expect(
+      getToolReadPath('file_read', {
+        status: 'pending',
+        input: { filePath: 'src/app.ts' },
+        raw: '',
+      })
+    ).toBe('src/app.ts');
+    expect(
+      getToolReadPath('bash', { status: 'pending', input: { filePath: 'src/app.ts' }, raw: '' })
+    ).toBeNull();
   });
 
   it('infers added, removed, and edited changes from tool names and metadata', () => {
@@ -40,7 +46,10 @@ describe('tool file change helpers', () => {
     });
 
     expect(
-      getToolFileChange('delete', completedState({ file_path: 'src/old.ts' }, { metadata: { status: 'deleted' } }))
+      getToolFileChange(
+        'delete',
+        completedState({ file_path: 'src/old.ts' }, { metadata: { status: 'deleted' } })
+      )
     ).toEqual({
       kind: 'removed',
       path: 'src/old.ts',
@@ -48,7 +57,10 @@ describe('tool file change helpers', () => {
     });
 
     expect(
-      getToolFileChange('custom_tool', completedState({ filename: 'src/app.ts' }, { title: 'Modified src/app.ts' }))
+      getToolFileChange(
+        'custom_tool',
+        completedState({ filename: 'src/app.ts' }, { title: 'Modified src/app.ts' })
+      )
     ).toEqual({
       kind: 'edited',
       path: 'src/app.ts',
@@ -58,10 +70,7 @@ describe('tool file change helpers', () => {
 
   it('detects moves from explicit paths or titles', () => {
     expect(
-      getToolFileChange(
-        'rename',
-        completedState({ fromPath: 'src/old.ts', toPath: 'src/new.ts' })
-      )
+      getToolFileChange('rename', completedState({ fromPath: 'src/old.ts', toPath: 'src/new.ts' }))
     ).toEqual({
       kind: 'moved',
       path: 'src/new.ts',

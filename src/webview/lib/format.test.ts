@@ -63,7 +63,9 @@ describe('format helpers', () => {
 
   it('appends provider names in parentheses', () => {
     expect(formatLabelWithProvider('GPT-5.4', 'OpenAI')).toBe('GPT-5.4 (OpenAI)');
-    expect(formatLabelWithProvider('GPT-5.4 · High', 'Anthropic')).toBe('GPT-5.4 · High (Anthropic)');
+    expect(formatLabelWithProvider('GPT-5.4 · High', 'Anthropic')).toBe(
+      'GPT-5.4 · High (Anthropic)'
+    );
     expect(formatLabelWithProvider('Thinking', '')).toBe('Thinking');
     expect(formatLabelWithProvider('  Thinking  ', '  OpenAI  ')).toBe('Thinking (OpenAI)');
     expect(formatLabelWithProvider('   ', 'OpenAI')).toBe('');
@@ -71,8 +73,22 @@ describe('format helpers', () => {
 
   it('selects the most constrained provider limit window', () => {
     const limit = availableLimit([
-      { id: 'requests', label: 'Requests', unit: 'requests', remaining: 40, limit: 100, resetAt: 60_000 },
-      { id: 'tokens', label: 'Tokens', unit: 'tokens', remaining: 12_000, limit: 20_000, resetAt: 90_000 },
+      {
+        id: 'requests',
+        label: 'Requests',
+        unit: 'requests',
+        remaining: 40,
+        limit: 100,
+        resetAt: 60_000,
+      },
+      {
+        id: 'tokens',
+        label: 'Tokens',
+        unit: 'tokens',
+        remaining: 12_000,
+        limit: 20_000,
+        resetAt: 90_000,
+      },
     ]);
 
     expect(getPrimaryProviderLimitWindow(limit)).toEqual(limit.windows[0]);
@@ -95,7 +111,14 @@ describe('format helpers', () => {
   it('breaks tied provider windows by priority', () => {
     const limit = availableLimit([
       { id: 'tokens', label: 'Tokens', unit: 'tokens', remaining: 10, limit: 20, resetAt: null },
-      { id: 'messages', label: 'Messages', unit: 'messages', remaining: 5, limit: 10, resetAt: null },
+      {
+        id: 'messages',
+        label: 'Messages',
+        unit: 'messages',
+        remaining: 5,
+        limit: 10,
+        resetAt: null,
+      },
       { id: 'credits', label: 'Credits', unit: 'credits', remaining: 3, limit: 6, resetAt: null },
     ]);
 
@@ -113,7 +136,14 @@ describe('format helpers', () => {
 
   it('formats compact provider limit badges and tooltips', () => {
     const limit = availableLimit([
-      { id: 'requests', label: 'Requests', unit: 'requests', remaining: 12, limit: 50, resetAt: 120_000 },
+      {
+        id: 'requests',
+        label: 'Requests',
+        unit: 'requests',
+        remaining: 12,
+        limit: 50,
+        resetAt: 120_000,
+      },
     ]);
 
     expect(formatProviderLimitCompact(limit)).toBe('12 req');
@@ -124,7 +154,14 @@ describe('format helpers', () => {
     expect(
       formatProviderLimitCompact(
         availableLimit([
-          { id: 'tokens', label: 'Tokens', unit: 'tokens', remaining: 1_200, limit: 2_000, resetAt: null },
+          {
+            id: 'tokens',
+            label: 'Tokens',
+            unit: 'tokens',
+            remaining: 1_200,
+            limit: 2_000,
+            resetAt: null,
+          },
         ])
       )
     ).toBe('1k tok');
@@ -132,7 +169,14 @@ describe('format helpers', () => {
     expect(
       formatProviderLimitCompact(
         availableLimit([
-          { id: 'messages', label: 'Messages', unit: 'messages', remaining: 9.4, limit: 10, resetAt: null },
+          {
+            id: 'messages',
+            label: 'Messages',
+            unit: 'messages',
+            remaining: 9.4,
+            limit: 10,
+            resetAt: null,
+          },
         ])
       )
     ).toBe('9.4 msg');
@@ -140,7 +184,14 @@ describe('format helpers', () => {
     expect(
       formatProviderLimitCompact(
         availableLimit([
-          { id: 'credits', label: 'Credits', unit: 'credits', remaining: 12_000_000, limit: null, resetAt: null },
+          {
+            id: 'credits',
+            label: 'Credits',
+            unit: 'credits',
+            remaining: 12_000_000,
+            limit: null,
+            resetAt: null,
+          },
         ])
       )
     ).toBe('12M cr');
@@ -148,7 +199,14 @@ describe('format helpers', () => {
     expect(
       formatProviderLimitCompact(
         availableLimit([
-          { id: 'custom', label: 'Custom', unit: 'unknown', remaining: 0.5, limit: null, resetAt: null },
+          {
+            id: 'custom',
+            label: 'Custom',
+            unit: 'unknown',
+            remaining: 0.5,
+            limit: null,
+            resetAt: null,
+          },
         ])
       )
     ).toBe('0.5 left');
@@ -164,7 +222,14 @@ describe('format helpers', () => {
         source: 'provider',
         checkedAt: 0,
         windows: [
-          { id: 'requests', label: 'Requests', unit: 'requests', remaining: 20, limit: 100, resetAt: null },
+          {
+            id: 'requests',
+            label: 'Requests',
+            unit: 'requests',
+            remaining: 20,
+            limit: 100,
+            resetAt: null,
+          },
         ],
       })
     ).toBe('warning');
@@ -176,7 +241,14 @@ describe('format helpers', () => {
         source: 'provider',
         checkedAt: 0,
         windows: [
-          { id: 'requests', label: 'Requests', unit: 'requests', remaining: 5, limit: 100, resetAt: null },
+          {
+            id: 'requests',
+            label: 'Requests',
+            unit: 'requests',
+            remaining: 5,
+            limit: 100,
+            resetAt: null,
+          },
         ],
       })
     ).toBe('error');
@@ -187,21 +259,42 @@ describe('format helpers', () => {
     expect(
       getProviderLimitTone(
         availableLimit([
-          { id: 'requests', label: 'Requests', unit: 'requests', remaining: 80, limit: 100, resetAt: null },
+          {
+            id: 'requests',
+            label: 'Requests',
+            unit: 'requests',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+          },
         ])
       )
     ).toBe('default');
     expect(
       getProviderLimitTone(
         availableLimit([
-          { id: 'requests', label: 'Requests', unit: 'requests', remaining: 80, limit: null, resetAt: null },
+          {
+            id: 'requests',
+            label: 'Requests',
+            unit: 'requests',
+            remaining: 80,
+            limit: null,
+            resetAt: null,
+          },
         ])
       )
     ).toBe('default');
     expect(
       getProviderLimitTone(
         availableLimit([
-          { id: 'requests', label: 'Requests', unit: 'requests', remaining: 80, limit: 0, resetAt: null },
+          {
+            id: 'requests',
+            label: 'Requests',
+            unit: 'requests',
+            remaining: 80,
+            limit: 0,
+            resetAt: null,
+          },
         ])
       )
     ).toBe('default');
@@ -221,9 +314,30 @@ describe('format helpers', () => {
 
     const limit = availableLimit([
       { id: 'subsec', label: 'Subsec', unit: 'requests', remaining: 1, limit: 10, resetAt: 500 },
-      { id: 'seconds', label: 'Seconds', unit: 'requests', remaining: 2, limit: null, resetAt: 20_000 },
-      { id: 'hours', label: 'Hours', unit: 'requests', remaining: 3, limit: 3_000, resetAt: 3_600_000 },
-      { id: 'days', label: 'Days', unit: 'requests', remaining: 4, limit: 40, resetAt: 72 * 3_600_000 },
+      {
+        id: 'seconds',
+        label: 'Seconds',
+        unit: 'requests',
+        remaining: 2,
+        limit: null,
+        resetAt: 20_000,
+      },
+      {
+        id: 'hours',
+        label: 'Hours',
+        unit: 'requests',
+        remaining: 3,
+        limit: 3_000,
+        resetAt: 3_600_000,
+      },
+      {
+        id: 'days',
+        label: 'Days',
+        unit: 'requests',
+        remaining: 4,
+        limit: 40,
+        resetAt: 72 * 3_600_000,
+      },
     ]);
 
     expect(formatProviderLimitTitle(limit, 0)).toBe(

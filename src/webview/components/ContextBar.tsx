@@ -74,13 +74,17 @@ export function ContextBar() {
                     : file.relativePath || file.path
                 }
                 icon={file.type === 'directory' ? 'folder' : 'file'}
-                onRemove={visibleFiles().length > 0 ? () => removeContextFile(file.path) : undefined}
+                onRemove={
+                  visibleFiles().length > 0 ? () => removeContextFile(file.path) : undefined
+                }
               />
             )}
           </For>
-            <For each={clipboardImages()}>
-              {(image) => <ImageContextChip image={image} onRemove={() => removeClipboardImage(image.id)} />}
-            </For>
+          <For each={clipboardImages()}>
+            {(image) => (
+              <ImageContextChip image={image} onRemove={() => removeClipboardImage(image.id)} />
+            )}
+          </For>
         </div>
         <div class="flex items-center">
           <Show when={clipboardImages().length > 0}>

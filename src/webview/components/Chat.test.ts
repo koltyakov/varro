@@ -47,7 +47,12 @@ describe('groupSessions', () => {
       session('other-3', 460),
     ];
 
-    const groups = groupSessions(sessions, () => false, () => false, 2);
+    const groups = groupSessions(
+      sessions,
+      () => false,
+      () => false,
+      2
+    );
 
     expect(groups.surfacedOther.map((item) => item.id)).toEqual(['other-1', 'other-2']);
     expect(groups.overflowOther.map((item) => item.id)).toEqual(['other-3']);

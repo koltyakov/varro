@@ -175,7 +175,7 @@ export function ChatInput() {
   const mentionAgents = createMemo(() =>
     state.allAgents
       .filter((agent) => agent.mode === 'subagent' || agent.mode === 'all')
-      .toSorted((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
   );
 
   const slashCommands = createMemo(() =>
@@ -510,8 +510,7 @@ export function ChatInput() {
     const text = inputText();
     const sendableText = getSendableInputText(text);
     const hasSendableImages = hasSendableClipboardImages();
-    if (!sendableText.trim() && state.droppedFiles.length === 0 && !hasSendableImages)
-      return;
+    if (!sendableText.trim() && state.droppedFiles.length === 0 && !hasSendableImages) return;
 
     requestMessageListScrollToBottom();
 
@@ -791,10 +790,7 @@ export function ChatInput() {
 
     if (filenames.length === 0 || inputText().trim().length === 0) return;
 
-    replaceComposerSelection(
-      filenames.map((filename) => `[${filename}]`).join(' '),
-      true
-    );
+    replaceComposerSelection(filenames.map((filename) => `[${filename}]`).join(' '), true);
   }
 
   onMount(() => {
@@ -821,7 +817,10 @@ export function ChatInput() {
         return;
       }
 
-      if (showPermissionModePicker() && clickedOutside(target, permissionPickerRef, permissionPopoverRef)) {
+      if (
+        showPermissionModePicker() &&
+        clickedOutside(target, permissionPickerRef, permissionPopoverRef)
+      ) {
         setShowPermissionModePicker(false);
       }
       if (showAgentPicker() && clickedOutside(target, agentPickerRef, agentPopoverRef)) {
@@ -883,7 +882,12 @@ export function ChatInput() {
   onMount(() => {
     if (!toolbarRef) return;
     const observer = new ResizeObserver(() => {
-      if (showAgentPicker() || showVariantPicker() || showModelPicker() || showPermissionModePicker())
+      if (
+        showAgentPicker() ||
+        showVariantPicker() ||
+        showModelPicker() ||
+        showPermissionModePicker()
+      )
         return;
       if (showBusyMenu() || showContextPopup()) return;
       scheduleToolbarFit();
@@ -1017,10 +1021,15 @@ export function ChatInput() {
   }
 
   function getSendableInputText(text = inputText()) {
-    return getPromptTextForClipboardImages(text, state.clipboardImages, currentModelSupportsVision());
+    return getPromptTextForClipboardImages(
+      text,
+      state.clipboardImages,
+      currentModelSupportsVision()
+    );
   }
 
-  const clipboardImagesDisabled = () => clipboardImages().length > 0 && !currentModelSupportsVision();
+  const clipboardImagesDisabled = () =>
+    clipboardImages().length > 0 && !currentModelSupportsVision();
 
   const assistantMessages = createMemo(() =>
     state.messages.map((entry) => entry.info).filter(isAssistantMessage)
@@ -1055,8 +1064,12 @@ export function ChatInput() {
     return limit;
   });
 
-  const currentProviderLimitCompact = createMemo(() => formatProviderLimitCompact(currentProviderLimit()));
-  const currentProviderLimitTitle = createMemo(() => formatProviderLimitTitle(currentProviderLimit()));
+  const currentProviderLimitCompact = createMemo(() =>
+    formatProviderLimitCompact(currentProviderLimit())
+  );
+  const currentProviderLimitTitle = createMemo(() =>
+    formatProviderLimitTitle(currentProviderLimit())
+  );
   const currentProviderLimitTone = createMemo(() => getProviderLimitTone(currentProviderLimit()));
 
   const availableVariants = createMemo(() => {
@@ -1162,11 +1175,14 @@ export function ChatInput() {
                   state.providers
                 ) ||
                 undefined;
-              setSelectedModel({
-                providerID: sel.providerID,
-                modelID: sel.modelID,
-                variant: matchedVariant,
-              }, { sessionId: state.activeSessionId });
+              setSelectedModel(
+                {
+                  providerID: sel.providerID,
+                  modelID: sel.modelID,
+                  variant: matchedVariant,
+                },
+                { sessionId: state.activeSessionId }
+              );
             }
           }}
           onClose={() => setShowModelPicker(false)}
@@ -1266,13 +1282,11 @@ export function ChatInput() {
                 label={activeContext()!.filename}
                 detail={activeContext()!.lineRange}
                 disabled={!activeContextEnabled()}
-                title={
-                  `${
-                    activeContext()!.lineRange
-                      ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
-                      : activeContext()!.filename
-                  }${activeContextEnabled() ? ' · Click to disable current document context' : ' · Current document context is disabled. Click to enable it again'}`
-                }
+                title={`${
+                  activeContext()!.lineRange
+                    ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
+                    : activeContext()!.filename
+                }${activeContextEnabled() ? ' · Click to disable current document context' : ' · Current document context is disabled. Click to enable it again'}`}
                 onClick={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
               />
             </Show>
@@ -1591,11 +1605,14 @@ export function ChatInput() {
                           class={`toolbar-popover-item ${effectiveVariant() === v ? 'selected' : ''}`}
                           onClick={() => {
                             const m = currentModel();
-                            setSelectedModel({
-                              providerID: m.providerID!,
-                              modelID: m.modelID!,
-                              variant: v,
-                            }, { sessionId: state.activeSessionId });
+                            setSelectedModel(
+                              {
+                                providerID: m.providerID!,
+                                modelID: m.modelID!,
+                                variant: v,
+                              },
+                              { sessionId: state.activeSessionId }
+                            );
                             setShowVariantPicker(false);
                           }}
                         >

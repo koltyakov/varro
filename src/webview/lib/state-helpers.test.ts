@@ -129,9 +129,11 @@ describe('state helpers', () => {
     stateModule.setPermissionModeForSession(null, 'full');
     expect(stateModule.getPermissionModeForSession(null)).toBe('full');
     expect(window.localStorage.getItem('varro.draftPermissionMode')).toBe(JSON.stringify('full'));
-    expect(JSON.parse(window.localStorage.getItem('varro.projectPermissionModes') || '{}')).toEqual({
-      '/repo': 'full',
-    });
+    expect(JSON.parse(window.localStorage.getItem('varro.projectPermissionModes') || '{}')).toEqual(
+      {
+        '/repo': 'full',
+      }
+    );
 
     stateModule.setPermissionModeForSession('session-1', 'full');
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('full');
@@ -196,7 +198,10 @@ describe('state helpers', () => {
       lineRanges: [{ startLine: 8, endLine: 9 }],
     });
     stateModule.addContextFile({ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' });
-    expect(stateModule.state.droppedFiles.map((file) => file.relativePath)).toEqual(['a.ts', 'b.ts']);
+    expect(stateModule.state.droppedFiles.map((file) => file.relativePath)).toEqual([
+      'a.ts',
+      'b.ts',
+    ]);
     expect(stateModule.state.droppedFiles[0]?.lineRanges).toBeUndefined();
 
     stateModule.clearContextFiles();
@@ -284,7 +289,10 @@ describe('state helpers', () => {
       providerID: 'openai',
       modelID: 'gpt-4o',
     });
-    expect(stateModule.getPersistedSelectedModel()).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
+    expect(stateModule.getPersistedSelectedModel()).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5',
+    });
 
     stateModule.clearSelectedModelForSession('session-1');
     expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
@@ -306,10 +314,17 @@ describe('state helpers', () => {
 
   it('updates questions and model visibility state', async () => {
     const stateModule = await loadState();
-    const providers = [provider('openai', ['gpt-4.1', 'gpt-4o']), provider('anthropic', ['claude'])];
+    const providers = [
+      provider('openai', ['gpt-4.1', 'gpt-4o']),
+      provider('anthropic', ['claude']),
+    ];
 
     stateModule.setQuestions([{ id: 'q1', sessionID: 'session-1', questions: [] }]);
-    stateModule.upsertQuestion({ id: 'q1', sessionID: 'session-1', questions: [{ question: 'Q', header: 'H', options: [] }] });
+    stateModule.upsertQuestion({
+      id: 'q1',
+      sessionID: 'session-1',
+      questions: [{ question: 'Q', header: 'H', options: [] }],
+    });
     stateModule.upsertQuestion({ id: 'q2', sessionID: 'session-2', questions: [] });
     stateModule.removeQuestion('q2');
 
@@ -381,7 +396,10 @@ describe('state helpers', () => {
       { info: assistantMessage('message-3', 'session-1', 30), parts: [] },
     ]);
 
-    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-2', 'message-3']);
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'message-2',
+      'message-3',
+    ]);
 
     const children = stateModule.getChildRunsByParentId([
       { info: assistantMessage('child-2', 'session-1', 20, 'subagent', 'parent-1'), parts: [] },

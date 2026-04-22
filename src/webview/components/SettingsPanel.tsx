@@ -21,7 +21,9 @@ export function SettingsPanel() {
 
     return state.providers
       .map((provider) => {
-        const models = Object.values(provider.models).toSorted((a, b) => a.name.localeCompare(b.name));
+        const models = Object.values(provider.models).toSorted((a, b) =>
+          a.name.localeCompare(b.name)
+        );
 
         if (!search) return { provider, models };
 
@@ -118,7 +120,8 @@ function ProviderSection(props: {
   const allModels = () =>
     Object.values(props.provider.models).sort((a, b) => a.name.localeCompare(b.name));
 
-  const enabledCount = () => props.models.filter((m) => isModelVisible(props.provider.id, m.id)).length;
+  const enabledCount = () =>
+    props.models.filter((m) => isModelVisible(props.provider.id, m.id)).length;
 
   const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;
   const someEnabled = () => enabledCount() > 0 && !allEnabled();
