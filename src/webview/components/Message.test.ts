@@ -238,6 +238,53 @@ describe('Message assistant final answer rendering', () => {
     expect(finalItem?.textContent).toContain('Final answer.');
   });
 
+  it('hides thinking and workspace text in highlighted planning cards', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-3'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', '[Working directory: /workspace]'),
+            textPart('text-2', 'Dummy Plan\n\n- First step'),
+          ],
+          highlightFinalAnswer: true,
+          highlightPlanningAnswer: true,
+        }),
+      container!
+    );
+
+    expect(container?.textContent).not.toContain('Thinking');
+    expect(container?.textContent).not.toContain('[Working directory: /workspace]');
+    expect(container?.textContent).toContain('Dummy Plan');
+    expect(container?.querySelector('.assistant-message-flow-item-final-planning')).toBeInstanceOf(
+      HTMLDivElement
+    );
+  });
+
+  it('hides thinking and workspace text in highlighted result cards', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-4'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', '[Working directory: /workspace]'),
+            textPart('text-2', 'Implemented the fix.'),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    expect(container?.textContent).not.toContain('Thinking');
+    expect(container?.textContent).not.toContain('[Working directory: /workspace]');
+    expect(container?.textContent).toContain('Implemented the fix.');
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
+      HTMLDivElement
+    );
+  });
+
   it('renders assistant message errors as an inline error block', () => {
     cleanup = render(
       () =>

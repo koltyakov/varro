@@ -2,6 +2,18 @@ import type { Part, ToolPart } from '../types';
 import { getToolFileChange, getToolReadPath } from './tool-file-change';
 import { showThinking } from './state';
 
+export function isWorkspaceDirectoryText(text: string) {
+  return text.startsWith('[Working directory:');
+}
+
+export function shouldShowAssistantPartInHighlightedCard(part: Part) {
+  if (part.type === 'reasoning') return false;
+  if (part.type === 'text') {
+    return part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text);
+  }
+  return shouldShowAssistantPartInline(part);
+}
+
 export function isFileEditPart(part: Part): boolean {
   if (part.type !== 'tool') return false;
   return getToolFileChange((part as ToolPart).tool, (part as ToolPart).state) !== null;

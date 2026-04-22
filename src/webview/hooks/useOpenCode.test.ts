@@ -542,7 +542,7 @@ describe('sendMessage', () => {
     });
   });
 
-  it('reuses the most recently selected agent for a new session', async () => {
+  it('defaults new sessions to the build agent', async () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('agents', [
@@ -568,8 +568,8 @@ describe('sendMessage', () => {
     await hookModule.createSession();
 
     expect(stateModule.state.activeSessionId).toBe('session-2');
-    expect(stateModule.state.selectedAgent).toBe('plan');
-    expect(stateModule.getSelectedAgentForSession('session-2')).toBe('plan');
+    expect(stateModule.state.selectedAgent).toBe('build');
+    expect(stateModule.getSelectedAgentForSession('session-2')).toBe('build');
     expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
   });
 

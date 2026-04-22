@@ -4,7 +4,9 @@ import {
   getFinalAssistantTextPartId,
   isFileEditPart,
   isFileReadPart,
+  isWorkspaceDirectoryText,
   isTodoToolPart,
+  shouldShowAssistantPartInHighlightedCard,
   shouldShowAssistantPartInline,
 } from './part-utils';
 import { setShowThinking } from './state';
@@ -98,6 +100,36 @@ describe('part utils', () => {
     setShowThinking(false);
     expect(shouldShowAssistantPartInline(reasoningPart)).toBe(false);
     expect(shouldShowAssistantPartInline(reasoningPart, false)).toBe(true);
+  });
+
+  it('hides reasoning and workspace directory text in highlighted cards', () => {
+    const workspaceTextPart: Part = {
+      id: 'text-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'text',
+      text: '[Working directory: /workspace]',
+    };
+    const visibleTextPart: Part = {
+      id: 'text-2',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'text',
+      text: 'Visible answer',
+    };
+    const reasoningPart: Part = {
+      id: 'reason-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'reasoning',
+      text: 'thinking',
+      time: { start: 0 },
+    };
+
+    expect(isWorkspaceDirectoryText(workspaceTextPart.text)).toBe(true);
+    expect(shouldShowAssistantPartInHighlightedCard(workspaceTextPart)).toBe(false);
+    expect(shouldShowAssistantPartInHighlightedCard(visibleTextPart)).toBe(true);
+    expect(shouldShowAssistantPartInHighlightedCard(reasoningPart)).toBe(false);
   });
 
   it('identifies the last visible text part when highlighting is enabled for the turn', () => {

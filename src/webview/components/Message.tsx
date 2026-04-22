@@ -26,6 +26,8 @@ import {
 import {
   getFinalAssistantTextPartId,
   isFileEditPart,
+  isWorkspaceDirectoryText,
+  shouldShowAssistantPartInHighlightedCard,
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
 
@@ -113,7 +115,10 @@ export function Message(props: {
   const visibleAssistantParts = createMemo(() =>
     assistant()
       ? normalizedParts().filter((part) => {
-          if (part.type === 'text') return (getEffectivePartText(part) || '').trim().length > 0;
+          if (part.type === 'text') {
+            const effectiveText = getEffectivePartText(part) || '';
+            return effectiveText.trim().length > 0 && !isWorkspaceDirectoryText(effectiveText);
+          }
           return shouldShowAssistantPartInline(part);
         })
       : normalizedParts()
@@ -204,6 +209,9 @@ export function Message(props: {
                 errorMessage={assistantErrorMessage()}
                 highlightFinalAnswer={props.highlightFinalAnswer}
                 highlightPlanningAnswer={props.highlightPlanningAnswer}
+                suppressHighlightedCardMetaParts={
+                  !!props.highlightFinalAnswer && assistantContainerVariant() !== 'plain'
+                }
                 streamedTextForPart={streamedTextForPart}
               />
             </Show>
@@ -638,17 +646,29 @@ function AssistantMessageContent(props: {
   errorMessage?: string | null;
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
+  suppressHighlightedCardMetaParts?: boolean;
   streamedTextForPart: (part: Part) => string | null;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
+  const displayParts = createMemo(() =>
+    props.suppressHighlightedCardMetaParts
+      ? dedupedParts().filter((part) => {
+          if (part.type === 'text') {
+            const effectiveText = props.streamedTextForPart(part) || part.text;
+            return shouldShowAssistantPartInHighlightedCard({ ...part, text: effectiveText });
+          }
+          return shouldShowAssistantPartInHighlightedCard(part);
+        })
+      : dedupedParts()
+  );
   const finalTextPartId = createMemo(() =>
-    getFinalAssistantTextPartId(dedupedParts(), !!props.highlightFinalAnswer)
+    getFinalAssistantTextPartId(displayParts(), !!props.highlightFinalAnswer)
   );
   const renderItems = createMemo(() => {
     const items: Array<
       { kind: 'part'; part: Part } | { kind: 'file-edit-stack'; parts: ToolPart[] }
     > = [];
-    const parts = dedupedParts();
+    const parts = displayParts();
 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];

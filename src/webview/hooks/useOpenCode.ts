@@ -742,7 +742,8 @@ export async function createSession(
     if (defaultModel) {
       setSelectedModel(defaultModel, { sessionId: session.id, persistGlobal: false });
     }
-    const defaultAgent = getPersistedSelectedAgent() || getDefaultPrimaryAgentName();
+    const defaultAgent =
+      getBuildAgentName() || getPersistedSelectedAgent() || getDefaultPrimaryAgentName();
     if (defaultAgent) {
       setSelectedAgent(defaultAgent, { sessionId: session.id, persistGlobal: false });
     }
