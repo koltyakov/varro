@@ -649,4 +649,42 @@ describe('sendMessage', () => {
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
   });
+
+  it('switches the active session to build and sends the implementation prompt', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('agents', [
+      {
+        name: 'build',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+      {
+        name: 'plan',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+    ]);
+    stateModule.setSelectedAgent('plan');
+    stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.implementPlan('Implement the approved plan.');
+
+    expect(stateModule.state.selectedAgent).toBe('build');
+    expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
+    expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      parts: [{ type: 'text', text: 'Implement the approved plan.' }],
+      agent: 'build',
+    });
+  });
 });

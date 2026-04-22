@@ -66,6 +66,10 @@ function getDefaultPrimaryAgentName() {
   return state.agents.find((agent) => agent.name === 'build')?.name || state.agents[0]?.name || null;
 }
 
+function getBuildAgentName() {
+  return state.agents.find((agent) => agent.name === 'build')?.name || null;
+}
+
 import type {
   Session,
   SessionStatus,
@@ -909,6 +913,19 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     }
     setError(baseMessage);
   }
+}
+
+export async function implementPlan(prompt: string, sessionId = state.activeSessionId) {
+  if (!sessionId || sessionId !== state.activeSessionId) return;
+
+  const buildAgent = getBuildAgentName();
+  if (!buildAgent) {
+    setError('Build agent is unavailable');
+    return;
+  }
+
+  setSelectedAgent(buildAgent, { sessionId, persistGlobal: false });
+  await sendMessage(prompt);
 }
 
 function getAttachmentReference(

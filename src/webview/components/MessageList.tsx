@@ -20,7 +20,7 @@ import {
 } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part } from '../types';
 import { Message as MessageComponent, type AssistantFileEditStackGroup } from './Message';
-import { recheckSessionStatus } from '../hooks/useOpenCode';
+import { implementPlan, recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import {
@@ -56,6 +56,20 @@ function getAssistantTurnSubagentCount(messages: Array<{ info: Message; parts: P
 
 function isPlanningAssistantMessage(info: AssistantMessage): boolean {
   return info.agent === 'plan' || getSelectedAgentForSession(info.sessionID) === 'plan';
+}
+
+export function buildPlanImplementationPrompt(parts: Part[]) {
+  void parts;
+  return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
+}
+
+export function getLatestPlanImplementationMessageId(messages: Array<{ info: Message }>): string | null {
+  const lastMessage = messages[messages.length - 1]?.info;
+  if (!lastMessage || !isAssistantMessage(lastMessage) || !isPlanningAssistantMessage(lastMessage)) {
+    return null;
+  }
+
+  return lastMessage.id;
 }
 
 const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
@@ -95,6 +109,9 @@ export function MessageList() {
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
 
   const messages = createMemo(() => state.messages);
+  const latestPlanImplementationMessageId = createMemo(() =>
+    getLatestPlanImplementationMessageId(messages())
+  );
 
   const shouldVirtualize = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
 
@@ -478,6 +495,7 @@ export function MessageList() {
   });
 
   const assistantDialogSummaryMap = createMemo(() => getAssistantDialogSummaryMap(messages()));
+  const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
 
   return (
     <div
@@ -543,7 +561,23 @@ export function MessageList() {
                         streamingText={state.streamingText}
                       />
                       <Show when={assistantDialogSummaryMap().get(msg.info.id)}>
-                        {(summary) => <AssistantDialogSummary summary={summary()} />}
+                        {(summary) => (
+                          <AssistantDialogSummary
+                            summary={summary()}
+                            showImplementPlanAction={
+                              hasBuildAgent() &&
+                              isAssistantMessage(msg.info) &&
+                              isPlanningAssistantMessage(msg.info) &&
+                              msg.info.id === latestPlanImplementationMessageId()
+                            }
+                            onImplementPlan={() =>
+                              void implementPlan(
+                                buildPlanImplementationPrompt(msg.parts),
+                                msg.info.sessionID
+                              )
+                            }
+                          />
+                        )}
                       </Show>
                     </div>
                   );
@@ -558,6 +592,8 @@ export function MessageList() {
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               fileEditStackGroupMap={assistantStackGroupMap()}
               assistantDialogSummaryMap={assistantDialogSummaryMap()}
+              hasBuildAgent={hasBuildAgent()}
+              latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}
             />
           </Show>
@@ -584,6 +620,8 @@ function VirtualizedContent(props: {
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
+  hasBuildAgent: boolean;
+  latestPlanImplementationMessageId: string | null;
   visibleRange: { start: number; end: number; topPad: number; bottomPad: number };
 }) {
   const visible = createMemo(() =>
@@ -632,7 +670,20 @@ function VirtualizedContent(props: {
                 streamingText={state.streamingText}
               />
               <Show when={props.assistantDialogSummaryMap.get(msg.info.id)}>
-                {(summary) => <AssistantDialogSummary summary={summary()} />}
+                {(summary) => (
+                  <AssistantDialogSummary
+                    summary={summary()}
+                    showImplementPlanAction={
+                      props.hasBuildAgent &&
+                      isAssistantMessage(msg.info) &&
+                      isPlanningAssistantMessage(msg.info) &&
+                      msg.info.id === props.latestPlanImplementationMessageId
+                    }
+                    onImplementPlan={() =>
+                      void implementPlan(buildPlanImplementationPrompt(msg.parts), msg.info.sessionID)
+                    }
+                  />
+                )}
               </Show>
             </div>
           );
@@ -708,15 +759,31 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
   return result;
 }
 
-function AssistantDialogSummary(props: { summary: AssistantDialogSummaryInfo }) {
+function AssistantDialogSummary(props: {
+  summary: AssistantDialogSummaryInfo;
+  showImplementPlanAction?: boolean;
+  onImplementPlan?: () => void;
+}) {
   const agentSuffix =
     props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
 
   return (
     <div class="model-change-indicator assistant-dialog-summary">
-      <span class="model-change-label">
-        {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
-      </span>
+      <div class="assistant-dialog-summary-content">
+        <span class="model-change-label">
+          {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
+        </span>
+        <Show when={props.showImplementPlanAction}>
+          <button
+            type="button"
+            class="assistant-dialog-summary-action"
+            disabled={isLoading()}
+            onClick={() => props.onImplementPlan?.()}
+          >
+            Implement the plan
+          </button>
+        </Show>
+      </div>
     </div>
   );
 }

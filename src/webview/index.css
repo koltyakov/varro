@@ -446,6 +446,35 @@ input:focus-visible {
   margin-bottom: 0;
 }
 
+.assistant-dialog-summary-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.assistant-dialog-summary-action {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-button-background) 18%, transparent);
+  color: var(--color-vscode-button-foreground);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.assistant-dialog-summary-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-button-background) 28%, transparent);
+}
+
+.assistant-dialog-summary-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .assistant-file-edit-stack {
   display: flex;
   flex-direction: column;
