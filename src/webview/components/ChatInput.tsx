@@ -59,7 +59,12 @@ import {
 } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
-import { getLeafPathName, getDroppedFileLabel, isSamePath } from '../lib/path-display';
+import { getLeafPathName, getDroppedFileLabel } from '../lib/path-display';
+import {
+  formatContextLineRanges,
+  getSelectionRangesFromEditorContext,
+  hasExplicitContextForPath,
+} from '../../shared/context-files';
 import { TodoList } from './TodoList';
 import type { Agent, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
@@ -145,24 +150,19 @@ export function ChatInput() {
   const selection = () => state.editorContext.selection;
   const terminalSelection = () => state.terminalSelection;
   const activeFile = () => state.editorContext.activeFile;
+  const explicitContextForActiveFile = () => hasExplicitContextForPath(files(), activeFile()?.path);
   const hasContext = () => !!activeFile() || !!selection() || !!terminalSelection();
 
   const hasMentions = () => files().length > 0 || clipboardImages().length > 0;
-  const visibleFiles = () => {
-    const currentPath = activeFile()?.path;
-    return files().filter((file) => !isSamePath(file.path, currentPath));
-  };
+  const visibleFiles = () => files();
 
   const activeContext = () => {
     const file = activeFile();
-    const selectedLines = selection();
+    const selectedLines = getSelectionRangesFromEditorContext(selection());
     if (!file) return null;
+    if (explicitContextForActiveFile() && selectedLines.length === 0) return null;
     const displayPath = getLeafPathName(file.relativePath || file.path);
-    const lineRange = selectedLines
-      ? selectedLines.startLine === selectedLines.endLine
-        ? `L${selectedLines.startLine}`
-        : `L${selectedLines.startLine}-${selectedLines.endLine}`
-      : null;
+    const lineRange = formatContextLineRanges(selectedLines);
     return {
       filename: displayPath,
       lineRange,
@@ -1282,8 +1282,13 @@ export function ChatInput() {
               {(file) => (
                 <AttachmentChip
                   label={getDroppedFileLabel(file)}
+                  detail={formatContextLineRanges(file.lineRanges)}
                   icon={file.type === 'directory' ? 'folder' : 'file'}
-                  title={file.relativePath || file.path}
+                  title={
+                    formatContextLineRanges(file.lineRanges)
+                      ? `${file.relativePath || file.path} ${formatContextLineRanges(file.lineRanges)}`
+                      : file.relativePath || file.path
+                  }
                   onRemove={() => {
                     removeContextFile(file.path);
                     postMessage({ type: 'files/remove', payload: { path: file.path } });

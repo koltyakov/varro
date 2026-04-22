@@ -18,6 +18,7 @@ import { getLeafPathName, isAbsolutePath, normalizePath } from '../lib/path-disp
 import { postMessage } from '../lib/bridge';
 import { getToolFileChange } from '../lib/tool-file-change';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
+import { formatContextLineRanges, getFirstContextLine, parseSelectionReference } from '../../shared/context-files';
 import {
   isFileEditPart,
   shouldShowAssistantPartInline,
@@ -157,7 +158,11 @@ function CompactionDivider(props: { part: CompactionPart }) {
 }
 
 type MessageAttachment =
-  | { type: 'file-selection'; filename: string; startLine: number; endLine: number }
+  | {
+      type: 'file-selection';
+      filename: string;
+      lineRanges: Array<{ startLine: number; endLine: number }>;
+    }
   | { type: 'terminal-selection'; terminalName: string }
   | { type: 'file-reference'; path: string; isDirectory: boolean };
 
@@ -180,13 +185,12 @@ function UserMessageContent(props: { parts: Part[] }) {
       if (text.startsWith('[Working directory:')) continue;
 
       if (text.startsWith('[Selection from ') && !text.startsWith('[Selection from terminal')) {
-        const match = text.match(/^\[Selection from (.+?) lines (\d+)-(\d+)\]/);
-        if (match) {
+        const selectionRef = parseSelectionReference(text);
+        if (selectionRef) {
           attachments.push({
             type: 'file-selection',
-            filename: match[1],
-            startLine: parseInt(match[2]),
-            endLine: parseInt(match[3]),
+            filename: selectionRef.path,
+            lineRanges: selectionRef.lineRanges,
           });
           continue;
         }
@@ -279,7 +283,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
       : wp
         ? `${normalizePath(wp).replace(/\/+$/, '')}/${filePath.replace(/^\.\//, '')}`
         : filePath;
-    const line = a.type === 'file-selection' ? a.startLine : undefined;
+    const line = a.type === 'file-selection' ? getFirstContextLine(a.lineRanges) : undefined;
     postMessage({ type: 'vscode/open', payload: { path: absolutePath, line } });
   };
 
@@ -308,11 +312,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const detail = () => {
     const a = att();
     if (a.type === 'file-selection') {
-      return (
-        <span class="chip-detail">
-          L{a.startLine}-{a.endLine}
-        </span>
-      );
+      return <span class="chip-detail">{formatContextLineRanges(a.lineRanges)}</span>;
     }
     if (a.type === 'terminal-selection') {
       return <span class="chip-detail">terminal</span>;
@@ -358,7 +358,7 @@ function getAttachmentLabel(att: MessageAttachment): string {
 function getAttachmentTitle(att: MessageAttachment): string {
   switch (att.type) {
     case 'file-selection':
-      return `${att.filename}:${att.startLine}-${att.endLine}`;
+      return `${att.filename}:${att.lineRanges.map((range) => `${range.startLine}-${range.endLine}`).join(',')}`;
     case 'terminal-selection':
       return `Terminal: ${att.terminalName}`;
     case 'file-reference':

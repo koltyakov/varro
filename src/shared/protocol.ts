@@ -17,10 +17,16 @@ export interface EditorContext {
   }>;
 }
 
+export interface ContextLineRange {
+  startLine: number;
+  endLine: number;
+}
+
 export interface DroppedFile {
   path: string;
   relativePath: string;
   type: 'file' | 'directory';
+  lineRanges?: ContextLineRange[];
 }
 
 export type PermissionMode = 'default' | 'full';

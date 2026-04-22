@@ -70,6 +70,13 @@ import type {
   FileDiff,
 } from '../types';
 import { getWorkspaceRelativePath, isSamePath } from '../lib/path-display';
+import {
+  formatSelectionReference,
+  getSelectionRangesFromEditorContext,
+  hasExplicitContextForPath,
+  mergeContextFile,
+  subtractContextLineRanges,
+} from '../../shared/context-files';
 import { applyWebviewTheme } from '../lib/theme';
 import { getPreferredVariant } from '../lib/model-variants';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
@@ -343,8 +350,11 @@ export function useOpenCode() {
         case 'files/dropped':
           for (const file of msg.payload) {
             setState('droppedFiles', (prev) => {
-              if (prev.find((f) => f.path === file.path)) return prev;
-              return [...prev, file];
+              const index = prev.findIndex((f) => f.path === file.path);
+              if (index === -1) return [...prev, file];
+              return prev.map((item, itemIndex) =>
+                itemIndex === index ? mergeContextFile(item, file) : item
+              );
             });
           }
           break;
@@ -733,12 +743,36 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   const af = state.editorContext.activeFile;
   if (af) {
     const activeFilePath = getAttachmentReference({ path: af.path, type: 'file' }, wp);
-    parts.push({
-      type: 'text',
-      text: sel
-        ? `[Selection from ${activeFilePath} lines ${sel.startLine}-${sel.endLine}]`
-        : `[Active file: ${activeFilePath}]`,
-    });
+    const explicitContext = hasExplicitContextForPath(state.droppedFiles, af.path);
+    const activeSelectionRanges = getSelectionRangesFromEditorContext(sel);
+    const explicitSelectionRanges = explicitContext?.type === 'file' ? explicitContext.lineRanges : undefined;
+    const uniqueActiveSelectionRanges = subtractContextLineRanges(
+      activeSelectionRanges,
+      explicitSelectionRanges
+    );
+    if (explicitContext) {
+      if (uniqueActiveSelectionRanges.length > 0) {
+        parts.push({
+          type: 'text',
+          text: formatSelectionReference(activeFilePath, uniqueActiveSelectionRanges),
+        });
+      }
+      parts.push({
+        type: 'text',
+        text:
+          explicitSelectionRanges && explicitSelectionRanges.length > 0
+            ? formatSelectionReference(activeFilePath, explicitSelectionRanges)
+            : activeFilePath,
+      });
+    } else {
+      parts.push({
+        type: 'text',
+        text:
+          uniqueActiveSelectionRanges.length > 0
+            ? formatSelectionReference(activeFilePath, uniqueActiveSelectionRanges)
+            : `[Active file: ${activeFilePath}]`,
+      });
+    }
   }
 
   const terminalSelection = state.terminalSelection;
@@ -751,7 +785,11 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
 
   for (const file of state.droppedFiles) {
     if (isSamePath(file.path, af?.path)) continue;
-    parts.push({ type: 'text', text: getAttachmentReference(file, wp) });
+    const fileReference = getAttachmentReference(file, wp);
+    parts.push({
+      type: 'text',
+      text: file.lineRanges?.length ? formatSelectionReference(fileReference, file.lineRanges) : fileReference,
+    });
   }
 
   if (includeClipboardImages) {

@@ -63,6 +63,10 @@
         "title": "Varro: Add to Context"
       },
       {
+        "command": "varro.chat.addSelectionToContext",
+        "title": "Varro: Add to Context"
+      },
+      {
         "command": "varro.chat.addTerminalSelectionToContext",
         "title": "Varro: Add to Context"
       }
@@ -71,6 +75,13 @@
       "explorer/context": [
         {
           "command": "varro.chat.addToContext",
+          "group": "z_varro"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "varro.chat.addSelectionToContext",
+          "when": "editorHasSelection && !editorReadonly",
           "group": "z_varro"
         }
       ],
@@ -84,6 +95,10 @@
       "commandPalette": [
         {
           "command": "varro.chat.addToContext",
+          "when": "false"
+        },
+        {
+          "command": "varro.chat.addSelectionToContext",
           "when": "false"
         },
         {

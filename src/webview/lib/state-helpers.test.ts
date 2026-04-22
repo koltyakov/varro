@@ -154,10 +154,51 @@ describe('state helpers', () => {
 
     stateModule.addContextFile({ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' });
     stateModule.addContextFile({ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' });
+    stateModule.addContextFile({
+      path: '/repo/a.ts',
+      relativePath: 'a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 2, endLine: 4 }],
+    });
+    stateModule.addContextFile({
+      path: '/repo/a.ts',
+      relativePath: 'a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 8, endLine: 9 }],
+    });
     stateModule.addContextFile({ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' });
     expect(stateModule.state.droppedFiles.map((file) => file.relativePath)).toEqual(['a.ts', 'b.ts']);
+    expect(stateModule.state.droppedFiles[0]?.lineRanges).toBeUndefined();
+
+    stateModule.clearContextFiles();
+    stateModule.addContextFile({
+      path: '/repo/a.ts',
+      relativePath: 'a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 2, endLine: 4 }],
+    });
+    stateModule.addContextFile({
+      path: '/repo/a.ts',
+      relativePath: 'a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 8, endLine: 9 }],
+    });
+    expect(stateModule.state.droppedFiles).toEqual([
+      {
+        path: '/repo/a.ts',
+        relativePath: 'a.ts',
+        type: 'file',
+        lineRanges: [
+          { startLine: 2, endLine: 4 },
+          { startLine: 8, endLine: 9 },
+        ],
+      },
+    ]);
 
     stateModule.removeContextFile('/repo/a.ts');
+    expect(stateModule.state.droppedFiles).toEqual([]);
+
+    stateModule.addContextFile({ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' });
     expect(stateModule.state.droppedFiles.map((file) => file.relativePath)).toEqual(['b.ts']);
 
     stateModule.clearContextFiles();

@@ -12,6 +12,7 @@ import type {
   WebviewThemeKind,
   WebviewMessage,
 } from '../shared/protocol';
+import { mergeContextFile } from '../shared/context-files';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
 import { logger } from './logger';
@@ -841,18 +842,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   postDroppedFiles(
     files: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>
   ) {
-    const seen = new Set<string>();
-    const unique = files.filter((file) => {
-      if (seen.has(file.path)) return false;
-      seen.add(file.path);
-      return true;
-    });
-    const existing = new Set(this.contextFiles.map((f) => f.path));
-    const next = unique.filter((file) => !existing.has(file.path));
-    if (next.length === 0) return;
+    const updates: DroppedFile[] = [];
+    for (const file of files) {
+      const incoming = file as DroppedFile;
+      const index = this.contextFiles.findIndex((item) => item.path === incoming.path);
+      if (index === -1) {
+        this.contextFiles.push(incoming);
+        updates.push(incoming);
+        continue;
+      }
 
-    this.contextFiles.push(...next);
-    this.post({ type: 'files/dropped', payload: next });
+      const merged = mergeContextFile(this.contextFiles[index], incoming);
+      this.contextFiles[index] = merged;
+      updates.push(merged);
+    }
+    if (updates.length === 0) return;
+
+    this.post({ type: 'files/dropped', payload: updates });
     this.onContextFilesChanged?.();
   }
 

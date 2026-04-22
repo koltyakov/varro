@@ -22,6 +22,7 @@ import type {
   ServerStatus,
   WebviewThemeKind,
 } from '../../shared/protocol';
+import { mergeContextFile } from '../../shared/context-files';
 
 const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
@@ -415,9 +416,12 @@ export function addContextFile(file: DroppedFile) {
   setState(
     'droppedFiles',
     produce((files) => {
-      if (!files.find((f) => f.path === file.path)) {
+      const idx = files.findIndex((f) => f.path === file.path);
+      if (idx === -1) {
         files.push(file);
+        return;
       }
+      files[idx] = mergeContextFile(files[idx], file);
     })
   );
 }

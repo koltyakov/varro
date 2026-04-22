@@ -6,7 +6,12 @@ import {
   clearClipboardImages,
   clearContextFiles,
 } from '../lib/state';
-import { getLeafPathName, getDroppedFileLabel, isSamePath } from '../lib/path-display';
+import { getLeafPathName, getDroppedFileLabel } from '../lib/path-display';
+import {
+  formatContextLineRanges,
+  getSelectionRangesFromEditorContext,
+  hasExplicitContextForPath,
+} from '../../shared/context-files';
 import { postMessage } from '../lib/bridge';
 
 export function ContextBar() {
@@ -15,6 +20,7 @@ export function ContextBar() {
   const selection = () => state.editorContext.selection;
   const terminalSelection = () => state.terminalSelection;
   const activeFile = () => state.editorContext.activeFile;
+  const explicitContextForActiveFile = () => hasExplicitContextForPath(files(), activeFile()?.path);
   const hasContext = () =>
     files().length > 0 ||
     clipboardImages().length > 0 ||
@@ -23,21 +29,15 @@ export function ContextBar() {
     !!terminalSelection();
   const activeContext = () => {
     const file = activeFile();
-    const selectedLines = selection();
+    const selectedLines = getSelectionRangesFromEditorContext(selection());
     if (!file) return null;
+    if (explicitContextForActiveFile() && selectedLines.length === 0) return null;
 
-    const lineRange = selectedLines
-      ? selectedLines.startLine === selectedLines.endLine
-        ? `L${selectedLines.startLine}`
-        : `L${selectedLines.startLine}-${selectedLines.endLine}`
-      : null;
+    const lineRange = formatContextLineRanges(selectedLines);
 
     return { filename: getLeafPathName(file.relativePath), lineRange };
   };
-  const visibleFiles = () => {
-    const currentPath = activeFile()?.path;
-    return files().filter((file) => !isSamePath(file.path, currentPath));
-  };
+  const visibleFiles = () => files();
 
   return (
     <Show when={hasContext()}>
@@ -67,7 +67,12 @@ export function ContextBar() {
             {(file) => (
               <ContextChip
                 label={getDroppedFileLabel(file)}
-                title={file.relativePath || file.path}
+                detail={formatContextLineRanges(file.lineRanges)}
+                title={
+                  formatContextLineRanges(file.lineRanges)
+                    ? `${file.relativePath || file.path} ${formatContextLineRanges(file.lineRanges)}`
+                    : file.relativePath || file.path
+                }
                 icon={file.type === 'directory' ? 'folder' : 'file'}
                 onRemove={visibleFiles().length > 0 ? () => removeContextFile(file.path) : undefined}
               />

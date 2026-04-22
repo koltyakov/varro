@@ -250,6 +250,211 @@ describe('sendMessage', () => {
     expect(stateModule.state.todos).toEqual([]);
   });
 
+  it('sends merged explicit selections as a single document attachment', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/a.ts',
+      relativePath: 'src/a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 3, endLine: 4 }],
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/a.ts',
+      relativePath: 'src/a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 8, endLine: 10 }],
+    });
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Review this');
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      parts: [
+        { type: 'text', text: 'Review this' },
+        { type: 'text', text: '[Working directory: /repo]' },
+        { type: 'text', text: '[Selection from src/a.ts lines 3-4, 8-10]' },
+      ],
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
+  });
+
+  it('includes only unique live-selection lines alongside explicit same-file context', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+      selection: { startLine: 20, endLine: 24 },
+      diagnostics: [],
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/a.ts',
+      relativePath: 'src/a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 3, endLine: 4 }],
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/a.ts',
+      relativePath: 'src/a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 8, endLine: 10 }],
+    });
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Review active file');
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      parts: [
+        { type: 'text', text: 'Review active file' },
+        { type: 'text', text: '[Working directory: /repo]' },
+        { type: 'text', text: '[Selection from src/a.ts lines 20-24]' },
+        { type: 'text', text: '[Selection from src/a.ts lines 3-4, 8-10]' },
+      ],
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
+  });
+
+  it('subtracts overlapping explicit ranges from the live same-file selection payload', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+      selection: { startLine: 2, endLine: 12 },
+      diagnostics: [],
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/a.ts',
+      relativePath: 'src/a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 1, endLine: 4 }],
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/a.ts',
+      relativePath: 'src/a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 8, endLine: 10 }],
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/a.ts',
+      relativePath: 'src/a.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 12, endLine: 20 }],
+    });
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Review overlap');
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      parts: [
+        { type: 'text', text: 'Review overlap' },
+        { type: 'text', text: '[Working directory: /repo]' },
+        { type: 'text', text: '[Selection from src/a.ts lines 5-7, 11]' },
+        { type: 'text', text: '[Selection from src/a.ts lines 1-4, 8-10, 12-20]' },
+      ],
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
+  });
+
+  it('hides the duplicate active file payload when the file is explicitly added without a live selection', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+      selection: null,
+      diagnostics: [],
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/a.ts',
+      relativePath: 'src/a.ts',
+      type: 'file',
+    });
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Review active file');
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      parts: [
+        { type: 'text', text: 'Review active file' },
+        { type: 'text', text: '[Working directory: /repo]' },
+        { type: 'text', text: 'src/a.ts' },
+      ],
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
+  });
+
   it('reuses the most recently selected model for a new session', async () => {
     const { stateModule, hookModule } = await loadModules();
 

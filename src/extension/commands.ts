@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
@@ -59,6 +60,19 @@ export function registerCommands(
       }
     }),
 
+    vscode.commands.registerCommand('varro.chat.addSelectionToContext', async () => {
+      try {
+        const selectionTarget = await getEditorSelectionTarget();
+        if (!selectionTarget) return;
+        sidebar.postDroppedFiles([selectionTarget]);
+        vscode.commands.executeCommand('workbench.view.extension.varro');
+      } catch (err) {
+        logger.error(
+          `varro.chat.addSelectionToContext: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }),
+
     vscode.commands.registerCommand(
       'varro.chat.addToContext',
       async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
@@ -104,6 +118,32 @@ export function registerCommands(
       }
     )
   );
+}
+
+async function getEditorSelectionTarget() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.selection.isEmpty) return null;
+
+  const document = editor.document;
+  if (document.isUntitled || document.uri.scheme === 'untitled') return null;
+
+  try {
+    const stat = await vscode.workspace.fs.stat(document.uri);
+    if (stat.type & vscode.FileType.Directory) return null;
+
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+    return {
+      path: document.uri.fsPath,
+      relativePath: getRelativePath(document.uri, workspaceFolder),
+      type: 'file' as const,
+      lineRanges: getSelectionRangesFromEditorContext({
+        startLine: editor.selection.start.line + 1,
+        endLine: editor.selection.end.line + 1,
+      }),
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function captureTerminalSelectionForContext(
