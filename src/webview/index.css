@@ -2923,6 +2923,14 @@ kbd {
   line-height: 1.6;
 }
 
+.user-message-text-scroll {
+  max-height: min(320px, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-right: -9px;
+  padding-right: 9px;
+}
+
 .user-message-empty {
   color: var(--color-vscode-muted);
   font-style: italic;

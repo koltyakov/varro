@@ -1,6 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { render } from 'solid-js/web';
 import type { Part } from '../types';
-import { getAssistantContainerVariant } from './Message';
+import { Message, getAssistantContainerVariant } from './Message';
+
+let container: HTMLDivElement | null = null;
+let cleanup: (() => void) | undefined;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+});
+
+afterEach(() => {
+  cleanup?.();
+  cleanup = undefined;
+  container?.remove();
+  container = null;
+});
 
 function textPart(id: string, text: string): Part {
   return {
@@ -20,6 +36,17 @@ function reasoningPart(id: string, text: string): Part {
     type: 'reasoning',
     text,
     time: { start: 0 },
+  };
+}
+
+function userMessage(id: string) {
+  return {
+    id,
+    sessionID: 'session-1',
+    role: 'user' as const,
+    time: { created: 0 },
+    agent: 'chat',
+    model: { providerID: 'provider-1', modelID: 'model-1' },
   };
 }
 
@@ -96,5 +123,22 @@ describe('getAssistantContainerVariant', () => {
         highlightFinalAnswer: true,
       })
     ).toBe('plain');
+  });
+});
+
+describe('Message user prompt rendering', () => {
+  it('wraps user prompt text in a scroll container', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-1'),
+          parts: [textPart('text-1', 'Line 1'), textPart('text-2', 'Line 2')],
+        }),
+      container!
+    );
+
+    const scrollContainer = container?.querySelector('.user-message-text-scroll');
+    expect(scrollContainer).toBeInstanceOf(HTMLDivElement);
+    expect(scrollContainer?.querySelectorAll('.user-message-text')).toHaveLength(2);
   });
 });

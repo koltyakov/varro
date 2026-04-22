@@ -297,7 +297,11 @@ function UserMessageContent(props: { parts: Part[] }) {
 
   return (
     <div class="rendered-markdown">
-      <For each={parsed().messageTexts}>{(text) => <p class="user-message-text">{text}</p>}</For>
+      <Show when={parsed().messageTexts.length > 0}>
+        <div class="user-message-text-scroll">
+          <For each={parsed().messageTexts}>{(text) => <p class="user-message-text">{text}</p>}</For>
+        </div>
+      </Show>
       <Show when={!hasContent()}>
         <p class="user-message-empty">(no content)</p>
       </Show>
