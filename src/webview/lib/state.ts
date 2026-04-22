@@ -58,7 +58,9 @@ function writeStored(key: string, value: unknown) {
       window.localStorage.removeItem(key);
       return;
     }
-    window.localStorage.setItem(key, JSON.stringify(value));
+    const serialized = JSON.stringify(value);
+    if (window.localStorage.getItem(key) === serialized) return;
+    window.localStorage.setItem(key, serialized);
   } catch {}
 }
 
@@ -420,6 +422,8 @@ export function setPermissionModeForSession(
     return;
   }
 
+  if (state.sessionPermissionModes[sessionId] === mode) return;
+
   const nextModes = { ...state.sessionPermissionModes, [sessionId]: mode };
 
   setState('sessionPermissionModes', nextModes);
@@ -454,10 +458,10 @@ export function setSelectedModel(
   const persistGlobal = options?.persistGlobal ?? true;
   const sessionId = options?.sessionId;
 
-  setState('selectedModel', model);
-  if (persistGlobal) {
-    writeStored(STORAGE_KEYS.selectedModel, model);
+  if (!modelsEqual(state.selectedModel, model)) {
+    setState('selectedModel', model);
   }
+  if (persistGlobal) writeStored(STORAGE_KEYS.selectedModel, model);
 
   if (sessionId) {
     const nextSessionModels = model
@@ -488,10 +492,11 @@ export function resetDraftPermissionMode() {
 }
 
 export function syncDraftPermissionForWorkspace(workspacePath: string | null) {
-  permissionWorkspace = workspacePath;
+  permissionWorkspace = workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '') || null;
   const modes =
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
-  const mode = workspacePath && modes[workspacePath] ? modes[workspacePath] : 'default';
+  const mode =
+    permissionWorkspace && modes[permissionWorkspace] ? modes[permissionWorkspace] : 'default';
   setDraftPermissionMode(mode);
 }
 
@@ -517,6 +522,23 @@ export function addContextFile(file: DroppedFile) {
         return;
       }
       files[idx] = mergeContextFile(files[idx], file);
+    })
+  );
+}
+
+export function addContextFiles(files: DroppedFile[]) {
+  if (files.length === 0) return;
+  setState(
+    'droppedFiles',
+    produce((current) => {
+      for (const file of files) {
+        const idx = current.findIndex((item) => item.path === file.path);
+        if (idx === -1) {
+          current.push(file);
+          continue;
+        }
+        current[idx] = mergeContextFile(current[idx], file);
+      }
     })
   );
 }
@@ -617,10 +639,10 @@ export function setSelectedAgent(
   const persistGlobal = options?.persistGlobal ?? true;
   const sessionId = options?.sessionId;
 
-  setState('selectedAgent', agent);
-  if (persistGlobal) {
-    writeStored(STORAGE_KEYS.selectedAgent, agent);
+  if (state.selectedAgent !== agent) {
+    setState('selectedAgent', agent);
   }
+  if (persistGlobal) writeStored(STORAGE_KEYS.selectedAgent, agent);
 
   if (sessionId) {
     const nextSessionAgents = agent
@@ -1091,12 +1113,16 @@ function ensureSessionTreeIndex(sessions = state.sessions, usageLimits = state.s
 
   const primarySessions = sessions.filter((session) => !session.parentID);
   if (primarySessions.length === 0) {
+    sessionTreeIdsByRoot = new Map();
+    activeUsageLimitByRoot = new Map();
     for (const session of sessions) {
       nearestPrimarySessionById.set(session.id, session.id);
       sessionTreeIdsByRoot.set(session.id, [session.id]);
       activeUsageLimitByRoot.set(session.id, usageLimits[session.id] || null);
     }
     sessionTreeIndexedVersion = sessionTreeIndexVersion;
+    indexedSessionsRef = sessions;
+    indexedUsageLimitsRef = usageLimits;
     return;
   }
   sessionTreeIdsByRoot = new Map();
@@ -1207,6 +1233,7 @@ export function replaceMessages(incoming: Array<{ info: Message; parts: Part[] }
 export function setMessagesIncremental(incoming: Array<{ info: Message; parts: Part[] }>) {
   clearStreamingState();
   const current = state.messages;
+  if (current === incoming) return;
   if (current.length === 0 || incoming.length === 0) {
     replaceMessages(incoming);
     return;
@@ -1222,15 +1249,23 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
       setState(
         'messages',
         produce((msgs) => {
+          let changed = false;
           for (let i = 0; i < incoming.length; i++) {
             if (i < msgs.length) {
-              msgs[i] = incoming[i];
+              if (msgs[i] !== incoming[i]) {
+                msgs[i] = incoming[i];
+                changed = true;
+              }
             } else {
               msgs.push(incoming[i]);
+              changed = true;
             }
           }
-          msgs.length = incoming.length;
-          invalidateIndex();
+          if (msgs.length !== incoming.length) {
+            msgs.length = incoming.length;
+            changed = true;
+          }
+          if (changed) invalidateIndex();
         })
       );
       return;
@@ -1246,10 +1281,14 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
       setState(
         'messages',
         produce((msgs) => {
+          let changed = false;
           for (let i = 0; i < incoming.length; i++) {
-            msgs[i] = incoming[i];
+            if (msgs[i] !== incoming[i]) {
+              msgs[i] = incoming[i];
+              changed = true;
+            }
           }
-          invalidateIndex();
+          if (changed) invalidateIndex();
         })
       );
       return;
@@ -1275,4 +1314,12 @@ export function getChildRunsByParentId(
     children.sort((a, b) => a.info.time.created - b.info.time.created);
   }
   return map;
+}
+
+function modelsEqual(a: SelectedModel | null, b: SelectedModel | null) {
+  return (
+    a?.providerID === b?.providerID &&
+    a?.modelID === b?.modelID &&
+    (a?.variant || null) === (b?.variant || null)
+  );
 }

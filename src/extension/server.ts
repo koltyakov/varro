@@ -12,6 +12,11 @@ import { buildServerEnv, getServerPathEntries } from './util/server-path';
 export class OpenCodeServer extends EventEmitter {
   private static readonly MISSING_CLI_MESSAGE =
     'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
+  private static readonly START_DISPOSED_MESSAGE = 'Server start was cancelled';
+  private static readonly HEALTH_TIMEOUT_MS = 2000;
+  private static readonly REQUEST_TIMEOUT_MS = 30_000;
+  private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
+  private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
   private process: ChildProcess | null = null;
   private _status: ServerStatus = { state: 'stopped' };
   private port: number;
@@ -27,8 +32,10 @@ export class OpenCodeServer extends EventEmitter {
   private static readonly MAX_EVENT_RECONNECTS = 10;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private startAttemptId = 0;
+  private disposeGeneration = 0;
   private isDisposing = false;
   private startPromise: Promise<string> | null = null;
+  private requestControllers = new Set<AbortController>();
 
   constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
     super();
@@ -79,6 +86,7 @@ export class OpenCodeServer extends EventEmitter {
 
   async start(): Promise<string> {
     return this.setStartPromise(async () => {
+      const disposeGeneration = this.disposeGeneration;
       this.isDisposing = false;
       if (this.simulateMissingCli) {
         this.stopEventStream();
@@ -88,6 +96,7 @@ export class OpenCodeServer extends EventEmitter {
       }
 
       const healthy = await this.checkHealth();
+      this.throwIfStartCancelled(disposeGeneration);
       if (healthy) {
         logger.info(`Found existing OpenCode server at ${this.url}`);
         this.setRunningStatus(this.url, 'healthy');
@@ -113,6 +122,11 @@ export class OpenCodeServer extends EventEmitter {
         const stderrLines: string[] = [];
         let settled = false;
 
+        const isStaleAttempt = () =>
+          settled ||
+          attemptId !== this.startAttemptId ||
+          this.disposeGeneration !== disposeGeneration;
+
         const rememberStderr = (text: string) => {
           for (const line of text
             .split(/\r?\n/)
@@ -131,7 +145,7 @@ export class OpenCodeServer extends EventEmitter {
         };
 
         const failStartup = (message: string, err?: Error) => {
-          if (settled || attemptId !== this.startAttemptId) return;
+          if (isStaleAttempt()) return;
           settled = true;
           this.cancelPollHealth();
           this.setStatus({ state: 'error', message });
@@ -139,19 +153,33 @@ export class OpenCodeServer extends EventEmitter {
         };
 
         const finishStartup = (url: string) => {
-          if (settled || attemptId !== this.startAttemptId) return;
+          if (isStaleAttempt()) return;
           settled = true;
           this.cancelPollHealth();
           resolve(url);
         };
 
         const recoverOrFailStartup = async (fallback: string) => {
+          if (isStaleAttempt()) return;
           const healthyNow = await this.checkHealth();
+          if (isStaleAttempt()) return;
           if (healthyNow) {
             this.setRunningStatus(this.url, 'healthy');
             this.retries = 0;
             this.startEventStream();
             finishStartup(this.url);
+            return;
+          }
+
+          if (this.retries < this.maxRetries) {
+            this.retries += 1;
+            const delay = this.getRestartDelay(this.retries);
+            logger.warn(`Retrying server startup in ${delay}ms (attempt ${this.retries})`);
+            this.clearStartPromise();
+            setTimeout(() => {
+              if (isStaleAttempt()) return;
+              this.start().then(resolve).catch(reject);
+            }, delay);
             return;
           }
 
@@ -190,14 +218,18 @@ export class OpenCodeServer extends EventEmitter {
             if (this.isDisposing) {
               return;
             }
-            if (attemptId !== this.startAttemptId) return;
+            if (isStaleAttempt()) return;
             if (this._status.state === 'running') {
               this.setStatus({ state: 'stopped' });
               if (this.retries < this.maxRetries) {
                 this.retries++;
-                logger.info(`Restarting server (attempt ${this.retries})`);
+                const delay = this.getRestartDelay(this.retries);
+                logger.info(`Restarting server in ${delay}ms (attempt ${this.retries})`);
                 this.clearStartPromise();
-                this.start().then(resolve).catch(reject);
+                setTimeout(() => {
+                  if (isStaleAttempt()) return;
+                  this.start().then(resolve).catch(reject);
+                }, delay);
                 return;
               }
               const runtimeFailure = `OpenCode server stopped unexpectedly${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}. Restart attempts (${this.maxRetries}) were exhausted.`;
@@ -225,6 +257,8 @@ export class OpenCodeServer extends EventEmitter {
         }
 
         this.pollHealth(
+          attemptId,
+          disposeGeneration,
           (url) => {
             this.retries = 0;
             finishStartup(url);
@@ -250,7 +284,13 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
-  private pollHealth(resolve: (url: string) => void, reject: (err: Error) => void, attempt = 0) {
+  private pollHealth(
+    startAttemptId: number,
+    disposeGeneration: number,
+    resolve: (url: string) => void,
+    reject: (err: Error) => void,
+    attempt = 0
+  ) {
     if (attempt > 50) {
       this.cancelPollHealth();
       this.setStatus({ state: 'error', message: 'Server failed to start within timeout' });
@@ -263,9 +303,21 @@ export class OpenCodeServer extends EventEmitter {
 
     this.pollHealthTimer = setTimeout(async () => {
       this.pollHealthTimer = null;
-      if (!this.pollHealthResolve || !this.pollHealthReject) return;
+      if (
+        !this.pollHealthResolve ||
+        !this.pollHealthReject ||
+        startAttemptId !== this.startAttemptId ||
+        disposeGeneration !== this.disposeGeneration
+      )
+        return;
       const healthy = await this.checkHealth();
-      if (!this.pollHealthResolve || !this.pollHealthReject) return;
+      if (
+        !this.pollHealthResolve ||
+        !this.pollHealthReject ||
+        startAttemptId !== this.startAttemptId ||
+        disposeGeneration !== this.disposeGeneration
+      )
+        return;
       if (healthy) {
         this.cancelPollHealth();
         this.setRunningStatus(this.url, 'healthy');
@@ -273,7 +325,13 @@ export class OpenCodeServer extends EventEmitter {
         this.startEventStream();
         this.pollHealthResolve(this.url);
       } else {
-        this.pollHealth(this.pollHealthResolve, this.pollHealthReject, attempt + 1);
+        this.pollHealth(
+          startAttemptId,
+          disposeGeneration,
+          this.pollHealthResolve,
+          this.pollHealthReject,
+          attempt + 1
+        );
       }
     }, 200);
   }
@@ -281,7 +339,7 @@ export class OpenCodeServer extends EventEmitter {
   private async checkHealth(): Promise<boolean> {
     try {
       const res = await fetch(`${this.url}/global/health`, {
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(OpenCodeServer.HEALTH_TIMEOUT_MS),
       });
       if (!res.ok) return false;
       const data = (await res.json()) as { healthy?: boolean };
@@ -293,29 +351,36 @@ export class OpenCodeServer extends EventEmitter {
 
   async request(method: string, path: string, body?: unknown): Promise<unknown> {
     const scoped = this.scopedUrl(path);
+    const controller = new AbortController();
+    this.requestControllers.add(controller);
     const init: RequestInit = {
       method,
       headers: {
         'Content-Type': 'application/json',
         ...this.directoryHeaders(scoped.directory),
       },
-      signal: AbortSignal.timeout(30_000),
+      signal: anySignal(controller.signal, AbortSignal.timeout(OpenCodeServer.REQUEST_TIMEOUT_MS)),
     };
-    if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
-      init.body = JSON.stringify(body);
-    }
-    const res = await fetch(scoped.url, init);
-    const text = await res.text();
-    let data: unknown = text;
     try {
-      data = text ? JSON.parse(text) : null;
-    } catch {}
-    if (!res.ok) {
-      const msg =
-        typeof data === 'object' && data && 'message' in data ? data.message : res.statusText;
-      throw new Error(`${res.status} ${msg}`);
+      if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
+        init.body = JSON.stringify(body);
+      }
+      const res = await fetch(scoped.url, init);
+      const text = await res.text();
+      let data: unknown = text;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {}
+      if (!res.ok) {
+        const msg =
+          typeof data === 'object' && data && 'message' in data ? data.message : res.statusText;
+        throw new Error(`${res.status} ${msg}`);
+      }
+      return data;
+    } finally {
+      controller.abort();
+      this.requestControllers.delete(controller);
     }
-    return data;
   }
 
   private async startEventStream() {
@@ -324,10 +389,24 @@ export class OpenCodeServer extends EventEmitter {
     const controller = this.eventController;
     let shouldReconnect = false;
     const scoped = this.scopedUrl('/event');
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (!controller.signal.aborted) {
+          logger.warn('Event stream stalled; reconnecting');
+          controller.abort(new Error('Event stream idle timeout'));
+        }
+      }, OpenCodeServer.EVENT_IDLE_TIMEOUT_MS);
+    };
 
     try {
       const res = await fetch(scoped.url, {
-        signal: controller.signal,
+        signal: anySignal(
+          controller.signal,
+          AbortSignal.timeout(OpenCodeServer.EVENT_CONNECT_TIMEOUT_MS)
+        ),
         headers: {
           Accept: 'text/event-stream',
           ...this.directoryHeaders(scoped.directory),
@@ -340,13 +419,20 @@ export class OpenCodeServer extends EventEmitter {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      resetIdleTimer();
       while (true) {
         const { value, done } = await reader.read();
         if (done) {
+          buffer += decoder.decode();
+          const finalChunk = buffer.trim();
+          if (finalChunk.length > 0) {
+            this.processSseChunk(finalChunk);
+          }
           logger.warn('Event stream closed; reconnecting');
           shouldReconnect = true;
           break;
         }
+        resetIdleTimer();
         buffer += decoder.decode(value, { stream: true });
         let boundary: { index: number; length: number } | null;
         while ((boundary = findSseChunkBoundary(buffer))) {
@@ -361,6 +447,10 @@ export class OpenCodeServer extends EventEmitter {
       logger.warn(`Event stream error: ${message}`);
       shouldReconnect = true;
     } finally {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
       if (shouldReconnect && !controller.signal.aborted && this._status.state === 'running') {
         this.updateEventStreamState('degraded');
         this.eventReconnectCount++;
@@ -405,9 +495,14 @@ export class OpenCodeServer extends EventEmitter {
 
   async dispose() {
     this.isDisposing = true;
+    this.disposeGeneration += 1;
     this.clearStartPromise();
     this.cancelPollHealth();
     this.stopEventStream();
+    for (const controller of this.requestControllers) {
+      controller.abort();
+    }
+    this.requestControllers.clear();
     if (this.process) {
       const proc = this.process;
       this.process = null;
@@ -474,6 +569,19 @@ export class OpenCodeServer extends EventEmitter {
   private serverPathEntries(): string[] {
     return getServerPathEntries();
   }
+
+  private throwIfStartCancelled(disposeGeneration: number) {
+    if (this.isDisposing || this.disposeGeneration !== disposeGeneration) {
+      throw new Error(OpenCodeServer.START_DISPOSED_MESSAGE);
+    }
+  }
+
+  private getRestartDelay(attempt: number) {
+    return Math.min(
+      1000 * 2 ** Math.max(0, attempt - 1),
+      OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS
+    );
+  }
 }
 
 function normalizeRunningStatus(next: ServerStatus, previous: ServerStatus): ServerStatus {
@@ -515,4 +623,24 @@ function waitForProcessExit(proc: ChildProcess, timeoutMs: number): Promise<bool
     proc.once('exit', handleExit);
     timer = setTimeout(() => finish(false), timeoutMs);
   });
+}
+
+function anySignal(...signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  const onAbort = (event: Event) => {
+    controller.abort((event.target as AbortSignal | null)?.reason);
+    for (const signal of signals) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  };
+
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return controller.signal;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  return controller.signal;
 }

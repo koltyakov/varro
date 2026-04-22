@@ -1,4 +1,5 @@
 import { onMount, onCleanup, createEffect } from 'solid-js';
+import { produce } from 'solid-js/store';
 import { client, serverEvents } from '../lib/client';
 import {
   state,
@@ -38,6 +39,7 @@ import {
   upsertQuestion,
   removeQuestion,
   removeContextFile,
+  addContextFiles,
   markSessionSeen,
   setSessionCompacting,
   getSelectedModelForSession,
@@ -99,7 +101,6 @@ import {
   formatSelectionReference,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
-  mergeContextFile,
   subtractContextLineRanges,
 } from '../../shared/context-files';
 import { applyWebviewTheme } from '../lib/theme';
@@ -196,10 +197,12 @@ function applySessions(sessions: Session[]) {
 }
 
 function setSessionStatusEntry(sessionId: string, status: SessionStatus) {
-  setState('sessionStatus', (statuses) => ({
-    ...statuses,
-    [sessionId]: status,
-  }));
+  setState(
+    'sessionStatus',
+    produce((statuses) => {
+      statuses[sessionId] = status;
+    })
+  );
 }
 
 function clearActiveSessionState() {
@@ -512,15 +515,7 @@ export function useOpenCode() {
           setState('terminalSelection', msg.payload);
           break;
         case 'files/dropped':
-          for (const file of msg.payload) {
-            setState('droppedFiles', (prev) => {
-              const index = prev.findIndex((f) => f.path === file.path);
-              if (index === -1) return [...prev, file];
-              return prev.map((item, itemIndex) =>
-                itemIndex === index ? mergeContextFile(item, file) : item
-              );
-            });
-          }
+          addContextFiles(msg.payload);
           break;
         case 'files/removed':
           removeContextFile(msg.payload.path);
@@ -674,7 +669,7 @@ function applyUsageLimitNotice(
 }
 
 function shouldResyncSessionAfterIdle(sessionId: string) {
-  return state.activeSessionId === sessionId && state.messages.length === 0;
+  return state.activeSessionId === sessionId;
 }
 
 export async function recheckSessionStatus(sessionId: string) {
@@ -885,7 +880,7 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
       return {} as Record<string, SessionStatus>;
     });
     if (state.activeSessionId !== id) return;
-    setState('sessionStatus', statuses);
+    setState('sessionStatus', (current) => ({ ...current, ...statuses }));
     updateUsageLimitState(id, statuses[id], msgs);
     const statusType = statuses[id]?.type;
     if (statusType === 'busy' || statusType === 'retry') {

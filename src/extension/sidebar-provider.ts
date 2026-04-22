@@ -12,7 +12,7 @@ import type {
   WebviewThemeKind,
   WebviewMessage,
 } from '../shared/protocol';
-import { mergeContextFile } from '../shared/context-files';
+import { areContextFilesEqual, mergeContextFile } from '../shared/context-files';
 import { normalizeSessionTitle } from '../shared/session-title';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
@@ -25,6 +25,7 @@ import {
   getOpenCodeAuthFilePath,
   parseProviderAuthStore,
   parseProviderLimitHeaders,
+  type ProviderAuthRecord,
   type ProviderMetadata,
 } from './util/provider-limit';
 
@@ -64,7 +65,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     string,
     { expiresAt: number; promise: Promise<ProviderLimitStatus> }
   >();
+  private providerMetadataPromise: Promise<ProviderMetadata[]> | null = null;
+  private providerMetadataFetchedAt = 0;
+  private providerAuthStorePromise: Promise<Record<string, ProviderAuthRecord>> | null = null;
+  private providerAuthStoreFetchedAt = 0;
   private webviewLoadGeneration = 0;
+  private webviewReady = false;
+  private lastPendingAttentionKey = '';
+  private lastStatusBarStateKey = '';
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -111,6 +119,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const type = typeof event.type === 'string' ? event.type : undefined;
     const props = asRecord(event.properties);
     if (!type) return;
+    let changed = false;
 
     switch (type) {
       case 'session.created':
@@ -128,8 +137,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         for (const [requestID, request] of this.pendingAttention.entries()) {
           if (request.sessionID === sessionID) {
             this.pendingAttention.delete(requestID);
+            changed = true;
           }
         }
+        changed = true;
         break;
       }
       case 'session.status': {
@@ -140,9 +151,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.busySessions.add(sessionID);
           this.completedSessions.delete(sessionID);
           this.failedSessions.delete(sessionID);
+          changed = true;
         }
         if (statusType === 'idle') {
           this.busySessions.delete(sessionID);
+          changed = true;
         }
         break;
       }
@@ -157,6 +170,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ) {
           this.completedSessions.add(sessionID);
           this.showCompletionNotification(sessionID);
+          changed = true;
         }
         break;
       }
@@ -168,32 +182,40 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (asRecord(info?.error)) {
           this.failedSessions.add(sessionID);
           this.completedSessions.delete(sessionID);
+          changed = true;
         } else {
           this.failedSessions.delete(sessionID);
+          changed = true;
         }
         break;
       }
       case 'permission.asked': {
-        if (props) this.trackBlockingRequest('permission', props);
+        changed = (props ? this.trackBlockingRequest('permission', props) : false) || changed;
         break;
       }
       case 'permission.replied': {
-        this.clearBlockingRequest(getString(props?.permissionID) || getString(props?.requestID));
+        changed =
+          this.clearBlockingRequest(
+            getString(props?.permissionID) || getString(props?.requestID)
+          ) || changed;
         break;
       }
       case 'question.asked': {
-        if (props) this.trackBlockingRequest('question', props);
+        changed = (props ? this.trackBlockingRequest('question', props) : false) || changed;
         break;
       }
       case 'question.replied':
       case 'question.rejected': {
-        this.clearBlockingRequest(getString(props?.requestID) || getString(props?.id));
+        changed =
+          this.clearBlockingRequest(getString(props?.requestID) || getString(props?.id)) || changed;
         break;
       }
     }
 
-    this.updateStatusBarItem();
-    this.postPendingAttentionState();
+    if (changed) {
+      this.updateStatusBarItem();
+      this.postPendingAttentionState();
+    }
   }
 
   private rememberSessionTitle(info: Record<string, unknown> | undefined) {
@@ -208,7 +230,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const requestID =
       getString(props.id) || getString(props.permissionID) || getString(props.requestID);
     const sessionID = getString(props.sessionID);
-    if (!requestID || !sessionID || this.pendingAttention.has(requestID)) return;
+    if (!requestID || !sessionID || this.pendingAttention.has(requestID)) return false;
 
     const label =
       kind === 'question'
@@ -217,11 +239,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.pendingAttention.set(requestID, { sessionID, kind, label });
     this.completedSessions.delete(sessionID);
     this.showBlockingNotification(kind, sessionID, label);
+    return true;
   }
 
   private clearBlockingRequest(requestID: string | undefined) {
-    if (!requestID) return;
-    this.pendingAttention.delete(requestID);
+    if (!requestID) return false;
+    return this.pendingAttention.delete(requestID);
   }
 
   private hasPendingAttentionForSession(sessionID: string) {
@@ -273,9 +296,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    if (label) {
-      this.statusBarItem.tooltip = `${message}\n${label}\n\nClick to open chat.`;
-    }
+    void label;
   }
 
   private showCompletionNotification(sessionID: string) {
@@ -302,51 +323,80 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const sessionIds = [
       ...new Set([...this.pendingAttention.values()].map((item) => item.sessionID)),
     ];
+    const key = sessionIds.join('\n');
+    if (key === this.lastPendingAttentionKey) return;
+    this.lastPendingAttentionKey = key;
     this.post({ type: 'pending-attention/update', payload: { sessionIds } });
   }
 
   private updateStatusBarItem() {
-    if (this.view?.visible) {
+    const next = this.getStatusBarState();
+    const nextKey = JSON.stringify(next);
+    if (nextKey === this.lastStatusBarStateKey) return;
+    this.lastStatusBarStateKey = nextKey;
+
+    if (!next.visible) {
       this.statusBarItem.hide();
       return;
     }
 
+    this.statusBarItem.text = next.text;
+    this.statusBarItem.backgroundColor = next.backgroundColor;
+    this.statusBarItem.tooltip = next.tooltip;
+    this.statusBarItem.show();
+  }
+
+  private getStatusBarState():
+    | {
+        visible: false;
+      }
+    | {
+        visible: true;
+        text: string;
+        tooltip: string;
+        backgroundColor?: vscode.ThemeColor;
+      } {
+    if (this.view?.visible) {
+      return { visible: false };
+    }
+
     const pendingRequests = [...this.pendingAttention.values()];
     if (pendingRequests.length > 0) {
-      this.statusBarItem.text = `$(bell-dot) Varro: ${pendingRequests.length} waiting`;
-      this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-      this.statusBarItem.tooltip = [
-        'Varro is waiting for your input.',
-        ...pendingRequests.slice(0, 3).map((request) => {
-          const title = this.sessionTitles.get(request.sessionID);
-          return title ? `${title}: ${request.label}` : request.label;
-        }),
-        ...(pendingRequests.length > 3 ? [`+${pendingRequests.length - 3} more`] : []),
-        '',
-        'Click to open chat.',
-      ].join('\n');
-      this.statusBarItem.show();
-      return;
+      return {
+        visible: true,
+        text: `$(bell-dot) Varro: ${pendingRequests.length} waiting`,
+        backgroundColor: new vscode.ThemeColor('statusBarItem.warningBackground'),
+        tooltip: [
+          'Varro is waiting for your input.',
+          ...pendingRequests.slice(0, 3).map((request) => {
+            const title = this.sessionTitles.get(request.sessionID);
+            return title ? `${title}: ${request.label}` : request.label;
+          }),
+          ...(pendingRequests.length > 3 ? [`+${pendingRequests.length - 3} more`] : []),
+          '',
+          'Click to open chat.',
+        ].join('\n'),
+      };
     }
 
     const completedSessions = [...this.completedSessions];
     if (completedSessions.length > 0) {
-      this.statusBarItem.text = `$(check-all) Varro: ${completedSessions.length} completed`;
-      this.statusBarItem.backgroundColor = undefined;
-      this.statusBarItem.tooltip = [
-        'Varro finished background work.',
-        ...completedSessions
-          .slice(0, 3)
-          .map((sessionID) => this.sessionTitles.get(sessionID) || sessionID),
-        ...(completedSessions.length > 3 ? [`+${completedSessions.length - 3} more`] : []),
-        '',
-        'Click to open chat.',
-      ].join('\n');
-      this.statusBarItem.show();
-      return;
+      return {
+        visible: true,
+        text: `$(check-all) Varro: ${completedSessions.length} completed`,
+        tooltip: [
+          'Varro finished background work.',
+          ...completedSessions
+            .slice(0, 3)
+            .map((sessionID) => this.sessionTitles.get(sessionID) || sessionID),
+          ...(completedSessions.length > 3 ? [`+${completedSessions.length - 3} more`] : []),
+          '',
+          'Click to open chat.',
+        ].join('\n'),
+      };
     }
 
-    this.statusBarItem.hide();
+    return { visible: false };
   }
 
   resolveWebviewView(
@@ -355,6 +405,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     this.view = webviewView;
+    this.webviewReady = false;
     const webviewLoadGeneration = ++this.webviewLoadGeneration;
 
     webviewView.webview.options = {
@@ -368,6 +419,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewDisposables.push(
       webviewView.webview.onDidReceiveMessage((msg: WebviewMessage) => {
         void this.handleMessage(msg);
+      })
+    );
+
+    this.webviewDisposables.push(
+      webviewView.onDidDispose(() => {
+        if (this.view === webviewView) {
+          this.view = undefined;
+          this.webviewReady = false;
+          this.webviewHasFocus = false;
+          this.updateStatusBarItem();
+        }
       })
     );
 
@@ -428,6 +490,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     try {
       switch (msg.type) {
         case 'ready':
+          this.webviewReady = true;
           this.webviewHasFocus = false;
           this.postContext();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
@@ -588,11 +651,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     modelID: string | null
   ): Promise<ProviderLimitStatus> {
     const checkedAt = Date.now();
-    const rawConfig = (await this.server.request('GET', '/config/providers')) as unknown;
-    const config = asRecord(rawConfig);
-    const providers = Array.isArray(config?.providers)
-      ? config.providers.filter((item): item is ProviderMetadata => Boolean(asRecord(item)))
-      : [];
+    const providers = await this.getProviderMetadata();
     const provider = providers.find((item) => item.id === providerID);
 
     if (!provider) {
@@ -669,12 +728,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async readProviderAuthStore() {
-    try {
-      const raw = await readFile(getOpenCodeAuthFilePath(), 'utf-8');
-      return parseProviderAuthStore(raw);
-    } catch {
-      return {};
+    const now = Date.now();
+    if (
+      this.providerAuthStorePromise &&
+      now - this.providerAuthStoreFetchedAt < SidebarProvider.PROVIDER_LIMIT_CACHE_TTL_MS
+    ) {
+      return this.providerAuthStorePromise;
     }
+
+    this.providerAuthStoreFetchedAt = now;
+    this.providerAuthStorePromise = (async () => {
+      try {
+        const raw = await readFile(getOpenCodeAuthFilePath(), 'utf-8');
+        return parseProviderAuthStore(raw);
+      } catch {
+        return {};
+      }
+    })();
+
+    return this.providerAuthStorePromise;
+  }
+
+  private async getProviderMetadata() {
+    const now = Date.now();
+    if (
+      this.providerMetadataPromise &&
+      now - this.providerMetadataFetchedAt < SidebarProvider.PROVIDER_LIMIT_CACHE_TTL_MS
+    ) {
+      return this.providerMetadataPromise;
+    }
+
+    this.providerMetadataFetchedAt = now;
+    this.providerMetadataPromise = (async () => {
+      const rawConfig = (await this.server.request('GET', '/config/providers')) as unknown;
+      const config = asRecord(rawConfig);
+      return Array.isArray(config?.providers)
+        ? config.providers.filter((item): item is ProviderMetadata => Boolean(asRecord(item)))
+        : [];
+    })();
+
+    return this.providerMetadataPromise;
   }
 
   post(msg: ExtensionMessage) {
@@ -764,7 +857,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   removeContextFile(path: string) {
-    this.contextFiles = this.contextFiles.filter((f) => f.path !== path);
+    const nextFiles = this.contextFiles.filter((f) => f.path !== path);
+    if (nextFiles.length === this.contextFiles.length) return;
+    this.contextFiles = nextFiles;
     this.post({ type: 'files/removed', payload: { path } });
     this.onContextFilesChanged?.();
   }
@@ -842,7 +937,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const token = this.fileSearchCts.token;
     this.fileSearchDebounceTimer = setTimeout(
       () => this.executeFileSearch(requestId, query, limit, token),
-      200
+      80
     );
   }
 
@@ -924,6 +1019,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
 
       const merged = mergeContextFile(this.contextFiles[index], incoming);
+      if (areContextFilesEqual(this.contextFiles[index], merged)) {
+        continue;
+      }
       this.contextFiles[index] = merged;
       updates.push(merged);
     }
@@ -943,7 +1041,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private flushPendingInputFocus() {
-    if (!this.pendingInputFocus || !this.view?.visible) return;
+    if (!this.pendingInputFocus || !this.view?.visible || !this.webviewReady) return;
     this.pendingInputFocus = false;
     this.post({ type: 'command/focus-input' });
   }
@@ -1006,6 +1104,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.serverEventHandler = undefined;
     for (const d of this.webviewDisposables) d.dispose();
     this.webviewDisposables = [];
+    this.webviewReady = false;
     this.themeDisposable?.dispose();
     this.windowStateDisposable?.dispose();
     this.statusBarItem.dispose();

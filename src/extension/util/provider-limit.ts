@@ -6,7 +6,7 @@ import type {
   ProviderLimitWindow,
 } from '../../shared/protocol';
 
-type ProviderAuthRecord =
+export type ProviderAuthRecord =
   | { type: 'oauth'; access: string }
   | { type: 'api' | 'wellknown'; key: string };
 

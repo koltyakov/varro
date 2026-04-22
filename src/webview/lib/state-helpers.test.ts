@@ -239,6 +239,20 @@ describe('state helpers', () => {
     expect(stateModule.state.droppedFiles.map((file) => file.relativePath)).toEqual(['b.ts']);
 
     stateModule.clearContextFiles();
+    stateModule.addContextFiles([
+      { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+      {
+        path: '/repo/a.ts',
+        relativePath: 'a.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 2, endLine: 4 }],
+      },
+    ]);
+    expect(stateModule.state.droppedFiles).toEqual([
+      { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+    ]);
+
+    stateModule.clearContextFiles();
     expect(stateModule.state.droppedFiles).toEqual([]);
 
     stateModule.setInputText('See [img-2.png] later');
@@ -494,6 +508,11 @@ describe('state helpers', () => {
       'message-2',
       'message-3',
     ]);
+
+    const afterNoOpSync = stateModule.messageStructureVersion();
+    const sameEntries = stateModule.state.messages;
+    stateModule.setMessagesIncremental(sameEntries);
+    expect(stateModule.messageStructureVersion()).toBe(afterNoOpSync);
 
     const children = stateModule.getChildRunsByParentId([
       { info: assistantMessage('child-2', 'session-1', 20, 'subagent', 'parent-1'), parts: [] },

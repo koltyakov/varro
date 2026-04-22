@@ -2,10 +2,15 @@ import * as vscode from 'vscode';
 import { isAbsolute, join } from 'path';
 import type { EditorContext } from '../shared/protocol';
 import { logger } from './logger';
-import { getRelativePath } from './util/path';
+import {
+  getRelativePath,
+  normalizeRelativeWorkspacePath,
+  resolveWorkspaceRelativePath,
+} from './util/path';
 
 export class ContextProvider implements vscode.Disposable {
   private static readonly TERMINAL_COPY_DELAY_MS = 40;
+  private static readonly TERMINAL_COPY_MAX_ATTEMPTS = 5;
   private static readonly ACTIVE_EDITOR_SETTLE_DELAY_MS = 60;
   private disposables: vscode.Disposable[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -20,6 +25,7 @@ export class ContextProvider implements vscode.Disposable {
   private _terminalSelection: { text: string; terminalName: string } | null = null;
   private _lastContextKey: string | null = null;
   private _lastEmittedContextKey: string | null = null;
+  private _lastDiagnosticsSourceKey: string | null = null;
   private onChange: (ctx: EditorContext) => void;
 
   constructor(onChange: (ctx: EditorContext) => void) {
@@ -28,8 +34,18 @@ export class ContextProvider implements vscode.Disposable {
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.update()),
       vscode.window.onDidChangeTextEditorSelection(() => this.debouncedUpdate()),
-      vscode.languages.onDidChangeDiagnostics(() => this.debouncedDiagnosticsUpdate()),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => this.update())
+      vscode.languages.onDidChangeDiagnostics((event) => {
+        const activeUri = vscode.window.activeTextEditor?.document.uri;
+        if (!activeUri || event.uris.some((uri) => uri.toString() === activeUri.toString())) {
+          this.debouncedDiagnosticsUpdate();
+        }
+      }),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.update()),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration('varro.context')) {
+          this.update();
+        }
+      })
     );
 
     this.update();
@@ -57,9 +73,14 @@ export class ContextProvider implements vscode.Disposable {
 
     try {
       await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
-      await delay(ContextProvider.TERMINAL_COPY_DELAY_MS);
-      selectionText = await vscode.env.clipboard.readText();
-      clipboardChanged = selectionText !== previousClipboard;
+      for (let attempt = 0; attempt < ContextProvider.TERMINAL_COPY_MAX_ATTEMPTS; attempt += 1) {
+        await delay(ContextProvider.TERMINAL_COPY_DELAY_MS * (attempt + 1));
+        selectionText = await vscode.env.clipboard.readText();
+        if (selectionText.trim().length > 0) {
+          clipboardChanged = selectionText !== previousClipboard;
+          break;
+        }
+      }
     } finally {
       if (clipboardChanged) {
         try {
@@ -70,7 +91,7 @@ export class ContextProvider implements vscode.Disposable {
       }
     }
 
-    if (!clipboardChanged || !selectionText.trim()) {
+    if (!selectionText.trim()) {
       return { ok: false, reason: 'empty-selection' };
     }
 
@@ -123,7 +144,7 @@ export class ContextProvider implements vscode.Disposable {
         const nextKey = this.getContextKey();
         if (nextKey === this._lastContextKey) return;
         this._lastContextKey = nextKey;
-        this.updateDiagnostics();
+        this.refreshDiagnosticsIfNeeded();
       }, ContextProvider.ACTIVE_EDITOR_SETTLE_DELAY_MS);
       return;
     }
@@ -135,7 +156,7 @@ export class ContextProvider implements vscode.Disposable {
       const nextKey = this.getContextKey();
       if (nextKey === this._lastContextKey) return;
       this._lastContextKey = nextKey;
-      this.updateDiagnostics();
+      this.refreshDiagnosticsIfNeeded();
       return;
     }
 
@@ -164,6 +185,18 @@ export class ContextProvider implements vscode.Disposable {
     if (nextKey === this._lastContextKey) return;
     this._lastContextKey = nextKey;
 
+    this.emitContextIfChanged();
+    this.refreshDiagnosticsIfNeeded();
+  }
+
+  private refreshDiagnosticsIfNeeded() {
+    const nextSourceKey = this.getDiagnosticsSourceKey();
+    if (nextSourceKey === this._lastDiagnosticsSourceKey) {
+      this.emitContextIfChanged();
+      return;
+    }
+
+    this._lastDiagnosticsSourceKey = nextSourceKey;
     this.updateDiagnostics();
   }
 
@@ -215,6 +248,10 @@ export class ContextProvider implements vscode.Disposable {
     });
   }
 
+  private getDiagnosticsSourceKey() {
+    return vscode.window.activeTextEditor?.document.uri.toString() || null;
+  }
+
   private emitContextIfChanged() {
     const nextKey = this.getEmittedContextKey();
     if (nextKey === this._lastEmittedContextKey) return;
@@ -224,7 +261,8 @@ export class ContextProvider implements vscode.Disposable {
 
   async readFile(path: string): Promise<string | null> {
     try {
-      const uri = await this.resolveWorkspaceUri(path);
+      const resolved = await this.resolveWorkspaceUri(path);
+      const uri = resolved?.uri;
       if (!uri) return null;
       const doc = await vscode.workspace.openTextDocument(uri);
       return doc.getText();
@@ -236,7 +274,8 @@ export class ContextProvider implements vscode.Disposable {
 
   async openPath(path: string, options?: { line?: number; kind?: 'auto' | 'file' | 'directory' }) {
     try {
-      const uri = await this.resolveWorkspaceUri(path);
+      const resolved = await this.resolveWorkspaceUri(path);
+      const uri = resolved?.uri;
       if (!uri) {
         logger.warn(`Could not resolve file path: ${path}`);
         return;
@@ -251,7 +290,7 @@ export class ContextProvider implements vscode.Disposable {
       }
 
       const doc = await vscode.workspace.openTextDocument(uri);
-      const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+      const editor = await vscode.window.showTextDocument(doc, { preview: false });
       if (options?.line !== undefined && options.line >= 1) {
         const position = new vscode.Position(options.line - 1, 0);
         editor.selection = new vscode.Selection(position, position);
@@ -265,7 +304,9 @@ export class ContextProvider implements vscode.Disposable {
     }
   }
 
-  private async resolveWorkspaceUri(rawPath: string): Promise<vscode.Uri | null> {
+  private async resolveWorkspaceUri(
+    rawPath: string
+  ): Promise<{ uri: vscode.Uri; workspaceFolder?: vscode.WorkspaceFolder } | null> {
     const input = rawPath.trim();
     if (!input) return null;
 
@@ -273,20 +314,31 @@ export class ContextProvider implements vscode.Disposable {
       const uri = vscode.Uri.file(input);
       try {
         await vscode.workspace.fs.stat(uri);
-        return uri;
+        return { uri, workspaceFolder: vscode.workspace.getWorkspaceFolder(uri) };
       } catch {
         return null;
       }
     }
 
-    const relativePath = input.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+    const folders = this.getWorkspaceFoldersInResolutionOrder();
+    const resolved = resolveWorkspaceRelativePath(input, folders);
+    if (!resolved) return null;
+
+    const relativePath = normalizeRelativeWorkspacePath(resolved.relativePath);
     if (!relativePath) return null;
 
-    for (const folder of this.getWorkspaceFoldersInResolutionOrder()) {
+    const resolutionOrder = resolved.workspaceFolder
+      ? [
+          resolved.workspaceFolder,
+          ...folders.filter((folder) => folder.uri.fsPath !== resolved.workspaceFolder?.uri.fsPath),
+        ]
+      : folders;
+
+    for (const folder of resolutionOrder) {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       try {
         await vscode.workspace.fs.stat(candidate);
-        return candidate;
+        return { uri: candidate, workspaceFolder: folder };
       } catch {}
     }
 

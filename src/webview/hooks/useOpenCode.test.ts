@@ -989,6 +989,54 @@ describe('useOpenCode initialization', () => {
     }
   });
 
+  it('resyncs active session messages on idle even when messages already exist', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([
+      { info: userMessage('user-1'), parts: [] },
+      { info: assistantMessage('assistant-1', 'user-1'), parts: [] },
+    ]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [{ info: userMessage('stale-user'), parts: [] }]);
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+      await vi.waitFor(() => {
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('session-1');
+        expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1');
+      });
+
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'user-1',
+        'assistant-1',
+      ]);
+    } finally {
+      dispose();
+    }
+  });
+
   it('ignores stale retry status updates after aborting a retrying session', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {
