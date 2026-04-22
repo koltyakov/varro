@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { batch, createSignal } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
 import type {
   Session,
@@ -293,7 +293,12 @@ export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
 export const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
+export const [messageStructureVersion, setMessageStructureVersion] = createSignal(0);
 let permissionWorkspace: string | null = initialWebviewState.editorContext?.workspacePath ?? null;
+
+function bumpMessageStructureVersion() {
+  setMessageStructureVersion((value) => value + 1);
+}
 
 function resolveInitialDraftMode(): PermissionMode {
   if (permissionWorkspace) {
@@ -742,6 +747,7 @@ function ensureIndex(msgs: Array<{ info: Message; parts: Part[] }>) {
 
 function invalidateIndex() {
   messageIndexVersion++;
+  bumpMessageStructureVersion();
 }
 
 function findMessageIndex(msgs: Array<{ info: Message; parts: Part[] }>, id: string): number {
@@ -795,8 +801,10 @@ export function upsertPart(part: Part) {
     })
   );
   if (state.streamingPartId === part.id) {
-    setState('streamingPartId', null);
-    setState('streamingText', '');
+    batch(() => {
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+    });
   }
 }
 
@@ -834,10 +842,18 @@ export function applyMessagePartDelta(
 ) {
   if (field !== 'text' || !delta) return;
 
-  const message = state.messages.find((item) => item.info.id === messageId);
+  ensureIndex(state.messages);
+  const location = partById.get(partId);
+  const message =
+    location && state.messages[location.msgIdx]?.info.id === messageId
+      ? state.messages[location.msgIdx]
+      : state.messages.find((item) => item.info.id === messageId);
   if (!message) return;
 
-  const existingPart = message.parts.find((item) => item.id === partId);
+  const existingPart =
+    location && message.parts[location.partIdx]?.id === partId
+      ? message.parts[location.partIdx]
+      : message.parts.find((item) => item.id === partId);
   const existingText =
     existingPart && (existingPart.type === 'text' || existingPart.type === 'reasoning')
       ? existingPart.text
@@ -846,8 +862,10 @@ export function applyMessagePartDelta(
     state.streamingPartId === partId ? state.streamingText : existingText;
   const nextStreamingText = currentStreamingText + delta;
 
-  setState('streamingPartId', partId);
-  setState('streamingText', nextStreamingText);
+  batch(() => {
+    setState('streamingPartId', partId);
+    setState('streamingText', nextStreamingText);
+  });
 
   setState(
     'messages',
@@ -887,8 +905,10 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
     })
   );
   if (state.streamingPartId === partId) {
-    setState('streamingPartId', null);
-    setState('streamingText', '');
+    batch(() => {
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+    });
   }
 }
 
@@ -914,25 +934,30 @@ export function removePermission(permissionId: string) {
 }
 
 export function clearStreamingState() {
-  setState('streamingPartId', null);
-  setState('streamingText', '');
+  batch(() => {
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+  });
 }
 
 export function clearMessages() {
-  setState('messages', []);
-  invalidateIndex();
+  replaceMessages([]);
   setState('permissions', []);
   setState('todos', []);
   setState('diffs', []);
   clearStreamingState();
 }
 
+export function replaceMessages(incoming: Array<{ info: Message; parts: Part[] }>) {
+  setState('messages', incoming);
+  invalidateIndex();
+}
+
 export function setMessagesIncremental(incoming: Array<{ info: Message; parts: Part[] }>) {
   clearStreamingState();
   const current = state.messages;
   if (current.length === 0 || incoming.length === 0) {
-    setState('messages', incoming);
-    invalidateIndex();
+    replaceMessages(incoming);
     return;
   }
 
@@ -980,8 +1005,7 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
     }
   }
 
-  setState('messages', incoming);
-  invalidateIndex();
+  replaceMessages(incoming);
 }
 
 export function getChildRunsByParentId(

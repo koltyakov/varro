@@ -31,6 +31,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
   private static readonly FILE_SEARCH_CACHE_TTL_MS = 15_000;
   private static readonly FILE_SEARCH_MAX_CANDIDATES = 4_000;
+  private static readonly FILE_SEARCH_RESULT_LIMIT = 30;
   private static readonly PROVIDER_LIMIT_CACHE_TTL_MS = 60_000;
   private view?: vscode.WebviewView;
   private contextProvider: ContextProvider;
@@ -39,7 +40,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private themeDisposable?: vscode.Disposable;
   private contextFiles: DroppedFile[] = [];
   private onContextFilesChanged?: () => void;
-  private workspaceFileCache: DroppedFile[] = [];
+  private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
   private workspaceFileCacheAt = 0;
   private fileSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private fileSearchCts: vscode.CancellationTokenSource | null = null;
@@ -799,14 +800,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const files = await this.getWorkspaceFiles(token);
       if (token.isCancellationRequested) return;
       const normalizedQuery = query.trim().toLowerCase();
-      const ranked = files
-        .map((file) => ({ file, score: getFileSearchScore(file.relativePath, normalizedQuery) }))
-        .filter((item) => item.score > Number.NEGATIVE_INFINITY)
-        .toSorted(
-          (a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath)
-        )
-        .slice(0, Math.max(1, Math.min(limit, 30)))
-        .map((item) => item.file);
+      const ranked = rankWorkspaceFiles(
+        files,
+        normalizedQuery,
+        Math.max(1, Math.min(limit, SidebarProvider.FILE_SEARCH_RESULT_LIMIT))
+      );
 
       this.post({
         type: 'files/search-results',
@@ -822,7 +820,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async getWorkspaceFiles(token?: vscode.CancellationToken): Promise<DroppedFile[]> {
+  private async getWorkspaceFiles(
+    token?: vscode.CancellationToken
+  ): Promise<WorkspaceFileSearchEntry[]> {
     const now = Date.now();
     if (
       this.workspaceFileCache.length > 0 &&
@@ -840,10 +840,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     this.workspaceFileCache = files.map((uri) => {
       const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+      const relativePath = getRelativePath(uri, workspaceFolder);
       return {
         path: uri.fsPath,
-        relativePath: getRelativePath(uri, workspaceFolder),
+        relativePath,
         type: 'file' as const,
+        relativePathLower: relativePath.toLowerCase(),
+        leafLower: basename(relativePath).toLowerCase(),
       };
     });
     this.workspaceFileCacheAt = now;
@@ -962,13 +965,68 @@ function getString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function getFileSearchScore(relativePath: string, query: string) {
-  if (!query) {
-    return 1 / Math.max(relativePath.length, 1);
+type WorkspaceFileSearchEntry = DroppedFile & {
+  relativePathLower: string;
+  leafLower: string;
+};
+
+type RankedWorkspaceFile = {
+  file: WorkspaceFileSearchEntry;
+  score: number;
+};
+
+function rankWorkspaceFiles(
+  files: WorkspaceFileSearchEntry[],
+  query: string,
+  limit: number
+): DroppedFile[] {
+  const ranked: RankedWorkspaceFile[] = [];
+
+  for (const file of files) {
+    const score = getFileSearchScore(file, query);
+    if (score === Number.NEGATIVE_INFINITY) continue;
+    insertRankedWorkspaceFile(ranked, { file, score }, limit);
   }
 
-  const haystack = relativePath.toLowerCase();
-  const leaf = basename(relativePath).toLowerCase();
+  return ranked.map(({ file, ..._ranked }) => {
+    void _ranked;
+    return {
+      path: file.path,
+      relativePath: file.relativePath,
+      type: file.type,
+      ...(file.lineRanges ? { lineRanges: file.lineRanges } : {}),
+    };
+  });
+}
+
+function insertRankedWorkspaceFile(
+  ranked: RankedWorkspaceFile[],
+  candidate: RankedWorkspaceFile,
+  limit: number
+) {
+  let insertAt = ranked.findIndex(
+    (item) =>
+      candidate.score > item.score ||
+      (candidate.score === item.score &&
+        candidate.file.relativePath.localeCompare(item.file.relativePath) < 0)
+  );
+
+  if (insertAt === -1) {
+    if (ranked.length >= limit) return;
+    insertAt = ranked.length;
+  }
+
+  ranked.splice(insertAt, 0, candidate);
+  if (ranked.length > limit) ranked.pop();
+}
+
+function getFileSearchScore(file: WorkspaceFileSearchEntry, query: string) {
+  if (!query) {
+    return 1 / Math.max(file.relativePath.length, 1);
+  }
+
+  const haystack = file.relativePathLower;
+  const leaf = file.leafLower;
   if (leaf === query) return 10_000;
   if (haystack === query) return 9_000;
   if (leaf.startsWith(query)) return 8_000 - leaf.length;

@@ -43,7 +43,7 @@ describe('bridge', () => {
     expect(handler).toHaveBeenCalledWith(firstMessage);
   });
 
-  it('sends cloned API request bodies and resolves matching responses', async () => {
+  it('sends API request bodies without cloning and resolves matching responses', async () => {
     const bridge = await loadBridge();
     const send = vi.fn();
     const body = { nested: { value: 1 } };
@@ -61,7 +61,7 @@ describe('bridge', () => {
         id: 1,
         method: 'POST',
         path: '/session',
-        body: { nested: { value: 1 } },
+        body: { nested: { value: 2 } },
       },
     });
 
@@ -75,7 +75,7 @@ describe('bridge', () => {
     );
 
     await expect(request).resolves.toEqual({ ok: true });
-    expect(message.payload.body).toEqual({ nested: { value: 1 } });
+    expect(message.payload.body).toBe(body);
   });
 
   it('rejects API requests when the extension returns an error', async () => {

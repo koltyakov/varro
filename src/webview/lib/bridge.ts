@@ -65,7 +65,7 @@ export function apiCall<T = unknown>(method: string, path: string, body?: unknow
         id,
         method,
         path,
-        body: body === undefined ? undefined : JSON.parse(JSON.stringify(body)),
+        body,
       },
     });
   });

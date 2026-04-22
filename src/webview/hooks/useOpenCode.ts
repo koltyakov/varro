@@ -20,6 +20,7 @@ import {
   getPersistedSelectedModel,
   clearClipboardImages,
   clearMessages,
+  replaceMessages,
   clearStreamingState,
   clearCurrentDocumentStateForSession,
   clearDraftCurrentDocumentState,
@@ -728,7 +729,7 @@ export async function createSession(
     } else {
       adoptDraftCurrentDocumentState(session.id);
     }
-    setState('sessionStatus', { ...state.sessionStatus, [session.id]: { type: 'idle' } });
+    setState('sessionStatus', session.id, { type: 'idle' });
     persistActiveSessionId(session.id);
     markSessionSeen(session.id);
     const defaultModel = getPersistedSelectedModel();
@@ -1131,7 +1132,7 @@ function registerEventHandlers() {
       if (!props) return;
       const sessionID = props.sessionID as string;
       const status = props.status as SessionStatus;
-      setState('sessionStatus', { ...state.sessionStatus, [sessionID]: status });
+      setState('sessionStatus', sessionID, status);
       if (sessionID === state.activeSessionId) {
         const statusType = (status as { type: string }).type;
         if (statusType === 'busy' || statusType === 'retry') {
@@ -1222,7 +1223,7 @@ function registerEventHandlers() {
         markLoadingActivity();
         clearStreamingState();
         const nextMessages = state.messages.filter((m) => m.info.id !== (p.messageID as string));
-        setState('messages', nextMessages);
+        replaceMessages(nextMessages);
         syncTodosFromMessages(nextMessages);
       }
     })

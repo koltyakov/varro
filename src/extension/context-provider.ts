@@ -18,6 +18,7 @@ export class ContextProvider implements vscode.Disposable {
   };
   private _terminalSelection: { text: string; terminalName: string } | null = null;
   private _lastContextKey: string | null = null;
+  private _lastEmittedContextKey: string | null = null;
   private onChange: (ctx: EditorContext) => void;
 
   constructor(onChange: (ctx: EditorContext) => void) {
@@ -172,7 +173,7 @@ export class ContextProvider implements vscode.Disposable {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       this._context.diagnostics = [];
-      this.onChange(this._context);
+      this.emitContextIfChanged();
       return;
     }
 
@@ -188,10 +189,18 @@ export class ContextProvider implements vscode.Disposable {
       message: d.message,
       line: d.range.start.line + 1,
     }));
-    this.onChange(this._context);
+    this.emitContextIfChanged();
   }
 
   private getContextKey() {
+    return JSON.stringify({
+      workspacePath: this._context.workspacePath,
+      activeFile: this._context.activeFile,
+      selection: this._context.selection,
+    });
+  }
+
+  private getEmittedContextKey() {
     const activeFile = this._context.activeFile;
     const selection = this._context.selection;
     return JSON.stringify({
@@ -204,7 +213,15 @@ export class ContextProvider implements vscode.Disposable {
           }
         : null,
       selection,
+      diagnostics: this._context.diagnostics,
     });
+  }
+
+  private emitContextIfChanged() {
+    const nextKey = this.getEmittedContextKey();
+    if (nextKey === this._lastEmittedContextKey) return;
+    this._lastEmittedContextKey = nextKey;
+    this.onChange(this._context);
   }
 
   async readFile(path: string): Promise<string | null> {

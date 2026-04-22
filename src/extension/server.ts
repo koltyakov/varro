@@ -25,6 +25,7 @@ export class OpenCodeServer extends EventEmitter {
   private eventReconnectDelay = 1000;
   private eventReconnectCount = 0;
   private static readonly MAX_EVENT_RECONNECTS = 10;
+  private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private startAttemptId = 0;
   private isDisposing = false;
 
@@ -330,16 +331,15 @@ export class OpenCodeServer extends EventEmitter {
     } finally {
       if (shouldReconnect && !controller.signal.aborted && this._status.state === 'running') {
         this.eventReconnectCount++;
-        if (this.eventReconnectCount > OpenCodeServer.MAX_EVENT_RECONNECTS) {
+        if (this.eventReconnectCount === OpenCodeServer.MAX_EVENT_RECONNECTS) {
           logger.warn(
-            `Event stream reconnect limit (${OpenCodeServer.MAX_EVENT_RECONNECTS}) reached`
+            `Event stream reconnect attempts reached ${OpenCodeServer.MAX_EVENT_RECONNECTS}; continuing background retries while keeping REST requests available`
           );
-          this.setStatus({ state: 'error', message: 'Event stream connection lost' });
-        } else {
-          const delay = this.eventReconnectDelay;
-          this.eventReconnectDelay = Math.min(delay * 2, 30_000);
-          this.eventReconnectTimer = setTimeout(() => this.startEventStream(), delay);
         }
+
+        const delay = this.eventReconnectDelay;
+        this.eventReconnectDelay = Math.min(delay * 2, OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS);
+        this.eventReconnectTimer = setTimeout(() => this.startEventStream(), delay);
       }
     }
   }

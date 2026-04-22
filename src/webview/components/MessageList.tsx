@@ -1,4 +1,13 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  on,
+} from 'solid-js';
 import {
   getSelectedAgentForSession,
   state,
@@ -10,6 +19,7 @@ import {
   loadingStartedAt,
   loadingLastActivityAt,
   messageListScrollRequestKey,
+  messageStructureVersion,
   getChildRunsByParentId,
 } from '../lib/state';
 import {
@@ -108,7 +118,7 @@ export function MessageList() {
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
 
-  const messages = createMemo(() => state.messages);
+  const messages = createMemo(on(messageStructureVersion, () => state.messages));
   const latestPlanImplementationMessageId = createMemo(() =>
     getLatestPlanImplementationMessageId(messages())
   );
@@ -398,7 +408,7 @@ export function MessageList() {
   });
 
   const modelChangeMap = createMemo(() => {
-    const msgs = state.messages;
+    const msgs = messages();
     const providerMap = new Map(state.providers.map((p) => [p.id, p]));
     const result = new Map<string, string>();
     let prevProvider: string | undefined;
@@ -437,7 +447,7 @@ export function MessageList() {
     const result = new Map<string, string | null>();
     let previousTrailingSignature: string | null = null;
 
-    for (const msg of state.messages) {
+    for (const msg of messages()) {
       result.set(msg.info.id, previousTrailingSignature);
 
       if (!isAssistantMessage(msg.info)) {
@@ -453,10 +463,11 @@ export function MessageList() {
 
   const assistantStackGroupMap = createMemo(() => {
     const result = new Map<string, AssistantFileEditStackGroup | null>();
+    const messageEntries = messages();
     let index = 0;
 
-    while (index < state.messages.length) {
-      const current = state.messages[index];
+    while (index < messageEntries.length) {
+      const current = messageEntries[index];
       const currentKind = getAssistantStackKind(
         current,
         previousTrailingFileEventSignatureMap().get(current.info.id) ?? null
@@ -468,8 +479,8 @@ export function MessageList() {
       }
 
       let end = index;
-      while (end + 1 < state.messages.length) {
-        const next = state.messages[end + 1];
+      while (end + 1 < messageEntries.length) {
+        const next = messageEntries[end + 1];
         if (
           getAssistantStackKind(
             next,
@@ -484,7 +495,7 @@ export function MessageList() {
       if (end > index) {
         for (let partIndex = index; partIndex <= end; partIndex++) {
           const position = partIndex === index ? 'start' : partIndex === end ? 'end' : 'middle';
-          result.set(state.messages[partIndex].info.id, position);
+          result.set(messageEntries[partIndex].info.id, position);
         }
       }
 
