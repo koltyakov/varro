@@ -31,6 +31,8 @@ jobs:
         run: npm run typecheck
 
       - name: Lint
+        # oxlint native bindings require newer Node releases than our Node 18 CI lane.
+        if: ${{ matrix.node-version >= 20 }}
         run: npm run lint:check
 
       - name: Test

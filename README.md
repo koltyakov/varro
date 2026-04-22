@@ -34,11 +34,11 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
    opencode auth login
    ```
 
-4. Open **Varro** from the Activity Bar, or run **Varro: Focus Chat**.
+4. Open `Varro` from the Activity Bar. For the best layout, move it to the `Secondary Side Bar` so you can keep the editor visible while chatting.
 5. Start prompting. Varro automatically includes the active file and current selection by default.
 6. Add more context when needed:
-   - Right-click a file or folder in Explorer and choose **Varro: Add to Context**
-   - Select terminal text and run **Varro: Add Terminal Selection to Context**
+   - Right-click a file or folder in Explorer and choose `Varro: Add to Context`
+   - Select terminal text and run `Varro: Add Terminal Selection to Context`
    - Drag files or folders into the chat
    - Paste an image into the input box
 7. Approve or reject tool permissions and answer follow-up questions directly in the chat panel.

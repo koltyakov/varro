@@ -47,20 +47,8 @@
     },
     "commands": [
       {
-        "command": "varro.chat.focus",
-        "title": "Varro: Focus Chat"
-      },
-      {
         "command": "varro.chat.newSession",
         "title": "Varro: New Session"
-      },
-      {
-        "command": "varro.chat.addToContext",
-        "title": "Varro: Add to Context"
-      },
-      {
-        "command": "varro.chat.addTerminalSelectionToContext",
-        "title": "Varro: Add Terminal Selection to Context"
       },
       {
         "command": "varro.chat.abort",
@@ -69,6 +57,14 @@
       {
         "command": "varro.server.restart",
         "title": "Varro: Restart Server"
+      },
+      {
+        "command": "varro.chat.addToContext",
+        "title": "Varro: Add to Context"
+      },
+      {
+        "command": "varro.chat.addTerminalSelectionToContext",
+        "title": "Varro: Add to Context"
       }
     ],
     "menus": {
@@ -78,23 +74,25 @@
           "group": "z_varro"
         }
       ],
+      "terminal/context": [
+        {
+          "command": "varro.chat.addTerminalSelectionToContext",
+          "when": "terminalTextSelected",
+          "group": "z_varro"
+        }
+      ],
       "commandPalette": [
         {
-          "command": "varro.chat.addToContext"
+          "command": "varro.chat.addToContext",
+          "when": "false"
         },
         {
-          "command": "varro.chat.addTerminalSelectionToContext"
+          "command": "varro.chat.addTerminalSelectionToContext",
+          "when": "false"
         }
       ]
     },
     "keybindings": [
-      {
-        "command": "varro.chat.focus",
-        "key": "cmd+shift+o",
-        "mac": "cmd+shift+o",
-        "win": "ctrl+shift+o",
-        "linux": "ctrl+shift+o"
-      },
       {
         "command": "varro.chat.addToContext",
         "key": "cmd+shift+k",
