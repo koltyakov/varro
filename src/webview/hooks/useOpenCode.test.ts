@@ -455,6 +455,59 @@ describe('sendMessage', () => {
     });
   });
 
+  it('omits a disabled current document while keeping other context attachments', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+      selection: { startLine: 4, endLine: 8 },
+      diagnostics: [],
+    });
+    stateModule.addClipboardImage({
+      id: 'img-1',
+      url: 'blob:1',
+      mime: 'image/png',
+      filename: 'img-1.png',
+      size: 10,
+    });
+    stateModule.addContextFile({
+      path: '/repo/src/extra.ts',
+      relativePath: 'src/extra.ts',
+      type: 'file',
+    });
+    stateModule.setCurrentDocumentEnabled(false, 'session-1');
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Review this image');
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      parts: [
+        { type: 'text', text: 'Review this image' },
+        { type: 'text', text: '[Working directory: /repo]' },
+        { type: 'text', text: 'src/extra.ts' },
+        { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
+      ],
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
+  });
+
   it('reuses the most recently selected model for a new session', async () => {
     const { stateModule, hookModule } = await loadModules();
 

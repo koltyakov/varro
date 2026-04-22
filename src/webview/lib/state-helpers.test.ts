@@ -149,6 +149,35 @@ describe('state helpers', () => {
     expect(window.localStorage.getItem('varro.draftPermissionMode')).toBeNull();
   });
 
+  it('tracks current document auto-context state by session in memory', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setState('activeSessionId', null);
+    stateModule.rememberCurrentDocumentNavigation(null, '/repo/a.ts');
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
+
+    stateModule.toggleCurrentDocumentEnabled();
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
+
+    stateModule.rememberCurrentDocumentNavigation('/repo/a.ts', '/repo/b.ts');
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
+
+    stateModule.adoptDraftCurrentDocumentState('session-1');
+    expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(false);
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
+
+    stateModule.setCurrentDocumentEnabled(true, 'session-1');
+    stateModule.rememberCurrentDocumentNavigation('/repo/a.ts', '/repo/b.ts', 'session-1');
+    expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(true);
+
+    stateModule.setCurrentDocumentEnabled(false, 'session-1');
+    stateModule.rememberCurrentDocumentNavigation('/repo/b.ts', '/repo/c.ts', 'session-1');
+    expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(false);
+
+    stateModule.clearCurrentDocumentStateForSession('session-1');
+    expect(stateModule.getCurrentDocumentEnabled('session-2')).toBe(true);
+  });
+
   it('deduplicates context files and manages clipboard image placeholders', async () => {
     const stateModule = await loadState();
 

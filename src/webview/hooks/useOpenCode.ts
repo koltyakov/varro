@@ -20,6 +20,8 @@ import {
   clearClipboardImages,
   clearMessages,
   clearStreamingState,
+  clearCurrentDocumentStateForSession,
+  clearDraftCurrentDocumentState,
   setMessagesIncremental,
   upsertMessageInfo,
   upsertPart,
@@ -43,6 +45,9 @@ import {
   saveProjectPermissionMode,
   draftPermissionMode,
   setDraftPermissionMode,
+  getCurrentDocumentEnabled,
+  adoptDraftCurrentDocumentState,
+  rememberCurrentDocumentNavigation,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
@@ -172,6 +177,7 @@ function clearActiveSessionState() {
 
 function clearDeletedSessionState(id: string) {
   removePermissionModeForSession(id);
+  clearCurrentDocumentStateForSession(id);
   setState('sessionStatus', (statuses) => {
     const next = { ...statuses };
     delete next[id];
@@ -336,6 +342,11 @@ export function useOpenCode() {
             const workspaceChanged = nextWorkspacePath !== currentWorkspacePath;
             currentWorkspacePath = nextWorkspacePath;
             setState('editorContext', msg.payload);
+            rememberCurrentDocumentNavigation(
+              state.editorContext.activeFile?.path ?? null,
+              msg.payload.activeFile?.path ?? null,
+              state.activeSessionId
+            );
             if (workspaceChanged) {
               syncDraftPermissionForWorkspace(nextWorkspacePath);
             }
@@ -583,6 +594,7 @@ async function loadSessions() {
 }
 
 export async function selectSession(id: string) {
+  clearDraftCurrentDocumentState();
   setState('activeSessionId', id);
   persistActiveSessionId(id);
   markSessionSeen(id);
@@ -649,12 +661,18 @@ export async function createSession(
   initialPermissionMode = getPermissionModeForSession(null)
 ): Promise<string | null> {
   try {
+    const previousActiveSessionId = state.activeSessionId;
     const session = await client.session.create({
       ...(title ? { title } : {}),
       permission: getSessionPermissionRulesForMode(initialPermissionMode, 'create'),
     });
     upsertSession(session);
     setState('activeSessionId', session.id);
+    if (previousActiveSessionId) {
+      clearDraftCurrentDocumentState();
+    } else {
+      adoptDraftCurrentDocumentState(session.id);
+    }
     setState('sessionStatus', { ...state.sessionStatus, [session.id]: { type: 'idle' } });
     persistActiveSessionId(session.id);
     markSessionSeen(session.id);
@@ -741,7 +759,8 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
 
   const sel = state.editorContext.selection;
   const af = state.editorContext.activeFile;
-  if (af) {
+  const currentDocumentEnabled = getCurrentDocumentEnabled(sessionId);
+  if (af && currentDocumentEnabled) {
     const activeFilePath = getAttachmentReference({ path: af.path, type: 'file' }, wp);
     const explicitContext = hasExplicitContextForPath(state.droppedFiles, af.path);
     const activeSelectionRanges = getSelectionRangesFromEditorContext(sel);

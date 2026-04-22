@@ -1803,6 +1803,15 @@ input:focus-visible {
     border-color 0.1s;
 }
 
+.chat-attachment-chip.clickable {
+  cursor: pointer;
+}
+
+.chat-attachment-chip.clickable:focus-visible {
+  outline: 1px solid var(--color-vscode-focusBorder);
+  outline-offset: 1px;
+}
+
 .chat-attachment-chip:hover {
   background: var(--color-vscode-input-surface-hover);
   border-color: var(--color-vscode-border-strong);

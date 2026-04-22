@@ -5,9 +5,11 @@ import { logger } from './logger';
 
 export class ContextProvider implements vscode.Disposable {
   private static readonly TERMINAL_COPY_DELAY_MS = 40;
+  private static readonly ACTIVE_EDITOR_SETTLE_DELAY_MS = 60;
   private disposables: vscode.Disposable[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private diagnosticsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private activeEditorSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private _context: EditorContext = {
     workspacePath: null,
     activeFile: null,
@@ -98,18 +100,30 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   private update() {
+    if (this.activeEditorSettleTimer) {
+      clearTimeout(this.activeEditorSettleTimer);
+      this.activeEditorSettleTimer = null;
+    }
+
     const folders = vscode.workspace.workspaceFolders;
     this._context.workspacePath = folders && folders.length > 0 ? folders[0].uri.fsPath : null;
     const config = getContextConfig();
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      this._context.activeFile = null;
-      this._context.selection = null;
-      const nextKey = this.getContextKey();
-      if (nextKey === this._lastContextKey) return;
-      this._lastContextKey = nextKey;
-      this.updateDiagnostics();
+      this.activeEditorSettleTimer = setTimeout(() => {
+        this.activeEditorSettleTimer = null;
+        if (vscode.window.activeTextEditor) {
+          this.update();
+          return;
+        }
+        this._context.activeFile = null;
+        this._context.selection = null;
+        const nextKey = this.getContextKey();
+        if (nextKey === this._lastContextKey) return;
+        this._lastContextKey = nextKey;
+        this.updateDiagnostics();
+      }, ContextProvider.ACTIVE_EDITOR_SETTLE_DELAY_MS);
       return;
     }
 
@@ -258,6 +272,7 @@ export class ContextProvider implements vscode.Disposable {
   dispose() {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.diagnosticsDebounceTimer) clearTimeout(this.diagnosticsDebounceTimer);
+    if (this.activeEditorSettleTimer) clearTimeout(this.activeEditorSettleTimer);
     this.disposables.forEach((d) => d.dispose());
   }
 }

@@ -64,10 +64,12 @@ interface AppState {
   providersLoaded: boolean;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
+  draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
   sessions: Session[];
   activeSessionId: string | null;
+  currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
   messages: Array<{ info: Message; parts: Part[] }>;
   todos: Todo[];
@@ -123,10 +125,12 @@ export const [state, setState] = createStore<AppState>({
   providersLoaded: false,
   editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
   terminalSelection: initialWebviewState.terminalSelection ?? null,
+  draftCurrentDocumentEnabled: null,
   droppedFiles: initialWebviewState.droppedFiles ?? [],
   clipboardImages: [],
   sessions: [],
   activeSessionId: null,
+  currentDocumentEnabledBySession: {},
   sessionStatus: {},
   messages: [],
   todos: [],
@@ -319,6 +323,59 @@ export function requestMessageListScrollToBottom() {
 export function getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode {
   if (!sessionId) return draftPermissionMode();
   return state.sessionPermissionModes[sessionId] || 'default';
+}
+
+export function getCurrentDocumentEnabled(
+  sessionId: string | null | undefined = state.activeSessionId
+) {
+  return sessionId ? state.currentDocumentEnabledBySession[sessionId] ?? true : state.draftCurrentDocumentEnabled ?? true;
+}
+
+export function setCurrentDocumentEnabled(
+  enabled: boolean,
+  sessionId: string | null | undefined = state.activeSessionId
+) {
+  if (sessionId) {
+    setState('currentDocumentEnabledBySession', sessionId, enabled);
+    return;
+  }
+  setState('draftCurrentDocumentEnabled', enabled);
+}
+
+export function toggleCurrentDocumentEnabled(
+  sessionId: string | null | undefined = state.activeSessionId
+) {
+  setCurrentDocumentEnabled(!getCurrentDocumentEnabled(sessionId), sessionId);
+}
+
+export function rememberCurrentDocumentNavigation(
+  previousPath: string | null | undefined,
+  nextPath: string | null | undefined,
+  sessionId: string | null | undefined = state.activeSessionId
+) {
+  if (!previousPath || !nextPath || previousPath === nextPath) return;
+  if (getCurrentDocumentEnabled(sessionId)) return;
+  setCurrentDocumentEnabled(false, sessionId);
+}
+
+export function adoptDraftCurrentDocumentState(sessionId: string) {
+  if (!sessionId || state.draftCurrentDocumentEnabled === null) return;
+  setState('currentDocumentEnabledBySession', sessionId, state.draftCurrentDocumentEnabled);
+  clearDraftCurrentDocumentState();
+}
+
+export function clearDraftCurrentDocumentState() {
+  setState('draftCurrentDocumentEnabled', null);
+}
+
+export function clearCurrentDocumentStateForSession(sessionId: string) {
+  if (!state.currentDocumentEnabledBySession[sessionId]) return;
+  setState(
+    'currentDocumentEnabledBySession',
+    produce((sessions) => {
+      delete sessions[sessionId];
+    })
+  );
 }
 
 export function setPermissionModeForSession(

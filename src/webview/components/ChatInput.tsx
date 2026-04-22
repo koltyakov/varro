@@ -29,6 +29,8 @@ import {
   getPermissionModeForSession,
   error,
   requestMessageListScrollToBottom,
+  getCurrentDocumentEnabled,
+  toggleCurrentDocumentEnabled,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import {
@@ -155,6 +157,7 @@ export function ChatInput() {
 
   const hasMentions = () => files().length > 0 || clipboardImages().length > 0;
   const visibleFiles = () => files();
+  const activeContextEnabled = () => getCurrentDocumentEnabled(state.activeSessionId);
 
   const activeContext = () => {
     const file = activeFile();
@@ -1262,11 +1265,15 @@ export function ChatInput() {
               <AttachmentChip
                 label={activeContext()!.filename}
                 detail={activeContext()!.lineRange}
+                disabled={!activeContextEnabled()}
                 title={
-                  activeContext()!.lineRange
-                    ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
-                    : activeContext()!.filename
+                  `${
+                    activeContext()!.lineRange
+                      ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
+                      : activeContext()!.filename
+                  }${activeContextEnabled() ? ' · Click to disable current document context' : ' · Current document context is disabled. Click to enable it again'}`
                 }
+                onClick={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
               />
             </Show>
             <Show when={terminalSelection()}>
@@ -1965,17 +1972,36 @@ function AttachmentChip(props: {
   detail?: string | null;
   disabled?: boolean;
   icon?: 'file' | 'folder' | 'image' | 'terminal';
+  onClick?: () => void;
   onRemove?: () => void;
   title?: string;
 }) {
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (!props.onClick) return;
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    props.onClick();
+  };
+
   return (
     <span
-      class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}`}
+      class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}${props.onClick ? ' clickable' : ''}`}
       title={props.title}
       aria-disabled={props.disabled ? 'true' : undefined}
+      aria-pressed={props.onClick ? (!props.disabled ? 'true' : 'false') : undefined}
+      role={props.onClick ? 'button' : undefined}
+      tabIndex={props.onClick ? 0 : undefined}
+      onClick={() => props.onClick?.()}
+      onKeyDown={handleKeyDown}
     >
       <Show when={props.onRemove}>
-        <button class="chip-remove" onClick={() => props.onRemove?.()}>
+        <button
+          class="chip-remove"
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onRemove?.();
+          }}
+        >
           <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
             <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
           </svg>
