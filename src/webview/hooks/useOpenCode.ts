@@ -163,7 +163,7 @@ function isSessionInWorkspace(session: Session, workspacePath: string | null | u
 }
 
 function sortSessions(sessions: Session[]) {
-  return [...sessions].toSorted((a, b) => b.time.updated - a.time.updated);
+  return [...sessions].sort((a, b) => b.time.updated - a.time.updated);
 }
 
 function applySessions(sessions: Session[]) {
@@ -968,7 +968,7 @@ export async function abortSession() {
 
 export async function undoSession() {
   if (!state.activeSessionId) return;
-  const lastAssistant = [...state.messages].toReversed().find((m) => m.info.role === 'assistant');
+  const lastAssistant = [...state.messages].reverse().find((m) => m.info.role === 'assistant');
   if (!lastAssistant) return;
   try {
     startLoading();

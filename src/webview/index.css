@@ -258,9 +258,9 @@ body.vscode-light .assistant-turn-content.assistant-turn-content-highlighted {
 }
 
 body.vscode-light .assistant-turn-content.assistant-turn-content-planning {
-  background: color-mix(in srgb, var(--color-vscode-warning) 9%, var(--color-vscode-widget-bg));
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 22%, var(--color-vscode-border));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-warning) 12%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-warning) 4%, var(--color-vscode-widget-bg));
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 12%, var(--color-vscode-border));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-warning) 6%, transparent);
 }
 
 body.vscode-light .assistant-turn-content {
@@ -432,11 +432,11 @@ input:focus-visible {
 .assistant-turn-content.assistant-turn-content-planning {
   background: color-mix(
     in srgb,
-    var(--color-vscode-warning) 7%,
+    var(--color-vscode-warning) 3%,
     var(--color-vscode-surface-subtle-alt)
   );
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 30%, var(--color-vscode-border));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 16%, var(--color-vscode-border));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-warning) 6%, transparent);
 }
 
 .assistant-turn-content.assistant-turn-content-bare {
@@ -2992,7 +2992,6 @@ kbd {
 .user-message-text {
   white-space: pre-wrap;
   word-break: break-word;
-  margin: 0;
   line-height: 1.6;
 }
 
@@ -3002,6 +3001,31 @@ kbd {
   overscroll-behavior: contain;
   margin-right: -9px;
   padding-right: 9px;
+}
+
+.interactive-session
+  .interactive-item-container.interactive-request
+  .chat-turn-card
+  > .rendered-markdown
+  p.user-message-text {
+  margin: 0;
+}
+
+.user-message-code-block {
+  margin: 0;
+}
+
+.user-message-code-block + .user-message-text,
+.user-message-text + .user-message-code-block,
+.user-message-code-block + .user-message-code-block,
+.user-message-text + .user-message-text {
+  margin-top: 10px;
+}
+
+.user-message-code-block pre.code-block {
+  max-height: min(240px, 34vh);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .user-message-empty {

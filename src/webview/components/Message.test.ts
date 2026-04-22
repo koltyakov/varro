@@ -144,4 +144,29 @@ describe('Message user prompt rendering', () => {
     expect(scrollContainer).toBeInstanceOf(HTMLDivElement);
     expect(scrollContainer?.querySelectorAll('.user-message-text')).toHaveLength(2);
   });
+
+  it('renders fenced user prompt text as a scrollable code block', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-1'),
+          parts: [
+            textPart(
+              'text-1',
+              'Before\n```ts\nconst value = 1;\nconst next = value + 1;\n```\nAfter'
+            ),
+          ],
+        }),
+      container!
+    );
+
+    expect(container?.querySelectorAll('.user-message-text')).toHaveLength(2);
+    expect(container?.querySelector('.user-message-code-block')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.user-message-code-block .code-block-lang')?.textContent).toBe(
+      'ts'
+    );
+    expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
+      'const value = 1;\nconst next = value + 1;\n'
+    );
+  });
 });

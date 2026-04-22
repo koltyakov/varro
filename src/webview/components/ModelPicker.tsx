@@ -29,7 +29,7 @@ export function ModelPicker(props: {
     const search = normalizedQuery();
     return visibleProviders()
       .map((provider) => {
-        const models = Object.values(provider.models).toSorted((a, b) =>
+        const models = Object.values(provider.models).sort((a, b) =>
           a.name.localeCompare(b.name)
         );
         if (!search) return { provider, models };

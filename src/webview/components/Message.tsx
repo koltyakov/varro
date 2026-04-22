@@ -226,6 +226,42 @@ type MessageAttachment =
   | { type: 'terminal-selection'; terminalName: string }
   | { type: 'file-reference'; path: string; isDirectory: boolean };
 
+type UserMessageSegment =
+  | { type: 'text'; content: string }
+  | { type: 'code'; content: string; language?: string };
+
+const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
+
+function parseUserMessageSegments(text: string): UserMessageSegment[] {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const segments: UserMessageSegment[] = [];
+  let lastIndex = 0;
+
+  for (const match of normalized.matchAll(USER_CODE_FENCE_RE)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      segments.push({ type: 'text', content: normalized.slice(lastIndex, index) });
+    }
+
+    segments.push({
+      type: 'code',
+      content: match[2],
+      language: match[1].trim() || undefined,
+    });
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < normalized.length) {
+    segments.push({ type: 'text', content: normalized.slice(lastIndex) });
+  }
+
+  if (segments.length === 0) {
+    segments.push({ type: 'text', content: normalized });
+  }
+
+  return segments;
+}
+
 function UserMessageContent(props: { parts: Part[] }) {
   const parsed = createMemo(() => {
     const messageTexts: string[] = [];
@@ -311,7 +347,7 @@ function UserMessageContent(props: { parts: Part[] }) {
       <Show when={parsed().messageTexts.length > 0}>
         <div class="user-message-text-scroll">
           <For each={parsed().messageTexts}>
-            {(text) => <p class="user-message-text">{text}</p>}
+            {(text) => <UserMessageTextContent text={text} />}
           </For>
         </div>
       </Show>
@@ -333,6 +369,33 @@ function UserMessageContent(props: { parts: Part[] }) {
       </Show>
       <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
     </div>
+  );
+}
+
+function UserMessageTextContent(props: { text: string }) {
+  const segments = createMemo(() => parseUserMessageSegments(props.text));
+
+  return (
+    <For each={segments()}>
+      {(segment) =>
+        segment.type === 'code' ? (
+          <div class="interactive-result-code-block user-message-code-block" data-lang={segment.language}>
+            <Show when={segment.language}>
+              <div class="code-block-header">
+                <span class="code-block-lang">{segment.language}</span>
+              </div>
+            </Show>
+            <pre class="code-block">
+              <code>{segment.content}</code>
+            </pre>
+          </div>
+        ) : (
+          <Show when={segment.content.length > 0}>
+            <p class="user-message-text">{segment.content}</p>
+          </Show>
+        )
+      }
+    </For>
   );
 }
 

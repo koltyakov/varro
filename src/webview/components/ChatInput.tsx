@@ -954,7 +954,7 @@ export function ChatInput() {
       };
     }
 
-    const latestAuto = [...assistantMessages()].toReversed()[0];
+    const latestAuto = [...assistantMessages()].reverse()[0];
     if (latestAuto) {
       const provider = state.providers.find((item) => item.id === latestAuto.providerID);
       const model = provider?.models[latestAuto.modelID];
