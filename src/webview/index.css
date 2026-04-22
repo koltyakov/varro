@@ -2996,6 +2996,9 @@ kbd {
 }
 
 .user-message-text-scroll {
+  display: flex;
+  flex-direction: column;
+  row-gap: 10px;
   max-height: min(320px, 45vh);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -3015,11 +3018,8 @@ kbd {
   margin: 0;
 }
 
-.user-message-code-block + .user-message-text,
-.user-message-text + .user-message-code-block,
-.user-message-code-block + .user-message-code-block,
-.user-message-text + .user-message-text {
-  margin-top: 10px;
+.user-message-text-scroll > .user-message-code-block:not(:last-child) {
+  margin-bottom: 8px;
 }
 
 .user-message-code-block pre.code-block {

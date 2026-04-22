@@ -161,6 +161,8 @@ describe('Message user prompt rendering', () => {
     );
 
     expect(container?.querySelectorAll('.user-message-text')).toHaveLength(2);
+    expect(container?.querySelectorAll('.user-message-text')[0]?.textContent).toBe('Before');
+    expect(container?.querySelectorAll('.user-message-text')[1]?.textContent).toBe('After');
     expect(container?.querySelector('.user-message-code-block')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.user-message-code-block .code-block-lang')?.textContent).toBe(
       'ts'

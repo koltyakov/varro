@@ -232,6 +232,10 @@ type UserMessageSegment =
 
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 
+function trimFenceBoundaryNewlines(content: string, side: 'start' | 'end') {
+  return side === 'start' ? content.replace(/^\n+/, '') : content.replace(/\n+$/, '');
+}
+
 function parseUserMessageSegments(text: string): UserMessageSegment[] {
   const normalized = text.replace(/\r\n?/g, '\n');
   const segments: UserMessageSegment[] = [];
@@ -240,7 +244,10 @@ function parseUserMessageSegments(text: string): UserMessageSegment[] {
   for (const match of normalized.matchAll(USER_CODE_FENCE_RE)) {
     const index = match.index ?? 0;
     if (index > lastIndex) {
-      segments.push({ type: 'text', content: normalized.slice(lastIndex, index) });
+      const content = trimFenceBoundaryNewlines(normalized.slice(lastIndex, index), 'end');
+      if (content.length > 0) {
+        segments.push({ type: 'text', content });
+      }
     }
 
     segments.push({
@@ -252,7 +259,10 @@ function parseUserMessageSegments(text: string): UserMessageSegment[] {
   }
 
   if (lastIndex < normalized.length) {
-    segments.push({ type: 'text', content: normalized.slice(lastIndex) });
+    const content = trimFenceBoundaryNewlines(normalized.slice(lastIndex), 'start');
+    if (content.length > 0) {
+      segments.push({ type: 'text', content });
+    }
   }
 
   if (segments.length === 0) {
