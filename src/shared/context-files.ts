@@ -23,7 +23,7 @@ export function normalizeContextLineRanges(
       startLine: Math.max(1, Math.min(range.startLine, range.endLine)),
       endLine: Math.max(1, Math.max(range.startLine, range.endLine)),
     }))
-    .sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+    .toSorted((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
 
   const merged: ContextLineRange[] = [];
   for (const range of sorted) {

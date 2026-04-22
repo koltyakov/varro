@@ -16,7 +16,7 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
 ## Requirements
 
 - [VS Code](https://code.visualstudio.com/) 1.91 or newer
-- [Node.js](https://nodejs.org/) 18 or newer
+- [Node.js](https://nodejs.org/) 20 or newer
 - The OpenCode CLI installed
 
 ## Quick Start

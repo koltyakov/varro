@@ -7,6 +7,7 @@
   "repository": "https://github.com/koltyakov/varro",
   "license": "MIT",
   "engines": {
+    "node": ">=20",
     "vscode": "^1.91.0"
   },
   "categories": [

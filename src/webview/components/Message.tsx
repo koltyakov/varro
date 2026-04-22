@@ -356,9 +356,7 @@ function UserMessageContent(props: { parts: Part[] }) {
     <div class="rendered-markdown">
       <Show when={parsed().messageTexts.length > 0}>
         <div class="user-message-text-scroll">
-          <For each={parsed().messageTexts}>
-            {(text) => <UserMessageTextContent text={text} />}
-          </For>
+          <For each={parsed().messageTexts}>{(text) => <UserMessageTextContent text={text} />}</For>
         </div>
       </Show>
       <Show when={!hasContent()}>
@@ -389,7 +387,10 @@ function UserMessageTextContent(props: { text: string }) {
     <For each={segments()}>
       {(segment) =>
         segment.type === 'code' ? (
-          <div class="interactive-result-code-block user-message-code-block" data-lang={segment.language}>
+          <div
+            class="interactive-result-code-block user-message-code-block"
+            data-lang={segment.language}
+          >
             <Show when={segment.language}>
               <div class="code-block-header">
                 <span class="code-block-lang">{segment.language}</span>

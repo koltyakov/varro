@@ -4,7 +4,7 @@ This document covers source setup, packaging, and debugging for the Varro VS Cod
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 18 or newer
+- [Node.js](https://nodejs.org/) 20 or newer
 - [VS Code](https://code.visualstudio.com/) 1.91 or newer
 - [OpenCode CLI](https://opencode.ai) installed globally
 
