@@ -3488,10 +3488,8 @@ kbd {
   padding: 0;
   border: none;
   border-radius: 999px;
-  background: var(--color-vscode-error);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
+  background: none;
   cursor: pointer;
-  animation: pulse-soft 1.2s ease-in-out infinite;
   transition: background-color 0.1s;
 }
 
@@ -3522,10 +3520,8 @@ kbd {
   padding: 0;
   border: none;
   border-radius: 999px;
-  background: var(--color-vscode-accent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-vscode-accent) 45%, transparent);
+  background: none;
   cursor: pointer;
-  animation: pulse-soft 1.5s ease-in-out infinite;
   transition: background-color 0.1s;
 }
 
@@ -3550,11 +3546,11 @@ kbd {
 }
 
 .chat-header-attention-badge:hover {
-  background: color-mix(in srgb, var(--color-vscode-accent) 88%, black);
+  background: color-mix(in srgb, var(--color-vscode-accent) 16%, transparent);
 }
 
 .chat-header-failed-badge:hover {
-  background: color-mix(in srgb, var(--color-vscode-error) 88%, black);
+  background: color-mix(in srgb, var(--color-vscode-error) 16%, transparent);
 }
 
 .chat-header-plan-badge:hover {
@@ -3580,26 +3576,6 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-.chat-header-attention-count {
-  position: relative;
-  z-index: 1;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-  color: white;
-  font-variant-numeric: tabular-nums;
-}
-
-.chat-header-failed-count {
-  position: relative;
-  z-index: 1;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-  color: white;
-  font-variant-numeric: tabular-nums;
-}
-
 .chat-header-plan-dot {
   width: 8px;
   height: 8px;
@@ -3607,6 +3583,24 @@ kbd {
   background: var(--color-vscode-warning);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-warning) 55%, transparent);
   animation: pulse-soft 1.5s ease-in-out infinite;
+}
+
+.chat-header-attention-dot,
+.chat-header-failed-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  animation: pulse-soft 1.5s ease-in-out infinite;
+}
+
+.chat-header-attention-dot {
+  background: var(--color-vscode-accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-accent) 55%, transparent);
+}
+
+.chat-header-failed-dot {
+  background: var(--color-vscode-error);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-error) 55%, transparent);
 }
 
 .chat-header-btn {

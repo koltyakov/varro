@@ -21,6 +21,7 @@ import {
   messageListScrollRequestKey,
   messageStructureVersion,
   getChildRunsByParentId,
+  getSessionTreeIds,
 } from '../lib/state';
 import {
   formatDuration,
@@ -117,6 +118,14 @@ export function MessageList() {
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
+  const activeUsageLimit = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return null;
+
+    return getSessionTreeIds(sessionId)
+      .map((id) => state.sessionUsageLimits[id] || null)
+      .find((notice) => !!notice);
+  });
 
   const messages = createMemo(on(messageStructureVersion, () => state.messages));
   const latestPlanImplementationMessageId = createMemo(() =>
@@ -614,7 +623,8 @@ export function MessageList() {
             (isLoading() || isSessionCompacting()) &&
             !hasActiveQuestion() &&
             !hasActivePermission() &&
-            !state.streamingPartId
+            !state.streamingPartId &&
+            !activeUsageLimit()
           }
         >
           <LoadingRow compacting={isSessionCompacting()} />

@@ -32,6 +32,7 @@ import {
   getCurrentDocumentEnabled,
   getProviderLimit,
   toggleCurrentDocumentEnabled,
+  getSessionTreeIds,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
@@ -1055,20 +1056,20 @@ export function ChatInput() {
 
   const sessionTokens = createMemo(() => sumAssistantTokens(assistantMessages()));
 
+  const activeUsageLimit = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return null;
+
+    const usageLimit = getSessionTreeIds(sessionId)
+      .map((id) => state.sessionUsageLimits[id] || null)
+      .find((notice) => !!notice);
+    if (!usageLimit) return null;
+    return usageLimit;
+  });
   const currentProviderLimit = createMemo(() => {
     const current = currentModel();
     if (!current.providerID) return null;
-
-    const usageLimit = state.activeSessionId
-      ? state.sessionUsageLimits[state.activeSessionId]
-      : null;
-    const syntheticLimit =
-      usageLimit &&
-      usageLimit.providerID === current.providerID &&
-      (!usageLimit.modelID || !current.modelID || usageLimit.modelID === current.modelID)
-        ? createUsageLimitProviderLimit(usageLimit)
-        : null;
-    return syntheticLimit || getProviderLimit(current.providerID, current.modelID);
+    return getProviderLimit(current.providerID, current.modelID);
   });
 
   const currentProviderLimitCompact = createMemo(() =>
@@ -1078,25 +1079,6 @@ export function ChatInput() {
     formatProviderLimitTitle(currentProviderLimit())
   );
   const currentProviderLimitTone = createMemo(() => getProviderLimitTone(currentProviderLimit()));
-  const activeUsageLimit = createMemo(() => {
-    const sessionId = state.activeSessionId;
-    if (!sessionId) return null;
-    const usageLimit = state.sessionUsageLimits[sessionId] || null;
-    if (!usageLimit) return null;
-
-    const current = currentModel();
-    if (
-      usageLimit.providerID &&
-      current.providerID &&
-      usageLimit.providerID !== current.providerID
-    ) {
-      return null;
-    }
-    if (usageLimit.modelID && current.modelID && usageLimit.modelID !== current.modelID) {
-      return null;
-    }
-    return usageLimit;
-  });
   const activeUsageLimitWindow = createMemo(() =>
     getPrimaryProviderLimitWindow(createUsageLimitProviderLimit(activeUsageLimit()))
   );

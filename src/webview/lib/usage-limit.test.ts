@@ -39,6 +39,70 @@ describe('usage limit helpers', () => {
     expect(notice?.retryAt).not.toBeNull();
   });
 
+  it('drops stale retry-part notices once a newer assistant message resumes without an error', () => {
+    const notice = deriveUsageLimitNotice({
+      sessionID: 'session-1',
+      status: { type: 'idle' },
+      messages: [
+        {
+          info: {
+            id: 'assistant-1',
+            sessionID: 'session-1',
+            role: 'assistant',
+            time: { created: 1, completed: 2 },
+            error: { name: 'Usage limit reached', data: { message: '429 usage limit reached' } },
+            parentID: 'user-1',
+            modelID: 'gpt-5.4',
+            providerID: 'openai',
+            mode: 'default',
+            path: { cwd: '/repo', root: '/repo' },
+            cost: 0,
+            tokens: {
+              input: 0,
+              output: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          },
+          parts: [
+            {
+              id: 'retry-1',
+              sessionID: 'session-1',
+              messageID: 'assistant-1',
+              type: 'retry',
+              attempt: 1,
+              error: { name: '429', data: { message: '429 usage limit reached' } },
+              time: { created: 1 },
+            },
+          ],
+        },
+        {
+          info: {
+            id: 'assistant-2',
+            sessionID: 'session-1',
+            role: 'assistant',
+            time: { created: 3 },
+            parentID: 'user-2',
+            modelID: 'gpt-5.4',
+            providerID: 'openai',
+            mode: 'default',
+            path: { cwd: '/repo', root: '/repo' },
+            cost: 0,
+            tokens: {
+              input: 0,
+              output: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          },
+          parts: [],
+        },
+      ],
+    });
+
+    expect(notice).toBeNull();
+  });
+
   it('creates a synthetic exhausted provider limit for usage-limit banners', () => {
     const limit = createUsageLimitProviderLimit({
       source: 'message',

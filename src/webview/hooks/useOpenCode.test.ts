@@ -837,6 +837,66 @@ describe('sendMessage', () => {
 });
 
 describe('useOpenCode initialization', () => {
+  it('hydrates 429 retry status for listed sessions before they are opened', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+    clientMocks.sessionStatus.mockResolvedValue({
+      'session-1': {
+        type: 'retry',
+        attempt: 2,
+        message: '429 usage limit reached',
+        next: 8,
+      },
+    });
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+      await vi.waitFor(() => {
+        expect(clientMocks.sessionStatus).toHaveBeenCalledTimes(1);
+      });
+      await vi.waitFor(() => {
+        expect(stateModule.state.sessionStatus['session-1']).toEqual({
+          type: 'retry',
+          attempt: 2,
+          message: '429 usage limit reached',
+          next: 8,
+        });
+        expect(stateModule.state.sessionUsageLimits['session-1']).toMatchObject({
+          statusCode: 429,
+          message: '429 usage limit reached',
+          attempt: 2,
+          sessionID: 'session-1',
+        });
+      });
+      expect(clientMocks.sessionGet).not.toHaveBeenCalled();
+      expect(clientMocks.sessionMessages).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+    }
+  });
+
   it('retries startup after an initial connection failure', async () => {
     let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
     bridgeMocks.onMessage.mockImplementation((handler) => {
@@ -994,6 +1054,152 @@ describe('useOpenCode initialization', () => {
         attempt: 1,
         message: '429 usage limit reached',
         next: 5,
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('aborts retrying subagent sessions when stopping the parent session', async () => {
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionAbort.mockResolvedValue(true);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1' },
+        { ...session('child-2'), parentID: 'child-1' },
+      ]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('sessionStatus', {
+        'session-1': { type: 'retry', attempt: 1, message: '429 usage limit reached', next: 3 },
+        'child-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 4 },
+        'child-2': { type: 'busy' },
+      });
+      stateModule.setSessionUsageLimit('session-1', {
+        source: 'status',
+        statusCode: 429,
+        message: '429 usage limit reached',
+        unit: 'messages',
+        retryAt: 3_000,
+        attempt: 1,
+        sessionID: 'session-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      });
+      stateModule.setSessionUsageLimit('child-1', {
+        source: 'status',
+        statusCode: 429,
+        message: '429 usage limit reached',
+        unit: 'messages',
+        retryAt: 4_000,
+        attempt: 2,
+        sessionID: 'child-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      });
+
+      await hookModule.abortSession();
+
+      expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(3);
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1');
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1');
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(3, 'child-2');
+      expect(stateModule.state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+      expect(stateModule.state.sessionStatus['child-1']).toEqual({ type: 'idle' });
+      expect(stateModule.state.sessionStatus['child-2']).toEqual({ type: 'idle' });
+      expect(stateModule.state.sessionUsageLimits['session-1']).toMatchObject({
+        attempt: 1,
+        sessionID: 'session-1',
+      });
+      expect(stateModule.state.sessionUsageLimits['child-1']).toMatchObject({
+        attempt: 2,
+        sessionID: 'child-1',
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('records the originating session on usage-limit notices', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({
+      providers: [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ],
+      default: { openai: 'gpt-4o' },
+    });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ]);
+      stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+      stateModule.setState('activeSessionId', 'child-1');
+
+      handlers.get('session.status')?.({
+        properties: {
+          sessionID: 'child-1',
+          status: {
+            type: 'retry',
+            attempt: 2,
+            message: '429 usage limit reached',
+            next: 8,
+          },
+        },
+      });
+
+      expect(stateModule.state.sessionUsageLimits['child-1']).toMatchObject({
+        sessionID: 'child-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
       });
     } finally {
       dispose();

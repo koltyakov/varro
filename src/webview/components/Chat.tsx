@@ -3,6 +3,7 @@ import {
   showSessionPicker,
   setShowSessionPicker,
   showSettings,
+  getSessionTreeIds,
   isSessionUnread,
   isSessionAwaitingInput,
   getSelectedAgentForSession,
@@ -75,7 +76,7 @@ export function Chat() {
   const failedSessionsCount = createMemo(() =>
     getHeaderFailedCount(
       primarySessions(),
-      (sessionId) => state.failedSessionIds.includes(sessionId),
+      (sessionId) => isFailedSession(sessionId),
       state.activeSessionId,
       showSessionPicker()
     )
@@ -676,7 +677,7 @@ function SessionListView(props: {
 
   const isSessionNeedingAttention = (sessionId: string) =>
     !isRunningSession(sessionId) && isSessionAwaitingInput(sessionId);
-  const isSessionFailed = (sessionId: string) => state.failedSessionIds.includes(sessionId);
+  const isSessionFailed = (sessionId: string) => isFailedSession(sessionId);
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
   const groupedSessions = createMemo(() =>
     groupSessions(
@@ -1002,7 +1003,7 @@ function SessionListItem(props: {
   const hasQuestionRequest = () =>
     state.questions.some((question) => question.sessionID === props.session.id);
   const isRunning = () => isRunningSession(props.session.id);
-  const isFailed = () => state.failedSessionIds.includes(props.session.id);
+  const isFailed = () => isFailedSession(props.session.id);
   const needsAttention = () => !isRunning() && isSessionAwaitingInput(props.session.id);
   const isNewlyCompleted = () =>
     !isRunning() &&
@@ -1138,53 +1139,51 @@ function RunningSessionsBadge(props: { count: number; onClick: () => void }) {
 }
 
 function AttentionSessionsBadge(props: { count: number; onClick: () => void }) {
-  const label = () =>
-    `${props.count} session${props.count === 1 ? '' : 's'} waiting for input or permission`;
+  const label = 'Sessions waiting for input or permission';
 
   return (
     <Show when={props.count > 0}>
       <button
         type="button"
         class="chat-header-attention-badge"
-        title={label()}
-        aria-label={label()}
+        title={label}
+        aria-label={label}
         onClick={props.onClick}
       >
-        <span class="chat-header-attention-count">{props.count}</span>
+        <span class="chat-header-attention-dot" aria-hidden="true" />
       </button>
     </Show>
   );
 }
 
 function FailedSessionsBadge(props: { count: number; onClick: () => void }) {
-  const label = () => `${props.count} failed session${props.count === 1 ? '' : 's'}`;
+  const label = 'Failed sessions';
 
   return (
     <Show when={props.count > 0}>
       <button
         type="button"
         class="chat-header-failed-badge"
-        title={label()}
-        aria-label={label()}
+        title={label}
+        aria-label={label}
         onClick={props.onClick}
       >
-        <span class="chat-header-failed-count">{props.count}</span>
+        <span class="chat-header-failed-dot" aria-hidden="true" />
       </button>
     </Show>
   );
 }
 
 function PlanReadyBadge(props: { count: number; onClick: () => void }) {
-  const label = () =>
-    `${props.count} completed plan${props.count === 1 ? '' : 's'} ready in another chat`;
+  const label = 'Completed plans ready in another chat';
 
   return (
     <Show when={props.count > 0}>
       <button
         type="button"
         class="chat-header-plan-badge"
-        title={label()}
-        aria-label={label()}
+        title={label}
+        aria-label={label}
         onClick={props.onClick}
       >
         <span class="chat-header-plan-dot" aria-hidden="true" />
@@ -1196,14 +1195,25 @@ function PlanReadyBadge(props: { count: number; onClick: () => void }) {
 function isPlanReadySession(session: (typeof state.sessions)[number]) {
   return (
     !isRunningSession(session.id) &&
-    !state.failedSessionIds.includes(session.id) &&
+    !isFailedSession(session.id) &&
     !isSessionAwaitingInput(session.id) &&
     isSessionUnread(session.id, session.time.updated) &&
     getSelectedAgentForSession(session.id) === 'plan'
   );
 }
 
-function isRunningSession(sessionId: string) {
+export function hasActiveUsageLimit(sessionId: string) {
+  return getSessionTreeIds(sessionId)
+    .map((id) => state.sessionUsageLimits[id] || null)
+    .some((notice) => !!notice);
+}
+
+export function isFailedSession(sessionId: string) {
+  return state.failedSessionIds.includes(sessionId) || hasActiveUsageLimit(sessionId);
+}
+
+export function isRunningSession(sessionId: string) {
+  if (hasActiveUsageLimit(sessionId)) return false;
   if (isSessionAwaitingInput(sessionId)) return false;
   const type = state.sessionStatus[sessionId]?.type;
   return type === 'busy' || type === 'retry';

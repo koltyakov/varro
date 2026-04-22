@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ToolPart } from '../types';
-import { formatToolTitle, shouldShowToolPreview } from './ToolCall';
+import { formatToolTitle, getVisibleInputEntries, shouldShowToolPreview } from './ToolCall';
 
 function completedState(
   input: Record<string, unknown> = {},
@@ -45,5 +45,25 @@ describe('shouldShowToolPreview', () => {
 
   it('shows previews when they add new information', () => {
     expect(shouldShowToolPreview('bash', { key: 'command', text: 'git status' })).toBe(true);
+  });
+});
+
+describe('getVisibleInputEntries', () => {
+  it('hides empty string fields while keeping meaningful values', () => {
+    expect(
+      getVisibleInputEntries({
+        description: 'stability perf scan',
+        prompt: 'Research the VS Code extension/webview codebase',
+        task_id: '',
+        command: '   ',
+        count: 0,
+        enabled: false,
+      })
+    ).toEqual([
+      ['description', 'stability perf scan'],
+      ['prompt', 'Research the VS Code extension/webview codebase'],
+      ['count', 0],
+      ['enabled', false],
+    ]);
   });
 });

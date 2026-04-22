@@ -54,6 +54,7 @@ import {
   getCurrentDocumentEnabled,
   adoptDraftCurrentDocumentState,
   rememberCurrentDocumentNavigation,
+  getSessionTreeIds,
   setProviderLimit,
   setSessionUsageLimit,
 } from '../lib/state';
@@ -105,7 +106,11 @@ import { getPreferredVariant } from '../lib/model-variants';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
 import { isAssistantMessage } from '../lib/message-metrics';
-import { deriveUsageLimitNotice, parseUsageLimitNotice } from '../lib/usage-limit';
+import {
+  deriveUsageLimitNotice,
+  parseUsageLimitNotice,
+  type UsageLimitNotice,
+} from '../lib/usage-limit';
 
 let initialized = false;
 let initializing = false;
@@ -333,9 +338,25 @@ function clearPendingAbort(sessionId: string | null | undefined) {
   pendingAbortRetryAttempts.delete(sessionId);
 }
 
+function hasPendingAbort(sessionId: string | null | undefined) {
+  return sessionId ? pendingAbortRetryAttempts.has(sessionId) : false;
+}
+
+function clearPendingAbortTree(sessionIds: string[]) {
+  for (const sessionId of sessionIds) {
+    clearPendingAbort(sessionId);
+  }
+}
+
 function markPendingAbort(sessionId: string) {
   const status = state.sessionStatus[sessionId];
   pendingAbortRetryAttempts.set(sessionId, status?.type === 'retry' ? status.attempt : null);
+}
+
+function markPendingAbortTree(sessionIds: string[]) {
+  for (const sessionId of sessionIds) {
+    markPendingAbort(sessionId);
+  }
 }
 
 function shouldIgnorePendingAbortStatus(
@@ -343,10 +364,7 @@ function shouldIgnorePendingAbortStatus(
   status: SessionStatus | null | undefined
 ) {
   if (!pendingAbortRetryAttempts.has(sessionId)) return false;
-  if (!status || status.type === 'idle') {
-    clearPendingAbort(sessionId);
-    return false;
-  }
+  if (!status || status.type === 'idle') return false;
   if (status.type === 'busy') return true;
   if (status.type !== 'retry') return false;
 
@@ -441,7 +459,7 @@ function getUsageLimitNoticeContext(
     return { providerID: derived.providerID, modelID: derived.modelID };
   }
 
-  return null;
+  return getActiveProviderSelection();
 }
 
 export function useOpenCode() {
@@ -631,12 +649,44 @@ function getActiveProviderSelection() {
   return { providerID: firstProvider.id, modelID: fallbackModelID };
 }
 
+function clearUsageLimitOnResumedProgress(sessionID: string, nextStatus?: SessionStatus | null) {
+  const current = state.sessionUsageLimits[sessionID];
+  if (!current) return;
+  if (nextStatus?.type === 'retry') return;
+  if (nextStatus?.type === 'busy' && current.source === 'message') return;
+  setSessionUsageLimit(sessionID, null);
+}
+
+function applyUsageLimitNotice(
+  sessionID: string,
+  notice: UsageLimitNotice | null,
+  options?: { preserveExistingOnNull?: boolean }
+) {
+  if (notice) {
+    setSessionUsageLimit(sessionID, { ...notice, sessionID });
+    if (notice.providerID) {
+      void refreshProviderLimit(notice.providerID, notice.modelID);
+    }
+    return;
+  }
+
+  if (!options?.preserveExistingOnNull) {
+    setSessionUsageLimit(sessionID, null);
+  }
+}
+
 export async function recheckSessionStatus(sessionId: string) {
   try {
     const statuses = await client.session.status();
     const status = statuses[sessionId];
     if (shouldIgnorePendingAbortStatus(sessionId, status)) return;
-    updateUsageLimitState(sessionId, status);
+    const abortedRetry = hasPendingAbort(sessionId);
+    if (!(abortedRetry && (!status || status.type === 'idle'))) {
+      updateUsageLimitState(sessionId, status);
+    }
+    if (!status || status.type === 'idle') {
+      clearPendingAbort(sessionId);
+    }
     if (!status || status.type === 'idle') {
       stopLoading();
       if (sessionId === state.activeSessionId) {
@@ -654,6 +704,7 @@ async function initConnection() {
   try {
     await client.health();
     await Promise.all([loadSessions(), loadAgents(), loadProviders(), loadQuestions()]);
+    await hydrateSessionStatuses();
     if (!state.activeSessionId) {
       const lastId = getPersistedActiveSessionId();
       if (lastId && state.sessions.some((s) => s.id === lastId)) {
@@ -762,6 +813,18 @@ async function loadSessions() {
     applySessions(sessions);
   } catch (err) {
     logError('loadSessions', err);
+  }
+}
+
+async function hydrateSessionStatuses() {
+  try {
+    const statuses = await client.session.status();
+    setState('sessionStatus', statuses);
+    for (const session of state.sessions) {
+      updateUsageLimitState(session.id, statuses[session.id], []);
+    }
+  } catch (err) {
+    logError('session.status', err);
   }
 }
 
@@ -1101,20 +1164,29 @@ function getAttachmentReference(
 export async function abortSession() {
   if (!state.activeSessionId) return;
   const sessionId = state.activeSessionId;
-  const previousStatus = state.sessionStatus[sessionId];
-  const previousUsageLimit = state.sessionUsageLimits[sessionId] || null;
-  markPendingAbort(sessionId);
-  setSessionStatusEntry(sessionId, { type: 'idle' });
-  setSessionUsageLimit(sessionId, null);
+  const sessionTreeIds = getSessionTreeIds(sessionId);
+  const previousStatuses = new Map(
+    sessionTreeIds.map((id) => [id, state.sessionStatus[id]] as const)
+  );
+  const previousUsageLimits = new Map(
+    sessionTreeIds.map((id) => [id, state.sessionUsageLimits[id] || null] as const)
+  );
+  markPendingAbortTree(sessionTreeIds);
+  for (const id of sessionTreeIds) {
+    setSessionStatusEntry(id, { type: 'idle' });
+  }
   stopLoading();
   try {
-    await client.session.abort(sessionId);
+    await Promise.all(sessionTreeIds.map((id) => client.session.abort(id)));
   } catch (err) {
-    clearPendingAbort(sessionId);
-    if (previousStatus) {
-      setSessionStatusEntry(sessionId, previousStatus);
+    clearPendingAbortTree(sessionTreeIds);
+    for (const id of sessionTreeIds) {
+      const previousStatus = previousStatuses.get(id);
+      if (previousStatus) {
+        setSessionStatusEntry(id, previousStatus);
+      }
+      setSessionUsageLimit(id, previousUsageLimits.get(id) || null);
     }
-    setSessionUsageLimit(sessionId, previousUsageLimit);
     logError('abortSession', err);
   }
 }
@@ -1282,8 +1354,17 @@ function registerEventHandlers() {
       const sessionID = props.sessionID as string;
       const status = props.status as SessionStatus;
       if (shouldIgnorePendingAbortStatus(sessionID, status)) return;
+      const abortedRetry = hasPendingAbort(sessionID);
       setSessionStatusEntry(sessionID, status);
-      updateUsageLimitState(sessionID, status);
+      if (status.type === 'busy') {
+        clearUsageLimitOnResumedProgress(sessionID, status);
+      }
+      if (!(abortedRetry && status.type === 'idle')) {
+        updateUsageLimitState(sessionID, status);
+      }
+      if (status.type === 'idle') {
+        clearPendingAbort(sessionID);
+      }
       if (sessionID === state.activeSessionId) {
         const statusType = (status as { type: string }).type;
         if (statusType === 'busy' || statusType === 'retry') {
@@ -1298,9 +1379,12 @@ function registerEventHandlers() {
   eventHandlerCleanups.push(
     serverEvents.on('session.idle', (data) => {
       const sid = getProps(data)?.sessionID as string | undefined;
+      const abortedRetry = hasPendingAbort(sid);
       clearPendingAbort(sid);
       if (sid) setSessionCompacting(sid, false);
-      if (sid) setSessionUsageLimit(sid, null);
+      if (sid && !abortedRetry) {
+        updateUsageLimitState(sid, { type: 'idle' });
+      }
       if (!sid || sid === state.activeSessionId) stopLoading();
       if (sid && sid === state.activeSessionId) {
         markSessionSeen(sid);
@@ -1323,15 +1407,17 @@ function registerEventHandlers() {
         setSessionFailed(message.sessionID, Boolean(message.error));
         const notice = parseUsageLimitNotice(message.error?.data?.message || message.error?.name);
         if (notice) {
-          setSessionUsageLimit(message.sessionID, {
+          applyUsageLimitNotice(message.sessionID, {
             ...notice,
             source: 'message',
+            sessionID: message.sessionID,
             providerID: message.providerID,
             modelID: message.modelID,
           });
-          void refreshProviderLimit(message.providerID, message.modelID);
         } else if (message.error) {
           setSessionUsageLimit(message.sessionID, null);
+        } else {
+          clearUsageLimitOnResumedProgress(message.sessionID);
         }
       }
     })
@@ -1500,12 +1586,10 @@ function updateUsageLimitState(
     rawNotice && context
       ? {
           ...rawNotice,
+          sessionID,
           providerID: context.providerID,
           modelID: rawNotice.modelID || context.modelID,
         }
       : rawNotice;
-  setSessionUsageLimit(sessionID, notice);
-  if (notice?.providerID) {
-    void refreshProviderLimit(notice.providerID, notice.modelID);
-  }
+  applyUsageLimitNotice(sessionID, notice, { preserveExistingOnNull: status?.type === 'idle' });
 }

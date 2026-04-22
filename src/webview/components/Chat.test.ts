@@ -4,6 +4,7 @@ import type { Session } from '../types';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import {
   archiveSessionGroup,
+  Chat,
   getAttentionSessions,
   getArchiveSessionGroupConfirmationMessage,
   getHeaderAttentionCount,
@@ -15,16 +16,27 @@ import {
   getSessionListFilterLabel,
   getSubagentSessionsForParent,
   groupSessions,
+  hasActiveUsageLimit,
+  isFailedSession,
+  isRunningSession,
   SessionListSectionHeader,
   shouldShowSessionHeaderBadge,
 } from './Chat';
+import { setSessionFailed, setSessionUsageLimit, setState } from '../lib/state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
+  originalResizeObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as typeof ResizeObserver;
 });
 
 afterEach(() => {
@@ -32,6 +44,16 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  setState('sessions', []);
+  setState('sessionStatus', {});
+  setState('sessionUsageLimits', {});
+  setState('failedSessionIds', []);
+  setState('questions', []);
+  setState('permissions', []);
+  setState('lastSeenSessions', {});
+  setState('sessionSelectedAgents', {});
+  setState('activeSessionId', null);
+  globalThis.ResizeObserver = originalResizeObserver;
   vi.restoreAllMocks();
 });
 
@@ -371,6 +393,34 @@ describe('SessionListSectionHeader', () => {
   });
 });
 
+describe('header status badges', () => {
+  it('shows a count only for running sessions', () => {
+    setState('sessions', [
+      session('running-1', 500),
+      session('running-2', 400),
+      session('failed-1', 300),
+      session('attention-1', 200),
+      session('plan-1', 100),
+    ]);
+    setState('activeSessionId', 'active');
+    setState('sessionStatus', {
+      'running-1': { type: 'busy' },
+      'running-2': { type: 'busy' },
+    });
+    setState('failedSessionIds', ['failed-1']);
+    setState('questions', [{ id: 'question-1', sessionID: 'attention-1', questions: [] }]);
+    setState('lastSeenSessions', { 'plan-1': 0 });
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('2');
+    expect(container?.querySelector('.chat-header-failed-badge')?.textContent).toBe('');
+    expect(container?.querySelector('.chat-header-attention-badge')?.textContent).toBe('');
+    expect(container?.querySelector('.chat-header-plan-badge')?.textContent).toBe('');
+  });
+});
+
 describe('getHeaderAttentionCount', () => {
   it('omits the active waiting session while the picker is closed', () => {
     const sessions = [
@@ -431,6 +481,26 @@ describe('getHeaderFailedCount', () => {
 
     expect(getHeaderFailedCount(sessions, () => true, null, true)).toBe(1);
   });
+
+  it('counts usage-limit sessions as failed', () => {
+    const sessions = [session('limited', 500), session('other', 400)];
+
+    setState('sessionUsageLimits', {
+      limited: {
+        source: 'status',
+        statusCode: 429,
+        message: '429 usage limit reached',
+        unit: 'messages',
+        retryAt: 8_000,
+        attempt: 2,
+        sessionID: 'limited',
+      },
+    });
+
+    expect(
+      getHeaderFailedCount(sessions, (sessionId) => isFailedSession(sessionId), null, true)
+    ).toBe(1);
+  });
 });
 
 describe('getHeaderRunningCount', () => {
@@ -458,6 +528,51 @@ describe('getHeaderRunningCount', () => {
     ];
 
     expect(getHeaderRunningCount(sessions, () => true, null, true)).toBe(1);
+  });
+});
+
+describe('usage-limit session status precedence', () => {
+  it('treats a retrying 429 session as failed instead of running', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('sessionStatus', {
+      'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
+    });
+    setSessionUsageLimit('session-1', {
+      source: 'status',
+      statusCode: 429,
+      message: '429 usage limit reached',
+      unit: 'messages',
+      retryAt: 8_000,
+      attempt: 2,
+      sessionID: 'session-1',
+    });
+
+    expect(hasActiveUsageLimit('session-1')).toBe(true);
+    expect(isFailedSession('session-1')).toBe(true);
+    expect(isRunningSession('session-1')).toBe(false);
+  });
+
+  it('returns to running once the 429 notice is cleared', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('sessionStatus', {
+      'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
+    });
+    setSessionUsageLimit('session-1', {
+      source: 'status',
+      statusCode: 429,
+      message: '429 usage limit reached',
+      unit: 'messages',
+      retryAt: 8_000,
+      attempt: 2,
+      sessionID: 'session-1',
+    });
+
+    setSessionUsageLimit('session-1', null);
+    setSessionFailed('session-1', false);
+
+    expect(hasActiveUsageLimit('session-1')).toBe(false);
+    expect(isFailedSession('session-1')).toBe(false);
+    expect(isRunningSession('session-1')).toBe(true);
   });
 });
 

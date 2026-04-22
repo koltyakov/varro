@@ -1040,17 +1040,36 @@ export function setSessionFailed(sessionId: string, failed: boolean) {
 export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice | null) {
   if (!sessionId) return;
 
-  setState('sessionUsageLimits', (current) => {
-    if (notice === null) {
-      if (!(sessionId in current)) return current;
-      const next = { ...current };
-      delete next[sessionId];
-      return next;
-    }
+  setState(
+    'sessionUsageLimits',
+    produce((current) => {
+      if (notice === null) {
+        delete current[sessionId];
+        return;
+      }
 
-    if (current[sessionId] === notice) return current;
-    return { ...current, [sessionId]: notice };
-  });
+      current[sessionId] = notice;
+    })
+  );
+}
+
+export function getSessionTreeIds(rootId: string | null | undefined, sessions = state.sessions) {
+  if (!rootId) return [];
+
+  const visited = new Set<string>();
+  const pending = [rootId];
+
+  while (pending.length > 0) {
+    const currentId = pending.pop();
+    if (!currentId || visited.has(currentId)) continue;
+    visited.add(currentId);
+
+    for (const session of sessions) {
+      if (session.parentID === currentId) pending.push(session.id);
+    }
+  }
+
+  return [...visited];
 }
 
 export function syncFailedSessionsFromMessages(

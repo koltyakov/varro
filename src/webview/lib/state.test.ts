@@ -4,6 +4,7 @@ import {
   applyMessagePartDelta,
   clearMessages,
   clearStreamingState,
+  getSessionTreeIds,
   setSessionFailed,
   setState,
   state,
@@ -185,5 +186,42 @@ describe('failed session tracking', () => {
     setSessionFailed('session-1', false);
 
     expect(state.failedSessionIds).toEqual(['session-2']);
+  });
+});
+
+describe('getSessionTreeIds', () => {
+  it('returns the root session and all descendants', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 1',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 20 },
+      },
+      {
+        id: 'child-2',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 2',
+        version: '1',
+        parentID: 'child-1',
+        time: { created: 0, updated: 30 },
+      },
+    ]);
+
+    expect(getSessionTreeIds('session-1')).toEqual(['session-1', 'child-1', 'child-2']);
+    expect(getSessionTreeIds('child-1')).toEqual(['child-1', 'child-2']);
+    expect(getSessionTreeIds(null)).toEqual([]);
   });
 });

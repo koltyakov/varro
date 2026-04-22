@@ -8,6 +8,7 @@ export type UsageLimitNotice = {
   unit: ProviderLimitUnit;
   retryAt: number | null;
   attempt: number | null;
+  sessionID?: string | null;
   providerID?: string | null;
   modelID?: string | null;
 };
@@ -60,6 +61,23 @@ export function deriveUsageLimitNotice(params: {
     const entry = params.messages[messageIndex];
     if (entry.info.sessionID !== sessionID || entry.info.role !== 'assistant') continue;
 
+    const assistantNotice = parseUsageLimitNotice(
+      entry.info.error?.data?.message || entry.info.error?.name,
+      undefined
+    );
+    if (assistantNotice) {
+      return {
+        ...assistantNotice,
+        source: 'message',
+        providerID: entry.info.providerID,
+        modelID: entry.info.modelID,
+      };
+    }
+
+    if (!entry.info.error) {
+      return null;
+    }
+
     for (let partIndex = entry.parts.length - 1; partIndex >= 0; partIndex -= 1) {
       const part = entry.parts[partIndex];
       if (part.type !== 'retry') continue;
@@ -74,19 +92,6 @@ export function deriveUsageLimitNotice(params: {
           modelID: entry.info.modelID,
         };
       }
-    }
-
-    const assistantNotice = parseUsageLimitNotice(
-      entry.info.error?.data?.message || entry.info.error?.name,
-      undefined
-    );
-    if (assistantNotice) {
-      return {
-        ...assistantNotice,
-        source: 'message',
-        providerID: entry.info.providerID,
-        modelID: entry.info.modelID,
-      };
     }
   }
 

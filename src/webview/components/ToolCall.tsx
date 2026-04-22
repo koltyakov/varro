@@ -32,6 +32,16 @@ function getStateTitle(state: ToolPart['state']) {
   return state.title?.trim() || '';
 }
 
+function hasVisibleInputValue(value: unknown) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  return true;
+}
+
+export function getVisibleInputEntries(input: Record<string, unknown>) {
+  return Object.entries(input).filter(([, value]) => hasVisibleInputValue(value));
+}
+
 export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   const input = (state.input || {}) as Record<string, unknown>;
   const title = getStateTitle(state);
@@ -169,7 +179,7 @@ export function ToolCall(props: { part: ToolPart }) {
 
   const inputEntries = () => {
     const input = (state().input || {}) as Record<string, unknown>;
-    return Object.entries(input).filter(([, v]) => v !== undefined && v !== null);
+    return getVisibleInputEntries(input);
   };
 
   const truncatedOutput = () => {
