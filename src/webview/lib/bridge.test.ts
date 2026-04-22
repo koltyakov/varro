@@ -85,7 +85,9 @@ describe('bridge', () => {
     window.__sendToExtension = send;
     const request = bridge.apiCall('DELETE', '/session/1');
     const rejection = expect(request).rejects.toThrow('permission denied');
-    const id = (send.mock.calls[0]?.[0] as { payload: { id: number } }).payload.id;
+    const firstCall = send.mock.calls[0] as [{ payload: { id: number } }] | undefined;
+    if (!firstCall) throw new Error('Expected bridge request to be sent');
+    const id = firstCall[0].payload.id;
 
     window.dispatchEvent(
       new MessageEvent('message', {

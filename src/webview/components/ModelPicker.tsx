@@ -13,7 +13,6 @@ export function ModelPicker(props: {
   onClose: () => void;
   popoverRef?: (el: HTMLDivElement) => void;
 }) {
-  // oxlint-disable-next-line no-unassigned-vars
   let menuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   const visibleProviders = createMemo(() => getVisibleProviders(state.providers));
@@ -151,7 +150,9 @@ export function ModelPicker(props: {
         <Show when={showSearch()}>
           <div class="dropdown-search">
             <input
-              ref={searchInputRef}
+              ref={(el) => {
+                searchInputRef = el;
+              }}
               type="text"
               class="dropdown-search-input"
               value={query()}

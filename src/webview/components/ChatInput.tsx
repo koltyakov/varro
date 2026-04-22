@@ -79,7 +79,6 @@ export function ChatInput() {
   let agentPopoverRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let modelPickerRef: HTMLButtonElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let modelPopoverRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let toolbarRef: HTMLDivElement | undefined;
@@ -762,7 +761,7 @@ export function ChatInput() {
 
     const filenames: string[] = [];
     const attachableItems = imageItems.slice(0, availableSlots);
-    let nextIndex = nextPastedImageIndex();
+    const nextIndex = nextPastedImageIndex();
 
     for (const [index, item] of attachableItems.entries()) {
       const file = item.getAsFile();
@@ -798,17 +797,6 @@ export function ChatInput() {
       if (msg.payload.query !== fileSearchQuery()) return;
       setFileSearchResults(msg.payload.files);
     });
-
-    const clickedOutside = (
-      target: Node | null,
-      trigger?: HTMLElement,
-      popup?: HTMLElement
-    ) => {
-      if (!target) return true;
-      if (trigger?.contains(target)) return false;
-      if (popup?.contains(target)) return false;
-      return true;
-    };
 
     const handleWindowClick = (e: MouseEvent) => {
       const target = e.target as Node | null;
@@ -2526,22 +2514,16 @@ function getPastedImageFilename(index: number) {
   return index <= 1 ? 'Image' : `Image ${index}`;
 }
 
+function clickedOutside(target: Node | null, trigger?: HTMLElement, popup?: HTMLElement) {
+  if (!target) return true;
+  if (trigger?.contains(target)) return false;
+  if (popup?.contains(target)) return false;
+  return true;
+}
+
 function createAttachmentID() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
   }
   return `img-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function extensionForMime(mime: string) {
-  switch (mime) {
-    case 'image/jpeg':
-      return 'jpg';
-    case 'image/gif':
-      return 'gif';
-    case 'image/webp':
-      return 'webp';
-    default:
-      return 'png';
-  }
 }

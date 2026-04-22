@@ -21,7 +21,7 @@ export function SettingsPanel() {
 
     return state.providers
       .map((provider) => {
-        const models = Object.values(provider.models).sort((a, b) => a.name.localeCompare(b.name));
+        const models = Object.values(provider.models).toSorted((a, b) => a.name.localeCompare(b.name));
 
         if (!search) return { provider, models };
 

@@ -27,7 +27,7 @@ async function loadClient() {
 }
 
 function emitMessage(message: ExtensionMessage) {
-  for (const handler of [...bridgeMocks.messageHandlers]) handler(message);
+  for (const handler of bridgeMocks.messageHandlers) handler(message);
 }
 
 beforeEach(() => {

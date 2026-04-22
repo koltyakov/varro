@@ -269,8 +269,8 @@ function resetTodoSync() {
   todoStateAuthority = 'messages';
 }
 
-function applyTheme(theme: WebviewThemeKind) {
-  applyWebviewTheme(theme);
+function applyTheme(nextTheme: WebviewThemeKind) {
+  applyWebviewTheme(nextTheme);
 }
 
 function syncTodosFromMessages(messages = state.messages) {

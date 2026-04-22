@@ -39,9 +39,7 @@ export function formatLabelWithProvider(label: string | null | undefined, provid
 export function getPrimaryProviderLimitWindow(limit: ProviderLimitStatus | null | undefined) {
   if (!limit || limit.status !== 'available' || limit.windows.length === 0) return null;
 
-  return limit.windows
-    .slice()
-    .sort((a, b) => compareProviderLimitWindows(a, b))[0] as ProviderLimitWindow;
+  return limit.windows.toSorted((a, b) => compareProviderLimitWindows(a, b))[0] ?? null;
 }
 
 export function getProviderLimitTone(limit: ProviderLimitStatus | null | undefined) {
