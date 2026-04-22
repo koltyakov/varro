@@ -4,7 +4,9 @@ import {
   applyMessagePartDelta,
   clearMessages,
   clearStreamingState,
+  getActiveUsageLimitNotice,
   getSessionTreeIds,
+  hasActiveUsageLimit,
   setSessionFailed,
   setState,
   state,
@@ -223,5 +225,43 @@ describe('getSessionTreeIds', () => {
     expect(getSessionTreeIds('session-1')).toEqual(['session-1', 'child-1', 'child-2']);
     expect(getSessionTreeIds('child-1')).toEqual(['child-1', 'child-2']);
     expect(getSessionTreeIds(null)).toEqual([]);
+  });
+
+  it('reuses active usage-limit lookups across a session tree', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 1',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 20 },
+      },
+    ]);
+    setState('sessionUsageLimits', {
+      'child-1': {
+        source: 'status',
+        statusCode: 429,
+        message: '429 usage limit reached',
+        unit: 'messages',
+        retryAt: 4_000,
+        attempt: 2,
+        sessionID: 'child-1',
+      },
+    });
+
+    expect(getActiveUsageLimitNotice('session-1')).toMatchObject({ sessionID: 'child-1' });
+    expect(getActiveUsageLimitNotice('child-1')).toMatchObject({ sessionID: 'child-1' });
+    expect(hasActiveUsageLimit('session-1')).toBe(true);
+    expect(hasActiveUsageLimit('child-1')).toBe(true);
   });
 });

@@ -3,7 +3,7 @@ import {
   showSessionPicker,
   setShowSessionPicker,
   showSettings,
-  getSessionTreeIds,
+  hasActiveUsageLimit,
   isSessionUnread,
   isSessionAwaitingInput,
   getSelectedAgentForSession,
@@ -264,6 +264,21 @@ export function Chat() {
           </div>
         </Show>
       </div>
+
+      <Show
+        when={
+          state.serverStatus.state === 'running' && state.serverStatus.eventStream === 'degraded'
+        }
+      >
+        <div class="chat-transport-banner" role="status" aria-live="polite">
+          <div class="chat-transport-copy">
+            <span class="chat-transport-title">Live updates are reconnecting</span>
+            <span class="chat-transport-message">
+              Chat actions still work, but session status may lag until the event stream recovers.
+            </span>
+          </div>
+        </div>
+      </Show>
 
       <Show
         when={!showSessionPicker()}
@@ -1200,12 +1215,6 @@ function isPlanReadySession(session: (typeof state.sessions)[number]) {
     isSessionUnread(session.id, session.time.updated) &&
     getSelectedAgentForSession(session.id) === 'plan'
   );
-}
-
-export function hasActiveUsageLimit(sessionId: string) {
-  return getSessionTreeIds(sessionId)
-    .map((id) => state.sessionUsageLimits[id] || null)
-    .some((notice) => !!notice);
 }
 
 export function isFailedSession(sessionId: string) {

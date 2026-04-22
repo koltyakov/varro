@@ -32,7 +32,7 @@ import {
   getCurrentDocumentEnabled,
   getProviderLimit,
   toggleCurrentDocumentEnabled,
-  getSessionTreeIds,
+  getActiveUsageLimitNotice,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
@@ -1056,16 +1056,7 @@ export function ChatInput() {
 
   const sessionTokens = createMemo(() => sumAssistantTokens(assistantMessages()));
 
-  const activeUsageLimit = createMemo(() => {
-    const sessionId = state.activeSessionId;
-    if (!sessionId) return null;
-
-    const usageLimit = getSessionTreeIds(sessionId)
-      .map((id) => state.sessionUsageLimits[id] || null)
-      .find((notice) => !!notice);
-    if (!usageLimit) return null;
-    return usageLimit;
-  });
+  const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
   const currentProviderLimit = createMemo(() => {
     const current = currentModel();
     if (!current.providerID) return null;

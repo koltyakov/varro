@@ -21,7 +21,7 @@ import {
   messageListScrollRequestKey,
   messageStructureVersion,
   getChildRunsByParentId,
-  getSessionTreeIds,
+  getActiveUsageLimitNotice,
 } from '../lib/state';
 import {
   formatDuration,
@@ -118,14 +118,7 @@ export function MessageList() {
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
-  const activeUsageLimit = createMemo(() => {
-    const sessionId = state.activeSessionId;
-    if (!sessionId) return null;
-
-    return getSessionTreeIds(sessionId)
-      .map((id) => state.sessionUsageLimits[id] || null)
-      .find((notice) => !!notice);
-  });
+  const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
 
   const messages = createMemo(on(messageStructureVersion, () => state.messages));
   const latestPlanImplementationMessageId = createMemo(() =>

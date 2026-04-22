@@ -2014,6 +2014,40 @@ body.vscode-light
   background: color-mix(in srgb, var(--color-vscode-error) 10%, var(--color-vscode-surface-softer));
 }
 
+.chat-transport-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 22%, var(--color-vscode-border));
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-warning) 8%,
+    var(--color-vscode-surface-softer)
+  );
+}
+
+.chat-transport-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-transport-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-vscode-warning);
+}
+
+.chat-transport-message {
+  font-size: 11px;
+  color: var(--color-vscode-fg-soft);
+  overflow-wrap: anywhere;
+}
+
 .chat-usage-limit-copy {
   min-width: 0;
   display: flex;

@@ -584,6 +584,11 @@ export function setQuestions(questions: QuestionRequest[]) {
   setState('questions', questions);
 }
 
+export function setSessions(nextSessions: Session[]) {
+  setState('sessions', nextSessions);
+  invalidateSessionTreeIndex();
+}
+
 export function upsertQuestion(question: QuestionRequest) {
   setState(
     'questions',
@@ -1051,10 +1056,95 @@ export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice
       current[sessionId] = notice;
     })
   );
+  invalidateSessionTreeIndex();
+}
+
+let sessionTreeIndexVersion = 0;
+let sessionTreeIndexedVersion = -1;
+let sessionTreeIdsByRoot: Map<string, string[]> = new Map();
+let nearestPrimarySessionById: Map<string, string> = new Map();
+let activeUsageLimitByRoot: Map<string, UsageLimitNotice | null> = new Map();
+let indexedSessionsRef: Session[] | null = null;
+let indexedUsageLimitsRef: Record<string, UsageLimitNotice | null> | null = null;
+
+function invalidateSessionTreeIndex() {
+  sessionTreeIndexVersion++;
+}
+
+function ensureSessionTreeIndex(sessions = state.sessions, usageLimits = state.sessionUsageLimits) {
+  if (
+    sessionTreeIndexedVersion === sessionTreeIndexVersion &&
+    indexedSessionsRef === sessions &&
+    indexedUsageLimitsRef === usageLimits
+  )
+    return;
+
+  const childrenByParent = new Map<string, string[]>();
+  nearestPrimarySessionById = new Map();
+
+  for (const session of sessions) {
+    if (!session.parentID) continue;
+    const children = childrenByParent.get(session.parentID);
+    if (children) children.push(session.id);
+    else childrenByParent.set(session.parentID, [session.id]);
+  }
+
+  const primarySessions = sessions.filter((session) => !session.parentID);
+  if (primarySessions.length === 0) {
+    for (const session of sessions) {
+      nearestPrimarySessionById.set(session.id, session.id);
+      sessionTreeIdsByRoot.set(session.id, [session.id]);
+      activeUsageLimitByRoot.set(session.id, usageLimits[session.id] || null);
+    }
+    sessionTreeIndexedVersion = sessionTreeIndexVersion;
+    return;
+  }
+  sessionTreeIdsByRoot = new Map();
+
+  for (const root of primarySessions) {
+    const visited: string[] = [];
+    const pending = [root.id];
+    while (pending.length > 0) {
+      const currentId = pending.pop();
+      if (!currentId || nearestPrimarySessionById.has(currentId)) continue;
+      nearestPrimarySessionById.set(currentId, root.id);
+      visited.push(currentId);
+      const children = childrenByParent.get(currentId);
+      if (!children) continue;
+      for (let index = children.length - 1; index >= 0; index--) {
+        pending.push(children[index]);
+      }
+    }
+    sessionTreeIdsByRoot.set(root.id, visited);
+  }
+
+  activeUsageLimitByRoot = new Map();
+  for (const root of primarySessions) {
+    const treeIds = sessionTreeIdsByRoot.get(root.id) || [root.id];
+    const activeNotice = treeIds.map((id) => usageLimits[id] || null).find((notice) => !!notice);
+    activeUsageLimitByRoot.set(root.id, activeNotice || null);
+  }
+
+  sessionTreeIndexedVersion = sessionTreeIndexVersion;
+  indexedSessionsRef = sessions;
+  indexedUsageLimitsRef = usageLimits;
 }
 
 export function getSessionTreeIds(rootId: string | null | undefined, sessions = state.sessions) {
   if (!rootId) return [];
+  if (sessions === state.sessions) {
+    ensureSessionTreeIndex();
+    const rootSessionId = nearestPrimarySessionById.get(rootId) || rootId;
+    if (rootSessionId === rootId) {
+      const cached = sessionTreeIdsByRoot.get(rootId);
+      if (cached) return [...cached];
+    }
+
+    const rootIndex = sessionTreeIdsByRoot.get(rootSessionId);
+    if (!rootIndex) return [rootId];
+    const start = rootIndex.indexOf(rootId);
+    return start === -1 ? [rootId] : rootIndex.slice(start);
+  }
 
   const visited = new Set<string>();
   const pending = [rootId];
@@ -1070,6 +1160,23 @@ export function getSessionTreeIds(rootId: string | null | undefined, sessions = 
   }
 
   return [...visited];
+}
+
+export function getSessionTreeRootId(sessionId: string | null | undefined) {
+  if (!sessionId) return null;
+  ensureSessionTreeIndex();
+  return nearestPrimarySessionById.get(sessionId) || sessionId;
+}
+
+export function getActiveUsageLimitNotice(sessionId: string | null | undefined) {
+  if (!sessionId) return null;
+  ensureSessionTreeIndex();
+  const rootId = nearestPrimarySessionById.get(sessionId) || sessionId;
+  return activeUsageLimitByRoot.get(rootId) || null;
+}
+
+export function hasActiveUsageLimit(sessionId: string | null | undefined) {
+  return !!getActiveUsageLimitNotice(sessionId);
 }
 
 export function syncFailedSessionsFromMessages(

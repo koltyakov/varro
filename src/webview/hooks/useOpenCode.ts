@@ -3,6 +3,7 @@ import { client, serverEvents } from '../lib/client';
 import {
   state,
   setState,
+  setSessions,
   setSelectedAgent,
   setSelectedModel,
   resolveSelectedModel,
@@ -184,7 +185,7 @@ function applySessions(sessions: Session[]) {
   const nextSessions = sortSessions(
     sessions.filter((session) => isSessionInWorkspace(session, currentWorkspacePath))
   );
-  setState('sessions', nextSessions);
+  setSessions(nextSessions);
 
   if (
     state.activeSessionId &&
@@ -256,10 +257,7 @@ function getNextSessionIdAfterDeletion(sessions: Session[]) {
 function removeDeletedSessionTree(id: string, sessions = state.sessions) {
   const deletedIds = getDeletedSessionTreeIds(id, sessions);
 
-  setState(
-    'sessions',
-    sessions.filter((session) => !deletedIds.has(session.id))
-  );
+  setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
 
   for (const deletedId of deletedIds) {
     clearDeletedSessionState(deletedId);
@@ -675,6 +673,10 @@ function applyUsageLimitNotice(
   }
 }
 
+function shouldResyncSessionAfterIdle(sessionId: string) {
+  return state.activeSessionId === sessionId && state.messages.length === 0;
+}
+
 export async function recheckSessionStatus(sessionId: string) {
   try {
     const statuses = await client.session.status();
@@ -689,7 +691,7 @@ export async function recheckSessionStatus(sessionId: string) {
     }
     if (!status || status.type === 'idle') {
       stopLoading();
-      if (sessionId === state.activeSessionId) {
+      if (shouldResyncSessionAfterIdle(sessionId)) {
         await syncSessionMessages(sessionId).catch(() => {});
       }
     } else if (status.type === 'busy' || status.type === 'retry') {
@@ -1389,7 +1391,9 @@ function registerEventHandlers() {
       if (sid && sid === state.activeSessionId) {
         markSessionSeen(sid);
         syncSession(sid).catch(() => {});
-        syncSessionMessages(sid).catch(() => {});
+        if (shouldResyncSessionAfterIdle(sid)) {
+          syncSessionMessages(sid).catch(() => {});
+        }
       }
     })
   );

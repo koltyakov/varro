@@ -63,7 +63,7 @@ export type ProviderLimitStatus =
 
 export type ServerStatus =
   | { state: 'starting' }
-  | { state: 'running'; url: string }
+  | { state: 'running'; url: string; eventStream?: 'healthy' | 'degraded' }
   | { state: 'stopped' }
   | { state: 'error'; message: string };
 

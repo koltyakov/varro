@@ -28,6 +28,7 @@ export class OpenCodeServer extends EventEmitter {
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private startAttemptId = 0;
   private isDisposing = false;
+  private startPromise: Promise<string> | null = null;
 
   constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
     super();
@@ -46,164 +47,193 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private setStatus(s: ServerStatus) {
-    this._status = s;
-    this.emit('status', s);
+    const nextStatus = normalizeRunningStatus(s, this._status);
+    this._status = nextStatus;
+    this.emit('status', nextStatus);
+  }
+
+  private setRunningStatus(url = this.url, eventStream?: 'healthy' | 'degraded') {
+    this.setStatus({ state: 'running', url, ...(eventStream ? { eventStream } : {}) });
+  }
+
+  private updateEventStreamState(eventStream: 'healthy' | 'degraded') {
+    if (this._status.state !== 'running') return;
+    if (this._status.eventStream === eventStream) return;
+    this.setRunningStatus(this._status.url, eventStream);
+  }
+
+  private setStartPromise(factory: () => Promise<string>): Promise<string> {
+    if (this.startPromise) return this.startPromise;
+    const promise = factory().finally(() => {
+      if (this.startPromise === promise) {
+        this.startPromise = null;
+      }
+    });
+    this.startPromise = promise;
+    return promise;
+  }
+
+  private clearStartPromise() {
+    this.startPromise = null;
   }
 
   async start(): Promise<string> {
-    this.isDisposing = false;
-    if (this.simulateMissingCli) {
-      this.stopEventStream();
-      this.cancelPollHealth();
-      this.setStatus({ state: 'error', message: OpenCodeServer.MISSING_CLI_MESSAGE });
-      throw new Error(OpenCodeServer.MISSING_CLI_MESSAGE);
-    }
-
-    const healthy = await this.checkHealth();
-    if (healthy) {
-      logger.info(`Found existing OpenCode server at ${this.url}`);
-      this.setStatus({ state: 'running', url: this.url });
-      this.startEventStream();
-      return this.url;
-    }
-
-    if (!this.autoStart) {
-      this.setStatus({
-        state: 'error',
-        message: `No server at ${this.url}. Start one with "opencode serve --port ${this.port}" or enable varro.server.autoStart.`,
-      });
-      throw new Error(
-        this._status.state === 'error'
-          ? (this._status as { message: string }).message
-          : 'server not running'
-      );
-    }
-
-    return new Promise((resolve, reject) => {
-      this.setStatus({ state: 'starting' });
-      const attemptId = ++this.startAttemptId;
-      const stderrLines: string[] = [];
-      let settled = false;
-
-      const rememberStderr = (text: string) => {
-        for (const line of text
-          .split(/\r?\n/)
-          .map((item) => item.trim())
-          .filter(Boolean)) {
-          stderrLines.push(line);
-        }
-        if (stderrLines.length > 8) {
-          stderrLines.splice(0, stderrLines.length - 8);
-        }
-      };
-
-      const describeStartupFailure = (fallback: string) => {
-        const recent = stderrLines[stderrLines.length - 1];
-        return recent ? `${fallback}: ${recent}` : fallback;
-      };
-
-      const failStartup = (message: string, err?: Error) => {
-        if (settled || attemptId !== this.startAttemptId) return;
-        settled = true;
+    return this.setStartPromise(async () => {
+      this.isDisposing = false;
+      if (this.simulateMissingCli) {
+        this.stopEventStream();
         this.cancelPollHealth();
-        this.setStatus({ state: 'error', message });
-        reject(err || new Error(message));
-      };
+        this.setStatus({ state: 'error', message: OpenCodeServer.MISSING_CLI_MESSAGE });
+        throw new Error(OpenCodeServer.MISSING_CLI_MESSAGE);
+      }
 
-      const finishStartup = (url: string) => {
-        if (settled || attemptId !== this.startAttemptId) return;
-        settled = true;
-        this.cancelPollHealth();
-        resolve(url);
-      };
+      const healthy = await this.checkHealth();
+      if (healthy) {
+        logger.info(`Found existing OpenCode server at ${this.url}`);
+        this.setRunningStatus(this.url, 'healthy');
+        this.startEventStream();
+        return this.url;
+      }
 
-      const recoverOrFailStartup = async (fallback: string) => {
-        const healthyNow = await this.checkHealth();
-        if (healthyNow) {
-          this.setStatus({ state: 'running', url: this.url });
-          this.retries = 0;
-          this.startEventStream();
-          finishStartup(this.url);
+      if (!this.autoStart) {
+        this.setStatus({
+          state: 'error',
+          message: `No server at ${this.url}. Start one with "opencode serve --port ${this.port}" or enable varro.server.autoStart.`,
+        });
+        throw new Error(
+          this._status.state === 'error'
+            ? (this._status as { message: string }).message
+            : 'server not running'
+        );
+      }
+
+      return new Promise((resolve, reject) => {
+        this.setStatus({ state: 'starting' });
+        const attemptId = ++this.startAttemptId;
+        const stderrLines: string[] = [];
+        let settled = false;
+
+        const rememberStderr = (text: string) => {
+          for (const line of text
+            .split(/\r?\n/)
+            .map((item) => item.trim())
+            .filter(Boolean)) {
+            stderrLines.push(line);
+          }
+          if (stderrLines.length > 8) {
+            stderrLines.splice(0, stderrLines.length - 8);
+          }
+        };
+
+        const describeStartupFailure = (fallback: string) => {
+          const recent = stderrLines[stderrLines.length - 1];
+          return recent ? `${fallback}: ${recent}` : fallback;
+        };
+
+        const failStartup = (message: string, err?: Error) => {
+          if (settled || attemptId !== this.startAttemptId) return;
+          settled = true;
+          this.cancelPollHealth();
+          this.setStatus({ state: 'error', message });
+          reject(err || new Error(message));
+        };
+
+        const finishStartup = (url: string) => {
+          if (settled || attemptId !== this.startAttemptId) return;
+          settled = true;
+          this.cancelPollHealth();
+          resolve(url);
+        };
+
+        const recoverOrFailStartup = async (fallback: string) => {
+          const healthyNow = await this.checkHealth();
+          if (healthyNow) {
+            this.setRunningStatus(this.url, 'healthy');
+            this.retries = 0;
+            this.startEventStream();
+            finishStartup(this.url);
+            return;
+          }
+
+          failStartup(describeStartupFailure(fallback));
+        };
+
+        try {
+          const command = this.resolveCommand();
+          const args = ['serve', '--port', String(this.port)];
+          const launch = resolveServerLaunch(command, args);
+          logger.info(`Starting OpenCode server with command: ${command}`);
+
+          this.process = spawn(launch.command, launch.args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: false,
+            cwd: this.getWorkspaceCwd(),
+            env: this.buildServerEnv(),
+            windowsHide: true,
+            ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+          });
+
+          this.process.stdout?.on('data', (data: Buffer) => {
+            logger.info(`[server] ${data.toString().trim()}`);
+          });
+
+          this.process.stderr?.on('data', (data: Buffer) => {
+            const text = data.toString().trim();
+            rememberStderr(text);
+            logger.error(`[server] ${text}`);
+          });
+
+          this.process.on('exit', (code, signal) => {
+            logger.info(`Server process exited with code ${code}`);
+            this.process = null;
+            this.stopEventStream();
+            if (this.isDisposing) {
+              return;
+            }
+            if (attemptId !== this.startAttemptId) return;
+            if (this._status.state === 'running') {
+              this.setStatus({ state: 'stopped' });
+              if (this.retries < this.maxRetries) {
+                this.retries++;
+                logger.info(`Restarting server (attempt ${this.retries})`);
+                this.clearStartPromise();
+                this.start().then(resolve).catch(reject);
+                return;
+              }
+              const runtimeFailure = `OpenCode server stopped unexpectedly${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}. Restart attempts (${this.maxRetries}) were exhausted.`;
+              this.setStatus({ state: 'error', message: runtimeFailure });
+              return;
+            }
+
+            void recoverOrFailStartup(
+              `OpenCode server exited during startup${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
+            );
+          });
+
+          this.process.on('error', (err) => {
+            logger.error(`Server process error: ${err.message}`);
+            if (err.message.includes('ENOENT')) {
+              failStartup(OpenCodeServer.MISSING_CLI_MESSAGE);
+              return;
+            }
+
+            void recoverOrFailStartup(`OpenCode server failed to spawn: ${err.message}`);
+          });
+        } catch (err) {
+          failStartup(String(err), err instanceof Error ? err : new Error(String(err)));
           return;
         }
 
-        failStartup(describeStartupFailure(fallback));
-      };
-
-      try {
-        const command = this.resolveCommand();
-        const args = ['serve', '--port', String(this.port)];
-        const launch = resolveServerLaunch(command, args);
-        logger.info(`Starting OpenCode server with command: ${command}`);
-
-        this.process = spawn(launch.command, launch.args, {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: false,
-          cwd: this.getWorkspaceCwd(),
-          env: this.buildServerEnv(),
-          windowsHide: true,
-          ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-        });
-
-        this.process.stdout?.on('data', (data: Buffer) => {
-          logger.info(`[server] ${data.toString().trim()}`);
-        });
-
-        this.process.stderr?.on('data', (data: Buffer) => {
-          const text = data.toString().trim();
-          rememberStderr(text);
-          logger.error(`[server] ${text}`);
-        });
-
-        this.process.on('exit', (code, signal) => {
-          logger.info(`Server process exited with code ${code}`);
-          this.process = null;
-          this.stopEventStream();
-          if (this.isDisposing) {
-            return;
+        this.pollHealth(
+          (url) => {
+            this.retries = 0;
+            finishStartup(url);
+          },
+          (err) => {
+            failStartup(describeStartupFailure(err.message), err);
           }
-          if (attemptId !== this.startAttemptId) return;
-          if (this._status.state === 'running') {
-            this.setStatus({ state: 'stopped' });
-            if (this.retries < this.maxRetries) {
-              this.retries++;
-              logger.info(`Restarting server (attempt ${this.retries})`);
-              this.start().then(resolve).catch(reject);
-              return;
-            }
-            const runtimeFailure = `OpenCode server stopped unexpectedly${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}. Restart attempts (${this.maxRetries}) were exhausted.`;
-            this.setStatus({ state: 'error', message: runtimeFailure });
-            return;
-          }
-
-          void recoverOrFailStartup(
-            `OpenCode server exited during startup${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
-          );
-        });
-
-        this.process.on('error', (err) => {
-          logger.error(`Server process error: ${err.message}`);
-          if (err.message.includes('ENOENT')) {
-            failStartup(OpenCodeServer.MISSING_CLI_MESSAGE);
-            return;
-          }
-
-          void recoverOrFailStartup(`OpenCode server failed to spawn: ${err.message}`);
-        });
-      } catch (err) {
-        failStartup(String(err), err instanceof Error ? err : new Error(String(err)));
-        return;
-      }
-
-      this.pollHealth(
-        (url) => {
-          this.retries = 0;
-          finishStartup(url);
-        },
-        (err) => {
-          failStartup(describeStartupFailure(err.message), err);
-        }
-      );
+        );
+      });
     });
   }
 
@@ -238,7 +268,7 @@ export class OpenCodeServer extends EventEmitter {
       if (!this.pollHealthResolve || !this.pollHealthReject) return;
       if (healthy) {
         this.cancelPollHealth();
-        this.setStatus({ state: 'running', url: this.url });
+        this.setRunningStatus(this.url, 'healthy');
         this.retries = 0;
         this.startEventStream();
         this.pollHealthResolve(this.url);
@@ -306,6 +336,7 @@ export class OpenCodeServer extends EventEmitter {
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
       this.eventReconnectDelay = 1000;
       this.eventReconnectCount = 0;
+      this.updateEventStreamState('healthy');
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -331,6 +362,7 @@ export class OpenCodeServer extends EventEmitter {
       shouldReconnect = true;
     } finally {
       if (shouldReconnect && !controller.signal.aborted && this._status.state === 'running') {
+        this.updateEventStreamState('degraded');
         this.eventReconnectCount++;
         if (this.eventReconnectCount === OpenCodeServer.MAX_EVENT_RECONNECTS) {
           logger.warn(
@@ -373,6 +405,7 @@ export class OpenCodeServer extends EventEmitter {
 
   async dispose() {
     this.isDisposing = true;
+    this.clearStartPromise();
     this.cancelPollHealth();
     this.stopEventStream();
     if (this.process) {
@@ -441,6 +474,13 @@ export class OpenCodeServer extends EventEmitter {
   private serverPathEntries(): string[] {
     return getServerPathEntries();
   }
+}
+
+function normalizeRunningStatus(next: ServerStatus, previous: ServerStatus): ServerStatus {
+  if (next.state !== 'running') return next;
+  if (next.eventStream) return next;
+  if (previous.state !== 'running') return { ...next, eventStream: 'healthy' };
+  return { ...next, eventStream: previous.eventStream || 'healthy' };
 }
 
 const SSE_CHUNK_BOUNDARY_RE = /\r\n\r\n|\n\n|\r\r|\r\n\n|\n\r\n/;

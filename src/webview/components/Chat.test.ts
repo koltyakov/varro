@@ -16,13 +16,17 @@ import {
   getSessionListFilterLabel,
   getSubagentSessionsForParent,
   groupSessions,
-  hasActiveUsageLimit,
   isFailedSession,
   isRunningSession,
   SessionListSectionHeader,
   shouldShowSessionHeaderBadge,
 } from './Chat';
-import { setSessionFailed, setSessionUsageLimit, setState } from '../lib/state';
+import {
+  hasActiveUsageLimit,
+  setSessionFailed,
+  setSessionUsageLimit,
+  setState,
+} from '../lib/state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -485,16 +489,15 @@ describe('getHeaderFailedCount', () => {
   it('counts usage-limit sessions as failed', () => {
     const sessions = [session('limited', 500), session('other', 400)];
 
-    setState('sessionUsageLimits', {
-      limited: {
-        source: 'status',
-        statusCode: 429,
-        message: '429 usage limit reached',
-        unit: 'messages',
-        retryAt: 8_000,
-        attempt: 2,
-        sessionID: 'limited',
-      },
+    setState('sessions', sessions);
+    setSessionUsageLimit('limited', {
+      source: 'status',
+      statusCode: 429,
+      message: '429 usage limit reached',
+      unit: 'messages',
+      retryAt: 8_000,
+      attempt: 2,
+      sessionID: 'limited',
     });
 
     expect(

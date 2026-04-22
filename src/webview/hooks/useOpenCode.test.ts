@@ -948,6 +948,47 @@ describe('useOpenCode initialization', () => {
     }
   });
 
+  it('keeps the chat connected when the event stream is degraded', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096', eventStream: 'degraded' },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(stateModule.state.serverStatus).toMatchObject({
+        state: 'running',
+        eventStream: 'degraded',
+      });
+      expect(clientMocks.health).toHaveBeenCalledTimes(1);
+    } finally {
+      dispose();
+    }
+  });
+
   it('ignores stale retry status updates after aborting a retrying session', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {

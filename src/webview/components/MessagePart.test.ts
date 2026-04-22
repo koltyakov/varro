@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { formatReasoningDuration, formatReasoningHeader, splitReasoningText } from './MessagePart';
+import {
+  formatReasoningDuration,
+  formatReasoningHeader,
+  parseStreamingTextSegments,
+  splitReasoningText,
+} from './MessagePart';
 
 describe('formatReasoningDuration', () => {
   it('returns null while reasoning is still running', () => {
@@ -53,5 +58,17 @@ describe('splitReasoningText', () => {
       subject: 'Plan the migration',
       body: 'Step one\nStep two',
     });
+  });
+});
+
+describe('parseStreamingTextSegments', () => {
+  it('keeps plain paragraphs and fenced code separate', () => {
+    expect(
+      parseStreamingTextSegments('First paragraph\n\n```ts\nconst x = 1;\n```\n\nSecond')
+    ).toEqual([
+      { type: 'text', content: 'First paragraph' },
+      { type: 'code', content: 'const x = 1;\n', language: 'ts' },
+      { type: 'text', content: 'Second' },
+    ]);
   });
 });

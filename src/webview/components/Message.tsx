@@ -734,6 +734,7 @@ function AssistantMessageContent(props: {
                       part={part}
                       messageInfo={props.info}
                       streamedText={props.streamedTextForPart(part)}
+                      deferMarkdown={props.streamedTextForPart(part) !== null}
                     />
                   )}
                 </For>
@@ -751,6 +752,7 @@ function AssistantMessageContent(props: {
                 part={item.part}
                 messageInfo={props.info}
                 streamedText={props.streamedTextForPart(item.part)}
+                deferMarkdown={props.streamedTextForPart(item.part) !== null}
               />
             </div>
           )
