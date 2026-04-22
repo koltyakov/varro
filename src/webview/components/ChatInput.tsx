@@ -59,7 +59,7 @@ import {
 } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
-import { getLeafPathName, getDroppedFileLabel } from '../lib/path-display';
+import { getLeafPathName, getDroppedFileLabel, isSamePath } from '../lib/path-display';
 import { TodoList } from './TodoList';
 import type { Agent, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
@@ -148,6 +148,10 @@ export function ChatInput() {
   const hasContext = () => !!activeFile() || !!selection() || !!terminalSelection();
 
   const hasMentions = () => files().length > 0 || clipboardImages().length > 0;
+  const visibleFiles = () => {
+    const currentPath = activeFile()?.path;
+    return files().filter((file) => !isSamePath(file.path, currentPath));
+  };
 
   const activeContext = () => {
     const file = activeFile();
@@ -1274,7 +1278,7 @@ export function ChatInput() {
                 onRemove={() => postMessage({ type: 'terminal-selection/clear' })}
               />
             </Show>
-            <For each={files()}>
+            <For each={visibleFiles()}>
               {(file) => (
                 <AttachmentChip
                   label={getDroppedFileLabel(file)}

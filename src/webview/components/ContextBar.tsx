@@ -6,7 +6,7 @@ import {
   clearClipboardImages,
   clearContextFiles,
 } from '../lib/state';
-import { getLeafPathName, getDroppedFileLabel } from '../lib/path-display';
+import { getLeafPathName, getDroppedFileLabel, isSamePath } from '../lib/path-display';
 import { postMessage } from '../lib/bridge';
 
 export function ContextBar() {
@@ -34,6 +34,10 @@ export function ContextBar() {
 
     return { filename: getLeafPathName(file.relativePath), lineRange };
   };
+  const visibleFiles = () => {
+    const currentPath = activeFile()?.path;
+    return files().filter((file) => !isSamePath(file.path, currentPath));
+  };
 
   return (
     <Show when={hasContext()}>
@@ -59,13 +63,13 @@ export function ContextBar() {
               onRemove={() => postMessage({ type: 'terminal-selection/clear' })}
             />
           </Show>
-          <For each={files()}>
+          <For each={visibleFiles()}>
             {(file) => (
               <ContextChip
                 label={getDroppedFileLabel(file)}
                 title={file.relativePath || file.path}
                 icon={file.type === 'directory' ? 'folder' : 'file'}
-                onRemove={files().length > 0 ? () => removeContextFile(file.path) : undefined}
+                onRemove={visibleFiles().length > 0 ? () => removeContextFile(file.path) : undefined}
               />
             )}
           </For>

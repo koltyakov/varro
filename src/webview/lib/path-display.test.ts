@@ -4,6 +4,7 @@ import {
   getDroppedFileLabel,
   getLeafPathName,
   getWorkspaceRelativePath,
+  isSamePath,
   isAbsolutePath,
   normalizePath,
 } from './path-display';
@@ -47,5 +48,13 @@ describe('path display helpers', () => {
       'index.ts'
     );
     expect(getDroppedFileLabel({ path: '/repo/src/index.ts', relativePath: '.' })).toBe('index.ts');
+  });
+
+  it('compares normalized paths for overlap checks', () => {
+    expect(isSamePath('/repo/src/index.ts', '/repo/src/index.ts')).toBe(true);
+    expect(isSamePath('/repo/src/index.ts/', '/repo/src/index.ts')).toBe(true);
+    expect(isSamePath('C:\\repo\\src\\index.ts', 'C:/repo/src/index.ts')).toBe(true);
+    expect(isSamePath('/repo/src/index.ts', '/repo/src/other.ts')).toBe(false);
+    expect(isSamePath('/repo/src/index.ts', null)).toBe(false);
   });
 });

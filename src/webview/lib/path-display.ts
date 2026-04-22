@@ -53,3 +53,8 @@ export function getDroppedFileLabel(file: { path: string; relativePath: string }
   }
   return getLeafPathName(file.relativePath);
 }
+
+export function isSamePath(a: string | null | undefined, b: string | null | undefined) {
+  if (!a || !b) return false;
+  return normalizePath(a) === normalizePath(b);
+}

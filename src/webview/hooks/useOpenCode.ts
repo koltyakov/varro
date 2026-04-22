@@ -69,7 +69,7 @@ import type {
   Todo,
   FileDiff,
 } from '../types';
-import { getWorkspaceRelativePath } from '../lib/path-display';
+import { getWorkspaceRelativePath, isSamePath } from '../lib/path-display';
 import { applyWebviewTheme } from '../lib/theme';
 import { getPreferredVariant } from '../lib/model-variants';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
@@ -750,6 +750,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   }
 
   for (const file of state.droppedFiles) {
+    if (isSamePath(file.path, af?.path)) continue;
     parts.push({ type: 'text', text: getAttachmentReference(file, wp) });
   }
 
