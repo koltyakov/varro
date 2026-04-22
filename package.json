@@ -7,7 +7,7 @@
   "repository": "https://github.com/koltyakov/varro",
   "license": "MIT",
   "engines": {
-    "node": ">=20",
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0",
     "vscode": "^1.91.0"
   },
   "categories": [
@@ -187,25 +187,25 @@
     "vscode:install": "npm run package && code --install-extension varro-*.vsix"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.2.4",
-    "@types/node": "^25.6.0",
+    "@tailwindcss/vite": "4.2.4",
+    "@types/node": "25.6.0",
     "@types/vscode": "1.91.0",
-    "@vitest/coverage-v8": "^4.1.5",
-    "@vscode/vsce": "^3.9.1",
-    "esbuild": "^0.28.0",
-    "jsdom": "^29.0.2",
-    "oxfmt": "^0.46.0",
-    "oxlint": "^1.61.0",
-    "postcss": "^8.5.10",
-    "tailwindcss": "^4.2.4",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.9",
-    "vite-plugin-solid": "^2.11.12",
-    "vitest": "^4.1.5"
+    "@vitest/coverage-v8": "4.1.5",
+    "@vscode/vsce": "3.9.1",
+    "esbuild": "0.28.0",
+    "jsdom": "29.0.2",
+    "oxfmt": "0.46.0",
+    "oxlint": "1.61.0",
+    "postcss": "8.5.10",
+    "tailwindcss": "4.2.4",
+    "typescript": "6.0.3",
+    "vite": "7.3.2",
+    "vite-plugin-solid": "2.11.12",
+    "vitest": "4.1.5"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.14.20",
-    "marked": "^18.0.2",
-    "solid-js": "^1.9.12"
+    "@opencode-ai/sdk": "1.14.20",
+    "marked": "18.0.2",
+    "solid-js": "1.9.12"
   }
 }
