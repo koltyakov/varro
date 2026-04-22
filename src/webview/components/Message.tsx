@@ -39,10 +39,12 @@ export function getAssistantContainerVariant(params: {
   hasStructuredAssistantParts: boolean;
   layoutParts: Part[];
   highlightFinalAnswer: boolean;
+  hasError: boolean;
 }): 'bare' | 'plain' | false {
   if (params.isUser) return false;
   if (params.visibleDiffCount > 0) return false;
   if (params.fileEditStackGroup) return false;
+  if (params.hasError) return 'plain';
   if (!params.highlightFinalAnswer) {
     return 'plain';
   }
@@ -86,6 +88,13 @@ export function Message(props: {
 }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
+  const assistantErrorMessage = createMemo(() => {
+    const error = assistant()?.error;
+    const message = error?.data?.message?.trim();
+    if (message) return message;
+    const name = error?.name?.trim();
+    return name || null;
+  });
   const isSubagent = () => assistant()?.mode === 'subagent';
   const normalizedParts = createMemo(() =>
     assistant()
@@ -112,9 +121,10 @@ export function Message(props: {
   const layoutAssistantParts = createMemo(() =>
     assistant() ? deduplicateFileEdits(visibleAssistantParts()) : []
   );
-  const diffRequest = createMemo(() =>
-    getAssistantDiffRequest(props.info, props.isLastAssistant ?? false)
-  );
+  const diffRequest = createMemo(() => {
+    if (assistantErrorMessage()) return null;
+    return getAssistantDiffRequest(props.info, props.isLastAssistant ?? false);
+  });
 
   const [diffs] = createResource(diffRequest, async (request) => {
     return client.session.diff(request.sessionID, request.messageID).catch(() => [] as FileDiff[]);
@@ -135,6 +145,7 @@ export function Message(props: {
   const shouldRender = () =>
     !!compactionDivider() ||
     isUser() ||
+    !!assistantErrorMessage() ||
     visibleAssistantParts().length > 0 ||
     visibleDiffs().length > 0;
   const hasStructuredAssistantParts = () =>
@@ -150,6 +161,7 @@ export function Message(props: {
       hasStructuredAssistantParts: hasStructuredAssistantParts(),
       layoutParts: layoutAssistantParts(),
       highlightFinalAnswer: !!props.highlightFinalAnswer,
+      hasError: !!assistantErrorMessage(),
     });
   };
   const streamedTextForPart = (part: Part) =>
@@ -189,6 +201,7 @@ export function Message(props: {
               <AssistantMessageContent
                 info={assistant()!}
                 parts={visibleAssistantParts()}
+                errorMessage={assistantErrorMessage()}
                 highlightFinalAnswer={props.highlightFinalAnswer}
                 highlightPlanningAnswer={props.highlightPlanningAnswer}
                 streamedTextForPart={streamedTextForPart}
@@ -622,6 +635,7 @@ function deduplicateFileEdits(parts: Part[]): Part[] {
 function AssistantMessageContent(props: {
   info: AssistantMessage;
   parts: Part[];
+  errorMessage?: string | null;
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
   streamedTextForPart: (part: Part) => string | null;
@@ -689,6 +703,11 @@ function AssistantMessageContent(props: {
           )
         }
       </For>
+      <Show when={props.errorMessage}>
+        <div class="assistant-message-flow-item assistant-message-flow-item-error rendered-markdown">
+          <p>{props.errorMessage!}</p>
+        </div>
+      </Show>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import {
   isSessionUnread,
   getSelectedAgentForSession,
 } from '../lib/state';
-import { Show, For, createSignal, onMount, onCleanup, createEffect } from 'solid-js';
+import { Show, For, createSignal, onMount, onCleanup, createEffect, createMemo } from 'solid-js';
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -39,12 +39,13 @@ export function Chat() {
     return session?.title || 'New Chat';
   };
 
-  const runningSessionsCount = () =>
+  const runningSessionsCount = createMemo(() =>
     state.sessions.reduce((count, session) => {
       if (!isRunningSession(session.id)) return count;
       if (!showSessionPicker() && session.id === state.activeSessionId) return count;
       return count + 1;
-    }, 0);
+    }, 0)
+  );
 
   const openAllSessions = async () => {
     setFocusRunningSessions(false);
@@ -173,30 +174,31 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
     !isRunningSession(sessionId) &&
     (state.permissions.some((permission) => permission.sessionID === sessionId) ||
       state.questions.some((question) => question.sessionID === sessionId));
-  const groupedSessions = () =>
+  const groupedSessions = createMemo(() =>
     groupSessions(
       state.sessions,
       (sessionId) => isRunningSession(sessionId),
       (sessionId) => isSessionNeedingAttention(sessionId),
       MAX_SURFACED_OTHER_SESSIONS
-    );
+    )
+  );
   const runningSessions = () => groupedSessions().running;
   const attentionSessions = () => groupedSessions().attention;
   const surfacedOtherSessions = () => groupedSessions().surfacedOther;
   const overflowOtherSessions = () => groupedSessions().overflowOther;
   const subagentSessions = () => groupedSessions().subagents;
-  const surfacedSessions = () => [
+  const surfacedSessions = createMemo(() => [
     ...runningSessions(),
     ...attentionSessions(),
     ...surfacedOtherSessions(),
-  ];
-  const visibleSessions = () => {
+  ]);
+  const visibleSessions = createMemo(() => {
     const sessions = showOtherSessions()
       ? [...surfacedSessions(), ...overflowOtherSessions()]
       : surfacedSessions();
     if (showSubagentSessions()) return [...sessions, ...subagentSessions()];
     return sessions;
-  };
+  });
 
   createEffect(() => {
     if (props.focusRunningSessions) {
@@ -389,21 +391,25 @@ function SessionListItem(props: {
   const hasQuestionRequest = () =>
     state.questions.some((question) => question.sessionID === props.session.id);
   const isRunning = () => isRunningSession(props.session.id);
+  const isFailed = () => state.failedSessionIds.includes(props.session.id);
   const needsAttention = () => !isRunning() && (hasPermissionRequest() || hasQuestionRequest());
   const isNewlyCompleted = () =>
     !isRunning() &&
+    !isFailed() &&
     !needsAttention() &&
     isSessionUnread(props.session.id, props.session.time.updated);
   const isCompletedPlanSession = () =>
     isNewlyCompleted() && getSelectedAgentForSession(props.session.id) === 'plan';
   const indicatorClass = () => {
     if (isRunning()) return 'is-running';
+    if (isFailed()) return 'is-failed';
     if (needsAttention()) return 'is-attention';
     if (isCompletedPlanSession()) return 'is-plan-completed';
     return 'is-completed';
   };
   const indicatorTitle = () => {
     if (isRunning()) return status()?.type === 'retry' ? 'Retrying' : 'Running';
+    if (isFailed()) return 'Failed';
     if (hasPermissionRequest() && hasQuestionRequest()) return 'Attention needed';
     if (hasPermissionRequest()) return 'Permission request pending';
     if (hasQuestionRequest()) return 'Attention needed';
@@ -425,7 +431,7 @@ function SessionListItem(props: {
         }}
       >
         <Show
-          when={isRunning() || needsAttention() || isNewlyCompleted()}
+          when={isRunning() || isFailed() || needsAttention() || isNewlyCompleted()}
           fallback={<span class="session-item-indicator-spacer" />}
         >
           <span

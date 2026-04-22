@@ -517,6 +517,41 @@ body.vscode-light
   margin-bottom: 0;
 }
 
+.assistant-message-flow-item-error {
+  min-width: 0;
+  color: var(--color-vscode-error);
+}
+
+.assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-error {
+  padding: 12px 14px 14px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-error) 46%, var(--color-vscode-border));
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-error) 16%,
+    var(--color-vscode-surface-subtle-alt)
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-vscode-error) 18%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
+}
+
+body.vscode-light
+  .assistant-turn-content.assistant-turn-content-plain
+  .assistant-message-flow-item-error {
+  background: color-mix(in srgb, var(--color-vscode-error) 18%, var(--color-vscode-widget-bg));
+  border-color: color-mix(in srgb, var(--color-vscode-error) 30%, var(--color-vscode-border));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-error) 16%, transparent);
+}
+
+.assistant-message-flow-item-error > :first-child {
+  margin-top: 0;
+}
+
+.assistant-message-flow-item-error > :last-child {
+  margin-bottom: 0;
+}
+
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item {
   margin: 0;
 }
@@ -3531,6 +3566,12 @@ kbd {
   background: var(--color-vscode-accent);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-accent) 40%, transparent);
   animation: pulse-soft 1.5s ease-in-out infinite;
+}
+
+.session-item-indicator.is-failed {
+  background: var(--color-vscode-error);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
+  animation: pulse-soft 1.2s ease-in-out infinite;
 }
 
 .session-item-indicator.is-completed {

@@ -4,7 +4,10 @@ import {
   applyMessagePartDelta,
   clearMessages,
   clearStreamingState,
+  setSessionFailed,
+  setState,
   state,
+  syncFailedSessionsFromMessages,
   upsertMessage,
 } from './state';
 
@@ -94,5 +97,93 @@ describe('state streaming deltas', () => {
     });
     expect(state.streamingPartId).toBe('reason-1');
     expect(state.streamingText).toBe('Thinking carefully now');
+  });
+});
+
+describe('failed session tracking', () => {
+  beforeEach(() => {
+    clearMessages();
+    setSessionFailed('session-1', false);
+    setSessionFailed('session-2', false);
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'session-2',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 2',
+        version: '1',
+        time: { created: 0, updated: 20 },
+      },
+    ]);
+    setState('activeSessionId', null);
+    setState('lastSeenSessions', { 'session-1': 0, 'session-2': 0 });
+  });
+
+  it('derives failed sessions from unread latest assistant message errors', () => {
+    syncFailedSessionsFromMessages([
+      {
+        info: {
+          ...assistantMessage('message-1', 'session-1'),
+          error: { name: 'server_error', data: { message: 'Request failed' } },
+        },
+        parts: [],
+      },
+      {
+        info: assistantMessage('message-2', 'session-2'),
+        parts: [],
+      },
+    ]);
+
+    expect(state.failedSessionIds).toEqual(['session-1']);
+  });
+
+  it('does not mark a session failed when the latest message is not the error', () => {
+    syncFailedSessionsFromMessages([
+      {
+        info: {
+          ...assistantMessage('message-1', 'session-1'),
+          error: { name: 'server_error', data: { message: 'Request failed' } },
+        },
+        parts: [],
+      },
+      {
+        info: assistantMessage('message-2', 'session-1'),
+        parts: [],
+      },
+    ]);
+
+    expect(state.failedSessionIds).toEqual([]);
+  });
+
+  it('does not mark a session failed when the errored latest message has already been seen', () => {
+    setState('lastSeenSessions', { 'session-1': 100 });
+
+    syncFailedSessionsFromMessages([
+      {
+        info: {
+          ...assistantMessage('message-1', 'session-1'),
+          error: { name: 'server_error', data: { message: 'Request failed' } },
+        },
+        parts: [],
+      },
+    ]);
+
+    expect(state.failedSessionIds).toEqual([]);
+  });
+
+  it('allows clearing an individual failed session flag', () => {
+    setSessionFailed('session-1', true);
+    setSessionFailed('session-2', true);
+    setSessionFailed('session-1', false);
+
+    expect(state.failedSessionIds).toEqual(['session-2']);
   });
 });

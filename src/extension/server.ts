@@ -377,15 +377,11 @@ export class OpenCodeServer extends EventEmitter {
     if (this.process) {
       const proc = this.process;
       this.process = null;
-      proc.kill('SIGTERM');
-      const exitPromise = new Promise<boolean>((resolve) => {
-        proc.on('exit', () => resolve(true));
-      });
-      const timeoutPromise = new Promise<boolean>((resolve) =>
-        setTimeout(() => resolve(false), 5000)
-      );
-      const exited = await Promise.race([exitPromise, timeoutPromise]);
-      if (!exited) {
+      if (proc.exitCode === null && proc.signalCode === null) {
+        proc.kill('SIGTERM');
+      }
+      const exited = await waitForProcessExit(proc, 5000);
+      if (!exited && proc.exitCode === null && proc.signalCode === null) {
         proc.kill('SIGKILL');
       }
     }
@@ -449,4 +445,30 @@ function findSseChunkBoundary(buffer: string): { index: number; length: number }
   const match = SSE_CHUNK_BOUNDARY_RE.exec(buffer);
   if (!match || match.index === undefined) return null;
   return { index: match.index, length: match[0].length };
+}
+
+function waitForProcessExit(proc: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (result: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      proc.off('exit', handleExit);
+      resolve(result);
+    };
+
+    const handleExit = () => finish(true);
+    proc.once('exit', handleExit);
+    timer = setTimeout(() => finish(false), timeoutMs);
+  });
 }

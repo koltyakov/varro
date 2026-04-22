@@ -96,6 +96,7 @@ interface AppState {
   lastSeenSessions: Record<string, number>;
   compactingSessionIds: string[];
   queuedMessages: QueuedMessage[];
+  failedSessionIds: string[];
 }
 
 export interface QueuedMessage {
@@ -162,6 +163,7 @@ export const [state, setState] = createStore<AppState>({
   lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
   compactingSessionIds: [],
   queuedMessages: [],
+  failedSessionIds: [],
 });
 
 export function enqueueMessage(message: QueuedMessage) {
@@ -757,6 +759,31 @@ function findMessageIndex(msgs: Array<{ info: Message; parts: Part[] }>, id: str
   return msgs.findIndex((m) => m.info.id === id);
 }
 
+function findPartLocation(
+  msgs: Array<{ info: Message; parts: Part[] }>,
+  partId: string
+): { msgIdx: number; partIdx: number } | null {
+  ensureIndex(msgs);
+  const indexed = partById.get(partId);
+  if (indexed) {
+    const message = msgs[indexed.msgIdx];
+    if (message?.parts[indexed.partIdx]?.id === partId) {
+      return indexed;
+    }
+  }
+
+  for (let msgIdx = 0; msgIdx < msgs.length; msgIdx++) {
+    const partIdx = msgs[msgIdx].parts.findIndex((part) => part.id === partId);
+    if (partIdx !== -1) {
+      const location = { msgIdx, partIdx };
+      partById.set(partId, location);
+      return location;
+    }
+  }
+
+  return null;
+}
+
 export function upsertMessage(msg: { info: Message; parts: Part[] }) {
   setState(
     'messages',
@@ -779,10 +806,11 @@ export function upsertMessageInfo(info: Message) {
       const idx = findMessageIndex(msgs, info.id);
       if (idx !== -1) {
         msgs[idx].info = info;
+        return;
       } else {
         msgs.push({ info, parts: [] });
+        invalidateIndex();
       }
-      invalidateIndex();
     })
   );
 }
@@ -794,9 +822,13 @@ export function upsertPart(part: Part) {
     produce((msgs) => {
       const idx = findMessageIndex(msgs, msgId);
       if (idx === -1) return;
-      const partIdx = msgs[idx].parts.findIndex((p) => p.id === part.id);
-      if (partIdx !== -1) msgs[idx].parts[partIdx] = part;
-      else msgs[idx].parts.push(part);
+      const location = findPartLocation(msgs, part.id);
+      if (location && location.msgIdx === idx) {
+        msgs[idx].parts[location.partIdx] = part;
+        return;
+      }
+
+      msgs[idx].parts.push(part);
       invalidateIndex();
     })
   );
@@ -813,21 +845,11 @@ export function updateMessagePart(part: Part) {
   setState(
     'messages',
     produce((msgs) => {
-      ensureIndex(msgs);
-      const loc = partById.get(partId);
-      if (loc && loc.msgIdx < msgs.length) {
-        const msg = msgs[loc.msgIdx];
-        if (loc.partIdx < msg.parts.length && msg.parts[loc.partIdx].id === partId) {
-          msg.parts[loc.partIdx] = part;
-          return;
-        }
-      }
-      for (const msg of msgs) {
-        const idx = msg.parts.findIndex((p) => p.id === partId);
-        if (idx !== -1) {
-          msg.parts[idx] = part;
-          break;
-        }
+      const location = findPartLocation(msgs, partId);
+      if (!location) return;
+      const msg = msgs[location.msgIdx];
+      if (msg) {
+        msg.parts[location.partIdx] = part;
       }
     })
   );
@@ -898,9 +920,11 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
     produce((msgs) => {
       const idx = findMessageIndex(msgs, messageId);
       if (idx !== -1 && msgs[idx].info.sessionID === sessionId) {
-        const partIdx = msgs[idx].parts.findIndex((p) => p.id === partId);
-        if (partIdx !== -1) msgs[idx].parts.splice(partIdx, 1);
-        invalidateIndex();
+        const location = findPartLocation(msgs, partId);
+        if (location && location.msgIdx === idx) {
+          msgs[idx].parts.splice(location.partIdx, 1);
+          invalidateIndex();
+        }
       }
     })
   );
@@ -946,6 +970,40 @@ export function clearMessages() {
   setState('todos', []);
   setState('diffs', []);
   clearStreamingState();
+}
+
+export function setSessionFailed(sessionId: string, failed: boolean) {
+  setState(
+    'failedSessionIds',
+    produce((ids) => {
+      const idx = ids.indexOf(sessionId);
+      if (failed) {
+        if (idx === -1) ids.push(sessionId);
+        return;
+      }
+      if (idx !== -1) ids.splice(idx, 1);
+    })
+  );
+}
+
+export function syncFailedSessionsFromMessages(
+  messages: Array<{ info: Message; parts: Part[] }> = state.messages
+) {
+  const failedSessionIds = new Set<string>();
+
+  const latestBySession = new Map<string, Message>();
+  for (const entry of messages) {
+    latestBySession.set(entry.info.sessionID, entry.info);
+  }
+
+  for (const [sessionId, info] of latestBySession) {
+    if (info.role !== 'assistant' || !info.error) continue;
+    const session = state.sessions.find((item) => item.id === sessionId);
+    if (!session) continue;
+    if (isSessionUnread(sessionId, session.time.updated)) failedSessionIds.add(sessionId);
+  }
+
+  setState('failedSessionIds', [...failedSessionIds]);
 }
 
 export function replaceMessages(incoming: Array<{ info: Message; parts: Part[] }>) {

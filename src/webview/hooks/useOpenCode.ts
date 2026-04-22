@@ -24,6 +24,8 @@ import {
   clearStreamingState,
   clearCurrentDocumentStateForSession,
   clearDraftCurrentDocumentState,
+  syncFailedSessionsFromMessages,
+  setSessionFailed,
   setMessagesIncremental,
   upsertMessageInfo,
   upsertPart,
@@ -100,6 +102,7 @@ import { applyWebviewTheme } from '../lib/theme';
 import { getPreferredVariant } from '../lib/model-variants';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
+import { isAssistantMessage } from '../lib/message-metrics';
 
 let initialized = false;
 let eventHandlerCleanups: (() => void)[] = [];
@@ -199,6 +202,7 @@ function clearDeletedSessionState(id: string) {
     delete next[id];
     return next;
   });
+  setSessionFailed(id, false);
   setState('questions', (items) => items.filter((item) => item.sessionID !== id));
   setState('permissions', (items) => items.filter((item) => item.sessionID !== id));
 
@@ -667,6 +671,7 @@ export async function selectSession(id: string) {
     if (state.activeSessionId !== id) return;
     upsertSession(session);
     setMessagesIncremental(msgs);
+    syncFailedSessionsFromMessages(msgs);
     const inferredAgent = !persistedAgent ? deriveSelectedAgentFromMessages(msgs) : null;
     if (inferredAgent) {
       setSelectedAgent(inferredAgent, { sessionId: id, persistGlobal: false });
@@ -703,6 +708,7 @@ async function syncSessionMessages(sessionId: string) {
   const msgs = await client.session.messages(sessionId);
   if (sessionId === state.activeSessionId) {
     setMessagesIncremental(msgs);
+    syncFailedSessionsFromMessages(msgs);
     syncTodosFromMessages(msgs);
   }
 }
@@ -1162,7 +1168,11 @@ function registerEventHandlers() {
       const info = getProps(data)?.info as { sessionID?: string } | undefined;
       if (info?.sessionID === state.activeSessionId) {
         markLoadingActivity();
-        upsertMessageInfo(info as Message);
+        const message = info as Message;
+        upsertMessageInfo(message);
+        if (isAssistantMessage(message)) {
+          setSessionFailed(message.sessionID, Boolean(message.error));
+        }
       }
     })
   );

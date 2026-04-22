@@ -363,7 +363,14 @@ describe('state helpers', () => {
     const stateModule = await loadState();
 
     stateModule.clearMessages();
+    const initialVersion = stateModule.messageStructureVersion();
     stateModule.upsertMessageInfo(userMessage('message-1'));
+    expect(stateModule.messageStructureVersion()).toBe(initialVersion + 1);
+
+    const afterMessageInsert = stateModule.messageStructureVersion();
+    stateModule.upsertMessageInfo(userMessage('message-1', 'session-1', 1));
+    expect(stateModule.messageStructureVersion()).toBe(afterMessageInsert);
+
     stateModule.applyMessagePartDelta('message-1', 'part-1', 'Hello', 'session-1');
 
     expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
@@ -371,6 +378,8 @@ describe('state helpers', () => {
       type: 'text',
       text: 'Hello',
     });
+
+    const afterPartInsert = stateModule.messageStructureVersion();
 
     stateModule.upsertPart({
       id: 'part-1',
@@ -380,11 +389,17 @@ describe('state helpers', () => {
       text: 'Hello world',
     });
 
+    expect(stateModule.messageStructureVersion()).toBe(afterPartInsert);
     expect(stateModule.state.streamingPartId).toBeNull();
     expect(stateModule.state.streamingText).toBe('');
 
     stateModule.applyMessagePartDelta('message-1', 'part-2', 'Bye', 'session-1');
+    const afterSecondPartInsert = stateModule.messageStructureVersion();
+    stateModule.removeMessagePart('session-1', 'message-1', 'missing-part');
+    expect(stateModule.messageStructureVersion()).toBe(afterSecondPartInsert);
+
     stateModule.removeMessagePart('session-1', 'message-1', 'part-2');
+    expect(stateModule.messageStructureVersion()).toBe(afterSecondPartInsert + 1);
     expect(stateModule.state.messages[0]?.parts).toHaveLength(1);
 
     stateModule.setMessagesIncremental([

@@ -85,6 +85,7 @@ describe('getAssistantContainerVariant', () => {
           textPart('text-1', 'Fixing it now.'),
         ],
         highlightFinalAnswer: false,
+        hasError: false,
       })
     ).toBe('plain');
   });
@@ -99,6 +100,7 @@ describe('getAssistantContainerVariant', () => {
         hasStructuredAssistantParts: false,
         layoutParts: [textPart('text-1', 'Updating the carousel layout.')],
         highlightFinalAnswer: false,
+        hasError: false,
       })
     ).toBe('plain');
   });
@@ -113,6 +115,7 @@ describe('getAssistantContainerVariant', () => {
         hasStructuredAssistantParts: true,
         layoutParts: [reasoningPart('reason-1', 'Inspecting'), textPart('text-1', 'Final answer.')],
         highlightFinalAnswer: true,
+        hasError: false,
       })
     ).toBe(false);
   });
@@ -127,6 +130,7 @@ describe('getAssistantContainerVariant', () => {
         hasStructuredAssistantParts: false,
         layoutParts: [textPart('text-1', 'Plan summary.')],
         highlightFinalAnswer: true,
+        hasError: false,
       })
     ).toBe(false);
   });
@@ -145,6 +149,22 @@ describe('getAssistantContainerVariant', () => {
           textPart('text-2', 'Final answer.'),
         ],
         highlightFinalAnswer: true,
+        hasError: false,
+      })
+    ).toBe('plain');
+  });
+
+  it('renders errored assistant turns plain even without a final answer', () => {
+    expect(
+      getAssistantContainerVariant({
+        isUser: false,
+        visibleDiffCount: 0,
+        fileEditStackGroup: null,
+        isSubagent: false,
+        hasStructuredAssistantParts: true,
+        layoutParts: [reasoningPart('reason-1', 'Inspecting')],
+        highlightFinalAnswer: false,
+        hasError: true,
       })
     ).toBe('plain');
   });
@@ -216,5 +236,29 @@ describe('Message assistant final answer rendering', () => {
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);
     expect(finalItem).toBeInstanceOf(HTMLDivElement);
     expect(finalItem?.textContent).toContain('Final answer.');
+  });
+
+  it('renders assistant message errors as an inline error block', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('message-3'),
+            error: {
+              name: 'server_error',
+              data: { message: 'An error occurred while processing your request.' },
+            },
+          },
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+        }),
+      container!
+    );
+
+    const errorText = container?.querySelector('.assistant-message-flow-item-error');
+    const diffSummary = container?.querySelector('.diff-summary');
+
+    expect(errorText).toBeInstanceOf(HTMLDivElement);
+    expect(errorText?.textContent).toContain('An error occurred while processing your request.');
+    expect(diffSummary).toBeNull();
   });
 });
