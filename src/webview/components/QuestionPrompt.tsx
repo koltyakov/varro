@@ -101,146 +101,155 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
   };
 
   return (
-    <div class="question-prompt animate-fade-in">
-      <div class="question-prompt-header">
-        <div class="question-prompt-header-main">
-          <svg class="question-prompt-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path
-              fill-rule="evenodd"
-              clip-rule="evenodd"
-              d="M8 15A7 7 0 108 1a7 7 0 000 14zm0-1A6 6 0 108 2a6 6 0 000 12zM7.25 4.5a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zM8 11a.75.75 0 100 1.5.75.75 0 000-1.5z"
-            />
-          </svg>
-          <div class="question-prompt-heading">
-            <span class="question-prompt-label">Input Needed</span>
-            <Show when={currentQuestion()?.header}>
-              <span class="question-prompt-title">{currentQuestion()!.header}</span>
-            </Show>
-          </div>
-        </div>
-        <Show when={questions().length > 1}>
-          <span class="question-prompt-step">
-            {currentStep() + 1} / {questions().length}
-          </span>
-        </Show>
-      </div>
-
-      <Show when={currentQuestion()}>
-        {(question) => {
-          const questionIndex = () => currentStep();
-          return (
-            <div class="question-prompt-panel">
-              <div class="question-prompt-text">{question().question}</div>
-              <div class="question-prompt-options">
-                <For each={question().options}>
-                  {(option) => {
-                    const checked = () =>
-                      (selected()[questionIndex()] || []).includes(option.label);
-                    const isMultiple = () => question().multiple;
-                    return (
-                      <button
-                        class={`question-option ${checked() ? 'selected' : ''}`}
-                        onClick={() =>
-                          toggleOption(questionIndex(), option.label, question().multiple)
-                        }
-                      >
-                        <Show
-                          when={isMultiple()}
-                          fallback={
-                            <div class={`question-radio ${checked() ? 'checked' : ''}`}>
-                              <Show when={checked()}>
-                                <div class="question-radio-dot" />
-                              </Show>
-                            </div>
-                          }
-                        >
-                          <div class={`question-checkbox ${checked() ? 'checked' : ''}`}>
-                            <Show when={checked()}>
-                              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                                <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
-                              </svg>
-                            </Show>
-                          </div>
-                        </Show>
-                        <div class="question-option-text">
-                          <span class="question-option-label">{option.label}</span>
-                          <Show when={option.description}>
-                            <span class="question-option-desc">{option.description}</span>
-                          </Show>
-                        </div>
-                      </button>
-                    );
-                  }}
-                </For>
-              </div>
-              <Show when={question().custom !== false}>
-                <div class="question-custom-row">
-                  <Show
-                    when={question().multiple}
-                    fallback={
-                      <div
-                        class={`question-radio ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
-                      >
-                        <Show when={(customValues()[questionIndex()] || '').trim()}>
-                          <div class="question-radio-dot" />
-                        </Show>
-                      </div>
-                    }
-                  >
-                    <div
-                      class={`question-checkbox ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
-                    >
-                      <Show when={(customValues()[questionIndex()] || '').trim()}>
-                        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                          <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
-                        </svg>
-                      </Show>
-                    </div>
-                  </Show>
-                  <input
-                    type="text"
-                    value={customValues()[questionIndex()] || ''}
-                    placeholder="Other..."
-                    class="question-custom-input"
-                    onInput={(e) => updateCustom(questionIndex(), e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.isComposing) {
-                        e.preventDefault();
-                        void handlePrimaryAction();
-                      }
-                    }}
-                  />
-                </div>
+    <div class="chat-tool-invocation-part question-prompt-card animate-fade-in">
+      <div class="question-prompt">
+        <div class="question-prompt-header">
+          <div class="question-prompt-header-main">
+            <svg class="question-prompt-icon" viewBox="0 0 16 16" fill="currentColor">
+              <path
+                fill-rule="evenodd"
+                clip-rule="evenodd"
+                d="M8 15A7 7 0 108 1a7 7 0 000 14zm0-1A6 6 0 108 2a6 6 0 000 12zM7.25 4.5a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zM8 11a.75.75 0 100 1.5.75.75 0 000-1.5z"
+              />
+            </svg>
+            <div class="question-prompt-heading">
+              <span class="question-prompt-label">Input Needed</span>
+              <Show when={currentQuestion()?.header}>
+                <span class="question-prompt-title">{currentQuestion()!.header}</span>
               </Show>
             </div>
-          );
-        }}
-      </Show>
+          </div>
+          <Show when={questions().length > 1}>
+            <span class="question-prompt-step">
+              {currentStep() + 1} / {questions().length}
+            </span>
+          </Show>
+        </div>
 
-      <div class="question-prompt-actions">
-        <button
-          class="question-btn question-btn-secondary"
-          disabled={isSubmitting()}
-          onClick={skip}
-        >
-          Skip
-        </button>
-        <Show when={currentStep() > 0}>
+        <Show when={currentQuestion()}>
+          {(question) => {
+            const questionIndex = () => currentStep();
+            return (
+              <div class="question-prompt-panel">
+                <div class="question-prompt-text">{question().question}</div>
+                <div class="question-prompt-options">
+                  <For each={question().options}>
+                    {(option) => {
+                      const checked = () =>
+                        (selected()[questionIndex()] || []).includes(option.label);
+                      const isMultiple = () => question().multiple;
+                      return (
+                        <button
+                          type="button"
+                          class={`question-option ${checked() ? 'selected' : ''}`}
+                          aria-pressed={checked()}
+                          onClick={() =>
+                            toggleOption(questionIndex(), option.label, question().multiple)
+                          }
+                        >
+                          <Show
+                            when={isMultiple()}
+                            fallback={
+                              <div class={`question-radio ${checked() ? 'checked' : ''}`}>
+                                <Show when={checked()}>
+                                  <div class="question-radio-dot" />
+                                </Show>
+                              </div>
+                            }
+                          >
+                            <div class={`question-checkbox ${checked() ? 'checked' : ''}`}>
+                              <Show when={checked()}>
+                                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                                  <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
+                                </svg>
+                              </Show>
+                            </div>
+                          </Show>
+                          <div class="question-option-text">
+                            <span class="question-option-label">{option.label}</span>
+                            <Show when={option.description}>
+                              <span class="question-option-desc">{option.description}</span>
+                            </Show>
+                          </div>
+                        </button>
+                      );
+                    }}
+                  </For>
+                </div>
+                <Show when={question().custom !== false}>
+                  <div
+                    class={`question-custom-row ${(customValues()[questionIndex()] || '').trim() ? 'selected' : ''}`}
+                  >
+                    <Show
+                      when={question().multiple}
+                      fallback={
+                        <div
+                          class={`question-radio ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
+                        >
+                          <Show when={(customValues()[questionIndex()] || '').trim()}>
+                            <div class="question-radio-dot" />
+                          </Show>
+                        </div>
+                      }
+                    >
+                      <div
+                        class={`question-checkbox ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
+                      >
+                        <Show when={(customValues()[questionIndex()] || '').trim()}>
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
+                          </svg>
+                        </Show>
+                      </div>
+                    </Show>
+                    <input
+                      type="text"
+                      value={customValues()[questionIndex()] || ''}
+                      placeholder="Type your own answer"
+                      class="question-custom-input"
+                      onInput={(e) => updateCustom(questionIndex(), e.currentTarget.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.isComposing) {
+                          e.preventDefault();
+                          void handlePrimaryAction();
+                        }
+                      }}
+                    />
+                  </div>
+                </Show>
+              </div>
+            );
+          }}
+        </Show>
+
+        <div class="question-prompt-actions">
           <button
+            type="button"
             class="question-btn question-btn-secondary"
             disabled={isSubmitting()}
-            onClick={goBack}
+            onClick={skip}
           >
-            Back
+            Skip
           </button>
-        </Show>
-        <button
-          class="question-btn question-btn-primary"
-          disabled={!canAdvance() || isSubmitting()}
-          onClick={() => void handlePrimaryAction()}
-        >
-          {isLastStep() ? 'Submit' : 'Next'}
-        </button>
+          <Show when={currentStep() > 0}>
+            <button
+              type="button"
+              class="question-btn question-btn-secondary"
+              disabled={isSubmitting()}
+              onClick={goBack}
+            >
+              Back
+            </button>
+          </Show>
+          <button
+            type="button"
+            class="question-btn question-btn-primary"
+            disabled={!canAdvance() || isSubmitting()}
+            onClick={() => void handlePrimaryAction()}
+          >
+            {isLastStep() ? 'Submit' : 'Next'}
+          </button>
+        </div>
       </div>
     </div>
   );
