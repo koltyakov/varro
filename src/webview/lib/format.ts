@@ -47,7 +47,9 @@ export function getPrimaryProviderLimitWindow(limit: ProviderLimitStatus | null 
 
 export function getProviderLimitTone(limit: ProviderLimitStatus | null | undefined) {
   const window = getPrimaryProviderLimitWindow(limit);
-  if (!window || window.limit == null || window.limit <= 0) return 'default';
+  if (!window) return 'default';
+  if (window.remaining <= 0) return 'error';
+  if (window.limit == null || window.limit <= 0) return 'default';
 
   const ratio = window.remaining / window.limit;
   if (ratio <= 0.1) return 'error';

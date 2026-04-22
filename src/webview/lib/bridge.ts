@@ -26,11 +26,13 @@ export function onMessage(handler: MessageHandler): () => void {
   return () => handlers.delete(handler);
 }
 
-export function postMessage(msg: WebviewMessage): void {
+export function postMessage(msg: WebviewMessage): boolean {
   const send = (window as unknown as Record<string, unknown>).__sendToExtension as
     | ((m: WebviewMessage) => void)
     | undefined;
-  if (send) send(msg);
+  if (!send) return false;
+  send(msg);
+  return true;
 }
 
 let reqId = 0;
@@ -59,7 +61,7 @@ export function apiCall<T = unknown>(method: string, path: string, body?: unknow
       reject(new Error(`API call timed out: ${method} ${path}`));
     }, API_CALL_TIMEOUT_MS);
     pending.set(id, { resolve, reject, timer });
-    postMessage({
+    const sent = postMessage({
       type: 'api/request',
       payload: {
         id,
@@ -68,5 +70,11 @@ export function apiCall<T = unknown>(method: string, path: string, body?: unknow
         body,
       },
     });
+
+    if (!sent) {
+      clearTimeout(timer);
+      pending.delete(id);
+      reject(new Error(`Extension transport unavailable: ${method} ${path}`));
+    }
   });
 }

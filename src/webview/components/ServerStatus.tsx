@@ -1,17 +1,19 @@
 import { Show } from 'solid-js';
 import { postMessage } from '../lib/bridge';
+import { openProviderSetup } from '../lib/provider-setup';
 import { state } from '../lib/state';
 
 export function ServerStatus() {
   const status = () => state.serverStatus;
   const noProvidersConfigured = () =>
     status().state === 'running' && state.providersLoaded && state.providers.length === 0;
-
-  const openProviderSetup = () => {
-    postMessage({
-      type: 'terminal/run',
-      payload: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
-    });
+  const serverErrorMessage = () => {
+    const currentStatus = status();
+    return currentStatus.state === 'error' ? currentStatus.message.trim() : '';
+  };
+  const isMissingCliError = () => serverErrorMessage().includes('OpenCode CLI not found');
+  const openExternal = (url: string) => {
+    postMessage({ type: 'vscode/open-external', payload: { url } });
   };
 
   return (
@@ -43,57 +45,64 @@ export function ServerStatus() {
       </Show>
 
       <Show when={status().state === 'error'}>
-        <div class="flex w-full max-w-62.5 flex-col items-center gap-4 text-center">
-          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
-            <svg
-              class="h-5 w-5 text-vscode-accent"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-              <polyline points="7.5 4.21 12 6.81 16.5 4.21" />
-              <polyline points="7.5 19.79 7.5 14.6 3 12" />
-              <polyline points="21 12 16.5 14.6 16.5 19.79" />
-              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-              <line x1="12" y1="22.08" x2="12" y2="12" />
-            </svg>
-          </div>
-          <div class="flex flex-col gap-1.5 px-4">
-            <p class="text-[13px] font-medium text-vscode-fg">OpenCode is not installed</p>
-            <p class="text-[12px] leading-normal text-vscode-muted">
-              Varro gives{' '}
-              <a
-                href="https://opencode.ai"
-                class="text-vscode-link hover:text-vscode-link-active hover:underline"
+        <Show
+          when={isMissingCliError()}
+          fallback={<GenericErrorState message={serverErrorMessage()} />}
+        >
+          <div class="flex w-full max-w-62.5 flex-col items-center gap-4 text-center">
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-accent/10">
+              <svg
+                class="h-5 w-5 text-vscode-accent"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
               >
-                OpenCode
-              </a>{' '}
-              a native UI.
-              <br />
-              Install the CLI to get started.
-            </p>
-          </div>
-          <div class="w-full px-4">
-            <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
-              <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">
-                Install
-              </p>
-              <code class="mt-1 block font-mono text-[12px] text-vscode-fg">
-                npm i -g opencode-ai
-              </code>
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="7.5 4.21 12 6.81 16.5 4.21" />
+                <polyline points="7.5 19.79 7.5 14.6 3 12" />
+                <polyline points="21 12 16.5 14.6 16.5 19.79" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
             </div>
+            <div class="flex flex-col gap-1.5 px-4">
+              <p class="text-[13px] font-medium text-vscode-fg">OpenCode is not installed</p>
+              <p class="text-[12px] leading-normal text-vscode-muted">
+                Varro gives{' '}
+                <button
+                  type="button"
+                  class="text-vscode-link hover:text-vscode-link-active hover:underline"
+                  onClick={() => openExternal('https://opencode.ai')}
+                >
+                  OpenCode
+                </button>{' '}
+                a native UI.
+                <br />
+                Install the CLI to get started.
+              </p>
+            </div>
+            <div class="w-full px-4">
+              <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
+                <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">
+                  Install
+                </p>
+                <code class="mt-1 block font-mono text-[12px] text-vscode-fg">
+                  npm i -g opencode-ai
+                </code>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
+              onClick={() => openExternal('https://opencode.ai')}
+            >
+              Learn more at opencode.ai
+            </button>
           </div>
-          <a
-            href="https://opencode.ai"
-            class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
-          >
-            Learn more at opencode.ai
-          </a>
-        </div>
+        </Show>
       </Show>
 
       <Show when={noProvidersConfigured()}>
@@ -143,14 +152,36 @@ export function ServerStatus() {
           <button type="button" class="server-status-action-button" onClick={openProviderSetup}>
             Open terminal and add a provider
           </button>
-          <a
-            href="https://opencode.ai/docs/providers"
+          <button
+            type="button"
             class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
+            onClick={() => openExternal('https://opencode.ai/docs/providers')}
           >
             Provider setup docs
-          </a>
+          </button>
         </div>
       </Show>
+    </div>
+  );
+}
+
+function GenericErrorState(props: { message: string }) {
+  return (
+    <div class="flex w-full max-w-75 flex-col items-center gap-4 text-center">
+      <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-error/10">
+        <svg
+          class="h-5 w-5 text-vscode-error"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+        </svg>
+      </div>
+      <div class="flex flex-col gap-1.5 px-4">
+        <p class="text-[13px] font-medium text-vscode-fg">OpenCode could not start</p>
+        <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
+      </div>
     </div>
   );
 }

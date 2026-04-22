@@ -17,6 +17,87 @@ const checkSvg =
 const renderer = new marked.Renderer();
 const SHELL_LANGS = new Set(['', 'bash', 'console', 'shell', 'sh', 'zsh']);
 const COMPACT_FIRST_COLUMN_HEADERS = new Set(['#', 'no', 'no.', 'num', 'id']);
+const ALLOWED_HTML_TAGS = new Set([
+  'a',
+  'blockquote',
+  'br',
+  'button',
+  'code',
+  'del',
+  'div',
+  'em',
+  'figcaption',
+  'figure',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'li',
+  'line',
+  'ol',
+  'p',
+  'path',
+  'polyline',
+  'pre',
+  'span',
+  'strong',
+  'svg',
+  'table',
+  'tbody',
+  'td',
+  'th',
+  'thead',
+  'tr',
+  'ul',
+]);
+const STRIP_HTML_TAGS = new Set([
+  'base',
+  'iframe',
+  'img',
+  'link',
+  'meta',
+  'object',
+  'script',
+  'style',
+]);
+const GLOBAL_ALLOWED_ATTRIBUTES = new Set(['aria-hidden', 'aria-label', 'class', 'role', 'title']);
+const TAG_ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
+  a: new Set(['data-external', 'data-file', 'href']),
+  button: new Set(['data-copy', 'data-copy-text', 'type']),
+  div: new Set(['data-lang']),
+  line: new Set([
+    'stroke',
+    'stroke-linecap',
+    'stroke-linejoin',
+    'stroke-width',
+    'x1',
+    'x2',
+    'y1',
+    'y2',
+  ]),
+  path: new Set(['d', 'fill', 'stroke', 'stroke-linecap', 'stroke-linejoin', 'stroke-width']),
+  polyline: new Set([
+    'fill',
+    'points',
+    'stroke',
+    'stroke-linecap',
+    'stroke-linejoin',
+    'stroke-width',
+  ]),
+  svg: new Set([
+    'fill',
+    'height',
+    'stroke',
+    'stroke-linecap',
+    'stroke-linejoin',
+    'stroke-width',
+    'viewBox',
+    'width',
+  ]),
+};
 
 function escapeHtml(value: string) {
   return value
@@ -151,6 +232,74 @@ function isLocalFileHref(href: string | null): boolean {
   return !/^[a-z][a-z0-9+.-]*:/i.test(href);
 }
 
+function isSafeExternalHref(href: string | null): boolean {
+  if (!href) return false;
+  try {
+    const parsed = new URL(href);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
+  const href = anchor.getAttribute('href')?.trim() || '';
+  if (isLocalFileHref(href)) {
+    anchor.setAttribute('href', href);
+    anchor.removeAttribute('data-external');
+    return;
+  }
+
+  if (isSafeExternalHref(href)) {
+    anchor.setAttribute('href', href);
+    anchor.setAttribute('data-external', 'true');
+    return;
+  }
+
+  anchor.removeAttribute('href');
+  anchor.removeAttribute('data-external');
+}
+
+function sanitizeHtml(html: string): string {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+
+  for (const element of Array.from(
+    template.content.querySelectorAll<HTMLElement | SVGElement>('*')
+  )) {
+    const tag = element.tagName.toLowerCase();
+
+    if (!ALLOWED_HTML_TAGS.has(tag)) {
+      if (STRIP_HTML_TAGS.has(tag)) {
+        element.remove();
+        continue;
+      }
+      const text = element.textContent || '';
+      element.replaceWith(document.createTextNode(text));
+      continue;
+    }
+
+    const allowedAttributes = TAG_ALLOWED_ATTRIBUTES[tag];
+    for (const attr of Array.from(element.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith('on') || name === 'style') {
+        element.removeAttribute(attr.name);
+        continue;
+      }
+
+      if (!GLOBAL_ALLOWED_ATTRIBUTES.has(name) && !allowedAttributes?.has(name)) {
+        element.removeAttribute(attr.name);
+      }
+    }
+
+    if (element instanceof HTMLAnchorElement) {
+      sanitizeAnchorHref(element);
+    }
+  }
+
+  return template.innerHTML;
+}
+
 function linkifyPaths(html: string): string {
   const preserved: string[] = [];
   let idx = 0;
@@ -235,7 +384,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   function parseMarkdown(content: string): string {
     try {
       const parsed = marked.parse(content) as string;
-      return linkifyPaths(parsed);
+      return sanitizeHtml(linkifyPaths(parsed));
     } catch {
       return `<p>${escapeHtml(content)}</p>`;
     }
@@ -300,17 +449,32 @@ export function MarkdownRenderer(props: MarkdownProps) {
       e.preventDefault();
       try {
         const payload = JSON.parse(link.dataset.file || '{}');
-        postMessage({ type: 'vscode/open', payload: { path: payload.path, line: payload.line } });
+        postMessage({
+          type: 'vscode/open',
+          payload: { path: payload.path, line: payload.line, kind: 'file' },
+        });
       } catch {}
       return;
     }
 
     const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href]');
+    if (anchor?.dataset.external === 'true') {
+      const href = anchor.getAttribute('href');
+      if (isSafeExternalHref(href)) {
+        e.preventDefault();
+        postMessage({ type: 'vscode/open-external', payload: { url: href! } });
+      }
+      return;
+    }
+
     if (anchor && isLocalFileHref(anchor.getAttribute('href'))) {
       e.preventDefault();
       const payload = splitPathReference(anchor.getAttribute('href') || '');
       if (payload?.path) {
-        postMessage({ type: 'vscode/open', payload: { path: payload.path, line: payload.line } });
+        postMessage({
+          type: 'vscode/open',
+          payload: { path: payload.path, line: payload.line, kind: 'file' },
+        });
       }
     }
   }

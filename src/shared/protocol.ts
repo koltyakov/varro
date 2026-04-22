@@ -104,6 +104,7 @@ export type ExtensionMessage =
       type: 'server/event';
       payload: { type: ServerEventName; properties?: Record<string, unknown> };
     }
+  | { type: 'pending-attention/update'; payload: { sessionIds: string[] } }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }
@@ -129,7 +130,11 @@ export type WebviewMessage =
   | { type: 'files/pick' }
   | { type: 'files/search'; payload: { requestId: number; query: string; limit?: number } }
   | { type: 'file/read'; payload: { path: string } }
-  | { type: 'vscode/open'; payload: { path: string; line?: number } }
+  | {
+      type: 'vscode/open';
+      payload: { path: string; line?: number; kind?: 'auto' | 'file' | 'directory' };
+    }
+  | { type: 'vscode/open-external'; payload: { url: string } }
   | { type: 'ready' }
   | { type: 'api/request'; payload: { id: number; method: string; path: string; body?: unknown } }
   | {

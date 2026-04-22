@@ -30,9 +30,11 @@ import {
   error,
   requestMessageListScrollToBottom,
   getCurrentDocumentEnabled,
+  getProviderLimit,
   toggleCurrentDocumentEnabled,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
+import { openProviderSetup } from '../lib/provider-setup';
 import {
   sendMessage,
   abortSession,
@@ -51,6 +53,7 @@ import {
   formatVariantInitial,
   formatVariantLabel,
   getProviderLimitTone,
+  getPrimaryProviderLimitWindow,
 } from '../lib/format';
 import { getMatchingVariant, getPreferredVariant } from '../lib/model-variants';
 import {
@@ -70,6 +73,7 @@ import {
 import { TodoList } from './TodoList';
 import type { Agent, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
+import { createUsageLimitProviderLimit } from '../lib/usage-limit';
 
 export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -182,11 +186,7 @@ export function ChatInput() {
     getSlashCommands({
       isBusy: isLoading(),
       canUndo: !!state.activeSessionId && state.messages.some((m) => m.info.role === 'assistant'),
-      onConnectProvider: () =>
-        postMessage({
-          type: 'terminal/run',
-          payload: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
-        }),
+      onConnectProvider: openProviderSetup,
       onOpenSessions: () => setShowSessionPicker(true),
       onOpenModels: () => setShowModelPicker(true),
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
@@ -1059,9 +1059,16 @@ export function ChatInput() {
     const current = currentModel();
     if (!current.providerID) return null;
 
-    const limit = state.providerLimits[current.providerID] || null;
-    if (limit?.modelID && current.modelID && limit.modelID !== current.modelID) return null;
-    return limit;
+    const usageLimit = state.activeSessionId
+      ? state.sessionUsageLimits[state.activeSessionId]
+      : null;
+    const syntheticLimit =
+      usageLimit &&
+      usageLimit.providerID === current.providerID &&
+      (!usageLimit.modelID || !current.modelID || usageLimit.modelID === current.modelID)
+        ? createUsageLimitProviderLimit(usageLimit)
+        : null;
+    return syntheticLimit || getProviderLimit(current.providerID, current.modelID);
   });
 
   const currentProviderLimitCompact = createMemo(() =>
@@ -1071,6 +1078,28 @@ export function ChatInput() {
     formatProviderLimitTitle(currentProviderLimit())
   );
   const currentProviderLimitTone = createMemo(() => getProviderLimitTone(currentProviderLimit()));
+  const activeUsageLimit = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return null;
+    const usageLimit = state.sessionUsageLimits[sessionId] || null;
+    if (!usageLimit) return null;
+
+    const current = currentModel();
+    if (
+      usageLimit.providerID &&
+      current.providerID &&
+      usageLimit.providerID !== current.providerID
+    ) {
+      return null;
+    }
+    if (usageLimit.modelID && current.modelID && usageLimit.modelID !== current.modelID) {
+      return null;
+    }
+    return usageLimit;
+  });
+  const activeUsageLimitWindow = createMemo(() =>
+    getPrimaryProviderLimitWindow(createUsageLimitProviderLimit(activeUsageLimit()))
+  );
 
   const availableVariants = createMemo(() => {
     const model = currentModel();
@@ -1252,6 +1281,34 @@ export function ChatInput() {
 
       <Show when={state.todos.length > 0 && !showModelPicker()}>
         <TodoList />
+      </Show>
+
+      <Show when={activeUsageLimit()}>
+        <div class="chat-usage-limit-banner" role="status" aria-live="polite">
+          <div class="chat-usage-limit-copy">
+            <span class="chat-usage-limit-title">Usage limit reached</span>
+            <span class="chat-usage-limit-meta">
+              {describeUsageLimit(activeUsageLimitWindow(), activeUsageLimit()?.attempt ?? null)}
+            </span>
+            <span class="chat-usage-limit-message">{activeUsageLimit()!.message}</span>
+          </div>
+          <div class="chat-usage-limit-actions">
+            <Show when={isLoading() && !hasActiveQuestion() && !hasActivePermission()}>
+              <button class="chat-usage-limit-action danger" onClick={() => abortSession()}>
+                Stop retrying
+              </button>
+            </Show>
+            <button
+              class="chat-usage-limit-action"
+              onClick={() => {
+                closePopups();
+                setShowModelPicker(true);
+              }}
+            >
+              Switch provider
+            </button>
+          </div>
+        </div>
       </Show>
 
       <div
@@ -2174,6 +2231,24 @@ function getSlashCommands(props: {
   }
 
   return commands;
+}
+
+function describeUsageLimit(
+  window: ReturnType<typeof getPrimaryProviderLimitWindow>,
+  attempt: number | null
+) {
+  const parts: string[] = [];
+  if (window?.label) {
+    parts.push(`${window.label.toLowerCase()} exhausted`);
+  }
+  if (window?.resetAt) {
+    const seconds = Math.max(1, Math.ceil((window.resetAt - Date.now()) / 1000));
+    parts.push(`retry in ${seconds}s`);
+  }
+  if (attempt) {
+    parts.push(`attempt #${attempt}`);
+  }
+  return parts.join(' · ');
 }
 
 function getActiveCompletion(text: string, cursor: number) {

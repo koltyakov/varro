@@ -7,6 +7,7 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { ToolCall } from './ToolCall';
 import { formatDisplayPath } from '../lib/path-display';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
+import { parseUsageLimitNotice } from '../lib/usage-limit';
 
 export function MessagePart(props: {
   part: Part;
@@ -42,14 +43,7 @@ export function MessagePart(props: {
       case 'patch':
         return null;
       case 'retry':
-        return (
-          <div class="chat-retry-notice">
-            ↻ Retry attempt {part.attempt}
-            <Show when={part.error?.data?.message}>
-              <span class="chat-retry-error">— {part.error!.data.message}</span>
-            </Show>
-          </div>
-        );
+        return <RetryNotice part={part} />;
       case 'compaction':
         return (
           <div class="chat-compaction-notice">
@@ -69,6 +63,26 @@ export function MessagePart(props: {
   };
 
   return <>{render()}</>;
+}
+
+function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {
+  const usageLimit = createMemo(() => parseUsageLimitNotice(props.part.error?.data?.message));
+
+  return (
+    <div class={`chat-retry-notice${usageLimit() ? ' usage-limit' : ''}`}>
+      <span>↻ Retry attempt {props.part.attempt}</span>
+      <Show
+        when={usageLimit()}
+        fallback={
+          <Show when={props.part.error?.data?.message}>
+            <span class="chat-retry-error">— {props.part.error!.data.message}</span>
+          </Show>
+        }
+      >
+        <span class="chat-retry-error">— usage limit reached</span>
+      </Show>
+    </div>
+  );
 }
 
 function ReasoningBlock(props: { part: ReasoningPart; messageInfo?: AssistantMessage }) {

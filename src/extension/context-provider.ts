@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { isAbsolute, join } from 'path';
 import type { EditorContext } from '../shared/protocol';
 import { logger } from './logger';
+import { getRelativePath } from './util/path';
 
 export class ContextProvider implements vscode.Disposable {
   private static readonly TERMINAL_COPY_DELAY_MS = 40;
@@ -106,8 +107,7 @@ export class ContextProvider implements vscode.Disposable {
       this.activeEditorSettleTimer = null;
     }
 
-    const folders = vscode.workspace.workspaceFolders;
-    this._context.workspacePath = folders && folders.length > 0 ? folders[0].uri.fsPath : null;
+    this._context.workspacePath = this.getPreferredWorkspacePath();
     const config = getContextConfig();
 
     const editor = vscode.window.activeTextEditor;
@@ -140,9 +140,7 @@ export class ContextProvider implements vscode.Disposable {
     }
 
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
-    const relativePath = workspaceFolder
-      ? vscode.workspace.asRelativePath(doc.uri)
-      : doc.uri.fsPath;
+    const relativePath = getRelativePath(doc.uri, workspaceFolder);
 
     this._context.activeFile = config.autoAttachFile
       ? {
@@ -236,17 +234,26 @@ export class ContextProvider implements vscode.Disposable {
     }
   }
 
-  async openFile(path: string, line?: number) {
+  async openPath(path: string, options?: { line?: number; kind?: 'auto' | 'file' | 'directory' }) {
     try {
       const uri = await this.resolveWorkspaceUri(path);
       if (!uri) {
         logger.warn(`Could not resolve file path: ${path}`);
         return;
       }
+
+      const stat = await vscode.workspace.fs.stat(uri);
+      const shouldRevealDirectory =
+        options?.kind === 'directory' || Boolean(stat.type & vscode.FileType.Directory);
+      if (shouldRevealDirectory) {
+        await vscode.commands.executeCommand('revealInExplorer', uri);
+        return;
+      }
+
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-      if (line !== undefined && line >= 1) {
-        const position = new vscode.Position(line - 1, 0);
+      if (options?.line !== undefined && options.line >= 1) {
+        const position = new vscode.Position(options.line - 1, 0);
         editor.selection = new vscode.Selection(position, position);
         editor.revealRange(
           new vscode.Range(position, position),
@@ -275,7 +282,7 @@ export class ContextProvider implements vscode.Disposable {
     const relativePath = input.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
     if (!relativePath) return null;
 
-    for (const folder of vscode.workspace.workspaceFolders || []) {
+    for (const folder of this.getWorkspaceFoldersInResolutionOrder()) {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       try {
         await vscode.workspace.fs.stat(candidate);
@@ -291,6 +298,25 @@ export class ContextProvider implements vscode.Disposable {
     if (this.diagnosticsDebounceTimer) clearTimeout(this.diagnosticsDebounceTimer);
     if (this.activeEditorSettleTimer) clearTimeout(this.activeEditorSettleTimer);
     this.disposables.forEach((d) => d.dispose());
+  }
+
+  private getWorkspaceFoldersInResolutionOrder(): vscode.WorkspaceFolder[] {
+    const folders = Array.from(vscode.workspace.workspaceFolders || []);
+    const preferredPath = this.getPreferredWorkspacePath();
+    if (!preferredPath) return folders;
+
+    const preferredFolder = folders.find((folder) => folder.uri.fsPath === preferredPath);
+    if (!preferredFolder) return folders;
+    return [preferredFolder, ...folders.filter((folder) => folder.uri.fsPath !== preferredPath)];
+  }
+
+  private getPreferredWorkspacePath(): string | null {
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    const activeFolder = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri) : undefined;
+    if (activeFolder) return activeFolder.uri.fsPath;
+
+    const fallbackFolder = vscode.workspace.workspaceFolders?.[0];
+    return fallbackFolder?.uri.fsPath || null;
   }
 }
 

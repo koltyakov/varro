@@ -7,6 +7,12 @@ import {
   state,
 } from '../lib/state';
 import { formatContextLimit } from '../lib/format';
+import {
+  modelSupportsTools,
+  modelSupportsVariants,
+  modelSupportsVision,
+} from '../lib/model-capabilities';
+import { openProviderSetup } from '../lib/provider-setup';
 
 type SettingsProvider = (typeof state.providers)[number];
 type SettingsModel = SettingsProvider['models'][string];
@@ -54,6 +60,17 @@ export function SettingsPanel() {
           </button>
           <span class="settings-header-title">Models</span>
         </div>
+        <button
+          type="button"
+          class="chat-header-btn"
+          onClick={openProviderSetup}
+          title="Add provider"
+          aria-label="Add provider"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 2.25a.75.75 0 01.75.75v4.25H13a.75.75 0 010 1.5H8.75V13a.75.75 0 01-1.5 0V8.75H3a.75.75 0 010-1.5h4.25V3A.75.75 0 018 2.25z" />
+          </svg>
+        </button>
       </div>
 
       <Show when={state.providers.length > 0}>
@@ -173,22 +190,55 @@ function ProviderSection(props: {
       <Show when={isExpanded()}>
         <div class="settings-model-list">
           <For each={props.models}>
-            {(model) => (
-              <label class="settings-model-row">
-                <input
-                  type="checkbox"
-                  class="settings-checkbox"
-                  checked={isModelVisible(props.provider.id, model.id)}
-                  onChange={(e) =>
-                    setModelVisible(props.provider.id, model.id, e.currentTarget.checked)
-                  }
-                />
-                <span class="settings-model-name">{model.name}</span>
-                <Show when={model.limit?.context}>
-                  <span class="settings-model-ctx">{formatContextLimit(model.limit!.context)}</span>
-                </Show>
-              </label>
-            )}
+            {(model) => {
+              const supportsTools = () =>
+                modelSupportsTools(props.provider.id, model.id, state.providers);
+              const supportsVariants = () =>
+                modelSupportsVariants(props.provider.id, model.id, state.providers);
+              const supportsVision = () =>
+                modelSupportsVision(props.provider.id, model.id, state.providers);
+
+              return (
+                <label class="settings-model-row">
+                  <input
+                    type="checkbox"
+                    class="settings-checkbox"
+                    checked={isModelVisible(props.provider.id, model.id)}
+                    onChange={(e) =>
+                      setModelVisible(props.provider.id, model.id, e.currentTarget.checked)
+                    }
+                  />
+                  <span class="settings-model-name">{model.name}</span>
+                  <Show
+                    when={
+                      supportsTools() ||
+                      supportsVariants() ||
+                      supportsVision() ||
+                      model.limit?.context
+                    }
+                  >
+                    <span class="settings-model-meta">
+                      <Show when={supportsTools()}>
+                        <span class="model-capability-tag model-capability-tag-tools">Tools</span>
+                      </Show>
+                      <Show when={supportsVariants()}>
+                        <span class="model-capability-tag model-capability-tag-variants">
+                          Variants
+                        </span>
+                      </Show>
+                      <Show when={supportsVision()}>
+                        <span class="model-capability-tag model-capability-tag-vision">Vision</span>
+                      </Show>
+                      <Show when={model.limit?.context}>
+                        <span class="settings-model-ctx">
+                          {formatContextLimit(model.limit!.context)}
+                        </span>
+                      </Show>
+                    </span>
+                  </Show>
+                </label>
+              );
+            }}
           </For>
         </div>
       </Show>

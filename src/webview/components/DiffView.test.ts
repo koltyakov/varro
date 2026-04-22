@@ -55,7 +55,7 @@ describe('DiffView', () => {
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: 'src/webview/components/Chat.tsx' },
+      payload: { path: 'src/webview/components/Chat.tsx', kind: 'file' },
     });
   });
 });

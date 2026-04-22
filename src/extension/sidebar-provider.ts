@@ -13,6 +13,7 @@ import type {
   WebviewMessage,
 } from '../shared/protocol';
 import { mergeContextFile } from '../shared/context-files';
+import { normalizeSessionTitle } from '../shared/session-title';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
 import { logger } from './logger';
@@ -53,6 +54,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private webviewHasFocus = false;
   private readonly busySessions = new Set<string>();
   private readonly completedSessions = new Set<string>();
+  private readonly failedSessions = new Set<string>();
   private readonly pendingAttention = new Map<
     string,
     { sessionID: string; kind: 'permission' | 'question'; label: string }
@@ -62,6 +64,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     string,
     { expiresAt: number; promise: Promise<ProviderLimitStatus> }
   >();
+  private webviewLoadGeneration = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -120,6 +123,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (!sessionID) break;
         this.busySessions.delete(sessionID);
         this.completedSessions.delete(sessionID);
+        this.failedSessions.delete(sessionID);
         this.sessionTitles.delete(sessionID);
         for (const [requestID, request] of this.pendingAttention.entries()) {
           if (request.sessionID === sessionID) {
@@ -135,6 +139,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (statusType === 'busy' || statusType === 'retry') {
           this.busySessions.add(sessionID);
           this.completedSessions.delete(sessionID);
+          this.failedSessions.delete(sessionID);
         }
         if (statusType === 'idle') {
           this.busySessions.delete(sessionID);
@@ -145,9 +150,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
         const wasBusy = this.busySessions.delete(sessionID);
-        if (wasBusy && !this.hasPendingAttentionForSession(sessionID)) {
+        if (
+          wasBusy &&
+          !this.hasPendingAttentionForSession(sessionID) &&
+          !this.failedSessions.has(sessionID)
+        ) {
           this.completedSessions.add(sessionID);
           this.showCompletionNotification(sessionID);
+        }
+        break;
+      }
+      case 'message.updated': {
+        const info = asRecord(props?.info);
+        const sessionID = getString(info?.sessionID);
+        if (!sessionID || getString(info?.role) !== 'assistant') break;
+
+        if (asRecord(info?.error)) {
+          this.failedSessions.add(sessionID);
+          this.completedSessions.delete(sessionID);
+        } else {
+          this.failedSessions.delete(sessionID);
         }
         break;
       }
@@ -171,11 +193,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     this.updateStatusBarItem();
+    this.postPendingAttentionState();
   }
 
   private rememberSessionTitle(info: Record<string, unknown> | undefined) {
     const sessionID = getString(info?.id);
-    const title = getString(info?.title)?.trim();
+    const title = normalizeSessionTitle(getString(info?.title));
     if (sessionID && title) {
       this.sessionTitles.set(sessionID, title);
     }
@@ -275,6 +298,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return title ? ` for "${title}"` : '';
   }
 
+  private postPendingAttentionState() {
+    const sessionIds = [
+      ...new Set([...this.pendingAttention.values()].map((item) => item.sessionID)),
+    ];
+    this.post({ type: 'pending-attention/update', payload: { sessionIds } });
+  }
+
   private updateStatusBarItem() {
     if (this.view?.visible) {
       this.statusBarItem.hide();
@@ -325,6 +355,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     this.view = webviewView;
+    const webviewLoadGeneration = ++this.webviewLoadGeneration;
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -342,9 +373,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     void this.getHtml()
       .then((html) => {
+        if (this.view !== webviewView || webviewLoadGeneration !== this.webviewLoadGeneration) {
+          return;
+        }
         webviewView.webview.html = html;
       })
       .catch((err) => {
+        if (this.view !== webviewView || webviewLoadGeneration !== this.webviewLoadGeneration) {
+          return;
+        }
         logger.error(`getHtml failed: ${err instanceof Error ? err.message : String(err)}`);
         webviewView.webview.html = '<p>Failed to load Varro webview. Please reload.</p>';
       });
@@ -356,6 +393,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postContext();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.post({ type: 'server/status', payload: this._status });
+          this.postPendingAttentionState();
           this.flushPendingInputFocus();
         } else {
           this.webviewHasFocus = false;
@@ -396,6 +434,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postContextFiles();
           this.post({ type: 'server/status', payload: this._status });
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
+          this.postPendingAttentionState();
           this.flushPendingInputFocus();
           break;
         case 'webview/focus':
@@ -434,7 +473,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postContext();
           break;
         case 'vscode/open':
-          await this.contextProvider.openFile(msg.payload.path, msg.payload.line);
+          await this.contextProvider.openPath(msg.payload.path, {
+            line: msg.payload.line,
+            kind: msg.payload.kind,
+          });
+          break;
+        case 'vscode/open-external':
+          await vscode.env.openExternal(vscode.Uri.parse(msg.payload.url));
           break;
         case 'api/request':
           await this.handleApiRequest(msg.payload);
@@ -691,7 +736,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const relativePath = input.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
     if (!relativePath) return null;
 
-    for (const folder of vscode.workspace.workspaceFolders || []) {
+    const preferredWorkspacePath = this.contextProvider.context.workspacePath;
+    const folders = vscode.workspace.workspaceFolders || [];
+    const preferredFolder = preferredWorkspacePath
+      ? folders.find((folder) => folder.uri.fsPath === preferredWorkspacePath)
+      : undefined;
+    const resolutionOrder = preferredFolder
+      ? [
+          preferredFolder,
+          ...folders.filter((folder) => folder.uri.fsPath !== preferredWorkspacePath),
+        ]
+      : folders;
+
+    for (const folder of resolutionOrder) {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       try {
         await vscode.workspace.fs.stat(candidate);

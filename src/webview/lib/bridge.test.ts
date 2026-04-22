@@ -123,4 +123,12 @@ describe('bridge', () => {
 
     await rejection;
   });
+
+  it('fails fast when the extension transport is unavailable', async () => {
+    const bridge = await loadBridge();
+
+    await expect(bridge.apiCall('GET', '/session')).rejects.toThrow(
+      'Extension transport unavailable: GET /session'
+    );
+  });
 });

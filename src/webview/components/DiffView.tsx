@@ -12,7 +12,7 @@ export function DiffView(props: { diffs: FileDiff[] }) {
 
 function DiffItem(props: { diff: FileDiff }) {
   const openFile = () => {
-    postMessage({ type: 'vscode/open', payload: { path: props.diff.file } });
+    postMessage({ type: 'vscode/open', payload: { path: props.diff.file, kind: 'file' } });
   };
 
   return (

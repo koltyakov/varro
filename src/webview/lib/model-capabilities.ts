@@ -26,6 +26,11 @@ function getBooleanCapability(value: Record<string, unknown> | null, keys: strin
   return null;
 }
 
+function getVariantNames(model: ProviderModel | null) {
+  if (!model?.variants) return [];
+  return Object.keys(model.variants).filter((variant) => variant !== 'none');
+}
+
 function normalizeSignal(value: string) {
   return value.toLowerCase().replace(/[_-]+/g, ' ');
 }
@@ -77,10 +82,25 @@ export function modelSupportsReasoning(
 ): boolean {
   const model = getModel(providerID, modelID, providers);
   if (!model) return false;
-  return (
-    !!model.capabilities?.reasoning ||
-    (model.variants != null && Object.keys(model.variants).length > 0)
-  );
+  return !!model.capabilities?.reasoning || getVariantNames(model).length > 0;
+}
+
+export function modelSupportsTools(
+  providerID: string | null,
+  modelID: string | null,
+  providers: Provider[]
+): boolean {
+  const model = getModel(providerID, modelID, providers);
+  return !!model?.capabilities?.toolcall;
+}
+
+export function modelSupportsVariants(
+  providerID: string | null,
+  modelID: string | null,
+  providers: Provider[]
+): boolean {
+  const model = getModel(providerID, modelID, providers);
+  return getVariantNames(model).length > 0;
 }
 
 export function modelSupportsVision(

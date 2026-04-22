@@ -113,7 +113,6 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
               />
             </svg>
             <div class="question-prompt-heading">
-              <span class="question-prompt-label">Input Needed</span>
               <Show when={currentQuestion()?.header}>
                 <span class="question-prompt-title">{currentQuestion()!.header}</span>
               </Show>
@@ -130,9 +129,19 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
           {(question) => {
             const questionIndex = () => currentStep();
             return (
-              <div class="question-prompt-panel">
+              <div class="question-prompt-body">
                 <div class="question-prompt-text">{question().question}</div>
-                <div class="question-prompt-options">
+                <div class="question-prompt-hint">
+                  {question().multiple ? 'Select one or more options.' : 'Select one option.'}
+                  <Show when={question().custom !== false}>
+                    {' '}
+                    You can also type your own answer.
+                  </Show>
+                </div>
+                <div
+                  class="question-prompt-options"
+                  role={question().multiple ? 'group' : 'radiogroup'}
+                >
                   <For each={question().options}>
                     {(option) => {
                       const checked = () =>
@@ -142,7 +151,8 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                         <button
                           type="button"
                           class={`question-option ${checked() ? 'selected' : ''}`}
-                          aria-pressed={checked()}
+                          role={isMultiple() ? 'checkbox' : 'radio'}
+                          aria-checked={checked()}
                           onClick={() =>
                             toggleOption(questionIndex(), option.label, question().multiple)
                           }
@@ -175,62 +185,63 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                       );
                     }}
                   </For>
-                </div>
-                <Show when={question().custom !== false}>
-                  <div
-                    class={`question-custom-row ${(customValues()[questionIndex()] || '').trim() ? 'selected' : ''}`}
-                  >
-                    <Show
-                      when={question().multiple}
-                      fallback={
+                  <Show when={question().custom !== false}>
+                    <div
+                      class={`question-option question-option-custom ${(customValues()[questionIndex()] || '').trim() ? 'selected' : ''}`}
+                      onClick={(e) => {
+                        if (e.target instanceof HTMLInputElement) return;
+                        e.currentTarget
+                          .querySelector<HTMLInputElement>('.question-custom-input')
+                          ?.focus();
+                      }}
+                    >
+                      <Show
+                        when={question().multiple}
+                        fallback={
+                          <div
+                            class={`question-radio ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
+                          >
+                            <Show when={(customValues()[questionIndex()] || '').trim()}>
+                              <div class="question-radio-dot" />
+                            </Show>
+                          </div>
+                        }
+                      >
                         <div
-                          class={`question-radio ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
+                          class={`question-checkbox ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
                         >
                           <Show when={(customValues()[questionIndex()] || '').trim()}>
-                            <div class="question-radio-dot" />
+                            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                              <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
+                            </svg>
                           </Show>
                         </div>
-                      }
-                    >
-                      <div
-                        class={`question-checkbox ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
-                      >
-                        <Show when={(customValues()[questionIndex()] || '').trim()}>
-                          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                            <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
-                          </svg>
-                        </Show>
+                      </Show>
+                      <div class="question-option-text question-custom-content">
+                        <span class="question-option-label">Custom answer</span>
+                        <input
+                          type="text"
+                          value={customValues()[questionIndex()] || ''}
+                          placeholder="Type your own answer"
+                          class="question-custom-input"
+                          onInput={(e) => updateCustom(questionIndex(), e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.isComposing) {
+                              e.preventDefault();
+                              void handlePrimaryAction();
+                            }
+                          }}
+                        />
                       </div>
-                    </Show>
-                    <input
-                      type="text"
-                      value={customValues()[questionIndex()] || ''}
-                      placeholder="Type your own answer"
-                      class="question-custom-input"
-                      onInput={(e) => updateCustom(questionIndex(), e.currentTarget.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.isComposing) {
-                          e.preventDefault();
-                          void handlePrimaryAction();
-                        }
-                      }}
-                    />
-                  </div>
-                </Show>
+                    </div>
+                  </Show>
+                </div>
               </div>
             );
           }}
         </Show>
 
         <div class="question-prompt-actions">
-          <button
-            type="button"
-            class="question-btn question-btn-secondary"
-            disabled={isSubmitting()}
-            onClick={skip}
-          >
-            Skip
-          </button>
           <Show when={currentStep() > 0}>
             <button
               type="button"
@@ -241,6 +252,14 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
               Back
             </button>
           </Show>
+          <button
+            type="button"
+            class="question-btn question-btn-tertiary"
+            disabled={isSubmitting()}
+            onClick={skip}
+          >
+            Skip
+          </button>
           <button
             type="button"
             class="question-btn question-btn-primary"

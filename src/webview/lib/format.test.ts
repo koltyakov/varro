@@ -252,6 +252,25 @@ describe('format helpers', () => {
         ],
       })
     ).toBe('error');
+
+    expect(
+      getProviderLimitTone({
+        providerID: 'openai',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 0,
+        windows: [
+          {
+            id: 'messages',
+            label: 'Messages',
+            unit: 'messages',
+            remaining: 0,
+            limit: null,
+            resetAt: null,
+          },
+        ],
+      })
+    ).toBe('error');
   });
 
   it('uses a default tone when there is no meaningful limit ratio', () => {

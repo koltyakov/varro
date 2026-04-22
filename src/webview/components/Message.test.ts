@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
-import type { Part } from '../types';
+import type { FilePart, Part } from '../types';
 import { Message, getAssistantContainerVariant } from './Message';
 
 let container: HTMLDivElement | null = null;
@@ -68,6 +68,18 @@ function assistantMessage(id: string) {
       reasoning: 0,
       cache: { read: 0, write: 0 },
     },
+  };
+}
+
+function imageFilePart(id: string, filename: string): FilePart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'file',
+    mime: 'image/png',
+    filename,
+    url: `https://example.test/${id}.png`,
   };
 }
 
@@ -283,6 +295,30 @@ describe('Message assistant final answer rendering', () => {
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
       HTMLDivElement
     );
+  });
+
+  it('renders carousel navigation inside the image block footer row', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-5'),
+          parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
+        }),
+      container!
+    );
+
+    const figure = container?.querySelector('.message-image-carousel-figure');
+    const captionRow = container?.querySelector('.message-image-carousel-caption-row');
+    const controls = container?.querySelector('.message-image-carousel-controls');
+
+    expect(figure).toBeInstanceOf(HTMLElement);
+    expect(captionRow).toBeInstanceOf(HTMLElement);
+    expect(controls).toBeInstanceOf(HTMLElement);
+    expect(figure?.contains(captionRow!)).toBe(true);
+    expect(captionRow?.contains(controls!)).toBe(true);
+    expect(captionRow?.textContent).toContain('1 / 2');
+    expect(captionRow?.textContent).toContain('Image 1');
+    expect(container?.querySelector('.message-image-carousel-footer')).toBeNull();
   });
 
   it('renders assistant message errors as an inline error block', () => {

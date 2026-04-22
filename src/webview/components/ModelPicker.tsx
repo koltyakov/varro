@@ -1,6 +1,11 @@
 import { createMemo, createSignal, For, onMount, Show, createEffect } from 'solid-js';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
 import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
+import {
+  modelSupportsTools,
+  modelSupportsVariants,
+  modelSupportsVision,
+} from '../lib/model-capabilities';
 
 interface ModelSelection {
   providerID?: string;
@@ -205,6 +210,12 @@ export function ModelPicker(props: {
                     <For each={models}>
                       {(model) => {
                         const myIndex = () => getItemIndex(provider.id, model.id);
+                        const supportsTools = () =>
+                          modelSupportsTools(provider.id, model.id, state.providers);
+                        const supportsVariants = () =>
+                          modelSupportsVariants(provider.id, model.id, state.providers);
+                        const supportsVision = () =>
+                          modelSupportsVision(provider.id, model.id, state.providers);
                         return (
                           <button
                             class={`dropdown-item ${isSelected(provider.id, model.id) ? 'selected' : ''} ${focusIndex() === myIndex() ? 'keyboard-focus' : ''}`}
@@ -228,9 +239,35 @@ export function ModelPicker(props: {
                                 </Show>
                               </span>
                             </span>
-                            <Show when={model.limit?.context}>
-                              <span class="dropdown-hint">
-                                {formatContextLimit(model.limit!.context)}
+                            <Show
+                              when={
+                                supportsTools() ||
+                                supportsVariants() ||
+                                supportsVision() ||
+                                model.limit?.context
+                              }
+                            >
+                              <span class="dropdown-meta">
+                                <Show when={supportsTools()}>
+                                  <span class="model-capability-tag model-capability-tag-tools">
+                                    Tools
+                                  </span>
+                                </Show>
+                                <Show when={supportsVariants()}>
+                                  <span class="model-capability-tag model-capability-tag-variants">
+                                    Variants
+                                  </span>
+                                </Show>
+                                <Show when={supportsVision()}>
+                                  <span class="model-capability-tag model-capability-tag-vision">
+                                    Vision
+                                  </span>
+                                </Show>
+                                <Show when={model.limit?.context}>
+                                  <span class="dropdown-hint">
+                                    {formatContextLimit(model.limit!.context)}
+                                  </span>
+                                </Show>
                               </span>
                             </Show>
                           </button>

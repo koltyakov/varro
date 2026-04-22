@@ -14,7 +14,12 @@ import type {
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
 import { state } from '../lib/state';
-import { getLeafPathName, isAbsolutePath, normalizePath } from '../lib/path-display';
+import {
+  formatDisplayPath,
+  getLeafPathName,
+  isAbsolutePath,
+  normalizePath,
+} from '../lib/path-display';
 import { postMessage } from '../lib/bridge';
 import { getToolFileChange } from '../lib/tool-file-change';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
@@ -436,6 +441,17 @@ function UserImageCarousel(props: { imageParts: FilePart[] }) {
   const [activeIndex, setActiveIndex] = createSignal(0);
   const total = () => props.imageParts.length;
   const currentPart = () => props.imageParts[activeIndex()];
+  const currentDisplayName = () => {
+    const part = currentPart();
+    if (!part) return '(file)';
+    if (part.source?.path) {
+      return formatDisplayPath(part.source.path, state.editorContext.workspacePath);
+    }
+    if (part.filename) {
+      return formatDisplayPath(part.filename, state.editorContext.workspacePath);
+    }
+    return '(file)';
+  };
 
   createEffect(() => {
     const maxIndex = total() - 1;
@@ -455,51 +471,61 @@ function UserImageCarousel(props: { imageParts: FilePart[] }) {
     <div class="message-image-carousel">
       <div class="message-image-carousel-frame">
         <div class="message-image-carousel-slide">
-          <Show when={currentPart()}>{(part) => <MessagePart part={part()} />}</Show>
+          <Show when={currentPart()}>
+            {(part) => (
+              <figure class="chat-image-figure message-image-carousel-figure">
+                <img src={part().url} alt={currentDisplayName()} class="chat-image-img" />
+                <figcaption class="chat-image-caption message-image-carousel-caption-row">
+                  <span class="message-image-carousel-caption" title={currentDisplayName()}>
+                    <span class="message-image-carousel-count">
+                      {activeIndex() + 1} / {total()}
+                    </span>
+                    <span class="message-image-carousel-separator">&middot;</span>
+                    {currentDisplayName()} <span class="chat-image-mime">· {part().mime}</span>
+                  </span>
+                  <div class="message-image-carousel-controls">
+                    <button
+                      type="button"
+                      class="message-image-carousel-nav"
+                      onClick={() => step(-1)}
+                      aria-label="Previous image"
+                      title="Previous image"
+                    >
+                      <svg
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        width="14"
+                        height="14"
+                      >
+                        <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="message-image-carousel-nav"
+                      onClick={() => step(1)}
+                      aria-label="Next image"
+                      title="Next image"
+                    >
+                      <svg
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        width="14"
+                        height="14"
+                      >
+                        <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </figcaption>
+              </figure>
+            )}
+          </Show>
         </div>
-        <div class="message-image-carousel-controls">
-          <button
-            type="button"
-            class="message-image-carousel-nav"
-            onClick={() => step(-1)}
-            aria-label="Previous image"
-            title="Previous image"
-          >
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              width="14"
-              height="14"
-            >
-              <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="message-image-carousel-nav"
-            onClick={() => step(1)}
-            aria-label="Next image"
-            title="Next image"
-          >
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              width="14"
-              height="14"
-            >
-              <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-        </div>
-      </div>
-      <div class="message-image-carousel-footer">
-        <span class="message-image-carousel-count">
-          {activeIndex() + 1} / {total()}
-        </span>
       </div>
     </div>
   );
@@ -532,7 +558,14 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
         ? `${normalizePath(wp).replace(/\/+$/, '')}/${filePath.replace(/^\.\//, '')}`
         : filePath;
     const line = a.type === 'file-selection' ? getFirstContextLine(a.lineRanges) : undefined;
-    postMessage({ type: 'vscode/open', payload: { path: absolutePath, line } });
+    postMessage({
+      type: 'vscode/open',
+      payload: {
+        path: absolutePath,
+        line,
+        kind: a.type === 'file-reference' && a.isDirectory ? 'directory' : 'file',
+      },
+    });
   };
 
   const iconSvg = () => {

@@ -171,7 +171,8 @@ export class OpenCodeServer extends EventEmitter {
               this.start().then(resolve).catch(reject);
               return;
             }
-            reject(new Error(`Server exited and max retries (${this.maxRetries}) exhausted`));
+            const runtimeFailure = `OpenCode server stopped unexpectedly${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}. Restart attempts (${this.maxRetries}) were exhausted.`;
+            this.setStatus({ state: 'error', message: runtimeFailure });
             return;
           }
 
@@ -389,11 +390,14 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private getWorkspaceCwd(): string | undefined {
-    const folders = vscode.workspace.workspaceFolders;
-    if (folders && folders.length > 0) {
-      return folders[0].uri.fsPath;
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    const activeFolder = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri) : undefined;
+    if (activeFolder) {
+      return activeFolder.uri.fsPath;
     }
-    return undefined;
+
+    const folders = vscode.workspace.workspaceFolders;
+    return folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
   }
 
   private scopedUrl(path: string): { url: string; directory?: string } {

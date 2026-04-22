@@ -23,6 +23,7 @@ import type {
   WebviewThemeKind,
 } from '../../shared/protocol';
 import { mergeContextFile } from '../../shared/context-files';
+import type { UsageLimitNotice } from './usage-limit';
 
 const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
@@ -78,6 +79,7 @@ interface AppState {
   todos: Todo[];
   permissions: Permission[];
   questions: QuestionRequest[];
+  pendingAttentionSessionIds: string[];
   diffs: FileDiff[];
   streamingPartId: string | null;
   streamingText: string;
@@ -97,6 +99,7 @@ interface AppState {
   compactingSessionIds: string[];
   queuedMessages: QueuedMessage[];
   failedSessionIds: string[];
+  sessionUsageLimits: Record<string, UsageLimitNotice | null>;
 }
 
 export interface QueuedMessage {
@@ -142,6 +145,7 @@ export const [state, setState] = createStore<AppState>({
   todos: [],
   permissions: [],
   questions: [],
+  pendingAttentionSessionIds: [],
   diffs: [],
   streamingPartId: null,
   streamingText: '',
@@ -164,6 +168,7 @@ export const [state, setState] = createStore<AppState>({
   compactingSessionIds: [],
   queuedMessages: [],
   failedSessionIds: [],
+  sessionUsageLimits: {},
 });
 
 export function enqueueMessage(message: QueuedMessage) {
@@ -212,7 +217,6 @@ export function markSessionSeen(id: string) {
 }
 
 export function isSessionUnread(sessionId: string, updatedAt: number) {
-  if (sessionId === state.activeSessionId) return false;
   const seen = state.lastSeenSessions[sessionId] ?? 0;
   return updatedAt > seen;
 }
@@ -289,6 +293,15 @@ export function hasActivePermission() {
   const sid = state.activeSessionId;
   return sid ? state.permissions.some((p) => p.sessionID === sid) : false;
 }
+
+export function isSessionAwaitingInput(sessionId: string) {
+  return (
+    state.pendingAttentionSessionIds.includes(sessionId) ||
+    state.permissions.some((permission) => permission.sessionID === sessionId) ||
+    state.questions.some((question) => question.sessionID === sessionId)
+  );
+}
+
 export const [error, setError] = createSignal<string | null>(null);
 export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
@@ -387,7 +400,7 @@ export function clearDraftCurrentDocumentState() {
 }
 
 export function clearCurrentDocumentStateForSession(sessionId: string) {
-  if (!state.currentDocumentEnabledBySession[sessionId]) return;
+  if (!(sessionId in state.currentDocumentEnabledBySession)) return;
   setState(
     'currentDocumentEnabledBySession',
     produce((sessions) => {
@@ -655,6 +668,44 @@ export function getVisibleProviders(providers: Provider[]) {
       ),
     }))
     .filter((provider) => Object.keys(provider.models).length > 0);
+}
+
+export function getProviderLimitKey(
+  providerID: string | null | undefined,
+  modelID: string | null | undefined
+) {
+  const providerKey = providerID?.trim();
+  if (!providerKey) return '';
+  return `${providerKey}:${modelID?.trim() || ''}`;
+}
+
+export function getProviderLimit(
+  providerID: string | null | undefined,
+  modelID: string | null | undefined
+) {
+  const key = getProviderLimitKey(providerID, modelID);
+  return key ? state.providerLimits[key] || null : null;
+}
+
+export function setProviderLimit(
+  providerID: string | null | undefined,
+  modelID: string | null | undefined,
+  limit: ProviderLimitStatus | null
+) {
+  const key = getProviderLimitKey(providerID, modelID);
+  if (!key) return;
+
+  setState(
+    'providerLimits',
+    produce((current) => {
+      if (limit === null) {
+        delete current[key];
+        return;
+      }
+
+      current[key] = limit;
+    })
+  );
 }
 
 export function setProviderVisible(providerID: string, visible: boolean) {
@@ -984,6 +1035,22 @@ export function setSessionFailed(sessionId: string, failed: boolean) {
       if (idx !== -1) ids.splice(idx, 1);
     })
   );
+}
+
+export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice | null) {
+  if (!sessionId) return;
+
+  setState('sessionUsageLimits', (current) => {
+    if (notice === null) {
+      if (!(sessionId in current)) return current;
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    }
+
+    if (current[sessionId] === notice) return current;
+    return { ...current, [sessionId]: notice };
+  });
 }
 
 export function syncFailedSessionsFromMessages(

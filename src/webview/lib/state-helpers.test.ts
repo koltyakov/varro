@@ -105,11 +105,13 @@ describe('state helpers', () => {
     stateModule.persistActiveSessionId('session-1');
     expect(stateModule.getPersistedActiveSessionId()).toBe('session-1');
 
+    stateModule.markSessionSeen('session-1');
     stateModule.markSessionSeen('session-2');
     stateModule.setState('activeSessionId', 'session-1');
 
-    expect(stateModule.state.lastSeenSessions).toEqual({ 'session-2': 1_000 });
-    expect(stateModule.isSessionUnread('session-1', 2_000)).toBe(false);
+    expect(stateModule.state.lastSeenSessions).toEqual({ 'session-1': 1_000, 'session-2': 1_000 });
+    expect(stateModule.isSessionUnread('session-1', 1_000)).toBe(false);
+    expect(stateModule.isSessionUnread('session-1', 1_001)).toBe(true);
     expect(stateModule.isSessionUnread('session-2', 999)).toBe(false);
     expect(stateModule.isSessionUnread('session-2', 1_001)).toBe(true);
 
@@ -177,6 +179,7 @@ describe('state helpers', () => {
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(false);
 
     stateModule.clearCurrentDocumentStateForSession('session-1');
+    expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(true);
     expect(stateModule.getCurrentDocumentEnabled('session-2')).toBe(true);
   });
 
@@ -357,6 +360,82 @@ describe('state helpers', () => {
 
     stateModule.resetModelVisibility();
     expect(stateModule.isModelVisible('anthropic', 'claude')).toBe(true);
+  });
+
+  it('tracks provider limits independently per provider and model', async () => {
+    const stateModule = await loadState();
+
+    const gpt4oLimit = {
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+      status: 'available' as const,
+      source: 'provider' as const,
+      checkedAt: 1,
+      windows: [
+        {
+          id: 'requests',
+          label: 'Requests',
+          unit: 'requests' as const,
+          remaining: 10,
+          limit: 100,
+          resetAt: null,
+        },
+      ],
+    };
+    const gpt41Limit = {
+      providerID: 'openai',
+      modelID: 'gpt-4.1',
+      status: 'available' as const,
+      source: 'provider' as const,
+      checkedAt: 2,
+      windows: [
+        {
+          id: 'requests',
+          label: 'Requests',
+          unit: 'requests' as const,
+          remaining: 4,
+          limit: 20,
+          resetAt: null,
+        },
+      ],
+    };
+
+    stateModule.setProviderLimit('openai', 'gpt-4o', gpt4oLimit);
+    stateModule.setProviderLimit('openai', 'gpt-4.1', gpt41Limit);
+
+    expect(stateModule.getProviderLimit('openai', 'gpt-4o')).toEqual(gpt4oLimit);
+    expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);
+    expect(stateModule.getProviderLimit('openai', 'missing')).toBeNull();
+
+    stateModule.setProviderLimit('openai', 'gpt-4o', null);
+    expect(stateModule.getProviderLimit('openai', 'gpt-4o')).toBeNull();
+    expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);
+  });
+
+  it('treats synced pending-attention sessions as awaiting input', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'write',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        title: 'Write file',
+        metadata: {},
+        time: { created: 0 },
+      },
+    ]);
+    expect(stateModule.isSessionAwaitingInput('session-1')).toBe(true);
+
+    stateModule.setState('permissions', []);
+    stateModule.setState('questions', [{ id: 'q1', sessionID: 'session-2', questions: [] }]);
+    expect(stateModule.isSessionAwaitingInput('session-2')).toBe(true);
+
+    stateModule.setState('questions', []);
+    stateModule.setState('pendingAttentionSessionIds', ['session-3']);
+    expect(stateModule.isSessionAwaitingInput('session-3')).toBe(true);
+    expect(stateModule.isSessionAwaitingInput('session-4')).toBe(false);
   });
 
   it('handles incremental message updates and subagent grouping', async () => {

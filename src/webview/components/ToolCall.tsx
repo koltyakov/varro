@@ -281,7 +281,10 @@ function ReadToolCard(props: {
   const openFile = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    postMessage({ type: 'vscode/open', payload: { path: props.filePath } });
+    postMessage({
+      type: 'vscode/open',
+      payload: { path: props.filePath, kind: isDirectory() ? 'directory' : 'file' },
+    });
   };
 
   const displayName = () => {
@@ -403,7 +406,7 @@ function FileChangeCard(props: {
   const openPath = (path: string) => (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    postMessage({ type: 'vscode/open', payload: { path } });
+    postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
   };
 
   const displayName = (path: string | undefined) =>
@@ -479,7 +482,7 @@ function GenericToolCall(props: {
   truncatedOutput: string;
 }) {
   const openFile = (path: string) => {
-    postMessage({ type: 'vscode/open', payload: { path } });
+    postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
   };
 
   return (

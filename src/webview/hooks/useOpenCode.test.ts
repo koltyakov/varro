@@ -1,11 +1,21 @@
+import { createRoot } from 'solid-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Message, Part, Provider, Session } from '../types';
 
 const clientMocks = vi.hoisted(() => ({
+  health: vi.fn(),
+  sessionList: vi.fn(),
   sessionCreate: vi.fn(),
+  sessionDelete: vi.fn(),
   sessionGet: vi.fn(),
   sessionMessages: vi.fn(),
   sessionSendAsync: vi.fn(),
+  sessionAbort: vi.fn(),
+  sessionStatus: vi.fn(),
+  agentList: vi.fn(),
+  providerList: vi.fn(),
+  providerLimit: vi.fn(),
+  questionList: vi.fn(),
   serverEventsOn: vi.fn(() => () => {}),
 }));
 
@@ -16,11 +26,26 @@ const bridgeMocks = vi.hoisted(() => ({
 
 vi.mock('../lib/client', () => ({
   client: {
+    health: clientMocks.health,
     session: {
+      list: clientMocks.sessionList,
       create: clientMocks.sessionCreate,
+      delete: clientMocks.sessionDelete,
       get: clientMocks.sessionGet,
       messages: clientMocks.sessionMessages,
       sendAsync: clientMocks.sessionSendAsync,
+      abort: clientMocks.sessionAbort,
+      status: clientMocks.sessionStatus,
+    },
+    agent: {
+      list: clientMocks.agentList,
+    },
+    config: {
+      providers: clientMocks.providerList,
+      providerLimit: clientMocks.providerLimit,
+    },
+    question: {
+      list: clientMocks.questionList,
     },
   },
   serverEvents: {
@@ -123,10 +148,19 @@ async function loadModules() {
 
 beforeEach(() => {
   vi.resetModules();
+  clientMocks.health.mockReset();
+  clientMocks.sessionList.mockReset();
   clientMocks.sessionCreate.mockReset();
+  clientMocks.sessionDelete.mockReset();
   clientMocks.sessionGet.mockReset();
   clientMocks.sessionMessages.mockReset();
   clientMocks.sessionSendAsync.mockReset();
+  clientMocks.sessionAbort.mockReset();
+  clientMocks.sessionStatus.mockReset();
+  clientMocks.agentList.mockReset();
+  clientMocks.providerList.mockReset();
+  clientMocks.providerLimit.mockReset();
+  clientMocks.questionList.mockReset();
   clientMocks.serverEventsOn.mockClear();
   bridgeMocks.onMessage.mockClear();
   bridgeMocks.postMessage.mockReset();
@@ -206,6 +240,50 @@ describe('sendMessage', () => {
       ],
       model: { providerID: 'openai', modelID: 'gpt-4o' },
     });
+  });
+
+  it('preserves attachments when sending fails', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.addContextFile({ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' });
+    stateModule.addClipboardImage({
+      id: 'img-1',
+      url: 'blob:1',
+      mime: 'image/png',
+      filename: 'img-1.png',
+      size: 10,
+    });
+
+    clientMocks.sessionSendAsync.mockRejectedValue(new Error('network down'));
+
+    await hookModule.sendMessage('Review this');
+
+    expect(stateModule.state.droppedFiles).toEqual([
+      { path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
+    ]);
+    expect(stateModule.state.clipboardImages).toEqual([
+      {
+        id: 'img-1',
+        url: 'blob:1',
+        mime: 'image/png',
+        filename: 'img-1.png',
+        size: 10,
+      },
+    ]);
+    expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({ type: 'files/clear' });
   });
 
   it('clears completed todos from previous turns on a new prompt', async () => {
@@ -659,6 +737,66 @@ describe('sendMessage', () => {
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
   });
 
+  it('keeps the unread marker when archive auto-selects the next session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('sessions', [
+      session('session-1'),
+      { ...session('session-2'), time: { created: 0, updated: 2_000 } },
+    ]);
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('lastSeenSessions', { 'session-2': 1_000 });
+
+    clientMocks.sessionDelete.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue({
+      ...session('session-2'),
+      time: { created: 0, updated: 2_000 },
+    });
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    await hookModule.deleteSession('session-1');
+
+    expect(stateModule.state.activeSessionId).toBe('session-2');
+    expect(stateModule.state.lastSeenSessions).toEqual({ 'session-2': 1_000 });
+    expect(stateModule.isSessionUnread('session-2', 2_000)).toBe(true);
+  });
+
+  it('removes subagent descendants before auto-selecting the next session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('sessions', [
+      session('session-1'),
+      {
+        ...session('subagent-1'),
+        parentID: 'session-1',
+        time: { created: 0, updated: 3_000 },
+      },
+      { ...session('session-2'), time: { created: 0, updated: 2_000 } },
+    ]);
+    stateModule.setState('activeSessionId', 'session-1');
+
+    clientMocks.sessionDelete.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockImplementation(async (id: string) => {
+      if (id === 'session-2') {
+        return { ...session('session-2'), time: { created: 0, updated: 2_000 } };
+      }
+
+      throw new Error(`unexpected session lookup: ${id}`);
+    });
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    await hookModule.deleteSession('session-1');
+
+    expect(clientMocks.sessionGet).toHaveBeenCalledWith('session-2');
+    expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-2');
+    expect(stateModule.state.sessions.map((item) => item.id)).toEqual(['session-2']);
+    expect(stateModule.state.activeSessionId).toBe('session-2');
+  });
+
   it('switches the active session to build and sends the implementation prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
 
@@ -695,5 +833,263 @@ describe('sendMessage', () => {
       parts: [{ type: 'text', text: 'Implement the approved plan.' }],
       agent: 'build',
     });
+  });
+});
+
+describe('useOpenCode initialization', () => {
+  it('retries startup after an initial connection failure', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    clientMocks.health.mockRejectedValueOnce(new Error('offline')).mockResolvedValue({
+      healthy: true,
+      version: '1.0.0',
+    });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(clientMocks.health).toHaveBeenCalledTimes(1);
+      expect(stateModule.error()).toBe('Failed to connect to OpenCode server');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(clientMocks.health).toHaveBeenCalledTimes(2);
+      expect(stateModule.error()).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('ignores stale retry status updates after aborting a retrying session', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({
+      providers: [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ],
+      default: { openai: 'gpt-4o' },
+    });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionAbort.mockResolvedValue(undefined);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ]);
+      stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('sessionStatus', 'session-1', {
+        type: 'retry',
+        attempt: 2,
+        message: '429 usage limit reached',
+        next: 3,
+      });
+      stateModule.setSessionUsageLimit('session-1', {
+        source: 'status',
+        statusCode: 429,
+        message: '429 usage limit reached',
+        unit: 'messages',
+        retryAt: 3_000,
+        attempt: 2,
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      });
+
+      await hookModule.abortSession();
+
+      handlers.get('session.status')?.({
+        properties: {
+          sessionID: 'session-1',
+          status: {
+            type: 'retry',
+            attempt: 3,
+            message: '429 usage limit reached',
+            next: 8,
+          },
+        },
+      });
+
+      expect(stateModule.state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+      expect(stateModule.state.sessionUsageLimits['session-1']).toMatchObject({
+        attempt: 2,
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      });
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+      handlers.get('session.status')?.({
+        properties: {
+          sessionID: 'session-1',
+          status: {
+            type: 'retry',
+            attempt: 1,
+            message: '429 usage limit reached',
+            next: 5,
+          },
+        },
+      });
+
+      expect(stateModule.state.sessionStatus['session-1']).toEqual({
+        type: 'retry',
+        attempt: 1,
+        message: '429 usage limit reached',
+        next: 5,
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('attaches retry usage-limit notices to the selected provider', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({
+      providers: [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+        provider('anthropic', {
+          claude: {
+            id: 'claude',
+            name: 'Claude',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ],
+      default: { openai: 'gpt-4o', anthropic: 'claude' },
+    });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+        provider('anthropic', {
+          claude: {
+            id: 'claude',
+            name: 'Claude',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ]);
+      stateModule.setState('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setSelectedModel(
+        { providerID: 'anthropic', modelID: 'claude' },
+        { sessionId: 'session-1', persistGlobal: false }
+      );
+
+      handlers.get('session.status')?.({
+        properties: {
+          sessionID: 'session-1',
+          status: {
+            type: 'retry',
+            attempt: 2,
+            message: '429 usage limit reached',
+            next: 8,
+          },
+        },
+      });
+
+      expect(stateModule.state.sessionUsageLimits['session-1']).toMatchObject({
+        providerID: 'anthropic',
+        modelID: 'claude',
+        attempt: 2,
+        statusCode: 429,
+      });
+    } finally {
+      dispose();
+    }
   });
 });
