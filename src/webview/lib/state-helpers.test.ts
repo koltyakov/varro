@@ -290,6 +290,20 @@ describe('state helpers', () => {
     expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
   });
 
+  it('tracks global and per-session selected agents independently', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSelectedAgent('build');
+    stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
+
+    expect(stateModule.state.selectedAgent).toBe('plan');
+    expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
+    expect(stateModule.getPersistedSelectedAgent()).toBe('build');
+
+    stateModule.clearSelectedAgentForSession('session-1');
+    expect(stateModule.getSelectedAgentForSession('session-1')).toBeNull();
+  });
+
   it('updates questions and model visibility state', async () => {
     const stateModule = await loadState();
     const providers = [provider('openai', ['gpt-4.1', 'gpt-4o']), provider('anthropic', ['claude'])];

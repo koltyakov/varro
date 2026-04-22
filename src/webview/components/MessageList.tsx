@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import {
+  getSelectedAgentForSession,
   state,
   isLoading,
   stopLoading,
@@ -51,6 +52,10 @@ function getAssistantTurnSubagentCount(messages: Array<{ info: Message; parts: P
   }
 
   return count;
+}
+
+function isPlanningAssistantMessage(info: AssistantMessage): boolean {
+  return info.agent === 'plan' || getSelectedAgentForSession(info.sessionID) === 'plan';
 }
 
 const emptyStateLogoUrl = new URL('../../../assets/icon.png', import.meta.url).href;
@@ -524,6 +529,12 @@ export function MessageList() {
                         info={msg.info}
                         parts={msg.parts}
                         isLastAssistant={msg.info.id === lastAssistantID()}
+                        highlightFinalAnswer={assistantDialogSummaryMap().has(msg.info.id)}
+                        highlightPlanningAnswer={
+                          assistantDialogSummaryMap().has(msg.info.id) &&
+                          isAssistantMessage(msg.info) &&
+                          isPlanningAssistantMessage(msg.info)
+                        }
                         previousTrailingFileEventSignature={
                           previousTrailingFileEventSignatureMap().get(msg.info.id) ?? null
                         }
@@ -607,6 +618,12 @@ function VirtualizedContent(props: {
                 info={msg.info}
                 parts={msg.parts}
                 isLastAssistant={msg.info.id === props.lastAssistantID}
+                highlightFinalAnswer={props.assistantDialogSummaryMap.has(msg.info.id)}
+                highlightPlanningAnswer={
+                  props.assistantDialogSummaryMap.has(msg.info.id) &&
+                  isAssistantMessage(msg.info) &&
+                  isPlanningAssistantMessage(msg.info)
+                }
                 previousTrailingFileEventSignature={
                   props.previousTrailingFileEventSignatureMap.get(msg.info.id) ?? null
                 }
@@ -696,8 +713,10 @@ function AssistantDialogSummary(props: { summary: AssistantDialogSummaryInfo }) 
     props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
 
   return (
-    <div class="assistant-dialog-summary">
-      {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
+    <div class="model-change-indicator assistant-dialog-summary">
+      <span class="model-change-label">
+        {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
+      </span>
     </div>
   );
 }

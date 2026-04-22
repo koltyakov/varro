@@ -16,6 +16,7 @@ import {
   requestComposerFocus,
   persistActiveSessionId,
   getPersistedActiveSessionId,
+  getPersistedSelectedAgent,
   getPersistedSelectedModel,
   clearClipboardImages,
   clearMessages,
@@ -36,6 +37,8 @@ import {
   markSessionSeen,
   setSessionCompacting,
   getSelectedModelForSession,
+  getSelectedAgentForSession,
+  clearSelectedAgentForSession,
   clearSelectedModelForSession,
   getPermissionModeForSession,
   removePermissionModeForSession,
@@ -178,6 +181,8 @@ function clearActiveSessionState() {
 function clearDeletedSessionState(id: string) {
   removePermissionModeForSession(id);
   clearCurrentDocumentStateForSession(id);
+  clearSelectedAgentForSession(id);
+  clearSelectedModelForSession(id);
   setState('sessionStatus', (statuses) => {
     const next = { ...statuses };
     delete next[id];
@@ -303,6 +308,17 @@ function deriveSelectedModelFromMessages(messages: Array<{ info: Message; parts:
       modelID: message.modelID,
       variant: message.variant,
     };
+  }
+
+  return null;
+}
+
+function deriveSelectedAgentFromMessages(messages: Array<{ info: Message; parts: Part[] }>) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role === 'user') return message.agent;
+    if (message.agent) return message.agent;
   }
 
   return null;
@@ -537,12 +553,20 @@ async function loadAgents() {
     const primaries = visible.filter((a) => a.mode !== 'subagent');
     setState('allAgents', visible);
     setState('agents', primaries);
-    if (state.selectedAgent && !primaries.some((agent) => agent.name === state.selectedAgent)) {
-      setSelectedAgent(null);
+    const activeSessionId = state.activeSessionId;
+    const activeAgent = state.selectedAgent;
+    if (activeAgent && !primaries.some((agent) => agent.name === activeAgent)) {
+      setSelectedAgent(null, { sessionId: activeSessionId, persistGlobal: !activeSessionId });
     }
     if (!state.selectedAgent) {
-      const def = getDefaultPrimaryAgentName();
-      if (def) setSelectedAgent(def);
+      const sessionAgent = getSelectedAgentForSession(activeSessionId);
+      const globalAgent = getPersistedSelectedAgent();
+      const fallback = [sessionAgent, globalAgent, getDefaultPrimaryAgentName()].find(
+        (candidate): candidate is string => !!candidate && primaries.some((agent) => agent.name === candidate)
+      );
+      if (fallback) {
+        setSelectedAgent(fallback, { sessionId: activeSessionId, persistGlobal: !activeSessionId });
+      }
     }
   } catch (err) {
     logError('loadAgents', err);
@@ -598,6 +622,15 @@ export async function selectSession(id: string) {
   setState('activeSessionId', id);
   persistActiveSessionId(id);
   markSessionSeen(id);
+  const persistedAgent = getSelectedAgentForSession(id);
+  if (persistedAgent) {
+    setSelectedAgent(persistedAgent, { sessionId: id, persistGlobal: false });
+  } else {
+    const defaultAgent = getPersistedSelectedAgent() || getDefaultPrimaryAgentName();
+    if (defaultAgent) {
+      setSelectedAgent(defaultAgent, { sessionId: id, persistGlobal: false });
+    }
+  }
   const persistedModel = resolveSelectedModel(
     getSelectedModelForSession(id),
     state.providers,
@@ -616,6 +649,10 @@ export async function selectSession(id: string) {
     if (state.activeSessionId !== id) return;
     upsertSession(session);
     setMessagesIncremental(msgs);
+    const inferredAgent = !persistedAgent ? deriveSelectedAgentFromMessages(msgs) : null;
+    if (inferredAgent) {
+      setSelectedAgent(inferredAgent, { sessionId: id, persistGlobal: false });
+    }
     const inferredModel = resolveSelectedModel(
       deriveSelectedModelFromMessages(msgs),
       state.providers,
@@ -680,7 +717,10 @@ export async function createSession(
     if (defaultModel) {
       setSelectedModel(defaultModel, { sessionId: session.id, persistGlobal: false });
     }
-    setSelectedAgent(getDefaultPrimaryAgentName());
+    const defaultAgent = getPersistedSelectedAgent() || getDefaultPrimaryAgentName();
+    if (defaultAgent) {
+      setSelectedAgent(defaultAgent, { sessionId: session.id, persistGlobal: false });
+    }
     if (initialPermissionMode === 'full') {
       setPermissionModeForSession(session.id, 'full');
     }
@@ -706,7 +746,6 @@ export async function deleteSession(id: string) {
       'sessions',
       state.sessions.filter((s) => s.id !== id)
     );
-    clearSelectedModelForSession(id);
     clearDeletedSessionState(id);
     if (nextActiveId) {
       await selectSession(nextActiveId);

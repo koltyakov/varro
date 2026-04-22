@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
 import { client } from '../lib/client';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import type {
@@ -20,16 +20,53 @@ import { getToolFileChange } from '../lib/tool-file-change';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { formatContextLineRanges, getFirstContextLine, parseSelectionReference } from '../../shared/context-files';
 import {
+  getFinalAssistantTextPartId,
   isFileEditPart,
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
 
 export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
 
+export function getAssistantContainerVariant(params: {
+  isUser: boolean;
+  visibleDiffCount: number;
+  fileEditStackGroup?: AssistantFileEditStackGroup | null;
+  isSubagent: boolean;
+  hasStructuredAssistantParts: boolean;
+  layoutParts: Part[];
+  highlightFinalAnswer: boolean;
+}): 'bare' | 'plain' | false {
+  if (params.isUser) return false;
+  if (params.visibleDiffCount > 0) return false;
+  if (params.fileEditStackGroup) return false;
+  if (!params.highlightFinalAnswer) {
+    return 'plain';
+  }
+
+  const parts = params.layoutParts;
+  if (parts.length === 0) return false;
+  if (parts.length !== 1) {
+    const textPartCount = parts.filter((part) => part.type === 'text').length;
+    if (!params.highlightFinalAnswer && textPartCount >= 1 && (params.hasStructuredAssistantParts || params.isSubagent)) {
+      return 'plain';
+    }
+    if (params.highlightFinalAnswer && textPartCount > 1 && (params.hasStructuredAssistantParts || params.isSubagent)) {
+      return 'plain';
+    }
+    return false;
+  }
+
+  const part = parts[0];
+  if (part.type === 'reasoning') return 'bare';
+  return part.type === 'tool' && !isFileEditPart(part) ? 'bare' : false;
+}
+
 export function Message(props: {
   info: MessageType;
   parts: Part[];
   isLastAssistant?: boolean;
+  highlightFinalAnswer?: boolean;
+  highlightPlanningAnswer?: boolean;
   previousTrailingFileEventSignature?: string | null;
   fileEditStackGroup?: AssistantFileEditStackGroup | null;
   streamingPartId?: string | null;
@@ -91,19 +128,30 @@ export function Message(props: {
     isUser() ||
     visibleAssistantParts().length > 0 ||
     visibleDiffs().length > 0;
-  const useBareAssistantContainer = () => {
-    if (isUser()) return false;
-    if (visibleDiffs().length > 0) return false;
-    if (props.fileEditStackGroup) return false;
-    const parts = layoutAssistantParts();
-    if (parts.length === 0) return false;
-    if (parts.length !== 1) return false;
-    const part = parts[0];
-    if (part.type === 'reasoning') return true;
-    return part.type === 'tool' && !isFileEditPart(part);
+  const hasStructuredAssistantParts = () =>
+    assistant()
+      ? visibleAssistantParts().some((part) => part.type !== 'text' && part.type !== 'file')
+      : false;
+  const assistantContainerVariant = () => {
+    return getAssistantContainerVariant({
+      isUser: isUser(),
+      visibleDiffCount: visibleDiffs().length,
+      fileEditStackGroup: props.fileEditStackGroup,
+      isSubagent: isSubagent(),
+      hasStructuredAssistantParts: hasStructuredAssistantParts(),
+      layoutParts: layoutAssistantParts(),
+      highlightFinalAnswer: !!props.highlightFinalAnswer,
+    });
   };
   const streamedTextForPart = (part: Part) =>
     part.type === 'text' && part.id === props.streamingPartId ? props.streamingText || part.text : null;
+  const assistantContainerClass = () => {
+    const variant = assistantContainerVariant();
+    if (variant === 'bare') return 'assistant-turn-content assistant-turn-content-bare';
+    if (variant === 'plain') return 'assistant-turn-content assistant-turn-content-plain';
+    return `assistant-turn-content${props.highlightFinalAnswer ? ' assistant-turn-content-highlighted' : ''}${props.highlightPlanningAnswer ? ' assistant-turn-content-planning' : ''}`;
+  };
+  const isWrapperlessAssistant = () => assistantContainerVariant() === 'plain';
 
   return (
     <Show when={shouldRender()}>
@@ -111,12 +159,14 @@ export function Message(props: {
         when={!compactionDivider()}
         fallback={<CompactionDivider part={compactionDivider()!} />}
       >
-      <div class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}`}>
+      <div
+        class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}`}
+      >
         <div
           class={`value chat-turn-content ${
             isUser()
               ? 'chat-turn-card user-message-card'
-              : `assistant-turn-content${useBareAssistantContainer() ? ' assistant-turn-content-bare' : ''}`
+              : assistantContainerClass()
           } ${isSubagent() ? 'chat-turn-subagent' : ''} ${
             props.fileEditStackGroup
               ? `assistant-turn-file-edit-group-${props.fileEditStackGroup}`
@@ -130,6 +180,7 @@ export function Message(props: {
             <AssistantMessageContent
               info={assistant()!}
               parts={visibleAssistantParts()}
+              highlightFinalAnswer={props.highlightFinalAnswer}
               streamedTextForPart={streamedTextForPart}
             />
           </Show>
@@ -170,11 +221,11 @@ function UserMessageContent(props: { parts: Part[] }) {
   const parsed = createMemo(() => {
     const messageTexts: string[] = [];
     const attachments: MessageAttachment[] = [];
-    const imageParts: FilePart[] = [];
+    const fileParts: FilePart[] = [];
 
     for (const part of props.parts) {
       if (part.type === 'file') {
-        imageParts.push(part as FilePart);
+        fileParts.push(part as FilePart);
         continue;
       }
 
@@ -231,12 +282,17 @@ function UserMessageContent(props: { parts: Part[] }) {
       messageTexts.push(text);
     }
 
-    return { messageTexts, attachments, imageParts };
+    return { messageTexts, attachments, fileParts };
   });
+
+  const imageParts = createMemo(() => parsed().fileParts.filter((part) => part.mime.startsWith('image/')));
+  const otherFileParts = createMemo(() =>
+    parsed().fileParts.filter((part) => !part.mime.startsWith('image/'))
+  );
 
   const hasContent = () =>
     parsed().messageTexts.length > 0 ||
-    parsed().imageParts.length > 0 ||
+    parsed().fileParts.length > 0 ||
     parsed().attachments.length > 0;
 
   return (
@@ -252,7 +308,69 @@ function UserMessageContent(props: { parts: Part[] }) {
           </For>
         </div>
       </Show>
-      <For each={parsed().imageParts}>{(part) => <MessagePart part={part} />}</For>
+      <Show when={imageParts().length > 1} fallback={<For each={imageParts()}>{(part) => <MessagePart part={part} />}</For>}>
+        <UserImageCarousel imageParts={imageParts()} />
+      </Show>
+      <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
+    </div>
+  );
+}
+
+function UserImageCarousel(props: { imageParts: FilePart[] }) {
+  const [activeIndex, setActiveIndex] = createSignal(0);
+  const total = () => props.imageParts.length;
+  const currentPart = () => props.imageParts[activeIndex()];
+
+  createEffect(() => {
+    const maxIndex = total() - 1;
+    setActiveIndex((index) => {
+      if (maxIndex < 0) return 0;
+      return Math.min(index, maxIndex);
+    });
+  });
+
+  const step = (delta: number) => {
+    const count = total();
+    if (count <= 1) return;
+    setActiveIndex((index) => (index + delta + count) % count);
+  };
+
+  return (
+    <div class="message-image-carousel">
+      <div class="message-image-carousel-frame">
+        <div class="message-image-carousel-slide">
+          <Show when={currentPart()}>{(part) => <MessagePart part={part()} />}</Show>
+        </div>
+        <div class="message-image-carousel-controls">
+          <button
+            type="button"
+            class="message-image-carousel-nav"
+            onClick={() => step(-1)}
+            aria-label="Previous image"
+            title="Previous image"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+              <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="message-image-carousel-nav"
+            onClick={() => step(1)}
+            aria-label="Next image"
+            title="Next image"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+              <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="message-image-carousel-footer">
+        <span class="message-image-carousel-count">
+          {activeIndex() + 1} / {total()}
+        </span>
+      </div>
     </div>
   );
 }
@@ -395,9 +513,13 @@ function deduplicateFileEdits(parts: Part[]): Part[] {
 function AssistantMessageContent(props: {
   info: AssistantMessage;
   parts: Part[];
+  highlightFinalAnswer?: boolean;
   streamedTextForPart: (part: Part) => string | null;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
+  const finalTextPartId = createMemo(() =>
+    getFinalAssistantTextPartId(dedupedParts(), !!props.highlightFinalAnswer)
+  );
   const renderItems = createMemo(() => {
     const items: Array<{ kind: 'part'; part: Part } | { kind: 'file-edit-stack'; parts: ToolPart[] }> = [];
     const parts = dedupedParts();
@@ -425,28 +547,44 @@ function AssistantMessageContent(props: {
       <For each={renderItems()}>
         {(item) =>
           item.kind === 'file-edit-stack' ? (
-            <div class="assistant-file-edit-stack">
-              <For each={item.parts}>
-                {(part) => (
-                  <MessagePart
-                    part={part}
-                    messageInfo={props.info}
-                    streamedText={props.streamedTextForPart(part)}
-                  />
-                )}
-              </For>
+            <div class="assistant-message-flow-item">
+              <div class="assistant-file-edit-stack">
+                <For each={item.parts}>
+                  {(part) => (
+                    <MessagePart
+                      part={part}
+                      messageInfo={props.info}
+                      streamedText={props.streamedTextForPart(part)}
+                    />
+                  )}
+                </For>
+              </div>
             </div>
           ) : (
-            <MessagePart
-              part={item.part}
-              messageInfo={props.info}
-              streamedText={props.streamedTextForPart(item.part)}
-            />
+            <div
+              class={getAssistantFlowItemClass(item.part, finalTextPartId())}
+            >
+              <MessagePart
+                part={item.part}
+                messageInfo={props.info}
+                streamedText={props.streamedTextForPart(item.part)}
+              />
+            </div>
           )
         }
       </For>
     </div>
   );
+}
+
+function getAssistantFlowItemClass(
+  part: Part,
+  finalTextPartId: string | null
+) {
+  let className = 'assistant-message-flow-item';
+  if (part.type !== 'text' || part.id !== finalTextPartId) return className;
+
+  return `${className} assistant-message-flow-item-final`;
 }
 
 function DiffSummary(props: { diffs: FileDiff[] }) {

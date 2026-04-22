@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { formatReasoningDuration, formatReasoningHeader, splitReasoningText } from './MessagePart';
+import {
+  formatReasoningDuration,
+  formatReasoningHeader,
+  splitReasoningText,
+} from './MessagePart';
 
 describe('formatReasoningDuration', () => {
   it('returns null while reasoning is still running', () => {

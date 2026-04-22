@@ -424,14 +424,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'vscode/open':
           await this.contextProvider.openFile(msg.payload.path, msg.payload.line);
           break;
-        case 'vscode/diff':
-          vscode.commands.executeCommand(
-            'vscode.diff',
-            vscode.Uri.parse(`varro-diff://${msg.payload.path}/before`),
-            vscode.Uri.parse(`varro-diff://${msg.payload.path}/after`),
-            `Varro: ${msg.payload.path}`
-          );
-          break;
         case 'api/request':
           await this.handleApiRequest(msg.payload);
           break;
@@ -751,6 +743,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private postContext() {
     this.post({ type: 'context/update', payload: this.contextProvider.context });
   }
+
 
   postTerminalSelection(selection: { text: string; terminalName: string } | null) {
     this.post({ type: 'terminal-selection/update', payload: selection });

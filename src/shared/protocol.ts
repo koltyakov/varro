@@ -129,7 +129,6 @@ export type WebviewMessage =
   | { type: 'files/search'; payload: { requestId: number; query: string; limit?: number } }
   | { type: 'file/read'; payload: { path: string } }
   | { type: 'vscode/open'; payload: { path: string; line?: number } }
-  | { type: 'vscode/diff'; payload: { path: string } }
   | { type: 'ready' }
   | { type: 'api/request'; payload: { id: number; method: string; path: string; body?: unknown } }
   | {

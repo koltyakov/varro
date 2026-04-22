@@ -26,6 +26,7 @@ import { mergeContextFile } from '../../shared/context-files';
 
 const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
+  sessionSelectedAgents: 'varro.sessionSelectedAgents',
   selectedModel: 'varro.selectedModel',
   sessionSelectedModels: 'varro.sessionSelectedModels',
   draftPermissionMode: 'varro.draftPermissionMode',
@@ -38,6 +39,7 @@ const STORAGE_KEYS = {
 } as const;
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
+export type SessionSelectedAgents = Record<string, string>;
 export type SessionSelectedModels = Record<string, SelectedModel>;
 
 function readStored<T>(key: string): T | null {
@@ -85,6 +87,7 @@ interface AppState {
   providerDefaults: Record<string, string>;
   sessionPermissionModes: Record<string, PermissionMode>;
   selectedAgent: string | null;
+  sessionSelectedAgents: SessionSelectedAgents;
   selectedModel: SelectedModel | null;
   sessionSelectedModels: SessionSelectedModels;
   hiddenProviders: string[];
@@ -147,6 +150,8 @@ export const [state, setState] = createStore<AppState>({
   sessionPermissionModes:
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
   selectedAgent: readStored<string>(STORAGE_KEYS.selectedAgent),
+  sessionSelectedAgents:
+    readStored<SessionSelectedAgents>(STORAGE_KEYS.sessionSelectedAgents) || {},
   selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
   sessionSelectedModels:
     readStored<SessionSelectedModels>(STORAGE_KEYS.sessionSelectedModels) || {},
@@ -186,6 +191,10 @@ export function persistActiveSessionId(id: string | null) {
 
 export function getPersistedSelectedModel(): SelectedModel | null {
   return readStored<SelectedModel>(STORAGE_KEYS.selectedModel);
+}
+
+export function getPersistedSelectedAgent(): string | null {
+  return readStored<string>(STORAGE_KEYS.selectedAgent);
 }
 
 export function getPersistedActiveSessionId(): string | null {
@@ -229,19 +238,12 @@ export const [showThinking, setShowThinking] = createSignal(readShowThinking());
 
 export function toggleThinking() {
   const next = !showThinking();
-  setShowThinking(next);
-  try {
-    window.localStorage.setItem('varro.showThinking', JSON.stringify(next));
-  } catch {}
+  setShowThinkingPreference(next);
 }
 
-function readShowThinking(): boolean {
-  try {
-    const raw = window.localStorage.getItem('varro.showThinking');
-    return raw ? JSON.parse(raw) : true;
-  } catch {
-    return true;
-  }
+export function setShowThinkingPreference(next: boolean) {
+  setShowThinking(next);
+  writeStored('varro.showThinking', next);
 }
 
 export const [inputText, setInputText] = createSignal('');
@@ -331,6 +333,15 @@ export function getCurrentDocumentEnabled(
   return sessionId ? state.currentDocumentEnabledBySession[sessionId] ?? true : state.draftCurrentDocumentEnabled ?? true;
 }
 
+function readShowThinking(): boolean {
+  try {
+    const raw = window.localStorage.getItem('varro.showThinking');
+    return raw ? JSON.parse(raw) : true;
+  } catch {
+    return true;
+  }
+}
+
 export function setCurrentDocumentEnabled(
   enabled: boolean,
   sessionId: string | null | undefined = state.activeSessionId
@@ -407,6 +418,11 @@ export function removePermissionModeForSession(sessionId: string) {
 export function getSelectedModelForSession(sessionId: string | null | undefined): SelectedModel | null {
   if (!sessionId) return null;
   return state.sessionSelectedModels[sessionId] || null;
+}
+
+export function getSelectedAgentForSession(sessionId: string | null | undefined): string | null {
+  if (!sessionId) return null;
+  return state.sessionSelectedAgents[sessionId] || null;
 }
 
 export function setSelectedModel(
@@ -567,9 +583,36 @@ export function removeQuestion(requestID: string) {
   );
 }
 
-export function setSelectedAgent(agent: string | null) {
+export function setSelectedAgent(
+  agent: string | null,
+  options?: { sessionId?: string | null; persistGlobal?: boolean }
+) {
+  const persistGlobal = options?.persistGlobal ?? true;
+  const sessionId = options?.sessionId;
+
   setState('selectedAgent', agent);
-  writeStored(STORAGE_KEYS.selectedAgent, agent);
+  if (persistGlobal) {
+    writeStored(STORAGE_KEYS.selectedAgent, agent);
+  }
+
+  if (sessionId) {
+    const nextSessionAgents = agent
+      ? { ...state.sessionSelectedAgents, [sessionId]: agent }
+      : Object.fromEntries(
+          Object.entries(state.sessionSelectedAgents).filter(([id]) => id !== sessionId)
+        );
+    setState('sessionSelectedAgents', reconcile(nextSessionAgents));
+    writeStored(STORAGE_KEYS.sessionSelectedAgents, nextSessionAgents);
+  }
+}
+
+export function clearSelectedAgentForSession(sessionId: string) {
+  if (!state.sessionSelectedAgents[sessionId]) return;
+  const nextSessionAgents = Object.fromEntries(
+    Object.entries(state.sessionSelectedAgents).filter(([id]) => id !== sessionId)
+  );
+  setState('sessionSelectedAgents', reconcile(nextSessionAgents));
+  writeStored(STORAGE_KEYS.sessionSelectedAgents, nextSessionAgents);
 }
 
 export function modelVisibilityKey(providerID: string, modelID: string) {

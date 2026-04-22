@@ -1,4 +1,5 @@
 import { For } from 'solid-js';
+import { postMessage } from '../lib/bridge';
 import type { FileDiff } from '../types';
 
 export function DiffView(props: { diffs: FileDiff[] }) {
@@ -10,8 +11,12 @@ export function DiffView(props: { diffs: FileDiff[] }) {
 }
 
 function DiffItem(props: { diff: FileDiff }) {
+  const openFile = () => {
+    postMessage({ type: 'vscode/open', payload: { path: props.diff.file } });
+  };
+
   return (
-    <div class="diff-view-item">
+    <button type="button" class="diff-view-item diff-view-item-button" onClick={openFile}>
       <svg
         class="diff-view-icon"
         width="14"
@@ -31,6 +36,6 @@ function DiffItem(props: { diff: FileDiff }) {
         <span class="diff-lines-added">+{props.diff.additions}</span>{' '}
         <span class="diff-lines-removed">-{props.diff.deletions}</span>
       </span>
-    </div>
+    </button>
   );
 }

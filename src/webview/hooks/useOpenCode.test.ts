@@ -542,6 +542,37 @@ describe('sendMessage', () => {
     });
   });
 
+  it('reuses the most recently selected agent for a new session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('agents', [
+      {
+        name: 'build',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+      {
+        name: 'plan',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+    ]);
+    stateModule.setSelectedAgent('plan');
+
+    clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
+
+    await hookModule.createSession();
+
+    expect(stateModule.state.activeSessionId).toBe('session-2');
+    expect(stateModule.state.selectedAgent).toBe('plan');
+    expect(stateModule.getSelectedAgentForSession('session-2')).toBe('plan');
+    expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
+  });
+
   it('restores the previously used model when switching back to an existing session', async () => {
     const { stateModule, hookModule } = await loadModules();
 
@@ -580,5 +611,42 @@ describe('sendMessage', () => {
       modelID: 'gpt-4o',
     });
     expect(stateModule.getPersistedSelectedModel()).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
+  });
+
+  it('restores the previously used agent when switching back to an existing session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('agents', [
+      {
+        name: 'build',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+      {
+        name: 'plan',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+    ]);
+    stateModule.setSelectedAgent('build');
+    stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
+
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([
+      {
+        info: userMessageForSession('user-1', 'session-1', { providerID: 'openai', modelID: 'gpt-4o' }),
+        parts: [],
+      },
+    ]);
+
+    await hookModule.selectSession('session-1');
+
+    expect(stateModule.state.selectedAgent).toBe('plan');
+    expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
+    expect(stateModule.getPersistedSelectedAgent()).toBe('build');
   });
 });

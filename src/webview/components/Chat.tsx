@@ -4,12 +4,21 @@ import {
   setShowSessionPicker,
   showSettings,
   isSessionUnread,
+  getSelectedAgentForSession,
 } from '../lib/state';
 import { Show, For, createSignal, onMount, onCleanup, createEffect } from 'solid-js';
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { SettingsPanel } from './SettingsPanel';
+
+type SessionGroups = {
+  running: (typeof state.sessions)[number][];
+  attention: (typeof state.sessions)[number][];
+  surfacedOther: (typeof state.sessions)[number][];
+  overflowOther: (typeof state.sessions)[number][];
+  subagents: (typeof state.sessions)[number][];
+};
 
 export function Chat() {
   const [focusRunningSessions, setFocusRunningSessions] = createSignal(false);
@@ -118,6 +127,30 @@ export function Chat() {
   );
 }
 
+export function groupSessions(
+  sessions: typeof state.sessions,
+  isRunning: (sessionId: string) => boolean,
+  isNeedingAttention: (sessionId: string) => boolean,
+  maxSurfacedOtherSessions: number
+): SessionGroups {
+  const primaries = sessions.filter((session) => !session.parentID);
+  const running = primaries.filter((session) => isRunning(session.id));
+  const attention = primaries.filter(
+    (session) => !isRunning(session.id) && isNeedingAttention(session.id)
+  );
+  const recentOther = primaries.filter(
+    (session) => !isRunning(session.id) && !isNeedingAttention(session.id)
+  );
+
+  return {
+    running,
+    attention,
+    surfacedOther: recentOther.slice(0, maxSurfacedOtherSessions),
+    overflowOther: recentOther.slice(maxSurfacedOtherSessions),
+    subagents: sessions.filter((session) => !!session.parentID),
+  };
+}
+
 function SessionListView(props: { focusRunningSessions: boolean }) {
   const MAX_SURFACED_OTHER_SESSIONS = 10;
   const [now, setNow] = createSignal(Date.now());
@@ -126,6 +159,7 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
   const [showOtherSessions, setShowOtherSessions] = createSignal(false);
+  const [showSubagentSessions, setShowSubagentSessions] = createSignal(false);
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
 
@@ -133,31 +167,35 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
     !isRunningSession(sessionId) &&
     (state.permissions.some((permission) => permission.sessionID === sessionId) ||
       state.questions.some((question) => question.sessionID === sessionId));
-  const runningSessions = () => state.sessions.filter((session) => isRunningSession(session.id));
-  const attentionSessions = () =>
-    state.sessions.filter(
-      (session) => !isRunningSession(session.id) && isSessionNeedingAttention(session.id)
+  const groupedSessions = () =>
+    groupSessions(
+      state.sessions,
+      (sessionId) => isRunningSession(sessionId),
+      (sessionId) => isSessionNeedingAttention(sessionId),
+      MAX_SURFACED_OTHER_SESSIONS
     );
-  const recentOtherSessions = () =>
-    state.sessions.filter(
-      (session) =>
-        !isRunningSession(session.id) && !isSessionNeedingAttention(session.id)
-    );
-  const surfacedOtherSessions = () => recentOtherSessions().slice(0, MAX_SURFACED_OTHER_SESSIONS);
-  const overflowOtherSessions = () => recentOtherSessions().slice(MAX_SURFACED_OTHER_SESSIONS);
+  const runningSessions = () => groupedSessions().running;
+  const attentionSessions = () => groupedSessions().attention;
+  const surfacedOtherSessions = () => groupedSessions().surfacedOther;
+  const overflowOtherSessions = () => groupedSessions().overflowOther;
+  const subagentSessions = () => groupedSessions().subagents;
   const surfacedSessions = () => [
     ...runningSessions(),
     ...attentionSessions(),
     ...surfacedOtherSessions(),
   ];
   const visibleSessions = () => {
-    if (showOtherSessions()) return [...surfacedSessions(), ...overflowOtherSessions()];
-    return surfacedSessions();
+    const sessions = showOtherSessions()
+      ? [...surfacedSessions(), ...overflowOtherSessions()]
+      : surfacedSessions();
+    if (showSubagentSessions()) return [...sessions, ...subagentSessions()];
+    return sessions;
   };
 
   createEffect(() => {
     if (props.focusRunningSessions) {
       setShowOtherSessions(false);
+      setShowSubagentSessions(false);
     }
   });
 
@@ -260,35 +298,66 @@ function SessionListView(props: { focusRunningSessions: boolean }) {
           </For>
         </Show>
         <Show when={overflowOtherSessions().length > 0}>
-            <button
-              type="button"
-              class="session-list-section-toggle"
-              onClick={() => setShowOtherSessions((value) => !value)}
+          <button
+            type="button"
+            class="session-list-section-toggle"
+            onClick={() => setShowOtherSessions((value) => !value)}
+          >
+            <span class="session-list-section-title">Other sessions</span>
+            <span class="session-list-section-count">{overflowOtherSessions().length}</span>
+            <svg
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              class={`session-list-section-chevron ${showOtherSessions() ? 'expanded' : ''}`}
+              aria-hidden="true"
             >
-              <span class="session-list-section-title">Other sessions</span>
-              <span class="session-list-section-count">{overflowOtherSessions().length}</span>
-              <svg
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                class={`session-list-section-chevron ${showOtherSessions() ? 'expanded' : ''}`}
-                aria-hidden="true"
-              >
-                <path d="M5.5 3.5L10 8l-4.5 4.5-.7-.7L8.6 8 4.8 4.2z" />
-              </svg>
-            </button>
-            <Show when={showOtherSessions()}>
-              <For each={overflowOtherSessions()}>
-                {(session, index) => (
-                  <SessionListItem
-                    session={session}
-                    itemIndex={() => surfacedSessions().length + index()}
-                    focusedIndex={focusedIndex}
-                    setFocusedIndex={setFocusedIndex}
-                    now={now}
-                  />
-                )}
-              </For>
-            </Show>
+              <path d="M5.5 3.5L10 8l-4.5 4.5-.7-.7L8.6 8 4.8 4.2z" />
+            </svg>
+          </button>
+          <Show when={showOtherSessions()}>
+            <For each={overflowOtherSessions()}>
+              {(session, index) => (
+                <SessionListItem
+                  session={session}
+                  itemIndex={() => surfacedSessions().length + index()}
+                  focusedIndex={focusedIndex}
+                  setFocusedIndex={setFocusedIndex}
+                  now={now}
+                />
+              )}
+            </For>
+          </Show>
+        </Show>
+        <Show when={subagentSessions().length > 0}>
+          <button
+            type="button"
+            class="session-list-section-toggle"
+            onClick={() => setShowSubagentSessions((value) => !value)}
+          >
+            <span class="session-list-section-title">Sub-Agents</span>
+            <span class="session-list-section-count">{subagentSessions().length}</span>
+            <svg
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              class={`session-list-section-chevron ${showSubagentSessions() ? 'expanded' : ''}`}
+              aria-hidden="true"
+            >
+              <path d="M5.5 3.5L10 8l-4.5 4.5-.7-.7L8.6 8 4.8 4.2z" />
+            </svg>
+          </button>
+          <Show when={showSubagentSessions()}>
+            <For each={subagentSessions()}>
+              {(session, index) => (
+                <SessionListItem
+                  session={session}
+                  itemIndex={() => surfacedSessions().length + (showOtherSessions() ? overflowOtherSessions().length : 0) + index()}
+                  focusedIndex={focusedIndex}
+                  setFocusedIndex={setFocusedIndex}
+                  now={now}
+                />
+              )}
+            </For>
+          </Show>
         </Show>
       </Show>
     </div>
@@ -313,9 +382,12 @@ function SessionListItem(props: {
   const needsAttention = () => !isRunning() && (hasPermissionRequest() || hasQuestionRequest());
   const isNewlyCompleted = () =>
     !isRunning() && !needsAttention() && isSessionUnread(props.session.id, props.session.time.updated);
+  const isCompletedPlanSession = () =>
+    isNewlyCompleted() && getSelectedAgentForSession(props.session.id) === 'plan';
   const indicatorClass = () => {
     if (isRunning()) return 'is-running';
     if (needsAttention()) return 'is-attention';
+    if (isCompletedPlanSession()) return 'is-plan-completed';
     return 'is-completed';
   };
   const indicatorTitle = () => {
@@ -323,6 +395,7 @@ function SessionListItem(props: {
     if (hasPermissionRequest() && hasQuestionRequest()) return 'Attention needed';
     if (hasPermissionRequest()) return 'Permission request pending';
     if (hasQuestionRequest()) return 'Attention needed';
+    if (isCompletedPlanSession()) return 'Plan completed';
     return 'Completed';
   };
 

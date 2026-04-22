@@ -350,7 +350,7 @@ export function ChatInput() {
         e.preventDefault();
         const agent = agents[agentFocusIndex()];
         if (agent) {
-          setSelectedAgent(agent.name);
+          setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
           setShowAgentPicker(false);
         }
         return;
@@ -1488,7 +1488,7 @@ export function ChatInput() {
                         <button
                           class={`toolbar-popover-item ${state.selectedAgent === agent.name ? 'selected' : ''} ${agentFocusIndex() === index() ? 'keyboard-focus' : ''}`}
                           onClick={() => {
-                            setSelectedAgent(agent.name);
+                            setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
                             setShowAgentPicker(false);
                           }}
                           onMouseEnter={() => setAgentFocusIndex(index())}

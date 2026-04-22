@@ -53,3 +53,15 @@ export function shouldShowAssistantPartInline(part: Part, respectThinkingToggle 
       return false;
   }
 }
+
+export function getFinalAssistantTextPartId(parts: Part[], isCompleted: boolean): string | null {
+  if (!isCompleted) return null;
+
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (!shouldShowAssistantPartInline(part, false)) continue;
+    if (part.type === 'text' && part.text.trim().length > 0) return part.id;
+  }
+
+  return null;
+}

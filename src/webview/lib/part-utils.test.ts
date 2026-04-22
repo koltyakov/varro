@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Part, ToolPart, ToolStateCompleted } from '../types';
 import {
+  getFinalAssistantTextPartId,
   isFileEditPart,
   isFileReadPart,
   isTodoToolPart,
@@ -95,5 +96,52 @@ describe('part utils', () => {
     setShowThinking(false);
     expect(shouldShowAssistantPartInline(reasoningPart)).toBe(false);
     expect(shouldShowAssistantPartInline(reasoningPart, false)).toBe(true);
+  });
+
+  it('identifies the last visible text part when highlighting is enabled for the turn', () => {
+    const parts: Part[] = [
+      {
+        id: 'reason-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'reasoning',
+        text: 'thinking',
+        time: { start: 0 },
+      },
+      toolPart('read', completedState({ filePath: 'src/app.ts' }, 'Read file')),
+      {
+        id: 'text-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'text',
+        text: 'Progress update',
+      },
+      {
+        id: 'text-2',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'text',
+        text: 'Final answer',
+      },
+    ];
+
+    expect(getFinalAssistantTextPartId(parts, false)).toBeNull();
+    expect(getFinalAssistantTextPartId(parts, true)).toBe('text-2');
+  });
+
+  it('does not mark a final answer when the highlighted turn has no visible text', () => {
+    const parts: Part[] = [
+      {
+        id: 'reason-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'reasoning',
+        text: 'thinking',
+        time: { start: 0 },
+      },
+      toolPart('edit', completedState({ path: 'src/app.ts' }, 'Update file')),
+    ];
+
+    expect(getFinalAssistantTextPartId(parts, true)).toBeNull();
   });
 });
