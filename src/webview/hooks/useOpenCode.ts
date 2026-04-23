@@ -119,6 +119,9 @@ let initializing = false;
 let eventHandlerCleanups: (() => void)[] = [];
 let currentWorkspacePath: string | null = null;
 let todoStateAuthority: 'messages' | 'event' = 'messages';
+let connectionGeneration = 0;
+let sessionSelectionGeneration = 0;
+let sessionSyncGeneration = 0;
 const pendingAbortRetryAttempts = new Map<string, number | null>();
 const FULL_ACCESS_PERMISSION_NAMES = [
   'read',
@@ -571,12 +574,12 @@ export function useOpenCode() {
   createEffect(() => {
     const loading = isLoading();
     const sessionId = state.activeSessionId;
-    if (!loading || !sessionId) return;
+    if (!loading || !sessionId || !isDocumentVisible()) return;
 
     let delay = 8000;
     const schedulePoll = () => {
       return setTimeout(() => {
-        if (!isLoading() || !state.activeSessionId) return;
+        if (!isLoading() || !state.activeSessionId || !isDocumentVisible()) return;
         recheckSessionStatus(state.activeSessionId);
         delay = Math.min(delay * 2, 60_000);
         timer = schedulePoll();
@@ -588,7 +591,8 @@ export function useOpenCode() {
   });
 
   createEffect(() => {
-    if (state.serverStatus.state !== 'running' || !state.providersLoaded) return;
+    if (state.serverStatus.state !== 'running' || !state.providersLoaded || !isDocumentVisible())
+      return;
 
     const active = getActiveProviderSelection();
     if (!active) return;
@@ -672,7 +676,16 @@ function shouldResyncSessionAfterIdle(sessionId: string) {
   return state.activeSessionId === sessionId;
 }
 
+function isDocumentVisible() {
+  return document.visibilityState === 'visible';
+}
+
+function isCurrentGeneration(current: number, expected: number) {
+  return current === expected;
+}
+
 export async function recheckSessionStatus(sessionId: string) {
+  if (!isDocumentVisible()) return;
   try {
     const statuses = await client.session.status();
     const status = statuses[sessionId];
@@ -698,14 +711,19 @@ export async function recheckSessionStatus(sessionId: string) {
 }
 
 async function initConnection() {
+  const generation = ++connectionGeneration;
   try {
     await client.health();
+    if (!isCurrentGeneration(generation, connectionGeneration)) return;
     await Promise.all([loadSessions(), loadAgents(), loadProviders(), loadQuestions()]);
+    if (!isCurrentGeneration(generation, connectionGeneration)) return;
     await hydrateSessionStatuses();
+    if (!isCurrentGeneration(generation, connectionGeneration)) return;
     if (!state.activeSessionId) {
       const lastId = getPersistedActiveSessionId();
       if (lastId && state.sessions.some((s) => s.id === lastId)) {
         await selectSession(lastId);
+        if (!isCurrentGeneration(generation, connectionGeneration)) return;
       }
     }
     initialized = true;
@@ -826,6 +844,7 @@ async function hydrateSessionStatuses() {
 }
 
 export async function selectSession(id: string, options?: { markSeen?: boolean }) {
+  const generation = ++sessionSelectionGeneration;
   clearDraftCurrentDocumentState();
   setState('activeSessionId', id);
   persistActiveSessionId(id);
@@ -856,7 +875,11 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
       client.session.get(id),
       client.session.messages(id),
     ]);
-    if (state.activeSessionId !== id) return;
+    if (
+      !isCurrentGeneration(generation, sessionSelectionGeneration) ||
+      state.activeSessionId !== id
+    )
+      return;
     upsertSession(session);
     setMessagesIncremental(msgs);
     syncFailedSessionsFromMessages(msgs);
@@ -874,12 +897,20 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
     }
     syncTodosFromMessages(msgs);
     await loadQuestions().catch((err) => logError('loadQuestions', err));
-    if (state.activeSessionId !== id) return;
+    if (
+      !isCurrentGeneration(generation, sessionSelectionGeneration) ||
+      state.activeSessionId !== id
+    )
+      return;
     const statuses = await client.session.status().catch((err) => {
       logError('session.status', err);
       return {} as Record<string, SessionStatus>;
     });
-    if (state.activeSessionId !== id) return;
+    if (
+      !isCurrentGeneration(generation, sessionSelectionGeneration) ||
+      state.activeSessionId !== id
+    )
+      return;
     setState('sessionStatus', (current) => ({ ...current, ...statuses }));
     updateUsageLimitState(id, statuses[id], msgs);
     const statusType = statuses[id]?.type;
@@ -894,7 +925,9 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
 }
 
 async function syncSessionMessages(sessionId: string) {
+  const generation = ++sessionSyncGeneration;
   const msgs = await client.session.messages(sessionId);
+  if (!isCurrentGeneration(generation, sessionSyncGeneration)) return;
   updateUsageLimitState(sessionId, state.sessionStatus[sessionId], msgs);
   if (sessionId === state.activeSessionId) {
     setMessagesIncremental(msgs);

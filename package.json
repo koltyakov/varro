@@ -22,9 +22,6 @@
     "opencode",
     "agent"
   ],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
   "main": "./dist/extension/extension.js",
   "icon": "assets/icon.png",
   "contributes": {

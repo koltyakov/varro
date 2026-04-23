@@ -45,7 +45,7 @@ export const client = {
       return apiCall('GET', `/session/${id}/diff${query}`);
     },
     async status(): Promise<Record<string, SessionStatus>> {
-      return apiCall('GET', '/session/status');
+      return getSharedSessionStatus();
     },
     async messages(id: string): Promise<Array<{ info: Message; parts: Part[] }>> {
       return apiCall('GET', `/session/${id}/message`);
@@ -114,7 +114,7 @@ export const client = {
 
   question: {
     async list(): Promise<QuestionRequest[]> {
-      return apiCall('GET', '/question');
+      return getSharedQuestionList();
     },
     async reply(requestID: string, answers: Array<Array<string>>): Promise<boolean> {
       return apiCall('POST', `/question/${requestID}/reply`, { answers });
@@ -129,6 +129,8 @@ let fileStatusCache: {
   expiresAt: number;
   promise: Promise<RepoFileStatus[]>;
 } | null = null;
+let sessionStatusRequest: Promise<Record<string, SessionStatus>> | null = null;
+let questionListRequest: Promise<QuestionRequest[]> | null = null;
 
 function getCachedFileStatus(): Promise<RepoFileStatus[]> {
   const now = Date.now();
@@ -138,6 +140,24 @@ function getCachedFileStatus(): Promise<RepoFileStatus[]> {
     throw err;
   });
   fileStatusCache = { expiresAt: now + 2_000, promise };
+  return promise;
+}
+
+function getSharedSessionStatus(): Promise<Record<string, SessionStatus>> {
+  if (sessionStatusRequest) return sessionStatusRequest;
+  const promise = apiCall<Record<string, SessionStatus>>('GET', '/session/status').finally(() => {
+    if (sessionStatusRequest === promise) sessionStatusRequest = null;
+  });
+  sessionStatusRequest = promise;
+  return promise;
+}
+
+function getSharedQuestionList(): Promise<QuestionRequest[]> {
+  if (questionListRequest) return questionListRequest;
+  const promise = apiCall<QuestionRequest[]>('GET', '/question').finally(() => {
+    if (questionListRequest === promise) questionListRequest = null;
+  });
+  questionListRequest = promise;
   return promise;
 }
 

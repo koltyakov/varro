@@ -73,6 +73,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private webviewReady = false;
   private lastPendingAttentionKey = '';
   private lastStatusBarStateKey = '';
+  private serverStartErrorMessage: string | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -457,6 +458,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.post({ type: 'server/status', payload: this._status });
           this.postPendingAttentionState();
           this.flushPendingInputFocus();
+          void this.ensureServerStarted().catch(() => {});
         } else {
           this.webviewHasFocus = false;
         }
@@ -486,6 +488,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async ensureServerStarted() {
+    if (this.server.status.state === 'running') {
+      this.serverStartErrorMessage = null;
+      return this.server.status.url;
+    }
+
+    if (this.server.status.state === 'starting') {
+      return this.server.start();
+    }
+
+    try {
+      const url = await this.server.start();
+      this.serverStartErrorMessage = null;
+      return url;
+    } catch (err) {
+      const message = `Failed to start OpenCode server: ${err instanceof Error ? err.message : String(err)}`;
+      logger.error(message);
+      if (this.serverStartErrorMessage !== message) {
+        this.serverStartErrorMessage = message;
+        void vscode.window.showErrorMessage(message);
+      }
+      throw err;
+    }
+  }
+
   async handleMessage(msg: WebviewMessage) {
     try {
       switch (msg.type) {
@@ -499,6 +526,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
           this.postPendingAttentionState();
           this.flushPendingInputFocus();
+          void this.ensureServerStarted().catch(() => {});
           break;
         case 'webview/focus':
           this.webviewHasFocus = msg.payload.focused;
@@ -571,14 +599,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     path: string;
     body?: unknown;
   }) {
-    if (this._status.state !== 'running') {
-      this.post({
-        type: 'api/response',
-        payload: { id: payload.id, error: 'Server is not running' },
-      });
-      return;
-    }
     try {
+      if (this._status.state !== 'running') {
+        await this.ensureServerStarted();
+      }
       const providerLimitRequest = this.parseProviderLimitRequest(payload.method, payload.path);
       if (providerLimitRequest) {
         const data = await this.getProviderLimit(

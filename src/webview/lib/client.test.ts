@@ -134,6 +134,32 @@ describe('client', () => {
     );
   });
 
+  it('dedupes concurrent session status requests', async () => {
+    const { client } = await loadClient();
+    const deferred = Promise.resolve({ 'session-1': { type: 'idle' } });
+    bridgeMocks.apiCall.mockReturnValue(deferred);
+
+    const [first, second] = await Promise.all([client.session.status(), client.session.status()]);
+
+    expect(first).toEqual({ 'session-1': { type: 'idle' } });
+    expect(second).toEqual({ 'session-1': { type: 'idle' } });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(1);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/session/status');
+  });
+
+  it('dedupes concurrent question list requests', async () => {
+    const { client } = await loadClient();
+    const deferred = Promise.resolve([{ id: 'q1' }]);
+    bridgeMocks.apiCall.mockReturnValue(deferred);
+
+    const [first, second] = await Promise.all([client.question.list(), client.question.list()]);
+
+    expect(first).toEqual([{ id: 'q1' }]);
+    expect(second).toEqual([{ id: 'q1' }]);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(1);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/question');
+  });
+
   it('caches file status requests for two seconds', async () => {
     const { client } = await loadClient();
     const nowSpy = vi.spyOn(Date, 'now');

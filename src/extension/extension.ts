@@ -40,20 +40,7 @@ export async function activate(context: vscode.ExtensionContext) {
   registerCommands(context, sidebarProvider!, contextProvider!, server!);
 
   vscode.commands.executeCommand('setContext', 'varro:activated', true);
-  logger.info('Varro extension activated');
-
-  server
-    .start()
-    .then((url) => {
-      logger.info(`OpenCode server running at ${url}`);
-    })
-    .catch((err) => {
-      const message = `Failed to start OpenCode server: ${err instanceof Error ? err.message : String(err)}`;
-      logger.error(message);
-      if (server?.status.state !== 'error') {
-        vscode.window.showErrorMessage(message);
-      }
-    });
+  logger.info('Varro extension activated; server startup is deferred until first use');
 }
 
 export async function deactivate() {

@@ -1037,6 +1037,32 @@ describe('useOpenCode initialization', () => {
     }
   });
 
+  it('ignores stale session selection results after switching sessions quickly', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    const slowSession = Promise.resolve({ ...session('session-1'), title: 'Slow session' });
+    const fastSession = Promise.resolve({ ...session('session-2'), title: 'Fast session' });
+    const slowMessages = Promise.resolve([{ info: userMessage('user-1'), parts: [] }]);
+    const fastMessages = Promise.resolve([{ info: userMessage('user-2'), parts: [] }]);
+
+    clientMocks.sessionGet.mockImplementation(async (id: string) =>
+      id === 'session-1' ? slowSession : fastSession
+    );
+    clientMocks.sessionMessages.mockImplementation(async (id: string) =>
+      id === 'session-1' ? slowMessages : fastMessages
+    );
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    await Promise.all([
+      hookModule.selectSession('session-1'),
+      hookModule.selectSession('session-2'),
+    ]);
+
+    expect(stateModule.state.activeSessionId).toBe('session-2');
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['user-2']);
+  });
+
   it('ignores stale retry status updates after aborting a retrying session', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {

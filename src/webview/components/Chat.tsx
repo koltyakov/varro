@@ -894,7 +894,7 @@ function SessionListView(props: {
 
   const emptyMessage = () => {
     if (props.subagentParentId) return 'No sub-agent sessions';
-    const label = getSessionListFilterLabel(props.sessionFilter);
+    const label = getSessionListFilterLabel(props.sessionFilter ?? null);
     return label ? `No ${label.toLowerCase()} sessions` : 'No sessions yet';
   };
 
