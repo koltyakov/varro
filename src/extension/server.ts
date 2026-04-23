@@ -390,28 +390,41 @@ export class OpenCodeServer extends EventEmitter {
     let shouldReconnect = false;
     const scoped = this.scopedUrl('/event');
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let connectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const abortForReconnect = (message: string, reason: string) => {
+      if (controller.signal.aborted) return;
+      shouldReconnect = true;
+      logger.warn(message);
+      controller.abort(new Error(reason));
+    };
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
-        if (!controller.signal.aborted) {
-          logger.warn('Event stream stalled; reconnecting');
-          controller.abort(new Error('Event stream idle timeout'));
-        }
+        abortForReconnect('Event stream stalled; reconnecting', 'Event stream idle timeout');
       }, OpenCodeServer.EVENT_IDLE_TIMEOUT_MS);
     };
 
+    connectTimer = setTimeout(() => {
+      abortForReconnect(
+        'Event stream connection timed out; reconnecting',
+        'Event stream connect timeout'
+      );
+    }, OpenCodeServer.EVENT_CONNECT_TIMEOUT_MS);
+
     try {
       const res = await fetch(scoped.url, {
-        signal: anySignal(
-          controller.signal,
-          AbortSignal.timeout(OpenCodeServer.EVENT_CONNECT_TIMEOUT_MS)
-        ),
+        signal: controller.signal,
         headers: {
           Accept: 'text/event-stream',
           ...this.directoryHeaders(scoped.directory),
         },
       });
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
+      }
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
       this.eventReconnectDelay = 1000;
       this.eventReconnectCount = 0;
@@ -442,16 +455,26 @@ export class OpenCodeServer extends EventEmitter {
         }
       }
     } catch (err: unknown) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted && !shouldReconnect) return;
       const message = err instanceof Error ? err.message : String(err);
-      logger.warn(`Event stream error: ${message}`);
+      if (!shouldReconnect) {
+        logger.warn(`Event stream error: ${message}`);
+      }
       shouldReconnect = true;
     } finally {
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
+      }
       if (idleTimer) {
         clearTimeout(idleTimer);
         idleTimer = null;
       }
-      if (shouldReconnect && !controller.signal.aborted && this._status.state === 'running') {
+      if (
+        shouldReconnect &&
+        this.eventController === controller &&
+        this._status.state === 'running'
+      ) {
         this.updateEventStreamState('degraded');
         this.eventReconnectCount++;
         if (this.eventReconnectCount === OpenCodeServer.MAX_EVENT_RECONNECTS) {
