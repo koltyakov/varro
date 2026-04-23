@@ -89,6 +89,16 @@ const DEFAULT_ITEM_HEIGHT = 120;
 const OVERSCAN = 5;
 const VIRTUALIZE_THRESHOLD = 50;
 
+type MessageRowSharedProps = {
+  modelChangeMap: Map<string, string>;
+  lastAssistantID: string | null;
+  previousTrailingFileEventSignatureMap: Map<string, string | null>;
+  fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
+  assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
+  hasBuildAgent: boolean;
+  latestPlanImplementationMessageId: string | null;
+};
+
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
@@ -537,65 +547,16 @@ export function MessageList() {
           <Show
             when={shouldVirtualize()}
             fallback={
-              <For each={state.messages}>
-                {(msg) => {
-                  const changeLabel = modelChangeMap().get(msg.info.id) ?? null;
-                  return (
-                    <div
-                      data-msg-id={msg.info.id}
-                      class={`interactive-item-container ${
-                        msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
-                      } ${
-                        assistantStackGroupMap().get(msg.info.id)
-                          ? `interactive-response-file-edit-group interactive-response-file-edit-group-${assistantStackGroupMap().get(msg.info.id)}`
-                          : ''
-                      }`}
-                    >
-                      <Show when={changeLabel}>
-                        <div class="model-change-indicator">
-                          <span class="model-change-label">Switched to {changeLabel}</span>
-                        </div>
-                      </Show>
-                      <MessageComponent
-                        info={msg.info}
-                        parts={msg.parts}
-                        isLastAssistant={msg.info.id === lastAssistantID()}
-                        highlightFinalAnswer={assistantDialogSummaryMap().has(msg.info.id)}
-                        highlightPlanningAnswer={
-                          assistantDialogSummaryMap().has(msg.info.id) &&
-                          isAssistantMessage(msg.info) &&
-                          isPlanningAssistantMessage(msg.info)
-                        }
-                        previousTrailingFileEventSignature={
-                          previousTrailingFileEventSignatureMap().get(msg.info.id) ?? null
-                        }
-                        fileEditStackGroup={assistantStackGroupMap().get(msg.info.id) ?? null}
-                        streamingPartId={state.streamingPartId}
-                        streamingText={state.streamingText}
-                      />
-                      <Show when={assistantDialogSummaryMap().get(msg.info.id)}>
-                        {(summary) => (
-                          <AssistantDialogSummary
-                            summary={summary()}
-                            showImplementPlanAction={
-                              hasBuildAgent() &&
-                              isAssistantMessage(msg.info) &&
-                              isPlanningAssistantMessage(msg.info) &&
-                              msg.info.id === latestPlanImplementationMessageId()
-                            }
-                            onImplementPlan={() =>
-                              void implementPlan(
-                                buildPlanImplementationPrompt(msg.parts),
-                                msg.info.sessionID
-                              )
-                            }
-                          />
-                        )}
-                      </Show>
-                    </div>
-                  );
-                }}
-              </For>
+              <MessageRows
+                messages={messages()}
+                modelChangeMap={modelChangeMap()}
+                lastAssistantID={lastAssistantID()}
+                previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
+                fileEditStackGroupMap={assistantStackGroupMap()}
+                assistantDialogSummaryMap={assistantDialogSummaryMap()}
+                hasBuildAgent={hasBuildAgent()}
+                latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+              />
             }
           >
             <VirtualizedContent
@@ -647,69 +608,87 @@ function VirtualizedContent(props: {
       <Show when={props.visibleRange.topPad > 0}>
         <div style={{ height: `${props.visibleRange.topPad}px` }} />
       </Show>
-      <For each={visible()}>
-        {(msg) => {
-          const changeLabel = props.modelChangeMap.get(msg.info.id) ?? null;
-          return (
-            <div
-              data-msg-id={msg.info.id}
-              class={`interactive-item-container ${
-                msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
-              } ${
-                props.fileEditStackGroupMap.get(msg.info.id)
-                  ? `interactive-response-file-edit-group interactive-response-file-edit-group-${props.fileEditStackGroupMap.get(msg.info.id)}`
-                  : ''
-              }`}
-            >
-              <Show when={changeLabel}>
-                <div class="model-change-indicator">
-                  <span class="model-change-label">Switched to {changeLabel}</span>
-                </div>
-              </Show>
-              <MessageComponent
-                info={msg.info}
-                parts={msg.parts}
-                isLastAssistant={msg.info.id === props.lastAssistantID}
-                highlightFinalAnswer={props.assistantDialogSummaryMap.has(msg.info.id)}
-                highlightPlanningAnswer={
-                  props.assistantDialogSummaryMap.has(msg.info.id) &&
-                  isAssistantMessage(msg.info) &&
-                  isPlanningAssistantMessage(msg.info)
-                }
-                previousTrailingFileEventSignature={
-                  props.previousTrailingFileEventSignatureMap.get(msg.info.id) ?? null
-                }
-                fileEditStackGroup={props.fileEditStackGroupMap.get(msg.info.id) ?? null}
-                streamingPartId={state.streamingPartId}
-                streamingText={state.streamingText}
-              />
-              <Show when={props.assistantDialogSummaryMap.get(msg.info.id)}>
-                {(summary) => (
-                  <AssistantDialogSummary
-                    summary={summary()}
-                    showImplementPlanAction={
-                      props.hasBuildAgent &&
-                      isAssistantMessage(msg.info) &&
-                      isPlanningAssistantMessage(msg.info) &&
-                      msg.info.id === props.latestPlanImplementationMessageId
-                    }
-                    onImplementPlan={() =>
-                      void implementPlan(
-                        buildPlanImplementationPrompt(msg.parts),
-                        msg.info.sessionID
-                      )
-                    }
-                  />
-                )}
-              </Show>
-            </div>
-          );
-        }}
-      </For>
+      <MessageRows
+        messages={visible()}
+        modelChangeMap={props.modelChangeMap}
+        lastAssistantID={props.lastAssistantID}
+        previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
+        fileEditStackGroupMap={props.fileEditStackGroupMap}
+        assistantDialogSummaryMap={props.assistantDialogSummaryMap}
+        hasBuildAgent={props.hasBuildAgent}
+        latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
+      />
       <Show when={props.visibleRange.bottomPad > 0}>
         <div style={{ height: `${props.visibleRange.bottomPad}px` }} />
       </Show>
     </>
+  );
+}
+
+function MessageRows(
+  props: { messages: Array<{ info: Message; parts: Part[] }> } & MessageRowSharedProps
+) {
+  return <For each={props.messages}>{(msg) => <MessageRow msg={msg} {...props} />}</For>;
+}
+
+function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps) {
+  const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
+  const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
+  const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
+  const highlightPlanningAnswer = () =>
+    props.assistantDialogSummaryMap.has(props.msg.info.id) &&
+    isAssistantMessage(props.msg.info) &&
+    isPlanningAssistantMessage(props.msg.info);
+
+  return (
+    <div
+      data-msg-id={props.msg.info.id}
+      class={`interactive-item-container ${
+        props.msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
+      } ${
+        fileEditStackGroup()
+          ? `interactive-response-file-edit-group interactive-response-file-edit-group-${fileEditStackGroup()}`
+          : ''
+      }`}
+    >
+      <Show when={changeLabel()}>
+        <div class="model-change-indicator">
+          <span class="model-change-label">Switched to {changeLabel()}</span>
+        </div>
+      </Show>
+      <MessageComponent
+        info={props.msg.info}
+        parts={props.msg.parts}
+        isLastAssistant={props.msg.info.id === props.lastAssistantID}
+        highlightFinalAnswer={props.assistantDialogSummaryMap.has(props.msg.info.id)}
+        highlightPlanningAnswer={highlightPlanningAnswer()}
+        previousTrailingFileEventSignature={
+          props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
+        }
+        fileEditStackGroup={fileEditStackGroup()}
+        streamingPartId={state.streamingPartId}
+        streamingText={state.streamingText}
+      />
+      <Show when={summary()}>
+        {(assistantSummary) => (
+          <AssistantDialogSummary
+            summary={assistantSummary()}
+            showImplementPlanAction={
+              props.hasBuildAgent &&
+              isAssistantMessage(props.msg.info) &&
+              isPlanningAssistantMessage(props.msg.info) &&
+              props.msg.info.id === props.latestPlanImplementationMessageId
+            }
+            onImplementPlan={() =>
+              void implementPlan(
+                buildPlanImplementationPrompt(props.msg.parts),
+                props.msg.info.sessionID
+              )
+            }
+          />
+        )}
+      </Show>
+    </div>
   );
 }
 

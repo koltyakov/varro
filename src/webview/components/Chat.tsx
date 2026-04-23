@@ -35,6 +35,28 @@ type SessionGroups = {
   subagents: (typeof state.sessions)[number][];
 };
 
+type HeaderSessionCounts = {
+  running: number;
+  attention: number;
+  failed: number;
+  planReady: number;
+  sidebarRunning: number;
+  sidebarAttention: number;
+  sidebarFailed: number;
+  sidebarPlanReady: number;
+};
+
+type SessionIndicatorSets = {
+  subagentCounts: Map<string, number>;
+  permissionIds: Set<string>;
+  questionIds: Set<string>;
+  runningIds: Set<string>;
+  failedIds: Set<string>;
+  attentionIds: Set<string>;
+  planReadyIds: Set<string>;
+  newlyCompletedIds: Set<string>;
+};
+
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
 
@@ -45,6 +67,9 @@ export function Chat() {
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
+  const sessionsById = createMemo(
+    () => new Map(state.sessions.map((session) => [session.id, session]))
+  );
   const shouldRenderWorkspace = () => !showSessionPicker() || isDesktopSessionLayout();
 
   onMount(() => {
@@ -71,59 +96,29 @@ export function Chat() {
 
   const activeTitle = () => {
     if (!state.activeSessionId) return 'New Chat';
-    const session = state.sessions.find((s) => s.id === state.activeSessionId);
+    const session = sessionsById().get(state.activeSessionId);
     return normalizeSessionTitle(session?.title) || 'New Chat';
   };
 
-  const runningSessionsCount = createMemo(() =>
-    getHeaderRunningCount(
+  const headerSessionCounts = createMemo(() =>
+    getHeaderSessionCounts(
       primarySessions(),
+      state.activeSessionId,
+      showSessionPicker(),
       (sessionId) => isRunningSession(sessionId),
-      state.activeSessionId,
-      showSessionPicker()
-    )
-  );
-  const attentionSessionsCount = createMemo(() =>
-    getHeaderAttentionCount(
-      primarySessions(),
       (sessionId) => isSessionAwaitingInput(sessionId),
-      state.activeSessionId,
-      showSessionPicker()
-    )
-  );
-  const failedSessionsCount = createMemo(() =>
-    getHeaderFailedCount(
-      primarySessions(),
       (sessionId) => isFailedSession(sessionId),
-      state.activeSessionId,
-      showSessionPicker()
+      (session) => isPlanReadySession(session)
     )
   );
-  const planReadySessionsCount = createMemo(() =>
-    getHeaderPlanReadyCount(
-      primarySessions(),
-      (session) => isPlanReadySession(session),
-      state.activeSessionId,
-      showSessionPicker()
-    )
-  );
-  const sessionSidebarRunningCount = createMemo(() =>
-    getHeaderRunningCount(primarySessions(), (sessionId) => isRunningSession(sessionId), null, true)
-  );
-  const sessionSidebarAttentionCount = createMemo(() =>
-    getHeaderAttentionCount(
-      primarySessions(),
-      (sessionId) => isSessionAwaitingInput(sessionId),
-      null,
-      true
-    )
-  );
-  const sessionSidebarFailedCount = createMemo(() =>
-    getHeaderFailedCount(primarySessions(), (sessionId) => isFailedSession(sessionId), null, true)
-  );
-  const sessionSidebarPlanReadyCount = createMemo(() =>
-    getHeaderPlanReadyCount(primarySessions(), (session) => isPlanReadySession(session), null, true)
-  );
+  const runningSessionsCount = () => headerSessionCounts().running;
+  const attentionSessionsCount = () => headerSessionCounts().attention;
+  const failedSessionsCount = () => headerSessionCounts().failed;
+  const planReadySessionsCount = () => headerSessionCounts().planReady;
+  const sessionSidebarRunningCount = () => headerSessionCounts().sidebarRunning;
+  const sessionSidebarAttentionCount = () => headerSessionCounts().sidebarAttention;
+  const sessionSidebarFailedCount = () => headerSessionCounts().sidebarFailed;
+  const sessionSidebarPlanReadyCount = () => headerSessionCounts().sidebarPlanReady;
 
   createEffect(() => {
     if (!showSessionPicker()) {
@@ -184,7 +179,7 @@ export function Chat() {
   const activeSubagentParent = createMemo(() => {
     const parentId = subagentParentId();
     if (!parentId) return null;
-    return state.sessions.find((session) => session.id === parentId) || null;
+    return sessionsById().get(parentId) || null;
   });
   const sessionListFilterLabel = createMemo(() => {
     if (subagentParentId()) return 'Sub-agents';
@@ -510,6 +505,51 @@ export function getHeaderPlanReadyCount(
   }, 0);
 }
 
+function getHeaderSessionCounts(
+  sessions: typeof state.sessions,
+  activeSessionId: string | null,
+  isSessionPickerOpen: boolean,
+  isRunning: (sessionId: string) => boolean,
+  isNeedingAttention: (sessionId: string) => boolean,
+  isFailed: (sessionId: string) => boolean,
+  isPlanReady: (session: (typeof state.sessions)[number]) => boolean
+): HeaderSessionCounts {
+  const counts: HeaderSessionCounts = {
+    running: 0,
+    attention: 0,
+    failed: 0,
+    planReady: 0,
+    sidebarRunning: 0,
+    sidebarAttention: 0,
+    sidebarFailed: 0,
+    sidebarPlanReady: 0,
+  };
+
+  for (const session of sessions) {
+    if (!isPrimarySession(session)) continue;
+
+    const includeHeader = isSessionPickerOpen || session.id !== activeSessionId;
+    if (isFailed(session.id)) {
+      counts.sidebarFailed += 1;
+      if (includeHeader) counts.failed += 1;
+    }
+    if (isPlanReady(session)) {
+      counts.sidebarPlanReady += 1;
+      if (includeHeader) counts.planReady += 1;
+    }
+    if (isNeedingAttention(session.id)) {
+      counts.sidebarAttention += 1;
+      if (includeHeader) counts.attention += 1;
+    }
+    if (isRunning(session.id)) {
+      counts.sidebarRunning += 1;
+      if (includeHeader) counts.running += 1;
+    }
+  }
+
+  return counts;
+}
+
 export function groupSessions(
   sessions: typeof state.sessions,
   isRunning: (sessionId: string) => boolean,
@@ -738,18 +778,16 @@ function SessionListView(props: {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
 
-  const isSessionNeedingAttention = (sessionId: string) =>
-    !isRunningSession(sessionId) && isSessionAwaitingInput(sessionId);
-  const isSessionFailed = (sessionId: string) => isFailedSession(sessionId);
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
+  const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const groupedSessions = createMemo(() =>
     groupSessions(
       state.sessions,
-      (sessionId) => isRunningSession(sessionId),
-      (sessionId) => isSessionNeedingAttention(sessionId),
-      (sessionId) => isSessionFailed(sessionId),
-      (session) => isPlanReadySession(session),
-      (session) => isSessionUnread(session.id, session.time.updated),
+      (sessionId) => sessionIndicators().runningIds.has(sessionId),
+      (sessionId) => sessionIndicators().attentionIds.has(sessionId),
+      (sessionId) => sessionIndicators().failedIds.has(sessionId),
+      (session) => sessionIndicators().planReadyIds.has(session.id),
+      (session) => sessionIndicators().newlyCompletedIds.has(session.id),
       now()
     )
   );
@@ -760,14 +798,6 @@ function SessionListView(props: {
   const newlyCompletedSessions = () => groupedSessions().newlyCompleted;
   const surfacedOtherSessions = () => groupedSessions().surfacedOther;
   const overflowOtherSessions = () => groupedSessions().overflowOther;
-  const subagentCounts = createMemo(() => {
-    const counts = new Map<string, number>();
-    for (const session of state.sessions) {
-      if (!session.parentID) continue;
-      counts.set(session.parentID, (counts.get(session.parentID) || 0) + 1);
-    }
-    return counts;
-  });
   const subagentSessions = createMemo(() =>
     getSubagentSessionsForParent(state.sessions, props.subagentParentId ?? null)
   );
@@ -776,10 +806,10 @@ function SessionListView(props: {
       ? getPrimarySessionsForFilter(
           primarySessions(),
           props.sessionFilter,
-          (sessionId) => isRunningSession(sessionId),
-          (sessionId) => isSessionNeedingAttention(sessionId),
-          (sessionId) => isSessionFailed(sessionId),
-          (session) => isPlanReadySession(session)
+          (sessionId) => sessionIndicators().runningIds.has(sessionId),
+          (sessionId) => sessionIndicators().attentionIds.has(sessionId),
+          (sessionId) => sessionIndicators().failedIds.has(sessionId),
+          (session) => sessionIndicators().planReadyIds.has(session.id)
         )
       : []
   );
@@ -903,7 +933,14 @@ function SessionListView(props: {
                 focusedIndex={focusedIndex}
                 setFocusedIndex={setFocusedIndex}
                 now={now}
-                subagentCount={subagentCounts().get(session.id) || 0}
+                subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
+                hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
+                hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
+                isRunning={sessionIndicators().runningIds.has(session.id)}
+                isFailed={sessionIndicators().failedIds.has(session.id)}
+                needsAttention={sessionIndicators().attentionIds.has(session.id)}
+                isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
+                isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
                 onOpenSubagents={props.onOpenSubagents}
                 embedded={props.embedded}
               />
@@ -921,7 +958,14 @@ function SessionListView(props: {
                 focusedIndex={focusedIndex}
                 setFocusedIndex={setFocusedIndex}
                 now={now}
-                subagentCount={subagentCounts().get(session.id) || 0}
+                subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
+                hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
+                hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
+                isRunning={sessionIndicators().runningIds.has(session.id)}
+                isFailed={sessionIndicators().failedIds.has(session.id)}
+                needsAttention={sessionIndicators().attentionIds.has(session.id)}
+                isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
+                isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
                 onOpenSubagents={props.onOpenSubagents}
                 embedded={props.embedded}
               />
@@ -949,7 +993,14 @@ function SessionListView(props: {
                   focusedIndex={focusedIndex}
                   setFocusedIndex={setFocusedIndex}
                   now={now}
-                  subagentCount={subagentCounts().get(session.id) || 0}
+                  subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
+                  hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
+                  hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
+                  isRunning={sessionIndicators().runningIds.has(session.id)}
+                  isFailed={sessionIndicators().failedIds.has(session.id)}
+                  needsAttention={sessionIndicators().attentionIds.has(session.id)}
+                  isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
+                  isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
                   onOpenSubagents={props.onOpenSubagents}
                   embedded={props.embedded}
                 />
@@ -969,43 +1020,37 @@ function SessionListItem(props: {
   setFocusedIndex: (index: number) => void;
   now: () => number;
   subagentCount: number;
+  hasPermissionRequest: boolean;
+  hasQuestionRequest: boolean;
+  isRunning: boolean;
+  isFailed: boolean;
+  needsAttention: boolean;
+  isNewlyCompleted: boolean;
+  isCompletedPlanSession: boolean;
   onOpenSubagents?: (parentSessionId: string) => void;
   embedded?: boolean;
 }) {
   const isActive = () => props.session.id === state.activeSessionId;
   const isFocused = () => props.focusedIndex() === props.itemIndex();
   const status = () => state.sessionStatus[props.session.id];
-  const hasPermissionRequest = () =>
-    state.permissions.some((permission) => permission.sessionID === props.session.id);
-  const hasQuestionRequest = () =>
-    state.questions.some((question) => question.sessionID === props.session.id);
-  const isRunning = () => isRunningSession(props.session.id);
-  const isFailed = () => isFailedSession(props.session.id);
-  const needsAttention = () => !isRunning() && isSessionAwaitingInput(props.session.id);
-  const isNewlyCompleted = () =>
-    !isRunning() &&
-    !isFailed() &&
-    !needsAttention() &&
-    isSessionUnread(props.session.id, props.session.time.updated);
-  const isCompletedPlanSession = () => isPlanReadySession(props.session);
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
   const subagentLabel = () =>
     `Show ${props.subagentCount} sub-agent session${props.subagentCount === 1 ? '' : 's'}`;
   const indicatorClass = () => {
-    if (isRunning()) return 'is-running';
-    if (isFailed()) return 'is-failed';
-    if (needsAttention()) return 'is-attention';
-    if (isCompletedPlanSession()) return 'is-plan-completed';
+    if (props.isRunning) return 'is-running';
+    if (props.isFailed) return 'is-failed';
+    if (props.needsAttention) return 'is-attention';
+    if (props.isCompletedPlanSession) return 'is-plan-completed';
     return 'is-completed';
   };
   const indicatorTitle = () => {
-    if (isRunning()) return status()?.type === 'retry' ? 'Retrying' : 'Running';
-    if (isFailed()) return 'Failed';
-    if (hasPermissionRequest() && hasQuestionRequest()) return 'Attention needed';
-    if (hasPermissionRequest()) return 'Permission request pending';
-    if (hasQuestionRequest()) return 'Attention needed';
-    if (needsAttention()) return 'Input needed';
-    if (isCompletedPlanSession()) return 'Plan completed';
+    if (props.isRunning) return status()?.type === 'retry' ? 'Retrying' : 'Running';
+    if (props.isFailed) return 'Failed';
+    if (props.hasPermissionRequest && props.hasQuestionRequest) return 'Attention needed';
+    if (props.hasPermissionRequest) return 'Permission request pending';
+    if (props.hasQuestionRequest) return 'Attention needed';
+    if (props.needsAttention) return 'Attention needed';
+    if (props.isCompletedPlanSession) return 'Plan completed';
     return 'Completed';
   };
 
@@ -1023,7 +1068,7 @@ function SessionListItem(props: {
         }}
       >
         <Show
-          when={isRunning() || isFailed() || needsAttention() || isNewlyCompleted()}
+          when={props.isRunning || props.isFailed || props.needsAttention || props.isNewlyCompleted}
           fallback={<span class="session-item-indicator-spacer" />}
         >
           <span
@@ -1167,6 +1212,61 @@ function PlanReadyBadge(props: { count: number; onClick: () => void }) {
       </button>
     </Show>
   );
+}
+
+function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
+  const subagentCounts = new Map<string, number>();
+  const permissionIds = new Set(state.permissions.map((permission) => permission.sessionID));
+  const questionIds = new Set(state.questions.map((question) => question.sessionID));
+  const runningIds = new Set<string>();
+  const failedIds = new Set<string>();
+  const attentionIds = new Set<string>();
+  const planReadyIds = new Set<string>();
+  const newlyCompletedIds = new Set<string>();
+
+  for (const session of sessions) {
+    if (session.parentID) {
+      subagentCounts.set(session.parentID, (subagentCounts.get(session.parentID) || 0) + 1);
+    }
+
+    const sessionId = session.id;
+    const failed = isFailedSession(sessionId);
+    const hasPrompt = permissionIds.has(sessionId) || questionIds.has(sessionId);
+    const needsAttention = !failed && (hasPrompt || isSessionAwaitingInput(sessionId));
+    const running = !needsAttention && isRunningSession(sessionId);
+
+    if (failed) {
+      failedIds.add(sessionId);
+      continue;
+    }
+    if (needsAttention) {
+      attentionIds.add(sessionId);
+      continue;
+    }
+    if (running) {
+      runningIds.add(sessionId);
+      continue;
+    }
+    if (!isSessionUnread(sessionId, session.time.updated)) {
+      continue;
+    }
+    if (getSelectedAgentForSession(sessionId) === 'plan') {
+      planReadyIds.add(sessionId);
+      continue;
+    }
+    newlyCompletedIds.add(sessionId);
+  }
+
+  return {
+    subagentCounts,
+    permissionIds,
+    questionIds,
+    runningIds,
+    failedIds,
+    attentionIds,
+    planReadyIds,
+    newlyCompletedIds,
+  };
 }
 
 function isPlanReadySession(session: (typeof state.sessions)[number]) {
