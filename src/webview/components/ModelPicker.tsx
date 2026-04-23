@@ -140,7 +140,11 @@ export function ModelPicker(props: {
   };
 
   return (
-    <div class="absolute inset-x-0 bottom-full z-50 mb-1 px-3" onClick={props.onClose}>
+    <div
+      class="absolute inset-x-0 z-50"
+      onClick={props.onClose}
+      style={{ bottom: 'calc(100% + 10px)' }}
+    >
       <div
         ref={(el) => {
           menuRef = el;

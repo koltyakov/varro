@@ -102,7 +102,7 @@ describe('part utils', () => {
     expect(shouldShowAssistantPartInline(reasoningPart, false)).toBe(true);
   });
 
-  it('hides reasoning and workspace directory text in highlighted cards', () => {
+  it('keeps reasoning but hides workspace directory text in highlighted cards', () => {
     const workspaceTextPart: Part = {
       id: 'text-1',
       sessionID: 'session-1',
@@ -129,7 +129,7 @@ describe('part utils', () => {
     expect(isWorkspaceDirectoryText(workspaceTextPart.text)).toBe(true);
     expect(shouldShowAssistantPartInHighlightedCard(workspaceTextPart)).toBe(false);
     expect(shouldShowAssistantPartInHighlightedCard(visibleTextPart)).toBe(true);
-    expect(shouldShowAssistantPartInHighlightedCard(reasoningPart)).toBe(false);
+    expect(shouldShowAssistantPartInHighlightedCard(reasoningPart)).toBe(true);
   });
 
   it('identifies the last visible text part when highlighting is enabled for the turn', () => {

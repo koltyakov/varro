@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import {
   isModelVisible,
   setModelVisible,
@@ -19,6 +19,7 @@ type SettingsModel = SettingsProvider['models'][string];
 
 export function SettingsPanel() {
   const [query, setQuery] = createSignal('');
+  let bodyRef: HTMLDivElement | undefined;
 
   const normalizedQuery = () => query().trim().toLocaleLowerCase();
 
@@ -49,79 +50,99 @@ export function SettingsPanel() {
       .filter((entry) => entry.models.length > 0);
   };
 
+  function updateScrollbarInset() {
+    if (!bodyRef) return;
+    const scrollbarInset = Math.max(0, bodyRef.offsetWidth - bodyRef.clientWidth);
+    bodyRef.parentElement?.style.setProperty('--settings-scrollbar-inset', `${scrollbarInset}px`);
+  }
+
+  onMount(() => {
+    updateScrollbarInset();
+    if (!bodyRef) return;
+    const observer = new ResizeObserver(() => updateScrollbarInset());
+    observer.observe(bodyRef);
+    onCleanup(() => observer.disconnect());
+  });
+
   return (
     <div class="settings-panel">
       <div class="settings-header">
-        <div class="settings-header-left">
-          <button class="chat-header-btn" onClick={() => setShowSettings(false)} title="Back">
+        <div class="settings-header-inner">
+          <div class="settings-header-left">
+            <button class="chat-header-btn" onClick={() => setShowSettings(false)} title="Back">
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+              </svg>
+            </button>
+            <span class="settings-header-title">Models</span>
+          </div>
+          <button
+            type="button"
+            class="chat-header-btn"
+            onClick={openProviderSetup}
+            title="Add provider"
+            aria-label="Add provider"
+          >
             <svg viewBox="0 0 16 16" fill="currentColor">
-              <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+              <path d="M8 2.25a.75.75 0 01.75.75v4.25H13a.75.75 0 010 1.5H8.75V13a.75.75 0 01-1.5 0V8.75H3a.75.75 0 010-1.5h4.25V3A.75.75 0 018 2.25z" />
             </svg>
           </button>
-          <span class="settings-header-title">Models</span>
         </div>
-        <button
-          type="button"
-          class="chat-header-btn"
-          onClick={openProviderSetup}
-          title="Add provider"
-          aria-label="Add provider"
-        >
-          <svg viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 2.25a.75.75 0 01.75.75v4.25H13a.75.75 0 010 1.5H8.75V13a.75.75 0 01-1.5 0V8.75H3a.75.75 0 010-1.5h4.25V3A.75.75 0 018 2.25z" />
-          </svg>
-        </button>
       </div>
 
       <Show when={state.providers.length > 0}>
         <div class="settings-toolbar">
-          <div class="settings-search">
-            <input
-              type="text"
-              class="settings-search-input"
-              value={query()}
-              onInput={(e) => setQuery(e.currentTarget.value)}
-              placeholder="Filter providers or models"
-              aria-label="Filter providers or models"
-              spellcheck={false}
-            />
-            <Show when={query().length > 0}>
-              <button
-                type="button"
-                class="settings-search-clear"
-                onClick={() => setQuery('')}
-                aria-label="Clear filter"
-                title="Clear filter"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
-                </svg>
-              </button>
-            </Show>
+          <div class="settings-toolbar-inner">
+            <div class="settings-search">
+              <input
+                type="text"
+                class="settings-search-input"
+                value={query()}
+                onInput={(e) => setQuery(e.currentTarget.value)}
+                placeholder="Filter providers or models"
+                aria-label="Filter providers or models"
+                spellcheck={false}
+              />
+              <Show when={query().length > 0}>
+                <button
+                  type="button"
+                  class="settings-search-clear"
+                  onClick={() => setQuery('')}
+                  aria-label="Clear filter"
+                  title="Clear filter"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
+                  </svg>
+                </button>
+              </Show>
+            </div>
           </div>
         </div>
       </Show>
 
-      <div class="settings-body">
-        <Show
-          when={state.providers.length > 0}
-          fallback={<div class="settings-empty">No providers configured</div>}
-        >
+      <div class="settings-body" ref={(el) => (bodyRef = el)}>
+        <div class="settings-body-inner">
           <Show
-            when={filteredProviders().length > 0}
-            fallback={<div class="settings-empty">No matching models</div>}
+            when={state.providers.length > 0}
+            fallback={<div class="settings-empty">No providers configured</div>}
           >
-            <For each={filteredProviders()}>
-              {({ provider, models }) => (
-                <ProviderSection
-                  provider={provider}
-                  models={models}
-                  forceExpanded={normalizedQuery().length > 0}
-                />
-              )}
-            </For>
+            <Show
+              when={filteredProviders().length > 0}
+              fallback={<div class="settings-empty">No matching models</div>}
+            >
+              <For each={filteredProviders()}>
+                {({ provider, models }) => (
+                  <ProviderSection
+                    provider={provider}
+                    models={models}
+                    forceExpanded={normalizedQuery().length > 0}
+                  />
+                )}
+              </For>
+            </Show>
           </Show>
-        </Show>
+        </div>
       </div>
     </div>
   );

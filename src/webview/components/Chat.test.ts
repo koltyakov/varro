@@ -24,6 +24,7 @@ import {
 import {
   hasActiveUsageLimit,
   setSessionFailed,
+  setShowSessionPicker,
   setSessionUsageLimit,
   setState,
 } from '../lib/state';
@@ -31,16 +32,46 @@ import {
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+let originalMatchMedia: typeof globalThis.matchMedia | undefined;
+let desktopMediaQueryMatches = false;
+let desktopMediaQueryListeners = new Set<(event: MediaQueryListEvent) => void>();
+
+function dispatchDesktopMediaQueryChange(matches: boolean) {
+  desktopMediaQueryMatches = matches;
+  const event = { matches, media: '(min-width: 1400px)' } as MediaQueryListEvent;
+  desktopMediaQueryListeners.forEach((listener) => listener(event));
+}
 
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
+  originalMatchMedia = globalThis.matchMedia;
+  desktopMediaQueryMatches = false;
+  desktopMediaQueryListeners = new Set();
   globalThis.ResizeObserver = class ResizeObserver {
     observe() {}
     unobserve() {}
     disconnect() {}
   } as typeof ResizeObserver;
+  globalThis.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: query === '(min-width: 1400px)' ? desktopMediaQueryMatches : false,
+    media: query,
+    onchange: null,
+    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      if (query === '(min-width: 1400px)') desktopMediaQueryListeners.add(listener);
+    },
+    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      if (query === '(min-width: 1400px)') desktopMediaQueryListeners.delete(listener);
+    },
+    addListener: (listener: (event: MediaQueryListEvent) => void) => {
+      if (query === '(min-width: 1400px)') desktopMediaQueryListeners.add(listener);
+    },
+    removeListener: (listener: (event: MediaQueryListEvent) => void) => {
+      if (query === '(min-width: 1400px)') desktopMediaQueryListeners.delete(listener);
+    },
+    dispatchEvent: () => true,
+  }));
 });
 
 afterEach(() => {
@@ -57,7 +88,9 @@ afterEach(() => {
   setState('lastSeenSessions', {});
   setState('sessionSelectedAgents', {});
   setState('activeSessionId', null);
+  setShowSessionPicker(false);
   globalThis.ResizeObserver = originalResizeObserver;
+  globalThis.matchMedia = originalMatchMedia;
   vi.restoreAllMocks();
 });
 
@@ -74,13 +107,15 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
 }
 
 describe('groupSessions', () => {
+  const now = 2 * 24 * 60 * 60 * 1_000;
+
   it('separates sub-agent sessions from primary session groups', () => {
     const sessions = [
-      session('running-primary', 500),
-      session('attention-primary', 400),
-      session('other-primary', 300),
-      session('subagent-newer', 600, { parentID: 'parent-1' }),
-      session('subagent-older', 200, { parentID: 'parent-2' }),
+      session('running-primary', now - 1_000),
+      session('attention-primary', now - 2_000),
+      session('other-primary', now - 3_000),
+      session('subagent-newer', now - 500, { parentID: 'parent-1' }),
+      session('subagent-older', now - 4_000, { parentID: 'parent-2' }),
     ];
 
     const groups = groupSessions(
@@ -90,7 +125,7 @@ describe('groupSessions', () => {
       () => false,
       () => false,
       () => false,
-      10
+      now
     );
 
     expect(groups.failed).toEqual([]);
@@ -103,13 +138,13 @@ describe('groupSessions', () => {
     expect(groups.subagents.map((item) => item.id)).toEqual(['subagent-newer', 'subagent-older']);
   });
 
-  it('caps surfaced primary others without affecting sub-agent ordering', () => {
+  it('moves primary sessions older than one day into show more without affecting sub-agent ordering', () => {
     const sessions = [
-      session('other-1', 500),
-      session('subagent-1', 490, { parentID: 'parent-1' }),
-      session('other-2', 480),
-      session('subagent-2', 470, { parentID: 'parent-2' }),
-      session('other-3', 460),
+      session('other-recent-1', now - 1_000),
+      session('subagent-1', now - 2_000, { parentID: 'parent-1' }),
+      session('other-recent-2', now - 12 * 60 * 60 * 1_000),
+      session('subagent-2', now - 3_000, { parentID: 'parent-2' }),
+      session('other-old', now - (24 * 60 * 60 * 1_000 + 1)),
     ];
 
     const groups = groupSessions(
@@ -119,25 +154,28 @@ describe('groupSessions', () => {
       () => false,
       () => false,
       () => false,
-      2
+      now
     );
 
-    expect(groups.surfacedOther.map((item) => item.id)).toEqual(['other-1', 'other-2']);
-    expect(groups.overflowOther.map((item) => item.id)).toEqual(['other-3']);
+    expect(groups.surfacedOther.map((item) => item.id)).toEqual([
+      'other-recent-1',
+      'other-recent-2',
+    ]);
+    expect(groups.overflowOther.map((item) => item.id)).toEqual(['other-old']);
     expect(groups.subagents.map((item) => item.id)).toEqual(['subagent-1', 'subagent-2']);
   });
 
-  it('keeps priority statuses outside others and sorts them by priority then age', () => {
+  it('sorts primary sessions by age regardless of status', () => {
     const sessions = [
-      session('other-newest', 900),
-      session('running-newer', 800),
-      session('attention-older', 700),
-      session('failed-older', 600),
-      session('plan-ready-newer', 500),
-      session('failed-newer', 400),
-      session('attention-newer', 300),
-      session('plan-ready-older', 200),
-      session('other-older', 100),
+      session('other-newest', now - 1_000),
+      session('running-newer', now - 2_000),
+      session('attention-older', now - 3_000),
+      session('failed-older', now - 4_000),
+      session('plan-ready-newer', now - 5_000),
+      session('failed-newer', now - 6_000),
+      session('attention-newer', now - 7_000),
+      session('plan-ready-older', now - 8_000),
+      session('other-older', now - (24 * 60 * 60 * 1_000 + 1)),
     ];
 
     const groups = groupSessions(
@@ -147,7 +185,7 @@ describe('groupSessions', () => {
       (sessionId) => sessionId === 'failed-older' || sessionId === 'failed-newer',
       (item) => item.id === 'plan-ready-newer' || item.id === 'plan-ready-older',
       () => false,
-      1
+      now
     );
 
     expect(groups.failed.map((item) => item.id)).toEqual(['failed-older', 'failed-newer']);
@@ -159,6 +197,30 @@ describe('groupSessions', () => {
     expect(groups.running.map((item) => item.id)).toEqual(['running-newer']);
     expect(groups.surfacedOther.map((item) => item.id)).toEqual(['other-newest']);
     expect(groups.overflowOther.map((item) => item.id)).toEqual(['other-older']);
+  });
+
+  it('preserves recency order within each status group after age-only sorting', () => {
+    const sessions = [
+      session('failed-newer', now - 1_000),
+      session('attention-newer', now - 2_000),
+      session('failed-older', now - 3_000),
+      session('attention-older', now - 4_000),
+      session('other', now - 5_000),
+    ];
+
+    const groups = groupSessions(
+      sessions,
+      () => false,
+      (sessionId) => sessionId === 'attention-newer' || sessionId === 'attention-older',
+      (sessionId) => sessionId === 'failed-newer' || sessionId === 'failed-older',
+      () => false,
+      () => false,
+      now
+    );
+
+    expect(groups.failed.map((item) => item.id)).toEqual(['failed-newer', 'failed-older']);
+    expect(groups.attention.map((item) => item.id)).toEqual(['attention-newer', 'attention-older']);
+    expect(groups.surfacedOther.map((item) => item.id)).toEqual(['other']);
   });
 });
 
@@ -422,6 +484,136 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-failed-badge')?.textContent).toBe('');
     expect(container?.querySelector('.chat-header-attention-badge')?.textContent).toBe('');
     expect(container?.querySelector('.chat-header-plan-badge')?.textContent).toBe('');
+  });
+
+  it('renders an embedded session sidebar alongside the active chat view', () => {
+    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-workspace')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-session-sidebar')).toBeInstanceOf(HTMLElement);
+    expect(container?.querySelector('.session-list-view-sidebar')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('shows only the title in the desktop chat header', () => {
+    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', {
+      'session-2': { type: 'busy' },
+    });
+
+    cleanup = render(() => Chat(), container!);
+
+    const desktopHeader = container?.querySelector('.chat-header-chat-desktop');
+    const desktopActions = desktopHeader?.querySelector('.chat-header-actions');
+
+    expect(desktopHeader).toBeInstanceOf(HTMLDivElement);
+    expect(desktopHeader?.querySelector('.chat-header-title-text')?.textContent).toBe('session-1');
+    expect(desktopActions).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-running-badge')).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-running-count')).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-failed-badge')).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-attention-badge')).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-plan-badge')).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-btn[title="New chat"]')).toBeNull();
+  });
+
+  it('shows session status badges in the desktop session sidebar header', () => {
+    setState('sessions', [
+      session('running-1', 500),
+      session('failed-1', 400),
+      session('attention-1', 300),
+      session('plan-1', 200),
+      session('session-1', 100),
+    ]);
+    setState('activeSessionId', 'running-1');
+    setState('sessionStatus', {
+      'running-1': { type: 'busy' },
+    });
+    setState('failedSessionIds', ['failed-1']);
+    setState('questions', [{ id: 'question-1', sessionID: 'attention-1', questions: [] }]);
+    setState('lastSeenSessions', { 'plan-1': 0 });
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+
+    cleanup = render(() => Chat(), container!);
+
+    const sidebarHeader = container?.querySelector('.chat-session-sidebar-header');
+
+    expect(sidebarHeader?.querySelector('.chat-header-failed-badge')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(sidebarHeader?.querySelector('.chat-header-attention-badge')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(sidebarHeader?.querySelector('.chat-header-plan-badge')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(sidebarHeader?.querySelector('.chat-header-running-badge')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(sidebarHeader?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
+    expect(sidebarHeader?.querySelector('.chat-header-btn[title="New chat"]')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+  });
+
+  it('orders the default session list by age only', () => {
+    setState('sessions', [
+      session('running-newest', 500),
+      session('failed-middle', 400),
+      session('attention-oldest', 300),
+    ]);
+    setState('activeSessionId', 'running-newest');
+    setState('sessionStatus', {
+      'running-newest': { type: 'busy' },
+    });
+    setState('failedSessionIds', ['failed-middle']);
+    setState('questions', [{ id: 'question-1', sessionID: 'attention-oldest', questions: [] }]);
+
+    cleanup = render(() => Chat(), container!);
+
+    const sidebar = container?.querySelector('.session-list-view-sidebar');
+    const titles = Array.from(sidebar?.querySelectorAll('.session-item-title') ?? []).map((item) =>
+      item.textContent?.trim()
+    );
+
+    expect(titles).toEqual(['running-newest', 'failed-middle', 'attention-oldest']);
+  });
+
+  it('does not render the embedded session sidebar when the session picker is open', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-session-sidebar')).toBeNull();
+    expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('shows the desktop workspace with a blank chat when the session picker expands to large screens', async () => {
+    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
+    setState('activeSessionId', null);
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-session-sidebar')).toBeNull();
+    expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
+
+    dispatchDesktopMediaQueryChange(true);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-workspace')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-session-sidebar')).toBeInstanceOf(HTMLElement);
+    expect(container?.querySelector('.session-list-view-sidebar')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
+    expect(
+      container?.querySelector('.chat-header-chat-desktop .chat-header-title-text')?.textContent
+    ).toBe('New Chat');
   });
 });
 

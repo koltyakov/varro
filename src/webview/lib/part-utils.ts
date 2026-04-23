@@ -7,7 +7,7 @@ export function isWorkspaceDirectoryText(text: string) {
 }
 
 export function shouldShowAssistantPartInHighlightedCard(part: Part) {
-  if (part.type === 'reasoning') return false;
+  if (part.type === 'reasoning') return part.text.trim().length > 0;
   if (part.type === 'text') {
     return part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text);
   }

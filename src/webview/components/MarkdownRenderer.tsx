@@ -372,6 +372,14 @@ function applyTableColumnClasses(root: HTMLDivElement | undefined) {
   }
 }
 
+function applyCodeBlockCopyIcons(root: HTMLDivElement | undefined) {
+  if (!root) return;
+  const buttons = root.querySelectorAll<HTMLButtonElement>('button[data-copy]');
+  for (const button of buttons) {
+    button.innerHTML = copySvg;
+  }
+}
+
 export function MarkdownRenderer(props: MarkdownProps) {
   // oxlint-disable-next-line no-unassigned-vars
   let ref: HTMLDivElement | undefined;
@@ -411,7 +419,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   createEffect(() => {
     renderedHtml();
-    queueMicrotask(() => applyTableColumnClasses(ref));
+    queueMicrotask(() => {
+      applyTableColumnClasses(ref);
+      applyCodeBlockCopyIcons(ref);
+    });
   });
 
   const copyTimeouts = new Set<ReturnType<typeof setTimeout>>();

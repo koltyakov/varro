@@ -35,12 +35,30 @@ type SessionGroups = {
   subagents: (typeof state.sessions)[number][];
 };
 
+const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
+const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
+
 export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready';
 
 export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
+  const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
+  const shouldRenderWorkspace = () => !showSessionPicker() || isDesktopSessionLayout();
+
+  onMount(() => {
+    if (typeof window.matchMedia !== 'function') return;
+
+    const mediaQuery = window.matchMedia(DESKTOP_SESSION_LAYOUT_MEDIA_QUERY);
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsDesktopSessionLayout(event.matches);
+    };
+
+    setIsDesktopSessionLayout(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    onCleanup(() => mediaQuery.removeEventListener('change', handleChange));
+  });
 
   const shouldDiscardActiveBlankSession = () => {
     const sessionId = state.activeSessionId;
@@ -88,6 +106,23 @@ export function Chat() {
       state.activeSessionId,
       showSessionPicker()
     )
+  );
+  const sessionSidebarRunningCount = createMemo(() =>
+    getHeaderRunningCount(primarySessions(), (sessionId) => isRunningSession(sessionId), null, true)
+  );
+  const sessionSidebarAttentionCount = createMemo(() =>
+    getHeaderAttentionCount(
+      primarySessions(),
+      (sessionId) => isSessionAwaitingInput(sessionId),
+      null,
+      true
+    )
+  );
+  const sessionSidebarFailedCount = createMemo(() =>
+    getHeaderFailedCount(primarySessions(), (sessionId) => isFailedSession(sessionId), null, true)
+  );
+  const sessionSidebarPlanReadyCount = createMemo(() =>
+    getHeaderPlanReadyCount(primarySessions(), (session) => isPlanReadySession(session), null, true)
   );
 
   createEffect(() => {
@@ -168,101 +203,126 @@ export function Chat() {
   const shouldShowHeaderBadge = (filter: SessionListFilter) =>
     shouldShowSessionHeaderBadge(sessionFilter(), filter);
 
-  return (
-    <div class="interactive-session">
-      <div class="chat-header">
+  const renderSessionPickerHeader = (showNewChatButton = true, useSidebarCounts = false) => (
+    <>
+      <div class="chat-header-left">
         <Show
-          when={showSessionPicker()}
-          fallback={
-            <>
-              <div class="chat-header-left">
-                <button
-                  class="chat-header-btn"
-                  onClick={() => void openAllSessions()}
-                  title="Back to sessions"
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
-                  </svg>
-                </button>
-                <span class="chat-header-title-text">{activeTitle()}</span>
-              </div>
-              <div class="chat-header-actions">
-                <FailedSessionsBadge count={failedSessionsCount()} onClick={openFailedSessions} />
-                <AttentionSessionsBadge
-                  count={attentionSessionsCount()}
-                  onClick={openAttentionSessions}
-                />
-                <PlanReadyBadge count={planReadySessionsCount()} onClick={openPlanReadySessions} />
-                <RunningSessionsBadge
-                  count={runningSessionsCount()}
-                  onClick={openRunningSessions}
-                />
-                <button class="chat-header-btn" onClick={() => createSession()} title="New chat">
-                  <svg viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
-                  </svg>
-                </button>
-              </div>
-            </>
-          }
+          when={sessionListFilterLabel()}
+          fallback={<span class="chat-header-title-text">Sessions</span>}
         >
-          <div class="chat-header-left">
-            <Show
-              when={sessionListFilterLabel()}
-              fallback={<span class="chat-header-title-text">Sessions</span>}
-            >
-              {(label) => (
-                <>
-                  <span class="chat-header-filter-prefix">{sessionListFilterPrefix()}</span>
-                  <span class="chat-header-filter-chip" title={sessionListFilterTitle()}>
-                    <span class="chat-header-filter-chip-label">{label()}</span>
-                    <button
-                      type="button"
-                      class="chat-header-filter-chip-remove"
-                      onClick={clearSessionListView}
-                      title="Clear filter"
-                      aria-label={`Clear ${label()} filter`}
-                    >
-                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                        <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-                      </svg>
-                    </button>
-                  </span>
-                </>
-              )}
-            </Show>
-          </div>
-          <div class="chat-header-actions">
-            <Show when={shouldShowHeaderBadge('failed')}>
+          {(label) => (
+            <>
+              <span class="chat-header-filter-prefix">{sessionListFilterPrefix()}</span>
+              <span class="chat-header-filter-chip" title={sessionListFilterTitle()}>
+                <span class="chat-header-filter-chip-label">{label()}</span>
+                <button
+                  type="button"
+                  class="chat-header-filter-chip-remove"
+                  onClick={clearSessionListView}
+                  title="Clear filter"
+                  aria-label={`Clear ${label()} filter`}
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                  </svg>
+                </button>
+              </span>
+            </>
+          )}
+        </Show>
+      </div>
+      <div class="chat-header-actions">
+        <Show when={shouldShowHeaderBadge('failed')}>
+          <FailedSessionsBadge
+            count={useSidebarCounts ? sessionSidebarFailedCount() : failedSessionsCount()}
+            onClick={openFailedSessions}
+          />
+        </Show>
+        <Show when={shouldShowHeaderBadge('attention')}>
+          <AttentionSessionsBadge
+            count={useSidebarCounts ? sessionSidebarAttentionCount() : attentionSessionsCount()}
+            onClick={openAttentionSessions}
+          />
+        </Show>
+        <Show when={shouldShowHeaderBadge('plan-ready')}>
+          <PlanReadyBadge
+            count={useSidebarCounts ? sessionSidebarPlanReadyCount() : planReadySessionsCount()}
+            onClick={openPlanReadySessions}
+          />
+        </Show>
+        <Show when={shouldShowHeaderBadge('running')}>
+          <RunningSessionsBadge
+            count={useSidebarCounts ? sessionSidebarRunningCount() : runningSessionsCount()}
+            onClick={openRunningSessions}
+          />
+        </Show>
+        <Show when={showNewChatButton}>
+          <button
+            class="chat-header-btn"
+            onClick={() => {
+              createSession();
+              setShowSessionPicker(false);
+            }}
+            title="New chat"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
+            </svg>
+          </button>
+        </Show>
+      </div>
+    </>
+  );
+
+  const renderChatHeader = (showBackButton: boolean, showActions = true) => (
+    <>
+      <div class="chat-header-left">
+        <Show when={showBackButton}>
+          <button
+            class="chat-header-btn"
+            onClick={() => void openAllSessions()}
+            title="Back to sessions"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+            </svg>
+          </button>
+        </Show>
+        <span class="chat-header-title-text">{activeTitle()}</span>
+      </div>
+      <Show when={showActions}>
+        <div class="chat-header-actions">
+          <Show when={showActions}>
+            <>
               <FailedSessionsBadge count={failedSessionsCount()} onClick={openFailedSessions} />
-            </Show>
-            <Show when={shouldShowHeaderBadge('attention')}>
               <AttentionSessionsBadge
                 count={attentionSessionsCount()}
                 onClick={openAttentionSessions}
               />
-            </Show>
-            <Show when={shouldShowHeaderBadge('plan-ready')}>
               <PlanReadyBadge count={planReadySessionsCount()} onClick={openPlanReadySessions} />
-            </Show>
-            <Show when={shouldShowHeaderBadge('running')}>
-              <RunningSessionsBadge count={runningSessionsCount()} onClick={openRunningSessions} />
-            </Show>
-            <button
-              class="chat-header-btn"
-              onClick={() => {
-                createSession();
-                setShowSessionPicker(false);
-              }}
-              title="New chat"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor">
-                <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
-              </svg>
-            </button>
-          </div>
-        </Show>
+            </>
+          </Show>
+          <RunningSessionsBadge count={runningSessionsCount()} onClick={openRunningSessions} />
+          <button class="chat-header-btn" onClick={() => createSession()} title="New chat">
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
+            </svg>
+          </button>
+        </div>
+      </Show>
+    </>
+  );
+
+  return (
+    <div class="interactive-session">
+      <div
+        class={`chat-header ${shouldRenderWorkspace() ? 'chat-header-centered chat-header-chat-layout' : ''}`}
+      >
+        <div class="chat-header-inner">
+          <Show when={showSessionPicker()} fallback={renderChatHeader(true)}>
+            {renderSessionPickerHeader()}
+          </Show>
+        </div>
       </div>
 
       <Show
@@ -270,7 +330,11 @@ export function Chat() {
           state.serverStatus.state === 'running' && state.serverStatus.eventStream === 'degraded'
         }
       >
-        <div class="chat-transport-banner" role="status" aria-live="polite">
+        <div
+          class={`chat-transport-banner ${shouldRenderWorkspace() ? 'chat-main-column' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
           <div class="chat-transport-copy">
             <span class="chat-transport-title">Live updates are reconnecting</span>
             <span class="chat-transport-message">
@@ -281,7 +345,7 @@ export function Chat() {
       </Show>
 
       <Show
-        when={!showSessionPicker()}
+        when={shouldRenderWorkspace()}
         fallback={
           <SessionListView
             sessionFilter={sessionFilter()}
@@ -290,13 +354,37 @@ export function Chat() {
           />
         }
       >
-        <Show when={showSettings()}>
+        <Show when={showSettings() && !showSessionPicker()}>
           <SettingsPanel />
         </Show>
 
-        <MessageList />
+        <div class="chat-workspace">
+          <aside class="chat-session-sidebar" aria-label="Sessions">
+            <div class="chat-header chat-session-sidebar-header">
+              <div class="chat-header-inner chat-session-sidebar-header-inner">
+                {renderSessionPickerHeader(true, true)}
+              </div>
+            </div>
+            <SessionListView
+              embedded
+              class="session-list-view-sidebar"
+              sessionFilter={showSessionPicker() ? sessionFilter() : null}
+              subagentParentId={showSessionPicker() ? subagentParentId() : null}
+              onOpenSubagents={showSessionPicker() ? openSubagentSessions : undefined}
+            />
+          </aside>
 
-        <ChatInput />
+          <div class="chat-main-shell">
+            <div class="chat-header chat-header-chat-desktop">
+              <div class="chat-header-inner">{renderChatHeader(false, false)}</div>
+            </div>
+            <div class="chat-main-column-shell">
+              <MessageList />
+
+              <ChatInput />
+            </div>
+          </div>
+        </div>
       </Show>
     </div>
   );
@@ -429,33 +517,12 @@ export function groupSessions(
   isFailed: (sessionId: string) => boolean,
   isPlanReady: (session: (typeof state.sessions)[number]) => boolean,
   isNewlyCompleted: (session: (typeof state.sessions)[number]) => boolean,
-  maxSurfacedOtherSessions: number
+  now: number
 ): SessionGroups {
   const primaries = sessions
     .filter((session) => !session.parentID)
     .slice()
-    .toSorted((left, right) => {
-      const priorityDiff =
-        getSessionPriorityRank(
-          left,
-          isRunning,
-          isNeedingAttention,
-          isFailed,
-          isPlanReady,
-          isNewlyCompleted
-        ) -
-        getSessionPriorityRank(
-          right,
-          isRunning,
-          isNeedingAttention,
-          isFailed,
-          isPlanReady,
-          isNewlyCompleted
-        );
-
-      if (priorityDiff !== 0) return priorityDiff;
-      return right.time.updated - left.time.updated;
-    });
+    .toSorted((left, right) => right.time.updated - left.time.updated);
   const failed = primaries.filter(
     (session) =>
       getSessionPriorityRank(
@@ -511,7 +578,7 @@ export function groupSessions(
         isNewlyCompleted
       ) === 4
   );
-  const recentOther = primaries.filter(
+  const otherSessions = primaries.filter(
     (session) =>
       getSessionPriorityRank(
         session,
@@ -522,6 +589,7 @@ export function groupSessions(
         isNewlyCompleted
       ) === 5
   );
+  const recentSessionCutoff = now - SESSION_SHOW_MORE_AGE_MS;
 
   return {
     failed,
@@ -529,8 +597,8 @@ export function groupSessions(
     newlyCompleted,
     running,
     attention,
-    surfacedOther: recentOther.slice(0, maxSurfacedOtherSessions),
-    overflowOther: recentOther.slice(maxSurfacedOtherSessions),
+    surfacedOther: otherSessions.filter((session) => session.time.updated >= recentSessionCutoff),
+    overflowOther: otherSessions.filter((session) => session.time.updated < recentSessionCutoff),
     subagents: sessions.filter((session) => !!session.parentID),
   };
 }
@@ -676,11 +744,12 @@ export function SessionListSectionHeader(props: {
 }
 
 function SessionListView(props: {
-  sessionFilter: SessionListFilter | null;
-  subagentParentId: string | null;
-  onOpenSubagents: (parentSessionId: string) => void;
+  sessionFilter?: SessionListFilter | null;
+  subagentParentId?: string | null;
+  onOpenSubagents?: (parentSessionId: string) => void;
+  embedded?: boolean;
+  class?: string;
 }) {
-  const MAX_SURFACED_OTHER_SESSIONS = 10;
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), 60_000);
   onCleanup(() => clearInterval(clock));
@@ -702,7 +771,7 @@ function SessionListView(props: {
       (sessionId) => isSessionFailed(sessionId),
       (session) => isPlanReadySession(session),
       (session) => isSessionUnread(session.id, session.time.updated),
-      MAX_SURFACED_OTHER_SESSIONS
+      now()
     )
   );
   const failedSessions = () => groupedSessions().failed;
@@ -721,7 +790,7 @@ function SessionListView(props: {
     return counts;
   });
   const subagentSessions = createMemo(() =>
-    getSubagentSessionsForParent(state.sessions, props.subagentParentId)
+    getSubagentSessionsForParent(state.sessions, props.subagentParentId ?? null)
   );
   const filteredSessions = createMemo(() =>
     props.sessionFilter
@@ -735,19 +804,21 @@ function SessionListView(props: {
         )
       : []
   );
+  const surfacedSessions = createMemo(() =>
+    [
+      ...failedSessions(),
+      ...planReadySessions(),
+      ...attentionSessions(),
+      ...runningSessions(),
+      ...newlyCompletedSessions(),
+      ...surfacedOtherSessions(),
+    ].toSorted((left, right) => right.time.updated - left.time.updated)
+  );
   const directSessions = createMemo(() => {
     if (props.subagentParentId) return subagentSessions();
     if (props.sessionFilter) return filteredSessions();
     return [];
   });
-  const prioritySessions = createMemo(() => [
-    ...failedSessions(),
-    ...planReadySessions(),
-    ...attentionSessions(),
-    ...runningSessions(),
-    ...newlyCompletedSessions(),
-  ]);
-  const surfacedSessions = createMemo(() => [...prioritySessions(), ...surfacedOtherSessions()]);
   const visibleSessions = createMemo(() => {
     if (props.subagentParentId || props.sessionFilter) return directSessions();
 
@@ -805,18 +876,19 @@ function SessionListView(props: {
       const idx = focusedIndex();
       if (idx >= 0 && idx < sessions.length) {
         selectSession(sessions[idx].id);
-        setShowSessionPicker(false);
+        if (!props.embedded) setShowSessionPicker(false);
       }
       return;
     }
 
     if (e.key === 'Escape') {
       e.preventDefault();
-      setShowSessionPicker(false);
+      if (!props.embedded) setShowSessionPicker(false);
     }
   }
 
   onMount(() => {
+    if (props.embedded) return;
     requestAnimationFrame(() => containerRef?.focus());
   });
 
@@ -827,7 +899,12 @@ function SessionListView(props: {
   };
 
   return (
-    <div ref={containerRef} class="session-list-view" tabindex="-1" onKeyDown={handleKeydown}>
+    <div
+      ref={containerRef}
+      class={`session-list-view ${props.class || ''}`.trim()}
+      tabindex="-1"
+      onKeyDown={handleKeydown}
+    >
       <Show
         when={
           props.subagentParentId
@@ -849,12 +926,15 @@ function SessionListView(props: {
                 now={now}
                 subagentCount={subagentCounts().get(session.id) || 0}
                 onOpenSubagents={props.onOpenSubagents}
+                embedded={props.embedded}
               />
             )}
           </For>
         </Show>
-        <Show when={!props.sessionFilter && !props.subagentParentId && failedSessions().length > 0}>
-          <For each={failedSessions()}>
+        <Show
+          when={!props.sessionFilter && !props.subagentParentId && surfacedSessions().length > 0}
+        >
+          <For each={surfacedSessions()}>
             {(session, index) => (
               <SessionListItem
                 session={session}
@@ -864,106 +944,7 @@ function SessionListView(props: {
                 now={now}
                 subagentCount={subagentCounts().get(session.id) || 0}
                 onOpenSubagents={props.onOpenSubagents}
-              />
-            )}
-          </For>
-        </Show>
-        <Show
-          when={!props.sessionFilter && !props.subagentParentId && planReadySessions().length > 0}
-        >
-          <For each={planReadySessions()}>
-            {(session, index) => (
-              <SessionListItem
-                session={session}
-                itemIndex={() => failedSessions().length + index()}
-                focusedIndex={focusedIndex}
-                setFocusedIndex={setFocusedIndex}
-                now={now}
-                subagentCount={subagentCounts().get(session.id) || 0}
-                onOpenSubagents={props.onOpenSubagents}
-              />
-            )}
-          </For>
-        </Show>
-        <Show
-          when={!props.sessionFilter && !props.subagentParentId && attentionSessions().length > 0}
-        >
-          <For each={attentionSessions()}>
-            {(session, index) => (
-              <SessionListItem
-                session={session}
-                itemIndex={() => failedSessions().length + planReadySessions().length + index()}
-                focusedIndex={focusedIndex}
-                setFocusedIndex={setFocusedIndex}
-                now={now}
-                subagentCount={subagentCounts().get(session.id) || 0}
-                onOpenSubagents={props.onOpenSubagents}
-              />
-            )}
-          </For>
-        </Show>
-        <Show
-          when={!props.sessionFilter && !props.subagentParentId && runningSessions().length > 0}
-        >
-          <For each={runningSessions()}>
-            {(session, index) => (
-              <SessionListItem
-                session={session}
-                itemIndex={() =>
-                  failedSessions().length +
-                  planReadySessions().length +
-                  attentionSessions().length +
-                  index()
-                }
-                focusedIndex={focusedIndex}
-                setFocusedIndex={setFocusedIndex}
-                now={now}
-                subagentCount={subagentCounts().get(session.id) || 0}
-                onOpenSubagents={props.onOpenSubagents}
-              />
-            )}
-          </For>
-        </Show>
-        <Show
-          when={
-            !props.sessionFilter && !props.subagentParentId && newlyCompletedSessions().length > 0
-          }
-        >
-          <For each={newlyCompletedSessions()}>
-            {(session, index) => (
-              <SessionListItem
-                session={session}
-                itemIndex={() =>
-                  failedSessions().length +
-                  planReadySessions().length +
-                  attentionSessions().length +
-                  runningSessions().length +
-                  index()
-                }
-                focusedIndex={focusedIndex}
-                setFocusedIndex={setFocusedIndex}
-                now={now}
-                subagentCount={subagentCounts().get(session.id) || 0}
-                onOpenSubagents={props.onOpenSubagents}
-              />
-            )}
-          </For>
-        </Show>
-        <Show
-          when={
-            !props.sessionFilter && !props.subagentParentId && surfacedOtherSessions().length > 0
-          }
-        >
-          <For each={surfacedOtherSessions()}>
-            {(session, index) => (
-              <SessionListItem
-                session={session}
-                itemIndex={() => prioritySessions().length + index()}
-                focusedIndex={focusedIndex}
-                setFocusedIndex={setFocusedIndex}
-                now={now}
-                subagentCount={subagentCounts().get(session.id) || 0}
-                onOpenSubagents={props.onOpenSubagents}
+                embedded={props.embedded}
               />
             )}
           </For>
@@ -991,6 +972,7 @@ function SessionListView(props: {
                   now={now}
                   subagentCount={subagentCounts().get(session.id) || 0}
                   onOpenSubagents={props.onOpenSubagents}
+                  embedded={props.embedded}
                 />
               )}
             </For>
@@ -1008,7 +990,8 @@ function SessionListItem(props: {
   setFocusedIndex: (index: number) => void;
   now: () => number;
   subagentCount: number;
-  onOpenSubagents: (parentSessionId: string) => void;
+  onOpenSubagents?: (parentSessionId: string) => void;
+  embedded?: boolean;
 }) {
   const isActive = () => props.session.id === state.activeSessionId;
   const isFocused = () => props.focusedIndex() === props.itemIndex();
@@ -1026,7 +1009,7 @@ function SessionListItem(props: {
     !needsAttention() &&
     isSessionUnread(props.session.id, props.session.time.updated);
   const isCompletedPlanSession = () => isPlanReadySession(props.session);
-  const hasSubagents = () => props.subagentCount > 0;
+  const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
   const subagentLabel = () =>
     `Show ${props.subagentCount} sub-agent session${props.subagentCount === 1 ? '' : 's'}`;
   const indicatorClass = () => {
@@ -1057,7 +1040,7 @@ function SessionListItem(props: {
         class="session-item-main"
         onClick={() => {
           selectSession(props.session.id);
-          setShowSessionPicker(false);
+          if (!props.embedded) setShowSessionPicker(false);
         }}
       >
         <Show
@@ -1089,7 +1072,7 @@ function SessionListItem(props: {
           <button
             type="button"
             class="session-item-subagents"
-            onClick={() => props.onOpenSubagents(props.session.id)}
+            onClick={() => props.onOpenSubagents?.(props.session.id)}
             title={subagentLabel()}
             aria-label={subagentLabel()}
           >

@@ -1161,37 +1161,6 @@ export function ChatInput() {
 
   return (
     <div class="interactive-input-part">
-      <Show when={showModelPicker()}>
-        <ModelPicker
-          onSelect={(sel) => {
-            if (sel.providerID && sel.modelID) {
-              const matchedVariant =
-                sel.variant ||
-                getMatchingVariant(
-                  {
-                    providerID: state.selectedModel?.providerID,
-                    modelID: state.selectedModel?.modelID,
-                    variant: state.selectedModel?.variant,
-                  },
-                  { providerID: sel.providerID, modelID: sel.modelID },
-                  state.providers
-                ) ||
-                undefined;
-              setSelectedModel(
-                {
-                  providerID: sel.providerID,
-                  modelID: sel.modelID,
-                  variant: matchedVariant,
-                },
-                { sessionId: state.activeSessionId }
-              );
-            }
-          }}
-          onClose={() => setShowModelPicker(false)}
-          popoverRef={(el) => (modelPopoverRef = el)}
-        />
-      </Show>
-
       <Show when={isDraggingOver()}>
         <div class="chat-drop-overlay" aria-hidden="true" />
       </Show>
@@ -1286,7 +1255,7 @@ export function ChatInput() {
 
       <div
         ref={containerRef}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1305,6 +1274,37 @@ export function ChatInput() {
         }}
         onDrop={handleDrop}
       >
+        <Show when={showModelPicker()}>
+          <ModelPicker
+            onSelect={(sel) => {
+              if (sel.providerID && sel.modelID) {
+                const matchedVariant =
+                  sel.variant ||
+                  getMatchingVariant(
+                    {
+                      providerID: state.selectedModel?.providerID,
+                      modelID: state.selectedModel?.modelID,
+                      variant: state.selectedModel?.variant,
+                    },
+                    { providerID: sel.providerID, modelID: sel.modelID },
+                    state.providers
+                  ) ||
+                  undefined;
+                setSelectedModel(
+                  {
+                    providerID: sel.providerID,
+                    modelID: sel.modelID,
+                    variant: matchedVariant,
+                  },
+                  { sessionId: state.activeSessionId }
+                );
+              }
+            }}
+            onClose={() => setShowModelPicker(false)}
+            popoverRef={(el) => (modelPopoverRef = el)}
+          />
+        </Show>
+
         <Show when={hasContext() || hasMentions()}>
           <div class="chat-attachments-container">
             <Show when={activeContext()}>

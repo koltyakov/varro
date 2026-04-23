@@ -250,7 +250,7 @@ describe('Message assistant final answer rendering', () => {
     expect(finalItem?.textContent).toContain('Final answer.');
   });
 
-  it('hides thinking and workspace text in highlighted planning cards', () => {
+  it('keeps thinking and hides workspace text in highlighted planning cards', () => {
     cleanup = render(
       () =>
         Message({
@@ -266,7 +266,7 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
-    expect(container?.textContent).not.toContain('Thinking');
+    expect(container?.textContent).toContain('Thinking');
     expect(container?.textContent).not.toContain('[Working directory: /workspace]');
     expect(container?.textContent).toContain('Dummy Plan');
     expect(container?.querySelector('.assistant-message-flow-item-final-planning')).toBeInstanceOf(
@@ -274,7 +274,7 @@ describe('Message assistant final answer rendering', () => {
     );
   });
 
-  it('hides thinking and workspace text in highlighted result cards', () => {
+  it('keeps thinking and hides workspace text in highlighted result cards', () => {
     cleanup = render(
       () =>
         Message({
@@ -289,7 +289,7 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
-    expect(container?.textContent).not.toContain('Thinking');
+    expect(container?.textContent).toContain('Thinking');
     expect(container?.textContent).not.toContain('[Working directory: /workspace]');
     expect(container?.textContent).toContain('Implemented the fix.');
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
