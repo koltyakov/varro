@@ -91,6 +91,11 @@
     var(--color-vscode-fg) 3%,
     var(--color-vscode-list-bg)
   );
+  --color-vscode-chat-scrollbar-thumb-desktop: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 10%,
+    var(--color-vscode-list-bg)
+  );
   --color-vscode-input-surface: color-mix(
     in srgb,
     var(--color-vscode-fg) 4%,
@@ -3381,6 +3386,10 @@ kbd {
   box-shadow: 0 4px 16px color-mix(in srgb, var(--color-vscode-widget-shadow) 100%, transparent);
 }
 
+.model-picker-list {
+  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+}
+
 .dropdown-group-header {
   padding: 5px 10px;
   font-size: 10px;
@@ -4416,6 +4425,10 @@ kbd {
 }
 
 @media (min-width: 960px) {
+  :root {
+    --color-vscode-chat-scrollbar-thumb: var(--color-vscode-chat-scrollbar-thumb-desktop);
+  }
+
   .chat-main-column-shell {
     width: 100%;
     max-width: none;

@@ -190,7 +190,7 @@ export function ModelPicker(props: {
           </div>
         </Show>
 
-        <div class="max-h-[280px] overflow-y-auto py-1">
+        <div class="model-picker-list max-h-[280px] overflow-y-auto py-1">
           <Show
             when={visibleProviders().length > 0}
             fallback={

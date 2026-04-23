@@ -44,7 +44,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private onContextFilesChanged?: () => void;
   private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
   private workspaceFileCacheAt = 0;
-  private fileSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private fileSearchCts: vscode.CancellationTokenSource | null = null;
   private pendingInputFocus = false;
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
@@ -74,6 +73,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private lastPendingAttentionKey = '';
   private lastStatusBarStateKey = '';
   private serverStartErrorMessage: string | null = null;
+  private webviewAssets: WebviewAssetContent | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -955,14 +955,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private searchFiles(requestId: number, query: string, limit = 12) {
-    if (this.fileSearchDebounceTimer) clearTimeout(this.fileSearchDebounceTimer);
     this.fileSearchCts?.dispose();
     this.fileSearchCts = new vscode.CancellationTokenSource();
     const token = this.fileSearchCts.token;
-    this.fileSearchDebounceTimer = setTimeout(
-      () => this.executeFileSearch(requestId, query, limit, token),
-      80
-    );
+    void this.executeFileSearch(requestId, query, limit, token);
   }
 
   private async executeFileSearch(
@@ -971,7 +967,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     limit: number,
     token: vscode.CancellationToken
   ) {
-    this.fileSearchDebounceTimer = null;
     try {
       const files = await this.getWorkspaceFiles(token);
       if (token.isCancellationRequested) return;
@@ -1071,19 +1066,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async getHtml(): Promise<string> {
-    const distDir = resolve(this.extensionUri.fsPath, 'dist', 'webview');
     const webview = this.view?.webview;
-    let scriptContent = '';
-    let cssContent = '';
-
-    try {
-      scriptContent = await readFile(join(distDir, 'webview.js'), 'utf-8');
-    } catch {
-      logger.warn('webview.js not found — run `npm run build:webview` first');
-    }
-    try {
-      cssContent = await readFile(join(distDir, 'webview.css'), 'utf-8');
-    } catch {}
+    const { scriptContent, cssContent } = await this.loadWebviewAssets();
 
     const nonce = randomNonce();
     const emptyStateLogoUri = webview?.asWebviewUri(
@@ -1121,6 +1105,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 </html>`;
   }
 
+  private async loadWebviewAssets(): Promise<WebviewAssetContent> {
+    if (this.webviewAssets) return this.webviewAssets;
+
+    const distDir = resolve(this.extensionUri.fsPath, 'dist', 'webview');
+    const [scriptResult, cssResult] = await Promise.allSettled([
+      readFile(join(distDir, 'webview.js'), 'utf-8'),
+      readFile(join(distDir, 'webview.css'), 'utf-8'),
+    ]);
+
+    const scriptContent = scriptResult.status === 'fulfilled' ? scriptResult.value : '';
+    const cssContent = cssResult.status === 'fulfilled' ? cssResult.value : '';
+
+    if (scriptResult.status !== 'fulfilled') {
+      logger.warn('webview.js not found — run `npm run build:webview` first');
+      return { scriptContent, cssContent };
+    }
+
+    this.webviewAssets = { scriptContent, cssContent };
+    return this.webviewAssets;
+  }
+
   dispose() {
     if (this.serverStatusHandler) this.server.off('status', this.serverStatusHandler);
     if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
@@ -1132,7 +1137,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.themeDisposable?.dispose();
     this.windowStateDisposable?.dispose();
     this.statusBarItem.dispose();
-    if (this.fileSearchDebounceTimer) clearTimeout(this.fileSearchDebounceTimer);
     this.fileSearchCts?.dispose();
   }
 }
@@ -1153,6 +1157,11 @@ type WorkspaceFileSearchEntry = DroppedFile & {
 type RankedWorkspaceFile = {
   file: WorkspaceFileSearchEntry;
   score: number;
+};
+
+type WebviewAssetContent = {
+  scriptContent: string;
+  cssContent: string;
 };
 
 function rankWorkspaceFiles(

@@ -519,77 +519,56 @@ export function groupSessions(
   isNewlyCompleted: (session: (typeof state.sessions)[number]) => boolean,
   now: number
 ): SessionGroups {
-  const primaries = sessions
-    .filter((session) => !session.parentID)
-    .slice()
-    .toSorted((left, right) => right.time.updated - left.time.updated);
-  const failed = primaries.filter(
-    (session) =>
-      getSessionPriorityRank(
-        session,
-        isRunning,
-        isNeedingAttention,
-        isFailed,
-        isPlanReady,
-        isNewlyCompleted
-      ) === 0
-  );
-  const planReady = primaries.filter(
-    (session) =>
-      getSessionPriorityRank(
-        session,
-        isRunning,
-        isNeedingAttention,
-        isFailed,
-        isPlanReady,
-        isNewlyCompleted
-      ) === 1
-  );
-  const attention = primaries.filter(
-    (session) =>
-      getSessionPriorityRank(
-        session,
-        isRunning,
-        isNeedingAttention,
-        isFailed,
-        isPlanReady,
-        isNewlyCompleted
-      ) === 2
-  );
-  const running = primaries.filter(
-    (session) =>
-      getSessionPriorityRank(
-        session,
-        isRunning,
-        isNeedingAttention,
-        isFailed,
-        isPlanReady,
-        isNewlyCompleted
-      ) === 3
-  );
-  const newlyCompleted = primaries.filter(
-    (session) =>
-      getSessionPriorityRank(
-        session,
-        isRunning,
-        isNeedingAttention,
-        isFailed,
-        isPlanReady,
-        isNewlyCompleted
-      ) === 4
-  );
-  const otherSessions = primaries.filter(
-    (session) =>
-      getSessionPriorityRank(
-        session,
-        isRunning,
-        isNeedingAttention,
-        isFailed,
-        isPlanReady,
-        isNewlyCompleted
-      ) === 5
-  );
+  const primaries: (typeof state.sessions)[number][] = [];
+  const subagents: (typeof state.sessions)[number][] = [];
+
+  for (const session of sessions) {
+    if (session.parentID) subagents.push(session);
+    else primaries.push(session);
+  }
+
+  primaries.sort((left, right) => right.time.updated - left.time.updated);
+  const failed: SessionGroups['failed'] = [];
+  const planReady: SessionGroups['planReady'] = [];
+  const attention: SessionGroups['attention'] = [];
+  const running: SessionGroups['running'] = [];
+  const newlyCompleted: SessionGroups['newlyCompleted'] = [];
+  const surfacedOther: SessionGroups['surfacedOther'] = [];
+  const overflowOther: SessionGroups['overflowOther'] = [];
   const recentSessionCutoff = now - SESSION_SHOW_MORE_AGE_MS;
+
+  for (const session of primaries) {
+    switch (
+      getSessionPriorityRank(
+        session,
+        isRunning,
+        isNeedingAttention,
+        isFailed,
+        isPlanReady,
+        isNewlyCompleted
+      )
+    ) {
+      case 0:
+        failed.push(session);
+        break;
+      case 1:
+        planReady.push(session);
+        break;
+      case 2:
+        attention.push(session);
+        break;
+      case 3:
+        running.push(session);
+        break;
+      case 4:
+        newlyCompleted.push(session);
+        break;
+      default:
+        if (session.time.updated >= recentSessionCutoff) surfacedOther.push(session);
+        else overflowOther.push(session);
+        break;
+    }
+  }
 
   return {
     failed,
@@ -597,9 +576,9 @@ export function groupSessions(
     newlyCompleted,
     running,
     attention,
-    surfacedOther: otherSessions.filter((session) => session.time.updated >= recentSessionCutoff),
-    overflowOther: otherSessions.filter((session) => session.time.updated < recentSessionCutoff),
-    subagents: sessions.filter((session) => !!session.parentID),
+    surfacedOther,
+    overflowOther,
+    subagents,
   };
 }
 
