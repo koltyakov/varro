@@ -7,6 +7,7 @@ import {
   isSessionUnread,
   isSessionAwaitingInput,
   getSelectedAgentForSession,
+  isSkippedPlanSession,
 } from '../lib/state';
 import {
   Show,
@@ -40,10 +41,12 @@ type HeaderSessionCounts = {
   attention: number;
   failed: number;
   planReady: number;
+  completed: number;
   sidebarRunning: number;
   sidebarAttention: number;
   sidebarFailed: number;
   sidebarPlanReady: number;
+  sidebarCompleted: number;
 };
 
 type SessionIndicatorSets = {
@@ -60,13 +63,14 @@ type SessionIndicatorSets = {
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
 
-export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready';
+export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
 
 export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
+  const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const sessionsById = createMemo(
     () => new Map(state.sessions.map((session) => [session.id, session]))
   );
@@ -101,7 +105,7 @@ export function Chat() {
   };
 
   const headerSessionCounts = createMemo(() => {
-    const indicators = deriveSessionIndicators(state.sessions);
+    const indicators = sessionIndicators();
     return getHeaderSessionCounts(
       primarySessions(),
       state.activeSessionId,
@@ -109,17 +113,49 @@ export function Chat() {
       (sessionId) => indicators.runningIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId),
-      (session) => indicators.planReadyIds.has(session.id)
+      (session) => indicators.planReadyIds.has(session.id),
+      (session) => indicators.newlyCompletedIds.has(session.id)
     );
   });
   const runningSessionsCount = () => headerSessionCounts().running;
   const attentionSessionsCount = () => headerSessionCounts().attention;
   const failedSessionsCount = () => headerSessionCounts().failed;
   const planReadySessionsCount = () => headerSessionCounts().planReady;
+  const completedSessionsCount = () => headerSessionCounts().completed;
   const sessionSidebarRunningCount = () => headerSessionCounts().sidebarRunning;
   const sessionSidebarAttentionCount = () => headerSessionCounts().sidebarAttention;
   const sessionSidebarFailedCount = () => headerSessionCounts().sidebarFailed;
   const sessionSidebarPlanReadyCount = () => headerSessionCounts().sidebarPlanReady;
+  const sessionSidebarCompletedCount = () => headerSessionCounts().sidebarCompleted;
+  const primarySessionsCount = () => primarySessions().length;
+
+  const openSessionFilter = async (filter: SessionListFilter, count: number) => {
+    if (count === 0) return;
+
+    const indicators = sessionIndicators();
+    const autoOpenSessionId = getAutoOpenSessionIdForFilter(
+      primarySessions(),
+      filter,
+      state.activeSessionId,
+      showSessionPicker(),
+      (sessionId) => indicators.runningIds.has(sessionId),
+      (sessionId) => indicators.attentionIds.has(sessionId),
+      (sessionId) => indicators.failedIds.has(sessionId),
+      (session) => indicators.planReadyIds.has(session.id),
+      (session) => indicators.newlyCompletedIds.has(session.id)
+    );
+
+    if (autoOpenSessionId) {
+      setSessionFilter(null);
+      setSubagentParentId(null);
+      await selectSession(autoOpenSessionId);
+      return;
+    }
+
+    setSubagentParentId(null);
+    setSessionFilter(filter);
+    setShowSessionPicker(true);
+  };
 
   createEffect(() => {
     if (!showSessionPicker()) {
@@ -141,31 +177,23 @@ export function Chat() {
   };
 
   const openRunningSessions = () => {
-    if (runningSessionsCount() === 0) return;
-    setSubagentParentId(null);
-    setSessionFilter('running');
-    setShowSessionPicker(true);
+    void openSessionFilter('running', runningSessionsCount());
   };
 
   const openAttentionSessions = () => {
-    if (attentionSessionsCount() === 0) return;
-    setSubagentParentId(null);
-    setSessionFilter('attention');
-    setShowSessionPicker(true);
+    void openSessionFilter('attention', attentionSessionsCount());
   };
 
   const openFailedSessions = () => {
-    if (failedSessionsCount() === 0) return;
-    setSubagentParentId(null);
-    setSessionFilter('failed');
-    setShowSessionPicker(true);
+    void openSessionFilter('failed', failedSessionsCount());
   };
 
   const openPlanReadySessions = () => {
-    if (planReadySessionsCount() === 0) return;
-    setSubagentParentId(null);
-    setSessionFilter('plan-ready');
-    setShowSessionPicker(true);
+    void openSessionFilter('plan-ready', planReadySessionsCount());
+  };
+
+  const openCompletedSessions = () => {
+    void openSessionFilter('completed', completedSessionsCount());
   };
 
   const openSubagentSessions = (parentSessionId: string) => {
@@ -204,7 +232,11 @@ export function Chat() {
       <div class="chat-header-left">
         <Show
           when={sessionListFilterLabel()}
-          fallback={<span class="chat-header-title-text">Sessions</span>}
+          fallback={
+            <span class="chat-header-title-text">
+              Sessions <span class="chat-header-title-count">({primarySessionsCount()})</span>
+            </span>
+          }
         >
           {(label) => (
             <>
@@ -244,6 +276,12 @@ export function Chat() {
           <PlanReadyBadge
             count={useSidebarCounts ? sessionSidebarPlanReadyCount() : planReadySessionsCount()}
             onClick={openPlanReadySessions}
+          />
+        </Show>
+        <Show when={shouldShowHeaderBadge('completed')}>
+          <CompletedSessionsBadge
+            count={useSidebarCounts ? sessionSidebarCompletedCount() : completedSessionsCount()}
+            onClick={openCompletedSessions}
           />
         </Show>
         <Show when={shouldShowHeaderBadge('running')}>
@@ -296,6 +334,10 @@ export function Chat() {
                 onClick={openAttentionSessions}
               />
               <PlanReadyBadge count={planReadySessionsCount()} onClick={openPlanReadySessions} />
+              <CompletedSessionsBadge
+                count={completedSessionsCount()}
+                onClick={openCompletedSessions}
+              />
             </>
           </Show>
           <RunningSessionsBadge count={runningSessionsCount()} onClick={openRunningSessions} />
@@ -403,6 +445,8 @@ export function getSessionListFilterLabel(filter: SessionListFilter | null) {
       return 'Failed';
     case 'plan-ready':
       return 'Plan ready';
+    case 'completed':
+      return 'Completed';
     default:
       return null;
   }
@@ -414,7 +458,8 @@ export function getPrimarySessionsForFilter(
   isRunning: (sessionId: string) => boolean,
   isNeedingAttention: (sessionId: string) => boolean,
   isFailed: (sessionId: string) => boolean,
-  isPlanReady: (session: (typeof state.sessions)[number]) => boolean
+  isPlanReady: (session: (typeof state.sessions)[number]) => boolean,
+  isCompleted: (session: (typeof state.sessions)[number]) => boolean
 ) {
   return sessions.filter((session) => {
     if (!isPrimarySession(session)) return false;
@@ -428,8 +473,36 @@ export function getPrimarySessionsForFilter(
         return isFailed(session.id);
       case 'plan-ready':
         return isPlanReady(session);
+      case 'completed':
+        return isCompleted(session);
     }
   });
+}
+
+export function getAutoOpenSessionIdForFilter(
+  sessions: typeof state.sessions,
+  filter: SessionListFilter,
+  activeSessionId: string | null,
+  isSessionPickerOpen: boolean,
+  isRunning: (sessionId: string) => boolean,
+  isNeedingAttention: (sessionId: string) => boolean,
+  isFailed: (sessionId: string) => boolean,
+  isPlanReady: (session: (typeof state.sessions)[number]) => boolean,
+  isCompleted: (session: (typeof state.sessions)[number]) => boolean
+) {
+  if (isSessionPickerOpen) return null;
+
+  const matchingSessions = getPrimarySessionsForFilter(
+    sessions,
+    filter,
+    isRunning,
+    isNeedingAttention,
+    isFailed,
+    isPlanReady,
+    isCompleted
+  ).filter((session) => session.id !== activeSessionId);
+
+  return matchingSessions.length === 1 ? matchingSessions[0]?.id || null : null;
 }
 
 export function getSubagentSessionsForParent(
@@ -506,6 +579,19 @@ export function getHeaderPlanReadyCount(
   }, 0);
 }
 
+export function getHeaderCompletedCount(
+  sessions: typeof state.sessions,
+  isCompleted: (session: (typeof state.sessions)[number]) => boolean,
+  activeSessionId: string | null,
+  isSessionPickerOpen: boolean
+) {
+  return sessions.reduce((count, session) => {
+    if (!isPrimarySession(session) || !isCompleted(session)) return count;
+    if (!isSessionPickerOpen && session.id === activeSessionId) return count;
+    return count + 1;
+  }, 0);
+}
+
 function getHeaderSessionCounts(
   sessions: typeof state.sessions,
   activeSessionId: string | null,
@@ -513,17 +599,20 @@ function getHeaderSessionCounts(
   isRunning: (sessionId: string) => boolean,
   isNeedingAttention: (sessionId: string) => boolean,
   isFailed: (sessionId: string) => boolean,
-  isPlanReady: (session: (typeof state.sessions)[number]) => boolean
+  isPlanReady: (session: (typeof state.sessions)[number]) => boolean,
+  isCompleted: (session: (typeof state.sessions)[number]) => boolean
 ): HeaderSessionCounts {
   const counts: HeaderSessionCounts = {
     running: 0,
     attention: 0,
     failed: 0,
     planReady: 0,
+    completed: 0,
     sidebarRunning: 0,
     sidebarAttention: 0,
     sidebarFailed: 0,
     sidebarPlanReady: 0,
+    sidebarCompleted: 0,
   };
 
   for (const session of sessions) {
@@ -537,6 +626,10 @@ function getHeaderSessionCounts(
     if (isPlanReady(session)) {
       counts.sidebarPlanReady += 1;
       if (includeHeader) counts.planReady += 1;
+    }
+    if (isCompleted(session)) {
+      counts.sidebarCompleted += 1;
+      if (includeHeader) counts.completed += 1;
     }
     if (isNeedingAttention(session.id)) {
       counts.sidebarAttention += 1;
@@ -776,8 +869,12 @@ function SessionListView(props: {
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
   const [showOtherSessions, setShowOtherSessions] = createSignal(false);
-  // oxlint-disable-next-line no-unassigned-vars
+  const [searchQuery, setSearchQuery] = createSignal('');
   let containerRef: HTMLDivElement | undefined;
+  let searchInputRef: HTMLInputElement | undefined;
+
+  const normalizedSearchQuery = createMemo(() => searchQuery().trim().toLowerCase());
+  const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
 
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
@@ -810,7 +907,8 @@ function SessionListView(props: {
           (sessionId) => sessionIndicators().runningIds.has(sessionId),
           (sessionId) => sessionIndicators().attentionIds.has(sessionId),
           (sessionId) => sessionIndicators().failedIds.has(sessionId),
-          (session) => sessionIndicators().planReadyIds.has(session.id)
+          (session) => sessionIndicators().planReadyIds.has(session.id),
+          (session) => sessionIndicators().newlyCompletedIds.has(session.id)
         )
       : []
   );
@@ -829,7 +927,7 @@ function SessionListView(props: {
     if (props.sessionFilter) return filteredSessions();
     return [];
   });
-  const visibleSessions = createMemo(() => {
+  const baseVisibleSessions = createMemo(() => {
     if (props.subagentParentId || props.sessionFilter) return directSessions();
 
     const sessions = showOtherSessions()
@@ -837,12 +935,27 @@ function SessionListView(props: {
       : surfacedSessions();
     return sessions;
   });
+  const visibleSessions = createMemo(() => {
+    const query = normalizedSearchQuery();
+    const sessions = baseVisibleSessions();
+    if (!shouldShowSearch() || query.length === 0) return sessions;
+
+    return sessions.filter((session) => {
+      const title = normalizeSessionTitle(session.title).toLowerCase();
+      return (
+        title.includes(query) ||
+        session.id.toLowerCase().includes(query) ||
+        session.directory.toLowerCase().includes(query)
+      );
+    });
+  });
 
   createEffect(
     on(
       () => [props.sessionFilter, props.subagentParentId],
       () => {
         setShowOtherSessions(false);
+        setSearchQuery('');
         setFocusedIndex(-1);
       }
     )
@@ -899,98 +1012,80 @@ function SessionListView(props: {
 
   onMount(() => {
     if (props.embedded) return;
-    requestAnimationFrame(() => containerRef?.focus());
+    requestAnimationFrame(() => {
+      if (shouldShowSearch()) {
+        searchInputRef?.focus();
+        return;
+      }
+      containerRef?.focus();
+    });
   });
 
   const emptyMessage = () => {
     if (props.subagentParentId) return 'No sub-agent sessions';
+    if (normalizedSearchQuery()) return 'No matching sessions';
     const label = getSessionListFilterLabel(props.sessionFilter ?? null);
     return label ? `No ${label.toLowerCase()} sessions` : 'No sessions yet';
   };
+  const hasVisibleContent = createMemo(() => {
+    if (props.subagentParentId) return subagentSessions().length > 0;
+    if (props.sessionFilter) return filteredSessions().length > 0;
+    if (normalizedSearchQuery()) return visibleSessions().length > 0;
+    return state.sessions.length > 0;
+  });
 
   return (
     <div
-      ref={containerRef}
+      ref={(el) => {
+        containerRef = el;
+      }}
       class={`session-list-view ${props.class || ''}`.trim()}
       tabindex="-1"
       onKeyDown={handleKeydown}
     >
-      <Show
-        when={
-          props.subagentParentId
-            ? subagentSessions().length > 0
-            : props.sessionFilter
-              ? filteredSessions().length > 0
-              : state.sessions.length > 0
-        }
-        fallback={<div class="session-empty">{emptyMessage()}</div>}
-      >
-        <Show when={props.subagentParentId || props.sessionFilter}>
-          <For each={directSessions()}>
-            {(session, index) => (
-              <SessionListItem
-                session={session}
-                itemIndex={() => index()}
-                focusedIndex={focusedIndex}
-                setFocusedIndex={setFocusedIndex}
-                now={now}
-                subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
-                hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
-                hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
-                isRunning={sessionIndicators().runningIds.has(session.id)}
-                isFailed={sessionIndicators().failedIds.has(session.id)}
-                needsAttention={sessionIndicators().attentionIds.has(session.id)}
-                isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
-                isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
-                onOpenSubagents={props.onOpenSubagents}
-                embedded={props.embedded}
-              />
-            )}
-          </For>
-        </Show>
-        <Show
-          when={!props.sessionFilter && !props.subagentParentId && surfacedSessions().length > 0}
-        >
-          <For each={surfacedSessions()}>
-            {(session, index) => (
-              <SessionListItem
-                session={session}
-                itemIndex={() => index()}
-                focusedIndex={focusedIndex}
-                setFocusedIndex={setFocusedIndex}
-                now={now}
-                subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
-                hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
-                hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
-                isRunning={sessionIndicators().runningIds.has(session.id)}
-                isFailed={sessionIndicators().failedIds.has(session.id)}
-                needsAttention={sessionIndicators().attentionIds.has(session.id)}
-                isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
-                isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
-                onOpenSubagents={props.onOpenSubagents}
-                embedded={props.embedded}
-              />
-            )}
-          </For>
-        </Show>
-        <Show
-          when={
-            !props.sessionFilter && !props.subagentParentId && overflowOtherSessions().length > 0
-          }
-        >
-          <SessionListSectionHeader
-            title="Show more"
-            count={overflowOtherSessions().length}
-            expanded={showOtherSessions()}
-            onToggle={() => setShowOtherSessions((value) => !value)}
-            onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
+      <Show when={shouldShowSearch()}>
+        <div class="session-list-search">
+          <input
+            ref={(el) => {
+              searchInputRef = el;
+            }}
+            type="text"
+            class="session-list-search-input"
+            value={searchQuery()}
+            onInput={(e) => setSearchQuery(e.currentTarget.value)}
+            placeholder="Search sessions"
+            aria-label="Search sessions"
+            spellcheck={false}
           />
-          <Show when={showOtherSessions()}>
-            <For each={overflowOtherSessions()}>
+          <Show when={searchQuery().length > 0}>
+            <button
+              type="button"
+              class="session-list-search-clear"
+              onClick={() => {
+                setSearchQuery('');
+                searchInputRef?.focus();
+              }}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
+              </svg>
+            </button>
+          </Show>
+        </div>
+      </Show>
+      <div class="session-list-scroll">
+        <Show
+          when={hasVisibleContent()}
+          fallback={<div class="session-empty">{emptyMessage()}</div>}
+        >
+          <Show when={props.subagentParentId || props.sessionFilter || normalizedSearchQuery()}>
+            <For each={visibleSessions()}>
               {(session, index) => (
                 <SessionListItem
                   session={session}
-                  itemIndex={() => surfacedSessions().length + index()}
+                  itemIndex={() => index()}
                   focusedIndex={focusedIndex}
                   setFocusedIndex={setFocusedIndex}
                   now={now}
@@ -1008,8 +1103,77 @@ function SessionListView(props: {
               )}
             </For>
           </Show>
+          <Show
+            when={
+              !props.sessionFilter &&
+              !props.subagentParentId &&
+              !normalizedSearchQuery() &&
+              surfacedSessions().length > 0
+            }
+          >
+            <For each={surfacedSessions()}>
+              {(session, index) => (
+                <SessionListItem
+                  session={session}
+                  itemIndex={() => index()}
+                  focusedIndex={focusedIndex}
+                  setFocusedIndex={setFocusedIndex}
+                  now={now}
+                  subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
+                  hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
+                  hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
+                  isRunning={sessionIndicators().runningIds.has(session.id)}
+                  isFailed={sessionIndicators().failedIds.has(session.id)}
+                  needsAttention={sessionIndicators().attentionIds.has(session.id)}
+                  isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
+                  isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
+                  onOpenSubagents={props.onOpenSubagents}
+                  embedded={props.embedded}
+                />
+              )}
+            </For>
+          </Show>
+          <Show
+            when={
+              !props.sessionFilter &&
+              !props.subagentParentId &&
+              !normalizedSearchQuery() &&
+              overflowOtherSessions().length > 0
+            }
+          >
+            <SessionListSectionHeader
+              title="Show more"
+              count={overflowOtherSessions().length}
+              expanded={showOtherSessions()}
+              onToggle={() => setShowOtherSessions((value) => !value)}
+              onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
+            />
+            <Show when={showOtherSessions()}>
+              <For each={overflowOtherSessions()}>
+                {(session, index) => (
+                  <SessionListItem
+                    session={session}
+                    itemIndex={() => surfacedSessions().length + index()}
+                    focusedIndex={focusedIndex}
+                    setFocusedIndex={setFocusedIndex}
+                    now={now}
+                    subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
+                    hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
+                    hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
+                    isRunning={sessionIndicators().runningIds.has(session.id)}
+                    isFailed={sessionIndicators().failedIds.has(session.id)}
+                    needsAttention={sessionIndicators().attentionIds.has(session.id)}
+                    isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
+                    isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
+                    onOpenSubagents={props.onOpenSubagents}
+                    embedded={props.embedded}
+                  />
+                )}
+              </For>
+            </Show>
+          </Show>
         </Show>
-      </Show>
+      </div>
     </div>
   );
 }
@@ -1051,7 +1215,7 @@ function SessionListItem(props: {
     if (props.hasPermissionRequest) return 'Permission request pending';
     if (props.hasQuestionRequest) return 'Attention needed';
     if (props.needsAttention) return 'Attention needed';
-    if (props.isCompletedPlanSession) return 'Plan completed';
+    if (props.isCompletedPlanSession) return 'Plan ready';
     return 'Completed';
   };
 
@@ -1069,7 +1233,13 @@ function SessionListItem(props: {
         }}
       >
         <Show
-          when={props.isRunning || props.isFailed || props.needsAttention || props.isNewlyCompleted}
+          when={
+            props.isRunning ||
+            props.isFailed ||
+            props.needsAttention ||
+            props.isCompletedPlanSession ||
+            props.isNewlyCompleted
+          }
           fallback={<span class="session-item-indicator-spacer" />}
         >
           <span
@@ -1215,7 +1385,25 @@ function PlanReadyBadge(props: { count: number; onClick: () => void }) {
   );
 }
 
-function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
+function CompletedSessionsBadge(props: { count: number; onClick: () => void }) {
+  const label = 'Completed sessions';
+
+  return (
+    <Show when={props.count > 0}>
+      <button
+        type="button"
+        class="chat-header-completed-badge"
+        title={label}
+        aria-label={label}
+        onClick={props.onClick}
+      >
+        <span class="chat-header-completed-dot" aria-hidden="true" />
+      </button>
+    </Show>
+  );
+}
+
+export function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
   const pendingAttentionIds = new Set(state.pendingAttentionSessionIds);
@@ -1262,11 +1450,14 @@ function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndica
       runningIds.add(sessionId);
       continue;
     }
-    if (!isSessionUnread(sessionId, session.time.updated)) {
+    const selectedAgent = getSelectedAgentForSession(sessionId);
+    if (selectedAgent === 'plan') {
+      if (!isSkippedPlanSession(sessionId, session.time.updated)) {
+        planReadyIds.add(sessionId);
+      }
       continue;
     }
-    if (getSelectedAgentForSession(sessionId) === 'plan') {
-      planReadyIds.add(sessionId);
+    if (!isSessionUnread(sessionId, session.time.updated)) {
       continue;
     }
     newlyCompletedIds.add(sessionId);

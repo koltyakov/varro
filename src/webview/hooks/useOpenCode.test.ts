@@ -148,6 +148,7 @@ async function loadModules() {
 
 beforeEach(() => {
   vi.resetModules();
+  delete (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState;
   clientMocks.health.mockReset();
   clientMocks.sessionList.mockReset();
   clientMocks.sessionCreate.mockReset();
@@ -769,7 +770,7 @@ describe('sendMessage', () => {
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
   });
 
-  it('keeps the unread marker when archive auto-selects the next session', async () => {
+  it('marks the next session seen when archive auto-selects it', async () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('sessions', [
@@ -791,8 +792,8 @@ describe('sendMessage', () => {
     await hookModule.deleteSession('session-1');
 
     expect(stateModule.state.activeSessionId).toBe('session-2');
-    expect(stateModule.state.lastSeenSessions).toEqual({ 'session-2': 1_000 });
-    expect(stateModule.isSessionUnread('session-2', 2_000)).toBe(true);
+    expect(stateModule.state.lastSeenSessions['session-2']).toBeGreaterThanOrEqual(2_000);
+    expect(stateModule.isSessionUnread('session-2', 2_000)).toBe(false);
   });
 
   it('removes subagent descendants before auto-selecting the next session', async () => {
@@ -980,6 +981,294 @@ describe('useOpenCode initialization', () => {
     }
   });
 
+  it('continues sessions that were interrupted by extension reload', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      interruptedSessionIds: ['session-1'],
+    };
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'idle' } });
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionMessages.mockResolvedValue([{ info: userMessage('user-1'), parts: [] }]);
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+
+    const { hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+
+      await vi.waitFor(() => {
+        expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+          parts: [
+            {
+              type: 'text',
+              text: 'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
+            },
+          ],
+        });
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('restores pending permission prompts from initial webview state after reload', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      interruptedSessionIds: ['session-1'],
+      pendingPermissions: [
+        {
+          id: 'perm-1',
+          permission: 'apply_patch',
+          sessionID: 'session-1',
+          title: 'apply_patch',
+          metadata: {},
+          tool: { messageID: 'message-1', callID: 'call-1' },
+          time: { created: 123 },
+        },
+      ],
+    };
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'idle' } });
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionMessages.mockResolvedValue([{ info: userMessage('user-1'), parts: [] }]);
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+
+      await vi.waitFor(() => {
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({
+            id: 'perm-1',
+            sessionID: 'session-1',
+            messageID: 'message-1',
+            callID: 'call-1',
+            type: 'apply_patch',
+          }),
+        ]);
+      });
+      expect(stateModule.state.pendingAttentionSessionIds).toContain('session-1');
+      expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('restores pending permission prompts that use permissionID after reload', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      interruptedSessionIds: ['session-1'],
+      pendingPermissions: [
+        {
+          permissionID: 'perm-2',
+          permission: 'apply_patch',
+          sessionID: 'session-1',
+          title: 'apply_patch',
+          metadata: {},
+          tool: { messageID: 'message-1', callID: 'call-1' },
+          time: { created: 123 },
+        },
+      ],
+    };
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionMessages.mockResolvedValue([{ info: userMessage('user-1'), parts: [] }]);
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+
+      await vi.waitFor(() => {
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({
+            id: 'perm-2',
+            sessionID: 'session-1',
+            messageID: 'message-1',
+            callID: 'call-1',
+            type: 'apply_patch',
+          }),
+        ]);
+      });
+      expect(stateModule.state.pendingAttentionSessionIds).toContain('session-1');
+      expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('normalizes live permission events with nested tool metadata', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    const serverEventHandlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation(
+      (event: string, handler: (data: unknown) => void) => {
+        serverEventHandlers.set(event, handler);
+        return () => {
+          serverEventHandlers.delete(event);
+        };
+      }
+    );
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'idle' } });
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionMessages.mockResolvedValue([{ info: userMessage('user-1'), parts: [] }]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+
+      await vi.waitFor(() => {
+        expect(serverEventHandlers.has('permission.asked')).toBe(true);
+      });
+
+      serverEventHandlers.get('permission.asked')?.({
+        properties: {
+          id: 'perm-live-1',
+          permission: 'apply_patch',
+          sessionID: 'session-1',
+          title: 'apply_patch',
+          metadata: {},
+          tool: { messageID: 'message-1', callID: 'call-1' },
+          time: { created: 123 },
+        },
+      });
+
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({
+          id: 'perm-live-1',
+          sessionID: 'session-1',
+          type: 'apply_patch',
+          messageID: 'message-1',
+          callID: 'call-1',
+        }),
+      ]);
+    } finally {
+      dispose();
+    }
+  });
+
   it('keeps the chat connected when the event stream is degraded', async () => {
     let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
     bridgeMocks.onMessage.mockImplementation((handler) => {
@@ -1065,6 +1354,51 @@ describe('useOpenCode initialization', () => {
         'assistant-1',
       ]);
     } finally {
+      dispose();
+    }
+  });
+
+  it('keeps the active session marked seen when a later session update arrives', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('lastSeenSessions', { 'session-1': 1_000 });
+
+      handlers.get('session.updated')?.({
+        properties: {
+          info: {
+            ...session('session-1'),
+            time: { created: 0, updated: 2_000 },
+          },
+        },
+      });
+
+      expect(stateModule.state.lastSeenSessions['session-1']).toBe(2_000);
+      expect(stateModule.isSessionUnread('session-1', 2_000)).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
       dispose();
     }
   });
@@ -1276,6 +1610,38 @@ describe('useOpenCode initialization', () => {
         attempt: 2,
         sessionID: 'child-1',
       });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('marks aborted plan sessions as skipped', async () => {
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionAbort.mockResolvedValue(true);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('sessions', [
+        { ...session('session-1'), time: { created: 0, updated: 200 } },
+      ]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('sessionSelectedAgents', { 'session-1': 'plan' });
+
+      await hookModule.abortSession();
+
+      expect(stateModule.state.skippedPlanSessions['session-1']).toBe(200);
     } finally {
       dispose();
     }

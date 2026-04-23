@@ -1,6 +1,30 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { render } from 'solid-js/web';
+import { setExpandThinkingAndCommandsByDefaultPreference } from '../lib/state';
 import type { ToolPart } from '../types';
-import { formatToolTitle, getVisibleInputEntries, shouldShowToolPreview } from './ToolCall';
+import {
+  ToolCall,
+  formatToolTitle,
+  getVisibleInputEntries,
+  shouldShowToolPreview,
+} from './ToolCall';
+
+let container: HTMLDivElement | null = null;
+let cleanup: (() => void) | undefined;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  setExpandThinkingAndCommandsByDefaultPreference(false);
+});
+
+afterEach(() => {
+  cleanup?.();
+  cleanup = undefined;
+  container?.remove();
+  container = null;
+  setExpandThinkingAndCommandsByDefaultPreference(false);
+});
 
 function completedState(
   input: Record<string, unknown> = {},
@@ -65,5 +89,26 @@ describe('getVisibleInputEntries', () => {
       ['count', 0],
       ['enabled', false],
     ]);
+  });
+});
+
+describe('ToolCall', () => {
+  it('keeps command blocks collapsed by default even when thinking auto-expand is enabled', () => {
+    setExpandThinkingAndCommandsByDefaultPreference(true);
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command: 'git status' }, 'git status'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
+    expect(container?.textContent).toContain('git status');
   });
 });

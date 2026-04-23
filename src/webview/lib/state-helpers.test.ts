@@ -115,11 +115,44 @@ describe('state helpers', () => {
     expect(stateModule.isSessionUnread('session-2', 999)).toBe(false);
     expect(stateModule.isSessionUnread('session-2', 1_001)).toBe(true);
 
+    stateModule.markSessionSeen('session-1', 1_500);
+    expect(stateModule.state.lastSeenSessions['session-1']).toBe(1_500);
+    expect(stateModule.isSessionUnread('session-1', 1_500)).toBe(false);
+
     stateModule.setSessionCompacting('session-4', true);
     expect(stateModule.state.compactingSessionIds).toEqual(['session-4']);
 
     stateModule.setSessionCompacting('session-4', false);
     expect(stateModule.state.compactingSessionIds).toEqual([]);
+  });
+
+  it('persists skipped plan sessions by session update time', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'session-1',
+        version: '1',
+        time: { created: 100, updated: 200 },
+      },
+    ]);
+
+    stateModule.skipPlanSession('session-1');
+
+    expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-1': 200 });
+    expect(stateModule.isSkippedPlanSession('session-1', 200)).toBe(true);
+    expect(stateModule.isSkippedPlanSession('session-1', 201)).toBe(false);
+    expect(window.localStorage.getItem('varro.skippedPlanSessions')).toBe(
+      JSON.stringify({ 'session-1': 200 })
+    );
+
+    stateModule.clearSkippedPlanSession('session-1');
+
+    expect(stateModule.state.skippedPlanSessions).toEqual({});
+    expect(window.localStorage.getItem('varro.skippedPlanSessions')).toBe(JSON.stringify({}));
   });
 
   it('tracks draft and per-session permission modes by workspace', async () => {
@@ -523,22 +556,32 @@ describe('state helpers', () => {
     expect(children.get('parent-1')?.map((entry) => entry.info.id)).toEqual(['child-1', 'child-2']);
   });
 
-  it('toggles local ui helpers and persisted thinking preference', async () => {
+  it('toggles local ui helpers and persists ui display preferences', async () => {
     const stateModule = await loadState();
 
     expect(stateModule.composerFocusKey()).toBe(0);
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
+    expect(stateModule.expandThinkingAndCommandsByDefault()).toBe(false);
+    expect(stateModule.showStickyUserPrompt()).toBe(true);
 
     stateModule.requestComposerFocus();
     stateModule.requestMessageListScrollToBottom();
     stateModule.toggleThinking();
+    stateModule.setExpandThinkingAndCommandsByDefaultPreference(true);
+    stateModule.setShowStickyUserPromptPreference(false);
     stateModule.resetPastedImageIndex();
 
     expect(stateModule.composerFocusKey()).toBe(1);
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
     expect(stateModule.showThinking()).toBe(false);
+    expect(stateModule.expandThinkingAndCommandsByDefault()).toBe(true);
+    expect(stateModule.showStickyUserPrompt()).toBe(false);
     expect(stateModule.nextPastedImageIndex()).toBe(1);
     expect(window.localStorage.getItem('varro.showThinking')).toBe(JSON.stringify(false));
+    expect(window.localStorage.getItem('varro.expandThinkingAndCommandsByDefault')).toBe(
+      JSON.stringify(true)
+    );
+    expect(window.localStorage.getItem('varro.showStickyUserPrompt')).toBe(JSON.stringify(false));
   });
 });

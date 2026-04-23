@@ -7,11 +7,13 @@ import {
   onCleanup,
   onMount,
   on,
+  untrack,
 } from 'solid-js';
 import {
   getSelectedAgentForSession,
   state,
   isLoading,
+  isSkippedPlanSession,
   stopLoading,
   hasActiveQuestion,
   hasActivePermission,
@@ -22,6 +24,8 @@ import {
   messageStructureVersion,
   getChildRunsByParentId,
   getActiveUsageLimitNotice,
+  showStickyUserPrompt,
+  skipPlanSession,
 } from '../lib/state';
 import {
   formatDuration,
@@ -29,8 +33,12 @@ import {
   isAssistantMessage,
   sumAssistantTokens,
 } from '../lib/message-metrics';
-import type { AssistantMessage, Message, Part } from '../types';
-import { Message as MessageComponent, type AssistantFileEditStackGroup } from './Message';
+import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
+import {
+  Message as MessageComponent,
+  getUserMessagePreviewText,
+  type AssistantFileEditStackGroup,
+} from './Message';
 import { implementPlan, recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
@@ -39,6 +47,8 @@ import {
   getTrailingFileEventSignature,
 } from '../lib/message-event-collapse';
 import { isFileEditPart, isFileReadPart, shouldShowAssistantPartInline } from '../lib/part-utils';
+import { PermissionPrompt } from './PermissionPrompt';
+import { QuestionPrompt } from './QuestionPrompt';
 
 function getAssistantTurnSubagentCount(messages: Array<{ info: Message; parts: Part[] }>): number {
   let count = 0;
@@ -65,6 +75,57 @@ function isPlanningAssistantMessage(info: AssistantMessage): boolean {
   return info.agent === 'plan' || getSelectedAgentForSession(info.sessionID) === 'plan';
 }
 
+function hasLinkedToolCall(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  sessionId: string,
+  messageId: string | null | undefined,
+  callId: string | null | undefined
+) {
+  if (!messageId || !callId) return false;
+
+  return messages.some(
+    (entry) =>
+      entry.info.sessionID === sessionId &&
+      entry.info.id === messageId &&
+      entry.parts.some(
+        (part) => part.type === 'tool' && part.messageID === messageId && part.callID === callId
+      )
+  );
+}
+
+export function getStandalonePermissionPrompts(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  permissions: Permission[],
+  activeSessionId: string | null
+) {
+  if (!activeSessionId) return [];
+
+  return permissions.filter(
+    (permission) =>
+      permission.sessionID === activeSessionId &&
+      !hasLinkedToolCall(messages, permission.sessionID, permission.messageID, permission.callID)
+  );
+}
+
+export function getStandaloneQuestionPrompts(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  questions: QuestionRequest[],
+  activeSessionId: string | null
+) {
+  if (!activeSessionId) return [];
+
+  return questions.filter(
+    (question) =>
+      question.sessionID === activeSessionId &&
+      !hasLinkedToolCall(
+        messages,
+        question.sessionID,
+        question.tool?.messageID,
+        question.tool?.callID
+      )
+  );
+}
+
 export function buildPlanImplementationPrompt(parts: Part[]) {
   void parts;
   return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
@@ -85,6 +146,27 @@ export function getLatestPlanImplementationMessageId(
   return lastMessage.id;
 }
 
+export function shouldShowPlanImplementationAction(args: {
+  hasBuildAgent: boolean;
+  info: Message;
+  latestPlanImplementationMessageId: string | null;
+}) {
+  if (
+    !args.hasBuildAgent ||
+    !isAssistantMessage(args.info) ||
+    !isPlanningAssistantMessage(args.info) ||
+    !!args.info.error
+  ) {
+    return false;
+  }
+  if (args.info.id !== args.latestPlanImplementationMessageId) {
+    return false;
+  }
+
+  const session = state.sessions.find((item) => item.id === args.info.sessionID);
+  return !session || !isSkippedPlanSession(args.info.sessionID, session.time.updated);
+}
+
 const DEFAULT_ITEM_HEIGHT = 120;
 const OVERSCAN = 5;
 const VIRTUALIZE_THRESHOLD = 50;
@@ -98,6 +180,61 @@ type MessageRowSharedProps = {
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
 };
+
+type StickyUserMessagePreview = {
+  id: string;
+  index: number;
+  text: string;
+};
+
+const STICKY_PREVIEW_VISIBILITY_BUFFER_PX = 12;
+const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
+const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
+
+export function getStickyUserMessagePreview(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  firstVisibleMessageIndex: number | null
+): StickyUserMessagePreview | null {
+  if (firstVisibleMessageIndex === null || firstVisibleMessageIndex < 0) return null;
+  if (messages[firstVisibleMessageIndex]?.info.role === 'user') return null;
+
+  for (let i = firstVisibleMessageIndex; i >= 0; i--) {
+    const entry = messages[i];
+    if (entry.info.role !== 'user') continue;
+    return {
+      id: entry.info.id,
+      index: i,
+      text: getUserMessagePreviewText(entry.parts),
+    };
+  }
+
+  return null;
+}
+
+export function shouldShowStickyUserMessagePreview(args: {
+  preview: StickyUserMessagePreview | null;
+  shouldVirtualize: boolean;
+  visibleRange: { start: number; end: number };
+  rowTop: number | null;
+  rowBottom: number | null;
+  viewportHeight: number;
+  previousPreviewId?: string | null;
+}) {
+  const { preview } = args;
+  if (!preview) return false;
+  if (args.viewportHeight <= 0) return false;
+  if (args.viewportHeight < STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX) return false;
+
+  const isPreviousPreview = args.previousPreviewId === preview.id;
+  const showThreshold = isPreviousPreview
+    ? STICKY_PREVIEW_VISIBILITY_BUFFER_PX
+    : -STICKY_PREVIEW_VISIBILITY_BUFFER_PX;
+
+  if (args.shouldVirtualize && preview.index < args.visibleRange.start) return true;
+
+  if (args.rowTop === null || args.rowBottom === null) return false;
+  return args.rowBottom <= showThreshold;
+}
 
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -119,6 +256,8 @@ export function MessageList() {
   let lastObservedScrollTop = 0;
   let pendingInitialScrollSessionId: string | null = null;
   let initialScrollRafId = 0;
+  let previousStickyPreviewId: string | null = null;
+  let stickyPreviewDebounceTimer: ReturnType<typeof setTimeout> | 0 = 0;
   const SCROLL_INTERVAL_MS = 700;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
   const INITIAL_SCROLL_STABLE_FRAMES = 3;
@@ -128,13 +267,63 @@ export function MessageList() {
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
+  const [stickyUserMessagePreview, setStickyUserMessagePreview] =
+    createSignal<StickyUserMessagePreview | null>(null);
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
 
   const messages = createMemo(on(messageStructureVersion, () => state.messages));
   const latestPlanImplementationMessageId = createMemo(() =>
     getLatestPlanImplementationMessageId(messages())
   );
+  const standalonePermissions = createMemo(() =>
+    getStandalonePermissionPrompts(messages(), state.permissions, state.activeSessionId)
+  );
+  const standaloneQuestions = createMemo(() =>
+    getStandaloneQuestionPrompts(messages(), state.questions, state.activeSessionId)
+  );
+  const messageIndexById = createMemo(() => {
+    const result = new Map<string, number>();
+    for (const [index, entry] of messages().entries()) {
+      result.set(entry.info.id, index);
+    }
+    return result;
+  });
+  const stickyUserMessagePreviewCandidate = createMemo(() => {
+    const currentScrollTop = scrollTop();
+    const currentViewportHeight = viewportHeight();
+    if (!containerRef || currentViewportHeight <= 0) return null;
 
+    const containerRect = containerRef.getBoundingClientRect();
+    const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
+    let firstVisibleMessageIndex: number | null = null;
+    for (const row of rows) {
+      const rowId = row.dataset.msgId;
+      if (!rowId) continue;
+      const rowRect = row.getBoundingClientRect();
+      const rowTop = rowRect.top - containerRect.top;
+      const rowBottom = rowRect.bottom - containerRect.top;
+      if (rowBottom <= 0 || rowTop >= currentViewportHeight) continue;
+      firstVisibleMessageIndex = messageIndexById().get(rowId) ?? null;
+      break;
+    }
+    void currentScrollTop;
+
+    const preview = getStickyUserMessagePreview(messages(), firstVisibleMessageIndex);
+    if (!preview) return null;
+
+    const row = containerRef.querySelector<HTMLElement>(`[data-msg-id="${preview.id}"]`);
+    const rowRect = row?.getBoundingClientRect();
+    const shouldShow = shouldShowStickyUserMessagePreview({
+      preview,
+      shouldVirtualize: shouldVirtualize(),
+      visibleRange: visibleRange(),
+      rowTop: rowRect ? rowRect.top - containerRect.top : null,
+      rowBottom: rowRect ? rowRect.bottom - containerRect.top : null,
+      viewportHeight: currentViewportHeight,
+      previousPreviewId: previousStickyPreviewId,
+    });
+    return shouldShow ? preview : null;
+  });
   const shouldVirtualize = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
 
   const measuredHeights = new Map<string, number>();
@@ -230,6 +419,10 @@ export function MessageList() {
     if (scrollTimer) {
       clearTimeout(scrollTimer);
       scrollTimer = 0;
+    }
+    if (stickyPreviewDebounceTimer) {
+      clearTimeout(stickyPreviewDebounceTimer);
+      stickyPreviewDebounceTimer = 0;
     }
     if (initialScrollRafId) {
       cancelAnimationFrame(initialScrollRafId);
@@ -352,8 +545,40 @@ export function MessageList() {
     onCleanup(() => {
       observer.disconnect();
       if (scrollTimer) clearTimeout(scrollTimer);
+      if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
     });
+  });
+
+  createEffect(() => {
+    const candidate = stickyUserMessagePreviewCandidate();
+    const current = untrack(stickyUserMessagePreview);
+
+    if (current?.id === candidate?.id && current?.text === candidate?.text) {
+      previousStickyPreviewId = current?.id ?? null;
+      if (stickyPreviewDebounceTimer) {
+        clearTimeout(stickyPreviewDebounceTimer);
+        stickyPreviewDebounceTimer = 0;
+      }
+      return;
+    }
+
+    if (stickyPreviewDebounceTimer) {
+      clearTimeout(stickyPreviewDebounceTimer);
+      stickyPreviewDebounceTimer = 0;
+    }
+
+    if (candidate) {
+      setStickyUserMessagePreview(candidate);
+      previousStickyPreviewId = candidate.id;
+      return;
+    }
+
+    stickyPreviewDebounceTimer = setTimeout(() => {
+      stickyPreviewDebounceTimer = 0;
+      setStickyUserMessagePreview(candidate);
+      previousStickyPreviewId = candidate?.id ?? null;
+    }, STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS);
   });
 
   createEffect(() => {
@@ -363,6 +588,8 @@ export function MessageList() {
     cancelPendingScroll();
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
+    setStickyUserMessagePreview(null);
+    previousStickyPreviewId = null;
     setAutoScroll(true);
     queueMicrotask(() => performScroll());
   });
@@ -372,12 +599,18 @@ export function MessageList() {
     const msgs = messages();
     if (msgs.length === 0) return;
     queueMicrotask(() => {
+      if (state.activeSessionId !== sessionId) return;
       measureVisibleItems();
       lastTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
       if (sessionId && pendingInitialScrollSessionId === sessionId) {
         pendingInitialScrollSessionId = null;
         performScroll();
         scrollToBottomUntilStable(sessionId);
+        return;
+      }
+
+      if (sessionId && autoScroll()) {
+        performScroll();
       }
     });
   });
@@ -530,6 +763,9 @@ export function MessageList() {
       onScroll={onScroll}
     >
       <div ref={trackRef} class="interactive-list-track">
+        <Show when={showStickyUserPrompt() && stickyUserMessagePreview()}>
+          {(preview) => <StickyUserMessagePreviewCard preview={preview()} />}
+        </Show>
         <Show
           when={state.messages.length > 0}
           fallback={
@@ -572,6 +808,10 @@ export function MessageList() {
             />
           </Show>
         </Show>
+        <PendingActionRows
+          questions={standaloneQuestions()}
+          permissions={standalonePermissions()}
+        />
         <Show
           when={
             (isLoading() || isSessionCompacting()) &&
@@ -585,6 +825,46 @@ export function MessageList() {
         </Show>
       </div>
     </div>
+  );
+}
+
+function StickyUserMessagePreviewCard(props: { preview: StickyUserMessagePreview }) {
+  return (
+    <div class="latest-user-message-sticky-wrap" aria-hidden="true">
+      <div class="latest-user-message-sticky-overlay">
+        <div class="latest-user-message-sticky-top" />
+        <div class="latest-user-message-sticky-shell">
+          <div class="latest-user-message-sticky">
+            <div class="latest-user-message-sticky-text" title={props.preview.text}>
+              {props.preview.text}
+            </div>
+          </div>
+        </div>
+        <div class="latest-user-message-sticky-bottom-solid" />
+        <div class="latest-user-message-sticky-bottom-fade" />
+      </div>
+    </div>
+  );
+}
+
+function PendingActionRows(props: { questions: QuestionRequest[]; permissions: Permission[] }) {
+  return (
+    <>
+      <For each={props.questions}>
+        {(question) => (
+          <div class="interactive-item-container interactive-response">
+            <QuestionPrompt request={question} />
+          </div>
+        )}
+      </For>
+      <For each={props.permissions}>
+        {(permission) => (
+          <div class="interactive-item-container interactive-response">
+            <PermissionPrompt permission={permission} />
+          </div>
+        )}
+      </For>
+    </>
   );
 }
 
@@ -673,18 +953,18 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
         {(assistantSummary) => (
           <AssistantDialogSummary
             summary={assistantSummary()}
-            showImplementPlanAction={
-              props.hasBuildAgent &&
-              isAssistantMessage(props.msg.info) &&
-              isPlanningAssistantMessage(props.msg.info) &&
-              props.msg.info.id === props.latestPlanImplementationMessageId
-            }
+            showImplementPlanAction={shouldShowPlanImplementationAction({
+              hasBuildAgent: props.hasBuildAgent,
+              info: props.msg.info,
+              latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
+            })}
             onImplementPlan={() =>
               void implementPlan(
                 buildPlanImplementationPrompt(props.msg.parts),
                 props.msg.info.sessionID
               )
             }
+            onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
           />
         )}
       </Show>
@@ -759,6 +1039,7 @@ function AssistantDialogSummary(props: {
   summary: AssistantDialogSummaryInfo;
   showImplementPlanAction?: boolean;
   onImplementPlan?: () => void;
+  onSkipPlan?: () => void;
 }) {
   const agentSuffix =
     props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
@@ -769,17 +1050,26 @@ function AssistantDialogSummary(props: {
         <span class="model-change-label">
           {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
         </span>
-        <Show when={props.showImplementPlanAction}>
+      </div>
+      <Show when={props.showImplementPlanAction}>
+        <div class="assistant-dialog-summary-actions">
           <button
             type="button"
-            class="assistant-dialog-summary-action"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-implement"
             disabled={isLoading()}
             onClick={() => props.onImplementPlan?.()}
           >
             Implement the plan
           </button>
-        </Show>
-      </div>
+          <button
+            type="button"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-secondary"
+            onClick={() => props.onSkipPlan?.()}
+          >
+            Skip for now
+          </button>
+        </div>
+      </Show>
     </div>
   );
 }

@@ -58,8 +58,14 @@ export function getAssistantContainerVariant(params: {
 
   const parts = params.layoutParts;
   if (parts.length === 0) return false;
+  const textPartCount = parts.filter((part) => part.type === 'text').length;
+  const hasReasoningPart = parts.some((part) => part.type === 'reasoning');
+
+  if (params.highlightFinalAnswer && textPartCount >= 1 && hasReasoningPart) {
+    return 'plain';
+  }
+
   if (parts.length !== 1) {
-    const textPartCount = parts.filter((part) => part.type === 'text').length;
     if (
       !params.highlightFinalAnswer &&
       textPartCount >= 1 &&
@@ -162,7 +168,13 @@ export function Message(props: {
     assistant()
       ? visibleAssistantParts().some((part) => part.type !== 'text' && part.type !== 'file')
       : false;
+  const hasVisibleReasoningPart = () =>
+    assistant() ? visibleAssistantParts().some((part) => part.type === 'reasoning') : false;
   const assistantContainerVariant = () => {
+    if (props.highlightFinalAnswer && hasVisibleReasoningPart()) {
+      return 'plain';
+    }
+
     return getAssistantContainerVariant({
       isUser: isUser(),
       visibleDiffCount: visibleDiffs().length,
@@ -257,6 +269,12 @@ type UserMessageSegment =
   | { type: 'text'; content: string }
   | { type: 'code'; content: string; language?: string };
 
+export type ParsedUserMessageContent = {
+  messageTexts: string[];
+  attachments: MessageAttachment[];
+  fileParts: FilePart[];
+};
+
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 
 function trimFenceBoundaryNewlines(content: string, side: 'start' | 'end') {
@@ -299,73 +317,102 @@ function parseUserMessageSegments(text: string): UserMessageSegment[] {
   return segments;
 }
 
-function UserMessageContent(props: { parts: Part[] }) {
-  const parsed = createMemo(() => {
-    const messageTexts: string[] = [];
-    const attachments: MessageAttachment[] = [];
-    const fileParts: FilePart[] = [];
+export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent {
+  const messageTexts: string[] = [];
+  const attachments: MessageAttachment[] = [];
+  const fileParts: FilePart[] = [];
 
-    for (const part of props.parts) {
-      if (part.type === 'file') {
-        fileParts.push(part as FilePart);
-        continue;
-      }
+  for (const part of parts) {
+    if (part.type === 'file') {
+      fileParts.push(part as FilePart);
+      continue;
+    }
 
-      if (part.type !== 'text') continue;
-      const text = (part as TextPart).text;
-      if (!text) continue;
+    if (part.type !== 'text') continue;
+    const text = (part as TextPart).text;
+    if (!text) continue;
 
-      if (text.startsWith('[Working directory:')) continue;
+    if (text.startsWith('[Working directory:')) continue;
 
-      if (text.startsWith('[Selection from ') && !text.startsWith('[Selection from terminal')) {
-        const selectionRef = parseSelectionReference(text);
-        if (selectionRef) {
-          attachments.push({
-            type: 'file-selection',
-            filename: selectionRef.path,
-            lineRanges: selectionRef.lineRanges,
-          });
-          continue;
-        }
-      }
-
-      if (text.startsWith('[Selection from terminal')) {
-        const match = text.match(/^\[Selection from terminal (.+?)\]/);
-        if (match) {
-          attachments.push({
-            type: 'terminal-selection',
-            terminalName: match[1],
-          });
-          continue;
-        }
-      }
-
-      if (text.startsWith('[Active file:')) {
-        const match = text.match(/^\[Active file: (.+?)\]/);
-        if (match) {
-          attachments.push({
-            type: 'file-reference',
-            path: match[1],
-            isDirectory: false,
-          });
-          continue;
-        }
-      }
-
-      if (isStandaloneFileReference(text)) {
+    if (text.startsWith('[Selection from ') && !text.startsWith('[Selection from terminal')) {
+      const selectionRef = parseSelectionReference(text);
+      if (selectionRef) {
         attachments.push({
-          type: 'file-reference',
-          path: text,
-          isDirectory: text.endsWith('/'),
+          type: 'file-selection',
+          filename: selectionRef.path,
+          lineRanges: selectionRef.lineRanges,
         });
         continue;
       }
-
-      messageTexts.push(text);
     }
 
-    return { messageTexts, attachments, fileParts };
-  });
+    if (text.startsWith('[Selection from terminal')) {
+      const match = text.match(/^\[Selection from terminal (.+?)\]/);
+      if (match) {
+        attachments.push({
+          type: 'terminal-selection',
+          terminalName: match[1],
+        });
+        continue;
+      }
+    }
+
+    if (text.startsWith('[Active file:')) {
+      const match = text.match(/^\[Active file: (.+?)\]/);
+      if (match) {
+        attachments.push({
+          type: 'file-reference',
+          path: match[1],
+          isDirectory: false,
+        });
+        continue;
+      }
+    }
+
+    if (isStandaloneFileReference(text)) {
+      attachments.push({
+        type: 'file-reference',
+        path: text,
+        isDirectory: text.endsWith('/'),
+      });
+      continue;
+    }
+
+    messageTexts.push(text);
+  }
+
+  return { messageTexts, attachments, fileParts };
+}
+
+export function getUserMessagePreviewText(parts: Part[]): string {
+  const parsed = parseUserMessageContent(parts);
+  const firstText = parsed.messageTexts
+    .map((text) => text.replace(/\s+/g, ' ').trim())
+    .find((text) => text.length > 0);
+  if (firstText) return firstText;
+
+  const firstAttachment = parsed.attachments[0];
+  if (firstAttachment) {
+    switch (firstAttachment.type) {
+      case 'file-selection':
+        return `Selection: ${getLeafPathName(firstAttachment.filename)}`;
+      case 'terminal-selection':
+        return `Terminal: ${firstAttachment.terminalName}`;
+      case 'file-reference':
+        return `${firstAttachment.isDirectory ? 'Folder' : 'File'}: ${getLeafPathName(firstAttachment.path)}`;
+    }
+  }
+
+  const firstFilePart = parsed.fileParts[0];
+  if (firstFilePart) {
+    return firstFilePart.filename ? `Attachment: ${firstFilePart.filename}` : 'Attachment';
+  }
+
+  return '(no content)';
+}
+
+function UserMessageContent(props: { parts: Part[] }) {
+  const parsed = createMemo(() => parseUserMessageContent(props.parts));
 
   const imageParts = createMemo(() =>
     parsed().fileParts.filter((part) => part.mime.startsWith('image/'))
@@ -734,7 +781,6 @@ function AssistantMessageContent(props: {
                       part={part}
                       messageInfo={props.info}
                       streamedText={props.streamedTextForPart(part)}
-                      deferMarkdown={props.streamedTextForPart(part) !== null}
                     />
                   )}
                 </For>
@@ -752,7 +798,6 @@ function AssistantMessageContent(props: {
                 part={item.part}
                 messageInfo={props.info}
                 streamedText={props.streamedTextForPart(item.part)}
-                deferMarkdown={props.streamedTextForPart(item.part) !== null}
               />
             </div>
           )

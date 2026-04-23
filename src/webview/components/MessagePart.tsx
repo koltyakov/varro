@@ -1,5 +1,5 @@
-import { For, Show, createMemo, createSignal } from 'solid-js';
-import { state, showThinking } from '../lib/state';
+import { Show, createMemo, createSignal } from 'solid-js';
+import { expandThinkingAndCommandsByDefault, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
@@ -13,7 +13,6 @@ export function MessagePart(props: {
   part: Part;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
-  deferMarkdown?: boolean;
 }) {
   const p = () => props.part;
 
@@ -21,11 +20,7 @@ export function MessagePart(props: {
     const part = p();
     switch (part.type) {
       case 'text':
-        return props.deferMarkdown ? (
-          <StreamingTextRenderer content={props.streamedText ?? (part as TextPart).text} />
-        ) : (
-          <MarkdownRenderer content={props.streamedText ?? (part as TextPart).text} />
-        );
+        return <MarkdownRenderer content={props.streamedText ?? (part as TextPart).text} />;
       case 'tool':
         return <ToolCall part={part} />;
       case 'reasoning':
@@ -70,81 +65,6 @@ export function MessagePart(props: {
   return <>{render()}</>;
 }
 
-type StreamingTextSegment =
-  | { type: 'text'; content: string }
-  | { type: 'code'; content: string; language?: string };
-
-const STREAMING_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
-
-function trimFenceBoundaryNewlines(content: string, side: 'start' | 'end') {
-  return side === 'start' ? content.replace(/^\n+/, '') : content.replace(/\n+$/, '');
-}
-
-export function parseStreamingTextSegments(text: string): StreamingTextSegment[] {
-  const normalized = text.replace(/\r\n?/g, '\n');
-  const segments: StreamingTextSegment[] = [];
-  let lastIndex = 0;
-
-  for (const match of normalized.matchAll(STREAMING_CODE_FENCE_RE)) {
-    const index = match.index ?? 0;
-    if (index > lastIndex) {
-      const content = trimFenceBoundaryNewlines(normalized.slice(lastIndex, index), 'end');
-      if (content.length > 0) {
-        segments.push({ type: 'text', content });
-      }
-    }
-
-    segments.push({
-      type: 'code',
-      content: match[2],
-      language: match[1].trim() || undefined,
-    });
-    lastIndex = index + match[0].length;
-  }
-
-  if (lastIndex < normalized.length) {
-    const content = trimFenceBoundaryNewlines(normalized.slice(lastIndex), 'start');
-    if (content.length > 0) {
-      segments.push({ type: 'text', content });
-    }
-  }
-
-  if (segments.length === 0) {
-    segments.push({ type: 'text', content: normalized });
-  }
-
-  return segments;
-}
-
-function StreamingTextRenderer(props: { content: string }) {
-  const segments = createMemo(() => parseStreamingTextSegments(props.content || ''));
-
-  return (
-    <div class="rendered-markdown streaming-text-renderer">
-      <For each={segments()}>
-        {(segment) =>
-          segment.type === 'code' ? (
-            <div class="interactive-result-code-block" data-lang={segment.language}>
-              <Show when={segment.language}>
-                <div class="code-block-header">
-                  <span class="code-block-lang">{segment.language}</span>
-                </div>
-              </Show>
-              <pre class="code-block">
-                <code>{segment.content}</code>
-              </pre>
-            </div>
-          ) : (
-            <For each={segment.content.split(/\n{2,}/).filter((item) => item.length > 0)}>
-              {(paragraph) => <p>{paragraph}</p>}
-            </For>
-          )
-        }
-      </For>
-    </div>
-  );
-}
-
 function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {
   const usageLimit = createMemo(() => parseUsageLimitNotice(props.part.error?.data?.message));
 
@@ -166,7 +86,7 @@ function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {
 }
 
 function ReasoningBlock(props: { part: ReasoningPart; messageInfo?: AssistantMessage }) {
-  const [expanded, setExpanded] = createSignal(false);
+  const [expanded, setExpanded] = createSignal(expandThinkingAndCommandsByDefault());
   const parsedText = createMemo(() => splitReasoningText(props.part.text));
   const isStreaming = () => props.part.time.end === undefined;
   const hasBody = () => parsedText().body.trim().length > 0;
@@ -202,7 +122,7 @@ function ReasoningBlock(props: { part: ReasoningPart; messageInfo?: AssistantMes
         </svg>
       </button>
       <Show when={expanded() && hasBody()}>
-        <div class="thinking-content animate-fade-in">
+        <div class="thinking-content">
           <div class="thinking-item">
             <div class="thinking-text">{parsedText().body}</div>
           </div>

@@ -35,11 +35,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly FILE_SEARCH_MAX_CANDIDATES = 4_000;
   private static readonly FILE_SEARCH_RESULT_LIMIT = 30;
   private static readonly PROVIDER_LIMIT_CACHE_TTL_MS = 60_000;
+  private static readonly INTERRUPTED_SESSIONS_KEY = 'varro.interruptedSessions';
+  private static readonly BLOCKING_REQUESTS_KEY = 'varro.blockingRequests';
   private view?: vscode.WebviewView;
   private contextProvider: ContextProvider;
   private server: OpenCodeServer;
   private _status: ServerStatus = { state: 'stopped' };
   private themeDisposable?: vscode.Disposable;
+  private configDisposable?: vscode.Disposable;
   private contextFiles: DroppedFile[] = [];
   private onContextFilesChanged?: () => void;
   private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
@@ -57,7 +60,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly failedSessions = new Set<string>();
   private readonly pendingAttention = new Map<
     string,
-    { sessionID: string; kind: 'permission' | 'question'; label: string }
+    {
+      sessionID: string;
+      kind: 'permission' | 'question';
+      label: string;
+      props: Record<string, unknown>;
+    }
   >();
   private readonly sessionTitles = new Map<string, string>();
   private readonly providerLimitCache = new Map<
@@ -74,9 +82,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private lastStatusBarStateKey = '';
   private serverStartErrorMessage: string | null = null;
   private webviewAssets: WebviewAssetContent | null = null;
+  private interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
+  private blockingRequestsForWebview: BlockingRequestSnapshot[] = [];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
+    private readonly workspaceState: vscode.Memento,
     contextProvider: ContextProvider,
     server: OpenCodeServer,
     private readonly simulateNoProviders = false
@@ -92,6 +103,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.statusBarItem.command = 'varro.chat.focus';
     this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
       this.updateStatusBarItem();
+    });
+    this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        event.affectsConfiguration('varro.chat.expandThinkingAndCommandsByDefault') ||
+        event.affectsConfiguration('varro.chat.showStickyUserPrompt')
+      ) {
+        this.postConfigState();
+      }
     });
 
     this.serverStatusHandler = (status: ServerStatus) => {
@@ -216,7 +235,70 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (changed) {
       this.updateStatusBarItem();
       this.postPendingAttentionState();
+      void Promise.all([this.persistInterruptedSessions(), this.persistBlockingRequests()]);
     }
+  }
+
+  private async persistInterruptedSessions() {
+    const snapshots = [...this.busySessions]
+      .toSorted()
+      .map((id) => ({ id, title: this.sessionTitles.get(id)?.trim() || undefined }));
+    await this.workspaceState.update(SidebarProvider.INTERRUPTED_SESSIONS_KEY, snapshots);
+  }
+
+  private async persistBlockingRequests() {
+    const snapshots = [...this.pendingAttention.entries()]
+      .map(([id, request]) => ({
+        id,
+        sessionID: request.sessionID,
+        kind: request.kind,
+        props: request.props,
+      }))
+      .toSorted((a, b) => a.id.localeCompare(b.id));
+    await this.workspaceState.update(SidebarProvider.BLOCKING_REQUESTS_KEY, snapshots);
+  }
+
+  private async consumeInterruptedSessions() {
+    const snapshots =
+      this.workspaceState.get<InterruptedSessionSnapshot[]>(
+        SidebarProvider.INTERRUPTED_SESSIONS_KEY,
+        []
+      ) || [];
+    await this.workspaceState.update(SidebarProvider.INTERRUPTED_SESSIONS_KEY, []);
+    return snapshots.filter((item) => typeof item?.id === 'string' && item.id.trim().length > 0);
+  }
+
+  private async consumeBlockingRequests() {
+    const snapshots =
+      this.workspaceState.get<BlockingRequestSnapshot[]>(
+        SidebarProvider.BLOCKING_REQUESTS_KEY,
+        []
+      ) || [];
+    await this.workspaceState.update(SidebarProvider.BLOCKING_REQUESTS_KEY, []);
+    return snapshots.filter(
+      (item) =>
+        typeof item?.id === 'string' &&
+        item.id.trim().length > 0 &&
+        typeof item?.sessionID === 'string' &&
+        item.sessionID.trim().length > 0 &&
+        (item.kind === 'permission' || item.kind === 'question') &&
+        item.props &&
+        typeof item.props === 'object'
+    );
+  }
+
+  private showInterruptedSessionNotification() {
+    if (this.interruptedSessionsForWebview.length === 0) return;
+    const labels = this.interruptedSessionsForWebview
+      .map((item) => item.title?.trim() || item.id)
+      .filter(Boolean);
+    const preview = labels.slice(0, 3).join(', ');
+    const suffix = labels.length > 3 ? ` +${labels.length - 3} more` : '';
+    const message = preview
+      ? `Varro is reconnecting to previously running sessions: ${preview}${suffix}.`
+      : `Varro is reconnecting to ${this.interruptedSessionsForWebview.length} previously running sessions.`;
+    this.interruptedSessionsForWebview = [];
+    void vscode.window.showInformationMessage(message);
   }
 
   private rememberSessionTitle(info: Record<string, unknown> | undefined) {
@@ -237,7 +319,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       kind === 'question'
         ? this.describeQuestionRequest(props)
         : this.describePermissionRequest(props);
-    this.pendingAttention.set(requestID, { sessionID, kind, label });
+    this.busySessions.delete(sessionID);
+    this.pendingAttention.set(requestID, { sessionID, kind, label, props: { ...props } });
     this.completedSessions.delete(sessionID);
     this.showBlockingNotification(kind, sessionID, label);
     return true;
@@ -455,6 +538,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.completedSessions.clear();
           this.postContext();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
+          this.postConfigState();
           this.post({ type: 'server/status', payload: this._status });
           this.postPendingAttentionState();
           this.flushPendingInputFocus();
@@ -486,6 +570,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       default:
         return 'dark';
     }
+  }
+
+  private getExpandThinkingAndCommandsByDefault() {
+    return vscode.workspace
+      .getConfiguration('varro')
+      .get<boolean>('chat.expandThinkingAndCommandsByDefault', false);
+  }
+
+  private getShowStickyUserPrompt() {
+    return vscode.workspace
+      .getConfiguration('varro')
+      .get<boolean>('chat.showStickyUserPrompt', true);
+  }
+
+  private postConfigState() {
+    this.post({
+      type: 'config/update',
+      payload: {
+        expandThinkingAndCommandsByDefault: this.getExpandThinkingAndCommandsByDefault(),
+        showStickyUserPrompt: this.getShowStickyUserPrompt(),
+      },
+    });
   }
 
   private async ensureServerStarted() {
@@ -522,10 +628,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postContext();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.postContextFiles();
+          this.postConfigState();
           this.post({ type: 'server/status', payload: this._status });
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
           this.postPendingAttentionState();
           this.flushPendingInputFocus();
+          this.showInterruptedSessionNotification();
           void this.ensureServerStarted().catch(() => {});
           break;
         case 'webview/focus':
@@ -571,6 +679,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'vscode/open-external':
           await vscode.env.openExternal(vscode.Uri.parse(msg.payload.url));
+          break;
+        case 'config/update':
+          await vscode.workspace
+            .getConfiguration('varro')
+            .update(
+              'chat.expandThinkingAndCommandsByDefault',
+              msg.payload.expandThinkingAndCommandsByDefault,
+              vscode.ConfigurationTarget.Global
+            );
+          await vscode.workspace
+            .getConfiguration('varro')
+            .update(
+              'chat.showStickyUserPrompt',
+              msg.payload.showStickyUserPrompt,
+              vscode.ConfigurationTarget.Global
+            );
+          this.postConfigState();
           break;
         case 'api/request':
           await this.handleApiRequest(msg.payload);
@@ -1068,6 +1193,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private async getHtml(): Promise<string> {
     const webview = this.view?.webview;
     const { scriptContent, cssContent } = await this.loadWebviewAssets();
+    const [interruptedSessions, blockingRequests] = await Promise.all([
+      this.consumeInterruptedSessions(),
+      this.consumeBlockingRequests(),
+    ]);
+    this.interruptedSessionsForWebview = interruptedSessions;
+    this.blockingRequestsForWebview = blockingRequests;
+    this.pendingAttention.clear();
+    for (const item of blockingRequests) {
+      this.pendingAttention.set(item.id, {
+        sessionID: item.sessionID,
+        kind: item.kind,
+        label:
+          item.kind === 'question'
+            ? this.describeQuestionRequest(item.props)
+            : this.describePermissionRequest(item.props),
+        props: item.props,
+      });
+    }
+    this.postPendingAttentionState();
+    this.updateStatusBarItem();
 
     const nonce = randomNonce();
     const emptyStateLogoUri = webview?.asWebviewUri(
@@ -1080,6 +1225,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       terminalSelection: this.contextProvider.terminalSelection,
       droppedFiles: this.contextFiles,
       emptyStateLogoUri: emptyStateLogoUri?.toString() || '',
+      expandThinkingAndCommandsByDefault: this.getExpandThinkingAndCommandsByDefault(),
+      showStickyUserPrompt: this.getShowStickyUserPrompt(),
+      interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
+      pendingPermissions: this.blockingRequestsForWebview
+        .filter((item) => item.kind === 'permission')
+        .map((item) => item.props),
+      pendingQuestions: this.blockingRequestsForWebview
+        .filter((item) => item.kind === 'question')
+        .map((item) => item.props),
     } satisfies InitialWebviewState);
 
     return /*html*/ `<!DOCTYPE html>
@@ -1127,6 +1281,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   dispose() {
+    void Promise.all([this.persistInterruptedSessions(), this.persistBlockingRequests()]);
     if (this.serverStatusHandler) this.server.off('status', this.serverStatusHandler);
     if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
     this.serverStatusHandler = undefined;
@@ -1135,6 +1290,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewDisposables = [];
     this.webviewReady = false;
     this.themeDisposable?.dispose();
+    this.configDisposable?.dispose();
     this.windowStateDisposable?.dispose();
     this.statusBarItem.dispose();
     this.fileSearchCts?.dispose();
@@ -1162,6 +1318,18 @@ type RankedWorkspaceFile = {
 type WebviewAssetContent = {
   scriptContent: string;
   cssContent: string;
+};
+
+type BlockingRequestSnapshot = {
+  id: string;
+  sessionID: string;
+  kind: 'permission' | 'question';
+  props: Record<string, unknown>;
+};
+
+type InterruptedSessionSnapshot = {
+  id: string;
+  title?: string;
 };
 
 function rankWorkspaceFiles(

@@ -41,6 +41,8 @@ import {
   removeContextFile,
   addContextFiles,
   markSessionSeen,
+  clearSkippedPlanSession,
+  skipPlanSession,
   setSessionCompacting,
   getSelectedModelForSession,
   getSelectedAgentForSession,
@@ -60,6 +62,9 @@ import {
   getSessionTreeIds,
   setProviderLimit,
   setSessionUsageLimit,
+  consumeInterruptedSessionIds,
+  setExpandThinkingAndCommandsByDefaultPreference,
+  setShowStickyUserPromptPreference,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
@@ -73,6 +78,17 @@ function logError(context: string, err: unknown) {
       level: 'warn',
     },
   });
+}
+
+function isNormalizedPermission(props: Record<string, unknown>): props is Permission {
+  return (
+    typeof props.id === 'string' &&
+    typeof props.sessionID === 'string' &&
+    typeof props.type === 'string' &&
+    typeof props.messageID === 'string' &&
+    !!props.time &&
+    typeof props.time === 'object'
+  );
 }
 
 function getDefaultPrimaryAgentName() {
@@ -156,6 +172,8 @@ const DEFAULT_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.
     action: READ_ONLY_PERMISSIONS.has(permission) ? 'allow' : 'ask',
   })
 );
+const INTERRUPTED_SESSION_CONTINUE_PROMPT =
+  'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.';
 
 function shouldAutoApprovePermissions(sessionId: string) {
   return getPermissionModeForSession(sessionId) === 'full';
@@ -220,6 +238,7 @@ function clearDeletedSessionState(id: string) {
   removePermissionModeForSession(id);
   clearCurrentDocumentStateForSession(id);
   clearSelectedAgentForSession(id);
+  clearSkippedPlanSession(id);
   clearSelectedModelForSession(id);
   setState('sessionStatus', (statuses) => {
     const next = { ...statuses };
@@ -281,6 +300,10 @@ function upsertSession(session: Session) {
   }
 
   applySessions([session, ...state.sessions.filter((item) => item.id !== session.id)]);
+
+  if (session.id === state.activeSessionId) {
+    markSessionSeen(session.id, session.time.updated);
+  }
 }
 
 const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
@@ -490,6 +513,12 @@ export function useOpenCode() {
         case 'theme/update':
           setTheme(msg.payload.theme);
           applyTheme(msg.payload.theme);
+          break;
+        case 'config/update':
+          setExpandThinkingAndCommandsByDefaultPreference(
+            msg.payload.expandThinkingAndCommandsByDefault
+          );
+          setShowStickyUserPromptPreference(msg.payload.showStickyUserPrompt);
           break;
         case 'pending-attention/update':
           setState('pendingAttentionSessionIds', msg.payload.sessionIds);
@@ -726,11 +755,77 @@ async function initConnection() {
         if (!isCurrentGeneration(generation, connectionGeneration)) return;
       }
     }
+    await recoverInterruptedSessions(generation);
+    if (!isCurrentGeneration(generation, connectionGeneration)) return;
     initialized = true;
   } catch (_err) {
     initialized = false;
     setError('Failed to connect to OpenCode server');
   }
+}
+
+async function recoverInterruptedSessions(generation: number) {
+  const sessionIds = consumeInterruptedSessionIds().filter(
+    (id, index, items) => items.indexOf(id) === index
+  );
+  if (sessionIds.length === 0) return;
+
+  for (const sessionId of sessionIds) {
+    if (!isCurrentGeneration(generation, connectionGeneration)) return;
+    if (!state.sessions.some((session) => session.id === sessionId)) continue;
+
+    const status = state.sessionStatus[sessionId];
+    if (status?.type === 'busy' || status?.type === 'retry') continue;
+    if (state.questions.some((item) => item.sessionID === sessionId)) continue;
+    if (state.permissions.some((item) => item.sessionID === sessionId)) continue;
+
+    try {
+      const messages = await client.session.messages(sessionId);
+      if (!isCurrentGeneration(generation, connectionGeneration)) return;
+      if (!shouldContinueInterruptedSession(messages)) continue;
+      await continueInterruptedSession(sessionId);
+    } catch (err) {
+      logError('recoverInterruptedSession', err);
+    }
+  }
+}
+
+function shouldContinueInterruptedSession(messages: Array<{ info: Message; parts: Part[] }>) {
+  const lastInfo = messages.at(-1)?.info;
+  if (!lastInfo) return false;
+  if (lastInfo.role === 'user') return true;
+  return !lastInfo.error && !lastInfo.time.completed;
+}
+
+async function continueInterruptedSession(sessionId: string) {
+  const model = resolveSelectedModel(
+    getSelectedModelForSession(sessionId),
+    state.providers,
+    state.providerDefaults
+  );
+  const agent = getSelectedAgentForSession(sessionId) || getDefaultPrimaryAgentName();
+  const body: {
+    parts: Array<{ type: string; text: string }>;
+    model?: { providerID: string; modelID: string };
+    agent?: string;
+    variant?: string;
+  } = {
+    parts: [{ type: 'text', text: INTERRUPTED_SESSION_CONTINUE_PROMPT }],
+  };
+
+  if (agent) {
+    body.agent = agent;
+  }
+
+  if (model) {
+    body.model = { providerID: model.providerID, modelID: model.modelID };
+    if (model.variant) {
+      body.variant = model.variant;
+    }
+  }
+
+  await client.session.sendAsync(sessionId, body);
+  await Promise.all([syncSession(sessionId), recheckSessionStatus(sessionId)]).catch(() => {});
 }
 
 function ensureConnectionInitialized() {
@@ -1179,6 +1274,7 @@ export async function implementPlan(prompt: string, sessionId = state.activeSess
     return;
   }
 
+  clearSkippedPlanSession(sessionId);
   setSelectedAgent(buildAgent, { sessionId, persistGlobal: false });
   await sendMessage(prompt);
 }
@@ -1199,6 +1295,9 @@ export async function abortSession() {
   if (!state.activeSessionId) return;
   const sessionId = state.activeSessionId;
   const sessionTreeIds = getSessionTreeIds(sessionId);
+  if (getSelectedAgentForSession(sessionId) === 'plan') {
+    skipPlanSession(sessionId);
+  }
   const previousStatuses = new Map(
     sessionTreeIds.map((id) => [id, state.sessionStatus[id]] as const)
   );
@@ -1523,7 +1622,7 @@ function registerEventHandlers() {
 
   function handlePermissionEvent(props: Record<string, unknown>) {
     let permission: Permission;
-    if ('title' in props && 'time' in props) {
+    if (isNormalizedPermission(props)) {
       permission = props as Permission;
     } else {
       const tool = props.tool as { messageID?: string; callID?: string } | undefined;

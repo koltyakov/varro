@@ -33,6 +33,7 @@ import {
   getProviderLimit,
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
+  isSessionCompacting,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
@@ -75,6 +76,96 @@ import { TodoList } from './TodoList';
 import type { Agent, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
+
+const CONTEXT_USAGE_WARNING_PERCENT = 70;
+const CONTEXT_USAGE_ERROR_PERCENT = 90;
+
+type ToolbarControl =
+  | 'permission'
+  | 'attachments'
+  | 'send'
+  | 'reasoning'
+  | 'agent'
+  | 'stop'
+  | 'context';
+type ToolbarCompactMode =
+  | 'full'
+  | 'compact-agent'
+  | 'compact-reasoning'
+  | 'truncate-model'
+  | 'hide-permission'
+  | 'hide-attachments'
+  | 'compact-stop'
+  | 'hide-send'
+  | 'hide-reasoning'
+  | 'hide-agent'
+  | 'hide-stop'
+  | 'hide-context'
+  | 'tight';
+
+const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
+  'permission',
+  'attachments',
+  'send',
+  'reasoning',
+  'agent',
+  'stop',
+  'context',
+];
+
+const TOOLBAR_COMPACT_MODES: ToolbarCompactMode[] = [
+  'full',
+  'compact-agent',
+  'compact-reasoning',
+  'truncate-model',
+  'hide-permission',
+  'hide-attachments',
+  'compact-stop',
+  'hide-send',
+  'hide-reasoning',
+  'hide-agent',
+  'hide-stop',
+  'hide-context',
+  'tight',
+];
+
+export function isToolbarControlHidden(mode: ToolbarCompactMode, control: ToolbarControl) {
+  const hiddenControlCount =
+    mode === 'hide-permission'
+      ? 1
+      : mode === 'hide-attachments'
+        ? 2
+        : mode === 'hide-send'
+          ? 3
+          : mode === 'hide-reasoning'
+            ? 4
+            : mode === 'hide-agent'
+              ? 5
+              : mode === 'hide-stop'
+                ? 6
+                : mode === 'hide-context' || mode === 'tight'
+                  ? 7
+                  : 0;
+  const hiddenControlIndex = TOOLBAR_HIDE_ORDER.indexOf(control);
+  return hiddenControlIndex !== -1 && hiddenControlIndex < hiddenControlCount;
+}
+
+export function isToolbarControlCompacted(
+  mode: ToolbarCompactMode,
+  control: 'agent' | 'reasoning' | 'stop'
+) {
+  if (control === 'agent') return mode !== 'full';
+  if (control === 'reasoning') return !['full', 'compact-agent'].includes(mode);
+  return [
+    'compact-stop',
+    'hide-send',
+    'hide-reasoning',
+    'hide-agent',
+    'hide-stop',
+    'hide-context',
+    'tight',
+  ].includes(mode);
+}
 
 export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -136,21 +227,11 @@ export function ChatInput() {
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
   const [fileSearchQuery, setFileSearchQuery] = createSignal('');
   const [suppressCompletion, setSuppressCompletion] = createSignal(false);
-  const [toolbarCompactMode, setToolbarCompactMode] = createSignal<
-    'full' | 'compact-agent-stop' | 'compact-reasoning' | 'truncate-model' | 'tight'
-  >('full');
+  const [toolbarCompactMode, setToolbarCompactMode] = createSignal<ToolbarCompactMode>('full');
   let latestFileSearchRequestId = 0;
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let toolbarFitRaf = 0;
   let toolbarFitRequestId = 0;
-
-  const toolbarCompactModes = [
-    'full',
-    'compact-agent-stop',
-    'compact-reasoning',
-    'truncate-model',
-    'tight',
-  ] as const;
 
   const files = () => state.droppedFiles;
   const clipboardImages = () => state.clipboardImages;
@@ -688,11 +769,11 @@ export function ChatInput() {
 
   function fitToolbar(modeIndex: number, requestId: number) {
     if (requestId !== toolbarFitRequestId) return;
-    const nextMode = toolbarCompactModes[Math.min(modeIndex, toolbarCompactModes.length - 1)];
+    const nextMode = TOOLBAR_COMPACT_MODES[Math.min(modeIndex, TOOLBAR_COMPACT_MODES.length - 1)];
     setToolbarCompactMode(nextMode);
     queueMicrotask(() => {
       if (requestId !== toolbarFitRequestId) return;
-      if (!isToolbarOverflowing() || modeIndex >= toolbarCompactModes.length - 1) return;
+      if (!isToolbarOverflowing() || modeIndex >= TOOLBAR_COMPACT_MODES.length - 1) return;
       fitToolbar(modeIndex + 1, requestId);
     });
   }
@@ -1121,29 +1202,26 @@ export function ChatInput() {
 
   const selectedAgentLabel = () => {
     const name = state.selectedAgent;
-    const compactMode = toolbarCompactMode();
-    const compactAgent = compactMode !== 'full';
-    if (!name) return compactAgent ? 'A' : 'Agent';
+    if (!name) return 'Agent';
     const agent = state.agents.find((a) => a.name === name);
     const label = formatAgentLabel(agent?.name || name);
-    return compactAgent ? formatAgentInitial(label) : label;
+    return isToolbarControlCompacted(toolbarCompactMode(), 'agent')
+      ? formatAgentInitial(label)
+      : label;
   };
 
   const selectedVariantLabel = () => {
     const variant = effectiveVariant();
     if (!variant) return '';
-    const compactMode = toolbarCompactMode();
-    return compactMode === 'compact-reasoning' ||
-      compactMode === 'truncate-model' ||
-      compactMode === 'tight'
+    return isToolbarControlCompacted(toolbarCompactMode(), 'reasoning')
       ? formatVariantInitial(variant)
       : formatVariantLabel(variant);
   };
 
-  const modelCanEllipsize = () => {
-    const compactMode = toolbarCompactMode();
-    return compactMode === 'truncate-model' || compactMode === 'tight';
-  };
+  const modelCanEllipsize = () =>
+    !['full', 'compact-agent', 'compact-reasoning'].includes(toolbarCompactMode());
+  const isToolbarControlVisible = (control: ToolbarControl) =>
+    !isToolbarControlHidden(toolbarCompactMode(), control);
 
   createEffect(() => {
     const deps = toolbarFitDependencies();
@@ -1170,51 +1248,55 @@ export function ChatInput() {
           <For each={queuedForSession()}>
             {(item) => (
               <div class="chat-queue-item" role="listitem" title={item.text}>
-                <span class="chat-queue-icon" aria-hidden="true">
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                <div class="chat-queue-body">
+                  <span class="chat-queue-icon" aria-hidden="true">
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M3 4h10M3 8h10M3 12h6" />
+                    </svg>
+                  </span>
+                  <span class="chat-queue-label">{item.text}</span>
+                </div>
+                <div class="chat-queue-actions">
+                  <button
+                    class="chat-queue-action"
+                    onClick={() => sendQueuedAsSteer(item.id, item.text)}
+                    title="Send now as Steer"
+                    aria-label="Send as Steer"
                   >
-                    <path d="M3 4h10M3 8h10M3 12h6" />
-                  </svg>
-                </span>
-                <span class="chat-queue-label">{item.text}</span>
-                <button
-                  class="chat-queue-action"
-                  onClick={() => sendQueuedAsSteer(item.id, item.text)}
-                  title="Send now as Steer"
-                  aria-label="Send as Steer"
-                >
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.75"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.75"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M8 13V3M4 7l4-4 4 4" />
+                    </svg>
+                    <span class="chat-queue-action-label">Steer</span>
+                  </button>
+                  <button
+                    class="chat-queue-remove"
+                    onClick={() => removeQueuedMessage(item.id)}
+                    title="Remove from queue"
+                    aria-label="Remove from queue"
                   >
-                    <path d="M8 13V3M4 7l4-4 4 4" />
-                  </svg>
-                  <span class="chat-queue-action-label">Steer</span>
-                </button>
-                <button
-                  class="chat-queue-remove"
-                  onClick={() => removeQueuedMessage(item.id)}
-                  title="Remove from queue"
-                  aria-label="Remove from queue"
-                >
-                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-                  </svg>
-                </button>
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             )}
           </For>
@@ -1445,54 +1527,56 @@ export function ChatInput() {
             ref={toolbarLeftRef}
             class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
           >
-            <div style={{ position: 'relative' }}>
-              <button
-                ref={permissionPickerRef!}
-                class="toolbar-picker icon-only"
-                onClick={() => {
-                  const next = !showPermissionModePicker();
-                  closePopups(next ? 'permission' : undefined);
-                  setShowPermissionModePicker(next);
-                }}
-                title={
-                  activePermissionMode() === 'full'
-                    ? 'Full access permissions'
-                    : 'Default permissions'
-                }
-                aria-label={
-                  activePermissionMode() === 'full'
-                    ? 'Full access permissions'
-                    : 'Default permissions'
-                }
-              >
-                <PermissionModeIcon mode={activePermissionMode()} />
-              </button>
-              <Show when={showPermissionModePicker()}>
-                <div
-                  ref={permissionPopoverRef!}
-                  class="toolbar-popover"
-                  onClick={(e) => e.stopPropagation()}
+            <Show when={isToolbarControlVisible('permission')}>
+              <div style={{ position: 'relative' }}>
+                <button
+                  ref={permissionPickerRef!}
+                  class="toolbar-picker icon-only"
+                  onClick={() => {
+                    const next = !showPermissionModePicker();
+                    closePopups(next ? 'permission' : undefined);
+                    setShowPermissionModePicker(next);
+                  }}
+                  title={
+                    activePermissionMode() === 'full'
+                      ? 'Full access permissions'
+                      : 'Default permissions'
+                  }
+                  aria-label={
+                    activePermissionMode() === 'full'
+                      ? 'Full access permissions'
+                      : 'Default permissions'
+                  }
                 >
-                  <div class="toolbar-popover-header">Permissions</div>
-                  <For each={PERMISSION_MODE_OPTIONS}>
-                    {(option) => (
-                      <button
-                        class={`toolbar-popover-item ${activePermissionMode() === option.mode ? 'selected' : ''}`}
-                        onClick={() => {
-                          void updatePermissionModeForSession(option.mode);
-                          setShowPermissionModePicker(false);
-                        }}
-                      >
-                        <PermissionModeIcon mode={option.mode} />
-                        <span class="min-w-0 flex-1">{option.label}</span>
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </div>
+                  <PermissionModeIcon mode={activePermissionMode()} />
+                </button>
+                <Show when={showPermissionModePicker()}>
+                  <div
+                    ref={permissionPopoverRef!}
+                    class="toolbar-popover"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div class="toolbar-popover-header">Permissions</div>
+                    <For each={PERMISSION_MODE_OPTIONS}>
+                      {(option) => (
+                        <button
+                          class={`toolbar-popover-item ${activePermissionMode() === option.mode ? 'selected' : ''}`}
+                          onClick={() => {
+                            void updatePermissionModeForSession(option.mode);
+                            setShowPermissionModePicker(false);
+                          }}
+                        >
+                          <PermissionModeIcon mode={option.mode} />
+                          <span class="min-w-0 flex-1">{option.label}</span>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+            </Show>
 
-            <Show when={state.agents.length > 0}>
+            <Show when={state.agents.length > 0 && isToolbarControlVisible('agent')}>
               <div style={{ position: 'relative' }}>
                 <button
                   ref={agentPickerRef!}
@@ -1595,7 +1679,7 @@ export function ChatInput() {
               </span>
             </Show>
 
-            <Show when={availableVariants().length > 0}>
+            <Show when={availableVariants().length > 0 && isToolbarControlVisible('reasoning')}>
               <div style={{ position: 'relative' }}>
                 <button
                   ref={variantPickerRef!}
@@ -1655,17 +1739,18 @@ export function ChatInput() {
               </div>
             </Show>
 
-            <Show when={contextUsage()}>
+            <Show when={contextUsage() && isToolbarControlVisible('context')}>
               <div style={{ position: 'relative' }}>
                 <button
                   ref={contextButtonRef!}
-                  class={`chat-context-usage ${contextUsage()!.percent >= 75 ? (contextUsage()!.percent >= 90 ? 'error' : 'warning') : ''}`}
+                  class={`chat-context-usage ${getContextUsageTone(contextUsage()!.percent)}`}
                   onClick={() => {
                     const next = !showContextPopup();
                     closePopups(next ? 'context' : undefined);
                     setShowContextPopup(next);
                   }}
-                  title="Context usage"
+                  title={formatContextUsageTitle(contextUsage()!.percent)}
+                  aria-label={formatContextUsageTitle(contextUsage()!.percent)}
                 >
                   <svg class="circular-progress" viewBox="0 0 36 36">
                     <circle class="progress-bg" cx="18" cy="18" r="14" />
@@ -1693,9 +1778,35 @@ export function ChatInput() {
           </div>
 
           <div ref={toolbarRightRef} class="toolbar-right">
-            <Show when={isLoading() && !hasActiveQuestion() && !hasActivePermission()}>
+            <Show when={isToolbarControlVisible('attachments')}>
               <button
-                class={`toolbar-picker stop-button ${toolbarCompactMode() === 'full' ? '' : 'compact'}`}
+                class="toolbar-attach-button"
+                onClick={() => postMessage({ type: 'files/pick' })}
+                title="Attach files"
+                aria-label="Attach files"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 32 32"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M27.41 5.586c-1.021-1.021-2.363-1.532-3.705-1.532S21.021 4.564 20 5.586L8.153 17.431c-1.216 1.216-1.216 3.196.002 4.414 1.217 1.217 3.195 1.217 4.412 0l8.26-8.26-1.414-1.414-8.26 8.26c-.437.436-1.146.437-1.586-.002-.437-.437-.437-1.147 0-1.584L21.414 7C22.678 5.738 24.732 5.737 26 7.004c1.263 1.263 1.263 3.319 0 4.582L14.151 23.433c-2.091 2.089-5.491 2.089-7.586-.006-2.09-2.09-2.09-5.49 0-7.58L16.828 5.586l-1.414-1.414L5.151 14.433c-2.87 2.87-2.87 7.539.006 10.414 2.869 2.87 7.539 2.87 10.408 0L27.414 13C29.457 10.957 29.457 7.633 27.41 5.586z" />
+                </svg>
+              </button>
+            </Show>
+
+            <Show
+              when={
+                isLoading() &&
+                !hasActiveQuestion() &&
+                !hasActivePermission() &&
+                isToolbarControlVisible('stop')
+              }
+            >
+              <button
+                class={`toolbar-picker stop-button ${isToolbarControlCompacted(toolbarCompactMode(), 'stop') ? 'compact' : ''}`}
                 onClick={() => abortSession()}
                 title="Stop"
                 aria-label="Stop"
@@ -1703,66 +1814,69 @@ export function ChatInput() {
                 <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                   <rect x="3" y="3" width="10" height="10" rx="1.5" />
                 </svg>
-                <Show when={toolbarCompactMode() === 'full'}>
+                <Show when={!isToolbarControlCompacted(toolbarCompactMode(), 'stop')}>
                   <span class="toolbar-picker-label">Stop</span>
                 </Show>
               </button>
             </Show>
 
             <div style={{ position: 'relative' }}>
-              <Show
-                when={isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()}
-                fallback={
-                  <button
-                    class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
-                    onClick={() => canSend() && handleSend()}
-                    disabled={!canSend()}
-                    title="Send (Enter)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
-                    </svg>
-                  </button>
-                }
-              >
-                <div class="send-button-group">
-                  <button
-                    class="chat-send-button enabled send-main"
-                    onClick={() => handleSend()}
-                    title="Add to queue (Enter)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
-                    </svg>
-                  </button>
-                  <button
-                    ref={busyToggleRef!}
-                    class="send-mode-chevron"
-                    onClick={() => {
-                      const next = !showBusyMenu();
-                      closePopups(next ? 'busy' : undefined);
-                      setShowBusyMenu(next);
-                    }}
-                    title="More send options"
-                  >
-                    <svg
-                      width="8"
-                      height="8"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
+              <Show when={isToolbarControlVisible('send')}>
+                <Show
+                  when={isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()}
+                  fallback={
+                    <button
+                      class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
+                      onClick={() => canSend() && handleSend()}
+                      disabled={!canSend()}
+                      title="Send (Enter)"
                     >
-                      <path d="M4 10l4-4 4 4" />
-                    </svg>
-                  </button>
-                </div>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
+                      </svg>
+                    </button>
+                  }
+                >
+                  <div class="send-button-group">
+                    <button
+                      class="chat-send-button enabled send-main"
+                      onClick={() => handleSend()}
+                      title="Add to queue (Enter)"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
+                      </svg>
+                    </button>
+                    <button
+                      ref={busyToggleRef!}
+                      class="send-mode-chevron"
+                      onClick={() => {
+                        const next = !showBusyMenu();
+                        closePopups(next ? 'busy' : undefined);
+                        setShowBusyMenu(next);
+                      }}
+                      title="More send options"
+                    >
+                      <svg
+                        width="8"
+                        height="8"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M4 10l4-4 4 4" />
+                      </svg>
+                    </button>
+                  </div>
+                </Show>
               </Show>
 
               <Show
                 when={
+                  isToolbarControlVisible('send') &&
                   showBusyMenu() &&
                   canSend() &&
                   isLoading() &&
@@ -1892,7 +2006,7 @@ function ContextPopup(props: {
 
       <div class="context-popup-bar">
         <div
-          class={`context-popup-bar-fill ${props.usage.percent >= 90 ? 'error' : props.usage.percent >= 75 ? 'warning' : ''}`}
+          class={`context-popup-bar-fill ${getContextUsageTone(props.usage.percent)}`}
           style={{ width: `${Math.min(props.usage.percent, 100)}%` }}
         />
       </div>
@@ -1922,6 +2036,22 @@ function ContextPopup(props: {
         </div>
       </Show>
 
+      <Show when={shouldShowContextCompact(props.usage.percent)}>
+        <div class="context-popup-actions">
+          <button
+            type="button"
+            class="context-popup-action"
+            disabled={isLoading() || isSessionCompacting()}
+            onClick={() => {
+              props.onClose();
+              void compactSession();
+            }}
+          >
+            Compact session
+          </button>
+        </div>
+      </Show>
+
       <Show when={props.model.modelName}>
         <div class="context-popup-model">
           {props.model.providerName} / {props.model.modelName}
@@ -1929,6 +2059,20 @@ function ContextPopup(props: {
       </Show>
     </div>
   );
+}
+
+function getContextUsageTone(percent: number) {
+  if (percent >= CONTEXT_USAGE_ERROR_PERCENT) return 'error';
+  if (percent >= CONTEXT_USAGE_WARNING_PERCENT) return 'warning';
+  return '';
+}
+
+function formatContextUsageTitle(percent: number) {
+  return `Context usage (${Math.round(percent)}%)`;
+}
+
+function shouldShowContextCompact(percent: number) {
+  return percent >= CONTEXT_USAGE_WARNING_PERCENT;
 }
 
 type SlashCommand = {
@@ -2093,13 +2237,21 @@ function PermissionModeIcon(props: { mode: PermissionMode }) {
       <Show
         when={props.mode === 'full'}
         fallback={
-          <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
-            <path d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1zm4 6c0 2.8-1.8 5.2-4 6.2C5.8 12.2 4 9.8 4 7V4l4-1.5L12 4v3z" />
+          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+            <path
+              fill-rule="evenodd"
+              clip-rule="evenodd"
+              d="M11.2071 3.6797C11.0909 3.85386 11 4.14834 11 4.5V6V11C11 11.5523 10.5523 12 10 12C9.44772 12 9 11.5523 9 11V6C9 5.64834 8.90906 5.35386 8.79295 5.1797C8.6966 5.03518 8.61209 5 8.5 5C8.38791 5 8.3034 5.03518 8.20705 5.1797C8.09094 5.35386 8 5.64834 8 6V12V15C8 15.5523 7.55228 16 7 16C6.44772 16 6 15.5523 6 15V12C6 11.6483 5.90906 11.3539 5.79295 11.1797C5.6966 11.0352 5.61209 11 5.5 11C5.38791 11 5.3034 11.0352 5.20705 11.1797C5.09094 11.3539 5 11.6483 5 12V16C5 17.033 5.70057 18.1402 7.0547 19.0429C8.3875 19.9315 10.1939 20.5 12 20.5C15.6675 20.5 18 18.251 18 16V9C18 8.64834 17.9091 8.35386 17.7929 8.1797C17.6966 8.03518 17.6121 8 17.5 8C17.3879 8 17.3034 8.03518 17.2071 8.1797C17.0909 8.35386 17 8.64834 17 9V12C17 12.5523 16.5523 13 16 13C15.4477 13 15 12.5523 15 12V9V6C15 5.64834 14.9091 5.35386 14.7929 5.1797C14.6966 5.03518 14.6121 5 14.5 5C14.3879 5 14.3034 5.03518 14.2071 5.1797C14.0909 5.35386 14 5.64834 14 6V11C14 11.5523 13.5523 12 13 12C12.4477 12 12 11.5523 12 11V6V4.5C12 4.14834 11.9091 3.85386 11.7929 3.6797C11.6966 3.53518 11.6121 3.5 11.5 3.5C11.3879 3.5 11.3034 3.53518 11.2071 3.6797ZM13.7452 3.12242C13.975 3.04395 14.227 3 14.5 3C15.3879 3 16.0534 3.46482 16.4571 4.0703C16.8409 4.64614 17 5.35166 17 6V6.05195C17.1578 6.01815 17.3245 6 17.5 6C18.3879 6 19.0534 6.46482 19.4571 7.0703C19.8409 7.64614 20 8.35166 20 9V16C20 19.749 16.3325 22.5 12 22.5C9.80613 22.5 7.6125 21.8185 5.9453 20.7071C4.29943 19.6098 3 17.967 3 16V12C3 11.3517 3.15906 10.6461 3.54295 10.0703C3.9466 9.46482 4.61209 9 5.5 9C5.67545 9 5.84222 9.01815 6 9.05195V6C6 5.35166 6.15906 4.64614 6.54295 4.0703C6.9466 3.46482 7.61209 3 8.5 3C8.77302 3 9.02501 3.04395 9.25482 3.12242C9.33156 2.92998 9.427 2.74423 9.54295 2.5703C9.9466 1.96482 10.6121 1.5 11.5 1.5C12.3879 1.5 13.0534 1.96482 13.4571 2.5703C13.573 2.74423 13.6684 2.92998 13.7452 3.12242Z"
+            />
           </svg>
         }
       >
         <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
-          <path d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1z" />
+          <path
+            fill-rule="evenodd"
+            clip-rule="evenodd"
+            d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1zM7.2 3.7c0-.44.36-.8.8-.8s.8.36.8.8v4.05c0 .44-.36.8-.8.8s-.8-.36-.8-.8V3.7zM8 8.8a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"
+          />
         </svg>
       </Show>
     </span>
@@ -2151,7 +2303,7 @@ function getSlashCommands(props: {
     {
       name: 'settings',
       aliases: [],
-      description: 'Open model visibility settings',
+      description: 'Open settings',
       action: props.onOpenSettings,
     },
     {

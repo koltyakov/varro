@@ -1,10 +1,41 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { render } from 'solid-js/web';
+import { setExpandThinkingAndCommandsByDefaultPreference } from '../lib/state';
+import type { ReasoningPart } from '../types';
 import {
+  MessagePart,
   formatReasoningDuration,
   formatReasoningHeader,
-  parseStreamingTextSegments,
   splitReasoningText,
 } from './MessagePart';
+
+let container: HTMLDivElement | null = null;
+let cleanup: (() => void) | undefined;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  setExpandThinkingAndCommandsByDefaultPreference(false);
+});
+
+afterEach(() => {
+  cleanup?.();
+  cleanup = undefined;
+  container?.remove();
+  container = null;
+  setExpandThinkingAndCommandsByDefaultPreference(false);
+});
+
+function reasoningPart(text: string): ReasoningPart {
+  return {
+    id: 'reasoning-1',
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'reasoning',
+    text,
+    time: { start: 0, end: 1 },
+  };
+}
 
 describe('formatReasoningDuration', () => {
   it('returns null while reasoning is still running', () => {
@@ -61,14 +92,15 @@ describe('splitReasoningText', () => {
   });
 });
 
-describe('parseStreamingTextSegments', () => {
-  it('keeps plain paragraphs and fenced code separate', () => {
-    expect(
-      parseStreamingTextSegments('First paragraph\n\n```ts\nconst x = 1;\n```\n\nSecond')
-    ).toEqual([
-      { type: 'text', content: 'First paragraph' },
-      { type: 'code', content: 'const x = 1;\n', language: 'ts' },
-      { type: 'text', content: 'Second' },
-    ]);
+describe('MessagePart', () => {
+  it('expands reasoning blocks by default when the setting is enabled', () => {
+    setExpandThinkingAndCommandsByDefaultPreference(true);
+
+    cleanup = render(
+      () => MessagePart({ part: reasoningPart('**Planning**\n\nStep one') }),
+      container!
+    );
+
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
   });
 });

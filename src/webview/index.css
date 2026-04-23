@@ -290,13 +290,14 @@ body.vscode-light :is(.chat-tool-invocation-part .tool-invocation-output, .chat-
 .tool-invocation-output,
 .toolbar-popover,
 .tool-invocation-params {
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable;
 }
 
 .tool-invocation-output:hover,
 .toolbar-popover:hover,
 .tool-invocation-params:hover {
-  scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent) transparent;
 }
 
@@ -430,6 +431,96 @@ input:focus-visible {
   padding: 14px
     max(0px, calc(var(--chat-horizontal-padding) - var(--interactive-list-scrollbar-inset))) 24px
     var(--chat-horizontal-padding);
+}
+
+.latest-user-message-sticky-wrap {
+  --latest-user-message-sticky-gap: 8px;
+  --latest-user-message-sticky-bottom-solid-gap: var(--latest-user-message-sticky-gap);
+  --latest-user-message-sticky-bottom-gap: calc(var(--latest-user-message-sticky-gap) * 2);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 0;
+  pointer-events: none;
+  width: 100%;
+  padding: 0;
+  box-sizing: border-box;
+  isolation: isolate;
+}
+
+.latest-user-message-sticky-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  contain: paint;
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.latest-user-message-sticky-top,
+.latest-user-message-sticky-bottom-solid,
+.latest-user-message-sticky-bottom-fade,
+.latest-user-message-sticky-shell {
+  width: 100%;
+  pointer-events: none;
+}
+
+.latest-user-message-sticky-top {
+  height: var(--latest-user-message-sticky-gap);
+  background: var(--color-vscode-list-bg);
+}
+
+.latest-user-message-sticky-shell {
+  background: var(--color-vscode-list-bg);
+  transform: translateZ(0);
+}
+
+.latest-user-message-sticky-bottom-solid {
+  height: var(--latest-user-message-sticky-bottom-solid-gap);
+  background: var(--color-vscode-list-bg);
+}
+
+.latest-user-message-sticky-bottom-fade {
+  height: var(--latest-user-message-sticky-bottom-gap);
+  background: linear-gradient(to bottom, var(--color-vscode-list-bg), transparent);
+}
+
+.latest-user-message-sticky {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 15px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
+  background: var(--color-vscode-request-bubble);
+  box-shadow: none;
+  color: var(--color-vscode-fg);
+  pointer-events: auto;
+  box-sizing: border-box;
+  opacity: 1;
+  contain: paint;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.latest-user-message-sticky-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-height: calc(1.35em * 4);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .interactive-item-container {
@@ -665,10 +756,18 @@ body.vscode-light
   gap: 8px;
 }
 
-.assistant-dialog-summary {
+.model-change-indicator.assistant-dialog-summary {
   font-variant-numeric: tabular-nums;
   margin-top: 10px;
   margin-bottom: 0;
+  display: block;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.model-change-indicator.assistant-dialog-summary::before,
+.model-change-indicator.assistant-dialog-summary::after {
+  display: none;
 }
 
 .assistant-dialog-summary-content {
@@ -676,14 +775,32 @@ body.vscode-light
   align-items: center;
   justify-content: center;
   gap: 8px;
+}
+
+.assistant-dialog-summary-content::before,
+.assistant-dialog-summary-content::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
+}
+
+.assistant-dialog-summary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   flex-wrap: wrap;
+  flex-direction: row;
+  margin-top: 8px;
+  width: 100%;
 }
 
 .assistant-dialog-summary-action {
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-button-background) 18%, transparent);
-  color: var(--color-vscode-button-foreground);
+  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
+  color: var(--color-vscode-fg);
   border-radius: 999px;
   font-size: 11px;
   line-height: 1.2;
@@ -692,7 +809,27 @@ body.vscode-light
 }
 
 .assistant-dialog-summary-action:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-vscode-button-background) 28%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
+}
+
+.assistant-dialog-summary-action-implement {
+  color: color-mix(in srgb, var(--color-vscode-success) 82%, var(--color-vscode-fg));
+  border-color: color-mix(in srgb, var(--color-vscode-success) 42%, var(--color-vscode-border));
+  background: color-mix(in srgb, var(--color-vscode-success) 18%, transparent);
+}
+
+.assistant-dialog-summary-action-implement:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-success) 26%, transparent);
+}
+
+.assistant-dialog-summary-action-secondary {
+  color: color-mix(in srgb, var(--color-vscode-error) 82%, var(--color-vscode-fg));
+  border-color: color-mix(in srgb, var(--color-vscode-error) 42%, var(--color-vscode-border));
+  background: color-mix(in srgb, var(--color-vscode-error) 18%, transparent);
+}
+
+.assistant-dialog-summary-action-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-error) 26%, transparent);
 }
 
 .assistant-dialog-summary-action:disabled {
@@ -1248,6 +1385,10 @@ body.vscode-light
   opacity: 0.8;
 }
 
+.chat-context-usage:focus-visible {
+  outline: none;
+}
+
 .chat-context-usage .circular-progress {
   width: 100%;
   height: 100%;
@@ -1425,6 +1566,34 @@ body.vscode-light
   white-space: nowrap;
 }
 
+.context-popup-actions {
+  display: flex;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.context-popup-action {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 26px;
+  border: 1px solid var(--color-vscode-border-soft);
+  border-radius: 6px;
+  background: var(--color-vscode-input-surface);
+  color: var(--color-vscode-fg);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 0 9px;
+}
+
+.context-popup-action:hover:not(:disabled) {
+  background: var(--color-vscode-input-surface-hover);
+  border-color: var(--color-vscode-border-strong);
+}
+
 .interactive-session .chat-editor-container {
   padding: 0;
   position: relative;
@@ -1566,12 +1735,12 @@ body.vscode-light
 .toolbar-picker.model-picker-btn.model-ellipsis {
   flex: 0 1 auto;
   max-width: 100%;
-  min-width: 0;
+  min-width: calc(5ch + 32px);
 }
 
 .toolbar-picker.model-picker-btn.model-ellipsis .toolbar-picker-label.model-name {
   flex: 1 1 auto;
-  min-width: 3ch;
+  min-width: 5ch;
   max-width: 100%;
 }
 
@@ -1632,6 +1801,10 @@ body.vscode-light
   color: var(--color-vscode-muted);
 }
 
+.permission-mode-icon svg {
+  display: block;
+}
+
 .permission-mode-icon.full {
   color: var(--color-vscode-warning);
 }
@@ -1664,6 +1837,7 @@ body.vscode-light
   padding: 4px 10px;
   text-align: left;
   font-size: 12px;
+  line-height: 1.2;
   color: var(--color-vscode-fg);
   border: none;
   background: none;
@@ -1772,6 +1946,34 @@ body.vscode-light
 .toolbar-picker.stop-button svg {
   color: var(--color-vscode-error);
   opacity: 0.75;
+}
+
+.toolbar-attach-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--color-vscode-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition:
+    background-color 0.12s,
+    color 0.12s;
+  flex-shrink: 0;
+}
+
+.toolbar-attach-button:hover {
+  background: var(--color-vscode-toolbar-hover);
+  color: var(--color-vscode-fg);
+}
+
+.chat-input-toolbars.compact-tight .toolbar-attach-button {
+  width: 22px;
+  height: 22px;
 }
 
 .toolbar-popover.busy-menu {
@@ -2031,15 +2233,25 @@ body.vscode-light
 }
 
 .chat-queue-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 11.5px;
-  padding: 4px 4px 4px 8px;
+  padding: 8px 8px 8px 10px;
   border: 1px solid var(--color-vscode-border-soft);
-  border-radius: 7px;
+  border-radius: 10px;
   background: var(--color-vscode-surface-softer);
   color: var(--color-vscode-fg);
+  min-width: 0;
+}
+
+.chat-queue-body {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -2054,9 +2266,18 @@ body.vscode-light
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.2;
   color: var(--color-vscode-fg-soft);
+}
+
+.chat-queue-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .chat-queue-action {
@@ -3603,6 +3824,11 @@ kbd {
   white-space: nowrap;
 }
 
+.chat-header-title-count {
+  font-weight: 400;
+  color: var(--color-vscode-muted);
+}
+
 .chat-header-actions {
   display: flex;
   align-items: center;
@@ -3673,6 +3899,22 @@ kbd {
   transition: background-color 0.1s;
 }
 
+.chat-header-completed-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
 .chat-header-running-badge:hover {
   background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
 }
@@ -3687,6 +3929,10 @@ kbd {
 
 .chat-header-plan-badge:hover {
   background: color-mix(in srgb, var(--color-vscode-warning) 16%, transparent);
+}
+
+.chat-header-completed-badge:hover {
+  background: color-mix(in srgb, var(--color-vscode-success) 16%, transparent);
 }
 
 .chat-header-running-spinner {
@@ -3721,6 +3967,14 @@ kbd {
   background: var(--color-vscode-warning);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-warning) 55%, transparent);
   animation: pulse-soft 1.5s ease-in-out infinite;
+}
+
+.chat-header-completed-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-vscode-success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-success) 55%, transparent);
 }
 
 .chat-header-attention-dot,
@@ -3845,15 +4099,83 @@ kbd {
 
 /* Session list view (full-page) */
 .session-list-view {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   padding: 4px 0;
   outline: none;
 }
 
 .session-list-view-sidebar {
   padding-top: 6px;
+}
+
+.session-list-view-sidebar .session-list-search {
+  padding: 12px;
+}
+
+.session-list-search {
+  position: relative;
+  padding: 4px 12px 8px;
+}
+
+.session-list-search-input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--color-vscode-border-soft);
+  border-radius: 8px;
+  background: var(--color-vscode-input-surface);
+  color: var(--color-vscode-input-fg);
+  font: inherit;
+}
+
+body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-light)
+  .session-list-search-input {
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-input-surface) 52%,
+    var(--color-vscode-sidebar)
+  );
+}
+
+.session-list-search-input::placeholder {
+  color: var(--color-vscode-fg-muted);
+}
+
+.session-list-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-vscode-muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.session-list-search-clear:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
+  color: var(--color-vscode-fg);
+}
+
+.session-list-search-clear svg {
+  width: 10px;
+  height: 10px;
+}
+
+.session-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .session-empty {
@@ -4172,6 +4494,26 @@ kbd {
   height: 14px;
 }
 
+.session-item-plan-skip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 75%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-warning) 14%, transparent);
+  color: var(--color-vscode-fg);
+  font-size: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.session-item-plan-skip:hover {
+  background: color-mix(in srgb, var(--color-vscode-warning) 22%, transparent);
+}
+
 .session-item-archive {
   display: flex;
   align-items: center;
@@ -4364,6 +4706,50 @@ kbd {
   color: var(--color-vscode-muted);
 }
 
+.settings-section {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+}
+
+.settings-section-header {
+  padding: 10px 10px 6px;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-vscode-fg);
+  opacity: 0.7;
+}
+
+.settings-option-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px 10px;
+  cursor: pointer;
+}
+
+.settings-option-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-option-label {
+  font-size: 12px;
+  color: var(--color-vscode-fg);
+}
+
+.settings-option-description {
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+  line-height: 1.4;
+}
+
 .settings-provider {
   border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
 }
@@ -4457,6 +4843,10 @@ kbd {
 
   .session-list-view-sidebar {
     padding-top: 0;
+  }
+
+  .session-list-view-sidebar .session-list-search {
+    padding: 12px;
   }
 
   .chat-header-chat-layout {
@@ -4963,7 +5353,7 @@ body.vscode-high-contrast-light
 /* Permission Prompt */
 .permission-prompt {
   margin: 0;
-  padding: 10px 12px 6px 0;
+  padding: 10px 12px 6px;
 }
 
 .permission-prompt-header {

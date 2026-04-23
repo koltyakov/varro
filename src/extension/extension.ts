@@ -26,6 +26,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
+    context.workspaceState,
     contextProvider,
     server,
     simulateNoProviders
@@ -54,7 +55,7 @@ export async function deactivate() {
 
   await disposeSafe(() => sidebarProvider?.dispose(), 'sidebarProvider dispose');
   await disposeSafe(() => contextProvider?.dispose(), 'contextProvider dispose');
-  await disposeSafe(() => server?.dispose(), 'server dispose');
+  await disposeSafe(() => server?.disconnect(), 'server disconnect');
   server = null;
   contextProvider = null;
   sidebarProvider = null;

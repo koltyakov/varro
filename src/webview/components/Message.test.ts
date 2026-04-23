@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
 import type { FilePart, Part } from '../types';
-import { Message, getAssistantContainerVariant } from './Message';
+import { Message, getAssistantContainerVariant, getUserMessagePreviewText } from './Message';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -117,7 +117,7 @@ describe('getAssistantContainerVariant', () => {
     ).toBe('plain');
   });
 
-  it('keeps final answers in the standard assistant card', () => {
+  it('renders final answers plain when reasoning precedes the final text', () => {
     expect(
       getAssistantContainerVariant({
         isUser: false,
@@ -129,7 +129,7 @@ describe('getAssistantContainerVariant', () => {
         highlightFinalAnswer: true,
         hasError: false,
       })
-    ).toBe(false);
+    ).toBe('plain');
   });
 
   it('keeps planning final answers in the standard assistant card variant', () => {
@@ -164,6 +164,21 @@ describe('getAssistantContainerVariant', () => {
         hasError: false,
       })
     ).toBe('plain');
+  });
+
+  it('keeps text-only final answers in the standard assistant card', () => {
+    expect(
+      getAssistantContainerVariant({
+        isUser: false,
+        visibleDiffCount: 0,
+        fileEditStackGroup: null,
+        isSubagent: false,
+        hasStructuredAssistantParts: false,
+        layoutParts: [textPart('text-1', 'Final answer.')],
+        highlightFinalAnswer: true,
+        hasError: false,
+      })
+    ).toBe(false);
   });
 
   it('renders errored assistant turns plain even without a final answer', () => {
@@ -226,6 +241,98 @@ describe('Message user prompt rendering', () => {
   });
 });
 
+describe('getUserMessagePreviewText', () => {
+  it('ignores working-directory boilerplate and keeps the first meaningful text', () => {
+    expect(
+      getUserMessagePreviewText([
+        textPart('text-1', '[Working directory: /repo]'),
+        textPart('text-2', 'Why it fails and how to fix?'),
+      ])
+    ).toBe('Why it fails and how to fix?');
+  });
+
+  it('collapses fenced code and multiline text into a compact single line', () => {
+    expect(
+      getUserMessagePreviewText([textPart('text-1', 'Before\n```ts\nconst value = 1;\n```\nAfter')])
+    ).toBe('Before ```ts const value = 1; ``` After');
+  });
+
+  it('falls back to attachment labels when the prompt only includes file context', () => {
+    expect(
+      getUserMessagePreviewText([
+        textPart('text-1', '[Active file: src/webview/components/Chat.tsx]'),
+      ])
+    ).toBe('File: Chat.tsx');
+  });
+
+  it('falls back to file attachments when no text or attachment refs exist', () => {
+    expect(getUserMessagePreviewText([imageFilePart('file-1', 'diagram.png')])).toBe(
+      'Attachment: diagram.png'
+    );
+  });
+});
+
+describe('Message streamed assistant text rendering', () => {
+  it('renders streamed assistant markdown formatting immediately', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantMessage('message-stream-1'), time: { created: 0 } },
+          parts: [textPart('text-1', 'Loading...')],
+          streamingPartId: 'text-1',
+          streamingText:
+            '## Accessibility\n\n| # | Issue |\n| --- | --- |\n| A1 | Live region |\n\n- Fix announcer',
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('h2')?.textContent).toBe('Accessibility');
+    expect(container?.querySelector('table')).toBeInstanceOf(HTMLTableElement);
+    expect(container?.querySelector('ul li')?.textContent).toContain('Fix announcer');
+  });
+
+  it('renders streamed fenced code blocks through the markdown renderer', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantMessage('message-stream-2'), time: { created: 0 } },
+          parts: [textPart('text-1', 'Loading...')],
+          streamingPartId: 'text-1',
+          streamingText: 'Before\n\n```ts\nconst value = 1;\n```\n\nAfter',
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.interactive-result-code-block')).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(
+      container?.querySelector('.interactive-result-code-block .code-block-lang')?.textContent
+    ).toBe('ts');
+    expect(container?.querySelector('.interactive-result-code-block code')?.textContent).toBe(
+      'const value = 1;'
+    );
+    expect(container?.textContent).toContain('Before');
+    expect(container?.textContent).toContain('After');
+  });
+
+  it('does not mark streamed assistant text as a final answer before completion highlighting', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantMessage('message-stream-3'), time: { created: 0 } },
+          parts: [reasoningPart('reason-1', 'Inspecting'), textPart('text-1', 'Loading...')],
+          streamingPartId: 'text-1',
+          streamingText: 'Implemented the fix.',
+          highlightFinalAnswer: false,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+  });
+});
+
 describe('Message assistant final answer rendering', () => {
   it('marks the final text update inside a mixed assistant turn as a dedicated final answer block', () => {
     cleanup = render(
@@ -250,7 +357,7 @@ describe('Message assistant final answer rendering', () => {
     expect(finalItem?.textContent).toContain('Final answer.');
   });
 
-  it('keeps thinking and hides workspace text in highlighted planning cards', () => {
+  it('renders thinking outside highlighted planning cards and hides workspace text', () => {
     cleanup = render(
       () =>
         Message({
@@ -266,15 +373,24 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
+    const plainContainer = container?.querySelector('.assistant-turn-content-plain');
+    const thinkingItem = container
+      ?.querySelector('.chat-thinking-box')
+      ?.closest('.assistant-message-flow-item');
+    const finalItem = container?.querySelector('.assistant-message-flow-item-final-planning');
+
+    expect(plainContainer).toBeInstanceOf(HTMLDivElement);
     expect(container?.textContent).toContain('Thinking');
     expect(container?.textContent).not.toContain('[Working directory: /workspace]');
     expect(container?.textContent).toContain('Dummy Plan');
-    expect(container?.querySelector('.assistant-message-flow-item-final-planning')).toBeInstanceOf(
-      HTMLDivElement
-    );
+    expect(finalItem).toBeInstanceOf(HTMLDivElement);
+    expect(thinkingItem).toBeInstanceOf(HTMLDivElement);
+    expect(thinkingItem).not.toBe(finalItem);
+    expect(container?.querySelector('.assistant-turn-content-highlighted')).toBeNull();
+    expect(container?.querySelector('.assistant-turn-content-planning')).toBeNull();
   });
 
-  it('keeps thinking and hides workspace text in highlighted result cards', () => {
+  it('renders thinking outside highlighted result cards and hides workspace text', () => {
     cleanup = render(
       () =>
         Message({
@@ -289,12 +405,19 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
+    const plainContainer = container?.querySelector('.assistant-turn-content-plain');
+    const thinkingItem = container
+      ?.querySelector('.chat-thinking-box')
+      ?.closest('.assistant-message-flow-item');
+    const finalItem = container?.querySelector('.assistant-message-flow-item-final');
+
+    expect(plainContainer).toBeInstanceOf(HTMLDivElement);
     expect(container?.textContent).toContain('Thinking');
     expect(container?.textContent).not.toContain('[Working directory: /workspace]');
     expect(container?.textContent).toContain('Implemented the fix.');
-    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
-      HTMLDivElement
-    );
+    expect(finalItem).toBeInstanceOf(HTMLDivElement);
+    expect(thinkingItem).toBeInstanceOf(HTMLDivElement);
+    expect(thinkingItem).not.toBe(finalItem);
   });
 
   it('renders carousel navigation inside the image block footer row', () => {

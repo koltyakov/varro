@@ -163,4 +163,22 @@ describe('OpenCodeServer event stream', () => {
 
     expect(restart).not.toHaveBeenCalled();
   });
+
+  it('keeps the managed process alive during disconnect', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const kill = vi.fn();
+    (
+      server as unknown as {
+        process: { kill: typeof kill; exitCode: null; signalCode: null };
+      }
+    ).process = {
+      kill,
+      exitCode: null,
+      signalCode: null,
+    };
+
+    await server.disconnect();
+
+    expect(kill).not.toHaveBeenCalled();
+  });
 });

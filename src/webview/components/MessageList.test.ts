@@ -1,6 +1,32 @@
-import { describe, expect, it } from 'vitest';
-import type { AssistantMessage, Message, Part, UserMessage } from '../types';
-import { buildPlanImplementationPrompt, getLatestPlanImplementationMessageId } from './MessageList';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render } from 'solid-js/web';
+import { reconcile } from 'solid-js/store';
+import { replaceMessages, setSessions, setState, skipPlanSession } from '../lib/state';
+import type {
+  AssistantMessage,
+  FilePart,
+  Message,
+  Part,
+  Permission,
+  QuestionRequest,
+  UserMessage,
+} from '../types';
+import {
+  buildPlanImplementationPrompt,
+  getStickyUserMessagePreview,
+  getStandalonePermissionPrompts,
+  getStandaloneQuestionPrompts,
+  getLatestPlanImplementationMessageId,
+  shouldShowStickyUserMessagePreview,
+  MessageList,
+  shouldShowPlanImplementationAction,
+} from './MessageList';
+
+let container: HTMLDivElement | null = null;
+let cleanup: (() => void) | undefined;
+let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | undefined;
+let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
 
 function textPart(
   id: string,
@@ -17,6 +43,18 @@ function textPart(
   };
 }
 
+function filePart(id: string, filename: string): FilePart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'file',
+    mime: 'image/png',
+    filename,
+    url: `https://example.test/${id}.png`,
+  };
+}
+
 function userMessage(id: string): UserMessage {
   return {
     id,
@@ -28,7 +66,13 @@ function userMessage(id: string): UserMessage {
   };
 }
 
-function assistantMessage(id: string, options?: { agent?: string }): AssistantMessage {
+function assistantMessage(
+  id: string,
+  options?: {
+    agent?: string;
+    error?: AssistantMessage['error'];
+  }
+): AssistantMessage {
   return {
     id,
     sessionID: 'session-1',
@@ -39,6 +83,7 @@ function assistantMessage(id: string, options?: { agent?: string }): AssistantMe
     providerID: 'openai',
     mode: 'default',
     agent: options?.agent,
+    error: options?.error,
     path: { cwd: '/workspace', root: '/workspace' },
     cost: 0,
     tokens: {
@@ -53,6 +98,67 @@ function assistantMessage(id: string, options?: { agent?: string }): AssistantMe
 function entry(info: Message) {
   return { info, parts: [] as Part[] };
 }
+
+function toolPart(id: string, messageID = 'message-1', callID = 'call-1'): Part {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID,
+    type: 'tool',
+    callID,
+    tool: 'bash',
+    state: {
+      status: 'running',
+      input: { command: 'pwd' },
+      time: { start: 1 },
+    },
+  };
+}
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  originalResizeObserver = globalThis.ResizeObserver;
+  originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as typeof ResizeObserver;
+  globalThis.requestAnimationFrame = vi.fn().mockImplementation((cb: FrameRequestCallback) => {
+    cb(0);
+    return 1;
+  });
+  globalThis.cancelAnimationFrame = vi.fn();
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  cleanup?.();
+  cleanup = undefined;
+  container?.remove();
+  container = null;
+  setState('messages', []);
+  setState('sessions', []);
+  setState('permissions', []);
+  setState('questions', []);
+  setState('activeSessionId', null);
+  setState('providers', []);
+  setState('agents', []);
+  setState('allAgents', []);
+  setState('queuedMessages', []);
+  setState('pendingAttentionSessionIds', []);
+  setState('streamingPartId', null);
+  setState('streamingText', '');
+  setState('sessionStatus', reconcile({}));
+  setState('skippedPlanSessions', reconcile({}));
+  globalThis.ResizeObserver = originalResizeObserver;
+  globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+  globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+  vi.restoreAllMocks();
+});
 
 describe('buildPlanImplementationPrompt', () => {
   it('uses a stable handoff prompt without copying visible plan text', () => {
@@ -73,6 +179,133 @@ describe('buildPlanImplementationPrompt', () => {
     ).toBe(
       'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.'
     );
+  });
+});
+
+describe('getStickyUserMessagePreview', () => {
+  it('returns the preceding user prompt for the first visible assistant message', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [
+          { info: userMessage('user-1'), parts: [textPart('text-1', 'Old prompt')] },
+          { info: assistantMessage('assistant-1'), parts: [] },
+          { info: userMessage('user-2'), parts: [textPart('text-2', 'Newest prompt')] },
+          { info: assistantMessage('assistant-2'), parts: [] },
+        ],
+        3
+      )
+    ).toEqual({
+      id: 'user-2',
+      index: 2,
+      text: 'Newest prompt',
+    });
+  });
+
+  it('uses fallback preview text for attachment-only user messages', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [
+          { info: userMessage('user-1'), parts: [filePart('file-1', 'diagram.png')] },
+          { info: assistantMessage('assistant-1'), parts: [] },
+        ],
+        1
+      )
+    ).toEqual({
+      id: 'user-1',
+      index: 0,
+      text: 'Attachment: diagram.png',
+    });
+  });
+
+  it('returns null when the first visible message is already a user prompt', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [{ info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] }],
+        0
+      )
+    ).toBeNull();
+  });
+});
+
+describe('shouldShowStickyUserMessagePreview', () => {
+  it('returns false on vertically narrow screens', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: -120,
+        rowBottom: -20,
+        viewportHeight: 320,
+      })
+    ).toBe(false);
+  });
+
+  it('returns true when virtualization places the prompt above the visible range', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: true,
+        visibleRange: { start: 5, end: 10 },
+        rowTop: null,
+        rowBottom: null,
+        viewportHeight: 500,
+      })
+    ).toBe(true);
+  });
+
+  it('returns true when the prompt row sits above the viewport', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: -120,
+        rowBottom: -20,
+        viewportHeight: 500,
+      })
+    ).toBe(true);
+  });
+
+  it('returns false when the prompt row is visible', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: 120,
+        rowBottom: 180,
+        viewportHeight: 500,
+      })
+    ).toBe(false);
+  });
+
+  it('keeps the current sticky preview visible within the debounce buffer', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: -10,
+        rowBottom: 8,
+        viewportHeight: 500,
+        previousPreviewId: 'user-1',
+      })
+    ).toBe(true);
+  });
+
+  it('does not show a new sticky preview until the prompt is clearly above the viewport', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: -10,
+        rowBottom: 8,
+        viewportHeight: 500,
+        previousPreviewId: 'user-2',
+      })
+    ).toBe(false);
   });
 });
 
@@ -104,5 +337,305 @@ describe('getLatestPlanImplementationMessageId', () => {
         entry(assistantMessage('assistant-2', { agent: 'build' })),
       ])
     ).toBeNull();
+  });
+});
+
+describe('shouldShowPlanImplementationAction', () => {
+  it('hides the action for aborted plan responses', () => {
+    const message = assistantMessage('assistant-1', {
+      agent: 'plan',
+      error: { name: 'aborted', data: { message: 'Aborted' } },
+    });
+
+    expect(
+      shouldShowPlanImplementationAction({
+        hasBuildAgent: true,
+        info: message,
+        latestPlanImplementationMessageId: 'assistant-1',
+      })
+    ).toBe(false);
+  });
+
+  it('hides the action after the plan session is skipped', () => {
+    const message = assistantMessage('assistant-1', { agent: 'plan' });
+    setState('skippedPlanSessions', reconcile({}));
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'session-1',
+        version: '1',
+        time: { created: 100, updated: 200 },
+      },
+    ]);
+    skipPlanSession('session-1', 200);
+
+    expect(
+      shouldShowPlanImplementationAction({
+        hasBuildAgent: true,
+        info: message,
+        latestPlanImplementationMessageId: 'assistant-1',
+      })
+    ).toBe(false);
+  });
+
+  it('shows the action for the latest unskipped plan response', () => {
+    const message = assistantMessage('assistant-1', { agent: 'plan' });
+    setState('skippedPlanSessions', reconcile({}));
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'session-1',
+        version: '1',
+        time: { created: 100, updated: 200 },
+      },
+    ]);
+
+    expect(
+      shouldShowPlanImplementationAction({
+        hasBuildAgent: true,
+        info: message,
+        latestPlanImplementationMessageId: 'assistant-1',
+      })
+    ).toBe(true);
+  });
+});
+
+describe('standalone action prompts', () => {
+  it('keeps unmatched permissions visible as standalone prompts', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: '',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ];
+
+    expect(getStandalonePermissionPrompts([], permissions, 'session-1')).toEqual(permissions);
+  });
+
+  it('does not duplicate permissions already linked to a tool call', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ];
+
+    expect(
+      getStandalonePermissionPrompts(
+        [{ info: assistantMessage('message-1'), parts: [toolPart('tool-1')] }],
+        permissions,
+        'session-1'
+      )
+    ).toEqual([]);
+  });
+
+  it('keeps unmatched questions visible as standalone prompts', () => {
+    const questions: QuestionRequest[] = [
+      {
+        id: 'question-1',
+        sessionID: 'session-1',
+        questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+      },
+    ];
+
+    expect(getStandaloneQuestionPrompts([], questions, 'session-1')).toEqual(questions);
+  });
+
+  it('does not duplicate questions already linked to a tool call', () => {
+    const questions: QuestionRequest[] = [
+      {
+        id: 'question-1',
+        sessionID: 'session-1',
+        questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+        tool: { messageID: 'message-1', callID: 'call-1' },
+      },
+    ];
+
+    expect(
+      getStandaloneQuestionPrompts(
+        [{ info: assistantMessage('message-1'), parts: [toolPart('tool-1')] }],
+        questions,
+        'session-1'
+      )
+    ).toEqual([]);
+  });
+});
+
+describe('MessageList sticky prompt preview', () => {
+  it('shows the prompt that belongs to the response currently in view', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+      { info: userMessage('user-3'), parts: [textPart('text-5', 'Prompt 3')] },
+      { info: assistantMessage('assistant-3'), parts: [textPart('text-6', 'Response 3')] },
+    ]);
+
+    const rectMap = new Map<Element, DOMRect>();
+    const defaultRect = new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return rectMap.get(this) || defaultRect;
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    const user3Row = container?.querySelector('[data-msg-id="user-3"]') as HTMLDivElement | null;
+    const assistant2Row = container?.querySelector(
+      '[data-msg-id="assistant-2"]'
+    ) as HTMLDivElement | null;
+    const assistant3Row = container?.querySelector(
+      '[data-msg-id="assistant-3"]'
+    ) as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    expect(user2Row).toBeInstanceOf(HTMLDivElement);
+    expect(user3Row).toBeInstanceOf(HTMLDivElement);
+    expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
+    expect(assistant3Row).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    rectMap.set(list!, new DOMRect(0, 0, 500, 500));
+
+    rectMap.set(user2Row!, new DOMRect(0, -220, 500, 52));
+    rectMap.set(assistant2Row!, new DOMRect(0, -340, 500, 300));
+    rectMap.set(user3Row!, new DOMRect(0, -90, 500, 52));
+    rectMap.set(assistant3Row!, new DOMRect(0, 40, 500, 320));
+
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
+    list?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    let sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky).toBeInstanceOf(HTMLDivElement);
+    expect(sticky?.textContent).toContain('Prompt 3');
+
+    rectMap.set(assistant2Row!, new DOMRect(0, 40, 500, 320));
+    rectMap.set(user3Row!, new DOMRect(0, -80, 500, 52));
+    rectMap.set(assistant3Row!, new DOMRect(0, 20, 500, 320));
+
+    list!.scrollTop = 1400;
+    list?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky).toBeInstanceOf(HTMLDivElement);
+    expect(sticky?.textContent).toContain('Prompt 2');
+    expect(container?.querySelector('.interactive-list-track .latest-user-message-sticky')).toBe(
+      sticky
+    );
+    expect(container?.querySelector('.latest-user-message-sticky [data-msg-id]')).toBeNull();
+  });
+
+  it('debounces sticky preview removal during brief boundary flicker', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    const rectMap = new Map<Element, DOMRect>();
+    const defaultRect = new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return rectMap.get(this) || defaultRect;
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    const assistant2Row = container?.querySelector(
+      '[data-msg-id="assistant-2"]'
+    ) as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    expect(user2Row).toBeInstanceOf(HTMLDivElement);
+    expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
+    rectMap.set(list!, new DOMRect(0, 0, 500, 500));
+    rectMap.set(user2Row!, new DOMRect(0, -90, 500, 52));
+    rectMap.set(assistant2Row!, new DOMRect(0, 40, 500, 320));
+
+    list?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    let sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky?.textContent).toContain('Prompt 2');
+
+    rectMap.set(user2Row!, new DOMRect(0, 0, 500, 52));
+    list!.scrollTop = 1210;
+    list?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky?.textContent).toContain('Prompt 2');
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky).toBeNull();
+  });
+});
+
+describe('MessageList auto-scroll', () => {
+  it('keeps the latest message fully visible when the last response grows', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1200 });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1700 });
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('text-2', 'Expanded response'), textPart('text-3', 'More content')],
+      },
+    ]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(1300);
   });
 });

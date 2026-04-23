@@ -1,12 +1,17 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import {
+  expandThinkingAndCommandsByDefault,
   isModelVisible,
   setModelVisible,
+  setExpandThinkingAndCommandsByDefaultPreference,
   setProviderVisible,
   setShowSettings,
+  setShowStickyUserPromptPreference,
+  showStickyUserPrompt,
   state,
 } from '../lib/state';
 import { formatContextLimit } from '../lib/format';
+import { postMessage } from '../lib/bridge';
 import {
   modelSupportsTools,
   modelSupportsVariants,
@@ -74,7 +79,7 @@ export function SettingsPanel() {
                 <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
               </svg>
             </button>
-            <span class="settings-header-title">Models</span>
+            <span class="settings-header-title">Settings</span>
           </div>
           <button
             type="button"
@@ -123,6 +128,60 @@ export function SettingsPanel() {
 
       <div class="settings-body" ref={(el) => (bodyRef = el)}>
         <div class="settings-body-inner">
+          <div class="settings-section">
+            <div class="settings-section-header">
+              <span class="settings-section-title">Interface</span>
+            </div>
+            <label class="settings-option-row">
+              <span class="settings-option-copy">
+                <span class="settings-option-label">Expand thinking by default</span>
+                <span class="settings-option-description">
+                  New thinking blocks start expanded. Tool calls stay collapsed.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                class="settings-checkbox"
+                checked={expandThinkingAndCommandsByDefault()}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked;
+                  setExpandThinkingAndCommandsByDefaultPreference(checked);
+                  postMessage({
+                    type: 'config/update',
+                    payload: {
+                      expandThinkingAndCommandsByDefault: checked,
+                      showStickyUserPrompt: showStickyUserPrompt(),
+                    },
+                  });
+                }}
+              />
+            </label>
+            <label class="settings-option-row">
+              <span class="settings-option-copy">
+                <span class="settings-option-label">Show sticky user prompt</span>
+                <span class="settings-option-description">
+                  Keep the latest relevant prompt visible while you scroll long responses.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                class="settings-checkbox"
+                checked={showStickyUserPrompt()}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked;
+                  setShowStickyUserPromptPreference(checked);
+                  postMessage({
+                    type: 'config/update',
+                    payload: {
+                      expandThinkingAndCommandsByDefault: expandThinkingAndCommandsByDefault(),
+                      showStickyUserPrompt: checked,
+                    },
+                  });
+                }}
+              />
+            </label>
+          </div>
+
           <Show
             when={state.providers.length > 0}
             fallback={<div class="settings-empty">No providers configured</div>}

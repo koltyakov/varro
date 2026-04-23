@@ -28,6 +28,7 @@ import type { UsageLimitNotice } from './usage-limit';
 const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
   sessionSelectedAgents: 'varro.sessionSelectedAgents',
+  skippedPlanSessions: 'varro.skippedPlanSessions',
   selectedModel: 'varro.selectedModel',
   sessionSelectedModels: 'varro.sessionSelectedModels',
   draftPermissionMode: 'varro.draftPermissionMode',
@@ -37,6 +38,9 @@ const STORAGE_KEYS = {
   hiddenModels: 'varro.hiddenModels',
   lastSeenSessions: 'varro.lastSeenSessions',
   lastActiveSessionId: 'varro.lastActiveSessionId',
+  showThinking: 'varro.showThinking',
+  expandThinkingAndCommandsByDefault: 'varro.expandThinkingAndCommandsByDefault',
+  showStickyUserPrompt: 'varro.showStickyUserPrompt',
 } as const;
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
@@ -98,10 +102,12 @@ interface AppState {
   hiddenProviders: string[];
   hiddenModels: string[];
   lastSeenSessions: Record<string, number>;
+  skippedPlanSessions: Record<string, number>;
   compactingSessionIds: string[];
   queuedMessages: QueuedMessage[];
   failedSessionIds: string[];
   sessionUsageLimits: Record<string, UsageLimitNotice | null>;
+  interruptedSessionIds: string[];
 }
 
 export interface QueuedMessage {
@@ -145,9 +151,9 @@ export const [state, setState] = createStore<AppState>({
   sessionStatus: {},
   messages: [],
   todos: [],
-  permissions: [],
-  questions: [],
-  pendingAttentionSessionIds: [],
+  permissions: normalizeInitialPermissions(initialWebviewState.pendingPermissions),
+  questions: normalizeInitialQuestions(initialWebviewState.pendingQuestions),
+  pendingAttentionSessionIds: collectInitialPendingAttentionSessionIds(initialWebviewState),
   diffs: [],
   streamingPartId: null,
   streamingText: '',
@@ -167,11 +173,144 @@ export const [state, setState] = createStore<AppState>({
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
   lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
+  skippedPlanSessions: readStored<Record<string, number>>(STORAGE_KEYS.skippedPlanSessions) || {},
   compactingSessionIds: [],
   queuedMessages: [],
   failedSessionIds: [],
   sessionUsageLimits: {},
+  interruptedSessionIds: initialWebviewState.interruptedSessionIds ?? [],
 });
+
+export function consumeInterruptedSessionIds() {
+  const ids = [...state.interruptedSessionIds];
+  setState('interruptedSessionIds', []);
+  return ids;
+}
+
+function normalizeInitialPermission(value: Record<string, unknown>): Permission | null {
+  const id =
+    typeof value.id === 'string'
+      ? value.id
+      : typeof value.permissionID === 'string'
+        ? value.permissionID
+        : typeof value.requestID === 'string'
+          ? value.requestID
+          : null;
+  const sessionID = typeof value.sessionID === 'string' ? value.sessionID : null;
+  if (!id || !sessionID) return null;
+
+  const tool = value.tool as { messageID?: unknown; callID?: unknown } | undefined;
+  const patterns = Array.isArray(value.patterns)
+    ? value.patterns.filter((item): item is string => typeof item === 'string')
+    : typeof value.patterns === 'string'
+      ? value.patterns
+      : undefined;
+  const metadata =
+    value.metadata && typeof value.metadata === 'object'
+      ? (value.metadata as Record<string, unknown>)
+      : {};
+  const createdAt =
+    value.time &&
+    typeof value.time === 'object' &&
+    typeof (value.time as { created?: unknown }).created === 'number'
+      ? ((value.time as { created: number }).created ?? Date.now() / 1000)
+      : Date.now() / 1000;
+  const title =
+    typeof value.title === 'string' && value.title.trim().length > 0
+      ? value.title
+      : [
+          typeof value.permission === 'string' ? value.permission : '',
+          Array.isArray(patterns)
+            ? patterns.join(', ')
+            : typeof patterns === 'string'
+              ? patterns
+              : '',
+        ]
+          .filter(Boolean)
+          .join(' ') || 'Permission required';
+
+  return {
+    id,
+    type:
+      typeof value.permission === 'string'
+        ? value.permission
+        : typeof value.type === 'string'
+          ? value.type
+          : '',
+    pattern: patterns,
+    sessionID,
+    messageID:
+      typeof value.messageID === 'string'
+        ? value.messageID
+        : typeof tool?.messageID === 'string'
+          ? tool.messageID
+          : '',
+    callID:
+      typeof value.callID === 'string'
+        ? value.callID
+        : typeof tool?.callID === 'string'
+          ? tool.callID
+          : undefined,
+    title,
+    metadata,
+    time: { created: createdAt },
+  };
+}
+
+function normalizeInitialQuestion(value: Record<string, unknown>): QuestionRequest | null {
+  const id = typeof value.id === 'string' ? value.id : null;
+  const sessionID = typeof value.sessionID === 'string' ? value.sessionID : null;
+  const questions = Array.isArray(value.questions) ? value.questions : null;
+  if (!id || !sessionID || !questions) return null;
+
+  const tool = value.tool;
+  return {
+    id,
+    sessionID,
+    questions: questions as QuestionRequest['questions'],
+    tool:
+      tool &&
+      typeof tool === 'object' &&
+      typeof (tool as { messageID?: unknown }).messageID === 'string' &&
+      typeof (tool as { callID?: unknown }).callID === 'string'
+        ? {
+            messageID: (tool as { messageID: string }).messageID,
+            callID: (tool as { callID: string }).callID,
+          }
+        : undefined,
+  };
+}
+
+function normalizeInitialPermissions(values: unknown): Permission[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((item) =>
+      item && typeof item === 'object'
+        ? normalizeInitialPermission(item as Record<string, unknown>)
+        : null
+    )
+    .filter((item): item is Permission => item !== null);
+}
+
+function normalizeInitialQuestions(values: unknown): QuestionRequest[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((item) =>
+      item && typeof item === 'object'
+        ? normalizeInitialQuestion(item as Record<string, unknown>)
+        : null
+    )
+    .filter((item): item is QuestionRequest => item !== null);
+}
+
+function collectInitialPendingAttentionSessionIds(initialState: Partial<InitialWebviewState>) {
+  return [
+    ...new Set([
+      ...normalizeInitialPermissions(initialState.pendingPermissions).map((item) => item.sessionID),
+      ...normalizeInitialQuestions(initialState.pendingQuestions).map((item) => item.sessionID),
+    ]),
+  ];
+}
 
 export function enqueueMessage(message: QueuedMessage) {
   setState(
@@ -212,10 +351,35 @@ export function getPersistedActiveSessionId(): string | null {
   return readStored<string>(STORAGE_KEYS.lastActiveSessionId);
 }
 
-export function markSessionSeen(id: string) {
-  const next = { ...state.lastSeenSessions, [id]: Date.now() };
+export function markSessionSeen(id: string, updatedAt?: number) {
+  const seenAt = Math.max(state.lastSeenSessions[id] ?? 0, updatedAt ?? 0, Date.now());
+  const next = { ...state.lastSeenSessions, [id]: seenAt };
   setState('lastSeenSessions', next);
   writeStored(STORAGE_KEYS.lastSeenSessions, next);
+}
+
+export function skipPlanSession(sessionId: string, updatedAt?: number) {
+  const sessionUpdatedAt =
+    updatedAt ?? state.sessions.find((session) => session.id === sessionId)?.time.updated;
+  if (typeof sessionUpdatedAt !== 'number') return;
+
+  const next = { ...state.skippedPlanSessions, [sessionId]: sessionUpdatedAt };
+  setState('skippedPlanSessions', next);
+  writeStored(STORAGE_KEYS.skippedPlanSessions, next);
+}
+
+export function clearSkippedPlanSession(sessionId: string) {
+  if (!(sessionId in state.skippedPlanSessions)) return;
+  const next = Object.fromEntries(
+    Object.entries(state.skippedPlanSessions).filter(([id]) => id !== sessionId)
+  );
+  setState('skippedPlanSessions', reconcile(next));
+  writeStored(STORAGE_KEYS.skippedPlanSessions, next);
+}
+
+export function isSkippedPlanSession(sessionId: string, updatedAt: number) {
+  const skippedAt = state.skippedPlanSessions[sessionId];
+  return typeof skippedAt === 'number' && skippedAt >= updatedAt;
 }
 
 export function isSessionUnread(sessionId: string, updatedAt: number) {
@@ -253,7 +417,24 @@ export function toggleThinking() {
 
 export function setShowThinkingPreference(next: boolean) {
   setShowThinking(next);
-  writeStored('varro.showThinking', next);
+  writeStored(STORAGE_KEYS.showThinking, next);
+}
+
+export const [expandThinkingAndCommandsByDefault, setExpandThinkingAndCommandsByDefault] =
+  createSignal(readExpandThinkingAndCommandsByDefault());
+
+export function setExpandThinkingAndCommandsByDefaultPreference(next: boolean) {
+  setExpandThinkingAndCommandsByDefault(next);
+  writeStored(STORAGE_KEYS.expandThinkingAndCommandsByDefault, next);
+}
+
+export const [showStickyUserPrompt, setShowStickyUserPrompt] = createSignal(
+  readShowStickyUserPrompt()
+);
+
+export function setShowStickyUserPromptPreference(next: boolean) {
+  setShowStickyUserPrompt(next);
+  writeStored(STORAGE_KEYS.showStickyUserPrompt, next);
 }
 
 export const [inputText, setInputText] = createSignal('');
@@ -356,12 +537,23 @@ export function getCurrentDocumentEnabled(
 }
 
 function readShowThinking(): boolean {
-  try {
-    const raw = window.localStorage.getItem('varro.showThinking');
-    return raw ? JSON.parse(raw) : true;
-  } catch {
-    return true;
-  }
+  return readStored<boolean>(STORAGE_KEYS.showThinking) ?? true;
+}
+
+function readExpandThinkingAndCommandsByDefault(): boolean {
+  return (
+    initialWebviewState.expandThinkingAndCommandsByDefault ??
+    readStored<boolean>(STORAGE_KEYS.expandThinkingAndCommandsByDefault) ??
+    false
+  );
+}
+
+function readShowStickyUserPrompt(): boolean {
+  return (
+    initialWebviewState.showStickyUserPrompt ??
+    readStored<boolean>(STORAGE_KEYS.showStickyUserPrompt) ??
+    true
+  );
 }
 
 export function setCurrentDocumentEnabled(
@@ -608,6 +800,16 @@ export function setQuestions(questions: QuestionRequest[]) {
 
 export function setSessions(nextSessions: Session[]) {
   setState('sessions', nextSessions);
+  const sessionIds = new Set(nextSessions.map((session) => session.id));
+  const nextSkippedPlanSessions = Object.fromEntries(
+    Object.entries(state.skippedPlanSessions).filter(([id]) => sessionIds.has(id))
+  );
+  if (
+    Object.keys(nextSkippedPlanSessions).length !== Object.keys(state.skippedPlanSessions).length
+  ) {
+    setState('skippedPlanSessions', reconcile(nextSkippedPlanSessions));
+    writeStored(STORAGE_KEYS.skippedPlanSessions, nextSkippedPlanSessions);
+  }
   invalidateSessionTreeIndex();
 }
 
@@ -1044,7 +1246,6 @@ export function clearStreamingState() {
 
 export function clearMessages() {
   replaceMessages([]);
-  setState('permissions', []);
   setState('todos', []);
   setState('diffs', []);
   clearStreamingState();

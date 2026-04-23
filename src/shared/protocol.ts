@@ -96,6 +96,11 @@ export type InitialWebviewState = {
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
   emptyStateLogoUri: string;
+  expandThinkingAndCommandsByDefault?: boolean;
+  showStickyUserPrompt?: boolean;
+  interruptedSessionIds?: string[];
+  pendingPermissions?: Array<Record<string, unknown>>;
+  pendingQuestions?: Array<Record<string, unknown>>;
 };
 
 export type ExtensionMessage =
@@ -112,6 +117,10 @@ export type ExtensionMessage =
   | {
       type: 'files/search-results';
       payload: { requestId: number; query: string; files: DroppedFile[] };
+    }
+  | {
+      type: 'config/update';
+      payload: { expandThinkingAndCommandsByDefault: boolean; showStickyUserPrompt: boolean };
     }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
@@ -135,6 +144,10 @@ export type WebviewMessage =
       payload: { path: string; line?: number; kind?: 'auto' | 'file' | 'directory' };
     }
   | { type: 'vscode/open-external'; payload: { url: string } }
+  | {
+      type: 'config/update';
+      payload: { expandThinkingAndCommandsByDefault: boolean; showStickyUserPrompt: boolean };
+    }
   | { type: 'ready' }
   | { type: 'api/request'; payload: { id: number; method: string; path: string; body?: unknown } }
   | {

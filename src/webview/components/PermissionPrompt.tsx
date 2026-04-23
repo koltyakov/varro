@@ -29,7 +29,7 @@ export function PermissionPrompt(props: { permission: Permission }) {
   };
 
   return (
-    <div class="permission-prompt animate-fade-in">
+    <div class="chat-tool-invocation-part permission-prompt animate-fade-in">
       <div class="permission-prompt-header">
         <svg class="permission-prompt-icon" viewBox="0 0 16 16" fill="currentColor">
           <path d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1zm4 6c0 2.8-1.8 5.2-4 6.2C5.8 12.2 4 9.8 4 7V4l4-1.5L12 4v3z" />

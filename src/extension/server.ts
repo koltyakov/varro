@@ -528,6 +528,14 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async dispose() {
+    await this.disposeResources({ stopProcess: true });
+  }
+
+  async disconnect() {
+    await this.disposeResources({ stopProcess: false });
+  }
+
+  private async disposeResources(options: { stopProcess: boolean }) {
     this.isDisposing = true;
     this.disposeGeneration += 1;
     this.clearStartPromise();
@@ -538,7 +546,7 @@ export class OpenCodeServer extends EventEmitter {
       controller.abort();
     }
     this.requestControllers.clear();
-    if (this.process) {
+    if (options.stopProcess && this.process) {
       const proc = this.process;
       this.process = null;
       if (proc.exitCode === null && proc.signalCode === null) {
