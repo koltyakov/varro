@@ -227,6 +227,49 @@ describe('getSessionTreeIds', () => {
     expect(getSessionTreeIds(null)).toEqual([]);
   });
 
+  it('does not include sibling branches when reading a descendant subtree', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 1',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 20 },
+      },
+      {
+        id: 'grandchild-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Grandchild 1',
+        version: '1',
+        parentID: 'child-1',
+        time: { created: 0, updated: 30 },
+      },
+      {
+        id: 'child-2',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 2',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 40 },
+      },
+    ]);
+
+    expect(getSessionTreeIds('child-1')).toEqual(['child-1', 'grandchild-1']);
+    expect(getSessionTreeIds('child-2')).toEqual(['child-2']);
+  });
+
   it('reuses active usage-limit lookups across a session tree', () => {
     setState('sessions', [
       {

@@ -73,6 +73,11 @@ function stopEventStream(server: OpenCodeServer) {
   (server as unknown as { stopEventStream: () => void }).stopEventStream();
 }
 
+function setRestartTimer(server: OpenCodeServer, timer: ReturnType<typeof setTimeout> | null) {
+  (server as unknown as { restartTimer: ReturnType<typeof setTimeout> | null }).restartTimer =
+    timer;
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
@@ -146,5 +151,16 @@ describe('OpenCodeServer event stream', () => {
 
     await server.dispose();
     await flushMicrotasks();
+  });
+
+  it('clears pending restart timers during dispose', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const restart = vi.fn();
+    setRestartTimer(server, setTimeout(restart, 1_000));
+
+    await server.dispose();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(restart).not.toHaveBeenCalled();
   });
 });

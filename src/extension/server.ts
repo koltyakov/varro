@@ -27,6 +27,7 @@ export class OpenCodeServer extends EventEmitter {
   private simulateMissingCli: boolean;
   private eventController: AbortController | null = null;
   private eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private eventReconnectDelay = 1000;
   private eventReconnectCount = 0;
   private static readonly MAX_EVENT_RECONNECTS = 10;
@@ -86,6 +87,7 @@ export class OpenCodeServer extends EventEmitter {
 
   async start(): Promise<string> {
     return this.setStartPromise(async () => {
+      this.clearRestartTimer();
       const disposeGeneration = this.disposeGeneration;
       this.isDisposing = false;
       if (this.simulateMissingCli) {
@@ -176,7 +178,8 @@ export class OpenCodeServer extends EventEmitter {
             const delay = this.getRestartDelay(this.retries);
             logger.warn(`Retrying server startup in ${delay}ms (attempt ${this.retries})`);
             this.clearStartPromise();
-            setTimeout(() => {
+            this.restartTimer = setTimeout(() => {
+              this.restartTimer = null;
               if (isStaleAttempt()) return;
               this.start().then(resolve).catch(reject);
             }, delay);
@@ -226,7 +229,8 @@ export class OpenCodeServer extends EventEmitter {
                 const delay = this.getRestartDelay(this.retries);
                 logger.info(`Restarting server in ${delay}ms (attempt ${this.retries})`);
                 this.clearStartPromise();
-                setTimeout(() => {
+                this.restartTimer = setTimeout(() => {
+                  this.restartTimer = null;
                   if (isStaleAttempt()) return;
                   this.start().then(resolve).catch(reject);
                 }, delay);
@@ -516,10 +520,18 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
+  private clearRestartTimer() {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+  }
+
   async dispose() {
     this.isDisposing = true;
     this.disposeGeneration += 1;
     this.clearStartPromise();
+    this.clearRestartTimer();
     this.cancelPollHealth();
     this.stopEventStream();
     for (const controller of this.requestControllers) {

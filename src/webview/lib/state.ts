@@ -1083,7 +1083,7 @@ export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice
 
 let sessionTreeIndexVersion = 0;
 let sessionTreeIndexedVersion = -1;
-let sessionTreeIdsByRoot: Map<string, string[]> = new Map();
+let sessionTreeIdsBySession: Map<string, string[]> = new Map();
 let nearestPrimarySessionById: Map<string, string> = new Map();
 let activeUsageLimitByRoot: Map<string, UsageLimitNotice | null> = new Map();
 let indexedSessionsRef: Session[] | null = null;
@@ -1113,11 +1113,11 @@ function ensureSessionTreeIndex(sessions = state.sessions, usageLimits = state.s
 
   const primarySessions = sessions.filter((session) => !session.parentID);
   if (primarySessions.length === 0) {
-    sessionTreeIdsByRoot = new Map();
+    sessionTreeIdsBySession = new Map();
     activeUsageLimitByRoot = new Map();
     for (const session of sessions) {
       nearestPrimarySessionById.set(session.id, session.id);
-      sessionTreeIdsByRoot.set(session.id, [session.id]);
+      sessionTreeIdsBySession.set(session.id, [session.id]);
       activeUsageLimitByRoot.set(session.id, usageLimits[session.id] || null);
     }
     sessionTreeIndexedVersion = sessionTreeIndexVersion;
@@ -1125,28 +1125,28 @@ function ensureSessionTreeIndex(sessions = state.sessions, usageLimits = state.s
     indexedUsageLimitsRef = usageLimits;
     return;
   }
-  sessionTreeIdsByRoot = new Map();
+  sessionTreeIdsBySession = new Map();
+
+  const collectSessionTreeIds = (sessionId: string, rootId: string): string[] => {
+    nearestPrimarySessionById.set(sessionId, rootId);
+
+    const treeIds = [sessionId];
+    const children = childrenByParent.get(sessionId) || [];
+    for (const childId of children) {
+      treeIds.push(...collectSessionTreeIds(childId, rootId));
+    }
+
+    sessionTreeIdsBySession.set(sessionId, treeIds);
+    return treeIds;
+  };
 
   for (const root of primarySessions) {
-    const visited: string[] = [];
-    const pending = [root.id];
-    while (pending.length > 0) {
-      const currentId = pending.pop();
-      if (!currentId || nearestPrimarySessionById.has(currentId)) continue;
-      nearestPrimarySessionById.set(currentId, root.id);
-      visited.push(currentId);
-      const children = childrenByParent.get(currentId);
-      if (!children) continue;
-      for (let index = children.length - 1; index >= 0; index--) {
-        pending.push(children[index]);
-      }
-    }
-    sessionTreeIdsByRoot.set(root.id, visited);
+    collectSessionTreeIds(root.id, root.id);
   }
 
   activeUsageLimitByRoot = new Map();
   for (const root of primarySessions) {
-    const treeIds = sessionTreeIdsByRoot.get(root.id) || [root.id];
+    const treeIds = sessionTreeIdsBySession.get(root.id) || [root.id];
     const activeNotice = treeIds.map((id) => usageLimits[id] || null).find((notice) => !!notice);
     activeUsageLimitByRoot.set(root.id, activeNotice || null);
   }
@@ -1160,16 +1160,7 @@ export function getSessionTreeIds(rootId: string | null | undefined, sessions = 
   if (!rootId) return [];
   if (sessions === state.sessions) {
     ensureSessionTreeIndex();
-    const rootSessionId = nearestPrimarySessionById.get(rootId) || rootId;
-    if (rootSessionId === rootId) {
-      const cached = sessionTreeIdsByRoot.get(rootId);
-      if (cached) return [...cached];
-    }
-
-    const rootIndex = sessionTreeIdsByRoot.get(rootSessionId);
-    if (!rootIndex) return [rootId];
-    const start = rootIndex.indexOf(rootId);
-    return start === -1 ? [rootId] : rootIndex.slice(start);
+    return [...(sessionTreeIdsBySession.get(rootId) || [rootId])];
   }
 
   const visited = new Set<string>();

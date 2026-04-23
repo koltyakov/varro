@@ -100,17 +100,18 @@ export function Chat() {
     return normalizeSessionTitle(session?.title) || 'New Chat';
   };
 
-  const headerSessionCounts = createMemo(() =>
-    getHeaderSessionCounts(
+  const headerSessionCounts = createMemo(() => {
+    const indicators = deriveSessionIndicators(state.sessions);
+    return getHeaderSessionCounts(
       primarySessions(),
       state.activeSessionId,
       showSessionPicker(),
-      (sessionId) => isRunningSession(sessionId),
-      (sessionId) => isSessionAwaitingInput(sessionId),
-      (sessionId) => isFailedSession(sessionId),
-      (session) => isPlanReadySession(session)
-    )
-  );
+      (sessionId) => indicators.runningIds.has(sessionId),
+      (sessionId) => indicators.attentionIds.has(sessionId),
+      (sessionId) => indicators.failedIds.has(sessionId),
+      (session) => indicators.planReadyIds.has(session.id)
+    );
+  });
   const runningSessionsCount = () => headerSessionCounts().running;
   const attentionSessionsCount = () => headerSessionCounts().attention;
   const failedSessionsCount = () => headerSessionCounts().failed;
@@ -1216,6 +1217,8 @@ function PlanReadyBadge(props: { count: number; onClick: () => void }) {
 
 function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
+  const failedSessionIds = new Set(state.failedSessionIds);
+  const pendingAttentionIds = new Set(state.pendingAttentionSessionIds);
   const permissionIds = new Set(state.permissions.map((permission) => permission.sessionID));
   const questionIds = new Set(state.questions.map((question) => question.sessionID));
   const runningIds = new Set<string>();
@@ -1223,6 +1226,18 @@ function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndica
   const attentionIds = new Set<string>();
   const planReadyIds = new Set<string>();
   const newlyCompletedIds = new Set<string>();
+  const isAwaitingInput = (sessionId: string) =>
+    pendingAttentionIds.has(sessionId) ||
+    permissionIds.has(sessionId) ||
+    questionIds.has(sessionId);
+  const isFailed = (sessionId: string) =>
+    failedSessionIds.has(sessionId) || hasActiveUsageLimit(sessionId);
+  const isRunning = (sessionId: string) => {
+    if (hasActiveUsageLimit(sessionId)) return false;
+    if (isAwaitingInput(sessionId)) return false;
+    const type = state.sessionStatus[sessionId]?.type;
+    return type === 'busy' || type === 'retry';
+  };
 
   for (const session of sessions) {
     if (session.parentID) {
@@ -1230,10 +1245,10 @@ function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndica
     }
 
     const sessionId = session.id;
-    const failed = isFailedSession(sessionId);
+    const failed = isFailed(sessionId);
     const hasPrompt = permissionIds.has(sessionId) || questionIds.has(sessionId);
-    const needsAttention = !failed && (hasPrompt || isSessionAwaitingInput(sessionId));
-    const running = !needsAttention && isRunningSession(sessionId);
+    const needsAttention = !failed && (hasPrompt || isAwaitingInput(sessionId));
+    const running = !needsAttention && isRunning(sessionId);
 
     if (failed) {
       failedIds.add(sessionId);
@@ -1267,16 +1282,6 @@ function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndica
     planReadyIds,
     newlyCompletedIds,
   };
-}
-
-function isPlanReadySession(session: (typeof state.sessions)[number]) {
-  return (
-    !isRunningSession(session.id) &&
-    !isFailedSession(session.id) &&
-    !isSessionAwaitingInput(session.id) &&
-    isSessionUnread(session.id, session.time.updated) &&
-    getSelectedAgentForSession(session.id) === 'plan'
-  );
 }
 
 export function isFailedSession(sessionId: string) {
