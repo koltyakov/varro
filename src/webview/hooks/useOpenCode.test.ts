@@ -286,6 +286,38 @@ describe('sendMessage', () => {
     expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({ type: 'files/clear' });
   });
 
+  it('clears loading when the prompt is accepted but the session is already idle', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({
+      session: { type: 'idle' },
+      'session-1': { type: 'idle' },
+    });
+
+    await hookModule.sendMessage('Review this');
+
+    expect(stateModule.isLoading()).toBe(false);
+    expect(stateModule.loadingStartedAt()).toBeNull();
+    expect(stateModule.loadingLastActivityAt()).toBeNull();
+  });
+
   it('clears completed todos from previous turns on a new prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
 

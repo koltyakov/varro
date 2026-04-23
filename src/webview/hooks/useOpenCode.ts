@@ -1152,7 +1152,11 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
     setState('droppedFiles', []);
     clearClipboardImages();
     postMessage({ type: 'files/clear' });
-    await Promise.all([syncSession(sessionId), syncSessionMessages(sessionId)]).catch(() => {});
+    await Promise.all([
+      syncSession(sessionId),
+      syncSessionMessages(sessionId),
+      recheckSessionStatus(sessionId),
+    ]).catch(() => {});
   } catch (err) {
     stopLoading();
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
