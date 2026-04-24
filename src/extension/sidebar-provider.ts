@@ -40,6 +40,11 @@ import {
   type ProviderAuthRecord,
   type ProviderMetadata,
 } from './util/provider-limit';
+import {
+  getOpenCodePlansDirectory,
+  getPlanFileName,
+  normalizePlanMarkdown,
+} from './util/plan-file';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -519,6 +524,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      const planOpenRequest = this.parsePlanOpenRequest(method, payload.path, payload.body);
+      if (planOpenRequest) {
+        const data = await this.openPlanDocument(planOpenRequest.content);
+        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        return;
+      }
+
       if (this.simulateNoProviders && method === 'GET' && payload.path === '/config/providers') {
         this.post({
           type: 'api/response',
@@ -550,6 +562,45 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       providerID,
       modelID: url.searchParams.get('modelID')?.trim() || null,
     };
+  }
+
+  private parsePlanOpenRequest(method: string, path: string, body: unknown) {
+    if (method !== 'POST' || path !== '/varro/plan/open') return null;
+
+    const payload = asRecord(body);
+    const content = typeof payload?.content === 'string' ? payload.content : '';
+    if (!content.trim()) {
+      throw new Error('Plan content is empty');
+    }
+    if (content.length > 1_000_000) {
+      throw new Error('Plan content is too large to save');
+    }
+
+    return { content };
+  }
+
+  private async openPlanDocument(content: string) {
+    const normalized = normalizePlanMarkdown(content);
+    if (!normalized) {
+      throw new Error('Plan content is empty');
+    }
+
+    const plansDir = getOpenCodePlansDirectory();
+    const filename = getPlanFileName(normalized);
+    const directoryUri = vscode.Uri.file(plansDir);
+    const fileUri = vscode.Uri.file(join(plansDir, filename));
+
+    await vscode.workspace.fs.createDirectory(directoryUri);
+
+    try {
+      await vscode.workspace.fs.stat(fileUri);
+    } catch {
+      await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(`${normalized}\n`));
+    }
+
+    const document = await vscode.workspace.openTextDocument(fileUri);
+    await vscode.window.showTextDocument(document, { preview: false });
+    return { path: fileUri.fsPath };
   }
 
   private getProviderLimit(providerID: string, modelID: string | null) {

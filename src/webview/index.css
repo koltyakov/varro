@@ -1025,13 +1025,23 @@ body.vscode-light
   background: color-mix(in srgb, var(--color-vscode-success) 26%, transparent);
 }
 
-.assistant-dialog-summary-action-secondary {
+.assistant-dialog-summary-action-neutral {
+  color: var(--color-vscode-fg);
+  border-color: color-mix(in srgb, var(--color-vscode-border) 85%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
+}
+
+.assistant-dialog-summary-action-neutral:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
+}
+
+.assistant-dialog-summary-action-danger {
   color: color-mix(in srgb, var(--color-vscode-error) 82%, var(--color-vscode-fg));
   border-color: color-mix(in srgb, var(--color-vscode-error) 42%, var(--color-vscode-border));
   background: color-mix(in srgb, var(--color-vscode-error) 18%, transparent);
 }
 
-.assistant-dialog-summary-action-secondary:hover:not(:disabled) {
+.assistant-dialog-summary-action-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-vscode-error) 26%, transparent);
 }
 

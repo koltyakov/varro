@@ -100,6 +100,12 @@ export const client = {
     },
   },
 
+  varro: {
+    async openPlan(content: string): Promise<{ path: string }> {
+      return apiCall('POST', '/varro/plan/open', { content });
+    },
+  },
+
   mcp: {
     async status(): Promise<Record<string, McpStatus>> {
       return apiCall('GET', '/mcp');

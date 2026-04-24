@@ -20,6 +20,7 @@ const clientMocks = vi.hoisted(() => ({
   mcpConnect: vi.fn(),
   mcpDisconnect: vi.fn(),
   questionList: vi.fn(),
+  varroOpenPlan: vi.fn(),
   serverEventsOn: vi.fn(() => () => {}),
 }));
 
@@ -48,6 +49,9 @@ vi.mock('../lib/client', () => ({
     config: {
       providers: clientMocks.providerList,
       providerLimit: clientMocks.providerLimit,
+    },
+    varro: {
+      openPlan: clientMocks.varroOpenPlan,
     },
     mcp: {
       status: clientMocks.mcpStatus,
@@ -176,12 +180,14 @@ beforeEach(() => {
   clientMocks.mcpConnect.mockReset();
   clientMocks.mcpDisconnect.mockReset();
   clientMocks.questionList.mockReset();
+  clientMocks.varroOpenPlan.mockReset();
   clientMocks.serverEventsOn.mockClear();
   bridgeMocks.onMessage.mockClear();
   bridgeMocks.postMessage.mockReset();
   clientMocks.mcpStatus.mockResolvedValue({});
   clientMocks.mcpConnect.mockResolvedValue(true);
   clientMocks.mcpDisconnect.mockResolvedValue(true);
+  clientMocks.varroOpenPlan.mockResolvedValue({ path: '/tmp/plan.md' });
 });
 
 describe('sendMessage', () => {
@@ -934,6 +940,27 @@ describe('sendMessage', () => {
       parts: [{ type: 'text', text: 'Implement the approved plan.' }],
       agent: 'build',
     });
+  });
+
+  it('opens the saved plan document for the active session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+
+    await hookModule.openPlan('# Plan\n\n1. Ship it');
+
+    expect(clientMocks.varroOpenPlan).toHaveBeenCalledWith('# Plan\n\n1. Ship it');
+  });
+
+  it('does not try to open an empty plan', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+
+    await hookModule.openPlan('   ');
+
+    expect(clientMocks.varroOpenPlan).not.toHaveBeenCalled();
+    expect(stateModule.error()).toBe('Plan content is empty');
   });
 
   it('continues the failed assistant turn with the interruption resume prompt', async () => {

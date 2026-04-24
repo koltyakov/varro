@@ -1386,6 +1386,23 @@ export async function implementPlan(prompt: string, sessionId = state.activeSess
   await sendMessage(prompt);
 }
 
+export async function openPlan(markdown: string, sessionId = state.activeSessionId) {
+  if (!sessionId || sessionId !== state.activeSessionId) return;
+
+  const content = markdown.trim();
+  if (!content) {
+    setError('Plan content is empty');
+    return;
+  }
+
+  try {
+    setError(null);
+    await client.varro.openPlan(content);
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Failed to open plan');
+  }
+}
+
 function getAttachmentReference(
   file: { path: string; type: 'file' | 'directory' },
   workspacePath: string | null
