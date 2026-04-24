@@ -91,7 +91,10 @@ At activation time, `src/extension/extension.ts`:
 - Creates `ContextProvider`
 - Creates and registers `SidebarProvider`
 - Registers commands
-- Starts or connects to the OpenCode server
+
+The OpenCode server itself is not started at activation. `SidebarProvider.ensureServerStarted()` is called lazily the first time the webview issues a request, which either attaches to an already running server or spawns `opencode serve`.
+
+See [architecture.md](architecture.md) for a deeper component-by-component breakdown.
 
 ## Extension Host Responsibilities
 
@@ -250,7 +253,8 @@ src/
   shared/             Shared protocol types
 docs/
   usage.md            End-user workflow guide
-  development.md      Build, debug, and architecture guide
+  development.md      Build, debug, and contributor guide
+  architecture.md     Runtime architecture reference
 ```
 
 ## Scripts

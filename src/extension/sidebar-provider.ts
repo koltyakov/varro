@@ -65,6 +65,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly busySessions = new Set<string>();
   private readonly completedSessions = new Set<string>();
   private readonly failedSessions = new Set<string>();
+  private readonly sessionAgents = new Map<string, string>();
   private readonly pendingAttention = new Map<
     string,
     {
@@ -164,6 +165,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.busySessions.delete(sessionID);
         this.completedSessions.delete(sessionID);
         this.failedSessions.delete(sessionID);
+        this.sessionAgents.delete(sessionID);
         this.sessionTitles.delete(sessionID);
         for (const [requestID, request] of this.pendingAttention.entries()) {
           if (request.sessionID === sessionID) {
@@ -208,15 +210,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case 'message.updated': {
         const info = asRecord(props?.info);
         const sessionID = getString(info?.sessionID);
-        if (!sessionID || getString(info?.role) !== 'assistant') break;
+        if (!sessionID) break;
 
-        if (asRecord(info?.error)) {
+        const agent = getString(info?.agent);
+        if (agent) {
+          this.sessionAgents.set(sessionID, agent);
+        }
+
+        if (getString(info?.role) !== 'assistant') break;
+
+        const error = asRecord(info?.error);
+        if (error) {
+          const wasFailed = this.failedSessions.has(sessionID);
           this.failedSessions.add(sessionID);
           this.completedSessions.delete(sessionID);
-          changed = true;
+          if (!wasFailed) {
+            this.showFailureNotification(sessionID, this.describeFailure(error));
+          }
+          changed = !wasFailed || changed;
         } else {
-          this.failedSessions.delete(sessionID);
-          changed = true;
+          changed = this.failedSessions.delete(sessionID) || changed;
         }
         break;
       }
@@ -411,8 +424,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private showCompletionNotification(sessionID: string) {
     if (!this.shouldShowNotification()) return;
 
-    const message = `Varro completed a background session${this.describeSessionSuffix(sessionID)}.`;
+    const message = this.isPlanSession(sessionID)
+      ? `Varro has a plan ready for review${this.describeSessionSuffix(sessionID)}.`
+      : `Varro completed a background session${this.describeSessionSuffix(sessionID)}.`;
     void vscode.window.showInformationMessage(message, 'Open Chat').then((action) => {
+      if (action === 'Open Chat') {
+        void vscode.commands.executeCommand('varro.chat.focus');
+      }
+    });
+  }
+
+  private showFailureNotification(sessionID: string, detail: string | undefined) {
+    if (!this.shouldShowNotification()) return;
+
+    const suffix = this.describeSessionSuffix(sessionID);
+    const message = detail?.trim()
+      ? `Varro hit an error${suffix}: ${detail.trim()}`
+      : `Varro hit an error${suffix}.`;
+    void vscode.window.showErrorMessage(message, 'Open Chat').then((action) => {
       if (action === 'Open Chat') {
         void vscode.commands.executeCommand('varro.chat.focus');
       }
@@ -421,6 +450,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private shouldShowNotification() {
     return !this.view?.visible || !vscode.window.state.focused || !this.webviewHasFocus;
+  }
+
+  private isPlanSession(sessionID: string) {
+    return this.sessionAgents.get(sessionID) === 'plan';
+  }
+
+  private describeFailure(error: Record<string, unknown>) {
+    const detail = asRecord(error.data);
+    return getString(detail?.message) || getString(error.name);
   }
 
   private describeSessionSuffix(sessionID: string) {

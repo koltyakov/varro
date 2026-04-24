@@ -494,6 +494,13 @@ function GenericToolCall(props: {
   const openFile = (path: string) => {
     postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
   };
+  const isBash = () => normalizeToolName(props.tool.tool) === 'bash';
+  const bashCommand = () => {
+    const command = props.state.input?.command;
+    return typeof command === 'string'
+      ? formatCommandDisplay(command, appState.editorContext.workspacePath)
+      : '';
+  };
 
   return (
     <div class="chat-tool-invocation-part">
@@ -547,32 +554,52 @@ function GenericToolCall(props: {
 
       <Show when={props.expanded}>
         <div class="tool-invocation-detail animate-fade-in">
-          <Show when={props.inputEntries.length > 0}>
-            <div class="tool-invocation-input">
-              <For each={props.inputEntries}>
-                {([key, value]) => (
-                  <div class="tool-input-entry">
-                    <span class="tool-input-key">{key}</span>
-                    {isPathKey(key) && typeof value === 'string' ? (
-                      <a
-                        href="#"
-                        class="file-path-link tool-input-value"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          openFile(String(value));
-                        }}
-                      >
-                        {formatDisplayPath(String(value), appState.editorContext.workspacePath)}
-                      </a>
-                    ) : (
-                      <span class="tool-input-value">{formatValue(key, value)}</span>
+          <Show
+            when={isBash() && bashCommand()}
+            fallback={
+              <Show when={props.inputEntries.length > 0}>
+                <div class="tool-invocation-input">
+                  <For each={props.inputEntries}>
+                    {([key, value]) => (
+                      <div class="tool-input-entry">
+                        <span class="tool-input-key">{key}</span>
+                        {isPathKey(key) && typeof value === 'string' ? (
+                          <a
+                            href="#"
+                            class="file-path-link tool-input-value"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              openFile(String(value));
+                            }}
+                          >
+                            {formatDisplayPath(String(value), appState.editorContext.workspacePath)}
+                          </a>
+                        ) : (
+                          <span class="tool-input-value">{formatValue(key, value)}</span>
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
-              </For>
+                  </For>
+                </div>
+              </Show>
+            }
+          >
+            <div class="terminal-command-card">
+              <div class="terminal-command-row terminal-command-row-input">
+                <span class="terminal-command-label">IN</span>
+                <pre class="terminal-command-text">{bashCommand()}</pre>
+              </div>
+              <Show when={props.state.status === 'completed' && props.truncatedOutput}>
+                <div class="terminal-command-row terminal-command-row-output">
+                  <span class="terminal-command-label">OUT</span>
+                  <pre class="terminal-command-text terminal-command-output">
+                    {props.truncatedOutput}
+                  </pre>
+                </div>
+              </Show>
             </div>
           </Show>
-          <Show when={props.state.status === 'completed' && props.truncatedOutput}>
+          <Show when={!isBash() && props.state.status === 'completed' && props.truncatedOutput}>
             <pre class="tool-invocation-output">{props.truncatedOutput}</pre>
           </Show>
           <Show when={props.state.status === 'error'}>

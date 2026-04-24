@@ -3000,6 +3000,52 @@ kbd {
   font-size: 11.5px;
 }
 
+.chat-tool-invocation-part .terminal-command-card {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 64%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 1.5%, var(--color-vscode-list-bg));
+  font-family: var(--font-mono);
+}
+
+.chat-tool-invocation-part .terminal-command-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: start;
+}
+
+.chat-tool-invocation-part .terminal-command-row + .terminal-command-row {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 52%, transparent);
+}
+
+.chat-tool-invocation-part .terminal-command-label {
+  padding: 8px 0 8px 8px;
+  color: var(--color-vscode-fg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.45;
+  opacity: 0.78;
+}
+
+.chat-tool-invocation-part .terminal-command-text {
+  min-width: 0;
+  max-height: 200px;
+  margin: 0;
+  padding: 8px 10px 8px 0;
+  overflow: auto;
+  color: var(--color-vscode-fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-tool-invocation-part .terminal-command-output {
+  opacity: 0.9;
+}
+
 .chat-tool-invocation-part .tool-invocation-input {
   display: flex;
   flex-direction: column;

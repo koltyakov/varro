@@ -5,24 +5,27 @@ This document maps the current Varro codebase to the runtime behavior of the ext
 ## High-Level Flow
 
 1. VS Code activates the extension from `src/extension/extension.ts`.
-2. Varro connects to an existing OpenCode server or starts `opencode serve`.
-3. `SidebarProvider` creates the webview and injects initial state.
+2. `SidebarProvider` creates the webview and injects initial state.
+3. The first webview interaction triggers the server lifecycle — Varro either attaches to a running OpenCode server on the configured port or spawns `opencode serve`.
 4. The webview sends `ready` and starts loading sessions, agents, providers, and questions.
 5. The extension host proxies API requests to the OpenCode server and forwards SSE events into the webview.
 6. The webview updates local state and renders structured chat UI.
 
+Server startup is deferred: activation only constructs the `OpenCodeServer` object, and the actual `start()` call is issued from `SidebarProvider.ensureServerStarted()` the first time the UI needs it.
+
 ## Main Runtime Pieces
 
-## Extension Host
+### Extension Host
 
-### `src/extension/extension.ts`
+#### `src/extension/extension.ts`
 
 - Reads extension configuration from `varro.*`
 - Instantiates `OpenCodeServer`, `ContextProvider`, and `SidebarProvider`
-- Registers VS Code commands
-- Starts the server lifecycle
+- Registers the webview view provider and VS Code commands
+- Sets the `varro:activated` context key
+- Does not start the OpenCode server directly — startup is deferred until the webview first needs it
 
-### `src/extension/server.ts`
+#### `src/extension/server.ts`
 
 - Owns the local OpenCode process
 - Checks health before auto-starting
@@ -36,14 +39,14 @@ Important behavior:
 - If the SSE stream drops while the server is running, Varro retries with exponential backoff.
 - If the child process exits after startup, Varro attempts a limited restart sequence.
 
-### `src/extension/context-provider.ts`
+#### `src/extension/context-provider.ts`
 
 - Watches editor focus, selection changes, diagnostics, and workspace folder changes
 - Maintains the current `EditorContext`
 - Captures terminal selection by temporarily invoking the VS Code terminal copy command
 - Reads and opens files requested by the webview
 
-### `src/extension/sidebar-provider.ts`
+#### `src/extension/sidebar-provider.ts`
 
 This is the main extension-side coordinator.
 
@@ -59,9 +62,9 @@ It also exposes a Varro-specific pseudo-endpoint:
 
 That endpoint is resolved locally by the extension host rather than forwarded directly to OpenCode.
 
-## Shared Layer
+### Shared Layer
 
-### `src/shared/protocol.ts`
+#### `src/shared/protocol.ts`
 
 Defines:
 
@@ -73,7 +76,7 @@ Defines:
 
 The protocol is intentionally small and transport-oriented. OpenCode domain types such as `Session`, `Message`, and `Part` live under `src/webview/types/` because they are consumed mainly by the UI.
 
-### `src/shared/context-files.ts`
+#### `src/shared/context-files.ts`
 
 Handles attachment semantics.
 
@@ -82,9 +85,9 @@ Handles attachment semantics.
 - Formats selection references such as `[Selection from path lines 12-20]`
 - Lets the composer subtract already-attached ranges from the live editor selection
 
-## Webview
+### Webview
 
-### Boot
+#### Boot
 
 `src/extension/sidebar-provider.ts` serializes an `InitialWebviewState` into the HTML payload.
 
@@ -101,7 +104,7 @@ That initial state includes:
 - `Chat` when the server is running and at least one provider is available
 - `ServerStatus` otherwise
 
-### State
+#### State
 
 `src/webview/lib/state.ts` is the source of truth for UI state.
 
@@ -117,7 +120,7 @@ It stores:
 
 Several pieces are persisted in `localStorage`, including selected model, hidden models, permission mode preferences, and last active session ID.
 
-### OpenCode integration
+#### OpenCode integration
 
 `src/webview/hooks/useOpenCode.ts` is the most important webview file.
 
@@ -131,7 +134,7 @@ Responsibilities:
 
 The hook also handles workspace filtering for sessions, stale loading recovery, and model/provider limit refreshes.
 
-### UI composition
+#### UI composition
 
 Key components:
 
@@ -147,7 +150,7 @@ Key components:
 
 ## Request and Event Flow
 
-## Webview to extension
+### Webview to extension
 
 The webview sends:
 
@@ -156,7 +159,7 @@ The webview sends:
 - `vscode/open` and `vscode/diff` for editor integration
 - `terminal/run` to launch setup commands such as `opencode auth login`
 
-## Extension to webview
+### Extension to webview
 
 The extension sends:
 
@@ -168,7 +171,7 @@ The extension sends:
 - `theme/update`
 - `command/new-session`, `command/focus-input`, and `command/abort`
 
-## Prompt construction
+### Prompt construction
 
 When the user sends a message, `sendMessage()` in `src/webview/hooks/useOpenCode.ts` builds prompt parts from current UI state.
 
