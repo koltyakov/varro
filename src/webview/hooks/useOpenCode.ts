@@ -63,7 +63,7 @@ import {
   setProviderLimit,
   setSessionUsageLimit,
   consumeInterruptedSessionIds,
-  setExpandThinkingAndCommandsByDefaultPreference,
+  setExpandThinkingByDefaultPreference,
   setShowStickyUserPromptPreference,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
@@ -515,9 +515,7 @@ export function useOpenCode() {
           applyTheme(msg.payload.theme);
           break;
         case 'config/update':
-          setExpandThinkingAndCommandsByDefaultPreference(
-            msg.payload.expandThinkingAndCommandsByDefault
-          );
+          setExpandThinkingByDefaultPreference(msg.payload.expandThinkingByDefault);
           setShowStickyUserPromptPreference(msg.payload.showStickyUserPrompt);
           break;
         case 'pending-attention/update':
@@ -857,10 +855,17 @@ async function loadAgents() {
     if (activeAgent && !primaries.some((agent) => agent.name === activeAgent)) {
       setSelectedAgent(null, { sessionId: activeSessionId, persistGlobal: !activeSessionId });
     }
+    if (!activeSessionId) {
+      const defaultAgent = getDefaultPrimaryAgentName();
+      if (defaultAgent && state.selectedAgent !== defaultAgent) {
+        setSelectedAgent(defaultAgent, { persistGlobal: false });
+      }
+      return;
+    }
     if (!state.selectedAgent) {
       const sessionAgent = getSelectedAgentForSession(activeSessionId);
       const globalAgent = getPersistedSelectedAgent();
-      const fallback = [sessionAgent, globalAgent, getDefaultPrimaryAgentName()].find(
+      const fallback = [sessionAgent, getDefaultPrimaryAgentName(), globalAgent].find(
         (candidate): candidate is string =>
           !!candidate && primaries.some((agent) => agent.name === candidate)
       );
@@ -1245,8 +1250,10 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   try {
     await client.session.sendAsync(sessionId, body);
     setState('droppedFiles', []);
+    setState('terminalSelection', null);
     clearClipboardImages();
     postMessage({ type: 'files/clear' });
+    postMessage({ type: 'terminal-selection/clear' });
     await Promise.all([
       syncSession(sessionId),
       syncSessionMessages(sessionId),

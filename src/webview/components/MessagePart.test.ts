@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
-import { setExpandThinkingAndCommandsByDefaultPreference } from '../lib/state';
+import { setExpandThinkingByDefaultPreference } from '../lib/state';
 import type { ReasoningPart } from '../types';
 import {
   MessagePart,
@@ -15,7 +15,7 @@ let cleanup: (() => void) | undefined;
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
-  setExpandThinkingAndCommandsByDefaultPreference(false);
+  setExpandThinkingByDefaultPreference(false);
 });
 
 afterEach(() => {
@@ -23,7 +23,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
-  setExpandThinkingAndCommandsByDefaultPreference(false);
+  setExpandThinkingByDefaultPreference(false);
 });
 
 function reasoningPart(text: string): ReasoningPart {
@@ -94,7 +94,7 @@ describe('splitReasoningText', () => {
 
 describe('MessagePart', () => {
   it('expands reasoning blocks by default when the setting is enabled', () => {
-    setExpandThinkingAndCommandsByDefaultPreference(true);
+    setExpandThinkingByDefaultPreference(true);
 
     cleanup = render(
       () => MessagePart({ part: reasoningPart('**Planning**\n\nStep one') }),

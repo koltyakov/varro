@@ -577,7 +577,7 @@ export function MessageList() {
     stickyPreviewDebounceTimer = setTimeout(() => {
       stickyPreviewDebounceTimer = 0;
       setStickyUserMessagePreview(candidate);
-      previousStickyPreviewId = candidate?.id ?? null;
+      previousStickyPreviewId = null;
     }, STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS);
   });
 

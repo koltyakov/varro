@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
-import { setExpandThinkingAndCommandsByDefaultPreference } from '../lib/state';
+import { setExpandThinkingByDefaultPreference } from '../lib/state';
 import type { ToolPart } from '../types';
 import {
   ToolCall,
@@ -15,7 +15,7 @@ let cleanup: (() => void) | undefined;
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
-  setExpandThinkingAndCommandsByDefaultPreference(false);
+  setExpandThinkingByDefaultPreference(false);
 });
 
 afterEach(() => {
@@ -23,7 +23,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
-  setExpandThinkingAndCommandsByDefaultPreference(false);
+  setExpandThinkingByDefaultPreference(false);
 });
 
 function completedState(
@@ -94,7 +94,7 @@ describe('getVisibleInputEntries', () => {
 
 describe('ToolCall', () => {
   it('keeps command blocks collapsed by default even when thinking auto-expand is enabled', () => {
-    setExpandThinkingAndCommandsByDefaultPreference(true);
+    setExpandThinkingByDefaultPreference(true);
 
     const part: ToolPart = {
       id: 'tool-1',

@@ -15,6 +15,10 @@ export class OpenCodeServer extends EventEmitter {
   private static readonly START_DISPOSED_MESSAGE = 'Server start was cancelled';
   private static readonly HEALTH_TIMEOUT_MS = 2000;
   private static readonly REQUEST_TIMEOUT_MS = 30_000;
+  private static readonly CLI_COMMAND_TIMEOUT_MS = 5000;
+  private static readonly VERSION_CHECK_INTERVAL_MS = 5 * 60_000;
+  private static readonly CLI_UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60_000;
+  private static readonly CLI_REGISTRY_TIMEOUT_MS = 10_000;
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
   private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
   private process: ChildProcess | null = null;
@@ -37,6 +41,14 @@ export class OpenCodeServer extends EventEmitter {
   private isDisposing = false;
   private startPromise: Promise<string> | null = null;
   private requestControllers = new Set<AbortController>();
+  private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
+  private maintenanceInFlight = false;
+  private automaticRestartInFlight = false;
+  private managedProcess = false;
+  private lastCliUpdateCheckAt = 0;
+  private lastSuggestedCliVersion = '';
+  private lastLoggedUnmanagedRestartKey = '';
+  private readonly pendingAttentionRequests = new Map<string, string>();
 
   constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
     super();
@@ -55,8 +67,14 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private setStatus(s: ServerStatus) {
+    const previousStatus = this._status;
     const nextStatus = normalizeRunningStatus(s, this._status);
     this._status = nextStatus;
+    if (nextStatus.state === 'running') {
+      this.startMaintenanceLoop();
+    } else if (previousStatus.state === 'running') {
+      this.stopMaintenanceLoop();
+    }
     this.emit('status', nextStatus);
   }
 
@@ -101,8 +119,10 @@ export class OpenCodeServer extends EventEmitter {
       this.throwIfStartCancelled(disposeGeneration);
       if (healthy) {
         logger.info(`Found existing OpenCode server at ${this.url}`);
+        this.managedProcess = false;
         this.setRunningStatus(this.url, 'healthy');
         this.startEventStream();
+        this.requestMaintenanceCheck();
         return this.url;
       }
 
@@ -203,6 +223,7 @@ export class OpenCodeServer extends EventEmitter {
             windowsHide: true,
             ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
           });
+          this.managedProcess = true;
 
           this.process.stdout?.on('data', (data: Buffer) => {
             logger.info(`[server] ${data.toString().trim()}`);
@@ -217,6 +238,7 @@ export class OpenCodeServer extends EventEmitter {
           this.process.on('exit', (code, signal) => {
             logger.info(`Server process exited with code ${code}`);
             this.process = null;
+            this.managedProcess = false;
             this.stopEventStream();
             if (this.isDisposing) {
               return;
@@ -341,16 +363,8 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async checkHealth(): Promise<boolean> {
-    try {
-      const res = await fetch(`${this.url}/global/health`, {
-        signal: AbortSignal.timeout(OpenCodeServer.HEALTH_TIMEOUT_MS),
-      });
-      if (!res.ok) return false;
-      const data = (await res.json()) as { healthy?: boolean };
-      return data.healthy === true;
-    } catch {
-      return false;
-    }
+    const data = await this.readHealthInfo();
+    return data.healthy === true;
   }
 
   async request(method: string, path: string, body?: unknown): Promise<unknown> {
@@ -503,9 +517,50 @@ export class OpenCodeServer extends EventEmitter {
     const data = dataLines.join('\n');
     try {
       const parsed = JSON.parse(data);
+      this.observeServerEvent(parsed);
       this.emit('event', parsed);
     } catch {
       // ignore
+    }
+  }
+
+  private observeServerEvent(event: unknown) {
+    const evt = asRecord(event);
+    const type = getString(evt?.type);
+    const props = asRecord(evt?.properties);
+    if (!type) return;
+
+    switch (type) {
+      case 'permission.asked':
+      case 'question.asked': {
+        const requestID =
+          getString(props?.id) || getString(props?.permissionID) || getString(props?.requestID);
+        const sessionID = getString(props?.sessionID);
+        if (requestID && sessionID) {
+          this.pendingAttentionRequests.set(requestID, sessionID);
+        }
+        break;
+      }
+      case 'permission.replied':
+      case 'question.replied':
+      case 'question.rejected': {
+        const requestID =
+          getString(props?.id) || getString(props?.permissionID) || getString(props?.requestID);
+        if (requestID) {
+          this.pendingAttentionRequests.delete(requestID);
+        }
+        break;
+      }
+      case 'session.deleted': {
+        const sessionID = getString(asRecord(props?.info)?.id);
+        if (!sessionID) break;
+        for (const [requestID, requestSessionID] of this.pendingAttentionRequests.entries()) {
+          if (requestSessionID === sessionID) {
+            this.pendingAttentionRequests.delete(requestID);
+          }
+        }
+        break;
+      }
     }
   }
 
@@ -527,6 +582,254 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
+  private startMaintenanceLoop() {
+    if (this.maintenanceTimer) return;
+    this.maintenanceTimer = setInterval(() => {
+      void this.runMaintenanceTick();
+    }, OpenCodeServer.VERSION_CHECK_INTERVAL_MS);
+  }
+
+  private stopMaintenanceLoop() {
+    if (!this.maintenanceTimer) return;
+    clearInterval(this.maintenanceTimer);
+    this.maintenanceTimer = null;
+  }
+
+  private requestMaintenanceCheck() {
+    void this.runMaintenanceTick();
+  }
+
+  private async runMaintenanceTick() {
+    if (this.maintenanceInFlight || this.isDisposing) return;
+    this.maintenanceInFlight = true;
+    try {
+      const installedCliVersion = await this.readInstalledCliVersion();
+      await this.maybeSuggestCliUpdate(installedCliVersion);
+
+      if (this._status.state !== 'running' || !installedCliVersion) {
+        return;
+      }
+
+      const health = await this.readHealthInfo();
+      const serverVersion = typeof health.version === 'string' ? health.version.trim() : '';
+      if (!health.healthy || !serverVersion) {
+        return;
+      }
+
+      if (compareVersions(installedCliVersion, serverVersion) <= 0) {
+        this.lastLoggedUnmanagedRestartKey = '';
+        return;
+      }
+
+      if (await this.hasActiveSessions()) {
+        return;
+      }
+
+      if (!this.process || !this.managedProcess) {
+        const key = `${serverVersion}->${installedCliVersion}`;
+        if (this.lastLoggedUnmanagedRestartKey !== key) {
+          this.lastLoggedUnmanagedRestartKey = key;
+          logger.info(
+            `OpenCode CLI ${installedCliVersion} is newer than running server ${serverVersion}, but the server is not managed by Varro; skipping automatic restart`
+          );
+        }
+        return;
+      }
+
+      this.lastLoggedUnmanagedRestartKey = '';
+      await this.restartManagedServer(serverVersion, installedCliVersion);
+    } catch (err) {
+      logger.warn(
+        `OpenCode background maintenance failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    } finally {
+      this.maintenanceInFlight = false;
+    }
+  }
+
+  private async restartManagedServer(serverVersion: string, installedCliVersion: string) {
+    if (this.automaticRestartInFlight) return;
+    this.automaticRestartInFlight = true;
+    try {
+      logger.info(
+        `Restarting managed OpenCode server to use CLI ${installedCliVersion} instead of server ${serverVersion}`
+      );
+      await this.dispose();
+      await this.start();
+    } finally {
+      this.automaticRestartInFlight = false;
+    }
+  }
+
+  private async hasActiveSessions(): Promise<boolean> {
+    const [statuses, questions] = await Promise.allSettled([
+      this.request('GET', '/session/status'),
+      this.request('GET', '/question'),
+    ]);
+
+    if (statuses.status === 'rejected') {
+      throw statuses.reason;
+    }
+
+    const sessionStatuses = asRecord(statuses.value) || {};
+    for (const value of Object.values(sessionStatuses)) {
+      const type = getString(asRecord(value)?.type);
+      if (type === 'busy' || type === 'retry') {
+        return true;
+      }
+    }
+
+    if (
+      questions.status === 'fulfilled' &&
+      Array.isArray(questions.value) &&
+      questions.value.length > 0
+    ) {
+      return true;
+    }
+
+    return this.pendingAttentionRequests.size > 0;
+  }
+
+  private async maybeSuggestCliUpdate(installedCliVersion: string | null) {
+    if (!installedCliVersion) return;
+
+    const now = Date.now();
+    if (now - this.lastCliUpdateCheckAt < OpenCodeServer.CLI_UPDATE_CHECK_INTERVAL_MS) {
+      return;
+    }
+    this.lastCliUpdateCheckAt = now;
+
+    const latestCliVersion = await this.readLatestCliVersion();
+    if (!latestCliVersion || compareVersions(latestCliVersion, installedCliVersion) <= 0) {
+      return;
+    }
+
+    if (this.lastSuggestedCliVersion === latestCliVersion) {
+      return;
+    }
+    this.lastSuggestedCliVersion = latestCliVersion;
+
+    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: npm install -g opencode-ai@latest`;
+    logger.info(message);
+    void vscode.window.showInformationMessage(message);
+  }
+
+  private async readInstalledCliVersion(): Promise<string | null> {
+    if (this.simulateMissingCli) {
+      return null;
+    }
+
+    try {
+      const output = await this.runCliCommand(['--version']);
+      return extractVersion(output);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('ENOENT') || message.includes(OpenCodeServer.MISSING_CLI_MESSAGE)) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  private async readLatestCliVersion(): Promise<string | null> {
+    try {
+      const res = await fetch('https://registry.npmjs.org/opencode-ai/latest', {
+        signal: AbortSignal.timeout(OpenCodeServer.CLI_REGISTRY_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to fetch latest OpenCode CLI version: ${res.status}`);
+      }
+      const data = (await res.json()) as { version?: unknown };
+      return typeof data.version === 'string' ? extractVersion(data.version) : null;
+    } catch (err) {
+      logger.warn(
+        `Failed to check for OpenCode CLI updates: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return null;
+    }
+  }
+
+  private async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {
+    try {
+      const res = await fetch(`${this.url}/global/health`, {
+        signal: AbortSignal.timeout(OpenCodeServer.HEALTH_TIMEOUT_MS),
+      });
+      if (!res.ok) return { healthy: false };
+      return (await res.json()) as { healthy: boolean; version?: string };
+    } catch {
+      return { healthy: false };
+    }
+  }
+
+  private async runCliCommand(args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const finish = (result: { output?: string; error?: Error }) => {
+        if (settled) return;
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (result.error) {
+          reject(result.error);
+          return;
+        }
+        resolve(result.output || '');
+      };
+
+      try {
+        const command = this.resolveCommand();
+        const launch = resolveServerLaunch(command, args);
+        const proc = spawn(launch.command, launch.args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          cwd: this.getWorkspaceCwd(),
+          env: this.buildServerEnv(),
+          windowsHide: true,
+          ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+        });
+
+        proc.stdout?.on('data', (data: Buffer) => {
+          stdout += data.toString();
+        });
+        proc.stderr?.on('data', (data: Buffer) => {
+          stderr += data.toString();
+        });
+        proc.once('error', (err) => {
+          finish({
+            error: err.message.includes('ENOENT')
+              ? new Error(OpenCodeServer.MISSING_CLI_MESSAGE)
+              : err,
+          });
+        });
+        proc.once('exit', (code, signal) => {
+          if (code === 0) {
+            finish({ output: stdout.trim() });
+            return;
+          }
+          const message =
+            stderr.trim() ||
+            stdout.trim() ||
+            `OpenCode CLI command failed${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`;
+          finish({ error: new Error(message) });
+        });
+
+        timer = setTimeout(() => {
+          if (proc.exitCode === null && proc.signalCode === null) {
+            proc.kill('SIGKILL');
+          }
+          finish({ error: new Error('OpenCode CLI command timed out') });
+        }, OpenCodeServer.CLI_COMMAND_TIMEOUT_MS);
+      } catch (err) {
+        finish({ error: err instanceof Error ? err : new Error(String(err)) });
+      }
+    });
+  }
+
   async dispose() {
     await this.disposeResources({ stopProcess: true });
   }
@@ -540,8 +843,10 @@ export class OpenCodeServer extends EventEmitter {
     this.disposeGeneration += 1;
     this.clearStartPromise();
     this.clearRestartTimer();
+    this.stopMaintenanceLoop();
     this.cancelPollHealth();
     this.stopEventStream();
+    this.pendingAttentionRequests.clear();
     for (const controller of this.requestControllers) {
       controller.abort();
     }
@@ -549,6 +854,7 @@ export class OpenCodeServer extends EventEmitter {
     if (options.stopProcess && this.process) {
       const proc = this.process;
       this.process = null;
+      this.managedProcess = false;
       if (proc.exitCode === null && proc.signalCode === null) {
         proc.kill('SIGTERM');
       }
@@ -686,4 +992,30 @@ function anySignal(...signals: AbortSignal[]): AbortSignal {
   }
 
   return controller.signal;
+}
+
+function extractVersion(value: string): string | null {
+  const match = value.trim().match(/\d+(?:\.\d+)+/);
+  return match ? match[0] : null;
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = right.split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }

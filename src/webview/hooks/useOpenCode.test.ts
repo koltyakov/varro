@@ -285,6 +285,57 @@ describe('sendMessage', () => {
       },
     ]);
     expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
+  });
+
+  it('clears sent attachments while keeping current document context', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ]);
+    stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+      selection: { startLine: 4, endLine: 8 },
+      diagnostics: [],
+    });
+    stateModule.setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
+    stateModule.addContextFile({
+      path: '/repo/src/extra.ts',
+      relativePath: 'src/extra.ts',
+      type: 'file',
+    });
+    stateModule.addClipboardImage({
+      id: 'img-1',
+      url: 'blob:1',
+      mime: 'image/png',
+      filename: 'img-1.png',
+      size: 10,
+    });
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Review this');
+
+    expect(stateModule.state.droppedFiles).toEqual([]);
+    expect(stateModule.state.clipboardImages).toEqual([]);
+    expect(stateModule.state.terminalSelection).toBeNull();
+    expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(true);
+    expect(bridgeMocks.postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(bridgeMocks.postMessage).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
   });
 
   it('clears loading when the prompt is accepted but the session is already idle', async () => {
@@ -870,6 +921,62 @@ describe('sendMessage', () => {
 });
 
 describe('useOpenCode initialization', () => {
+  it('defaults the extension toolbar agent to build on startup', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    window.localStorage.setItem('varro.selectedAgent', JSON.stringify('plan'));
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.agentList.mockResolvedValue([
+      {
+        name: 'build',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+      {
+        name: 'plan',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+    ]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+
+      await vi.waitFor(() => {
+        expect(stateModule.state.selectedAgent).toBe('build');
+      });
+      expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
+    } finally {
+      dispose();
+    }
+  });
+
   it('hydrates 429 retry status for listed sessions before they are opened', async () => {
     let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
     bridgeMocks.onMessage.mockImplementation((handler) => {

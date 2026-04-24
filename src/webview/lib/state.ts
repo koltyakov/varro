@@ -39,7 +39,8 @@ const STORAGE_KEYS = {
   lastSeenSessions: 'varro.lastSeenSessions',
   lastActiveSessionId: 'varro.lastActiveSessionId',
   showThinking: 'varro.showThinking',
-  expandThinkingAndCommandsByDefault: 'varro.expandThinkingAndCommandsByDefault',
+  expandThinkingByDefault: 'varro.expandThinkingByDefault',
+  legacyexpandThinkingByDefault: 'varro.expandThinkingByDefault',
   showStickyUserPrompt: 'varro.showStickyUserPrompt',
 } as const;
 
@@ -420,12 +421,13 @@ export function setShowThinkingPreference(next: boolean) {
   writeStored(STORAGE_KEYS.showThinking, next);
 }
 
-export const [expandThinkingAndCommandsByDefault, setExpandThinkingAndCommandsByDefault] =
-  createSignal(readExpandThinkingAndCommandsByDefault());
+export const [expandThinkingByDefault, setExpandThinkingByDefault] = createSignal(
+  readExpandThinkingByDefault()
+);
 
-export function setExpandThinkingAndCommandsByDefaultPreference(next: boolean) {
-  setExpandThinkingAndCommandsByDefault(next);
-  writeStored(STORAGE_KEYS.expandThinkingAndCommandsByDefault, next);
+export function setExpandThinkingByDefaultPreference(next: boolean) {
+  setExpandThinkingByDefault(next);
+  writeStored(STORAGE_KEYS.expandThinkingByDefault, next);
 }
 
 export const [showStickyUserPrompt, setShowStickyUserPrompt] = createSignal(
@@ -540,10 +542,11 @@ function readShowThinking(): boolean {
   return readStored<boolean>(STORAGE_KEYS.showThinking) ?? true;
 }
 
-function readExpandThinkingAndCommandsByDefault(): boolean {
+function readExpandThinkingByDefault(): boolean {
   return (
-    initialWebviewState.expandThinkingAndCommandsByDefault ??
-    readStored<boolean>(STORAGE_KEYS.expandThinkingAndCommandsByDefault) ??
+    initialWebviewState.expandThinkingByDefault ??
+    readStored<boolean>(STORAGE_KEYS.expandThinkingByDefault) ??
+    readStored<boolean>(STORAGE_KEYS.legacyexpandThinkingByDefault) ??
     false
   );
 }

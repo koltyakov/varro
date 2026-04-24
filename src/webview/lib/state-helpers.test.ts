@@ -562,26 +562,24 @@ describe('state helpers', () => {
     expect(stateModule.composerFocusKey()).toBe(0);
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
-    expect(stateModule.expandThinkingAndCommandsByDefault()).toBe(false);
+    expect(stateModule.expandThinkingByDefault()).toBe(false);
     expect(stateModule.showStickyUserPrompt()).toBe(true);
 
     stateModule.requestComposerFocus();
     stateModule.requestMessageListScrollToBottom();
     stateModule.toggleThinking();
-    stateModule.setExpandThinkingAndCommandsByDefaultPreference(true);
+    stateModule.setExpandThinkingByDefaultPreference(true);
     stateModule.setShowStickyUserPromptPreference(false);
     stateModule.resetPastedImageIndex();
 
     expect(stateModule.composerFocusKey()).toBe(1);
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
     expect(stateModule.showThinking()).toBe(false);
-    expect(stateModule.expandThinkingAndCommandsByDefault()).toBe(true);
+    expect(stateModule.expandThinkingByDefault()).toBe(true);
     expect(stateModule.showStickyUserPrompt()).toBe(false);
     expect(stateModule.nextPastedImageIndex()).toBe(1);
     expect(window.localStorage.getItem('varro.showThinking')).toBe(JSON.stringify(false));
-    expect(window.localStorage.getItem('varro.expandThinkingAndCommandsByDefault')).toBe(
-      JSON.stringify(true)
-    );
+    expect(window.localStorage.getItem('varro.expandThinkingByDefault')).toBe(JSON.stringify(true));
     expect(window.localStorage.getItem('varro.showStickyUserPrompt')).toBe(JSON.stringify(false));
   });
 });

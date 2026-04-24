@@ -96,7 +96,7 @@ export type InitialWebviewState = {
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
   emptyStateLogoUri: string;
-  expandThinkingAndCommandsByDefault?: boolean;
+  expandThinkingByDefault?: boolean;
   showStickyUserPrompt?: boolean;
   interruptedSessionIds?: string[];
   pendingPermissions?: Array<Record<string, unknown>>;
@@ -120,7 +120,7 @@ export type ExtensionMessage =
     }
   | {
       type: 'config/update';
-      payload: { expandThinkingAndCommandsByDefault: boolean; showStickyUserPrompt: boolean };
+      payload: { expandThinkingByDefault: boolean; showStickyUserPrompt: boolean };
     }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
@@ -146,7 +146,7 @@ export type WebviewMessage =
   | { type: 'vscode/open-external'; payload: { url: string } }
   | {
       type: 'config/update';
-      payload: { expandThinkingAndCommandsByDefault: boolean; showStickyUserPrompt: boolean };
+      payload: { expandThinkingByDefault: boolean; showStickyUserPrompt: boolean };
     }
   | { type: 'ready' }
   | { type: 'api/request'; payload: { id: number; method: string; path: string; body?: unknown } }

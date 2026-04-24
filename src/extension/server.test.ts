@@ -10,6 +10,7 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
   vscodeMock: {
     window: {
       activeTextEditor: undefined,
+      showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
     },
     workspace: {
       getWorkspaceFolder: vi.fn(),
@@ -57,12 +58,15 @@ function createPendingEventResponse(signal: AbortSignal) {
   } as unknown as Response;
 }
 
-function setRunning(server: OpenCodeServer) {
+function setRunning(server: OpenCodeServer, options?: { keepMaintenance?: boolean }) {
   (
     server as unknown as {
       setRunningStatus: (url?: string, eventStream?: 'healthy' | 'degraded') => void;
     }
   ).setRunningStatus(server.url, 'healthy');
+  if (!options?.keepMaintenance) {
+    (server as unknown as { stopMaintenanceLoop: () => void }).stopMaintenanceLoop();
+  }
 }
 
 function startEventStream(server: OpenCodeServer) {
@@ -76,6 +80,18 @@ function stopEventStream(server: OpenCodeServer) {
 function setRestartTimer(server: OpenCodeServer, timer: ReturnType<typeof setTimeout> | null) {
   (server as unknown as { restartTimer: ReturnType<typeof setTimeout> | null }).restartTimer =
     timer;
+}
+
+function runMaintenanceTick(server: OpenCodeServer) {
+  return (server as unknown as { runMaintenanceTick: () => Promise<void> }).runMaintenanceTick();
+}
+
+function maybeSuggestCliUpdate(server: OpenCodeServer, installedCliVersion: string | null) {
+  return (
+    server as unknown as {
+      maybeSuggestCliUpdate: (version: string | null) => Promise<void>;
+    }
+  ).maybeSuggestCliUpdate(installedCliVersion);
 }
 
 beforeEach(() => {
@@ -180,5 +196,109 @@ describe('OpenCodeServer event stream', () => {
     await server.disconnect();
 
     expect(kill).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpenCodeServer maintenance', () => {
+  it('restarts a managed idle server when the installed CLI is newer', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const restartManagedServer = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      readInstalledCliVersion: () => Promise<string | null>;
+      maybeSuggestCliUpdate: (version: string | null) => Promise<void>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: () => Promise<boolean>;
+      restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+    };
+
+    setRunning(server);
+    api.process = {};
+    api.managedProcess = true;
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(undefined);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.restartManagedServer = restartManagedServer;
+
+    await runMaintenanceTick(server);
+
+    expect(restartManagedServer).toHaveBeenCalledWith('1.14.20', '1.14.22');
+  });
+
+  it('does not restart when there are active sessions', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const restartManagedServer = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      readInstalledCliVersion: () => Promise<string | null>;
+      maybeSuggestCliUpdate: (version: string | null) => Promise<void>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: () => Promise<boolean>;
+      restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+    };
+
+    setRunning(server);
+    api.process = {};
+    api.managedProcess = true;
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(undefined);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(true);
+    api.restartManagedServer = restartManagedServer;
+
+    await runMaintenanceTick(server);
+
+    expect(restartManagedServer).not.toHaveBeenCalled();
+  });
+
+  it('does not restart an unmanaged server even when the CLI is newer', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const restartManagedServer = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      readInstalledCliVersion: () => Promise<string | null>;
+      maybeSuggestCliUpdate: (version: string | null) => Promise<void>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: () => Promise<boolean>;
+      restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+    };
+
+    setRunning(server);
+    api.process = null;
+    api.managedProcess = false;
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(undefined);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.restartManagedServer = restartManagedServer;
+
+    await runMaintenanceTick(server);
+
+    expect(restartManagedServer).not.toHaveBeenCalled();
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      'OpenCode CLI 1.14.22 is newer than running server 1.14.20, but the server is not managed by Varro; skipping automatic restart'
+    );
+  });
+
+  it('suggests a newer CLI version only on the slower update cadence', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+
+    api.readLatestCliVersion = readLatestCliVersion;
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await maybeSuggestCliUpdate(server, '1.14.20');
+
+    expect(readLatestCliVersion).toHaveBeenCalledTimes(1);
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      'OpenCode CLI 1.14.22 is available (installed: 1.14.20). Update with: npm install -g opencode-ai@latest'
+    );
   });
 });

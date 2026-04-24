@@ -106,7 +106,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       if (
-        event.affectsConfiguration('varro.chat.expandThinkingAndCommandsByDefault') ||
+        event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
+        event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
         event.affectsConfiguration('varro.chat.showStickyUserPrompt')
       ) {
         this.postConfigState();
@@ -572,10 +573,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private getExpandThinkingAndCommandsByDefault() {
-    return vscode.workspace
-      .getConfiguration('varro')
-      .get<boolean>('chat.expandThinkingAndCommandsByDefault', false);
+  private getExpandThinkingByDefault() {
+    const config = vscode.workspace.getConfiguration('varro');
+    return (
+      config.get<boolean>('chat.expandThinkingByDefault') ??
+      config.get<boolean>('chat.expandThinkingByDefault') ??
+      false
+    );
   }
 
   private getShowStickyUserPrompt() {
@@ -588,7 +592,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({
       type: 'config/update',
       payload: {
-        expandThinkingAndCommandsByDefault: this.getExpandThinkingAndCommandsByDefault(),
+        expandThinkingByDefault: this.getExpandThinkingByDefault(),
         showStickyUserPrompt: this.getShowStickyUserPrompt(),
       },
     });
@@ -684,8 +688,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await vscode.workspace
             .getConfiguration('varro')
             .update(
-              'chat.expandThinkingAndCommandsByDefault',
-              msg.payload.expandThinkingAndCommandsByDefault,
+              'chat.expandThinkingByDefault',
+              msg.payload.expandThinkingByDefault,
               vscode.ConfigurationTarget.Global
             );
           await vscode.workspace
@@ -1225,7 +1229,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       terminalSelection: this.contextProvider.terminalSelection,
       droppedFiles: this.contextFiles,
       emptyStateLogoUri: emptyStateLogoUri?.toString() || '',
-      expandThinkingAndCommandsByDefault: this.getExpandThinkingAndCommandsByDefault(),
+      expandThinkingByDefault: this.getExpandThinkingByDefault(),
       showStickyUserPrompt: this.getShowStickyUserPrompt(),
       interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
       pendingPermissions: this.blockingRequestsForWebview

@@ -1,5 +1,5 @@
 import { Show, createMemo, createSignal } from 'solid-js';
-import { expandThinkingAndCommandsByDefault, state, showThinking } from '../lib/state';
+import { expandThinkingByDefault, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
@@ -86,7 +86,7 @@ function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {
 }
 
 function ReasoningBlock(props: { part: ReasoningPart; messageInfo?: AssistantMessage }) {
-  const [expanded, setExpanded] = createSignal(expandThinkingAndCommandsByDefault());
+  const [expanded, setExpanded] = createSignal(expandThinkingByDefault());
   const parsedText = createMemo(() => splitReasoningText(props.part.text));
   const isStreaming = () => props.part.time.end === undefined;
   const hasBody = () => parsedText().body.trim().length > 0;
