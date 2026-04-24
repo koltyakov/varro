@@ -13,6 +13,7 @@ import {
   hasExplicitContextForPath,
 } from '../../shared/context-files';
 import { postMessage } from '../lib/bridge';
+import { DocumentIcon } from './DocumentIcon';
 
 export function ContextBar() {
   const files = () => state.droppedFiles;
@@ -132,15 +133,7 @@ function ContextChip(props: {
         fallback={
           <Show
             when={props.icon === 'terminal'}
-            fallback={
-              <svg
-                class="h-3 w-3 shrink-0 text-vscode-muted/60"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-              </svg>
-            }
+            fallback={<DocumentIcon class="h-3 w-3 shrink-0 text-vscode-muted/60" />}
           >
             <svg
               class="h-3 w-3 shrink-0 text-vscode-muted/60"

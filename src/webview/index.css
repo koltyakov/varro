@@ -1888,6 +1888,13 @@ body.vscode-light
   padding: 4px;
 }
 
+.composer-completion-header {
+  padding: 6px 8px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-vscode-muted);
+}
+
 .composer-completion-item {
   display: flex;
   width: 100%;
@@ -1916,7 +1923,15 @@ body.vscode-light
   color: var(--color-vscode-muted);
 }
 
+.composer-completion-title-shell {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .composer-completion-title {
+  display: inline-block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1926,7 +1941,16 @@ body.vscode-light
   flex-shrink: 0;
 }
 
+.composer-completion-item.completion-file:hover .composer-completion-title.marquee,
+.composer-completion-item.completion-file.selected .composer-completion-title.marquee {
+  overflow: visible;
+  text-overflow: clip;
+  animation: composer-title-marquee var(--marquee-duration, 6s) linear infinite alternate;
+}
+
 .composer-completion-detail {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1934,6 +1958,34 @@ body.vscode-light
   line-height: 1;
   color: var(--color-vscode-muted);
   margin-left: 2px;
+}
+
+.composer-completion-item.completion-agent .composer-completion-title-shell {
+  flex: 0 0 auto;
+  max-width: 45%;
+}
+
+.composer-completion-item.completion-agent .composer-completion-detail {
+  flex: 1 1 auto;
+}
+
+.composer-completion-item.completion-file .composer-completion-title-shell {
+  flex: 1 1 auto;
+}
+
+.composer-completion-item.completion-file .composer-completion-detail {
+  flex: 0 0 auto;
+  max-width: 9.5ch;
+}
+
+@keyframes composer-title-marquee {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(var(--marquee-distance, 0px) * -1));
+  }
 }
 
 .toolbar-icon {

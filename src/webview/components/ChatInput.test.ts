@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isToolbarControlCompacted, isToolbarControlHidden } from './ChatInput';
+import {
+  getMentionCompletionItems,
+  isToolbarControlCompacted,
+  isToolbarControlHidden,
+} from './ChatInput';
 
 describe('isToolbarControlCompacted', () => {
   it('removes the stop label before compacting other toolbar controls', () => {
@@ -69,5 +73,53 @@ describe('isToolbarControlHidden', () => {
     expect(isToolbarControlHidden('tight', 'agent')).toBe(true);
     expect(isToolbarControlHidden('tight', 'stop')).toBe(true);
     expect(isToolbarControlHidden('tight', 'context')).toBe(true);
+  });
+});
+
+describe('getMentionCompletionItems', () => {
+  const agents = [
+    {
+      name: 'helper',
+      description: 'Helpful agent',
+      mode: 'all',
+      permission: {
+        edit: 'allow',
+        bash: { '*': 'allow' },
+      },
+    },
+  ];
+
+  const files = [
+    {
+      path: '/workspace/README.md',
+      relativePath: 'README.md',
+      type: 'file' as const,
+    },
+  ];
+
+  it('shows file results for bare filename queries', () => {
+    const completions = getMentionCompletionItems({
+      rawQuery: 'readme',
+      agents,
+      files,
+    });
+
+    expect(completions.some((item) => item.type === 'file' && item.label === '@README.md')).toBe(
+      true
+    );
+  });
+
+  it('shows file results for empty @ queries', () => {
+    const completions = getMentionCompletionItems({
+      rawQuery: '',
+      agents,
+      files,
+      meta: { showFileSearchHint: true },
+    });
+
+    expect(completions.some((item) => item.type === 'agent' && item.label === '@helper')).toBe(
+      true
+    );
+    expect(completions.some((item) => item.type === 'file')).toBe(false);
   });
 });
