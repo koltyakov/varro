@@ -8,7 +8,6 @@ import xaiIcon from '../assets/provider-icons/xai.svg';
 import qwenIcon from '../assets/provider-icons/qwen.svg';
 import kimiIcon from '../assets/provider-icons/kimi.svg';
 import opencodeIcon from '../assets/provider-icons/opencode.svg';
-import ollamaIcon from '../assets/provider-icons/ollama.svg';
 
 // Provider SVGs sourced from https://uxwing.com
 import githubCopilotIcon from '../assets/provider-icons/copilot.svg';
@@ -29,7 +28,6 @@ const PROVIDER_ICON_MAP: Record<string, string> = {
   'opencode-go': opencodeIcon,
   qwen: qwenIcon,
   kimi: kimiIcon,
-  ollama: ollamaIcon,
 };
 
 export function getProviderIcon(providerID: string | null | undefined) {
