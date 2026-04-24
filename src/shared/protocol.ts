@@ -148,6 +148,10 @@ export type WebviewMessage =
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
   | { type: 'files/drop'; payload: { paths: string[] } }
+  | {
+      type: 'files/drop-content';
+      payload: { files: Array<{ name: string; content: string; size: number }> };
+    }
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }
   | { type: 'files/pick' }

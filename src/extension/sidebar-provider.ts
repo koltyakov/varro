@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { readFile } from 'fs/promises';
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { tmpdir } from 'os';
+import { Buffer } from 'buffer';
 import { randomBytes } from 'crypto';
 import { resolve, join, isAbsolute } from 'path';
 import type {
@@ -426,6 +428,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'files/drop':
           await this.handleDroppedPaths(msg.payload.paths);
           break;
+        case 'files/drop-content':
+          await this.handleDroppedContent(msg.payload.files);
+          break;
         case 'files/remove':
           this.removeContextFile(msg.payload.path);
           break;
@@ -758,13 +763,58 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(msg);
   }
 
+  async handleDroppedContent(files: Array<{ name: string; content: string; size: number }>) {
+    const dropsDir = join(tmpdir(), 'varro-drops');
+    try {
+      await mkdir(dropsDir, { recursive: true });
+    } catch (err) {
+      logger.warn(
+        `Failed to create drop temp dir: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return;
+    }
+
+    const results = await Promise.all(
+      files.map(async (file) => {
+        try {
+          const buffer = Buffer.from(file.content, 'base64');
+          const safeName = sanitizeDroppedFileName(file.name);
+          const targetPath = join(
+            dropsDir,
+            `${Date.now()}-${randomBytes(4).toString('hex')}-${safeName}`
+          );
+          await writeFile(targetPath, buffer);
+          const uri = vscode.Uri.file(targetPath);
+          return {
+            path: uri.fsPath,
+            relativePath: safeName,
+            type: 'file' as 'file' | 'directory',
+          };
+        } catch (err) {
+          logger.warn(
+            `Failed to write dropped file ${file.name}: ${err instanceof Error ? err.message : String(err)}`
+          );
+          return null;
+        }
+      })
+    );
+
+    const valid = results.filter(
+      (item): item is { path: string; relativePath: string; type: 'file' | 'directory' } =>
+        item !== null
+    );
+    if (valid.length > 0) {
+      this.postDroppedFiles(valid);
+    }
+  }
+
   async handleDroppedPaths(paths: string[]) {
     const dropped = await Promise.all(
       Array.from(new Set(paths)).map(async (path) => {
         try {
           const uri = await this.resolveDroppedUri(path);
           if (!uri) {
-            throw new Error('Path is not part of the current workspace or does not exist');
+            throw new Error('Path does not exist');
           }
           const stat = await vscode.workspace.fs.stat(uri);
           const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
@@ -803,7 +853,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (isAbsolute(input)) {
       try {
         await vscode.workspace.fs.stat(absoluteUri);
-        return vscode.workspace.getWorkspaceFolder(absoluteUri) ? absoluteUri : null;
+        return absoluteUri;
       } catch {
         return null;
       }
@@ -1066,6 +1116,12 @@ type WebviewAssetContent = {
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function sanitizeDroppedFileName(name: string): string {
+  const base = name.split(/[\\/]/).pop() || 'dropped';
+  const sanitized = base.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+  return sanitized || 'dropped';
 }
 
 function shouldClearProviderLimitCache(previous: ServerStatus, next: ServerStatus) {

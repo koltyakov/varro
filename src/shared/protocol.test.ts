@@ -41,6 +41,7 @@ describe('protocol conformance', () => {
       'terminal-selection/clear': true,
       'terminal/run': true,
       'files/drop': true,
+      'files/drop-content': true,
       'files/remove': true,
       'files/clear': true,
       'files/pick': true,

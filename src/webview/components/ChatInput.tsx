@@ -1,4 +1,5 @@
 import { Show, For, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import {
   state,
   inputText,
@@ -807,6 +808,10 @@ export function ChatInput() {
     const dataTransfer = e.dataTransfer;
     if (!dataTransfer) return;
 
+    // Snapshot File objects now — DataTransfer is invalidated after the drop
+    // event returns, so FileReader fallback later wouldn't see them otherwise.
+    const droppedFiles = Array.from(dataTransfer.files || []);
+
     const paths = await collectDroppedPaths(dataTransfer);
     if (paths.length > 0) {
       postMessage({ type: 'files/drop', payload: { paths } });
@@ -840,8 +845,31 @@ export function ChatInput() {
       const uris = parseDroppedText(plainText);
       if (uris.length > 0) {
         postMessage({ type: 'files/drop', payload: { paths: uris } });
+        return;
       }
     }
+
+    // Final fallback: no paths extractable (e.g. Finder drop on Electron 32+,
+    // where File.path is stripped). Read the file bytes and ship the content.
+    await sendDroppedContent(droppedFiles);
+  }
+
+  async function sendDroppedContent(droppedFiles: File[]) {
+    if (droppedFiles.length === 0) return;
+    const MAX_BYTES = 25 * 1024 * 1024;
+    const MAX_FILES = 20;
+
+    const payloads: Array<{ name: string; content: string; size: number }> = [];
+    for (const file of droppedFiles.slice(0, MAX_FILES)) {
+      if (file.size > MAX_BYTES) continue;
+      try {
+        const base64 = await readFileAsBase64(file);
+        payloads.push({ name: file.name, content: base64, size: file.size });
+      } catch {}
+    }
+
+    if (payloads.length === 0) return;
+    postMessage({ type: 'files/drop-content', payload: { files: payloads } });
   }
 
   async function handlePaste(e: ClipboardEvent) {
@@ -1273,7 +1301,29 @@ export function ChatInput() {
   return (
     <div class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}`}>
       <Show when={isDraggingOver()}>
-        <div class="chat-drop-overlay" aria-hidden="true" />
+        <Portal>
+          <div class="chat-drop-overlay" aria-hidden="true">
+            <div class="chat-drop-overlay-card">
+              <div class="chat-drop-overlay-icon">
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </div>
+              <div class="chat-drop-overlay-title">Drop to add to context</div>
+            </div>
+          </div>
+        </Portal>
       </Show>
 
       <Show when={queuedForSession().length > 0}>
@@ -2815,6 +2865,23 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.addEventListener('error', () =>
       reject(reader.error || new Error('Failed to read clipboard image'))
     );
+    reader.readAsDataURL(file);
+  });
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('Unexpected FileReader result'));
+        return;
+      }
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : '');
+    });
+    reader.addEventListener('error', () => reject(reader.error || new Error('FileReader failed')));
     reader.readAsDataURL(file);
   });
 }
