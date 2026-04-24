@@ -397,7 +397,6 @@ export class OpenCodeServer extends EventEmitter {
       }
       return data;
     } finally {
-      controller.abort();
       this.requestControllers.delete(controller);
     }
   }
@@ -451,12 +450,13 @@ export class OpenCodeServer extends EventEmitter {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let cursor = 0;
       resetIdleTimer();
       while (true) {
         const { value, done } = await reader.read();
         if (done) {
           buffer += decoder.decode();
-          const finalChunk = buffer.trim();
+          const finalChunk = buffer.slice(cursor).trim();
           if (finalChunk.length > 0) {
             this.processSseChunk(finalChunk);
           }
@@ -467,10 +467,13 @@ export class OpenCodeServer extends EventEmitter {
         resetIdleTimer();
         buffer += decoder.decode(value, { stream: true });
         let boundary: { index: number; length: number } | null;
-        while ((boundary = findSseChunkBoundary(buffer))) {
-          const chunk = buffer.slice(0, boundary.index);
-          buffer = buffer.slice(boundary.index + boundary.length);
-          this.processSseChunk(chunk);
+        while ((boundary = findSseChunkBoundary(buffer, cursor))) {
+          this.processSseChunk(buffer.slice(cursor, boundary.index));
+          cursor = boundary.index + boundary.length;
+        }
+        if (cursor > 0) {
+          buffer = buffer.slice(cursor);
+          cursor = 0;
         }
         if (buffer.length > OpenCodeServer.EVENT_MAX_BUFFER_CHARS) {
           abortForReconnect(
@@ -517,12 +520,13 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private processSseChunk(chunk: string) {
-    const dataLines: string[] = [];
+    let data = '';
     for (const line of chunk.split(/\r\n|[\r\n]/)) {
-      if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+      if (!line.startsWith('data:')) continue;
+      const value = line.slice(5).trimStart();
+      data = data.length === 0 ? value : `${data}\n${value}`;
     }
-    if (!dataLines.length) return;
-    const data = dataLines.join('\n');
+    if (data.length === 0) return;
     try {
       const parsed = JSON.parse(data);
       this.observeServerEvent(parsed);
@@ -979,11 +983,15 @@ function normalizeRunningStatus(next: ServerStatus, previous: ServerStatus): Ser
   return { ...next, eventStream: previous.eventStream || 'healthy' };
 }
 
-const SSE_CHUNK_BOUNDARY_RE = /\r\n\r\n|\n\n|\r\r|\r\n\n|\n\r\n/;
+const SSE_CHUNK_BOUNDARY_RE = /\r\n\r\n|\n\n|\r\r|\r\n\n|\n\r\n/g;
 
-function findSseChunkBoundary(buffer: string): { index: number; length: number } | null {
+function findSseChunkBoundary(
+  buffer: string,
+  fromIndex: number
+): { index: number; length: number } | null {
+  SSE_CHUNK_BOUNDARY_RE.lastIndex = fromIndex;
   const match = SSE_CHUNK_BOUNDARY_RE.exec(buffer);
-  if (!match || match.index === undefined) return null;
+  if (!match) return null;
   return { index: match.index, length: match[0].length };
 }
 

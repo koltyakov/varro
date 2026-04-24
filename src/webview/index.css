@@ -277,8 +277,22 @@ body.vscode-light .assistant-turn-content {
   box-shadow: none;
 }
 
-body.vscode-light :is(.chat-tool-invocation-part .tool-invocation-output, .chat-compaction-notice) {
+body.vscode-light .chat-compaction-notice,
+body.vscode-high-contrast-light .chat-compaction-notice {
   background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-sidebar));
+}
+
+body.vscode-light
+  :is(
+    .chat-tool-invocation-part .tool-invocation-output,
+    .chat-tool-invocation-part .terminal-command-card
+  ),
+body.vscode-high-contrast-light
+  :is(
+    .chat-tool-invocation-part .tool-invocation-output,
+    .chat-tool-invocation-part .terminal-command-card
+  ) {
+  background: #fff;
 }
 
 * {

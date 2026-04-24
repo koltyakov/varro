@@ -374,6 +374,8 @@ export function MessageList() {
   const measuredHeights = new Map<string, number>();
   let lastTrackHeight = 0;
 
+  const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
+
   const visibleRange = createMemo(() => {
     const msgs = messages();
     measurementVersion();
@@ -381,7 +383,7 @@ export function MessageList() {
       return { start: 0, end: msgs.length, topPad: 0, bottomPad: 0 };
     }
     return calculateVirtualRange({
-      itemIds: msgs.map((msg) => msg.info.id),
+      itemIds: messageIds(),
       measuredHeights,
       scrollTop: scrollTop(),
       viewportHeight: viewportHeight(),

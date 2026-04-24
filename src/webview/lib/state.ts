@@ -1598,6 +1598,29 @@ function areMessageEntriesEquivalent(
   return true;
 }
 
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (Array.isArray(b)) return false;
+  const aKeys = Object.keys(a as Record<string, unknown>);
+  const bKeys = Object.keys(b as Record<string, unknown>);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    if (!deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function areMessagesEquivalent(left: Message, right: Message) {
   if (left.id !== right.id) return false;
   if (left.sessionID !== right.sessionID) return false;
@@ -1609,12 +1632,9 @@ function areMessagesEquivalent(left: Message, right: Message) {
   ) {
     return false;
   }
-  if (
-    JSON.stringify((left as { error?: unknown }).error || null) !==
-    JSON.stringify((right as { error?: unknown }).error || null)
-  ) {
-    return false;
-  }
+  const leftError = (left as { error?: unknown }).error ?? null;
+  const rightError = (right as { error?: unknown }).error ?? null;
+  if (leftError !== rightError && !deepEqual(leftError, rightError)) return false;
   return true;
 }
 
@@ -1624,10 +1644,10 @@ function arePartsEquivalent(left: Part, right: Part) {
   if (left.messageID !== right.messageID) return false;
   if (left.sessionID !== right.sessionID) return false;
   if ((left as { text?: unknown }).text !== (right as { text?: unknown }).text) return false;
-  return (
-    JSON.stringify((left as { state?: unknown }).state || null) ===
-    JSON.stringify((right as { state?: unknown }).state || null)
-  );
+  const leftState = (left as { state?: unknown }).state ?? null;
+  const rightState = (right as { state?: unknown }).state ?? null;
+  if (leftState === rightState) return true;
+  return deepEqual(leftState, rightState);
 }
 
 export function getChildRunsByParentId(
