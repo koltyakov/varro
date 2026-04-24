@@ -439,6 +439,8 @@ function UserMessageContent(props: { parts: Part[] }) {
     parsed().messageTexts.length > 0 ||
     parsed().fileParts.length > 0 ||
     parsed().attachments.length > 0;
+  const hasLeadingAttachmentSeparator = () =>
+    parsed().messageTexts.length > 0 || parsed().fileParts.length > 0;
 
   return (
     <div class="rendered-markdown">
@@ -451,7 +453,9 @@ function UserMessageContent(props: { parts: Part[] }) {
         <p class="user-message-empty">(no content)</p>
       </Show>
       <Show when={parsed().attachments.length > 0}>
-        <div class="message-attachments">
+        <div
+          class={`message-attachments${hasLeadingAttachmentSeparator() ? '' : ' message-attachments-standalone'}`}
+        >
           <For each={parsed().attachments}>
             {(att) => <MessageAttachmentChip attachment={att} />}
           </For>

@@ -22,11 +22,15 @@ export class OpenCodeServer extends EventEmitter {
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
   private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
   private static readonly EVENT_MAX_BUFFER_CHARS = 1_000_000;
+  private static readonly PORT_FALLBACK_MAX_OFFSET = 10;
   private process: ChildProcess | null = null;
   private _status: ServerStatus = { state: 'stopped' };
   private port: number;
+  private readonly originalPort: number;
   private retries = 0;
   private maxRetries = 3;
+  private portFallbackAttempts = 0;
+  private portInUseDetected = false;
   private autoStart: boolean;
   private command: string;
   private simulateMissingCli: boolean;
@@ -54,6 +58,7 @@ export class OpenCodeServer extends EventEmitter {
   constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
     super();
     this.port = port;
+    this.originalPort = port;
     this.autoStart = autoStart;
     this.command = command?.trim() || '';
     this.simulateMissingCli = simulateMissingCli;
@@ -121,6 +126,8 @@ export class OpenCodeServer extends EventEmitter {
       if (healthy) {
         logger.info(`Found existing OpenCode server at ${this.url}`);
         this.managedProcess = false;
+        this.portFallbackAttempts = 0;
+        this.portInUseDetected = false;
         this.setRunningStatus(this.url, 'healthy');
         this.startEventStream();
         this.requestMaintenanceCheck();
@@ -194,6 +201,20 @@ export class OpenCodeServer extends EventEmitter {
             return;
           }
 
+          if (this.portInUseDetected && this.tryAdvancePort()) {
+            logger.warn(
+              `Port ${this.port - 1} in use by another process; retrying on ${this.port}`
+            );
+            this.portInUseDetected = false;
+            this.clearStartPromise();
+            this.restartTimer = setTimeout(() => {
+              this.restartTimer = null;
+              if (isStaleAttempt()) return;
+              this.start().then(resolve).catch(reject);
+            }, 100);
+            return;
+          }
+
           if (this.retries < this.maxRetries) {
             this.retries += 1;
             const delay = this.getRestartDelay(this.retries);
@@ -233,6 +254,9 @@ export class OpenCodeServer extends EventEmitter {
           this.process.stderr?.on('data', (data: Buffer) => {
             const text = data.toString().trim();
             rememberStderr(text);
+            if (isPortInUseMessage(text)) {
+              this.portInUseDetected = true;
+            }
             logger.error(`[server] ${text}`);
           });
 
@@ -349,6 +373,8 @@ export class OpenCodeServer extends EventEmitter {
         this.cancelPollHealth();
         this.setRunningStatus(this.url, 'healthy');
         this.retries = 0;
+        this.portFallbackAttempts = 0;
+        this.portInUseDetected = false;
         this.startEventStream();
         this.pollHealthResolve(this.url);
       } else {
@@ -527,14 +553,24 @@ export class OpenCodeServer extends EventEmitter {
       data = data.length === 0 ? value : `${data}\n${value}`;
     }
     if (data.length === 0) return;
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(data);
-      this.observeServerEvent(parsed);
-      this.emit('event', parsed);
+      parsed = JSON.parse(data);
     } catch (err) {
       logger.warn(
         `Ignoring malformed event stream payload: ${err instanceof Error ? err.message : String(err)}`
       );
+      return;
+    }
+    try {
+      this.observeServerEvent(parsed);
+    } catch (err) {
+      logger.warn(`Event observation threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      this.emit('event', parsed);
+    } catch (err) {
+      logger.warn(`Event listener threw: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -891,6 +927,11 @@ export class OpenCodeServer extends EventEmitter {
       controller.abort();
     }
     this.requestControllers.clear();
+    if (options.stopProcess) {
+      this.port = this.originalPort;
+      this.portFallbackAttempts = 0;
+      this.portInUseDetected = false;
+    }
     if (options.stopProcess && this.process) {
       const proc = this.process;
       this.process = null;
@@ -974,6 +1015,17 @@ export class OpenCodeServer extends EventEmitter {
       OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS
     );
   }
+
+  private tryAdvancePort(): boolean {
+    if (this.portFallbackAttempts >= OpenCodeServer.PORT_FALLBACK_MAX_OFFSET) return false;
+    this.portFallbackAttempts += 1;
+    this.port = this.originalPort + this.portFallbackAttempts;
+    return true;
+  }
+}
+
+function isPortInUseMessage(text: string): boolean {
+  return /\bEADDRINUSE\b|address already in use|port .* (already )?in use/i.test(text);
 }
 
 function normalizeRunningStatus(next: ServerStatus, previous: ServerStatus): ServerStatus {

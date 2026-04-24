@@ -1,11 +1,13 @@
 import type { ExtensionMessage, WebviewMessage } from '../../shared/protocol';
+import { parseExtensionMessage } from '../../shared/extension-message';
 
 type MessageHandler = (msg: ExtensionMessage) => void;
 
 const handlers = new Set<MessageHandler>();
 
 const messageListener = (event: MessageEvent) => {
-  const msg = event.data as ExtensionMessage;
+  const msg = parseExtensionMessage(event.data);
+  if (!msg) return;
   for (const handler of handlers) handler(msg);
 };
 

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { readFile } from 'fs/promises';
 import { randomBytes } from 'crypto';
-import { resolve, join, basename, isAbsolute } from 'path';
+import { resolve, join, isAbsolute } from 'path';
 import type {
   DesktopSessionPaneSide,
   DroppedFile,
@@ -14,11 +14,17 @@ import type {
   WebviewMessage,
 } from '../shared/protocol';
 import { areContextFilesEqual, mergeContextFile } from '../shared/context-files';
-import { normalizeSessionTitle } from '../shared/session-title';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
+import { errorHub } from './error-hub';
 import { logger } from './logger';
 import { getRelativePath } from './util/path';
+import { FileSearchService } from './file-search-service';
+import {
+  SessionStateManager,
+  type BlockingRequestSnapshot,
+  type InterruptedSessionSnapshot,
+} from './session-state-manager';
 import {
   isAllowedApiRequest,
   isAllowedExternalUrl,
@@ -37,12 +43,7 @@ import {
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
-  private static readonly FILE_SEARCH_CACHE_TTL_MS = 15_000;
-  private static readonly FILE_SEARCH_MAX_CANDIDATES = 4_000;
-  private static readonly FILE_SEARCH_RESULT_LIMIT = 30;
   private static readonly PROVIDER_LIMIT_CACHE_TTL_MS = 60_000;
-  private static readonly INTERRUPTED_SESSIONS_KEY = 'varro.interruptedSessions';
-  private static readonly BLOCKING_REQUESTS_KEY = 'varro.blockingRequests';
   private view?: vscode.WebviewView;
   private contextProvider: ContextProvider;
   private server: OpenCodeServer;
@@ -51,10 +52,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private configDisposable?: vscode.Disposable;
   private contextFiles: DroppedFile[] = [];
   private onContextFilesChanged?: () => void;
-  private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
-  private workspaceFileCacheAt = 0;
-  private workspaceFileCachePromise: Promise<WorkspaceFileSearchEntry[]> | null = null;
-  private fileSearchCts: vscode.CancellationTokenSource | null = null;
+  private readonly fileSearch = new FileSearchService();
+  private readonly sessionState: SessionStateManager;
   private pendingInputFocus = false;
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
   private serverEventHandler: ((event: unknown) => void) | undefined;
@@ -62,20 +61,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private windowStateDisposable?: vscode.Disposable;
   private readonly statusBarItem: vscode.StatusBarItem;
   private webviewHasFocus = false;
-  private readonly busySessions = new Set<string>();
-  private readonly completedSessions = new Set<string>();
-  private readonly failedSessions = new Set<string>();
-  private readonly sessionAgents = new Map<string, string>();
-  private readonly pendingAttention = new Map<
-    string,
-    {
-      sessionID: string;
-      kind: 'permission' | 'question';
-      label: string;
-      props: Record<string, unknown>;
-    }
-  >();
-  private readonly sessionTitles = new Map<string, string>();
   private readonly providerLimitCache = new Map<
     string,
     { expiresAt: number; promise: Promise<ProviderLimitStatus> }
@@ -86,7 +71,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private providerAuthStoreFetchedAt = 0;
   private webviewLoadGeneration = 0;
   private webviewReady = false;
-  private lastPendingAttentionKey = '';
   private lastStatusBarStateKey = '';
   private serverStartErrorMessage: string | null = null;
   private webviewAssets: WebviewAssetContent | null = null;
@@ -95,13 +79,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly workspaceState: vscode.Memento,
+    workspaceState: vscode.Memento,
     contextProvider: ContextProvider,
     server: OpenCodeServer,
     private readonly simulateNoProviders = false
   ) {
     this.contextProvider = contextProvider;
     this.server = server;
+    this.sessionState = new SessionStateManager(
+      workspaceState,
+      {
+        onPendingAttentionChange: (sessionIds) => {
+          this.post({ type: 'pending-attention/update', payload: { sessionIds } });
+        },
+        onStatusChange: () => this.updateStatusBarItem(),
+      },
+      {
+        shouldShow: () => this.shouldShowNotification(),
+      }
+    );
     this.statusBarItem = vscode.window.createStatusBarItem(
       'varro.session-status',
       vscode.StatusBarAlignment.Left,
@@ -132,7 +128,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
     this.serverEventHandler = (event: unknown) => {
       const evt = event as Record<string, unknown>;
-      this.handleServerEvent(evt);
+      this.sessionState.handleServerEvent(evt);
       this.post({
         type: 'server/event',
         payload: {
@@ -147,182 +143,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.updateStatusBarItem();
   }
 
-  private handleServerEvent(event: Record<string, unknown>) {
-    const type = typeof event.type === 'string' ? event.type : undefined;
-    const props = asRecord(event.properties);
-    if (!type) return;
-    let changed = false;
-
-    switch (type) {
-      case 'session.created':
-      case 'session.updated': {
-        this.rememberSessionTitle(asRecord(props?.info));
-        break;
-      }
-      case 'session.deleted': {
-        const sessionID = getString(asRecord(props?.info)?.id);
-        if (!sessionID) break;
-        this.busySessions.delete(sessionID);
-        this.completedSessions.delete(sessionID);
-        this.failedSessions.delete(sessionID);
-        this.sessionAgents.delete(sessionID);
-        this.sessionTitles.delete(sessionID);
-        for (const [requestID, request] of this.pendingAttention.entries()) {
-          if (request.sessionID === sessionID) {
-            this.pendingAttention.delete(requestID);
-            changed = true;
-          }
-        }
-        changed = true;
-        break;
-      }
-      case 'session.status': {
-        const sessionID = getString(props?.sessionID);
-        const statusType = getString(asRecord(props?.status)?.type);
-        if (!sessionID || !statusType) break;
-        if (statusType === 'busy' || statusType === 'retry') {
-          this.busySessions.add(sessionID);
-          this.completedSessions.delete(sessionID);
-          this.failedSessions.delete(sessionID);
-          changed = true;
-        }
-        if (statusType === 'idle') {
-          this.busySessions.delete(sessionID);
-          changed = true;
-        }
-        break;
-      }
-      case 'session.idle': {
-        const sessionID = getString(props?.sessionID);
-        if (!sessionID) break;
-        const wasBusy = this.busySessions.delete(sessionID);
-        if (
-          wasBusy &&
-          !this.hasPendingAttentionForSession(sessionID) &&
-          !this.failedSessions.has(sessionID)
-        ) {
-          this.completedSessions.add(sessionID);
-          this.showCompletionNotification(sessionID);
-          changed = true;
-        }
-        break;
-      }
-      case 'message.updated': {
-        const info = asRecord(props?.info);
-        const sessionID = getString(info?.sessionID);
-        if (!sessionID) break;
-
-        const agent = getString(info?.agent);
-        if (agent) {
-          this.sessionAgents.set(sessionID, agent);
-        }
-
-        if (getString(info?.role) !== 'assistant') break;
-
-        const error = asRecord(info?.error);
-        if (error) {
-          const wasFailed = this.failedSessions.has(sessionID);
-          this.failedSessions.add(sessionID);
-          this.completedSessions.delete(sessionID);
-          if (!wasFailed) {
-            this.showFailureNotification(sessionID, this.describeFailure(error));
-          }
-          changed = !wasFailed || changed;
-        } else {
-          changed = this.failedSessions.delete(sessionID) || changed;
-        }
-        break;
-      }
-      case 'permission.asked': {
-        changed = (props ? this.trackBlockingRequest('permission', props) : false) || changed;
-        break;
-      }
-      case 'permission.replied': {
-        changed =
-          this.clearBlockingRequest(
-            getString(props?.permissionID) || getString(props?.requestID)
-          ) || changed;
-        break;
-      }
-      case 'question.asked': {
-        changed = (props ? this.trackBlockingRequest('question', props) : false) || changed;
-        break;
-      }
-      case 'question.replied':
-      case 'question.rejected': {
-        changed =
-          this.clearBlockingRequest(getString(props?.requestID) || getString(props?.id)) || changed;
-        break;
-      }
-    }
-
-    if (changed) {
-      this.updateStatusBarItem();
-      this.postPendingAttentionState();
-      void this.persistSessionState();
-    }
-  }
-
-  private async persistSessionState() {
-    const results = await Promise.allSettled([
-      this.persistInterruptedSessions(),
-      this.persistBlockingRequests(),
-    ]);
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        logger.warn(
-          `Failed to persist session state: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
-        );
-      }
-    }
-  }
-
-  private async persistInterruptedSessions() {
-    const snapshots = [...this.busySessions]
-      .toSorted()
-      .map((id) => ({ id, title: this.sessionTitles.get(id)?.trim() || undefined }));
-    await this.workspaceState.update(SidebarProvider.INTERRUPTED_SESSIONS_KEY, snapshots);
-  }
-
-  private async persistBlockingRequests() {
-    const snapshots = [...this.pendingAttention.entries()]
-      .map(([id, request]) => ({
-        id,
-        sessionID: request.sessionID,
-        kind: request.kind,
-        props: request.props,
-      }))
-      .toSorted((a, b) => a.id.localeCompare(b.id));
-    await this.workspaceState.update(SidebarProvider.BLOCKING_REQUESTS_KEY, snapshots);
-  }
-
-  private async consumeInterruptedSessions() {
-    const snapshots =
-      this.workspaceState.get<InterruptedSessionSnapshot[]>(
-        SidebarProvider.INTERRUPTED_SESSIONS_KEY,
-        []
-      ) || [];
-    await this.workspaceState.update(SidebarProvider.INTERRUPTED_SESSIONS_KEY, []);
-    return snapshots.filter((item) => typeof item?.id === 'string' && item.id.trim().length > 0);
-  }
-
-  private async consumeBlockingRequests() {
-    const snapshots =
-      this.workspaceState.get<BlockingRequestSnapshot[]>(
-        SidebarProvider.BLOCKING_REQUESTS_KEY,
-        []
-      ) || [];
-    await this.workspaceState.update(SidebarProvider.BLOCKING_REQUESTS_KEY, []);
-    return snapshots.filter(
-      (item) =>
-        typeof item?.id === 'string' &&
-        item.id.trim().length > 0 &&
-        typeof item?.sessionID === 'string' &&
-        item.sessionID.trim().length > 0 &&
-        (item.kind === 'permission' || item.kind === 'question') &&
-        item.props &&
-        typeof item.props === 'object'
-    );
+  private shouldShowNotification() {
+    return !this.view?.visible || !vscode.window.state.focused || !this.webviewHasFocus;
   }
 
   private showInterruptedSessionNotification() {
@@ -337,143 +159,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       : `Varro is reconnecting to ${this.interruptedSessionsForWebview.length} previously running sessions.`;
     this.interruptedSessionsForWebview = [];
     void vscode.window.showInformationMessage(message);
-  }
-
-  private rememberSessionTitle(info: Record<string, unknown> | undefined) {
-    const sessionID = getString(info?.id);
-    const title = normalizeSessionTitle(getString(info?.title));
-    if (sessionID && title) {
-      this.sessionTitles.set(sessionID, title);
-    }
-  }
-
-  private trackBlockingRequest(kind: 'permission' | 'question', props: Record<string, unknown>) {
-    const requestID =
-      getString(props.id) || getString(props.permissionID) || getString(props.requestID);
-    const sessionID = getString(props.sessionID);
-    if (!requestID || !sessionID || this.pendingAttention.has(requestID)) return false;
-
-    const label =
-      kind === 'question'
-        ? this.describeQuestionRequest(props)
-        : this.describePermissionRequest(props);
-    this.busySessions.delete(sessionID);
-    this.pendingAttention.set(requestID, { sessionID, kind, label, props: { ...props } });
-    this.completedSessions.delete(sessionID);
-    this.showBlockingNotification(kind, sessionID, label);
-    return true;
-  }
-
-  private clearBlockingRequest(requestID: string | undefined) {
-    if (!requestID) return false;
-    return this.pendingAttention.delete(requestID);
-  }
-
-  private hasPendingAttentionForSession(sessionID: string) {
-    for (const request of this.pendingAttention.values()) {
-      if (request.sessionID === sessionID) return true;
-    }
-    return false;
-  }
-
-  private describeQuestionRequest(props: Record<string, unknown>) {
-    const questions = Array.isArray(props.questions) ? props.questions : [];
-    const firstQuestion = asRecord(questions[0]);
-    return (
-      getString(firstQuestion?.header) ||
-      getString(firstQuestion?.question) ||
-      'User input required'
-    );
-  }
-
-  private describePermissionRequest(props: Record<string, unknown>) {
-    const title = getString(props.title)?.trim();
-    if (title) return title;
-
-    const permission = getString(props.permission);
-    const patterns = Array.isArray(props.patterns)
-      ? props.patterns
-          .map((item) => getString(item))
-          .filter((item): item is string => Boolean(item))
-      : [];
-    return (
-      [permission, patterns.join(', ')].filter(Boolean).join(' ').trim() || 'Permission required'
-    );
-  }
-
-  private showBlockingNotification(
-    kind: 'permission' | 'question',
-    sessionID: string,
-    label: string
-  ) {
-    if (!this.shouldShowNotification()) return;
-
-    const prefix =
-      kind === 'question' ? 'Varro is waiting for your input' : 'Varro needs permission approval';
-    const message = `${prefix}${this.describeSessionSuffix(sessionID)}.`;
-
-    void vscode.window.showWarningMessage(message, 'Open Chat').then((action) => {
-      if (action === 'Open Chat') {
-        void vscode.commands.executeCommand('varro.chat.focus');
-      }
-    });
-
-    void label;
-  }
-
-  private showCompletionNotification(sessionID: string) {
-    if (!this.shouldShowNotification()) return;
-
-    const message = this.isPlanSession(sessionID)
-      ? `Varro has a plan ready for review${this.describeSessionSuffix(sessionID)}.`
-      : `Varro completed a background session${this.describeSessionSuffix(sessionID)}.`;
-    void vscode.window.showInformationMessage(message, 'Open Chat').then((action) => {
-      if (action === 'Open Chat') {
-        void vscode.commands.executeCommand('varro.chat.focus');
-      }
-    });
-  }
-
-  private showFailureNotification(sessionID: string, detail: string | undefined) {
-    if (!this.shouldShowNotification()) return;
-
-    const suffix = this.describeSessionSuffix(sessionID);
-    const message = detail?.trim()
-      ? `Varro hit an error${suffix}: ${detail.trim()}`
-      : `Varro hit an error${suffix}.`;
-    void vscode.window.showErrorMessage(message, 'Open Chat').then((action) => {
-      if (action === 'Open Chat') {
-        void vscode.commands.executeCommand('varro.chat.focus');
-      }
-    });
-  }
-
-  private shouldShowNotification() {
-    return !this.view?.visible || !vscode.window.state.focused || !this.webviewHasFocus;
-  }
-
-  private isPlanSession(sessionID: string) {
-    return this.sessionAgents.get(sessionID) === 'plan';
-  }
-
-  private describeFailure(error: Record<string, unknown>) {
-    const detail = asRecord(error.data);
-    return getString(detail?.message) || getString(error.name);
-  }
-
-  private describeSessionSuffix(sessionID: string) {
-    const title = this.sessionTitles.get(sessionID)?.trim();
-    return title ? ` for "${title}"` : '';
-  }
-
-  private postPendingAttentionState() {
-    const sessionIds = [
-      ...new Set([...this.pendingAttention.values()].map((item) => item.sessionID)),
-    ];
-    const key = sessionIds.join('\n');
-    if (key === this.lastPendingAttentionKey) return;
-    this.lastPendingAttentionKey = key;
-    this.post({ type: 'pending-attention/update', payload: { sessionIds } });
   }
 
   private updateStatusBarItem() {
@@ -507,7 +192,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return { visible: false };
     }
 
-    const pendingRequests = [...this.pendingAttention.values()];
+    const pendingRequests = [...this.sessionState.pending.values()];
     if (pendingRequests.length > 0) {
       return {
         visible: true,
@@ -516,7 +201,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         tooltip: [
           'Varro is waiting for your input.',
           ...pendingRequests.slice(0, 3).map((request) => {
-            const title = this.sessionTitles.get(request.sessionID);
+            const title = this.sessionState.titleFor(request.sessionID);
             return title ? `${title}: ${request.label}` : request.label;
           }),
           ...(pendingRequests.length > 3 ? [`+${pendingRequests.length - 3} more`] : []),
@@ -526,7 +211,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       };
     }
 
-    const completedSessions = [...this.completedSessions];
+    const completedSessions = [...this.sessionState.completed];
     if (completedSessions.length > 0) {
       return {
         visible: true,
@@ -535,7 +220,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           'Varro finished background work.',
           ...completedSessions
             .slice(0, 3)
-            .map((sessionID) => this.sessionTitles.get(sessionID) || sessionID),
+            .map((sessionID) => this.sessionState.titleFor(sessionID) || sessionID),
           ...(completedSessions.length > 3 ? [`+${completedSessions.length - 3} more`] : []),
           '',
           'Click to open chat.',
@@ -603,12 +288,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewDisposables.push(
       webviewView.onDidChangeVisibility(() => {
         if (webviewView.visible) {
-          this.completedSessions.clear();
+          this.sessionState.clearCompleted();
           this.postContext();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.postConfigState();
           this.post({ type: 'server/status', payload: this._status });
-          this.postPendingAttentionState();
+          this.sessionState.publishPendingAttention();
           this.flushPendingInputFocus();
           void this.ensureServerStarted().catch(() => {});
         } else {
@@ -683,11 +368,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.serverStartErrorMessage = null;
       return url;
     } catch (err) {
-      const message = `Failed to start OpenCode server: ${err instanceof Error ? err.message : String(err)}`;
-      logger.error(message);
+      const rawMessage = err instanceof Error ? err.message : String(err);
+      const message = `Failed to start OpenCode server: ${rawMessage}`;
       if (this.serverStartErrorMessage !== message) {
         this.serverStartErrorMessage = message;
-        void vscode.window.showErrorMessage(message);
+        if (/OpenCode CLI not found/i.test(rawMessage)) {
+          errorHub.reportCliMissing(rawMessage);
+        } else {
+          errorHub.report({ code: 'server-start', message });
+        }
+      } else {
+        logger.error(message);
       }
       throw err;
     }
@@ -705,7 +396,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postConfigState();
           this.post({ type: 'server/status', payload: this._status });
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
-          this.postPendingAttentionState();
+          this.sessionState.publishPendingAttention();
           this.flushPendingInputFocus();
           this.showInterruptedSessionNotification();
           void this.ensureServerStarted().catch(() => {});
@@ -1166,86 +857,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private searchFiles(requestId: number, query: string, limit = 12) {
-    this.fileSearchCts?.dispose();
-    this.fileSearchCts = new vscode.CancellationTokenSource();
-    const token = this.fileSearchCts.token;
-    void this.executeFileSearch(requestId, query, limit, token);
-  }
-
-  private async executeFileSearch(
-    requestId: number,
-    query: string,
-    limit: number,
-    token: vscode.CancellationToken
-  ) {
-    try {
-      const files = await this.getWorkspaceFiles(token);
-      if (token.isCancellationRequested) return;
-      const normalizedQuery = query.trim().toLowerCase();
-      const ranked = rankWorkspaceFiles(
-        files,
-        normalizedQuery,
-        Math.max(1, Math.min(limit, SidebarProvider.FILE_SEARCH_RESULT_LIMIT))
-      );
-
-      this.post({
-        type: 'files/search-results',
-        payload: { requestId, query, files: ranked },
-      });
-    } catch (err) {
-      if (token.isCancellationRequested) return;
-      this.post({
-        type: 'files/search-results',
-        payload: { requestId, query, files: [] },
-      });
-      logger.warn(`searchFiles failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  private async getWorkspaceFiles(
-    token?: vscode.CancellationToken
-  ): Promise<WorkspaceFileSearchEntry[]> {
-    const now = Date.now();
-    if (
-      this.workspaceFileCache.length > 0 &&
-      now - this.workspaceFileCacheAt < SidebarProvider.FILE_SEARCH_CACHE_TTL_MS
-    ) {
-      return this.workspaceFileCache;
-    }
-    if (this.workspaceFileCachePromise) return this.workspaceFileCachePromise;
-
-    const promise = Promise.resolve(
-      vscode.workspace.findFiles(
-        '**/*',
-        '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/coverage/**}',
-        SidebarProvider.FILE_SEARCH_MAX_CANDIDATES,
-        token
-      )
-    )
-      .then((files) => {
-        const entries = files.map((uri) => {
-          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-          const relativePath = getRelativePath(uri, workspaceFolder);
-          return {
-            path: uri.fsPath,
-            relativePath,
-            type: 'file' as const,
-            relativePathLower: relativePath.toLowerCase(),
-            leafLower: basename(relativePath).toLowerCase(),
-          };
-        });
-        this.workspaceFileCache = entries;
-        this.workspaceFileCacheAt = Date.now();
-        return entries;
-      })
-      .finally(() => {
-        if (this.workspaceFileCachePromise === promise) {
-          this.workspaceFileCachePromise = null;
-        }
-      });
-
-    this.workspaceFileCachePromise = promise;
-    return promise;
+    this.fileSearch.search(requestId, query, limit, (result) => {
+      this.post({ type: 'files/search-results', payload: result });
+    });
   }
 
   postDroppedFiles(
@@ -1293,24 +907,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const webview = this.view?.webview;
     const { scriptContent, cssContent } = await this.loadWebviewAssets();
     const [interruptedSessions, blockingRequests] = await Promise.all([
-      this.consumeInterruptedSessions(),
-      this.consumeBlockingRequests(),
+      this.sessionState.consumeInterruptedSessions(),
+      this.sessionState.consumeBlockingRequests(),
     ]);
     this.interruptedSessionsForWebview = interruptedSessions;
     this.blockingRequestsForWebview = blockingRequests;
-    this.pendingAttention.clear();
-    for (const item of blockingRequests) {
-      this.pendingAttention.set(item.id, {
-        sessionID: item.sessionID,
-        kind: item.kind,
-        label:
-          item.kind === 'question'
-            ? this.describeQuestionRequest(item.props)
-            : this.describePermissionRequest(item.props),
-        props: item.props,
-      });
-    }
-    this.postPendingAttentionState();
+    this.sessionState.restoreBlockingRequests(blockingRequests);
+    this.sessionState.publishPendingAttention();
     this.updateStatusBarItem();
 
     const nonce = randomNonce();
@@ -1381,7 +984,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose() {
-    await this.persistSessionState();
+    await this.sessionState.persist();
     if (this.serverStatusHandler) this.server.off('status', this.serverStatusHandler);
     if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
     this.serverStatusHandler = undefined;
@@ -1393,88 +996,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.configDisposable?.dispose();
     this.windowStateDisposable?.dispose();
     this.statusBarItem.dispose();
-    this.fileSearchCts?.dispose();
+    this.fileSearch.dispose();
   }
 }
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
-}
-
-function getString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-type WorkspaceFileSearchEntry = DroppedFile & {
-  relativePathLower: string;
-  leafLower: string;
-};
-
-type RankedWorkspaceFile = {
-  file: WorkspaceFileSearchEntry;
-  score: number;
-};
 
 type WebviewAssetContent = {
   scriptContent: string;
   cssContent: string;
 };
 
-type BlockingRequestSnapshot = {
-  id: string;
-  sessionID: string;
-  kind: 'permission' | 'question';
-  props: Record<string, unknown>;
-};
-
-type InterruptedSessionSnapshot = {
-  id: string;
-  title?: string;
-};
-
-function rankWorkspaceFiles(
-  files: WorkspaceFileSearchEntry[],
-  query: string,
-  limit: number
-): DroppedFile[] {
-  const ranked: RankedWorkspaceFile[] = [];
-
-  for (const file of files) {
-    const score = getFileSearchScore(file, query);
-    if (score === Number.NEGATIVE_INFINITY) continue;
-    insertRankedWorkspaceFile(ranked, { file, score }, limit);
-  }
-
-  return ranked.map(({ file, ..._ranked }) => {
-    void _ranked;
-    return {
-      path: file.path,
-      relativePath: file.relativePath,
-      type: file.type,
-      ...(file.lineRanges ? { lineRanges: file.lineRanges } : {}),
-    };
-  });
-}
-
-function insertRankedWorkspaceFile(
-  ranked: RankedWorkspaceFile[],
-  candidate: RankedWorkspaceFile,
-  limit: number
-) {
-  let insertAt = ranked.findIndex(
-    (item) =>
-      candidate.score > item.score ||
-      (candidate.score === item.score &&
-        candidate.file.relativePath.localeCompare(item.file.relativePath) < 0)
-  );
-
-  if (insertAt === -1) {
-    if (ranked.length >= limit) return;
-    insertAt = ranked.length;
-  }
-
-  ranked.splice(insertAt, 0, candidate);
-  if (ranked.length > limit) ranked.pop();
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
 }
 
 function shouldClearProviderLimitCache(previous: ServerStatus, next: ServerStatus) {
@@ -1486,31 +1018,6 @@ function shouldClearProviderLimitCache(previous: ServerStatus, next: ServerStatu
     return previous.message !== next.message;
   }
   return false;
-}
-
-function getFileSearchScore(file: WorkspaceFileSearchEntry, query: string) {
-  if (!query) {
-    return 1 / Math.max(file.relativePath.length, 1);
-  }
-
-  const haystack = file.relativePathLower;
-  const leaf = file.leafLower;
-  if (leaf === query) return 10_000;
-  if (haystack === query) return 9_000;
-  if (leaf.startsWith(query)) return 8_000 - leaf.length;
-  if (haystack.startsWith(query)) return 7_000 - haystack.length;
-  if (leaf.includes(query)) return 6_000 - leaf.indexOf(query) * 8 - leaf.length;
-  if (haystack.includes(query)) return 5_000 - haystack.indexOf(query) * 4 - haystack.length;
-
-  let score = 0;
-  let index = 0;
-  for (const char of query) {
-    const next = haystack.indexOf(char, index);
-    if (next === -1) return Number.NEGATIVE_INFINITY;
-    score += 12 - Math.min(next - index, 11);
-    index = next + 1;
-  }
-  return score - haystack.length;
 }
 
 function randomNonce(): string {

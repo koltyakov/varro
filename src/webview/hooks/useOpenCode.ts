@@ -81,16 +81,7 @@ function logError(context: string, err: unknown) {
   });
 }
 
-function isNormalizedPermission(props: Record<string, unknown>): props is Permission {
-  return (
-    typeof props.id === 'string' &&
-    typeof props.sessionID === 'string' &&
-    typeof props.type === 'string' &&
-    typeof props.messageID === 'string' &&
-    !!props.time &&
-    typeof props.time === 'object'
-  );
-}
+import { normalizePermissionEvent } from '../lib/session-event-reducer';
 
 function getDefaultPrimaryAgentName() {
   return (
@@ -1653,25 +1644,8 @@ function registerEventHandlers() {
   );
 
   function handlePermissionEvent(props: Record<string, unknown>) {
-    let permission: Permission;
-    if (isNormalizedPermission(props)) {
-      permission = props as Permission;
-    } else {
-      const tool = props.tool as { messageID?: string; callID?: string } | undefined;
-      permission = {
-        id: props.id as string,
-        type: (props.permission as string) || '',
-        pattern: props.patterns as string[] | undefined,
-        sessionID: props.sessionID as string,
-        messageID: tool?.messageID || '',
-        callID: tool?.callID,
-        title: [props.permission, Array.isArray(props.patterns) ? props.patterns.join(', ') : '']
-          .filter(Boolean)
-          .join(' '),
-        metadata: (props.metadata as { [key: string]: unknown }) || {},
-        time: { created: Date.now() / 1000 },
-      };
-    }
+    const permission = normalizePermissionEvent(props);
+    if (!permission) return;
     if (shouldAutoApprovePermissions(permission.sessionID)) {
       void respondPermission(permission.sessionID, permission.id, 'always');
       return;

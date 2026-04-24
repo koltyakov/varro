@@ -1331,7 +1331,7 @@ body.vscode-light
   height: 20px;
   z-index: 0;
   pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--chat-input-top-gradient-bg));
+  background: none;
 }
 
 .interactive-session .interactive-input-part > * {
@@ -1772,6 +1772,8 @@ body.vscode-light
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .toolbar-picker.model-picker-btn {
@@ -2016,6 +2018,8 @@ body.vscode-light
     background-color 0.12s,
     color 0.12s;
   flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .toolbar-attach-button:hover {
@@ -2069,6 +2073,8 @@ body.vscode-light
     background-color 0.15s,
     opacity 0.15s,
     transform 0.1s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .chat-send-button.enabled:active {
@@ -2116,6 +2122,8 @@ body.vscode-light
   border-radius: 0 8px 8px 0;
   border-left: 1px solid color-mix(in srgb, var(--color-vscode-button-separator) 100%, transparent);
   transition: background-color 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .send-mode-chevron:hover {
@@ -3641,6 +3649,12 @@ kbd {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
+}
+
+.message-attachments.message-attachments-standalone {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .message-attachment-chip {

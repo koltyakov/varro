@@ -1,0 +1,126 @@
+import { describe, expect, it } from 'vitest';
+import { parseExtensionMessage } from './extension-message';
+
+describe('parseExtensionMessage', () => {
+  it('rejects non-objects and unknown types', () => {
+    expect(parseExtensionMessage(null)).toBeNull();
+    expect(parseExtensionMessage(undefined)).toBeNull();
+    expect(parseExtensionMessage(42)).toBeNull();
+    expect(parseExtensionMessage({ type: 'totally/unknown' })).toBeNull();
+  });
+
+  it('parses command messages', () => {
+    expect(parseExtensionMessage({ type: 'command/new-session' })).toEqual({
+      type: 'command/new-session',
+    });
+    expect(parseExtensionMessage({ type: 'command/focus-input' })).toEqual({
+      type: 'command/focus-input',
+    });
+    expect(parseExtensionMessage({ type: 'command/abort' })).toEqual({ type: 'command/abort' });
+  });
+
+  it('parses server/status and rejects malformed variants', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://localhost:4096' },
+      })
+    ).toEqual({
+      type: 'server/status',
+      payload: { state: 'running', url: 'http://localhost:4096' },
+    });
+
+    expect(
+      parseExtensionMessage({ type: 'server/status', payload: { state: 'running' } })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({ type: 'server/status', payload: { state: 'unknown' } })
+    ).toBeNull();
+  });
+
+  it('parses api/response with data or error', () => {
+    expect(
+      parseExtensionMessage({ type: 'api/response', payload: { id: 1, data: { ok: true } } })
+    ).toEqual({ type: 'api/response', payload: { id: 1, data: { ok: true } } });
+
+    expect(
+      parseExtensionMessage({ type: 'api/response', payload: { id: 2, error: 'bad' } })
+    ).toEqual({
+      type: 'api/response',
+      payload: { id: 2, error: 'bad' },
+    });
+
+    expect(parseExtensionMessage({ type: 'api/response', payload: { id: 'x' } })).toBeNull();
+  });
+
+  it('parses server/event requiring a type', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'server/event',
+        payload: { type: 'session.created', properties: { a: 1 } },
+      })
+    ).toEqual({
+      type: 'server/event',
+      payload: { type: 'session.created', properties: { a: 1 } },
+    });
+
+    expect(parseExtensionMessage({ type: 'server/event', payload: {} })).toBeNull();
+  });
+
+  it('parses terminal-selection/update null and object payloads', () => {
+    expect(parseExtensionMessage({ type: 'terminal-selection/update', payload: null })).toEqual({
+      type: 'terminal-selection/update',
+      payload: null,
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'terminal-selection/update',
+        payload: { text: 'ls', terminalName: 'zsh' },
+      })
+    ).toEqual({
+      type: 'terminal-selection/update',
+      payload: { text: 'ls', terminalName: 'zsh' },
+    });
+
+    expect(
+      parseExtensionMessage({ type: 'terminal-selection/update', payload: { text: 'ls' } })
+    ).toBeNull();
+  });
+
+  it('parses pending-attention/update and filters non-string ids', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'pending-attention/update',
+        payload: { sessionIds: ['a', 1, 'b'] },
+      })
+    ).toEqual({ type: 'pending-attention/update', payload: { sessionIds: ['a', 'b'] } });
+  });
+
+  it('parses config/update with strict payload', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: false,
+          desktopSessionPaneSide: 'left',
+        },
+      })
+    ).toEqual({
+      type: 'config/update',
+      payload: {
+        expandThinkingByDefault: true,
+        showStickyUserPrompt: false,
+        desktopSessionPaneSide: 'left',
+      },
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: { expandThinkingByDefault: true, showStickyUserPrompt: false },
+      })
+    ).toBeNull();
+  });
+});

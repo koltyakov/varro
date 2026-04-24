@@ -246,6 +246,22 @@ describe('Message user prompt rendering', () => {
       'const value = 1;\nconst next = value + 1;\n'
     );
   });
+
+  it('does not render an attachments separator for attachment-only user prompts', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-1'),
+          parts: [textPart('text-1', '[Active file: src/shared/extension-message.ts]')],
+        }),
+      container!
+    );
+
+    const attachments = container?.querySelector('.message-attachments');
+
+    expect(attachments).toBeInstanceOf(HTMLDivElement);
+    expect(attachments?.classList.contains('message-attachments-standalone')).toBe(true);
+  });
 });
 
 describe('getUserMessagePreviewText', () => {

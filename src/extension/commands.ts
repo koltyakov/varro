@@ -4,6 +4,7 @@ import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
 import { getRelativePath } from './util/path';
+import { errorHub } from './error-hub';
 import { logger } from './logger';
 
 export function registerCommands(
@@ -41,9 +42,10 @@ export function registerCommands(
           })
           .catch((err) => {
             const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
-            logger.error(message);
             if (server.status.state !== 'error') {
-              vscode.window.showErrorMessage(message);
+              errorHub.report({ code: 'server-start', message });
+            } else {
+              logger.error(message);
             }
           });
       } catch (err) {
