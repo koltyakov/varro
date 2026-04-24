@@ -18,6 +18,7 @@ import type {
   EditorContext,
   DroppedFile,
   InitialWebviewState,
+  McpStatus,
   PermissionMode,
   ProviderLimitStatus,
   ServerStatus,
@@ -34,6 +35,7 @@ const STORAGE_KEYS = {
   sessionSelectedModels: 'varro.sessionSelectedModels',
   draftPermissionMode: 'varro.draftPermissionMode',
   sessionPermissionModes: 'varro.sessionPermissionModes',
+  sessionSelectedMcps: 'varro.sessionSelectedMcps',
   projectPermissionModes: 'varro.projectPermissionModes',
   hiddenProviders: 'varro.hiddenProviders',
   hiddenModels: 'varro.hiddenModels',
@@ -48,6 +50,7 @@ const STORAGE_KEYS = {
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
 export type SessionSelectedAgents = Record<string, string>;
 export type SessionSelectedModels = Record<string, SelectedModel>;
+export type SessionSelectedMcps = Record<string, string[]>;
 
 function readStored<T>(key: string): T | null {
   try {
@@ -95,12 +98,14 @@ interface AppState {
   allAgents: Agent[];
   providers: Provider[];
   providerLimits: Record<string, ProviderLimitStatus | null>;
+  mcpStatus: Record<string, McpStatus>;
   providerDefaults: Record<string, string>;
   sessionPermissionModes: Record<string, PermissionMode>;
   selectedAgent: string | null;
   sessionSelectedAgents: SessionSelectedAgents;
   selectedModel: SelectedModel | null;
   sessionSelectedModels: SessionSelectedModels;
+  sessionSelectedMcps: SessionSelectedMcps;
   hiddenProviders: string[];
   hiddenModels: string[];
   lastSeenSessions: Record<string, number>;
@@ -163,6 +168,7 @@ export const [state, setState] = createStore<AppState>({
   allAgents: [],
   providers: [],
   providerLimits: {},
+  mcpStatus: {},
   providerDefaults: {},
   sessionPermissionModes:
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
@@ -172,6 +178,7 @@ export const [state, setState] = createStore<AppState>({
   selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
   sessionSelectedModels:
     readStored<SessionSelectedModels>(STORAGE_KEYS.sessionSelectedModels) || {},
+  sessionSelectedMcps: readStored<SessionSelectedMcps>(STORAGE_KEYS.sessionSelectedMcps) || {},
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
   lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
@@ -654,6 +661,11 @@ export function getSelectedAgentForSession(sessionId: string | null | undefined)
   return state.sessionSelectedAgents[sessionId] || null;
 }
 
+export function getSelectedMcpsForSession(sessionId: string | null | undefined): string[] | null {
+  if (!sessionId) return null;
+  return state.sessionSelectedMcps[sessionId] || null;
+}
+
 export function setSelectedModel(
   model: SelectedModel | null,
   options?: { sessionId?: string | null; persistGlobal?: boolean }
@@ -684,6 +696,30 @@ export function clearSelectedModelForSession(sessionId: string) {
   );
   setState('sessionSelectedModels', reconcile(nextSessionModels));
   writeStored(STORAGE_KEYS.sessionSelectedModels, nextSessionModels);
+}
+
+export function setMcpStatus(status: Record<string, McpStatus>) {
+  setState('mcpStatus', status);
+}
+
+export function getAvailableMcpNames() {
+  return Object.keys(state.mcpStatus).toSorted((a, b) => a.localeCompare(b));
+}
+
+export function setSelectedMcpsForSession(sessionId: string, names: string[]) {
+  const nextNames = [...new Set(names)].toSorted((a, b) => a.localeCompare(b));
+  const nextSessionMcps = { ...state.sessionSelectedMcps, [sessionId]: nextNames };
+  setState('sessionSelectedMcps', reconcile(nextSessionMcps));
+  writeStored(STORAGE_KEYS.sessionSelectedMcps, nextSessionMcps);
+}
+
+export function clearSelectedMcpsForSession(sessionId: string) {
+  if (!state.sessionSelectedMcps[sessionId]) return;
+  const nextSessionMcps = Object.fromEntries(
+    Object.entries(state.sessionSelectedMcps).filter(([id]) => id !== sessionId)
+  );
+  setState('sessionSelectedMcps', reconcile(nextSessionMcps));
+  writeStored(STORAGE_KEYS.sessionSelectedMcps, nextSessionMcps);
 }
 
 export function resetDraftPermissionMode() {

@@ -372,6 +372,16 @@ describe('state helpers', () => {
     expect(stateModule.getSelectedAgentForSession('session-1')).toBeNull();
   });
 
+  it('tracks per-session selected mcps independently', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSelectedMcpsForSession('session-1', ['browser-bridge', 'docs']);
+    expect(stateModule.getSelectedMcpsForSession('session-1')).toEqual(['browser-bridge', 'docs']);
+
+    stateModule.clearSelectedMcpsForSession('session-1');
+    expect(stateModule.getSelectedMcpsForSession('session-1')).toBeNull();
+  });
+
   it('updates questions and model visibility state', async () => {
     const stateModule = await loadState();
     const providers = [

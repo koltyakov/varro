@@ -528,4 +528,32 @@ describe('Message assistant final answer rendering', () => {
 
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
   });
+
+  it('does not render a retry action for aborted assistant errors', async () => {
+    const { setState } = await import('../lib/state');
+    const assistant = {
+      ...assistantMessage('message-3'),
+      error: {
+        name: 'aborted',
+        data: { message: 'Aborted' },
+      },
+    };
+
+    setState('messages', [
+      {
+        info: assistant,
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+      },
+    ]);
+
+    cleanup = render(
+      () => Message({ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }),
+      container!
+    );
+
+    const retryButton = container?.querySelector('.assistant-message-flow-item-error-action');
+
+    expect(retryButton).toBeNull();
+    expect(retryMessageMock).not.toHaveBeenCalled();
+  });
 });

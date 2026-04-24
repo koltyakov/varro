@@ -8,6 +8,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=msg-1')).toBe(true);
     expect(isAllowedApiRequest('POST', '/question/request-1/reply')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/provider-limit?providerID=openai')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/mcp')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/connect')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/disconnect')).toBe(true);
   });
 
   it('rejects absolute and unsupported API routes', () => {

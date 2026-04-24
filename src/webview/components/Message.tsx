@@ -109,6 +109,10 @@ export function Message(props: {
     const name = error?.name?.trim();
     return name || null;
   });
+  const canRetryAssistant = createMemo(() => {
+    const name = assistant()?.error?.name?.trim().toLowerCase();
+    return !!name && name !== 'aborted';
+  });
   const isSubagent = () => assistant()?.mode === 'subagent';
   const isLatestAssistant = () => {
     const latestAssistant = [...state.messages]
@@ -234,7 +238,7 @@ export function Message(props: {
                 parts={visibleAssistantParts()}
                 errorMessage={assistantErrorMessage()}
                 onRetry={
-                  isLatestAssistant()
+                  isLatestAssistant() && canRetryAssistant()
                     ? () => void retryMessage(assistant()!.id, assistant()!.sessionID)
                     : undefined
                 }

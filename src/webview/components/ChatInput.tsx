@@ -38,6 +38,7 @@ import {
 import { onMessage, postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
 import {
+  applySessionMcps,
   sendMessage,
   abortSession,
   createSession,
@@ -47,6 +48,7 @@ import {
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel } from './ModelPicker';
+import { McpPicker } from './McpPicker';
 import {
   formatAgentInitial,
   formatAgentLabel,
@@ -183,6 +185,7 @@ export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
   let modelPickerRef: HTMLButtonElement | undefined;
   let modelPopoverRef: HTMLDivElement | undefined;
+  let mcpPopoverRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let toolbarRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
@@ -208,12 +211,14 @@ export function ChatInput() {
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [showPermissionModePicker, setShowPermissionModePicker] = createSignal(false);
   const [showContextPopup, setShowContextPopup] = createSignal(false);
+  const [showMcpPicker, setShowMcpPicker] = createSignal(false);
 
-  type PopupKind = 'agent' | 'variant' | 'model' | 'permission' | 'context' | 'busy';
+  type PopupKind = 'agent' | 'variant' | 'model' | 'permission' | 'context' | 'busy' | 'mcp';
   const closePopups = (except?: PopupKind) => {
     if (except !== 'agent') setShowAgentPicker(false);
     if (except !== 'variant') setShowVariantPicker(false);
     if (except !== 'model') setShowModelPicker(false);
+    if (except !== 'mcp') setShowMcpPicker(false);
     if (except !== 'permission') setShowPermissionModePicker(false);
     if (except !== 'context') setShowContextPopup(false);
     if (except !== 'busy') setShowBusyMenu(false);
@@ -271,6 +276,7 @@ export function ChatInput() {
       onConnectProvider: openProviderSetup,
       onOpenSessions: () => setShowSessionPicker(true),
       onOpenModels: () => setShowModelPicker(true),
+      onOpenMcps: () => setShowMcpPicker(true),
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
       onOpenSettings: () => setShowSettings(true),
     })
@@ -911,6 +917,9 @@ export function ChatInput() {
       if (showModelPicker() && clickedOutside(target, modelPickerRef, modelPopoverRef)) {
         setShowModelPicker(false);
       }
+      if (showMcpPicker() && target && !mcpPopoverRef?.contains(target)) {
+        setShowMcpPicker(false);
+      }
       if (showVariantPicker() && clickedOutside(target, variantPickerRef, variantPopoverRef)) {
         setShowVariantPicker(false);
       }
@@ -968,6 +977,7 @@ export function ChatInput() {
         showAgentPicker() ||
         showVariantPicker() ||
         showModelPicker() ||
+        showMcpPicker() ||
         showPermissionModePicker()
       )
         return;
@@ -1187,6 +1197,7 @@ export function ChatInput() {
     showAgentPicker: showAgentPicker(),
     showVariantPicker: showVariantPicker(),
     showModelPicker: showModelPicker(),
+    showMcpPicker: showMcpPicker(),
     showPermissionModePicker: showPermissionModePicker(),
     showBusyMenu: showBusyMenu(),
     showContextPopup: showContextPopup(),
@@ -1209,6 +1220,7 @@ export function ChatInput() {
       !showContextPopup() &&
       !showAgentPicker() &&
       !showVariantPicker() &&
+      !showMcpPicker() &&
       !showPermissionModePicker() &&
       !showBusyMenu() &&
       !(isFocused() && composerCompletions().length > 0 && !suppressCompletion())
@@ -1243,6 +1255,7 @@ export function ChatInput() {
       deps.showAgentPicker ||
       deps.showVariantPicker ||
       deps.showModelPicker ||
+      deps.showMcpPicker ||
       deps.showPermissionModePicker
     )
       return;
@@ -1351,7 +1364,7 @@ export function ChatInput() {
 
       <div
         ref={containerRef}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1398,6 +1411,15 @@ export function ChatInput() {
             }}
             onClose={() => setShowModelPicker(false)}
             popoverRef={(el) => (modelPopoverRef = el)}
+          />
+        </Show>
+
+        <Show when={showMcpPicker()}>
+          <McpPicker
+            sessionId={state.activeSessionId}
+            onChange={(names) => void applySessionMcps(names)}
+            onClose={() => setShowMcpPicker(false)}
+            popoverRef={(el) => (mcpPopoverRef = el)}
           />
         </Show>
 
@@ -1506,6 +1528,7 @@ export function ChatInput() {
               setCaretPosition(e.currentTarget.selectionStart || 0);
               setShowAgentPicker(false);
               setShowModelPicker(false);
+              setShowMcpPicker(false);
               setShowVariantPicker(false);
               setShowPermissionModePicker(false);
               setShowBusyMenu(false);
@@ -1539,7 +1562,7 @@ export function ChatInput() {
         >
           <div
             ref={toolbarLeftRef}
-            class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
+            class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
           >
             <Show when={isToolbarControlVisible('permission')}>
               <div style={{ position: 'relative' }}>
@@ -2278,6 +2301,7 @@ function getSlashCommands(props: {
   onConnectProvider: () => void;
   onOpenSessions: () => void;
   onOpenModels: () => void;
+  onOpenMcps: () => void;
   onOpenFiles: () => void;
   onOpenSettings: () => void;
 }): SlashCommand[] {
@@ -2301,6 +2325,12 @@ function getSlashCommands(props: {
       aliases: [],
       description: 'Open the model picker',
       action: props.onOpenModels,
+    },
+    {
+      name: 'mcps',
+      aliases: ['mcp'],
+      description: 'Open the MCP picker for this session',
+      action: props.onOpenMcps,
     },
     {
       name: 'connect',

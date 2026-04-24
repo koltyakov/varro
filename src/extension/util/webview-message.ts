@@ -170,6 +170,7 @@ export function isAllowedApiRequest(method: string, path: string) {
 
   if (pathname === '/global/health') return method === 'GET' && noQuery();
   if (pathname === '/config/providers') return method === 'GET' && noQuery();
+  if (pathname === '/mcp') return method === 'GET' && noQuery();
   if (pathname === '/file/status') return method === 'GET' && noQuery();
   if (pathname === '/agent') return method === 'GET' && noQuery();
   if (pathname === '/question') return method === 'GET' && noQuery();
@@ -185,6 +186,12 @@ export function isAllowedApiRequest(method: string, path: string) {
 
   if (segments[0] === 'question' && segments.length === 3) {
     return method === 'POST' && noQuery() && (segments[2] === 'reply' || segments[2] === 'reject');
+  }
+
+  if (segments[0] === 'mcp' && segments.length === 3) {
+    return (
+      method === 'POST' && noQuery() && (segments[2] === 'connect' || segments[2] === 'disconnect')
+    );
   }
 
   if (segments[0] !== 'session' || segments.length < 2) return false;

@@ -3822,6 +3822,20 @@ kbd {
   color: color-mix(in srgb, var(--color-vscode-muted) 84%, var(--color-vscode-accent));
 }
 
+.mcp-status-tag.status-connected {
+  color: color-mix(in srgb, var(--color-vscode-muted) 70%, var(--color-vscode-success));
+}
+
+.mcp-status-tag.status-disabled {
+  color: var(--color-vscode-muted);
+}
+
+.mcp-status-tag.status-failed,
+.mcp-status-tag.status-needs_auth,
+.mcp-status-tag.status-needs_client_registration {
+  color: color-mix(in srgb, var(--color-vscode-muted) 76%, var(--color-vscode-warning));
+}
+
 .dropdown-meta {
   display: flex;
   align-items: center;

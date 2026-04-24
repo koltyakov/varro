@@ -46,6 +46,7 @@ import {
   setSessionCompacting,
   getSelectedModelForSession,
   getSelectedAgentForSession,
+  getSelectedMcpsForSession,
   clearSelectedAgentForSession,
   clearSelectedModelForSession,
   getPermissionModeForSession,
@@ -61,11 +62,14 @@ import {
   rememberCurrentDocumentNavigation,
   getSessionTreeIds,
   setProviderLimit,
+  setMcpStatus,
+  setSelectedMcpsForSession,
   setSessionUsageLimit,
   consumeInterruptedSessionIds,
   setDesktopSessionPaneSide,
   setExpandThinkingByDefaultPreference,
   setShowStickyUserPromptPreference,
+  getAvailableMcpNames,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
@@ -552,6 +556,14 @@ export function useOpenCode() {
         case 'command/abort':
           abortSession();
           break;
+        case 'server/event':
+          if (
+            msg.payload.type === 'mcp.tools.changed' ||
+            msg.payload.type === 'mcp.browser.open.failed'
+          ) {
+            void loadMcps();
+          }
+          break;
       }
     });
 
@@ -735,7 +747,7 @@ async function initConnection() {
   try {
     await client.health();
     if (!isCurrentGeneration(generation, connectionGeneration)) return;
-    await Promise.all([loadSessions(), loadAgents(), loadProviders(), loadQuestions()]);
+    await Promise.all([loadSessions(), loadAgents(), loadProviders(), loadMcps(), loadQuestions()]);
     if (!isCurrentGeneration(generation, connectionGeneration)) return;
     await hydrateSessionStatuses();
     if (!isCurrentGeneration(generation, connectionGeneration)) return;
@@ -753,6 +765,60 @@ async function initConnection() {
     initialized = false;
     setError('Failed to connect to OpenCode server');
   }
+}
+
+async function loadMcps() {
+  try {
+    const status = await client.mcp.status();
+    setMcpStatus(status || {});
+    const activeSessionId = state.activeSessionId;
+    if (activeSessionId && !getSelectedMcpsForSession(activeSessionId)) {
+      setSelectedMcpsForSession(
+        activeSessionId,
+        Object.entries(status || {})
+          .filter(([, value]) => value?.status === 'connected')
+          .map(([name]) => name)
+      );
+    }
+  } catch (err) {
+    logError('loadMcps', err);
+  }
+}
+
+async function syncSessionMcps(sessionId: string) {
+  const desired = getSelectedMcpsForSession(sessionId);
+  if (!desired) return;
+
+  if (Object.keys(state.mcpStatus).length === 0) {
+    await loadMcps();
+  }
+
+  const available = new Set(getAvailableMcpNames());
+  const desiredSet = new Set(desired.filter((name) => available.has(name)));
+  const connected = Object.entries(state.mcpStatus)
+    .filter(([, value]) => value?.status === 'connected')
+    .map(([name]) => name);
+
+  const connect = [...desiredSet].filter((name) => !connected.includes(name));
+  const disconnect = connected.filter((name) => !desiredSet.has(name));
+  if (connect.length === 0 && disconnect.length === 0) return;
+
+  try {
+    await Promise.all([
+      ...connect.map((name) => client.mcp.connect(name)),
+      ...disconnect.map((name) => client.mcp.disconnect(name)),
+    ]);
+  } catch (err) {
+    logError('syncSessionMcps', err);
+  }
+
+  await loadMcps();
+}
+
+export async function applySessionMcps(names: string[], sessionId = state.activeSessionId) {
+  if (!sessionId) return;
+  setSelectedMcpsForSession(sessionId, names);
+  await syncSessionMcps(sessionId);
 }
 
 async function recoverInterruptedSessions(generation: number) {
@@ -789,6 +855,7 @@ function shouldContinueInterruptedSession(messages: Array<{ info: Message; parts
 }
 
 async function continueInterruptedSession(sessionId: string) {
+  await syncSessionMcps(sessionId);
   const model = resolveSelectedModel(
     getSelectedModelForSession(sessionId),
     state.providers,
@@ -961,6 +1028,15 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
   if (persistedModel) {
     setSelectedModel(persistedModel, { sessionId: id, persistGlobal: false });
   }
+  if (!getSelectedMcpsForSession(id)) {
+    setSelectedMcpsForSession(
+      id,
+      Object.entries(state.mcpStatus)
+        .filter(([, value]) => value?.status === 'connected')
+        .map(([name]) => name)
+    );
+  }
+  await syncSessionMcps(id);
   resetTodoSync();
   clearMessages();
   try {
@@ -1064,6 +1140,12 @@ export async function createSession(
     if (defaultAgent) {
       setSelectedAgent(defaultAgent, { sessionId: session.id, persistGlobal: false });
     }
+    setSelectedMcpsForSession(
+      session.id,
+      Object.entries(state.mcpStatus)
+        .filter(([, value]) => value?.status === 'connected')
+        .map(([name]) => name)
+    );
     if (initialPermissionMode === 'full') {
       setPermissionModeForSession(session.id, 'full');
     }
@@ -1111,6 +1193,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   }
 
   clearPendingAbort(sessionId);
+  await syncSessionMcps(sessionId);
 
   const effectiveModel = resolveSelectedModel(
     state.selectedModel,
