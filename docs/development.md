@@ -18,6 +18,13 @@ npm install -g opencode-ai
 npm install
 ```
 
+## Validate The Project
+
+```sh
+npm run typecheck
+npm run test
+```
+
 ## Build
 
 ```sh
@@ -29,11 +36,11 @@ This produces:
 - `dist/extension/extension.js` for the extension host bundle
 - `dist/webview/webview.js` and `dist/webview/webview.css` for the sidebar UI
 
-## Load the Extension
+## Load The Extension
 
 There are two common ways to run the extension locally.
 
-### Option A: Install a VSIX
+### Option A: Install A VSIX
 
 Package the extension:
 
@@ -61,7 +68,7 @@ After installation, reload the window:
 
 - Command Palette -> **Developer: Reload Window**
 
-### Option B: Run in an Extension Development Host
+### Option B: Run In An Extension Development Host
 
 1. Open this repository in VS Code.
 2. Press `F5`.
@@ -76,7 +83,7 @@ npm run dev
 
 Then reload the Extension Development Host window after changes.
 
-## Architecture Overview
+## Runtime Overview
 
 Varro has three layers:
 
@@ -92,7 +99,7 @@ At activation time, `src/extension/extension.ts`:
 - Creates and registers `SidebarProvider`
 - Registers commands
 
-The OpenCode server itself is not started at activation. `SidebarProvider.ensureServerStarted()` is called lazily the first time the webview issues a request, which either attaches to an already running server or spawns `opencode serve`.
+The OpenCode server itself is not started at activation. `SidebarProvider.ensureServerStarted()` is called lazily when the view becomes active or the webview issues a request, which either attaches to an already running server or spawns `opencode serve`.
 
 See [architecture.md](architecture.md) for a deeper component-by-component breakdown.
 
@@ -103,11 +110,18 @@ See [architecture.md](architecture.md) for a deeper component-by-component break
 `src/extension/server.ts` is the bridge to the local OpenCode HTTP server.
 
 - Checks `/global/health` before spawning anything
-- Starts `opencode serve --port <port>` when auto-start is enabled
+- Starts `opencode serve --port <port>` only when Varro first needs the server and auto-start is enabled
 - Adds the current workspace directory to non-global requests
 - Opens an SSE connection to `/event`
 - Reconnects the event stream with backoff
 - Restarts the child process a limited number of times if it exits unexpectedly
+
+Important behavior:
+
+- The current workspace folder is attached to requests through both a `directory` query param and `x-opencode-directory` header.
+- If the spawned server reports that the configured port is already in use, Varro can retry on nearby ports.
+- If the SSE stream drops while REST is still available, Varro keeps the chat usable and reports the event stream as degraded.
+- A background maintenance loop checks the installed OpenCode CLI version, can suggest `opencode upgrade`, and can restart a Varro-managed server when the CLI is newer and no sessions are active.
 
 ### `ContextProvider`
 
@@ -119,6 +133,8 @@ See [architecture.md](architecture.md) for a deeper component-by-component break
 - Up to 20 diagnostics from the active editor
 - Terminal selection captured via the terminal copy command
 
+Terminal selection capture preserves the clipboard by restoring the previous clipboard contents after reading the terminal selection.
+
 It debounces editor and diagnostics updates before posting them to the webview.
 
 ### `SidebarProvider`
@@ -128,35 +144,59 @@ It debounces editor and diagnostics updates before posting them to the webview.
 - Injects the built webview HTML, CSS, and JS into the sidebar
 - Sends initial state to the webview inline
 - Proxies webview API calls to the OpenCode server
-- Handles file search, file picking, dropped files, and VS Code open/diff actions
+- Handles file search, file picking, dropped files, and VS Code open actions
 - Tracks session attention state for notifications and a status bar item
 - Resolves provider limit metadata through OpenCode or supported provider APIs
 
+It also exposes two Varro-specific pseudo-endpoints:
+
+- `GET /varro/provider-limit`
+- `POST /varro/plan/open`
+
+Those endpoints are resolved locally by the extension host instead of being forwarded directly to OpenCode.
+
+Drag and drop also has a fallback path for environments that do not expose local file paths. In that case, the webview sends file bytes and the extension writes them to a temporary `varro-drops` directory before attaching them as context.
+
+### `commands.ts`
+
+`src/extension/commands.ts` registers the VS Code command surface.
+
+- Focus the Varro view and composer
+- Start a new session
+- Abort the active session
+- Restart the OpenCode server
+- Add Explorer files, editor selections, or terminal selections to context
+
 ## Webview Responsibilities
 
-### State and connection
+### State And Connection
 
 `src/webview/lib/state.ts` holds client-side app state, including:
 
 - Sessions and active session
 - Messages, tool parts, todos, diffs, permissions, and questions
-- Selected model, agent, and reasoning variant
+- Selected model, agent, reasoning variant, and MCP set
 - Dropped files, pasted images, and terminal selection
 - Workspace-scoped permission mode preferences and model visibility preferences
+- Current-document context toggles and skipped plan-session markers
+- Pending attention session IDs and interrupted session IDs from the extension host
 
 `src/webview/hooks/useOpenCode.ts` is the main integration hook.
 
 - Initializes the UI once the server reports `running`
-- Loads sessions, agents, providers, and questions
+- Loads sessions, agents, providers, MCP status, and questions
 - Subscribes to extension messages and OpenCode server events
 - Builds prompt parts before sending messages
-- Keeps session state in sync during streaming, compaction, and follow-up actions
+- Keeps session state in sync during streaming, compaction, follow-up actions, usage-limit retries, and permission mode changes
+- Recovers interrupted sessions after extension reload when they are safe to continue
+- Synchronizes per-session MCP selection with OpenCode connect and disconnect calls
+- Opens saved plan documents and supports plan-to-build handoff flows
 
-### Message transport
+### Message Transport
 
 - `src/shared/protocol.ts` defines extension-to-webview and webview-to-extension messages.
 - `src/webview/lib/bridge.ts` wraps `postMessage` and API request/response correlation.
-- `src/webview/lib/client.ts` exposes typed helpers for OpenCode endpoints such as `/session`, `/agent`, `/config/providers`, and `/question`.
+- `src/webview/lib/client.ts` exposes typed helpers for OpenCode endpoints such as `/session`, `/agent`, `/config/providers`, `/question`, `/mcp`, and Varro pseudo-endpoints.
 
 ## Context Semantics
 
@@ -171,7 +211,7 @@ When sending a prompt, the webview builds message parts in roughly this order:
 
 1. User text
 2. `[Working directory: ...]`
-3. Active file or active selection reference
+3. Active file or active selection reference, when current-document context is enabled for the session
 4. Terminal selection block
 5. Explicitly attached files and folders
 6. Clipboard images for vision-capable models
@@ -184,7 +224,9 @@ While a session is running:
 
 - plain text follow-ups are queued instead of being sent immediately
 - `Ctrl+Enter` or `Cmd+Enter` sends a steering message with `noReply`
-- queued prompts are dispatched automatically once the session becomes idle
+- queued prompts are dispatched automatically once the active session becomes idle
+
+The session UI also distinguishes running, attention-needed, failed, completed, and plan-ready states. On larger layouts, the session list can stay pinned beside the main chat pane.
 
 ## Provider Limits
 
@@ -197,6 +239,19 @@ The implementation in `src/extension/sidebar-provider.ts` and `src/extension/uti
 3. A direct provider metadata probe for supported providers such as OpenAI and GitHub Copilot
 
 Results are cached briefly in the extension host before being shown in the composer toolbar.
+
+## MCP And Plan Flows
+
+Varro can manage MCP connectivity per session.
+
+- The webview loads MCP status from OpenCode on startup.
+- The MCP picker stores the desired MCP set per session.
+- `useOpenCode.ts` connects newly selected MCPs and disconnects removed ones, then refreshes status.
+
+Plan responses have two extra flows in the UI.
+
+- `Open plan` normalizes the markdown and writes it to the OpenCode plans directory before opening it in VS Code.
+- `Implement the plan` switches into the build-oriented flow and continues from the plan instead of asking the plan agent to revise it.
 
 ## Debugging
 
@@ -216,7 +271,7 @@ The chat UI runs inside a VS Code webview.
 
 The webview build outputs source maps in `dist/webview/webview.js.map`.
 
-## Connect to an Existing OpenCode Server
+## Connect To An Existing OpenCode Server
 
 By default, Varro tries to auto-start OpenCode on port `4096`. You can connect to an already running server instead.
 
@@ -234,6 +289,8 @@ Then configure these VS Code settings as needed:
 
 Varro checks `http://127.0.0.1:<port>/global/health` to verify the server.
 
+If Varro launched the server itself and the configured port is already occupied by a different process, it can retry on a nearby port. Set `varro.server.port` explicitly if you want a fixed server address.
+
 ## Project Structure
 
 ```text
@@ -244,6 +301,8 @@ src/
     sidebar-provider.ts
     context-provider.ts
     commands.ts
+    file-search-service.ts
+    session-state-manager.ts
     logger.ts
     util/
   webview/            Sidebar chat UI
@@ -274,3 +333,4 @@ docs/
 | `npm run test:coverage` | Run tests with coverage output |
 | `npm run typecheck` | Run TypeScript checks for extension and webview |
 | `npm run package` | Build and create a VSIX package |
+| `npm run vscode:install` | Package and install the VSIX into local VS Code |

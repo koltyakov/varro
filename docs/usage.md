@@ -7,7 +7,7 @@ This guide covers the current Varro workflow inside VS Code.
 - Click the `Varro` icon in the Activity Bar.
 - For the best layout, move Varro to the `Secondary Side Bar` so you can keep the editor visible while chatting.
 
-## First Run
+## First Run And Connection
 
 Install the OpenCode CLI:
 
@@ -21,7 +21,7 @@ If OpenCode does not have any providers configured yet, log in:
 opencode auth login
 ```
 
-Varro connects to `http://127.0.0.1:4096` by default and can auto-start the local OpenCode server when the extension activates.
+Varro connects to `http://127.0.0.1:4096` by default. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it.
 
 ## What Varro Sends As Context
 
@@ -36,6 +36,8 @@ Varro can include more than the text in the composer.
 - Explicit line ranges attached from the editor selection command
 - Pasted image attachments when the selected model supports vision
 
+The current document appears as a chip above the composer. You can click that chip to disable or re-enable live current-document context for the active session.
+
 When the active file is also attached explicitly, Varro avoids duplicating overlapping line ranges.
 
 ## Add Context Manually
@@ -48,19 +50,8 @@ Use any of these flows to add more context.
 - Drag files or folders into the composer.
 - Use the composer attachment flow from `/attach`.
 - Paste an image into the composer.
-- Type `@` in the composer to search for files and agents.
-
-## Sessions
-
-Sessions are filtered to the current workspace directory, then sorted by most recently updated.
-
-- Start a fresh session with `Varro: New Session` or the new chat button.
-- Open the session list from the back button in the header.
-- Switch between running, attention-needed, and recent sessions.
-- Archive sessions from the session list.
-- Stop the active run with `Varro: Abort Session`.
-
-If the sidebar is hidden or unfocused, Varro can show VS Code notifications when a background session finishes or when the agent is blocked on a permission or question.
+- Type `@path/to/file` to search workspace files.
+- Type `@agent-name` to mention an available agent.
 
 ## Composer Behavior
 
@@ -68,6 +59,9 @@ If the sidebar is hidden or unfocused, Varro can show VS Code notifications when
 - `Shift+Enter` inserts a newline.
 - While a session is running, plain `Enter` queues a follow-up message if you only typed text.
 - While a session is running, `Ctrl+Enter` or `Cmd+Enter` sends a steering message with `noReply` enabled.
+- While a session is running, the send menu also exposes `Add to Queue`, `Steer with Message`, and `Stop and Send`.
+- `ArrowUp` and `ArrowDown` can step through previous user prompts when the composer is empty.
+- `Tab` accepts the highlighted slash-command or mention completion.
 - Slash commands are available directly in the composer.
 
 Current built-in slash commands include:
@@ -75,6 +69,7 @@ Current built-in slash commands include:
 - `/new`
 - `/sessions`
 - `/models`
+- `/mcps`
 - `/connect`
 - `/attach`
 - `/settings`
@@ -86,21 +81,51 @@ Current built-in slash commands include:
 
 Some commands only appear when they apply. For example, `/undo` only appears when there is an assistant response to revert, and `/abort` only appears while a session is active.
 
-## Models, Agents, and Reasoning
+## Sessions
 
-Varro loads agents and models from your local OpenCode configuration.
+Sessions are filtered to the current workspace directory, then sorted by most recently updated.
+
+- Start a fresh session with `Varro: New Session` or the new chat button.
+- Open the session list from the back button in the header.
+- Search sessions by title, session ID, or workspace directory.
+- Filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions from the header badges.
+- Open sub-agent sessions from the parent session row when they exist.
+- Archive sessions from the session list.
+- Stop the active run with `Varro: Abort Session`.
+
+On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.desktopSessionPaneSide` to choose whether that pane appears on the left or right.
+
+If the sidebar is hidden, Varro can show VS Code notifications when a background session finishes or when the agent is blocked on a permission or question. It also exposes a status bar item that summarizes waiting or completed sessions.
+
+If VS Code reloads while a session was running, Varro reconnects to those sessions and can continue interrupted work automatically when the session is still resumable.
+
+## Plans And Reviews
+
+- `/review` sends a review prompt for the current workspace changes.
+- Sessions that finished with the `plan` agent surface as `Plan ready` in the session list.
+- The latest plan response can be opened as a saved markdown plan document.
+- The latest plan response can also be handed off to the build flow so Varro continues with implementation instead of revising the plan.
+
+## Models, Agents, Reasoning, And MCPs
+
+Varro loads agents, models, and MCP tools from your local OpenCode configuration.
 
 - Pick the agent from the composer toolbar.
 - Pick the provider/model from the model picker.
 - Choose a reasoning variant when the selected model exposes variants.
-- Open `Manage Models` to hide or show providers and individual models.
+- Open the MCP picker to connect or disconnect session MCPs.
+- Open `/settings` to hide or show providers and individual models.
 
-The composer can also show two pieces of model metadata:
+The model settings view also shows whether a model exposes tools, variants, vision support, and a known context-window size.
+
+The composer can show two pieces of model metadata:
 
 - Provider limit status, when Varro can read quota information from OpenCode metadata or a supported provider endpoint.
 - Context usage, based on token totals from assistant messages and the selected model's context window.
 
-## Permissions and Questions
+If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers.
+
+## Permissions And Questions
 
 OpenCode approval flows stay inside the chat UI.
 
@@ -110,7 +135,7 @@ OpenCode approval flows stay inside the chat UI.
 
 `Default` allows read-style tools by default and asks for tool calls that can modify state. `Full access` updates the session permission rules and auto-approves pending permission prompts for that session.
 
-## Output in the Chat
+## Output In The Chat
 
 Varro renders OpenCode output as structured UI instead of plain text only.
 
@@ -121,6 +146,17 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - Diff summaries for changed files
 - Session summaries with changed-file counts and line additions/deletions
 - Context compaction markers when OpenCode summarizes a session
+- Usage-limit banners when a run is retrying against provider limits
+- A transport banner when the OpenCode event stream is reconnecting and live updates may lag temporarily
+
+## VS Code Commands And Keybindings
+
+- `Varro: New Session`
+- `Varro: Abort Session`
+- `Varro: Restart Server`
+- `Varro: Add to Context` from Explorer, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the editor is focused
+- `Varro: Add to Context` from the editor selection context menu
+- `Varro: Add Terminal Selection to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused
 
 ## Settings
 
@@ -154,4 +190,5 @@ There are also hidden debug settings used in development builds:
 - No models available: run `opencode auth login` and reopen Varro.
 - Provider badge missing: quota metadata is only shown when OpenCode or the provider exposes usable limit information.
 - Images do not send: select a model with vision support.
+- Live updates are reconnecting: REST requests still work, but session status can lag until the event stream recovers.
 - Server needs a clean reconnect: run `Varro: Restart Server`.
