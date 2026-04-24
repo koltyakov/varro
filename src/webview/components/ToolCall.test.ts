@@ -111,4 +111,28 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
     expect(container?.textContent).toContain('git status');
   });
+
+  it('shows an aligned empty output row for completed bash commands', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState(
+        { command: 'pnpm -s exec prettier --check src/webview/index.css' },
+        'check'
+      ),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    expect(container?.querySelector('.terminal-command-row-output')).not.toBeNull();
+    expect(container?.querySelector('.terminal-command-output-empty')?.textContent).toBe(
+      '(no output)'
+    );
+  });
 });

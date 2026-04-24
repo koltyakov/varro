@@ -501,6 +501,11 @@ function GenericToolCall(props: {
       ? formatCommandDisplay(command, appState.editorContext.workspacePath)
       : '';
   };
+  const bashOutput = () => {
+    if (props.state.status !== 'completed') return '';
+    return props.truncatedOutput || '(no output)';
+  };
+  const bashOutputIsEmpty = () => props.state.status === 'completed' && !props.truncatedOutput;
 
   return (
     <div class="chat-tool-invocation-part">
@@ -589,11 +594,13 @@ function GenericToolCall(props: {
                 <span class="terminal-command-label">IN</span>
                 <pre class="terminal-command-text">{bashCommand()}</pre>
               </div>
-              <Show when={props.state.status === 'completed' && props.truncatedOutput}>
+              <Show when={props.state.status === 'completed'}>
                 <div class="terminal-command-row terminal-command-row-output">
                   <span class="terminal-command-label">OUT</span>
-                  <pre class="terminal-command-text terminal-command-output">
-                    {props.truncatedOutput}
+                  <pre
+                    class={`terminal-command-text terminal-command-output${bashOutputIsEmpty() ? ' terminal-command-output-empty' : ''}`}
+                  >
+                    {bashOutput()}
                   </pre>
                 </div>
               </Show>

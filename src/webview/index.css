@@ -339,10 +339,16 @@ input:focus-visible {
   --interactive-list-scrollbar-inset: 0px;
   --chat-content-max-width: 960px;
   --chat-sidebar-width: 380px;
+  --chat-input-top-gradient-bg: var(--color-vscode-bg);
   display: flex;
   flex-direction: column;
   height: 100%;
   position: relative;
+}
+
+body.vscode-light .interactive-session,
+body.vscode-high-contrast-light .interactive-session {
+  --chat-input-top-gradient-bg: #fff;
 }
 
 .chat-main-column {
@@ -1300,6 +1306,23 @@ body.vscode-light
   flex-direction: column;
   gap: 6px;
   position: relative;
+}
+
+.interactive-session .interactive-input-part.input-top-gradient::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--chat-input-top-gradient-bg));
+}
+
+.interactive-session .interactive-input-part > * {
+  position: relative;
+  z-index: 1;
 }
 
 .interactive-session .model-selection-row {
@@ -3004,7 +3027,7 @@ kbd {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 64%, transparent);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--color-vscode-fg) 1.5%, var(--color-vscode-list-bg));
+  background: color-mix(in srgb, black 14%, var(--color-vscode-list-bg));
   font-family: var(--font-mono);
 }
 
@@ -3032,7 +3055,7 @@ kbd {
   min-width: 0;
   max-height: 200px;
   margin: 0;
-  padding: 8px 10px 8px 0;
+  padding: 8px 10px 8px 8px;
   overflow: auto;
   color: var(--color-vscode-fg);
   font-family: var(--font-mono);
@@ -3044,6 +3067,11 @@ kbd {
 
 .chat-tool-invocation-part .terminal-command-output {
   opacity: 0.9;
+}
+
+.chat-tool-invocation-part .terminal-command-output-empty {
+  color: var(--color-vscode-fg-muted);
+  font-style: italic;
 }
 
 .chat-tool-invocation-part .tool-invocation-input {

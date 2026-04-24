@@ -1200,6 +1200,20 @@ export function ChatInput() {
       : []
   );
 
+  const showInputTopGradient = createMemo(
+    () =>
+      queuedForSession().length === 0 &&
+      state.todos.length === 0 &&
+      !activeUsageLimit() &&
+      !showModelPicker() &&
+      !showContextPopup() &&
+      !showAgentPicker() &&
+      !showVariantPicker() &&
+      !showPermissionModePicker() &&
+      !showBusyMenu() &&
+      !(isFocused() && composerCompletions().length > 0 && !suppressCompletion())
+  );
+
   const selectedAgentLabel = () => {
     const name = state.selectedAgent;
     if (!name) return 'Agent';
@@ -1238,7 +1252,7 @@ export function ChatInput() {
   });
 
   return (
-    <div class="interactive-input-part">
+    <div class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}`}>
       <Show when={isDraggingOver()}>
         <div class="chat-drop-overlay" aria-hidden="true" />
       </Show>
