@@ -78,6 +78,7 @@ import { TodoList } from './TodoList';
 import type { Agent, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
+import { getProviderIcon } from '../lib/provider-icons';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
@@ -1695,7 +1696,18 @@ export function ChatInput() {
                 when={currentModel().modelName}
                 fallback={<span class="toolbar-picker-label model-name">Model</span>}
               >
-                <span class="toolbar-picker-label model-name">{currentModel().modelName}</span>
+                <span class="toolbar-picker-label model-name">
+                  <Show when={getProviderIcon(currentModel().providerID)}>
+                    {(icon) => (
+                      <span
+                        class="provider-icon"
+                        style={{ '--provider-icon-mask': `url("${icon()}")` }}
+                        aria-hidden="true"
+                      />
+                    )}
+                  </Show>
+                  <span class="model-name-text">{currentModel().modelName}</span>
+                </span>
               </Show>
               <svg
                 class="codicon-chevron"

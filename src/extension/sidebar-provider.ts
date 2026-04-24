@@ -144,7 +144,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private shouldShowNotification() {
-    return !this.view?.visible || !vscode.window.state.focused || !this.webviewHasFocus;
+    // Suppress VS Code in-editor notifications when the chat view is open.
+    // Only show notifications when the chat view is not visible.
+    return !this.view?.visible;
   }
 
   private showInterruptedSessionNotification() {

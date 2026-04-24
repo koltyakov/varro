@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerStatus } from '../shared/protocol';
 
+type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
+
 const { loggerMock, vscodeMock } = vi.hoisted(() => ({
   loggerMock: {
     info: vi.fn(),
@@ -10,7 +12,11 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
   vscodeMock: {
     window: {
       activeTextEditor: undefined,
-      showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
+      showInformationMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
+      createTerminal: vi.fn(() => ({
+        show: vi.fn(),
+        sendText: vi.fn(),
+      })),
     },
     workspace: {
       getWorkspaceFolder: vi.fn(),
@@ -369,7 +375,34 @@ describe('OpenCodeServer maintenance', () => {
 
     expect(readLatestCliVersion).toHaveBeenCalledTimes(1);
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
-      'OpenCode CLI 1.14.22 is available (installed: 1.14.20). Update with: npm install -g opencode-ai@latest'
+      'OpenCode CLI 1.14.22 is available (installed: 1.14.20). Update with: opencode upgrade',
+      'Run Upgrade'
     );
+  });
+
+  it('runs the upgrade command in an integrated terminal when the notification action is selected', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const terminal = {
+      show: vi.fn(),
+      sendText: vi.fn(),
+    };
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+
+    api.readLatestCliVersion = readLatestCliVersion;
+    vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
+    vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
+
+    expect(vscodeMock.window.createTerminal).toHaveBeenCalledWith({
+      name: 'OpenCode Upgrade',
+      cwd: undefined,
+    });
+    expect(terminal.show).toHaveBeenCalledWith(false);
+    expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
   });
 });

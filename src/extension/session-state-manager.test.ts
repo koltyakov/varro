@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
+
 const { loggerMock, vscodeMock } = vi.hoisted(() => ({
   loggerMock: {
     info: vi.fn(),
@@ -8,9 +10,9 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
   },
   vscodeMock: {
     window: {
-      showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
-      showWarningMessage: vi.fn(() => Promise.resolve(undefined)),
-      showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
+      showInformationMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
+      showWarningMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
+      showErrorMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
     },
     commands: {
       executeCommand: vi.fn(() => Promise.resolve(undefined)),

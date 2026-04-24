@@ -12,6 +12,8 @@ import { buildServerEnv, getServerPathEntries } from './util/server-path';
 export class OpenCodeServer extends EventEmitter {
   private static readonly MISSING_CLI_MESSAGE =
     'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
+  private static readonly CLI_UPGRADE_COMMAND = 'opencode upgrade';
+  private static readonly CLI_UPGRADE_ACTION = 'Run Upgrade';
   private static readonly START_DISPOSED_MESSAGE = 'Server start was cancelled';
   private static readonly HEALTH_TIMEOUT_MS = 2000;
   private static readonly REQUEST_TIMEOUT_MS = 30_000;
@@ -785,9 +787,15 @@ export class OpenCodeServer extends EventEmitter {
     }
     this.lastSuggestedCliVersion = latestCliVersion;
 
-    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: npm install -g opencode-ai@latest`;
+    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${OpenCodeServer.CLI_UPGRADE_COMMAND}`;
     logger.info(message);
-    void vscode.window.showInformationMessage(message);
+    void vscode.window
+      .showInformationMessage(message, OpenCodeServer.CLI_UPGRADE_ACTION)
+      .then((action) => {
+        if (action === OpenCodeServer.CLI_UPGRADE_ACTION) {
+          this.runInTerminal(OpenCodeServer.CLI_UPGRADE_COMMAND, 'OpenCode Upgrade');
+        }
+      });
   }
 
   private async readInstalledCliVersion(): Promise<string | null> {
@@ -956,6 +964,18 @@ export class OpenCodeServer extends EventEmitter {
 
     const folders = vscode.workspace.workspaceFolders;
     return folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
+  }
+
+  private runInTerminal(command: string, title: string) {
+    const text = command.trim();
+    if (!text) return;
+
+    const terminal = vscode.window.createTerminal({
+      name: title,
+      cwd: this.getWorkspaceCwd(),
+    });
+    terminal.show(false);
+    terminal.sendText(text, true);
   }
 
   private scopedUrl(path: string): { url: string; directory?: string } {
