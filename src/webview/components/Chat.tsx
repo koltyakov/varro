@@ -1225,15 +1225,15 @@ function SessionListItem(props: {
   const subagentLabel = () =>
     `Show ${props.subagentCount} sub-agent session${props.subagentCount === 1 ? '' : 's'}`;
   const indicatorClass = () => {
-    if (props.isRunning) return 'is-running';
     if (props.isFailed) return 'is-failed';
+    if (props.isRunning) return 'is-running';
     if (props.needsAttention) return 'is-attention';
     if (props.isCompletedPlanSession) return 'is-plan-completed';
     return 'is-completed';
   };
   const indicatorTitle = () => {
-    if (props.isRunning) return status()?.type === 'retry' ? 'Retrying' : 'Running';
     if (props.isFailed) return 'Failed';
+    if (props.isRunning) return status()?.type === 'retry' ? 'Retrying' : 'Running';
     if (props.hasPermissionRequest && props.hasQuestionRequest) return 'Attention needed';
     if (props.hasPermissionRequest) return 'Permission request pending';
     if (props.hasQuestionRequest) return 'Attention needed';

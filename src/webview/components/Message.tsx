@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
 import { client } from '../lib/client';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
+import { retryMessage } from '../hooks/useOpenCode';
 import type {
   AssistantMessage,
   CompactionPart,
@@ -13,7 +14,7 @@ import type {
 } from '../types';
 import { DiffView } from './DiffView';
 import { MessagePart } from './MessagePart';
-import { state } from '../lib/state';
+import { isLoading, state } from '../lib/state';
 import {
   formatDisplayPath,
   getLeafPathName,
@@ -109,6 +110,12 @@ export function Message(props: {
     return name || null;
   });
   const isSubagent = () => assistant()?.mode === 'subagent';
+  const isLatestAssistant = () => {
+    const latestAssistant = [...state.messages]
+      .toReversed()
+      .find((entry) => entry.info.role === 'assistant');
+    return latestAssistant?.info.id === assistant()?.id;
+  };
   const normalizedParts = createMemo(() =>
     assistant()
       ? collapseLeadingDuplicateFileEvents(
@@ -224,6 +231,11 @@ export function Message(props: {
                 info={assistant()!}
                 parts={visibleAssistantParts()}
                 errorMessage={assistantErrorMessage()}
+                onRetry={
+                  isLatestAssistant()
+                    ? () => void retryMessage(assistant()!.id, assistant()!.sessionID)
+                    : undefined
+                }
                 highlightFinalAnswer={props.highlightFinalAnswer}
                 highlightPlanningAnswer={props.highlightPlanningAnswer}
                 suppressHighlightedCardMetaParts={
@@ -724,6 +736,7 @@ function AssistantMessageContent(props: {
   info: AssistantMessage;
   parts: Part[];
   errorMessage?: string | null;
+  onRetry?: (() => void) | undefined;
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
   suppressHighlightedCardMetaParts?: boolean;
@@ -806,6 +819,18 @@ function AssistantMessageContent(props: {
       <Show when={props.errorMessage}>
         <div class="assistant-message-flow-item assistant-message-flow-item-error rendered-markdown">
           <p>{props.errorMessage!}</p>
+          <Show when={props.onRetry}>
+            <div class="assistant-message-flow-item-error-actions">
+              <button
+                type="button"
+                class="assistant-dialog-summary-action assistant-dialog-summary-action-implement assistant-message-flow-item-error-action"
+                disabled={isLoading()}
+                onClick={() => props.onRetry?.()}
+              >
+                Retry
+              </button>
+            </div>
+          </Show>
         </div>
       </Show>
     </div>

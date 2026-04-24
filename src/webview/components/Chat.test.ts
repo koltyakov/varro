@@ -1087,6 +1087,21 @@ describe('usage-limit session status precedence', () => {
     expect(isRunningSession('session-1')).toBe(false);
   });
 
+  it('renders a failed indicator when a session is both retrying and failed', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('sessionStatus', {
+      'session-1': { type: 'retry', attempt: 2, message: 'Retrying request', next: 8 },
+    });
+    setState('failedSessionIds', ['session-1']);
+
+    cleanup = render(() => Chat(), container!);
+
+    const indicator = container?.querySelector('.session-item .session-item-indicator');
+
+    expect(indicator?.classList.contains('is-failed')).toBe(true);
+    expect(indicator?.getAttribute('aria-label')).toBe('Failed');
+  });
+
   it('returns to running once the 429 notice is cleared', () => {
     setState('sessions', [session('session-1', 500)]);
     setState('sessionStatus', {

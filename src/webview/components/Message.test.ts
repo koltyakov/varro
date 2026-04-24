@@ -1,7 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type { FilePart, Part } from '../types';
 import { Message, getAssistantContainerVariant, getUserMessagePreviewText } from './Message';
+
+const retryMessageMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../hooks/useOpenCode', () => ({
+  retryMessage: retryMessageMock,
+}));
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -16,6 +22,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  retryMessageMock.mockReset();
 });
 
 function textPart(id: string, text: string): Part {
@@ -466,5 +473,43 @@ describe('Message assistant final answer rendering', () => {
     expect(errorText).toBeInstanceOf(HTMLDivElement);
     expect(errorText?.textContent).toContain('An error occurred while processing your request.');
     expect(diffSummary).toBeNull();
+  });
+
+  it('renders a retry action for the latest assistant error and retries that turn', async () => {
+    const { setState } = await import('../lib/state');
+    const user = userMessage('message-2');
+    const assistant = {
+      ...assistantMessage('message-3'),
+      parentID: 'message-2',
+      error: {
+        name: 'server_error',
+        data: { message: 'An error occurred while processing your request.' },
+      },
+    };
+
+    setState('messages', [
+      {
+        info: user,
+        parts: [textPart('text-user-1', 'Try again')],
+      },
+      {
+        info: assistant,
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+      },
+    ]);
+
+    cleanup = render(
+      () => Message({ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }),
+      container!
+    );
+
+    const retryButton = container?.querySelector('.assistant-message-flow-item-error-action');
+
+    expect(retryButton).toBeInstanceOf(HTMLButtonElement);
+    expect(retryButton?.textContent).toContain('Retry');
+
+    (retryButton as HTMLButtonElement).click();
+
+    expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
   });
 });

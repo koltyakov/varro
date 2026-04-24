@@ -130,7 +130,7 @@ describe('failed session tracking', () => {
     setState('lastSeenSessions', { 'session-1': 0, 'session-2': 0 });
   });
 
-  it('derives failed sessions from unread latest assistant message errors', () => {
+  it('derives failed sessions from latest assistant message errors', () => {
     syncFailedSessionsFromMessages([
       {
         info: {
@@ -166,7 +166,7 @@ describe('failed session tracking', () => {
     expect(state.failedSessionIds).toEqual([]);
   });
 
-  it('does not mark a session failed when the errored latest message has already been seen', () => {
+  it('keeps a session failed when the errored latest message has already been seen', () => {
     setState('lastSeenSessions', { 'session-1': 100 });
 
     syncFailedSessionsFromMessages([
@@ -179,7 +179,7 @@ describe('failed session tracking', () => {
       },
     ]);
 
-    expect(state.failedSessionIds).toEqual([]);
+    expect(state.failedSessionIds).toEqual(['session-1']);
   });
 
   it('allows clearing an individual failed session flag', () => {

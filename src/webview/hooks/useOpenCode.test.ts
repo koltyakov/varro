@@ -10,6 +10,7 @@ const clientMocks = vi.hoisted(() => ({
   sessionGet: vi.fn(),
   sessionMessages: vi.fn(),
   sessionSendAsync: vi.fn(),
+  sessionRevert: vi.fn(),
   sessionAbort: vi.fn(),
   sessionStatus: vi.fn(),
   agentList: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock('../lib/client', () => ({
       get: clientMocks.sessionGet,
       messages: clientMocks.sessionMessages,
       sendAsync: clientMocks.sessionSendAsync,
+      revert: clientMocks.sessionRevert,
       abort: clientMocks.sessionAbort,
       status: clientMocks.sessionStatus,
     },
@@ -156,6 +158,7 @@ beforeEach(() => {
   clientMocks.sessionGet.mockReset();
   clientMocks.sessionMessages.mockReset();
   clientMocks.sessionSendAsync.mockReset();
+  clientMocks.sessionRevert.mockReset();
   clientMocks.sessionAbort.mockReset();
   clientMocks.sessionStatus.mockReset();
   clientMocks.agentList.mockReset();
@@ -916,6 +919,58 @@ describe('sendMessage', () => {
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
       parts: [{ type: 'text', text: 'Implement the approved plan.' }],
       agent: 'build',
+    });
+  });
+
+  it('continues the failed assistant turn with the interruption resume prompt', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('messages', [
+      {
+        info: userMessage('user-1'),
+        parts: [
+          {
+            id: 'text-1',
+            sessionID: 'session-1',
+            messageID: 'user-1',
+            type: 'text',
+            text: 'Describe what to build',
+          },
+          {
+            id: 'file-1',
+            sessionID: 'session-1',
+            messageID: 'user-1',
+            type: 'file',
+            mime: 'image/png',
+            filename: 'image.png',
+            url: 'blob:1',
+          },
+        ],
+      },
+      {
+        info: {
+          ...assistantMessage('assistant-1', 'user-1'),
+          error: { name: 'server_error', data: { message: 'Request failed' } },
+        },
+        parts: [],
+      },
+    ]);
+
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
+
+    await hookModule.retryMessage('assistant-1');
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      parts: [
+        {
+          type: 'text',
+          text: 'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.',
+        },
+      ],
     });
   });
 });

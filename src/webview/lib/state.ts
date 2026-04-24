@@ -1422,7 +1422,7 @@ export function syncFailedSessionsFromMessages(
     if (info.role !== 'assistant' || !info.error) continue;
     const session = state.sessions.find((item) => item.id === sessionId);
     if (!session) continue;
-    if (isSessionUnread(sessionId, session.time.updated)) failedSessionIds.add(sessionId);
+    failedSessionIds.add(sessionId);
   }
 
   setState('failedSessionIds', [...failedSessionIds]);

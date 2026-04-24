@@ -1274,6 +1274,29 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   }
 }
 
+export async function retryMessage(messageId: string, sessionId = state.activeSessionId) {
+  if (!sessionId || sessionId !== state.activeSessionId) return;
+
+  const assistantEntry = state.messages.find(
+    (entry) => entry.info.role === 'assistant' && entry.info.id === messageId
+  );
+  if (!assistantEntry || assistantEntry.info.role !== 'assistant') return;
+
+  startLoading();
+  setError(null);
+  clearPendingAbort(sessionId);
+  setSessionUsageLimit(sessionId, null);
+  setSessionFailed(sessionId, false);
+
+  try {
+    await continueInterruptedSession(sessionId);
+  } catch (err) {
+    stopLoading();
+    setSessionFailed(sessionId, true);
+    setError(err instanceof Error ? err.message : 'Failed to retry message');
+  }
+}
+
 export async function implementPlan(prompt: string, sessionId = state.activeSessionId) {
   if (!sessionId || sessionId !== state.activeSessionId) return;
 

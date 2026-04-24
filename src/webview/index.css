@@ -725,6 +725,16 @@ body.vscode-light
   margin-bottom: 0;
 }
 
+.assistant-message-flow-item-error-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.assistant-message-flow-item-error-action {
+  font: inherit;
+}
+
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item {
   margin: 0;
 }
@@ -4905,7 +4915,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 10px 3px 28px;
+  padding: 3px 10px;
   cursor: pointer;
   transition: background-color 0.08s;
 }
