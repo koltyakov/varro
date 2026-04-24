@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
-import type { FilePart, Part } from '../types';
+import { createSignal } from 'solid-js';
+import type { FilePart, Part, ToolPart } from '../types';
 import { Message, getAssistantContainerVariant, getUserMessagePreviewText } from './Message';
+import { resetToolCallExpansionState } from './ToolCall';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
 
@@ -23,6 +25,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   retryMessageMock.mockReset();
+  resetToolCallExpansionState();
 });
 
 function textPart(id: string, text: string): Part {
@@ -87,6 +90,33 @@ function imageFilePart(id: string, filename: string): FilePart {
     mime: 'image/png',
     filename,
     url: `https://example.test/${id}.png`,
+  };
+}
+
+function toolPart(id: string, state: ToolPart['state']): ToolPart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'tool',
+    callID: 'call-1',
+    tool: 'browser-bridge_browser_page',
+    state,
+  };
+}
+
+function completedToolState(
+  input: Record<string, unknown>,
+  output: string,
+  title = ''
+): Extract<ToolPart['state'], { status: 'completed' }> {
+  return {
+    status: 'completed',
+    input,
+    output,
+    title,
+    metadata: {},
+    time: { start: 0, end: 1 },
   };
 }
 
@@ -261,6 +291,47 @@ describe('Message user prompt rendering', () => {
 
     expect(attachments).toBeInstanceOf(HTMLDivElement);
     expect(attachments?.classList.contains('message-attachments-standalone')).toBe(true);
+  });
+});
+
+describe('Message tool call expansion', () => {
+  it('preserves expanded tool calls across assistant message updates', () => {
+    const [parts, setParts] = createSignal<Part[]>([
+      toolPart(
+        'tool-1',
+        completedToolState(
+          { action: 'text', textBudget: 5000 },
+          'Page text: 2908 chars.',
+          'browser_page'
+        )
+      ),
+    ]);
+
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-1'),
+          parts: parts(),
+        }),
+      container!
+    );
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
+
+    setParts([
+      toolPart(
+        'tool-1',
+        completedToolState(
+          { action: 'text', budgetPreset: 'normal', textBudget: 5000 },
+          'Page text: 2908 chars.',
+          'browser_page'
+        )
+      ),
+      textPart('text-1', 'The current page is cursor.com.'),
+    ]);
+
+    expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
   });
 });
 
@@ -551,8 +622,10 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
+    const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
     const retryButton = container?.querySelector('.assistant-message-flow-item-error-action');
 
+    expect(errorBlock).toBeNull();
     expect(retryButton).toBeNull();
     expect(retryMessageMock).not.toHaveBeenCalled();
   });

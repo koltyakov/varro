@@ -92,12 +92,12 @@ type ToolbarControl =
   | 'context';
 type ToolbarCompactMode =
   | 'full'
+  | 'compact-stop'
   | 'compact-agent'
   | 'compact-reasoning'
   | 'truncate-model'
   | 'hide-permission'
   | 'hide-attachments'
-  | 'compact-stop'
   | 'hide-send'
   | 'hide-reasoning'
   | 'hide-agent'
@@ -117,12 +117,12 @@ const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
 
 const TOOLBAR_COMPACT_MODES: ToolbarCompactMode[] = [
   'full',
+  'compact-stop',
   'compact-agent',
   'compact-reasoning',
   'truncate-model',
   'hide-permission',
   'hide-attachments',
-  'compact-stop',
   'hide-send',
   'hide-reasoning',
   'hide-agent',
@@ -156,10 +156,15 @@ export function isToolbarControlCompacted(
   mode: ToolbarCompactMode,
   control: 'agent' | 'reasoning' | 'stop'
 ) {
-  if (control === 'agent') return mode !== 'full';
-  if (control === 'reasoning') return !['full', 'compact-agent'].includes(mode);
+  if (control === 'agent') return !['full', 'compact-stop'].includes(mode);
+  if (control === 'reasoning') return !['full', 'compact-stop', 'compact-agent'].includes(mode);
   return [
     'compact-stop',
+    'compact-agent',
+    'compact-reasoning',
+    'truncate-model',
+    'hide-permission',
+    'hide-attachments',
     'hide-send',
     'hide-reasoning',
     'hide-agent',
@@ -1245,7 +1250,7 @@ export function ChatInput() {
   };
 
   const modelCanEllipsize = () =>
-    !['full', 'compact-agent', 'compact-reasoning'].includes(toolbarCompactMode());
+    !['full', 'compact-stop', 'compact-agent', 'compact-reasoning'].includes(toolbarCompactMode());
   const isToolbarControlVisible = (control: ToolbarControl) =>
     !isToolbarControlHidden(toolbarCompactMode(), control);
 

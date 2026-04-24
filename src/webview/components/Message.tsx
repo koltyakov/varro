@@ -36,6 +36,7 @@ import {
   shouldShowAssistantPartInHighlightedCard,
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
+import { isAbortedAssistantError } from '../lib/aborted';
 
 export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
 
@@ -104,14 +105,15 @@ export function Message(props: {
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
   const assistantErrorMessage = createMemo(() => {
     const error = assistant()?.error;
+    if (isAbortedAssistantError(error)) return null;
     const message = error?.data?.message?.trim();
     if (message) return message;
     const name = error?.name?.trim();
     return name || null;
   });
   const canRetryAssistant = createMemo(() => {
-    const name = assistant()?.error?.name?.trim().toLowerCase();
-    return !!name && name !== 'aborted';
+    const error = assistant()?.error;
+    return !!error && !isAbortedAssistantError(error);
   });
   const isSubagent = () => assistant()?.mode === 'subagent';
   const isLatestAssistant = () => {

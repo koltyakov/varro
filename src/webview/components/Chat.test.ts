@@ -1102,6 +1102,33 @@ describe('usage-limit session status precedence', () => {
     expect(indicator?.getAttribute('aria-label')).toBe('Failed');
   });
 
+  it('does not render a failed indicator for aborted sessions', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('messages', [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 0 },
+          parentID: 'user-1',
+          modelID: 'model-1',
+          providerID: 'provider-1',
+          mode: 'default',
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          error: { name: 'aborted', data: { message: 'Aborted' } },
+        },
+        parts: [],
+      },
+    ]);
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(indicators.failedIds.has('session-1')).toBe(false);
+  });
+
   it('renders a completed indicator for unread plan sessions', () => {
     setState('sessions', [session('active', 600), session('plan-1', 500)]);
     setState('activeSessionId', 'active');

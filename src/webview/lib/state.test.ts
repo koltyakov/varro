@@ -194,6 +194,20 @@ describe('failed session tracking', () => {
     expect(state.failedSessionIds).toEqual(['session-1']);
   });
 
+  it('does not mark a session failed for aborted assistant messages', () => {
+    syncFailedSessionsFromMessages([
+      {
+        info: {
+          ...assistantMessage('message-1', 'session-1'),
+          error: { name: 'aborted', data: { message: 'Aborted' } },
+        },
+        parts: [],
+      },
+    ]);
+
+    expect(state.failedSessionIds).toEqual([]);
+  });
+
   it('allows clearing an individual failed session flag', () => {
     setSessionFailed('session-1', true);
     setSessionFailed('session-2', true);

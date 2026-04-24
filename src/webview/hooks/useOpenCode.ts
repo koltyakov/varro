@@ -86,6 +86,7 @@ function logError(context: string, err: unknown) {
 }
 
 import { normalizePermissionEvent } from '../lib/session-event-reducer';
+import { isAbortedAssistantError } from '../lib/aborted';
 
 function getDefaultPrimaryAgentName() {
   return (
@@ -1645,7 +1646,10 @@ function registerEventHandlers() {
         upsertMessageInfo(message);
       }
       if (isAssistantMessage(message)) {
-        setSessionFailed(message.sessionID, Boolean(message.error));
+        setSessionFailed(
+          message.sessionID,
+          !!message.error && !isAbortedAssistantError(message.error)
+        );
         const notice = parseUsageLimitNotice(message.error?.data?.message || message.error?.name);
         if (notice) {
           applyUsageLimitNotice(message.sessionID, {

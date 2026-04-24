@@ -2985,6 +2985,10 @@ kbd {
   background: var(--color-vscode-error);
 }
 
+.chat-tool-invocation-part .tool-status-dot.tool-status-aborted {
+  background: color-mix(in srgb, var(--color-vscode-fg-muted) 72%, transparent);
+}
+
 .chat-tool-invocation-part .tool-invocation-title {
   flex: 1;
   min-width: 0;
@@ -3007,6 +3011,10 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-error-label {
   font-size: 11px;
   color: var(--color-vscode-error);
+}
+
+.chat-tool-invocation-part .tool-invocation-error-label.is-aborted {
+  color: var(--color-vscode-fg-muted);
 }
 
 .chat-tool-invocation-part .tool-invocation-chevron {
@@ -3153,6 +3161,11 @@ kbd {
   opacity: 0.85;
 }
 
+.chat-tool-invocation-part .tool-invocation-error.is-aborted {
+  color: var(--color-vscode-fg-muted);
+  opacity: 0.82;
+}
+
 .chat-tool-invocation-part .tool-invocation-running {
   display: flex;
   align-items: center;
@@ -3196,6 +3209,10 @@ kbd {
 
 .file-edit-dot.error {
   background: var(--color-vscode-error);
+}
+
+.file-edit-dot.aborted {
+  background: color-mix(in srgb, var(--color-vscode-fg-muted) 72%, transparent);
 }
 
 .file-edit-action-label {
@@ -3350,6 +3367,11 @@ kbd {
 
 .file-read-error-label {
   color: var(--color-vscode-error);
+}
+
+.file-read-error-label.is-aborted,
+.file-edit-error-label.is-aborted {
+  color: var(--color-vscode-fg-muted);
 }
 
 .chat-subtask-part {

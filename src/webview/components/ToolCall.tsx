@@ -1,4 +1,4 @@
-import { Show, For, createMemo, createSignal, createResource } from 'solid-js';
+import { Show, For, createEffect, createMemo, createSignal, createResource } from 'solid-js';
 import type { RepoFileStatus, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState } from '../lib/state';
@@ -8,10 +8,20 @@ import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
 import { client } from '../lib/client';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
+import { isAbortedToolError } from '../lib/aborted';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
 type ToolPreview = { text: string; key: string };
+const toolCallExpansionState = new Map<string, boolean>();
+
+function getToolCallExpansionKey(part: ToolPart) {
+  return `${part.sessionID}\u0000${part.messageID}\u0000${part.callID}`;
+}
+
+export function resetToolCallExpansionState() {
+  toolCallExpansionState.clear();
+}
 
 function normalizeToolName(toolName: string) {
   const normalized = toolName.trim().toLowerCase();
@@ -124,8 +134,9 @@ function isDirectoryOutput(toolState: ToolPart['state']): boolean {
 }
 
 export function ToolCall(props: { part: ToolPart }) {
-  const [expanded, setExpanded] = createSignal(false);
   const tool = () => props.part;
+  const expansionKey = () => getToolCallExpansionKey(tool());
+  const [expanded, setExpanded] = createSignal(toolCallExpansionState.get(expansionKey()) ?? false);
   const state = () => tool().state;
   const questionRequest = () =>
     appState.questions.find(
@@ -159,7 +170,7 @@ export function ToolCall(props: { part: ToolPart }) {
       case 'completed':
         return 'tool-status-completed';
       case 'error':
-        return 'tool-status-error';
+        return isAbortedToolError(state()) ? 'tool-status-aborted' : 'tool-status-error';
     }
   };
 
@@ -195,6 +206,16 @@ export function ToolCall(props: { part: ToolPart }) {
     );
   };
 
+  createEffect(() => {
+    setExpanded(toolCallExpansionState.get(expansionKey()) ?? false);
+  });
+
+  const toggleExpand = () => {
+    const next = !expanded();
+    toolCallExpansionState.set(expansionKey(), next);
+    setExpanded(next);
+  };
+
   return (
     <Show
       when={questionRequest()}
@@ -215,7 +236,7 @@ export function ToolCall(props: { part: ToolPart }) {
                       title={title()}
                       preview={preview()}
                       expanded={expanded()}
-                      toggleExpand={() => setExpanded(!expanded())}
+                      toggleExpand={toggleExpand}
                       inputEntries={inputEntries()}
                       truncatedOutput={truncatedOutput()}
                     />
@@ -251,6 +272,7 @@ function ReadToolCard(props: {
   const isCompleted = () => s().status === 'completed';
   const isRunning = () => s().status === 'running';
   const isError = () => s().status === 'error';
+  const isAborted = () => isAbortedToolError(s());
   const statusClass = () => {
     switch (s().status) {
       case 'pending':
@@ -260,7 +282,7 @@ function ReadToolCard(props: {
       case 'completed':
         return 'tool-status-completed';
       case 'error':
-        return 'tool-status-error';
+        return isAborted() ? 'tool-status-aborted' : 'tool-status-error';
     }
   };
   const metadata = () => {
@@ -336,7 +358,9 @@ function ReadToolCard(props: {
           <span class="file-read-running-label">reading…</span>
         </Show>
         <Show when={isError()}>
-          <span class="file-read-error-label">failed</span>
+          <span class={`file-read-error-label${isAborted() ? ' is-aborted' : ''}`}>
+            {isAborted() ? 'aborted' : 'failed'}
+          </span>
         </Show>
       </div>
     </div>
@@ -351,6 +375,7 @@ function FileChangeCard(props: {
   const isCompleted = () => s().status === 'completed';
   const isRunning = () => s().status === 'running';
   const isError = () => s().status === 'error';
+  const isAborted = () => isAbortedToolError(s());
   const change = () => props.change!;
   const changePath = createMemo(() => {
     const c = change();
@@ -426,8 +451,10 @@ function FileChangeCard(props: {
     <div class="chat-tool-invocation-part file-change-card">
       <div class="file-change-card-header">
         <span
-          class={`file-edit-dot ${isRunning() ? 'running' : isError() ? 'error' : 'done'}`}
-          aria-label={isRunning() ? 'Running' : isError() ? 'Error' : 'Done'}
+          class={`file-edit-dot ${isRunning() ? 'running' : isError() ? (isAborted() ? 'aborted' : 'error') : 'done'}`}
+          aria-label={
+            isRunning() ? 'Running' : isError() ? (isAborted() ? 'Aborted' : 'Error') : 'Done'
+          }
         />
         <span class="file-edit-action-label">{action()}</span>
         <Show
@@ -466,7 +493,9 @@ function FileChangeCard(props: {
           <span class="file-edit-running-label">editing…</span>
         </Show>
         <Show when={isError()}>
-          <span class="file-edit-error-label">failed</span>
+          <span class={`file-edit-error-label${isAborted() ? ' is-aborted' : ''}`}>
+            {isAborted() ? 'aborted' : 'failed'}
+          </span>
         </Show>
         <Show when={isCompleted()}>
           <span class="tool-invocation-duration file-edit-duration">
@@ -494,6 +523,7 @@ function GenericToolCall(props: {
   const openFile = (path: string) => {
     postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
   };
+  const isAborted = () => isAbortedToolError(props.state);
   const isBash = () => normalizeToolName(props.tool.tool) === 'bash';
   const bashCommand = () => {
     const command = props.state.input?.command;
@@ -521,7 +551,9 @@ function GenericToolCall(props: {
           </span>
         </Show>
         <Show when={props.state.status === 'error'}>
-          <span class="tool-invocation-error-label">failed</span>
+          <span class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}`}>
+            {isAborted() ? 'aborted' : 'failed'}
+          </span>
         </Show>
         <svg
           class={`tool-invocation-chevron ${props.expanded ? 'expanded' : ''}`}
@@ -610,7 +642,9 @@ function GenericToolCall(props: {
             <pre class="tool-invocation-output">{props.truncatedOutput}</pre>
           </Show>
           <Show when={props.state.status === 'error'}>
-            <div class="tool-invocation-error">{(props.state as ToolStateError).error}</div>
+            <div class={`tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}>
+              {(props.state as ToolStateError).error}
+            </div>
           </Show>
           <Show when={props.state.status === 'running'}>
             <div class="tool-invocation-running">

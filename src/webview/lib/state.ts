@@ -26,6 +26,7 @@ import type {
 } from '../../shared/protocol';
 import { mergeContextFile } from '../../shared/context-files';
 import type { UsageLimitNotice } from './usage-limit';
+import { isAbortedAssistantError } from './aborted';
 
 const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
@@ -1532,6 +1533,7 @@ export function syncFailedSessionsFromMessages(
 
   for (const [sessionId, info] of latestBySession) {
     if (info.role !== 'assistant' || !info.error) continue;
+    if (isAbortedAssistantError(info.error)) continue;
     const session = state.sessions.find((item) => item.id === sessionId);
     if (!session) continue;
     failedSessionIds.add(sessionId);
