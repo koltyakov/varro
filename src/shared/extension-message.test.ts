@@ -65,6 +65,16 @@ describe('parseExtensionMessage', () => {
     });
 
     expect(parseExtensionMessage({ type: 'server/event', payload: {} })).toBeNull();
+
+    expect(
+      parseExtensionMessage({
+        type: 'server/event',
+        payload: { type: 'mcp.tools.changed', properties: { name: 'browser-bridge' } },
+      })
+    ).toEqual({
+      type: 'server/event',
+      payload: { type: 'mcp.tools.changed', properties: { name: 'browser-bridge' } },
+    });
   });
 
   it('parses terminal-selection/update null and object payloads', () => {

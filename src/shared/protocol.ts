@@ -61,6 +61,11 @@ export type ProviderLimitStatus =
       note: string;
     };
 
+export type McpStatus = {
+  status: 'connected' | 'disabled' | 'failed' | 'needs_auth' | 'needs_client_registration';
+  error?: string;
+};
+
 export type ServerStatus =
   | { state: 'starting' }
   | { state: 'running'; url: string; eventStream?: 'healthy' | 'degraded' }
@@ -85,7 +90,9 @@ export type ServerEventName =
   | 'question.asked'
   | 'question.replied'
   | 'question.rejected'
-  | 'todo.updated';
+  | 'todo.updated'
+  | 'mcp.tools.changed'
+  | 'mcp.browser.open.failed';
 
 export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light';
 
@@ -141,6 +148,10 @@ export type WebviewMessage =
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
   | { type: 'files/drop'; payload: { paths: string[] } }
+  | {
+      type: 'files/drop-content';
+      payload: { files: Array<{ name: string; content: string; size: number }> };
+    }
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }
   | { type: 'files/pick' }

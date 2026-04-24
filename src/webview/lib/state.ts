@@ -18,6 +18,7 @@ import type {
   EditorContext,
   DroppedFile,
   InitialWebviewState,
+  McpStatus,
   PermissionMode,
   ProviderLimitStatus,
   ServerStatus,
@@ -25,6 +26,7 @@ import type {
 } from '../../shared/protocol';
 import { mergeContextFile } from '../../shared/context-files';
 import type { UsageLimitNotice } from './usage-limit';
+import { isAbortedAssistantError } from './aborted';
 
 const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
@@ -34,6 +36,7 @@ const STORAGE_KEYS = {
   sessionSelectedModels: 'varro.sessionSelectedModels',
   draftPermissionMode: 'varro.draftPermissionMode',
   sessionPermissionModes: 'varro.sessionPermissionModes',
+  sessionSelectedMcps: 'varro.sessionSelectedMcps',
   projectPermissionModes: 'varro.projectPermissionModes',
   hiddenProviders: 'varro.hiddenProviders',
   hiddenModels: 'varro.hiddenModels',
@@ -48,6 +51,7 @@ const STORAGE_KEYS = {
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
 export type SessionSelectedAgents = Record<string, string>;
 export type SessionSelectedModels = Record<string, SelectedModel>;
+export type SessionSelectedMcps = Record<string, string[]>;
 
 function readStored<T>(key: string): T | null {
   try {
@@ -95,12 +99,14 @@ interface AppState {
   allAgents: Agent[];
   providers: Provider[];
   providerLimits: Record<string, ProviderLimitStatus | null>;
+  mcpStatus: Record<string, McpStatus>;
   providerDefaults: Record<string, string>;
   sessionPermissionModes: Record<string, PermissionMode>;
   selectedAgent: string | null;
   sessionSelectedAgents: SessionSelectedAgents;
   selectedModel: SelectedModel | null;
   sessionSelectedModels: SessionSelectedModels;
+  sessionSelectedMcps: SessionSelectedMcps;
   hiddenProviders: string[];
   hiddenModels: string[];
   lastSeenSessions: Record<string, number>;
@@ -163,6 +169,7 @@ export const [state, setState] = createStore<AppState>({
   allAgents: [],
   providers: [],
   providerLimits: {},
+  mcpStatus: {},
   providerDefaults: {},
   sessionPermissionModes:
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
@@ -172,6 +179,7 @@ export const [state, setState] = createStore<AppState>({
   selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
   sessionSelectedModels:
     readStored<SessionSelectedModels>(STORAGE_KEYS.sessionSelectedModels) || {},
+  sessionSelectedMcps: readStored<SessionSelectedMcps>(STORAGE_KEYS.sessionSelectedMcps) || {},
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
   lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
@@ -654,6 +662,11 @@ export function getSelectedAgentForSession(sessionId: string | null | undefined)
   return state.sessionSelectedAgents[sessionId] || null;
 }
 
+export function getSelectedMcpsForSession(sessionId: string | null | undefined): string[] | null {
+  if (!sessionId) return null;
+  return state.sessionSelectedMcps[sessionId] || null;
+}
+
 export function setSelectedModel(
   model: SelectedModel | null,
   options?: { sessionId?: string | null; persistGlobal?: boolean }
@@ -684,6 +697,30 @@ export function clearSelectedModelForSession(sessionId: string) {
   );
   setState('sessionSelectedModels', reconcile(nextSessionModels));
   writeStored(STORAGE_KEYS.sessionSelectedModels, nextSessionModels);
+}
+
+export function setMcpStatus(status: Record<string, McpStatus>) {
+  setState('mcpStatus', status);
+}
+
+export function getAvailableMcpNames() {
+  return Object.keys(state.mcpStatus).toSorted((a, b) => a.localeCompare(b));
+}
+
+export function setSelectedMcpsForSession(sessionId: string, names: string[]) {
+  const nextNames = [...new Set(names)].toSorted((a, b) => a.localeCompare(b));
+  const nextSessionMcps = { ...state.sessionSelectedMcps, [sessionId]: nextNames };
+  setState('sessionSelectedMcps', reconcile(nextSessionMcps));
+  writeStored(STORAGE_KEYS.sessionSelectedMcps, nextSessionMcps);
+}
+
+export function clearSelectedMcpsForSession(sessionId: string) {
+  if (!state.sessionSelectedMcps[sessionId]) return;
+  const nextSessionMcps = Object.fromEntries(
+    Object.entries(state.sessionSelectedMcps).filter(([id]) => id !== sessionId)
+  );
+  setState('sessionSelectedMcps', reconcile(nextSessionMcps));
+  writeStored(STORAGE_KEYS.sessionSelectedMcps, nextSessionMcps);
 }
 
 export function resetDraftPermissionMode() {
@@ -1026,7 +1063,6 @@ let messageById: Map<string, number> = new Map();
 let partById: Map<string, { msgIdx: number; partIdx: number }> = new Map();
 let streamingDeltaFlushScheduled = false;
 let streamingDeltaGeneration = 0;
-const MAX_PENDING_STREAMING_DELTAS = 128;
 const pendingStreamingDeltas = new Map<
   string,
   { messageId: string; partId: string; sessionId?: string; text: string }
@@ -1119,16 +1155,17 @@ function flushPendingStreamingDeltas() {
       'messages',
       produce((msgs) => {
         for (const item of deltas) {
-          const msgIdx = findMessageIndex(msgs, item.messageId);
-          if (msgIdx === -1) continue;
-          const partIdx = msgs[msgIdx].parts.findIndex((part) => part.id === item.partId);
-          if (partIdx !== -1) {
-            const part = msgs[msgIdx].parts[partIdx];
+          const location = findPartLocation(msgs, item.partId);
+          if (location) {
+            const part = msgs[location.msgIdx]?.parts[location.partIdx];
             if (part.type === 'text' || part.type === 'reasoning') {
               part.text = item.text;
             }
             continue;
           }
+
+          const msgIdx = findMessageIndex(msgs, item.messageId);
+          if (msgIdx === -1) continue;
           msgs[msgIdx].parts.push({
             id: item.partId,
             messageID: item.messageId,
@@ -1259,16 +1296,7 @@ export function applyMessagePartDelta(
     sessionId,
     text: currentStreamingText + delta,
   });
-  evictOldPendingStreamingDeltas();
   scheduleStreamingDeltaFlush();
-}
-
-function evictOldPendingStreamingDeltas() {
-  while (pendingStreamingDeltas.size > MAX_PENDING_STREAMING_DELTAS) {
-    const oldest = pendingStreamingDeltas.keys().next().value;
-    if (!oldest) break;
-    pendingStreamingDeltas.delete(oldest);
-  }
 }
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
@@ -1496,6 +1524,7 @@ export function syncFailedSessionsFromMessages(
 
   for (const [sessionId, info] of latestBySession) {
     if (info.role !== 'assistant' || !info.error) continue;
+    if (isAbortedAssistantError(info.error)) continue;
     const session = state.sessions.find((item) => item.id === sessionId);
     if (!session) continue;
     failedSessionIds.add(sessionId);
@@ -1519,63 +1548,56 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
     return;
   }
 
-  if (current.length !== incoming.length) {
-    let prefixMatch = true;
-    const minLen = Math.min(current.length, incoming.length);
-    for (let i = 0; i < minLen && prefixMatch; i++) {
-      if (current[i].info.id !== incoming[i].info.id) prefixMatch = false;
-    }
-    if (prefixMatch) {
-      setState(
-        'messages',
-        produce((msgs) => {
-          let changed = false;
-          for (let i = 0; i < incoming.length; i++) {
-            if (i < msgs.length) {
-              if (!areMessageEntriesEquivalent(msgs[i], incoming[i])) {
-                msgs[i] = incoming[i];
-                changed = true;
-              }
-            } else {
-              msgs.push(incoming[i]);
-              changed = true;
-            }
-          }
-          if (msgs.length !== incoming.length) {
-            msgs.length = incoming.length;
+  const sharedPrefixLength = getSharedMessagePrefixLength(current, incoming);
+
+  if (sharedPrefixLength === 0) {
+    replaceMessages(incoming);
+    return;
+  }
+
+  setState(
+    'messages',
+    produce((msgs) => {
+      let changed = false;
+      for (let i = 0; i < incoming.length; i++) {
+        const next = incoming[i];
+        if (i < sharedPrefixLength) {
+          if (!areMessageEntriesEquivalent(msgs[i], next)) {
+            msgs[i] = next;
             changed = true;
           }
-          if (changed) invalidateIndex();
-        })
-      );
-      return;
-    }
-  }
+          continue;
+        }
 
-  if (current.length === incoming.length) {
-    let identical = true;
-    for (let i = 0; i < current.length && identical; i++) {
-      if (current[i].info.id !== incoming[i].info.id) identical = false;
-    }
-    if (identical) {
-      setState(
-        'messages',
-        produce((msgs) => {
-          let changed = false;
-          for (let i = 0; i < incoming.length; i++) {
-            if (msgs[i] !== incoming[i]) {
-              msgs[i] = incoming[i];
-              changed = true;
-            }
+        if (i < msgs.length) {
+          if (msgs[i] !== next) {
+            msgs[i] = next;
+            changed = true;
           }
-          if (changed) invalidateIndex();
-        })
-      );
-      return;
-    }
-  }
+        } else {
+          msgs.push(next);
+          changed = true;
+        }
+      }
+      if (msgs.length !== incoming.length) {
+        msgs.length = incoming.length;
+        changed = true;
+      }
+      if (changed) invalidateIndex();
+    })
+  );
+}
 
-  replaceMessages(incoming);
+function getSharedMessagePrefixLength(
+  current: Array<{ info: Message; parts: Part[] }>,
+  incoming: Array<{ info: Message; parts: Part[] }>
+) {
+  const minLen = Math.min(current.length, incoming.length);
+  let index = 0;
+  while (index < minLen && current[index].info.id === incoming[index].info.id) {
+    index += 1;
+  }
+  return index;
 }
 
 function areMessageEntriesEquivalent(

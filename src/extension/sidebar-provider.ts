@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { readFile } from 'fs/promises';
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { tmpdir } from 'os';
+import { Buffer } from 'buffer';
 import { randomBytes } from 'crypto';
 import { resolve, join, isAbsolute } from 'path';
 import type {
@@ -40,6 +42,11 @@ import {
   type ProviderAuthRecord,
   type ProviderMetadata,
 } from './util/provider-limit';
+import {
+  getOpenCodePlansDirectory,
+  getPlanFileName,
+  normalizePlanMarkdown,
+} from './util/plan-file';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -144,7 +151,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private shouldShowNotification() {
-    return !this.view?.visible || !vscode.window.state.focused || !this.webviewHasFocus;
+    // Suppress VS Code in-editor notifications when the chat view is open.
+    // Only show notifications when the chat view is not visible.
+    return !this.view?.visible;
   }
 
   private showInterruptedSessionNotification() {
@@ -419,6 +428,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'files/drop':
           await this.handleDroppedPaths(msg.payload.paths);
           break;
+        case 'files/drop-content':
+          await this.handleDroppedContent(msg.payload.files);
+          break;
         case 'files/remove':
           this.removeContextFile(msg.payload.path);
           break;
@@ -517,6 +529,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      const planOpenRequest = this.parsePlanOpenRequest(method, payload.path, payload.body);
+      if (planOpenRequest) {
+        const data = await this.openPlanDocument(planOpenRequest.content);
+        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        return;
+      }
+
       if (this.simulateNoProviders && method === 'GET' && payload.path === '/config/providers') {
         this.post({
           type: 'api/response',
@@ -548,6 +567,45 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       providerID,
       modelID: url.searchParams.get('modelID')?.trim() || null,
     };
+  }
+
+  private parsePlanOpenRequest(method: string, path: string, body: unknown) {
+    if (method !== 'POST' || path !== '/varro/plan/open') return null;
+
+    const payload = asRecord(body);
+    const content = typeof payload?.content === 'string' ? payload.content : '';
+    if (!content.trim()) {
+      throw new Error('Plan content is empty');
+    }
+    if (content.length > 1_000_000) {
+      throw new Error('Plan content is too large to save');
+    }
+
+    return { content };
+  }
+
+  private async openPlanDocument(content: string) {
+    const normalized = normalizePlanMarkdown(content);
+    if (!normalized) {
+      throw new Error('Plan content is empty');
+    }
+
+    const plansDir = getOpenCodePlansDirectory();
+    const filename = getPlanFileName(normalized);
+    const directoryUri = vscode.Uri.file(plansDir);
+    const fileUri = vscode.Uri.file(join(plansDir, filename));
+
+    await vscode.workspace.fs.createDirectory(directoryUri);
+
+    try {
+      await vscode.workspace.fs.stat(fileUri);
+    } catch {
+      await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(`${normalized}\n`));
+    }
+
+    const document = await vscode.workspace.openTextDocument(fileUri);
+    await vscode.window.showTextDocument(document, { preview: false });
+    return { path: fileUri.fsPath };
   }
 
   private getProviderLimit(providerID: string, modelID: string | null) {
@@ -689,7 +747,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return Array.isArray(config?.providers)
         ? config.providers.filter((item): item is ProviderMetadata => Boolean(asRecord(item)))
         : [];
-    })();
+    })().catch((err) => {
+      if (this.providerMetadataPromise) {
+        this.providerMetadataPromise = null;
+        this.providerMetadataFetchedAt = 0;
+      }
+      throw err;
+    });
 
     return this.providerMetadataPromise;
   }
@@ -699,13 +763,58 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(msg);
   }
 
+  async handleDroppedContent(files: Array<{ name: string; content: string; size: number }>) {
+    const dropsDir = join(tmpdir(), 'varro-drops');
+    try {
+      await mkdir(dropsDir, { recursive: true });
+    } catch (err) {
+      logger.warn(
+        `Failed to create drop temp dir: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return;
+    }
+
+    const results = await Promise.all(
+      files.map(async (file) => {
+        try {
+          const buffer = Buffer.from(file.content, 'base64');
+          const safeName = sanitizeDroppedFileName(file.name);
+          const targetPath = join(
+            dropsDir,
+            `${Date.now()}-${randomBytes(4).toString('hex')}-${safeName}`
+          );
+          await writeFile(targetPath, buffer);
+          const uri = vscode.Uri.file(targetPath);
+          return {
+            path: uri.fsPath,
+            relativePath: safeName,
+            type: 'file' as 'file' | 'directory',
+          };
+        } catch (err) {
+          logger.warn(
+            `Failed to write dropped file ${file.name}: ${err instanceof Error ? err.message : String(err)}`
+          );
+          return null;
+        }
+      })
+    );
+
+    const valid = results.filter(
+      (item): item is { path: string; relativePath: string; type: 'file' | 'directory' } =>
+        item !== null
+    );
+    if (valid.length > 0) {
+      this.postDroppedFiles(valid);
+    }
+  }
+
   async handleDroppedPaths(paths: string[]) {
     const dropped = await Promise.all(
       Array.from(new Set(paths)).map(async (path) => {
         try {
           const uri = await this.resolveDroppedUri(path);
           if (!uri) {
-            throw new Error('Path is not part of the current workspace or does not exist');
+            throw new Error('Path does not exist');
           }
           const stat = await vscode.workspace.fs.stat(uri);
           const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
@@ -744,7 +853,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (isAbsolute(input)) {
       try {
         await vscode.workspace.fs.stat(absoluteUri);
-        return vscode.workspace.getWorkspaceFolder(absoluteUri) ? absoluteUri : null;
+        return absoluteUri;
       } catch {
         return null;
       }
@@ -1007,6 +1116,12 @@ type WebviewAssetContent = {
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function sanitizeDroppedFileName(name: string): string {
+  const base = name.split(/[\\/]/).pop() || 'dropped';
+  const sanitized = base.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+  return sanitized || 'dropped';
 }
 
 function shouldClearProviderLimitCache(previous: ServerStatus, next: ServerStatus) {

@@ -39,7 +39,7 @@ import {
   getUserMessagePreviewText,
   type AssistantFileEditStackGroup,
 } from './Message';
-import { implementPlan, recheckSessionStatus } from '../hooks/useOpenCode';
+import { implementPlan, openPlan, recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import {
@@ -129,6 +129,18 @@ export function getStandaloneQuestionPrompts(
 export function buildPlanImplementationPrompt(parts: Part[]) {
   void parts;
   return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
+}
+
+export function buildPlanDocumentContent(parts: Part[]) {
+  return parts
+    .filter(
+      (part): part is Extract<Part, { type: 'text' }> =>
+        part.type === 'text' && !part.synthetic && !part.ignored
+    )
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
 }
 
 export function getLatestPlanImplementationMessageId(
@@ -986,6 +998,9 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
                 props.msg.info.sessionID
               )
             }
+            onOpenPlan={() =>
+              void openPlan(buildPlanDocumentContent(props.msg.parts), props.msg.info.sessionID)
+            }
             onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
           />
         )}
@@ -1060,6 +1075,7 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
 function AssistantDialogSummary(props: {
   summary: AssistantDialogSummaryInfo;
   showImplementPlanAction?: boolean;
+  onOpenPlan?: () => void;
   onImplementPlan?: () => void;
   onSkipPlan?: () => void;
 }) {
@@ -1077,6 +1093,14 @@ function AssistantDialogSummary(props: {
         <div class="assistant-dialog-summary-actions">
           <button
             type="button"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-neutral"
+            disabled={isLoading()}
+            onClick={() => props.onOpenPlan?.()}
+          >
+            Open plan
+          </button>
+          <button
+            type="button"
             class="assistant-dialog-summary-action assistant-dialog-summary-action-implement"
             disabled={isLoading()}
             onClick={() => props.onImplementPlan?.()}
@@ -1085,7 +1109,7 @@ function AssistantDialogSummary(props: {
           </button>
           <button
             type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-secondary"
+            class="assistant-dialog-summary-action assistant-dialog-summary-action-danger"
             onClick={() => props.onSkipPlan?.()}
           >
             Skip for now

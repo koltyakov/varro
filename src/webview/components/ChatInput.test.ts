@@ -1,27 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { isToolbarControlCompacted, isToolbarControlHidden } from './ChatInput';
+import {
+  getMentionCompletionItems,
+  isToolbarControlCompacted,
+  isToolbarControlHidden,
+} from './ChatInput';
 
 describe('isToolbarControlCompacted', () => {
-  it('shortens agent and reasoning before model truncation begins', () => {
+  it('removes the stop label before compacting other toolbar controls', () => {
     expect(isToolbarControlCompacted('full', 'agent')).toBe(false);
     expect(isToolbarControlCompacted('full', 'reasoning')).toBe(false);
     expect(isToolbarControlCompacted('full', 'stop')).toBe(false);
 
+    expect(isToolbarControlCompacted('compact-stop', 'stop')).toBe(true);
+    expect(isToolbarControlCompacted('compact-stop', 'agent')).toBe(false);
+    expect(isToolbarControlCompacted('compact-stop', 'reasoning')).toBe(false);
+
     expect(isToolbarControlCompacted('compact-agent', 'agent')).toBe(true);
     expect(isToolbarControlCompacted('compact-agent', 'reasoning')).toBe(false);
-    expect(isToolbarControlCompacted('compact-agent', 'stop')).toBe(false);
+    expect(isToolbarControlCompacted('compact-agent', 'stop')).toBe(true);
 
     expect(isToolbarControlCompacted('compact-reasoning', 'agent')).toBe(true);
     expect(isToolbarControlCompacted('compact-reasoning', 'reasoning')).toBe(true);
-    expect(isToolbarControlCompacted('compact-reasoning', 'stop')).toBe(false);
+    expect(isToolbarControlCompacted('compact-reasoning', 'stop')).toBe(true);
 
     expect(isToolbarControlCompacted('truncate-model', 'agent')).toBe(true);
     expect(isToolbarControlCompacted('truncate-model', 'reasoning')).toBe(true);
-    expect(isToolbarControlCompacted('truncate-model', 'stop')).toBe(false);
-
-    expect(isToolbarControlCompacted('compact-stop', 'stop')).toBe(true);
-    expect(isToolbarControlCompacted('compact-stop', 'agent')).toBe(true);
-    expect(isToolbarControlCompacted('compact-stop', 'reasoning')).toBe(true);
+    expect(isToolbarControlCompacted('truncate-model', 'stop')).toBe(true);
   });
 });
 
@@ -69,5 +73,53 @@ describe('isToolbarControlHidden', () => {
     expect(isToolbarControlHidden('tight', 'agent')).toBe(true);
     expect(isToolbarControlHidden('tight', 'stop')).toBe(true);
     expect(isToolbarControlHidden('tight', 'context')).toBe(true);
+  });
+});
+
+describe('getMentionCompletionItems', () => {
+  const agents = [
+    {
+      name: 'helper',
+      description: 'Helpful agent',
+      mode: 'all',
+      permission: {
+        edit: 'allow',
+        bash: { '*': 'allow' },
+      },
+    },
+  ];
+
+  const files = [
+    {
+      path: '/workspace/README.md',
+      relativePath: 'README.md',
+      type: 'file' as const,
+    },
+  ];
+
+  it('shows file results for bare filename queries', () => {
+    const completions = getMentionCompletionItems({
+      rawQuery: 'readme',
+      agents,
+      files,
+    });
+
+    expect(completions.some((item) => item.type === 'file' && item.label === '@README.md')).toBe(
+      true
+    );
+  });
+
+  it('shows file results for empty @ queries', () => {
+    const completions = getMentionCompletionItems({
+      rawQuery: '',
+      agents,
+      files,
+      meta: { showFileSearchHint: true },
+    });
+
+    expect(completions.some((item) => item.type === 'agent' && item.label === '@helper')).toBe(
+      true
+    );
+    expect(completions.some((item) => item.type === 'file')).toBe(false);
   });
 });

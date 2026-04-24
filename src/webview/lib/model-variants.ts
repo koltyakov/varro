@@ -34,6 +34,10 @@ function isHighReasoningVariant(variantName: string) {
   return getVariantKind(variantName) === 'high';
 }
 
+function shouldPreferLowReasoningByDefault(modelID: string | null | undefined) {
+  return modelID === 'gpt-5.5';
+}
+
 export function getMatchingVariant(
   source: {
     providerID: string | null | undefined;
@@ -77,6 +81,11 @@ export function getPreferredVariant(
 ) {
   const variants = getVariantsForModel(providerID, modelID, providers);
   if (variants.length === 0) return null;
+
+  if (shouldPreferLowReasoningByDefault(modelID)) {
+    const lowVariant = variants.find((variant) => isLowReasoningVariant(variant));
+    if (lowVariant) return lowVariant;
+  }
 
   const lastIndex = variants.length - 1;
   const highIndex = variants.findIndex(

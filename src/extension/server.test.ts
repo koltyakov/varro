@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as FsModule from 'fs';
 import type { ServerStatus } from '../shared/protocol';
+
+type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
 
 const { loggerMock, vscodeMock } = vi.hoisted(() => ({
   loggerMock: {
@@ -10,7 +13,11 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
   vscodeMock: {
     window: {
       activeTextEditor: undefined,
-      showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
+      showInformationMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
+      createTerminal: vi.fn(() => ({
+        show: vi.fn(),
+        sendText: vi.fn(),
+      })),
     },
     workspace: {
       getWorkspaceFolder: vi.fn(),
@@ -21,8 +28,16 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof FsModule>('fs');
+  return {
+    ...actual,
+    existsSync: vi.fn(actual.existsSync),
+  };
+});
 
 import { OpenCodeServer } from './server';
+import { existsSync } from 'fs';
 
 function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve());
@@ -68,6 +83,27 @@ function createChunkedEventResponse(signal: AbortSignal, chunks: Uint8Array[]) {
           read() {
             const chunk = chunks[index++];
             return chunk ? Promise.resolve({ value: chunk, done: false }) : waitForAbort(signal);
+          },
+        };
+      },
+    },
+  } as unknown as Response;
+}
+
+function createImmediateEventResponse(payload: string) {
+  const bytes = new TextEncoder().encode(payload);
+  let delivered = false;
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        return {
+          read() {
+            if (!delivered) {
+              delivered = true;
+              return Promise.resolve({ value: bytes, done: false });
+            }
+            return Promise.resolve({ value: undefined, done: true });
           },
         };
       },
@@ -177,7 +213,7 @@ describe('OpenCodeServer event stream', () => {
     ).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_500);
     await flushMicrotasks();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -192,7 +228,7 @@ describe('OpenCodeServer event stream', () => {
     setRestartTimer(server, setTimeout(restart, 1_000));
 
     await server.dispose();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_500);
 
     expect(restart).not.toHaveBeenCalled();
   });
@@ -221,12 +257,88 @@ describe('OpenCodeServer event stream', () => {
       )
     ).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_500);
     await flushMicrotasks();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await server.dispose();
+  });
+
+  it('drops oversized SSE payloads before parsing them', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const events: unknown[] = [];
+    server.on('event', (event) => events.push(event));
+    setRunning(server);
+
+    const oversizedPayload = `data: {"type":"${'x'.repeat(250_001)}"}\n\n`;
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(createImmediateEventResponse(oversizedPayload));
+
+    await startEventStream(server);
+
+    expect(events).toEqual([]);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Ignoring oversized event stream payload (250012 chars > 250000)'
+    );
+
+    await server.dispose();
+  });
+
+  it('ignores stale stream events after a newer stream replaces them', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const events: unknown[] = [];
+    server.on('event', (event) => events.push(event));
+    setRunning(server);
+
+    let releaseFirstRead: (() => void) | null = null;
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (_input, init) => {
+      const signal = init?.signal as AbortSignal;
+      if (!releaseFirstRead) {
+        let chunkDelivered = false;
+        return {
+          ok: true,
+          body: {
+            getReader() {
+              return {
+                async read() {
+                  if (!chunkDelivered) {
+                    chunkDelivered = true;
+                    await new Promise<void>((resolve) => {
+                      releaseFirstRead = resolve;
+                    });
+                    return {
+                      value: new TextEncoder().encode('data: {"type":"session.created"}\n\n'),
+                      done: false,
+                    };
+                  }
+                  return waitForAbort(signal);
+                },
+              };
+            },
+          },
+        } as unknown as Response;
+      }
+
+      return createPendingEventResponse(signal);
+    });
+
+    const firstStream = startEventStream(server);
+    await flushMicrotasks();
+    const secondStream = startEventStream(server);
+    await flushMicrotasks();
+
+    const release = releaseFirstRead as unknown;
+    if (typeof release === 'function') {
+      release();
+    }
+    await firstStream;
+
+    expect(events).toEqual([]);
+
+    stopEventStream(server);
+    await secondStream;
   });
 
   it('keeps the managed process alive during disconnect', async () => {
@@ -369,7 +481,51 @@ describe('OpenCodeServer maintenance', () => {
 
     expect(readLatestCliVersion).toHaveBeenCalledTimes(1);
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
-      'OpenCode CLI 1.14.22 is available (installed: 1.14.20). Update with: npm install -g opencode-ai@latest'
+      'OpenCode CLI 1.14.22 is available (installed: 1.14.20). Update with: opencode upgrade',
+      'Run Upgrade'
     );
+  });
+
+  it('runs the upgrade command in an integrated terminal when the notification action is selected', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const terminal = {
+      show: vi.fn(),
+      sendText: vi.fn(),
+    };
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+
+    api.readLatestCliVersion = readLatestCliVersion;
+    vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
+    vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
+
+    expect(vscodeMock.window.createTerminal).toHaveBeenCalledWith({
+      name: 'OpenCode Upgrade',
+      cwd: undefined,
+    });
+    expect(terminal.show).toHaveBeenCalledWith(false);
+    expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+  });
+});
+
+describe('OpenCodeServer command resolution', () => {
+  it('caches the resolved CLI path across repeated lookups', () => {
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      getResolvedCommandCacheKey: () => string;
+      resolveCommand: () => string;
+      resolvedCommandCache: { key: string; value: string } | null;
+    };
+    api.getResolvedCommandCacheKey = vi.fn(() => 'stable-key');
+    api.resolvedCommandCache = { key: 'stable-key', value: '/tmp/bin/opencode' };
+
+    expect(api.resolveCommand()).toBe('/tmp/bin/opencode');
+    expect(api.getResolvedCommandCacheKey).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(existsSync)).not.toHaveBeenCalled();
   });
 });

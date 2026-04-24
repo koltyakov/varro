@@ -12,6 +12,7 @@ import type {
   UserMessage,
 } from '../types';
 import {
+  buildPlanDocumentContent,
   buildPlanImplementationPrompt,
   getStickyUserMessagePreview,
   getStandalonePermissionPrompts,
@@ -180,6 +181,24 @@ describe('buildPlanImplementationPrompt', () => {
     ).toBe(
       'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.'
     );
+  });
+});
+
+describe('buildPlanDocumentContent', () => {
+  it('joins non-synthetic text parts into markdown content', () => {
+    expect(
+      buildPlanDocumentContent([
+        textPart('text-1', '# Plan'),
+        textPart('text-2', '1. First'),
+        textPart('text-3', 'ignore me', { synthetic: true }),
+      ])
+    ).toBe('# Plan\n\n1. First');
+  });
+
+  it('returns an empty string when no real text parts exist', () => {
+    expect(
+      buildPlanDocumentContent([textPart('synthetic', 'placeholder', { synthetic: true })])
+    ).toBe('');
   });
 });
 

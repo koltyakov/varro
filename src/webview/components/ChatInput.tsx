@@ -1,4 +1,5 @@
 import { Show, For, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import {
   state,
   inputText,
@@ -38,6 +39,7 @@ import {
 import { onMessage, postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
 import {
+  applySessionMcps,
   sendMessage,
   abortSession,
   createSession,
@@ -47,6 +49,7 @@ import {
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel } from './ModelPicker';
+import { McpPicker } from './McpPicker';
 import {
   formatAgentInitial,
   formatAgentLabel,
@@ -73,9 +76,11 @@ import {
   hasExplicitContextForPath,
 } from '../../shared/context-files';
 import { TodoList } from './TodoList';
+import { DocumentIcon } from './DocumentIcon';
 import type { Agent, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
+import { getProviderIcon } from '../lib/provider-icons';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
@@ -90,18 +95,39 @@ type ToolbarControl =
   | 'context';
 type ToolbarCompactMode =
   | 'full'
+  | 'compact-stop'
   | 'compact-agent'
   | 'compact-reasoning'
   | 'truncate-model'
   | 'hide-permission'
   | 'hide-attachments'
-  | 'compact-stop'
   | 'hide-send'
   | 'hide-reasoning'
   | 'hide-agent'
   | 'hide-stop'
   | 'hide-context'
   | 'tight';
+
+type MentionCompletionItem =
+  | {
+      key: string;
+      type: 'agent';
+      label: string;
+      detail: string;
+      value: string;
+    }
+  | {
+      key: string;
+      type: 'file';
+      label: string;
+      detail: string;
+      value: string;
+      file: DroppedFile;
+    };
+
+type MentionCompletionMeta = {
+  showFileSearchHint: boolean;
+};
 
 const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
   'permission',
@@ -115,12 +141,12 @@ const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
 
 const TOOLBAR_COMPACT_MODES: ToolbarCompactMode[] = [
   'full',
+  'compact-stop',
   'compact-agent',
   'compact-reasoning',
   'truncate-model',
   'hide-permission',
   'hide-attachments',
-  'compact-stop',
   'hide-send',
   'hide-reasoning',
   'hide-agent',
@@ -154,10 +180,15 @@ export function isToolbarControlCompacted(
   mode: ToolbarCompactMode,
   control: 'agent' | 'reasoning' | 'stop'
 ) {
-  if (control === 'agent') return mode !== 'full';
-  if (control === 'reasoning') return !['full', 'compact-agent'].includes(mode);
+  if (control === 'agent') return !['full', 'compact-stop'].includes(mode);
+  if (control === 'reasoning') return !['full', 'compact-stop', 'compact-agent'].includes(mode);
   return [
     'compact-stop',
+    'compact-agent',
+    'compact-reasoning',
+    'truncate-model',
+    'hide-permission',
+    'hide-attachments',
     'hide-send',
     'hide-reasoning',
     'hide-agent',
@@ -183,6 +214,7 @@ export function ChatInput() {
   // oxlint-disable-next-line no-unassigned-vars
   let modelPickerRef: HTMLButtonElement | undefined;
   let modelPopoverRef: HTMLDivElement | undefined;
+  let mcpPopoverRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let toolbarRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
@@ -208,12 +240,14 @@ export function ChatInput() {
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [showPermissionModePicker, setShowPermissionModePicker] = createSignal(false);
   const [showContextPopup, setShowContextPopup] = createSignal(false);
+  const [showMcpPicker, setShowMcpPicker] = createSignal(false);
 
-  type PopupKind = 'agent' | 'variant' | 'model' | 'permission' | 'context' | 'busy';
+  type PopupKind = 'agent' | 'variant' | 'model' | 'permission' | 'context' | 'busy' | 'mcp';
   const closePopups = (except?: PopupKind) => {
     if (except !== 'agent') setShowAgentPicker(false);
     if (except !== 'variant') setShowVariantPicker(false);
     if (except !== 'model') setShowModelPicker(false);
+    if (except !== 'mcp') setShowMcpPicker(false);
     if (except !== 'permission') setShowPermissionModePicker(false);
     if (except !== 'context') setShowContextPopup(false);
     if (except !== 'busy') setShowBusyMenu(false);
@@ -226,6 +260,7 @@ export function ChatInput() {
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
   const [fileSearchQuery, setFileSearchQuery] = createSignal('');
+  const [showFileSearchHint, setShowFileSearchHint] = createSignal(false);
   const [suppressCompletion, setSuppressCompletion] = createSignal(false);
   const [toolbarCompactMode, setToolbarCompactMode] = createSignal<ToolbarCompactMode>('full');
   let latestFileSearchRequestId = 0;
@@ -271,6 +306,7 @@ export function ChatInput() {
       onConnectProvider: openProviderSetup,
       onOpenSessions: () => setShowSessionPicker(true),
       onOpenModels: () => setShowModelPicker(true),
+      onOpenMcps: () => setShowMcpPicker(true),
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
       onOpenSettings: () => setShowSettings(true),
     })
@@ -289,19 +325,13 @@ export function ChatInput() {
       }
       setFileSearchResults([]);
       setFileSearchQuery('');
+      setShowFileSearchHint(false);
       return;
     }
 
     const rawQuery = completion.query.trim();
-    if (!looksLikeFileMentionQuery(rawQuery)) {
-      if (fileSearchTimer) {
-        clearTimeout(fileSearchTimer);
-        fileSearchTimer = null;
-      }
-      setFileSearchResults([]);
-      setFileSearchQuery('');
-      return;
-    }
+
+    setShowFileSearchHint(rawQuery.length === 0);
 
     if (!rawQuery) {
       if (fileSearchTimer) {
@@ -330,44 +360,12 @@ export function ChatInput() {
     const completion = activeCompletion();
     if (completion?.type !== 'mention') return [];
 
-    const rawQuery = completion.query.trim();
-    const query = rawQuery.toLowerCase();
-    const fileLike = looksLikeFileMentionQuery(rawQuery);
-    const exactAgentMatch = mentionAgents().some((agent) => agent.name.toLowerCase() === query);
-    const exactFileMatch = fileSearchResults().some(
-      (file) => normalizeMentionPath(file.relativePath) === normalizeMentionPath(rawQuery)
-    );
-    if (query && (exactAgentMatch || exactFileMatch)) return [];
-
-    const agents = (fileLike ? [] : mentionAgents())
-      .filter((agent) => {
-        if (!query) return true;
-        return (
-          agent.name.toLowerCase().includes(query) ||
-          agent.description?.toLowerCase().includes(query)
-        );
-      })
-      .map((agent) => ({
-        key: `agent:${agent.name}`,
-        type: 'agent' as const,
-        label: `@${agent.name}`,
-        detail: agent.description || getAgentBadgeLine(agent),
-        value: `@${agent.name} `,
-      }));
-
-    const completionFiles = (rawQuery ? fileSearchResults() : []).map((file) => ({
-      key: `file:${file.path}`,
-      type: 'file' as const,
-      label: `@${file.relativePath}`,
-      detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
-      value:
-        file.type === 'directory'
-          ? `@${formatMentionPath(file.relativePath)}/`
-          : `@${formatMentionPath(file.relativePath)}`,
-      file,
-    }));
-
-    return [...completionFiles, ...agents].slice(0, 10);
+    return getMentionCompletionItems({
+      rawQuery: completion.query.trim(),
+      agents: mentionAgents(),
+      files: fileSearchResults(),
+      meta: { showFileSearchHint: showFileSearchHint() },
+    });
   });
 
   const slashCompletions = createMemo(() => {
@@ -396,6 +394,15 @@ export function ChatInput() {
     if (!completion) return [];
     return completion.type === 'slash' ? slashCompletions() : mentionCompletions();
   });
+
+  const showCompletionMenu = () => {
+    if (suppressCompletion()) return false;
+    const completion = activeCompletion();
+    if (!completion) return false;
+    return (
+      composerCompletions().length > 0 || (completion.type === 'mention' && showFileSearchHint())
+    );
+  };
 
   createEffect(() => {
     const length = composerCompletions().length;
@@ -795,6 +802,10 @@ export function ChatInput() {
     const dataTransfer = e.dataTransfer;
     if (!dataTransfer) return;
 
+    // Snapshot File objects now — DataTransfer is invalidated after the drop
+    // event returns, so FileReader fallback later wouldn't see them otherwise.
+    const droppedFiles = Array.from(dataTransfer.files || []);
+
     const paths = await collectDroppedPaths(dataTransfer);
     if (paths.length > 0) {
       postMessage({ type: 'files/drop', payload: { paths } });
@@ -828,8 +839,31 @@ export function ChatInput() {
       const uris = parseDroppedText(plainText);
       if (uris.length > 0) {
         postMessage({ type: 'files/drop', payload: { paths: uris } });
+        return;
       }
     }
+
+    // Final fallback: no paths extractable (e.g. Finder drop on Electron 32+,
+    // where File.path is stripped). Read the file bytes and ship the content.
+    await sendDroppedContent(droppedFiles);
+  }
+
+  async function sendDroppedContent(droppedFiles: File[]) {
+    if (droppedFiles.length === 0) return;
+    const MAX_BYTES = 25 * 1024 * 1024;
+    const MAX_FILES = 20;
+
+    const payloads: Array<{ name: string; content: string; size: number }> = [];
+    for (const file of droppedFiles.slice(0, MAX_FILES)) {
+      if (file.size > MAX_BYTES) continue;
+      try {
+        const base64 = await readFileAsBase64(file);
+        payloads.push({ name: file.name, content: base64, size: file.size });
+      } catch {}
+    }
+
+    if (payloads.length === 0) return;
+    postMessage({ type: 'files/drop-content', payload: { files: payloads } });
   }
 
   async function handlePaste(e: ClipboardEvent) {
@@ -911,6 +945,9 @@ export function ChatInput() {
       if (showModelPicker() && clickedOutside(target, modelPickerRef, modelPopoverRef)) {
         setShowModelPicker(false);
       }
+      if (showMcpPicker() && target && !mcpPopoverRef?.contains(target)) {
+        setShowMcpPicker(false);
+      }
       if (showVariantPicker() && clickedOutside(target, variantPickerRef, variantPopoverRef)) {
         setShowVariantPicker(false);
       }
@@ -968,6 +1005,7 @@ export function ChatInput() {
         showAgentPicker() ||
         showVariantPicker() ||
         showModelPicker() ||
+        showMcpPicker() ||
         showPermissionModePicker()
       )
         return;
@@ -1187,6 +1225,7 @@ export function ChatInput() {
     showAgentPicker: showAgentPicker(),
     showVariantPicker: showVariantPicker(),
     showModelPicker: showModelPicker(),
+    showMcpPicker: showMcpPicker(),
     showPermissionModePicker: showPermissionModePicker(),
     showBusyMenu: showBusyMenu(),
     showContextPopup: showContextPopup(),
@@ -1209,9 +1248,10 @@ export function ChatInput() {
       !showContextPopup() &&
       !showAgentPicker() &&
       !showVariantPicker() &&
+      !showMcpPicker() &&
       !showPermissionModePicker() &&
       !showBusyMenu() &&
-      !(isFocused() && composerCompletions().length > 0 && !suppressCompletion())
+      !(isFocused() && showCompletionMenu())
   );
 
   const selectedAgentLabel = () => {
@@ -1233,7 +1273,7 @@ export function ChatInput() {
   };
 
   const modelCanEllipsize = () =>
-    !['full', 'compact-agent', 'compact-reasoning'].includes(toolbarCompactMode());
+    !['full', 'compact-stop', 'compact-agent', 'compact-reasoning'].includes(toolbarCompactMode());
   const isToolbarControlVisible = (control: ToolbarControl) =>
     !isToolbarControlHidden(toolbarCompactMode(), control);
 
@@ -1243,6 +1283,7 @@ export function ChatInput() {
       deps.showAgentPicker ||
       deps.showVariantPicker ||
       deps.showModelPicker ||
+      deps.showMcpPicker ||
       deps.showPermissionModePicker
     )
       return;
@@ -1254,7 +1295,29 @@ export function ChatInput() {
   return (
     <div class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}`}>
       <Show when={isDraggingOver()}>
-        <div class="chat-drop-overlay" aria-hidden="true" />
+        <Portal>
+          <div class="chat-drop-overlay" aria-hidden="true">
+            <div class="chat-drop-overlay-card">
+              <div class="chat-drop-overlay-icon">
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </div>
+              <div class="chat-drop-overlay-title">Drop to add to context</div>
+            </div>
+          </div>
+        </Portal>
       </Show>
 
       <Show when={queuedForSession().length > 0}>
@@ -1351,7 +1414,7 @@ export function ChatInput() {
 
       <div
         ref={containerRef}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && composerCompletions().length > 0 && !suppressCompletion()) ? 'showing-context-popup' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1398,6 +1461,15 @@ export function ChatInput() {
             }}
             onClose={() => setShowModelPicker(false)}
             popoverRef={(el) => (modelPopoverRef = el)}
+          />
+        </Show>
+
+        <Show when={showMcpPicker()}>
+          <McpPicker
+            sessionId={state.activeSessionId}
+            onChange={(names) => void applySessionMcps(names)}
+            onClose={() => setShowMcpPicker(false)}
+            popoverRef={(el) => (mcpPopoverRef = el)}
           />
         </Show>
 
@@ -1506,6 +1578,7 @@ export function ChatInput() {
               setCaretPosition(e.currentTarget.selectionStart || 0);
               setShowAgentPicker(false);
               setShowModelPicker(false);
+              setShowMcpPicker(false);
               setShowVariantPicker(false);
               setShowPermissionModePicker(false);
               setShowBusyMenu(false);
@@ -1514,10 +1587,11 @@ export function ChatInput() {
             onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
           />
 
-          <Show when={isFocused() && composerCompletions().length > 0 && !suppressCompletion()}>
+          <Show when={isFocused() && showCompletionMenu()}>
             <CompletionMenu
               items={composerCompletions()}
               selectedIndex={completionIndex()}
+              header={showFileSearchHint() ? 'Type to search workspace files' : undefined}
               onSelect={(item) => {
                 const completion = activeCompletion();
                 if (!completion) return;
@@ -1539,7 +1613,7 @@ export function ChatInput() {
         >
           <div
             ref={toolbarLeftRef}
-            class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
+            class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
           >
             <Show when={isToolbarControlVisible('permission')}>
               <div style={{ position: 'relative' }}>
@@ -1667,7 +1741,18 @@ export function ChatInput() {
                 when={currentModel().modelName}
                 fallback={<span class="toolbar-picker-label model-name">Model</span>}
               >
-                <span class="toolbar-picker-label model-name">{currentModel().modelName}</span>
+                <span class="toolbar-picker-label model-name">
+                  <Show when={getProviderIcon(currentModel().providerID)}>
+                    {(icon) => (
+                      <span
+                        class="provider-icon"
+                        style={{ '--provider-icon-mask': `url("${icon()}")` }}
+                        aria-hidden="true"
+                      />
+                    )}
+                  </Show>
+                  <span class="model-name-text">{currentModel().modelName}</span>
+                </span>
               </Show>
               <svg
                 class="codicon-chevron"
@@ -2104,6 +2189,7 @@ function CompletionMenu(props: {
   items: CompletionItem[];
   selectedIndex: number;
   onSelect: (item: CompletionItem) => void;
+  header?: string;
 }) {
   // oxlint-disable-next-line no-unassigned-vars
   let menuRef: HTMLDivElement | undefined;
@@ -2134,15 +2220,19 @@ function CompletionMenu(props: {
 
   return (
     <div class="composer-completion-menu" ref={menuRef}>
+      <Show when={props.header}>
+        <div class="composer-completion-header">{props.header}</div>
+      </Show>
       <For each={props.items}>
         {(item, index) => {
           const isSlash = item.type === 'slash';
           const title = 'name' in item ? `/${item.name}` : item.label;
           const detail = 'description' in item ? item.description : item.detail;
+          const enableMarquee = item.type === 'file';
           return (
             <button
               ref={(el) => itemRefs.set(index(), el)}
-              class={`composer-completion-item ${props.selectedIndex === index() ? 'selected' : ''}`}
+              class={`composer-completion-item completion-${item.type} ${props.selectedIndex === index() ? 'selected' : ''}`}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => props.onSelect(item)}
             >
@@ -2150,25 +2240,78 @@ function CompletionMenu(props: {
                 <span class="composer-completion-icon">
                   <Show
                     when={item.type === 'agent'}
-                    fallback={
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-                      </svg>
-                    }
+                    fallback={<DocumentIcon width={14} height={14} />}
                   >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M2.5 1h3.4l.6.5.5.5H14l.5.5v10l-.5.5H2l-.5-.5v-11L2.5 1zm0 1v3h4l.5.5.5.5h4v-3H8.5L8 2.5l-.5-.5H2.5zm0 10h11V6h-4l-.5-.5L8.5 5h-6v7z" />
+                    <svg width="14" height="14" viewBox="0 0 32 32" aria-hidden="true">
+                      <path
+                        fill="currentColor"
+                        d="M28 12V4h-8v3.546l-6 5.25V11H4v10h10v-1.796l6 5.25V28h8v-8h-8v1.796l-6-5.25v-1.092l6-5.25V12h8zM22 22h4v4h-4v-4zM12 19H6v-6h6v6zM22 6h4v4h-4V6z"
+                      />
                     </svg>
                   </Show>
                 </span>
               </Show>
-              <span class="composer-completion-title">{title}</span>
-              <span class="composer-completion-detail">{detail}</span>
+              <CompletionTitle title={title} enableMarquee={enableMarquee} />
+              <span class="composer-completion-detail" title={detail}>
+                {detail}
+              </span>
             </button>
           );
         }}
       </For>
     </div>
+  );
+}
+
+function CompletionTitle(props: { title: string; enableMarquee?: boolean }) {
+  let shellRef: HTMLSpanElement | undefined;
+  let textRef: HTMLSpanElement | undefined;
+  const [overflowDistance, setOverflowDistance] = createSignal(0);
+
+  const measure = () => {
+    if (!props.enableMarquee || !shellRef || !textRef) {
+      setOverflowDistance(0);
+      return;
+    }
+
+    const distance = Math.ceil(textRef.scrollWidth - shellRef.clientWidth);
+    setOverflowDistance(distance > 1 ? distance : 0);
+  };
+
+  onMount(() => {
+    queueMicrotask(measure);
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => measure());
+    if (shellRef) observer.observe(shellRef);
+    if (textRef) observer.observe(textRef);
+    onCleanup(() => observer.disconnect());
+  });
+
+  createEffect(() => {
+    void props.title;
+    void props.enableMarquee;
+    queueMicrotask(measure);
+  });
+
+  return (
+    <span class="composer-completion-title-shell" ref={(el) => (shellRef = el)}>
+      <span
+        ref={(el) => (textRef = el)}
+        class={`composer-completion-title ${overflowDistance() > 0 ? 'marquee' : ''}`}
+        title={props.title}
+        style={
+          overflowDistance() > 0
+            ? {
+                '--marquee-distance': `${overflowDistance()}px`,
+                '--marquee-duration': `${Math.max(2.2, 1.2 + overflowDistance() / 90)}s`,
+              }
+            : undefined
+        }
+      >
+        {props.title}
+      </span>
+    </span>
   );
 }
 
@@ -2228,9 +2371,7 @@ function AttachmentChip(props: {
         </svg>
       </Show>
       <Show when={props.icon !== 'image' && props.icon !== 'folder' && props.icon !== 'terminal'}>
-        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-        </svg>
+        <DocumentIcon class="chip-icon" width="12" height="12" />
       </Show>
       <span class="chip-label">{props.label}</span>
       <Show when={props.detail}>
@@ -2278,6 +2419,7 @@ function getSlashCommands(props: {
   onConnectProvider: () => void;
   onOpenSessions: () => void;
   onOpenModels: () => void;
+  onOpenMcps: () => void;
   onOpenFiles: () => void;
   onOpenSettings: () => void;
 }): SlashCommand[] {
@@ -2301,6 +2443,12 @@ function getSlashCommands(props: {
       aliases: [],
       description: 'Open the model picker',
       action: props.onOpenModels,
+    },
+    {
+      name: 'mcps',
+      aliases: ['mcp'],
+      description: 'Open the MCP picker for this session',
+      action: props.onOpenMcps,
     },
     {
       name: 'connect',
@@ -2431,8 +2579,56 @@ function getAgentBadgeLine(agent: Agent) {
   return badges.join(' · ');
 }
 
-function looksLikeFileMentionQuery(query: string) {
-  return /[./\\]/.test(query);
+export function getMentionCompletionItems({
+  rawQuery,
+  agents,
+  files,
+  meta,
+}: {
+  rawQuery: string;
+  agents: Agent[];
+  files: DroppedFile[];
+  meta?: MentionCompletionMeta;
+}): MentionCompletionItem[] {
+  const query = rawQuery.toLowerCase();
+  const exactAgentMatch = agents.some((agent) => agent.name.toLowerCase() === query);
+  const exactFileMatch = files.some(
+    (file) => normalizeMentionPath(file.relativePath) === normalizeMentionPath(rawQuery)
+  );
+  if (query && (exactAgentMatch || exactFileMatch)) return [];
+
+  const agentItems = agents
+    .filter((agent) => {
+      if (!query) return true;
+      return (
+        agent.name.toLowerCase().includes(query) || agent.description?.toLowerCase().includes(query)
+      );
+    })
+    .map((agent) => ({
+      key: `agent:${agent.name}`,
+      type: 'agent' as const,
+      label: `@${agent.name}`,
+      detail: agent.description || getAgentBadgeLine(agent),
+      value: `@${agent.name} `,
+    }));
+
+  const fileItems = (rawQuery ? files : []).map((file) => ({
+    key: `file:${file.path}`,
+    type: 'file' as const,
+    label: `@${file.relativePath}`,
+    detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
+    value:
+      file.type === 'directory'
+        ? `@${formatMentionPath(file.relativePath)}/`
+        : `@${formatMentionPath(file.relativePath)}`,
+    file,
+  }));
+
+  if (!rawQuery && !meta?.showFileSearchHint) {
+    return agentItems.slice(0, 10);
+  }
+
+  return [...fileItems, ...agentItems].slice(0, 10);
 }
 
 function normalizeMentionPath(value: string) {
@@ -2768,6 +2964,23 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.addEventListener('error', () =>
       reject(reader.error || new Error('Failed to read clipboard image'))
     );
+    reader.readAsDataURL(file);
+  });
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('Unexpected FileReader result'));
+        return;
+      }
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : '');
+    });
+    reader.addEventListener('error', () => reject(reader.error || new Error('FileReader failed')));
     reader.readAsDataURL(file);
   });
 }

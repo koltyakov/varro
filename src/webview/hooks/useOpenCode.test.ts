@@ -16,7 +16,11 @@ const clientMocks = vi.hoisted(() => ({
   agentList: vi.fn(),
   providerList: vi.fn(),
   providerLimit: vi.fn(),
+  mcpStatus: vi.fn(),
+  mcpConnect: vi.fn(),
+  mcpDisconnect: vi.fn(),
   questionList: vi.fn(),
+  varroOpenPlan: vi.fn(),
   serverEventsOn: vi.fn(() => () => {}),
 }));
 
@@ -45,6 +49,14 @@ vi.mock('../lib/client', () => ({
     config: {
       providers: clientMocks.providerList,
       providerLimit: clientMocks.providerLimit,
+    },
+    varro: {
+      openPlan: clientMocks.varroOpenPlan,
+    },
+    mcp: {
+      status: clientMocks.mcpStatus,
+      connect: clientMocks.mcpConnect,
+      disconnect: clientMocks.mcpDisconnect,
     },
     question: {
       list: clientMocks.questionList,
@@ -164,10 +176,18 @@ beforeEach(() => {
   clientMocks.agentList.mockReset();
   clientMocks.providerList.mockReset();
   clientMocks.providerLimit.mockReset();
+  clientMocks.mcpStatus.mockReset();
+  clientMocks.mcpConnect.mockReset();
+  clientMocks.mcpDisconnect.mockReset();
   clientMocks.questionList.mockReset();
+  clientMocks.varroOpenPlan.mockReset();
   clientMocks.serverEventsOn.mockClear();
   bridgeMocks.onMessage.mockClear();
   bridgeMocks.postMessage.mockReset();
+  clientMocks.mcpStatus.mockResolvedValue({});
+  clientMocks.mcpConnect.mockResolvedValue(true);
+  clientMocks.mcpDisconnect.mockResolvedValue(true);
+  clientMocks.varroOpenPlan.mockResolvedValue({ path: '/tmp/plan.md' });
 });
 
 describe('sendMessage', () => {
@@ -922,6 +942,27 @@ describe('sendMessage', () => {
     });
   });
 
+  it('opens the saved plan document for the active session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+
+    await hookModule.openPlan('# Plan\n\n1. Ship it');
+
+    expect(clientMocks.varroOpenPlan).toHaveBeenCalledWith('# Plan\n\n1. Ship it');
+  });
+
+  it('does not try to open an empty plan', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+
+    await hookModule.openPlan('   ');
+
+    expect(clientMocks.varroOpenPlan).not.toHaveBeenCalled();
+    expect(stateModule.error()).toBe('Plan content is empty');
+  });
+
   it('continues the failed assistant turn with the interruption resume prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
 
@@ -1204,6 +1245,64 @@ describe('useOpenCode initialization', () => {
     } finally {
       dispose();
     }
+  });
+
+  it('syncs session-selected mcps when selecting a session', async () => {
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.mcpStatus
+      .mockResolvedValueOnce({
+        alpha: { status: 'connected' },
+        beta: { status: 'disabled' },
+      })
+      .mockResolvedValueOnce({
+        alpha: { status: 'disabled' },
+        beta: { status: 'connected' },
+      });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setSelectedMcpsForSession('session-1', ['beta']);
+
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await hookModule.selectSession('session-1');
+
+      expect(clientMocks.mcpDisconnect).toHaveBeenCalledWith('alpha');
+      expect(clientMocks.mcpConnect).toHaveBeenCalledWith('beta');
+    } finally {
+      dispose();
+    }
+  });
+
+  it('applies session mcps immediately when toggled', async () => {
+    clientMocks.mcpStatus
+      .mockResolvedValueOnce({
+        alpha: { status: 'connected' },
+        beta: { status: 'disabled' },
+      })
+      .mockResolvedValueOnce({
+        alpha: { status: 'disabled' },
+        beta: { status: 'connected' },
+      });
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+
+    await hookModule.applySessionMcps(['beta'], 'session-1');
+
+    expect(clientMocks.mcpDisconnect).toHaveBeenCalledWith('alpha');
+    expect(clientMocks.mcpConnect).toHaveBeenCalledWith('beta');
+    expect(stateModule.getSelectedMcpsForSession('session-1')).toEqual(['beta']);
   });
 
   it('applies desktop session pane side from config updates', async () => {

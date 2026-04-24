@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
-import type { FilePart, Part } from '../types';
+import { createSignal } from 'solid-js';
+import type { FilePart, Part, ToolPart } from '../types';
 import { Message, getAssistantContainerVariant, getUserMessagePreviewText } from './Message';
+import { resetToolCallExpansionState } from './ToolCall';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
 
@@ -23,6 +25,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   retryMessageMock.mockReset();
+  resetToolCallExpansionState();
 });
 
 function textPart(id: string, text: string): Part {
@@ -87,6 +90,33 @@ function imageFilePart(id: string, filename: string): FilePart {
     mime: 'image/png',
     filename,
     url: `https://example.test/${id}.png`,
+  };
+}
+
+function toolPart(id: string, state: ToolPart['state']): ToolPart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'tool',
+    callID: 'call-1',
+    tool: 'browser-bridge_browser_page',
+    state,
+  };
+}
+
+function completedToolState(
+  input: Record<string, unknown>,
+  output: string,
+  title = ''
+): Extract<ToolPart['state'], { status: 'completed' }> {
+  return {
+    status: 'completed',
+    input,
+    output,
+    title,
+    metadata: {},
+    time: { start: 0, end: 1 },
   };
 }
 
@@ -264,6 +294,47 @@ describe('Message user prompt rendering', () => {
   });
 });
 
+describe('Message tool call expansion', () => {
+  it('preserves expanded tool calls across assistant message updates', () => {
+    const [parts, setParts] = createSignal<Part[]>([
+      toolPart(
+        'tool-1',
+        completedToolState(
+          { action: 'text', textBudget: 5000 },
+          'Page text: 2908 chars.',
+          'browser_page'
+        )
+      ),
+    ]);
+
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-1'),
+          parts: parts(),
+        }),
+      container!
+    );
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
+
+    setParts([
+      toolPart(
+        'tool-1',
+        completedToolState(
+          { action: 'text', budgetPreset: 'normal', textBudget: 5000 },
+          'Page text: 2908 chars.',
+          'browser_page'
+        )
+      ),
+      textPart('text-1', 'The current page is cursor.com.'),
+    ]);
+
+    expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
+  });
+});
+
 describe('getUserMessagePreviewText', () => {
   it('ignores working-directory boilerplate and keeps the first meaningful text', () => {
     expect(
@@ -357,6 +428,102 @@ describe('Message streamed assistant text rendering', () => {
 });
 
 describe('Message assistant final answer rendering', () => {
+  it('shows the read mode toggle for large final answers', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-read-large'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', 'Status update.'),
+            textPart(
+              'text-2',
+              [
+                'Implemented the final fix across the highlighted layout and kept the intermediate updates separate.',
+                'The final answer now has enough detail to warrant read mode.',
+                'It includes multiple lines of explanation so longer responses stay comfortable to read.',
+                'This also gives the toggle a clear threshold-based behavior.',
+                'Users will no longer see the expand affordance for very short replies.',
+                'Only responses with enough content should show the button.',
+                'That keeps the card cleaner for compact confirmations.',
+                'This paragraph pushes the response over the large-response threshold.',
+              ].join('\n\n')
+            ),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    const toggle = container?.querySelector('.assistant-read-mode-toggle');
+    expect(toggle).toBeInstanceOf(HTMLButtonElement);
+  });
+
+  it('hides the read mode toggle for short final answers', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-read-short'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', 'Status update.'),
+            textPart('text-2', 'Final answer for reading.'),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
+  });
+
+  it('opens the final answer in read mode and closes with Escape', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-read-1'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', 'Status update.'),
+            textPart(
+              'text-2',
+              [
+                'Final answer for reading.',
+                'This version is intentionally long enough to trigger the read mode affordance.',
+                'It spans several paragraphs so the expanded reading surface is useful.',
+                'That keeps the test aligned with the production behavior for large responses.',
+                'The extra lines ensure the threshold is crossed without depending on exact markdown rendering.',
+                'Read mode should open from the final answer only.',
+                'Earlier status updates must stay out of the overlay.',
+                'Escape should still close the overlay cleanly.',
+              ].join('\n\n')
+            ),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    const toggle = container?.querySelector('.assistant-read-mode-toggle');
+    expect(toggle).toBeInstanceOf(HTMLButtonElement);
+
+    (toggle as HTMLButtonElement).click();
+
+    const overlay = container?.querySelector('.assistant-read-overlay');
+    const overlayContent = container?.querySelector('.assistant-read-mode-content');
+
+    expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(document.body.classList.contains('chat-read-mode-open')).toBe(true);
+    expect(overlayContent?.textContent).toContain('Final answer for reading.');
+    expect(overlayContent?.textContent).not.toContain('Status update.');
+    expect(overlayContent?.textContent).not.toContain('Thinking');
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(container?.querySelector('.assistant-read-overlay')).toBeNull();
+    expect(document.body.classList.contains('chat-read-mode-open')).toBe(false);
+  });
+
   it('marks the final text update inside a mixed assistant turn as a dedicated final answer block', () => {
     cleanup = render(
       () =>
@@ -527,5 +694,35 @@ describe('Message assistant final answer rendering', () => {
     (retryButton as HTMLButtonElement).click();
 
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
+  });
+
+  it('does not render a retry action for aborted assistant errors', async () => {
+    const { setState } = await import('../lib/state');
+    const assistant = {
+      ...assistantMessage('message-3'),
+      error: {
+        name: 'aborted',
+        data: { message: 'Aborted' },
+      },
+    };
+
+    setState('messages', [
+      {
+        info: assistant,
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+      },
+    ]);
+
+    cleanup = render(
+      () => Message({ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }),
+      container!
+    );
+
+    const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
+    const retryButton = container?.querySelector('.assistant-message-flow-item-error-action');
+
+    expect(errorBlock).toBeNull();
+    expect(retryButton).toBeNull();
+    expect(retryMessageMock).not.toHaveBeenCalled();
   });
 });

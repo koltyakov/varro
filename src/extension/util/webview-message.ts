@@ -5,6 +5,10 @@ const MAX_QUERY_LENGTH = 2048;
 const MAX_LOG_FIELD_LENGTH = 10_000;
 const MAX_SEARCH_QUERY_LENGTH = 200;
 const MAX_DROPPED_PATHS = 100;
+const MAX_DROPPED_CONTENT_FILES = 20;
+const MAX_DROPPED_CONTENT_BYTES = 25 * 1024 * 1024;
+const MAX_DROPPED_CONTENT_NAME_LENGTH = 512;
+const MAX_DROPPED_CONTENT_BASE64_LENGTH = Math.ceil((MAX_DROPPED_CONTENT_BYTES * 4) / 3) + 4;
 const API_BASE = 'http://varro.local';
 
 export function parseWebviewMessage(value: unknown): WebviewMessage | null {
@@ -42,6 +46,23 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return paths.every((path): path is string => Boolean(path))
         ? { type, payload: { paths } }
         : null;
+    }
+
+    case 'files/drop-content': {
+      const payload = asRecord(message?.payload);
+      if (!Array.isArray(payload?.files) || payload.files.length === 0) return null;
+      if (payload.files.length > MAX_DROPPED_CONTENT_FILES) return null;
+      const files: Array<{ name: string; content: string; size: number }> = [];
+      for (const entry of payload.files) {
+        const record = asRecord(entry);
+        const name = getBoundedString(record?.name, MAX_DROPPED_CONTENT_NAME_LENGTH);
+        const content = getBoundedString(record?.content, MAX_DROPPED_CONTENT_BASE64_LENGTH, true);
+        const size = getSafeInteger(record?.size);
+        if (!name || content === null || size === null || size > MAX_DROPPED_CONTENT_BYTES)
+          return null;
+        files.push({ name, content, size });
+      }
+      return { type, payload: { files } };
     }
 
     case 'files/remove':
@@ -170,6 +191,7 @@ export function isAllowedApiRequest(method: string, path: string) {
 
   if (pathname === '/global/health') return method === 'GET' && noQuery();
   if (pathname === '/config/providers') return method === 'GET' && noQuery();
+  if (pathname === '/mcp') return method === 'GET' && noQuery();
   if (pathname === '/file/status') return method === 'GET' && noQuery();
   if (pathname === '/agent') return method === 'GET' && noQuery();
   if (pathname === '/question') return method === 'GET' && noQuery();
@@ -182,9 +204,16 @@ export function isAllowedApiRequest(method: string, path: string) {
       Boolean(url.searchParams.get('providerID')?.trim())
     );
   }
+  if (pathname === '/varro/plan/open') return method === 'POST' && noQuery();
 
   if (segments[0] === 'question' && segments.length === 3) {
     return method === 'POST' && noQuery() && (segments[2] === 'reply' || segments[2] === 'reject');
+  }
+
+  if (segments[0] === 'mcp' && segments.length === 3) {
+    return (
+      method === 'POST' && noQuery() && (segments[2] === 'connect' || segments[2] === 'disconnect')
+    );
   }
 
   if (segments[0] !== 'session' || segments.length < 2) return false;

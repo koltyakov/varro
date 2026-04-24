@@ -12,6 +12,8 @@ import { buildServerEnv, getServerPathEntries } from './util/server-path';
 export class OpenCodeServer extends EventEmitter {
   private static readonly MISSING_CLI_MESSAGE =
     'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
+  private static readonly CLI_UPGRADE_COMMAND = 'opencode upgrade';
+  private static readonly CLI_UPGRADE_ACTION = 'Run Upgrade';
   private static readonly START_DISPOSED_MESSAGE = 'Server start was cancelled';
   private static readonly HEALTH_TIMEOUT_MS = 2000;
   private static readonly REQUEST_TIMEOUT_MS = 30_000;
@@ -22,6 +24,7 @@ export class OpenCodeServer extends EventEmitter {
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
   private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
   private static readonly EVENT_MAX_BUFFER_CHARS = 1_000_000;
+  private static readonly EVENT_MAX_PAYLOAD_CHARS = 250_000;
   private static readonly PORT_FALLBACK_MAX_OFFSET = 10;
   private process: ChildProcess | null = null;
   private _status: ServerStatus = { state: 'stopped' };
@@ -39,6 +42,7 @@ export class OpenCodeServer extends EventEmitter {
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private eventReconnectDelay = 1000;
   private eventReconnectCount = 0;
+  private eventStreamGeneration = 0;
   private static readonly EVENT_RECONNECT_WARNING_THRESHOLD = 10;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private startAttemptId = 0;
@@ -54,6 +58,10 @@ export class OpenCodeServer extends EventEmitter {
   private lastSuggestedCliVersion = '';
   private lastLoggedUnmanagedRestartKey = '';
   private readonly pendingAttentionRequests = new Map<string, string>();
+  private resolvedCommandCache: {
+    key: string;
+    value: string;
+  } | null = null;
 
   constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
     super();
@@ -429,15 +437,17 @@ export class OpenCodeServer extends EventEmitter {
 
   private async startEventStream() {
     this.stopEventStream();
+    const generation = ++this.eventStreamGeneration;
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
     const scoped = this.scopedUrl('/event');
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
+    const isCurrentStream = () => this.isCurrentEventStream(controller, generation);
 
     const abortForReconnect = (message: string, reason: string) => {
-      if (controller.signal.aborted) return;
+      if (!isCurrentStream() || controller.signal.aborted) return;
       shouldReconnect = true;
       logger.warn(message);
       controller.abort(new Error(reason));
@@ -469,6 +479,7 @@ export class OpenCodeServer extends EventEmitter {
         clearTimeout(connectTimer);
         connectTimer = null;
       }
+      if (!isCurrentStream()) return;
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
       this.eventReconnectDelay = 1000;
       this.eventReconnectCount = 0;
@@ -480,11 +491,12 @@ export class OpenCodeServer extends EventEmitter {
       resetIdleTimer();
       while (true) {
         const { value, done } = await reader.read();
+        if (!isCurrentStream()) return;
         if (done) {
           buffer += decoder.decode();
           const finalChunk = buffer.slice(cursor).trim();
           if (finalChunk.length > 0) {
-            this.processSseChunk(finalChunk);
+            this.processSseChunk(finalChunk, controller, generation);
           }
           logger.warn('Event stream closed; reconnecting');
           shouldReconnect = true;
@@ -494,7 +506,7 @@ export class OpenCodeServer extends EventEmitter {
         buffer += decoder.decode(value, { stream: true });
         let boundary: { index: number; length: number } | null;
         while ((boundary = findSseChunkBoundary(buffer, cursor))) {
-          this.processSseChunk(buffer.slice(cursor, boundary.index));
+          this.processSseChunk(buffer.slice(cursor, boundary.index), controller, generation);
           cursor = boundary.index + boundary.length;
         }
         if (cursor > 0) {
@@ -527,7 +539,7 @@ export class OpenCodeServer extends EventEmitter {
       }
       if (
         shouldReconnect &&
-        this.eventController === controller &&
+        this.isCurrentEventStream(controller, generation) &&
         this._status.state === 'running'
       ) {
         this.updateEventStreamState('degraded');
@@ -538,14 +550,13 @@ export class OpenCodeServer extends EventEmitter {
           );
         }
 
-        const delay = this.eventReconnectDelay;
-        this.eventReconnectDelay = Math.min(delay * 2, OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS);
+        const delay = this.getEventReconnectDelay();
         this.eventReconnectTimer = setTimeout(() => this.startEventStream(), delay);
       }
     }
   }
 
-  private processSseChunk(chunk: string) {
+  private processSseChunk(chunk: string, controller?: AbortController, generation?: number) {
     let data = '';
     for (const line of chunk.split(/\r\n|[\r\n]/)) {
       if (!line.startsWith('data:')) continue;
@@ -553,6 +564,12 @@ export class OpenCodeServer extends EventEmitter {
       data = data.length === 0 ? value : `${data}\n${value}`;
     }
     if (data.length === 0) return;
+    if (data.length > OpenCodeServer.EVENT_MAX_PAYLOAD_CHARS) {
+      logger.warn(
+        `Ignoring oversized event stream payload (${data.length} chars > ${OpenCodeServer.EVENT_MAX_PAYLOAD_CHARS})`
+      );
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(data);
@@ -560,6 +577,13 @@ export class OpenCodeServer extends EventEmitter {
       logger.warn(
         `Ignoring malformed event stream payload: ${err instanceof Error ? err.message : String(err)}`
       );
+      return;
+    }
+    if (
+      controller &&
+      generation !== undefined &&
+      !this.isCurrentEventStream(controller, generation)
+    ) {
       return;
     }
     try {
@@ -615,6 +639,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private stopEventStream() {
+    this.eventStreamGeneration += 1;
     if (this.eventReconnectTimer) {
       clearTimeout(this.eventReconnectTimer);
       this.eventReconnectTimer = null;
@@ -785,9 +810,15 @@ export class OpenCodeServer extends EventEmitter {
     }
     this.lastSuggestedCliVersion = latestCliVersion;
 
-    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: npm install -g opencode-ai@latest`;
+    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${OpenCodeServer.CLI_UPGRADE_COMMAND}`;
     logger.info(message);
-    void vscode.window.showInformationMessage(message);
+    void vscode.window
+      .showInformationMessage(message, OpenCodeServer.CLI_UPGRADE_ACTION)
+      .then((action) => {
+        if (action === OpenCodeServer.CLI_UPGRADE_ACTION) {
+          this.runInTerminal(OpenCodeServer.CLI_UPGRADE_COMMAND, 'OpenCode Upgrade');
+        }
+      });
   }
 
   private async readInstalledCliVersion(): Promise<string | null> {
@@ -958,6 +989,18 @@ export class OpenCodeServer extends EventEmitter {
     return folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
   }
 
+  private runInTerminal(command: string, title: string) {
+    const text = command.trim();
+    if (!text) return;
+
+    const terminal = vscode.window.createTerminal({
+      name: title,
+      cwd: this.getWorkspaceCwd(),
+    });
+    terminal.show(false);
+    terminal.sendText(text, true);
+  }
+
   private scopedUrl(path: string): { url: string; directory?: string } {
     const url = new URL(path, this.url);
     if (!path.startsWith('/') || path.startsWith('//') || url.origin !== this.url) {
@@ -980,6 +1023,11 @@ export class OpenCodeServer extends EventEmitter {
   private resolveCommand(): string {
     if (this.command) return this.command;
 
+    const cacheKey = this.getResolvedCommandCacheKey();
+    if (this.resolvedCommandCache?.key === cacheKey) {
+      return this.resolvedCommandCache.value;
+    }
+
     const candidates =
       process.platform === 'win32'
         ? ['opencode.exe', 'opencode.cmd', 'opencode.bat']
@@ -988,11 +1036,16 @@ export class OpenCodeServer extends EventEmitter {
     for (const dir of this.serverPathEntries()) {
       for (const candidate of candidates) {
         const fullPath = join(dir, candidate);
-        if (existsSync(fullPath)) return fullPath;
+        if (existsSync(fullPath)) {
+          this.resolvedCommandCache = { key: cacheKey, value: fullPath };
+          return fullPath;
+        }
       }
     }
 
-    return process.platform === 'win32' ? 'opencode.cmd' : 'opencode';
+    const fallback = process.platform === 'win32' ? 'opencode.cmd' : 'opencode';
+    this.resolvedCommandCache = { key: cacheKey, value: fallback };
+    return fallback;
   }
 
   private buildServerEnv(): NodeJS.ProcessEnv {
@@ -1001,6 +1054,17 @@ export class OpenCodeServer extends EventEmitter {
 
   private serverPathEntries(): string[] {
     return getServerPathEntries();
+  }
+
+  private getResolvedCommandCacheKey() {
+    return JSON.stringify({
+      platform: process.platform,
+      pathEntries: this.serverPathEntries(),
+      home: process.env.HOME || process.env.USERPROFILE || '',
+      pnpmHome: process.env.PNPM_HOME || '',
+      appData: process.env.APPDATA || '',
+      localAppData: process.env.LOCALAPPDATA || '',
+    });
   }
 
   private throwIfStartCancelled(disposeGeneration: number) {
@@ -1014,6 +1078,17 @@ export class OpenCodeServer extends EventEmitter {
       1000 * 2 ** Math.max(0, attempt - 1),
       OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS
     );
+  }
+
+  private getEventReconnectDelay() {
+    const delay = this.eventReconnectDelay;
+    this.eventReconnectDelay = Math.min(delay * 2, OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS);
+    const jitteredDelay = Math.round(delay * (0.8 + Math.random() * 0.4));
+    return Math.min(jitteredDelay, OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS);
+  }
+
+  private isCurrentEventStream(controller: AbortController, generation: number) {
+    return this.eventController === controller && this.eventStreamGeneration === generation;
   }
 
   private tryAdvancePort(): boolean {
@@ -1074,6 +1149,9 @@ function waitForProcessExit(proc: ChildProcess, timeoutMs: number): Promise<bool
 }
 
 function anySignal(...signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === 'function') {
+    return AbortSignal.any(signals);
+  }
   const controller = new AbortController();
   const onAbort = (event: Event) => {
     controller.abort((event.target as AbortSignal | null)?.reason);

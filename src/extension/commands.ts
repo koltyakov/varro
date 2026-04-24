@@ -35,21 +35,15 @@ export function registerCommands(
     vscode.commands.registerCommand('varro.server.restart', async () => {
       try {
         await server.dispose();
-        server
-          .start()
-          .then((url) => {
-            logger.info(`OpenCode server restarted at ${url}`);
-          })
-          .catch((err) => {
-            const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
-            if (server.status.state !== 'error') {
-              errorHub.report({ code: 'server-start', message });
-            } else {
-              logger.error(message);
-            }
-          });
+        const url = await server.start();
+        logger.info(`OpenCode server restarted at ${url}`);
       } catch (err) {
-        logger.error(`varro.server.restart: ${err instanceof Error ? err.message : String(err)}`);
+        const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
+        if (server.status.state !== 'error') {
+          errorHub.report({ code: 'server-start', message });
+        } else {
+          logger.error(message);
+        }
       }
     }),
 

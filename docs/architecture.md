@@ -5,13 +5,15 @@ This document maps the current Varro codebase to the runtime behavior of the ext
 ## High-Level Flow
 
 1. VS Code activates the extension from `src/extension/extension.ts`.
-2. `SidebarProvider` creates the webview and injects initial state.
-3. The first webview interaction triggers the server lifecycle — Varro either attaches to a running OpenCode server on the configured port or spawns `opencode serve`.
-4. The webview sends `ready` and starts loading sessions, agents, providers, and questions.
-5. The extension host proxies API requests to the OpenCode server and forwards SSE events into the webview.
-6. The webview updates local state and renders structured chat UI.
+2. Activation constructs `OpenCodeServer`, `ContextProvider`, `SidebarProvider`, registers commands, and creates the status bar integration, but it does not start OpenCode yet.
+3. `SidebarProvider` creates the webview, injects initial state, and restores pending attention or interrupted-session snapshots from extension state.
+4. When the view becomes active or the webview sends its first request, Varro either attaches to a running OpenCode server on the configured port or spawns `opencode serve`.
+5. The webview sends `ready`, initializes its bridge listeners, and starts loading sessions, agents, providers, MCP status, questions, and session statuses.
+6. The extension host proxies allowed API requests to the OpenCode server and forwards SSE events into the webview.
+7. The webview updates local state, renders the structured chat UI, and derives higher-level states such as running, attention-needed, failed, completed, and plan-ready sessions.
+8. After reloads, the webview can reconnect to interrupted sessions and continue them when they are still resumable.
 
-Server startup is deferred: activation only constructs the `OpenCodeServer` object, and the actual `start()` call is issued from `SidebarProvider.ensureServerStarted()` the first time the UI needs it.
+Server startup is deferred: activation only constructs the `OpenCodeServer` object, and the actual `start()` call is issued from `SidebarProvider.ensureServerStarted()` when the UI first needs it.
 
 ## Main Runtime Pieces
 
@@ -23,7 +25,21 @@ Server startup is deferred: activation only constructs the `OpenCodeServer` obje
 - Instantiates `OpenCodeServer`, `ContextProvider`, and `SidebarProvider`
 - Registers the webview view provider and VS Code commands
 - Sets the `varro:activated` context key
-- Does not start the OpenCode server directly — startup is deferred until the webview first needs it
+- Does not start the OpenCode server directly; startup is deferred until the webview first needs it
+
+#### `src/extension/commands.ts`
+
+Registers the VS Code command surface that surrounds the chat UI.
+
+- `varro.chat.focus`
+- `varro.chat.newSession`
+- `varro.chat.abort`
+- `varro.server.restart`
+- `varro.chat.addToContext`
+- `varro.chat.addSelectionToContext`
+- `varro.chat.addTerminalSelectionToContext`
+
+These commands route through `SidebarProvider` and `ContextProvider` rather than talking to OpenCode directly.
 
 #### `src/extension/server.ts`
 
@@ -37,7 +53,10 @@ Important behavior:
 
 - The current workspace folder is attached to requests through both a `directory` query param and `x-opencode-directory` header.
 - If the SSE stream drops while the server is running, Varro retries with exponential backoff.
+- If the event stream drops but REST still works, Varro marks the event stream as degraded so the UI can show a reconnecting banner.
 - If the child process exits after startup, Varro attempts a limited restart sequence.
+- If the configured port is already in use by another process during Varro-managed startup, the server layer can retry on nearby ports.
+- A maintenance loop compares installed CLI and server versions, suggests `opencode upgrade` when a newer CLI exists, and can restart a Varro-managed idle server onto the newer version.
 
 #### `src/extension/context-provider.ts`
 
@@ -45,6 +64,8 @@ Important behavior:
 - Maintains the current `EditorContext`
 - Captures terminal selection by temporarily invoking the VS Code terminal copy command
 - Reads and opens files requested by the webview
+
+Clipboard-sensitive terminal capture is implemented here: Varro reads the terminal selection, then restores the previous clipboard contents when possible.
 
 #### `src/extension/sidebar-provider.ts`
 
@@ -56,11 +77,28 @@ This is the main extension-side coordinator.
 - Tracks dropped files, file search cache, and provider limit cache
 - Sends notifications and updates a status bar item when background sessions finish or need attention
 
-It also exposes a Varro-specific pseudo-endpoint:
+It also restores pending permission or question prompts across reloads and serializes that state into the initial webview payload.
+
+It also exposes Varro-specific pseudo-endpoints:
 
 - `GET /varro/provider-limit`
+- `POST /varro/plan/open`
 
-That endpoint is resolved locally by the extension host rather than forwarded directly to OpenCode.
+Those endpoints are resolved locally by the extension host rather than forwarded directly to OpenCode.
+
+Drag and drop has two paths here.
+
+- Path-based drops are normalized and attached directly.
+- Content-only drops are written into a temporary `varro-drops` directory before being attached.
+
+#### `src/extension/session-state-manager.ts`
+
+Tracks extension-side session attention and completion state independently from the webview.
+
+- Records pending permissions and questions
+- Tracks completed background sessions
+- Persists state that needs to survive webview reloads
+- Drives the status bar item and notification behavior
 
 ### Shared Layer
 
@@ -98,6 +136,9 @@ That initial state includes:
 - editor context
 - terminal selection
 - dropped files
+- config such as thinking expansion and desktop session pane side
+- interrupted session IDs
+- pending permission and question snapshots
 
 `src/webview/App.tsx` shows either:
 
@@ -114,8 +155,12 @@ It stores:
 - messages and streaming state
 - todos, permissions, questions, and diffs
 - selected agent/model/variant
+- selected MCPs per session
 - hidden providers and models
 - permission modes
+- current-document context toggles
+- failed-session and usage-limit state
+- skipped plan-session markers
 - queued follow-up messages
 
 Several pieces are persisted in `localStorage`, including selected model, hidden models, permission mode preferences, and last active session ID.
@@ -129,8 +174,10 @@ Responsibilities:
 - react to extension messages such as `server/status` and `context/update`
 - subscribe to OpenCode events forwarded from the extension host
 - fetch initial data from OpenCode REST endpoints
-- send prompts, undo, abort, compact, and permission/question responses
+- send prompts, undo, abort, compact, plan handoff, and permission/question responses
 - rebuild todo state either from explicit `todo.updated` events or from tool parts in messages
+- synchronize per-session MCP selections with OpenCode
+- recover interrupted sessions after reload when the previous run still looks incomplete
 
 The hook also handles workspace filtering for sessions, stale loading recovery, and model/provider limit refreshes.
 
@@ -139,7 +186,7 @@ The hook also handles workspace filtering for sessions, stale loading recovery, 
 Key components:
 
 - `src/webview/components/Chat.tsx`: session header, session list, and top-level chat layout
-- `src/webview/components/ChatInput.tsx`: composer, slash commands, attachments, model/agent pickers, queueing, and send modes
+- `src/webview/components/ChatInput.tsx`: composer, slash commands, attachments, model/agent/MCP pickers, queueing, and send modes
 - `src/webview/components/MessageList.tsx`: chat transcript and loading state
 - `src/webview/components/Message.tsx` and `MessagePart.tsx`: assistant/user message rendering
 - `src/webview/components/PermissionPrompt.tsx`: inline approval UI
@@ -148,16 +195,17 @@ Key components:
 - `src/webview/components/DiffView.tsx`: file change summaries
 - `src/webview/components/SettingsPanel.tsx`: model visibility settings
 
-## Request and Event Flow
+## Request And Event Flow
 
 ### Webview to extension
 
 The webview sends:
 
 - `api/request` for OpenCode REST calls
-- `files/search`, `files/pick`, `files/drop`, and `files/remove` for context management
-- `vscode/open` and `vscode/diff` for editor integration
+- `files/search`, `files/pick`, `files/drop`, `files/drop-content`, and `files/remove` for context management
+- `vscode/open` for editor integration
 - `terminal/run` to launch setup commands such as `opencode auth login`
+- `config/update` and `webview/focus` for UI preference and focus synchronization
 
 ### Extension to webview
 
@@ -166,6 +214,7 @@ The extension sends:
 - `server/status`
 - `server/event`
 - `context/update`
+- `pending-attention/update`
 - `terminal-selection/update`
 - `files/dropped` and `files/removed`
 - `theme/update`
@@ -179,20 +228,29 @@ Typical part sequence:
 
 1. user text
 2. working directory marker
-3. active file or active selection marker
+3. active file or active selection marker, if current-document context is enabled for the session
 4. terminal selection block
 5. explicit context files and folders
 6. pasted image files when the model supports vision
 
 This is where Varro turns live VS Code context into OpenCode-compatible prompt parts.
 
-## Session and attention model
+### Custom endpoints
 
-Varro distinguishes three session states in the UI:
+Two paths are resolved by the extension host instead of the OpenCode server.
+
+- `/varro/provider-limit` returns best-effort provider quota metadata for the current provider and model.
+- `/varro/plan/open` normalizes a plan response, saves it into the local OpenCode plans directory, and opens the file in VS Code.
+
+## Session And Attention Model
+
+Varro distinguishes several session states in the UI:
 
 - running
 - attention needed
-- recent or completed
+- failed
+- completed
+- plan ready
 
 The extension host derives attention from server events such as:
 
@@ -205,10 +263,20 @@ That information drives both:
 - sidebar notifications
 - the status bar item shown when the sidebar is hidden
 
+The webview adds more derived states on top of that data.
+
+- `failed` also includes usage-limit failures surfaced from message or status data.
+- `plan ready` is derived from sessions whose selected agent is `plan` and have not been explicitly skipped.
+- `completed` uses unread state so old completed sessions do not keep looking new forever.
+- Parent sessions can surface sub-agent counts so the session list can branch into child work.
+
 ## Notable implementation details
 
 - The webview is bundled and inlined into the HTML payload instead of loaded as separate local resources.
 - File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic rather than shelling out.
 - Session lists are filtered to the active workspace path, which prevents unrelated project sessions from appearing in the sidebar.
 - Queued follow-up prompts are stored client-side and auto-dispatched once the active session becomes idle.
+- Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.
+- The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.
 - Provider limits are best-effort metadata; they are not guaranteed for every provider or model.
+- Server startup is lazy and workspace-scoped, which keeps activation lightweight and helps multi-project use against a shared OpenCode instance.

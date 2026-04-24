@@ -119,8 +119,26 @@ describe('bridge', () => {
 
     const request = bridge.apiCall('GET', '/slow');
     const rejection = expect(request).rejects.toThrow('API call timed out: GET /slow');
-    await vi.advanceTimersByTimeAsync(40_000);
+    await vi.advanceTimersByTimeAsync(8_000);
 
+    await rejection;
+  });
+
+  it('uses the long timeout for async prompt requests', async () => {
+    vi.useFakeTimers();
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn();
+
+    const request = bridge.apiCall('POST', '/session/1/prompt_async', { parts: [] });
+    const rejection = expect(request).rejects.toThrow(
+      'API call timed out: POST /session/1/prompt_async'
+    );
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    await Promise.resolve();
+    expect(window.__sendToExtension).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(32_000);
     await rejection;
   });
 
@@ -130,5 +148,40 @@ describe('bridge', () => {
     await expect(bridge.apiCall('GET', '/session')).rejects.toThrow(
       'Extension transport unavailable: GET /session'
     );
+  });
+
+  it('retries once when transport is unavailable during startup', async () => {
+    vi.useFakeTimers();
+    const bridge = await loadBridge();
+    const send = vi.fn();
+
+    const request = bridge.apiCall<{ ok: boolean }>('GET', '/session');
+    await Promise.resolve();
+
+    window.__sendToExtension = send;
+    await vi.advanceTimersByTimeAsync(150);
+
+    const id = (send.mock.calls[0]?.[0] as { payload: { id: number } } | undefined)?.payload.id;
+    if (!id) throw new Error('Expected retried request id');
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'api/response', payload: { id, data: { ok: true } } },
+      })
+    );
+
+    await expect(request).resolves.toEqual({ ok: true });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts in-flight API requests', async () => {
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn();
+    const controller = new AbortController();
+
+    const request = bridge.apiCall('GET', '/session', undefined, { signal: controller.signal });
+    controller.abort(new Error('request cancelled'));
+
+    await expect(request).rejects.toThrow('request cancelled');
   });
 });

@@ -11,7 +11,7 @@ import type {
   QuestionRequest,
   PermissionRule,
 } from '../types';
-import type { ProviderLimitStatus, ServerEventName } from '../../shared/protocol';
+import type { McpStatus, ProviderLimitStatus, ServerEventName } from '../../shared/protocol';
 
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
@@ -97,6 +97,24 @@ export const client = {
       const params = new URLSearchParams({ providerID });
       if (modelID) params.set('modelID', modelID);
       return apiCall('GET', `/varro/provider-limit?${params.toString()}`);
+    },
+  },
+
+  varro: {
+    async openPlan(content: string): Promise<{ path: string }> {
+      return apiCall('POST', '/varro/plan/open', { content });
+    },
+  },
+
+  mcp: {
+    async status(): Promise<Record<string, McpStatus>> {
+      return apiCall('GET', '/mcp');
+    },
+    async connect(name: string): Promise<boolean> {
+      return apiCall('POST', `/mcp/${encodeURIComponent(name)}/connect`);
+    },
+    async disconnect(name: string): Promise<boolean> {
+      return apiCall('POST', `/mcp/${encodeURIComponent(name)}/disconnect`);
     },
   },
 

@@ -6,6 +6,7 @@ import {
   ToolCall,
   formatToolTitle,
   getVisibleInputEntries,
+  resetToolCallExpansionState,
   shouldShowToolPreview,
 } from './ToolCall';
 
@@ -24,6 +25,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   setExpandThinkingByDefaultPreference(false);
+  resetToolCallExpansionState();
 });
 
 function completedState(
@@ -134,5 +136,39 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.terminal-command-output-empty')?.textContent).toBe(
       '(no output)'
     );
+  });
+
+  it('renders aborted tool errors with neutral aborted styling', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'browser-bridge_browser_investigate',
+      state: {
+        status: 'error',
+        input: { objective: 'Check current page' },
+        error: 'Aborted',
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const header = container?.querySelector('.tool-invocation-header');
+    const dot = container?.querySelector('.tool-status-dot');
+    const label = container?.querySelector('.tool-invocation-error-label');
+
+    expect(dot?.classList.contains('tool-status-aborted')).toBe(true);
+    expect(label?.classList.contains('is-aborted')).toBe(true);
+    expect(label?.textContent).toBe('aborted');
+
+    (header as HTMLButtonElement).click();
+
+    const detail = container?.querySelector('.tool-invocation-error');
+
+    expect(detail?.classList.contains('is-aborted')).toBe(true);
+    expect(detail?.textContent).toContain('Aborted');
   });
 });
