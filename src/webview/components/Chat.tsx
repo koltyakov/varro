@@ -1221,6 +1221,9 @@ function SessionListItem(props: {
   const isActive = () => props.session.id === state.activeSessionId;
   const isFocused = () => props.focusedIndex() === props.itemIndex();
   const status = () => state.sessionStatus[props.session.id];
+  const hasUnreadCompletion = () =>
+    props.isNewlyCompleted ||
+    (props.isCompletedPlanSession && isSessionUnread(props.session.id, props.session.time.updated));
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
   const subagentLabel = () =>
     `Show ${props.subagentCount} sub-agent session${props.subagentCount === 1 ? '' : 's'}`;
@@ -1228,6 +1231,7 @@ function SessionListItem(props: {
     if (props.isFailed) return 'is-failed';
     if (props.isRunning) return 'is-running';
     if (props.needsAttention) return 'is-attention';
+    if (hasUnreadCompletion()) return 'is-completed';
     if (props.isCompletedPlanSession) return 'is-plan-completed';
     return 'is-completed';
   };
@@ -1238,6 +1242,7 @@ function SessionListItem(props: {
     if (props.hasPermissionRequest) return 'Permission request pending';
     if (props.hasQuestionRequest) return 'Attention needed';
     if (props.needsAttention) return 'Attention needed';
+    if (hasUnreadCompletion()) return 'Completed';
     if (props.isCompletedPlanSession) return 'Plan ready';
     return 'Completed';
   };

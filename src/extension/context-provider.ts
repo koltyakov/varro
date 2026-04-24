@@ -11,6 +11,7 @@ import {
 export class ContextProvider implements vscode.Disposable {
   private static readonly TERMINAL_COPY_DELAY_MS = 40;
   private static readonly TERMINAL_COPY_MAX_ATTEMPTS = 5;
+  private static readonly TERMINAL_COPY_TIMEOUT_MS = 1500;
   private static readonly ACTIVE_EDITOR_SETTLE_DELAY_MS = 60;
   private disposables: vscode.Disposable[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -67,15 +68,27 @@ export class ContextProvider implements vscode.Disposable {
       return { ok: false, reason: 'no-terminal' };
     }
 
-    const previousClipboard = await vscode.env.clipboard.readText();
+    const previousClipboard = await withTimeout(
+      vscode.env.clipboard.readText(),
+      ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
+      'Timed out reading clipboard before terminal selection capture'
+    );
     let selectionText = '';
     let clipboardChanged = false;
 
     try {
-      await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+      await withTimeout(
+        vscode.commands.executeCommand('workbench.action.terminal.copySelection'),
+        ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
+        'Timed out copying terminal selection'
+      );
       for (let attempt = 0; attempt < ContextProvider.TERMINAL_COPY_MAX_ATTEMPTS; attempt += 1) {
         await delay(ContextProvider.TERMINAL_COPY_DELAY_MS * (attempt + 1));
-        selectionText = await vscode.env.clipboard.readText();
+        selectionText = await withTimeout(
+          vscode.env.clipboard.readText(),
+          ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
+          'Timed out reading clipboard while capturing terminal selection'
+        );
         if (selectionText.trim().length > 0) {
           clipboardChanged = selectionText !== previousClipboard;
           break;
@@ -385,4 +398,20 @@ function getContextConfig() {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withTimeout<T>(promise: Thenable<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
 }

@@ -53,6 +53,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private onContextFilesChanged?: () => void;
   private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
   private workspaceFileCacheAt = 0;
+  private workspaceFileCachePromise: Promise<WorkspaceFileSearchEntry[]> | null = null;
   private fileSearchCts: vscode.CancellationTokenSource | null = null;
   private pendingInputFocus = false;
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
@@ -113,7 +114,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
-        event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
         event.affectsConfiguration('varro.chat.showStickyUserPrompt') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide')
       ) {
@@ -122,8 +122,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     this.serverStatusHandler = (status: ServerStatus) => {
+      const previousStatus = this._status;
       this._status = status;
-      this.providerLimitCache.clear();
+      if (shouldClearProviderLimitCache(previousStatus, status)) {
+        this.providerLimitCache.clear();
+      }
       this.post({ type: 'server/status', payload: status });
     };
     this.serverEventHandler = (event: unknown) => {
@@ -601,11 +604,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private getExpandThinkingByDefault() {
     const config = vscode.workspace.getConfiguration('varro');
-    return (
-      config.get<boolean>('chat.expandThinkingByDefault') ??
-      config.get<boolean>('chat.expandThinkingByDefault') ??
-      false
-    );
+    return config.get<boolean>('chat.expandThinkingByDefault') ?? false;
   }
 
   private getShowStickyUserPrompt() {
@@ -1175,27 +1174,40 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     ) {
       return this.workspaceFileCache;
     }
+    if (this.workspaceFileCachePromise) return this.workspaceFileCachePromise;
 
-    const files = await vscode.workspace.findFiles(
-      '**/*',
-      '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/coverage/**}',
-      SidebarProvider.FILE_SEARCH_MAX_CANDIDATES,
-      token
-    );
+    const promise = Promise.resolve(
+      vscode.workspace.findFiles(
+        '**/*',
+        '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/coverage/**}',
+        SidebarProvider.FILE_SEARCH_MAX_CANDIDATES,
+        token
+      )
+    )
+      .then((files) => {
+        const entries = files.map((uri) => {
+          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+          const relativePath = getRelativePath(uri, workspaceFolder);
+          return {
+            path: uri.fsPath,
+            relativePath,
+            type: 'file' as const,
+            relativePathLower: relativePath.toLowerCase(),
+            leafLower: basename(relativePath).toLowerCase(),
+          };
+        });
+        this.workspaceFileCache = entries;
+        this.workspaceFileCacheAt = Date.now();
+        return entries;
+      })
+      .finally(() => {
+        if (this.workspaceFileCachePromise === promise) {
+          this.workspaceFileCachePromise = null;
+        }
+      });
 
-    this.workspaceFileCache = files.map((uri) => {
-      const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-      const relativePath = getRelativePath(uri, workspaceFolder);
-      return {
-        path: uri.fsPath,
-        relativePath,
-        type: 'file' as const,
-        relativePathLower: relativePath.toLowerCase(),
-        leafLower: basename(relativePath).toLowerCase(),
-      };
-    });
-    this.workspaceFileCacheAt = now;
-    return this.workspaceFileCache;
+    this.workspaceFileCachePromise = promise;
+    return promise;
   }
 
   postDroppedFiles(
@@ -1425,6 +1437,17 @@ function insertRankedWorkspaceFile(
 
   ranked.splice(insertAt, 0, candidate);
   if (ranked.length > limit) ranked.pop();
+}
+
+function shouldClearProviderLimitCache(previous: ServerStatus, next: ServerStatus) {
+  if (previous.state !== next.state) return true;
+  if (previous.state === 'running' && next.state === 'running') {
+    return previous.url !== next.url;
+  }
+  if (previous.state === 'error' && next.state === 'error') {
+    return previous.message !== next.message;
+  }
+  return false;
 }
 
 function getFileSearchScore(file: WorkspaceFileSearchEntry, query: string) {

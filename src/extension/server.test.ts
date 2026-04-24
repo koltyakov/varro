@@ -276,6 +276,28 @@ describe('OpenCodeServer maintenance', () => {
     expect(restartManagedServer).toHaveBeenCalledWith('1.14.20', '1.14.22');
   });
 
+  it('restarts a managed process without emitting a stopped status', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const statuses: ServerStatus[] = [];
+    const api = server as unknown as {
+      process: { kill: ReturnType<typeof vi.fn>; exitCode: number; signalCode: null } | null;
+      managedProcess: boolean;
+      start: () => Promise<string>;
+      restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+    };
+
+    setRunning(server);
+    server.on('status', (status) => statuses.push(status));
+    api.process = { kill: vi.fn(), exitCode: 0, signalCode: null };
+    api.managedProcess = true;
+    api.start = vi.fn().mockResolvedValue(server.url);
+
+    await api.restartManagedServer('1.14.20', '1.14.22');
+
+    expect(api.start).toHaveBeenCalledTimes(1);
+    expect(statuses.some((status) => status.state === 'stopped')).toBe(false);
+  });
+
   it('does not restart when there are active sessions', async () => {
     const server = new OpenCodeServer(4096, false);
     const restartManagedServer = vi.fn().mockResolvedValue(undefined);

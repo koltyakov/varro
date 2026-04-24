@@ -19,6 +19,7 @@ import {
   getLatestPlanImplementationMessageId,
   shouldShowStickyUserMessagePreview,
   MessageList,
+  calculateVirtualRange,
   shouldShowPlanImplementationAction,
 } from './MessageList';
 
@@ -179,6 +180,41 @@ describe('buildPlanImplementationPrompt', () => {
     ).toBe(
       'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.'
     );
+  });
+});
+
+describe('calculateVirtualRange', () => {
+  it('uses measured heights to calculate visible rows and padding', () => {
+    const measuredHeights = new Map([
+      ['a', 50],
+      ['b', 100],
+      ['c', 150],
+      ['d', 200],
+    ]);
+
+    expect(
+      calculateVirtualRange({
+        itemIds: ['a', 'b', 'c', 'd'],
+        measuredHeights,
+        scrollTop: 120,
+        viewportHeight: 120,
+        defaultItemHeight: 100,
+        overscan: 0,
+      })
+    ).toEqual({ start: 1, end: 3, topPad: 50, bottomPad: 200 });
+  });
+
+  it('falls back to default item heights for unmeasured rows', () => {
+    expect(
+      calculateVirtualRange({
+        itemIds: ['a', 'b', 'c'],
+        measuredHeights: new Map(),
+        scrollTop: 90,
+        viewportHeight: 40,
+        defaultItemHeight: 50,
+        overscan: 0,
+      })
+    ).toEqual({ start: 1, end: 3, topPad: 50, bottomPad: 0 });
   });
 });
 

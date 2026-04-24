@@ -1026,6 +1026,7 @@ let messageById: Map<string, number> = new Map();
 let partById: Map<string, { msgIdx: number; partIdx: number }> = new Map();
 let streamingDeltaFlushScheduled = false;
 let streamingDeltaGeneration = 0;
+const MAX_PENDING_STREAMING_DELTAS = 128;
 const pendingStreamingDeltas = new Map<
   string,
   { messageId: string; partId: string; sessionId?: string; text: string }
@@ -1258,7 +1259,16 @@ export function applyMessagePartDelta(
     sessionId,
     text: currentStreamingText + delta,
   });
+  evictOldPendingStreamingDeltas();
   scheduleStreamingDeltaFlush();
+}
+
+function evictOldPendingStreamingDeltas() {
+  while (pendingStreamingDeltas.size > MAX_PENDING_STREAMING_DELTAS) {
+    const oldest = pendingStreamingDeltas.keys().next().value;
+    if (!oldest) break;
+    pendingStreamingDeltas.delete(oldest);
+  }
 }
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
@@ -1433,6 +1443,14 @@ export function getSessionTreeIds(rootId: string | null | undefined, sessions = 
     return [...(sessionTreeIdsBySession.get(rootId) || [rootId])];
   }
 
+  const childrenByParent = new Map<string, string[]>();
+  for (const session of sessions) {
+    if (!session.parentID) continue;
+    const children = childrenByParent.get(session.parentID);
+    if (children) children.push(session.id);
+    else childrenByParent.set(session.parentID, [session.id]);
+  }
+
   const visited = new Set<string>();
   const pending = [rootId];
 
@@ -1441,8 +1459,8 @@ export function getSessionTreeIds(rootId: string | null | undefined, sessions = 
     if (!currentId || visited.has(currentId)) continue;
     visited.add(currentId);
 
-    for (const session of sessions) {
-      if (session.parentID === currentId) pending.push(session.id);
+    for (const childId of childrenByParent.get(currentId) || []) {
+      pending.push(childId);
     }
   }
 
@@ -1514,7 +1532,7 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
           let changed = false;
           for (let i = 0; i < incoming.length; i++) {
             if (i < msgs.length) {
-              if (msgs[i] !== incoming[i]) {
+              if (!areMessageEntriesEquivalent(msgs[i], incoming[i])) {
                 msgs[i] = incoming[i];
                 changed = true;
               }
@@ -1558,6 +1576,58 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
   }
 
   replaceMessages(incoming);
+}
+
+function areMessageEntriesEquivalent(
+  left: { info: Message; parts: Part[] },
+  right: { info: Message; parts: Part[] }
+) {
+  if (left === right) return true;
+  if (left.info !== right.info && !areMessagesEquivalent(left.info, right.info)) return false;
+  if (left.parts === right.parts) return true;
+  if (left.parts.length !== right.parts.length) return false;
+
+  for (let index = 0; index < left.parts.length; index += 1) {
+    if (
+      left.parts[index] !== right.parts[index] &&
+      !arePartsEquivalent(left.parts[index], right.parts[index])
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areMessagesEquivalent(left: Message, right: Message) {
+  if (left.id !== right.id) return false;
+  if (left.sessionID !== right.sessionID) return false;
+  if (left.role !== right.role) return false;
+  if (left.time.created !== right.time.created) return false;
+  if (
+    (left.time as { completed?: number }).completed !==
+    (right.time as { completed?: number }).completed
+  ) {
+    return false;
+  }
+  if (
+    JSON.stringify((left as { error?: unknown }).error || null) !==
+    JSON.stringify((right as { error?: unknown }).error || null)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function arePartsEquivalent(left: Part, right: Part) {
+  if (left.id !== right.id) return false;
+  if (left.type !== right.type) return false;
+  if (left.messageID !== right.messageID) return false;
+  if (left.sessionID !== right.sessionID) return false;
+  if ((left as { text?: unknown }).text !== (right as { text?: unknown }).text) return false;
+  return (
+    JSON.stringify((left as { state?: unknown }).state || null) ===
+    JSON.stringify((right as { state?: unknown }).state || null)
+  );
 }
 
 export function getChildRunsByParentId(

@@ -1102,6 +1102,22 @@ describe('usage-limit session status precedence', () => {
     expect(indicator?.getAttribute('aria-label')).toBe('Failed');
   });
 
+  it('renders a completed indicator for unread plan sessions', () => {
+    setState('sessions', [session('active', 600), session('plan-1', 500)]);
+    setState('activeSessionId', 'active');
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState('lastSeenSessions', { active: 600, 'plan-1': 0 });
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const indicator = container?.querySelector('.session-item .session-item-indicator');
+
+    expect(indicator?.classList.contains('is-completed')).toBe(true);
+    expect(indicator?.classList.contains('is-plan-completed')).toBe(false);
+    expect(indicator?.getAttribute('aria-label')).toBe('Completed');
+  });
+
   it('returns to running once the 429 notice is cleared', () => {
     setState('sessions', [session('session-1', 500)]);
     setState('sessionStatus', {

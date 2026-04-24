@@ -35,7 +35,7 @@ export class OpenCodeServer extends EventEmitter {
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private eventReconnectDelay = 1000;
   private eventReconnectCount = 0;
-  private static readonly MAX_EVENT_RECONNECTS = 10;
+  private static readonly EVENT_RECONNECT_WARNING_THRESHOLD = 10;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private startAttemptId = 0;
   private disposeGeneration = 0;
@@ -503,9 +503,9 @@ export class OpenCodeServer extends EventEmitter {
       ) {
         this.updateEventStreamState('degraded');
         this.eventReconnectCount++;
-        if (this.eventReconnectCount === OpenCodeServer.MAX_EVENT_RECONNECTS) {
+        if (this.eventReconnectCount === OpenCodeServer.EVENT_RECONNECT_WARNING_THRESHOLD) {
           logger.warn(
-            `Event stream reconnect attempts reached ${OpenCodeServer.MAX_EVENT_RECONNECTS}; continuing background retries while keeping REST requests available`
+            `Event stream reconnect attempts reached ${OpenCodeServer.EVENT_RECONNECT_WARNING_THRESHOLD}; continuing background retries while keeping REST requests available`
           );
         }
 
@@ -664,10 +664,36 @@ export class OpenCodeServer extends EventEmitter {
       logger.info(
         `Restarting managed OpenCode server to use CLI ${installedCliVersion} instead of server ${serverVersion}`
       );
-      await this.dispose();
+      await this.stopManagedProcessForRestart();
       await this.start();
     } finally {
       this.automaticRestartInFlight = false;
+    }
+  }
+
+  private async stopManagedProcessForRestart() {
+    this.isDisposing = true;
+    this.disposeGeneration += 1;
+    this.clearStartPromise();
+    this.clearRestartTimer();
+    this.cancelPollHealth();
+    this.stopEventStream();
+    for (const controller of this.requestControllers) {
+      controller.abort();
+    }
+    this.requestControllers.clear();
+
+    const proc = this.process;
+    this.process = null;
+    this.managedProcess = false;
+    if (!proc) return;
+
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill('SIGTERM');
+    }
+    const exited = await waitForProcessExit(proc, 5000);
+    if (!exited && proc.exitCode === null && proc.signalCode === null) {
+      proc.kill('SIGKILL');
     }
   }
 

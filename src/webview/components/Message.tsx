@@ -146,11 +146,13 @@ export function Message(props: {
   );
   const diffRequest = createMemo(() => {
     if (assistantErrorMessage()) return null;
-    return getAssistantDiffRequest(props.info, props.isLastAssistant ?? false);
+    const request = getAssistantDiffRequest(props.info, props.isLastAssistant ?? false);
+    return request ? `${request.sessionID}\u0000${request.messageID}` : null;
   });
 
-  const [diffs] = createResource(diffRequest, async (request) => {
-    return client.session.diff(request.sessionID, request.messageID).catch(() => [] as FileDiff[]);
+  const [diffs] = createResource(diffRequest, async (requestKey) => {
+    const [sessionID, messageID] = requestKey.split('\u0000');
+    return client.session.diff(sessionID, messageID).catch(() => [] as FileDiff[]);
   });
   const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
   const compactionDivider = createMemo<CompactionPart | null>(() => {

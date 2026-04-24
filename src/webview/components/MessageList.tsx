@@ -171,6 +171,51 @@ const DEFAULT_ITEM_HEIGHT = 120;
 const OVERSCAN = 5;
 const VIRTUALIZE_THRESHOLD = 50;
 
+export function calculateVirtualRange(args: {
+  itemIds: string[];
+  measuredHeights: Map<string, number>;
+  scrollTop: number;
+  viewportHeight: number;
+  defaultItemHeight?: number;
+  overscan?: number;
+}) {
+  const itemCount = args.itemIds.length;
+  const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
+  const overscan = args.overscan ?? OVERSCAN;
+  if (itemCount === 0) return { start: 0, end: 0, topPad: 0, bottomPad: 0 };
+
+  const heights = args.itemIds.map((id) => args.measuredHeights.get(id) ?? defaultItemHeight);
+  const prefix = Array.from<number>({ length: itemCount + 1 });
+  prefix[0] = 0;
+  for (let index = 0; index < itemCount; index += 1) {
+    prefix[index + 1] = prefix[index] + heights[index];
+  }
+
+  const overscanPx = overscan * defaultItemHeight;
+  const startOffset = Math.max(0, args.scrollTop - overscanPx);
+  const endOffset = Math.max(startOffset, args.scrollTop + args.viewportHeight + overscanPx);
+  const start = Math.max(0, Math.min(itemCount - 1, lowerBound(prefix, startOffset + 1) - 1));
+  const end = Math.min(itemCount, Math.max(start + 1, lowerBound(prefix, endOffset + 1)));
+
+  return {
+    start,
+    end,
+    topPad: prefix[start],
+    bottomPad: prefix[itemCount] - prefix[end],
+  };
+}
+
+function lowerBound(values: number[], target: number) {
+  let low = 0;
+  let high = values.length - 1;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (values[mid] < target) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
 type MessageRowSharedProps = {
   modelChangeMap: Map<string, string>;
   lastAssistantID: string | null;
@@ -335,37 +380,12 @@ export function MessageList() {
     if (!shouldVirtualize() || msgs.length === 0) {
       return { start: 0, end: msgs.length, topPad: 0, bottomPad: 0 };
     }
-
-    const st = scrollTop();
-    const vh = viewportHeight();
-    let acc = 0;
-    let start = -1;
-    let end = msgs.length;
-
-    for (let i = 0; i < msgs.length; i++) {
-      const h = measuredHeights.get(msgs[i].info.id) ?? DEFAULT_ITEM_HEIGHT;
-      if (start === -1 && acc + h > st - OVERSCAN * DEFAULT_ITEM_HEIGHT) {
-        start = i;
-      }
-      if (acc > st + vh + OVERSCAN * DEFAULT_ITEM_HEIGHT) {
-        end = i;
-        break;
-      }
-      acc += h;
-    }
-    if (start === -1) start = 0;
-
-    let topPad = 0;
-    for (let i = 0; i < start; i++) {
-      topPad += measuredHeights.get(msgs[i].info.id) ?? DEFAULT_ITEM_HEIGHT;
-    }
-
-    let bottomPad = 0;
-    for (let i = end; i < msgs.length; i++) {
-      bottomPad += measuredHeights.get(msgs[i].info.id) ?? DEFAULT_ITEM_HEIGHT;
-    }
-
-    return { start, end, topPad, bottomPad };
+    return calculateVirtualRange({
+      itemIds: msgs.map((msg) => msg.info.id),
+      measuredHeights,
+      scrollTop: scrollTop(),
+      viewportHeight: viewportHeight(),
+    });
   });
 
   function measureVisibleItems() {
