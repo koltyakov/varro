@@ -4171,10 +4171,19 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
+  line-height: 0;
   color: var(--color-vscode-muted);
+}
+
+.dropdown-footer-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .dropdown-search {

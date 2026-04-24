@@ -295,26 +295,20 @@ export function ModelPicker(props: {
           >
             <span class="dropdown-footer-icon">
               <svg
-                class="h-3.5 w-3.5 text-vscode-muted"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
+                class="block h-[18px] w-[18px] text-vscode-muted"
+                viewBox="0 0 32 32"
+                fill="currentColor"
+                aria-hidden="true"
               >
-                <path d="M2.5 4h7" />
-                <path d="M12.5 4h1" />
-                <circle cx="11" cy="4" r="1.4" fill="currentColor" />
-                <path d="M2.5 8h2" />
-                <path d="M7 8h6.5" />
-                <circle cx="5.5" cy="8" r="1.4" fill="currentColor" />
-                <path d="M2.5 12h5" />
-                <path d="M10 12h3.5" />
-                <circle cx="8.5" cy="12" r="1.4" fill="currentColor" />
+                <path d="M10 20c-1.657 0-3 1.343-3 3s1.343 3 3 3 3-1.343 3-3-1.343-3-3-3zm0 4c-.551 0-1-.449-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z" />
+                <circle cx="10" cy="16" r="3" />
+                <path d="M10 6C8.343 6 7 7.343 7 9s1.343 3 3 3 3-1.343 3-3-1.343-3-3-3zm0 4c-.551 0-1-.449-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z" />
+                <rect x="15" y="8" width="10" height="2" />
+                <rect x="15" y="15" width="10" height="2" />
+                <rect x="15" y="22" width="10" height="2" />
               </svg>
             </span>
-            <span class="text-vscode-muted">Manage Models</span>
+            <span class="dropdown-footer-label text-vscode-muted">Manage Models</span>
           </button>
         </div>
       </div>
