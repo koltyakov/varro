@@ -21,6 +21,7 @@ export class OpenCodeServer extends EventEmitter {
   private static readonly CLI_REGISTRY_TIMEOUT_MS = 10_000;
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
   private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
+  private static readonly EVENT_MAX_BUFFER_CHARS = 1_000_000;
   private process: ChildProcess | null = null;
   private _status: ServerStatus = { state: 'stopped' };
   private port: number;
@@ -471,6 +472,13 @@ export class OpenCodeServer extends EventEmitter {
           buffer = buffer.slice(boundary.index + boundary.length);
           this.processSseChunk(chunk);
         }
+        if (buffer.length > OpenCodeServer.EVENT_MAX_BUFFER_CHARS) {
+          abortForReconnect(
+            'Event stream buffer exceeded safety limit; reconnecting',
+            'Event stream buffer overflow'
+          );
+          break;
+        }
       }
     } catch (err: unknown) {
       if (controller.signal.aborted && !shouldReconnect) return;
@@ -519,8 +527,10 @@ export class OpenCodeServer extends EventEmitter {
       const parsed = JSON.parse(data);
       this.observeServerEvent(parsed);
       this.emit('event', parsed);
-    } catch {
-      // ignore
+    } catch (err) {
+      logger.warn(
+        `Ignoring malformed event stream payload: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
@@ -879,6 +889,9 @@ export class OpenCodeServer extends EventEmitter {
 
   private scopedUrl(path: string): { url: string; directory?: string } {
     const url = new URL(path, this.url);
+    if (!path.startsWith('/') || path.startsWith('//') || url.origin !== this.url) {
+      throw new Error('Unsupported OpenCode API path');
+    }
     const directory = this.getWorkspaceCwd();
 
     if (directory && !url.pathname.startsWith('/global/') && !url.searchParams.has('directory')) {

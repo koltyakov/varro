@@ -119,7 +119,7 @@ describe('bridge', () => {
 
     const request = bridge.apiCall('GET', '/slow');
     const rejection = expect(request).rejects.toThrow('API call timed out: GET /slow');
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(40_000);
 
     await rejection;
   });

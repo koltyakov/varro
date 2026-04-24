@@ -358,16 +358,7 @@ function buildDirectWindow(
 }
 
 function getProviderApiBaseUrl(provider: ProviderMetadata) {
-  if (PROVIDER_LIMIT_PROBE_BASES[provider.id]) {
-    return PROVIDER_LIMIT_PROBE_BASES[provider.id];
-  }
-
-  const modelUrls = Object.values(provider.models)
-    .map((model) => (typeof model.api?.url === 'string' ? model.api.url.trim() : ''))
-    .filter(Boolean);
-
-  if (modelUrls.length > 0) return modelUrls[0];
-  return null;
+  return PROVIDER_LIMIT_PROBE_BASES[provider.id] || null;
 }
 
 function resolveProviderAuthToken(

@@ -139,4 +139,22 @@ describe('provider limit helpers', () => {
       },
     });
   });
+
+  it('does not send auth tokens to provider metadata URLs for unknown providers', () => {
+    const authStore = parseProviderAuthStore(
+      JSON.stringify({
+        custom: { type: 'api', key: 'secret-token' },
+      })
+    );
+
+    expect(
+      buildProviderLimitProbe(
+        {
+          id: 'custom',
+          models: { model: { api: { url: 'https://provider.example.test/v1' } } },
+        },
+        authStore
+      )
+    ).toBeNull();
+  });
 });

@@ -1024,6 +1024,12 @@ let messageIndexVersion = 0;
 let indexedVersion = -1;
 let messageById: Map<string, number> = new Map();
 let partById: Map<string, { msgIdx: number; partIdx: number }> = new Map();
+let streamingDeltaFlushScheduled = false;
+let streamingDeltaGeneration = 0;
+const pendingStreamingDeltas = new Map<
+  string,
+  { messageId: string; partId: string; sessionId?: string; text: string }
+>();
 
 function ensureIndex(msgs: Array<{ info: Message; parts: Part[] }>) {
   if (indexedVersion === messageIndexVersion) return;
@@ -1075,7 +1081,69 @@ function findPartLocation(
   return null;
 }
 
+function scheduleStreamingDeltaFlush() {
+  if (streamingDeltaFlushScheduled) return;
+  streamingDeltaFlushScheduled = true;
+  const generation = streamingDeltaGeneration;
+  const flush = () => {
+    streamingDeltaFlushScheduled = false;
+    if (generation !== streamingDeltaGeneration) return;
+    flushPendingStreamingDeltas();
+  };
+
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(flush);
+    return;
+  }
+  setTimeout(flush, 16);
+}
+
+function resetPendingStreamingDeltas() {
+  pendingStreamingDeltas.clear();
+  streamingDeltaFlushScheduled = false;
+  streamingDeltaGeneration++;
+}
+
+function flushPendingStreamingDeltas() {
+  if (pendingStreamingDeltas.size === 0) return;
+  const deltas = [...pendingStreamingDeltas.values()];
+  pendingStreamingDeltas.clear();
+  streamingDeltaFlushScheduled = false;
+  const latest = deltas[deltas.length - 1];
+
+  batch(() => {
+    setState('streamingPartId', latest.partId);
+    setState('streamingText', latest.text);
+    setState(
+      'messages',
+      produce((msgs) => {
+        for (const item of deltas) {
+          const msgIdx = findMessageIndex(msgs, item.messageId);
+          if (msgIdx === -1) continue;
+          const partIdx = msgs[msgIdx].parts.findIndex((part) => part.id === item.partId);
+          if (partIdx !== -1) {
+            const part = msgs[msgIdx].parts[partIdx];
+            if (part.type === 'text' || part.type === 'reasoning') {
+              part.text = item.text;
+            }
+            continue;
+          }
+          msgs[msgIdx].parts.push({
+            id: item.partId,
+            messageID: item.messageId,
+            sessionID: item.sessionId || msgs[msgIdx].info.sessionID,
+            type: 'text',
+            text: item.text,
+          });
+          invalidateIndex();
+        }
+      })
+    );
+  });
+}
+
 export function upsertMessage(msg: { info: Message; parts: Part[] }) {
+  flushPendingStreamingDeltas();
   setState(
     'messages',
     produce((msgs) => {
@@ -1107,6 +1175,7 @@ export function upsertMessageInfo(info: Message) {
 }
 
 export function upsertPart(part: Part) {
+  flushPendingStreamingDeltas();
   const msgId = (part as { messageID: string }).messageID;
   setState(
     'messages',
@@ -1132,6 +1201,7 @@ export function upsertPart(part: Part) {
 }
 
 export function updateMessagePart(part: Part) {
+  flushPendingStreamingDeltas();
   const partId = part.id;
   setState(
     'messages',
@@ -1155,6 +1225,15 @@ export function applyMessagePartDelta(
 ) {
   if (field !== 'text' || !delta) return;
 
+  const pending = pendingStreamingDeltas.get(partId);
+  if (pending && pending.messageId === messageId) {
+    pending.text += delta;
+    pendingStreamingDeltas.delete(partId);
+    pendingStreamingDeltas.set(partId, pending);
+    scheduleStreamingDeltaFlush();
+    return;
+  }
+
   ensureIndex(state.messages);
   const location = partById.get(partId);
   const message =
@@ -1173,39 +1252,17 @@ export function applyMessagePartDelta(
       : '';
   const currentStreamingText =
     state.streamingPartId === partId ? state.streamingText : existingText;
-  const nextStreamingText = currentStreamingText + delta;
-
-  batch(() => {
-    setState('streamingPartId', partId);
-    setState('streamingText', nextStreamingText);
+  pendingStreamingDeltas.set(partId, {
+    messageId,
+    partId,
+    sessionId,
+    text: currentStreamingText + delta,
   });
-
-  setState(
-    'messages',
-    produce((msgs) => {
-      const msgIdx = findMessageIndex(msgs, messageId);
-      if (msgIdx === -1) return;
-      const partIdx = msgs[msgIdx].parts.findIndex((item) => item.id === partId);
-      if (partIdx !== -1) {
-        const part = msgs[msgIdx].parts[partIdx];
-        if (part.type === 'text' || part.type === 'reasoning') {
-          part.text = nextStreamingText;
-        }
-        return;
-      }
-      msgs[msgIdx].parts.push({
-        id: partId,
-        messageID: messageId,
-        sessionID: sessionId || msgs[msgIdx].info.sessionID,
-        type: 'text',
-        text: nextStreamingText,
-      });
-      invalidateIndex();
-    })
-  );
+  scheduleStreamingDeltaFlush();
 }
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
+  flushPendingStreamingDeltas();
   setState(
     'messages',
     produce((msgs) => {
@@ -1249,6 +1306,7 @@ export function removePermission(permissionId: string) {
 }
 
 export function clearStreamingState() {
+  resetPendingStreamingDeltas();
   batch(() => {
     setState('streamingPartId', null);
     setState('streamingText', '');
@@ -1429,6 +1487,7 @@ export function syncFailedSessionsFromMessages(
 }
 
 export function replaceMessages(incoming: Array<{ info: Message; parts: Part[] }>) {
+  resetPendingStreamingDeltas();
   setState('messages', incoming);
   invalidateIndex();
 }

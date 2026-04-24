@@ -63,6 +63,16 @@ async function loadState() {
   return import('./state');
 }
 
+function nextFrame() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 16);
+  });
+}
+
 beforeEach(() => {
   vi.resetModules();
 });
@@ -498,6 +508,7 @@ describe('state helpers', () => {
     expect(stateModule.messageStructureVersion()).toBe(afterMessageInsert);
 
     stateModule.applyMessagePartDelta('message-1', 'part-1', 'Hello', 'session-1');
+    await nextFrame();
 
     expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
       id: 'part-1',
@@ -520,6 +531,7 @@ describe('state helpers', () => {
     expect(stateModule.state.streamingText).toBe('');
 
     stateModule.applyMessagePartDelta('message-1', 'part-2', 'Bye', 'session-1');
+    await nextFrame();
     const afterSecondPartInsert = stateModule.messageStructureVersion();
     stateModule.removeMessagePart('session-1', 'message-1', 'missing-part');
     expect(stateModule.messageStructureVersion()).toBe(afterSecondPartInsert);

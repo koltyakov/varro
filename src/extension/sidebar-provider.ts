@@ -20,6 +20,11 @@ import type { OpenCodeServer } from './server';
 import { logger } from './logger';
 import { getRelativePath } from './util/path';
 import {
+  isAllowedApiRequest,
+  isAllowedExternalUrl,
+  parseWebviewMessage,
+} from './util/webview-message';
+import {
   buildProviderLimitProbe,
   extractOpenCodeConsoleLimit,
   extractOpenCodeProviderLimit,
@@ -238,7 +243,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (changed) {
       this.updateStatusBarItem();
       this.postPendingAttentionState();
-      void Promise.all([this.persistInterruptedSessions(), this.persistBlockingRequests()]);
+      void this.persistSessionState();
+    }
+  }
+
+  private async persistSessionState() {
+    const results = await Promise.allSettled([
+      this.persistInterruptedSessions(),
+      this.persistBlockingRequests(),
+    ]);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        logger.warn(
+          `Failed to persist session state: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+        );
+      }
     }
   }
 
@@ -504,7 +523,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewDisposables = [];
 
     this.webviewDisposables.push(
-      webviewView.webview.onDidReceiveMessage((msg: WebviewMessage) => {
+      webviewView.webview.onDidReceiveMessage((raw: unknown) => {
+        const msg = parseWebviewMessage(raw);
+        if (!msg) {
+          logger.warn('Ignoring invalid webview message');
+          return;
+        }
         void this.handleMessage(msg);
       })
     );
@@ -691,6 +715,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           });
           break;
         case 'vscode/open-external':
+          if (!isAllowedExternalUrl(msg.payload.url)) {
+            throw new Error('Unsupported external URL');
+          }
           await vscode.env.openExternal(vscode.Uri.parse(msg.payload.url));
           break;
         case 'config/update':
@@ -745,10 +772,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     body?: unknown;
   }) {
     try {
+      const method = payload.method.toUpperCase();
+      if (!isAllowedApiRequest(method, payload.path)) {
+        throw new Error('Unsupported API request');
+      }
       if (this._status.state !== 'running') {
         await this.ensureServerStarted();
       }
-      const providerLimitRequest = this.parseProviderLimitRequest(payload.method, payload.path);
+      const providerLimitRequest = this.parseProviderLimitRequest(method, payload.path);
       if (providerLimitRequest) {
         const data = await this.getProviderLimit(
           providerLimitRequest.providerID,
@@ -758,11 +789,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      if (
-        this.simulateNoProviders &&
-        payload.method === 'GET' &&
-        payload.path === '/config/providers'
-      ) {
+      if (this.simulateNoProviders && method === 'GET' && payload.path === '/config/providers') {
         this.post({
           type: 'api/response',
           payload: { id: payload.id, data: { providers: [], default: {} } },
@@ -770,7 +797,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      const data = await this.server.request(payload.method, payload.path, payload.body);
+      const data = await this.server.request(method, payload.path, payload.body);
       this.post({ type: 'api/response', payload: { id: payload.id, data } });
     } catch (err) {
       this.post({
@@ -989,7 +1016,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (isAbsolute(input)) {
       try {
         await vscode.workspace.fs.stat(absoluteUri);
-        return absoluteUri;
+        return vscode.workspace.getWorkspaceFolder(absoluteUri) ? absoluteUri : null;
       } catch {
         return null;
       }
@@ -1014,7 +1041,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       try {
         await vscode.workspace.fs.stat(candidate);
-        return candidate;
+        if (vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath === folder.uri.fsPath) {
+          return candidate;
+        }
       } catch {}
     }
 
@@ -1301,8 +1330,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.webviewAssets;
   }
 
-  dispose() {
-    void Promise.all([this.persistInterruptedSessions(), this.persistBlockingRequests()]);
+  async dispose() {
+    await this.persistSessionState();
     if (this.serverStatusHandler) this.server.off('status', this.serverStatusHandler);
     if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
     this.serverStatusHandler = undefined;

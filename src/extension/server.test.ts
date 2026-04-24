@@ -58,6 +58,23 @@ function createPendingEventResponse(signal: AbortSignal) {
   } as unknown as Response;
 }
 
+function createChunkedEventResponse(signal: AbortSignal, chunks: Uint8Array[]) {
+  let index = 0;
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        return {
+          read() {
+            const chunk = chunks[index++];
+            return chunk ? Promise.resolve({ value: chunk, done: false }) : waitForAbort(signal);
+          },
+        };
+      },
+    },
+  } as unknown as Response;
+}
+
 function setRunning(server: OpenCodeServer, options?: { keepMaintenance?: boolean }) {
   (
     server as unknown as {
@@ -178,6 +195,38 @@ describe('OpenCodeServer event stream', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(restart).not.toHaveBeenCalled();
+  });
+
+  it('reconnects when the event stream buffer exceeds the safety limit', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const statuses: ServerStatus[] = [];
+    server.on('status', (status) => statuses.push(status));
+    setRunning(server);
+
+    const oversizedChunk = new TextEncoder().encode('x'.repeat(1_000_001));
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (_input, init) => {
+      const signal = init?.signal as AbortSignal;
+      return createChunkedEventResponse(signal, [oversizedChunk]);
+    });
+
+    await startEventStream(server);
+
+    expect(
+      statuses.some(
+        (status) =>
+          status.state === 'running' &&
+          status.url === server.url &&
+          status.eventStream === 'degraded'
+      )
+    ).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await server.dispose();
   });
 
   it('keeps the managed process alive during disconnect', async () => {

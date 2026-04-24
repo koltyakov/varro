@@ -40,7 +40,7 @@ const pending = new Map<
   number,
   { resolve(v: unknown): void; reject(e: unknown): void; timer: ReturnType<typeof setTimeout> }
 >();
-const API_CALL_TIMEOUT_MS = 30_000;
+const API_CALL_TIMEOUT_MS = 40_000;
 
 onMessage((msg) => {
   if (msg.type === 'api/response') {

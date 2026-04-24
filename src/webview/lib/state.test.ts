@@ -56,13 +56,23 @@ function textPart(id: string, text: string): Part {
   };
 }
 
+function nextFrame() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 16);
+  });
+}
+
 describe('state streaming deltas', () => {
   beforeEach(() => {
     clearMessages();
     clearStreamingState();
   });
 
-  it('updates existing reasoning parts as deltas arrive', () => {
+  it('updates existing reasoning parts as deltas arrive', async () => {
     upsertMessage({
       info: assistantMessage(),
       parts: [reasoningPart('Planning'), textPart('text-1', '')],
@@ -70,6 +80,7 @@ describe('state streaming deltas', () => {
 
     applyMessagePartDelta('message-1', 'reason-1', ' more', 'session-1');
     applyMessagePartDelta('message-1', 'text-1', 'Answer', 'session-1');
+    await nextFrame();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
@@ -83,7 +94,7 @@ describe('state streaming deltas', () => {
     });
   });
 
-  it('resumes streaming from the part text after another part becomes active', () => {
+  it('resumes streaming from the part text after another part becomes active', async () => {
     upsertMessage({
       info: assistantMessage(),
       parts: [reasoningPart('Thinking'), textPart('text-1', 'Done')],
@@ -92,6 +103,7 @@ describe('state streaming deltas', () => {
     applyMessagePartDelta('message-1', 'reason-1', ' carefully', 'session-1');
     applyMessagePartDelta('message-1', 'text-1', ' already', 'session-1');
     applyMessagePartDelta('message-1', 'reason-1', ' now', 'session-1');
+    await nextFrame();
 
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',

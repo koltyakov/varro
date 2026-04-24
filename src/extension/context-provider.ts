@@ -314,7 +314,8 @@ export class ContextProvider implements vscode.Disposable {
       const uri = vscode.Uri.file(input);
       try {
         await vscode.workspace.fs.stat(uri);
-        return { uri, workspaceFolder: vscode.workspace.getWorkspaceFolder(uri) };
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        return workspaceFolder ? { uri, workspaceFolder } : null;
       } catch {
         return null;
       }
@@ -338,7 +339,9 @@ export class ContextProvider implements vscode.Disposable {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       try {
         await vscode.workspace.fs.stat(candidate);
-        return { uri: candidate, workspaceFolder: folder };
+        if (vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath === folder.uri.fsPath) {
+          return { uri: candidate, workspaceFolder: folder };
+        }
       } catch {}
     }
 
