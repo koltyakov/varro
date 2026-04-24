@@ -3,15 +3,16 @@ import { getMatchingVariant, getPreferredVariant } from './model-variants';
 import type { Provider } from '../types';
 
 function providerWithVariants(
-  variants: NonNullable<Provider['models'][string]['variants']>
+  variants: NonNullable<Provider['models'][string]['variants']>,
+  modelID = 'model'
 ): Provider {
   return {
     id: 'provider',
     name: 'Provider',
     source: 'config',
     models: {
-      model: {
-        id: 'model',
+      [modelID]: {
+        id: modelID,
         name: 'Model',
         capabilities: { toolcall: true, reasoning: true },
         cost: { input: 0, output: 0 },
@@ -32,6 +33,21 @@ describe('getPreferredVariant', () => {
     ];
 
     expect(getPreferredVariant('provider', 'model', providers)).toBe('medium');
+  });
+
+  it('prefers low reasoning by default for GPT-5.5', () => {
+    const providers = [
+      providerWithVariants(
+        {
+          low: {},
+          medium: {},
+          high: {},
+        },
+        'gpt-5.5'
+      ),
+    ];
+
+    expect(getPreferredVariant('provider', 'gpt-5.5', providers)).toBe('low');
   });
 
   it('prefers high when it is available before the last option', () => {
