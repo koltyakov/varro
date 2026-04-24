@@ -5,7 +5,6 @@ import openrouterIcon from '../assets/provider-icons/openrouter.svg';
 import geminiIcon from '../assets/provider-icons/gemini.svg';
 import deepseekIcon from '../assets/provider-icons/deepseek.svg';
 import xaiIcon from '../assets/provider-icons/xai.svg';
-import cerebrasIcon from '../assets/provider-icons/cerebras.svg';
 import qwenIcon from '../assets/provider-icons/qwen.svg';
 import kimiIcon from '../assets/provider-icons/kimi.svg';
 import opencodeIcon from '../assets/provider-icons/opencode.svg';
@@ -23,7 +22,6 @@ const PROVIDER_ICON_MAP: Record<string, string> = {
   google: geminiIcon,
   deepseek: deepseekIcon,
   xai: xaiIcon,
-  cerebras: cerebrasIcon,
   'github-copilot': githubCopilotIcon,
   zai: zaiIcon,
   'zai-coding-plan': zaiIcon,

@@ -1,6 +1,5 @@
 import { createMemo, createSignal, For, onMount, Show, createEffect } from 'solid-js';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
-import { getProviderIcon } from '../lib/provider-icons';
 import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
 import {
   modelSupportsTools,
@@ -211,18 +210,7 @@ export function ModelPicker(props: {
               <For each={filteredProviders()}>
                 {({ provider, models }) => (
                   <>
-                    <div class="dropdown-group-header">
-                      <Show when={getProviderIcon(provider.id)}>
-                        {(icon) => (
-                          <span
-                            class="provider-icon"
-                            style={{ '--provider-icon-mask': `url("${icon()}")` }}
-                            aria-hidden="true"
-                          />
-                        )}
-                      </Show>
-                      <span class="dropdown-group-name">{provider.name}</span>
-                    </div>
+                    <div class="dropdown-group-header">{provider.name}</div>
                     <For each={models}>
                       {(model) => {
                         const myIndex = () => getItemIndex(provider.id, model.id);
