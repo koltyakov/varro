@@ -81,6 +81,27 @@ function createChunkedEventResponse(signal: AbortSignal, chunks: Uint8Array[]) {
   } as unknown as Response;
 }
 
+function createImmediateEventResponse(payload: string) {
+  const bytes = new TextEncoder().encode(payload);
+  let delivered = false;
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        return {
+          read() {
+            if (!delivered) {
+              delivered = true;
+              return Promise.resolve({ value: bytes, done: false });
+            }
+            return Promise.resolve({ value: undefined, done: true });
+          },
+        };
+      },
+    },
+  } as unknown as Response;
+}
+
 function setRunning(server: OpenCodeServer, options?: { keepMaintenance?: boolean }) {
   (
     server as unknown as {
@@ -183,7 +204,7 @@ describe('OpenCodeServer event stream', () => {
     ).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_500);
     await flushMicrotasks();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -198,7 +219,7 @@ describe('OpenCodeServer event stream', () => {
     setRestartTimer(server, setTimeout(restart, 1_000));
 
     await server.dispose();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_500);
 
     expect(restart).not.toHaveBeenCalled();
   });
@@ -227,12 +248,85 @@ describe('OpenCodeServer event stream', () => {
       )
     ).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_500);
     await flushMicrotasks();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await server.dispose();
+  });
+
+  it('drops oversized SSE payloads before parsing them', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const events: unknown[] = [];
+    server.on('event', (event) => events.push(event));
+    setRunning(server);
+
+    const oversizedPayload = `data: {"type":"${'x'.repeat(250_001)}"}\n\n`;
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(createImmediateEventResponse(oversizedPayload));
+
+    await startEventStream(server);
+
+    expect(events).toEqual([]);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Ignoring oversized event stream payload (250012 chars > 250000)'
+    );
+
+    await server.dispose();
+  });
+
+  it('ignores stale stream events after a newer stream replaces them', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const events: unknown[] = [];
+    server.on('event', (event) => events.push(event));
+    setRunning(server);
+
+    let releaseFirstRead: (() => void) | null = null;
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (_input, init) => {
+      const signal = init?.signal as AbortSignal;
+      if (!releaseFirstRead) {
+        let chunkDelivered = false;
+        return {
+          ok: true,
+          body: {
+            getReader() {
+              return {
+                async read() {
+                  if (!chunkDelivered) {
+                    chunkDelivered = true;
+                    await new Promise<void>((resolve) => {
+                      releaseFirstRead = resolve;
+                    });
+                    return {
+                      value: new TextEncoder().encode('data: {"type":"session.created"}\n\n'),
+                      done: false,
+                    };
+                  }
+                  return waitForAbort(signal);
+                },
+              };
+            },
+          },
+        } as unknown as Response;
+      }
+
+      return createPendingEventResponse(signal);
+    });
+
+    const firstStream = startEventStream(server);
+    await flushMicrotasks();
+    const secondStream = startEventStream(server);
+    await flushMicrotasks();
+
+    releaseFirstRead?.();
+    await firstStream;
+
+    expect(events).toEqual([]);
+
+    stopEventStream(server);
+    await secondStream;
   });
 
   it('keeps the managed process alive during disconnect', async () => {

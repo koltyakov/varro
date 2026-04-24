@@ -24,6 +24,7 @@ export class OpenCodeServer extends EventEmitter {
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
   private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
   private static readonly EVENT_MAX_BUFFER_CHARS = 1_000_000;
+  private static readonly EVENT_MAX_PAYLOAD_CHARS = 250_000;
   private static readonly PORT_FALLBACK_MAX_OFFSET = 10;
   private process: ChildProcess | null = null;
   private _status: ServerStatus = { state: 'stopped' };
@@ -41,6 +42,7 @@ export class OpenCodeServer extends EventEmitter {
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private eventReconnectDelay = 1000;
   private eventReconnectCount = 0;
+  private eventStreamGeneration = 0;
   private static readonly EVENT_RECONNECT_WARNING_THRESHOLD = 10;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private startAttemptId = 0;
@@ -431,15 +433,17 @@ export class OpenCodeServer extends EventEmitter {
 
   private async startEventStream() {
     this.stopEventStream();
+    const generation = ++this.eventStreamGeneration;
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
     const scoped = this.scopedUrl('/event');
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
+    const isCurrentStream = () => this.isCurrentEventStream(controller, generation);
 
     const abortForReconnect = (message: string, reason: string) => {
-      if (controller.signal.aborted) return;
+      if (!isCurrentStream() || controller.signal.aborted) return;
       shouldReconnect = true;
       logger.warn(message);
       controller.abort(new Error(reason));
@@ -471,6 +475,7 @@ export class OpenCodeServer extends EventEmitter {
         clearTimeout(connectTimer);
         connectTimer = null;
       }
+      if (!isCurrentStream()) return;
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
       this.eventReconnectDelay = 1000;
       this.eventReconnectCount = 0;
@@ -482,11 +487,12 @@ export class OpenCodeServer extends EventEmitter {
       resetIdleTimer();
       while (true) {
         const { value, done } = await reader.read();
+        if (!isCurrentStream()) return;
         if (done) {
           buffer += decoder.decode();
           const finalChunk = buffer.slice(cursor).trim();
           if (finalChunk.length > 0) {
-            this.processSseChunk(finalChunk);
+            this.processSseChunk(finalChunk, controller, generation);
           }
           logger.warn('Event stream closed; reconnecting');
           shouldReconnect = true;
@@ -496,7 +502,7 @@ export class OpenCodeServer extends EventEmitter {
         buffer += decoder.decode(value, { stream: true });
         let boundary: { index: number; length: number } | null;
         while ((boundary = findSseChunkBoundary(buffer, cursor))) {
-          this.processSseChunk(buffer.slice(cursor, boundary.index));
+          this.processSseChunk(buffer.slice(cursor, boundary.index), controller, generation);
           cursor = boundary.index + boundary.length;
         }
         if (cursor > 0) {
@@ -529,7 +535,7 @@ export class OpenCodeServer extends EventEmitter {
       }
       if (
         shouldReconnect &&
-        this.eventController === controller &&
+        this.isCurrentEventStream(controller, generation) &&
         this._status.state === 'running'
       ) {
         this.updateEventStreamState('degraded');
@@ -540,14 +546,13 @@ export class OpenCodeServer extends EventEmitter {
           );
         }
 
-        const delay = this.eventReconnectDelay;
-        this.eventReconnectDelay = Math.min(delay * 2, OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS);
+        const delay = this.getEventReconnectDelay();
         this.eventReconnectTimer = setTimeout(() => this.startEventStream(), delay);
       }
     }
   }
 
-  private processSseChunk(chunk: string) {
+  private processSseChunk(chunk: string, controller?: AbortController, generation?: number) {
     let data = '';
     for (const line of chunk.split(/\r\n|[\r\n]/)) {
       if (!line.startsWith('data:')) continue;
@@ -555,6 +560,12 @@ export class OpenCodeServer extends EventEmitter {
       data = data.length === 0 ? value : `${data}\n${value}`;
     }
     if (data.length === 0) return;
+    if (data.length > OpenCodeServer.EVENT_MAX_PAYLOAD_CHARS) {
+      logger.warn(
+        `Ignoring oversized event stream payload (${data.length} chars > ${OpenCodeServer.EVENT_MAX_PAYLOAD_CHARS})`
+      );
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(data);
@@ -562,6 +573,13 @@ export class OpenCodeServer extends EventEmitter {
       logger.warn(
         `Ignoring malformed event stream payload: ${err instanceof Error ? err.message : String(err)}`
       );
+      return;
+    }
+    if (
+      controller &&
+      generation !== undefined &&
+      !this.isCurrentEventStream(controller, generation)
+    ) {
       return;
     }
     try {
@@ -617,6 +635,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private stopEventStream() {
+    this.eventStreamGeneration += 1;
     if (this.eventReconnectTimer) {
       clearTimeout(this.eventReconnectTimer);
       this.eventReconnectTimer = null;
@@ -1034,6 +1053,17 @@ export class OpenCodeServer extends EventEmitter {
       1000 * 2 ** Math.max(0, attempt - 1),
       OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS
     );
+  }
+
+  private getEventReconnectDelay() {
+    const delay = this.eventReconnectDelay;
+    this.eventReconnectDelay = Math.min(delay * 2, OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS);
+    const jitteredDelay = Math.round(delay * (0.8 + Math.random() * 0.4));
+    return Math.min(jitteredDelay, OpenCodeServer.MAX_EVENT_RECONNECT_DELAY_MS);
+  }
+
+  private isCurrentEventStream(controller: AbortController, generation: number) {
+    return this.eventController === controller && this.eventStreamGeneration === generation;
   }
 
   private tryAdvancePort(): boolean {
