@@ -74,7 +74,7 @@ export function SettingsPanel() {
                 <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
               </svg>
             </button>
-            <span class="settings-header-title">Settings</span>
+            <span class="settings-header-title">Models</span>
           </div>
           <button
             type="button"

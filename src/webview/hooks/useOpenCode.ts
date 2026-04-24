@@ -63,6 +63,7 @@ import {
   setProviderLimit,
   setSessionUsageLimit,
   consumeInterruptedSessionIds,
+  setDesktopSessionPaneSide,
   setExpandThinkingByDefaultPreference,
   setShowStickyUserPromptPreference,
 } from '../lib/state';
@@ -517,6 +518,7 @@ export function useOpenCode() {
         case 'config/update':
           setExpandThinkingByDefaultPreference(msg.payload.expandThinkingByDefault);
           setShowStickyUserPromptPreference(msg.payload.showStickyUserPrompt);
+          setDesktopSessionPaneSide(msg.payload.desktopSessionPaneSide);
           break;
         case 'pending-attention/update':
           setState('pendingAttentionSessionIds', msg.payload.sessionIds);

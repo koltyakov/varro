@@ -389,6 +389,11 @@ input:focus-visible {
   background: color-mix(in srgb, var(--color-vscode-sidebar) 90%, var(--color-vscode-widget-bg));
 }
 
+.chat-workspace-pane-right .chat-session-sidebar {
+  border-right: none;
+  border-left: 1px solid color-mix(in srgb, var(--color-vscode-border) 26%, transparent);
+}
+
 .chat-session-sidebar-header {
   padding: 0;
 }
@@ -4147,7 +4152,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-list-search-clear {
   position: absolute;
-  top: 50%;
+  top: calc(4px + (30px / 2));
   right: 18px;
   display: inline-flex;
   align-items: center;
@@ -4847,6 +4852,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
   .session-list-view-sidebar .session-list-search {
     padding: 12px;
+  }
+
+  .session-list-view-sidebar .session-list-search-clear {
+    top: calc(12px + (30px / 2));
   }
 
   .chat-header-chat-layout {

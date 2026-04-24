@@ -582,4 +582,25 @@ describe('state helpers', () => {
     expect(window.localStorage.getItem('varro.expandThinkingByDefault')).toBe(JSON.stringify(true));
     expect(window.localStorage.getItem('varro.showStickyUserPrompt')).toBe(JSON.stringify(false));
   });
+
+  it('reads desktop session pane side from initial webview state', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      desktopSessionPaneSide: 'right',
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.desktopSessionPaneSide()).toBe('right');
+  });
 });

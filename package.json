@@ -152,6 +152,15 @@
           "default": true,
           "description": "Show the sticky user prompt preview while scrolling long assistant responses."
         },
+        "varro.chat.desktopSessionPaneSide": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "left",
+          "markdownDescription": "Choose which side shows the sessions pane on large screens in the Varro chat view."
+        },
         "varro.context.autoAttachFile": {
           "type": "boolean",
           "default": true,

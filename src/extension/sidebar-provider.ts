@@ -3,6 +3,7 @@ import { readFile } from 'fs/promises';
 import { randomBytes } from 'crypto';
 import { resolve, join, basename, isAbsolute } from 'path';
 import type {
+  DesktopSessionPaneSide,
   DroppedFile,
   ExtensionMessage,
   InitialWebviewState,
@@ -108,7 +109,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (
         event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
         event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
-        event.affectsConfiguration('varro.chat.showStickyUserPrompt')
+        event.affectsConfiguration('varro.chat.showStickyUserPrompt') ||
+        event.affectsConfiguration('varro.chat.desktopSessionPaneSide')
       ) {
         this.postConfigState();
       }
@@ -588,12 +590,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       .get<boolean>('chat.showStickyUserPrompt', true);
   }
 
+  private getDesktopSessionPaneSide(): DesktopSessionPaneSide {
+    return vscode.workspace
+      .getConfiguration('varro')
+      .get<DesktopSessionPaneSide>('chat.desktopSessionPaneSide', 'left');
+  }
+
   private postConfigState() {
     this.post({
       type: 'config/update',
       payload: {
         expandThinkingByDefault: this.getExpandThinkingByDefault(),
         showStickyUserPrompt: this.getShowStickyUserPrompt(),
+        desktopSessionPaneSide: this.getDesktopSessionPaneSide(),
       },
     });
   }
@@ -697,6 +706,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             .update(
               'chat.showStickyUserPrompt',
               msg.payload.showStickyUserPrompt,
+              vscode.ConfigurationTarget.Global
+            );
+          await vscode.workspace
+            .getConfiguration('varro')
+            .update(
+              'chat.desktopSessionPaneSide',
+              msg.payload.desktopSessionPaneSide,
               vscode.ConfigurationTarget.Global
             );
           this.postConfigState();
@@ -1231,6 +1247,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       emptyStateLogoUri: emptyStateLogoUri?.toString() || '',
       expandThinkingByDefault: this.getExpandThinkingByDefault(),
       showStickyUserPrompt: this.getShowStickyUserPrompt(),
+      desktopSessionPaneSide: this.getDesktopSessionPaneSide(),
       interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')

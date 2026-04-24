@@ -89,6 +89,8 @@ export type ServerEventName =
 
 export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light';
 
+export type DesktopSessionPaneSide = 'left' | 'right';
+
 export type InitialWebviewState = {
   theme: WebviewThemeKind;
   serverStatus: ServerStatus;
@@ -98,6 +100,7 @@ export type InitialWebviewState = {
   emptyStateLogoUri: string;
   expandThinkingByDefault?: boolean;
   showStickyUserPrompt?: boolean;
+  desktopSessionPaneSide?: DesktopSessionPaneSide;
   interruptedSessionIds?: string[];
   pendingPermissions?: Array<Record<string, unknown>>;
   pendingQuestions?: Array<Record<string, unknown>>;
@@ -120,7 +123,11 @@ export type ExtensionMessage =
     }
   | {
       type: 'config/update';
-      payload: { expandThinkingByDefault: boolean; showStickyUserPrompt: boolean };
+      payload: {
+        expandThinkingByDefault: boolean;
+        showStickyUserPrompt: boolean;
+        desktopSessionPaneSide: DesktopSessionPaneSide;
+      };
     }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
@@ -146,7 +153,11 @@ export type WebviewMessage =
   | { type: 'vscode/open-external'; payload: { url: string } }
   | {
       type: 'config/update';
-      payload: { expandThinkingByDefault: boolean; showStickyUserPrompt: boolean };
+      payload: {
+        expandThinkingByDefault: boolean;
+        showStickyUserPrompt: boolean;
+        desktopSessionPaneSide: DesktopSessionPaneSide;
+      };
     }
   | { type: 'ready' }
   | { type: 'api/request'; payload: { id: number; method: string; path: string; body?: unknown } }

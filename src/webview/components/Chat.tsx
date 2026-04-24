@@ -1,4 +1,5 @@
 import {
+  desktopSessionPaneSide,
   state,
   showSessionPicker,
   setShowSessionPicker,
@@ -69,6 +70,7 @@ export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
+  const isDesktopSessionPaneRight = () => desktopSessionPaneSide() === 'right';
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const sessionsById = createMemo(
@@ -351,6 +353,36 @@ export function Chat() {
     </>
   );
 
+  const renderSessionSidebar = () => (
+    <aside class="chat-session-sidebar" aria-label="Sessions">
+      <div class="chat-header chat-session-sidebar-header">
+        <div class="chat-header-inner chat-session-sidebar-header-inner">
+          {renderSessionPickerHeader(true, true)}
+        </div>
+      </div>
+      <SessionListView
+        embedded
+        class="session-list-view-sidebar"
+        sessionFilter={showSessionPicker() ? sessionFilter() : null}
+        subagentParentId={showSessionPicker() ? subagentParentId() : null}
+        onOpenSubagents={showSessionPicker() ? openSubagentSessions : undefined}
+      />
+    </aside>
+  );
+
+  const renderMainShell = () => (
+    <div class="chat-main-shell">
+      <div class="chat-header chat-header-chat-desktop">
+        <div class="chat-header-inner">{renderChatHeader(false, false)}</div>
+      </div>
+      <div class="chat-main-column-shell">
+        <MessageList />
+
+        <ChatInput />
+      </div>
+    </div>
+  );
+
   return (
     <div class="interactive-session">
       <div
@@ -392,36 +424,27 @@ export function Chat() {
           />
         }
       >
-        <Show when={showSettings() && !showSessionPicker()}>
+        <Show when={showSettings()}>
           <SettingsPanel />
         </Show>
 
-        <div class="chat-workspace">
-          <aside class="chat-session-sidebar" aria-label="Sessions">
-            <div class="chat-header chat-session-sidebar-header">
-              <div class="chat-header-inner chat-session-sidebar-header-inner">
-                {renderSessionPickerHeader(true, true)}
-              </div>
-            </div>
-            <SessionListView
-              embedded
-              class="session-list-view-sidebar"
-              sessionFilter={showSessionPicker() ? sessionFilter() : null}
-              subagentParentId={showSessionPicker() ? subagentParentId() : null}
-              onOpenSubagents={showSessionPicker() ? openSubagentSessions : undefined}
-            />
-          </aside>
-
-          <div class="chat-main-shell">
-            <div class="chat-header chat-header-chat-desktop">
-              <div class="chat-header-inner">{renderChatHeader(false, false)}</div>
-            </div>
-            <div class="chat-main-column-shell">
-              <MessageList />
-
-              <ChatInput />
-            </div>
-          </div>
+        <div
+          class={`chat-workspace ${isDesktopSessionPaneRight() ? 'chat-workspace-pane-right' : ''}`}
+        >
+          <Show
+            when={isDesktopSessionPaneRight()}
+            fallback={
+              <>
+                {renderSessionSidebar()}
+                {renderMainShell()}
+              </>
+            }
+          >
+            <>
+              {renderMainShell()}
+              {renderSessionSidebar()}
+            </>
+          </Show>
         </div>
       </Show>
     </div>

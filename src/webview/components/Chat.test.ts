@@ -27,9 +27,11 @@ import {
   shouldShowSessionHeaderBadge,
 } from './Chat';
 import {
+  setDesktopSessionPaneSide,
   hasActiveUsageLimit,
   state,
   setSessionFailed,
+  setShowSettings,
   setShowSessionPicker,
   setSessionUsageLimit,
   setState,
@@ -103,7 +105,9 @@ afterEach(() => {
   setState('streamingPartId', null);
   setState('streamingText', '');
   setState('compactingSessionIds', []);
+  setDesktopSessionPaneSide('left');
   setShowSessionPicker(false);
+  setShowSettings(false);
   globalThis.ResizeObserver = originalResizeObserver;
   globalThis.matchMedia = originalMatchMedia;
   vi.restoreAllMocks();
@@ -915,6 +919,41 @@ describe('header status badges', () => {
     expect(
       container?.querySelector('.chat-header-chat-desktop .chat-header-title-text')?.textContent
     ).toBe('New Chat');
+  });
+
+  it('renders settings on desktop while the session picker state is active', async () => {
+    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
+    setState('activeSessionId', 'session-1');
+    setShowSessionPicker(true);
+    setShowSettings(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    dispatchDesktopMediaQueryChange(true);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.settings-panel')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('renders the desktop session pane on the right when configured', async () => {
+    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
+    setState('activeSessionId', 'session-1');
+    setDesktopSessionPaneSide('right');
+    dispatchDesktopMediaQueryChange(true);
+
+    cleanup = render(() => Chat(), container!);
+    await Promise.resolve();
+
+    const workspace = container?.querySelector('.chat-workspace');
+    const sidebar = container?.querySelector('.chat-session-sidebar');
+    const mainShell = container?.querySelector('.chat-main-shell');
+
+    expect(workspace).toBeInstanceOf(HTMLDivElement);
+    expect(workspace?.classList.contains('chat-workspace-pane-right')).toBe(true);
+    expect(sidebar).toBeInstanceOf(HTMLElement);
+    expect(mainShell).toBeInstanceOf(HTMLDivElement);
+    expect(workspace?.firstElementChild).toBe(mainShell);
+    expect(workspace?.lastElementChild).toBe(sidebar);
   });
 });
 

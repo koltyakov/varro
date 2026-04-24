@@ -14,6 +14,7 @@ import type {
   AssistantMessage,
 } from '../types';
 import type {
+  DesktopSessionPaneSide,
   EditorContext,
   DroppedFile,
   InitialWebviewState,
@@ -439,6 +440,9 @@ export function setShowStickyUserPromptPreference(next: boolean) {
   writeStored(STORAGE_KEYS.showStickyUserPrompt, next);
 }
 
+export const [desktopSessionPaneSide, setDesktopSessionPaneSide] =
+  createSignal<DesktopSessionPaneSide>(readDesktopSessionPaneSide());
+
 export const [inputText, setInputText] = createSignal('');
 export const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
 export const [isLoading, setIsLoading] = createSignal(false);
@@ -557,6 +561,10 @@ function readShowStickyUserPrompt(): boolean {
     readStored<boolean>(STORAGE_KEYS.showStickyUserPrompt) ??
     true
   );
+}
+
+function readDesktopSessionPaneSide(): DesktopSessionPaneSide {
+  return initialWebviewState.desktopSessionPaneSide === 'right' ? 'right' : 'left';
 }
 
 export function setCurrentDocumentEnabled(
