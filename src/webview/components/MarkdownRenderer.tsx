@@ -98,6 +98,8 @@ const TAG_ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
     'width',
   ]),
 };
+const CODE_BLOCK_CACHE_LIMIT = 100;
+const codeBlockHtmlCache = new Map<string, string>();
 
 function escapeHtml(value: string) {
   return value
@@ -182,6 +184,13 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   const normalizedText = SHELL_LANGS.has((lang || '').toLowerCase())
     ? formatCommandDisplay(text, state.editorContext.workspacePath)
     : text;
+  const cacheKey = `${lang || ''}\u0000${normalizedText}`;
+  const cached = codeBlockHtmlCache.get(cacheKey);
+  if (cached) {
+    codeBlockHtmlCache.delete(cacheKey);
+    codeBlockHtmlCache.set(cacheKey, cached);
+    return cached;
+  }
   const escaped = normalizedText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const copyPayload = encodeCopyPayload(normalizedText);
   const langLabel = lang ? `<span class="code-block-lang">${lang}</span>` : '';
@@ -190,7 +199,13 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
     copySvg +
     '</button>';
   const langAttr = lang ? ` data-lang="${lang.replace(/"/g, '&quot;')}"` : '';
-  return `<div class="interactive-result-code-block"${langAttr}><div class="code-block-header">${langLabel}${copyBtn}</div><pre class="code-block"><code>${escaped}</code></pre></div>`;
+  const html = `<div class="interactive-result-code-block"${langAttr}><div class="code-block-header">${langLabel}${copyBtn}</div><pre class="code-block"><code>${escaped}</code></pre></div>`;
+  codeBlockHtmlCache.set(cacheKey, html);
+  if (codeBlockHtmlCache.size > CODE_BLOCK_CACHE_LIMIT) {
+    const oldest = codeBlockHtmlCache.keys().next().value;
+    if (oldest) codeBlockHtmlCache.delete(oldest);
+  }
+  return html;
 };
 
 renderer.link = function ({
@@ -386,6 +401,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   let pendingContent: string | null = null;
   let rafId: number | null = null;
+  let lastAppliedHtml = '';
 
   const [renderedHtml, setRenderedHtml] = createSignal(parseMarkdown(props.content || ''));
 
@@ -403,9 +419,19 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (pendingContent !== null) {
       const content = pendingContent;
       pendingContent = null;
-      setRenderedHtml(parseMarkdown(content));
+      const nextHtml = parseMarkdown(content);
+      if (nextHtml !== lastAppliedHtml) {
+        lastAppliedHtml = nextHtml;
+        setRenderedHtml(nextHtml);
+      }
+      queueMicrotask(() => {
+        applyTableColumnClasses(ref);
+        applyCodeBlockCopyIcons(ref);
+      });
     }
   }
+
+  lastAppliedHtml = renderedHtml();
 
   createEffect(() => {
     const content = props.content || '';
@@ -415,14 +441,6 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
     pendingContent = content;
     rafId = requestAnimationFrame(flushPending);
-  });
-
-  createEffect(() => {
-    renderedHtml();
-    queueMicrotask(() => {
-      applyTableColumnClasses(ref);
-      applyCodeBlockCopyIcons(ref);
-    });
   });
 
   const copyTimeouts = new Set<ReturnType<typeof setTimeout>>();

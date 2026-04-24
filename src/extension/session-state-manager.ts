@@ -38,6 +38,10 @@ export interface NotificationGate {
 
 const INTERRUPTED_SESSIONS_KEY = 'varro.interruptedSessions';
 const BLOCKING_REQUESTS_KEY = 'varro.blockingRequests';
+const MAX_PERSISTED_INTERRUPTED_SESSIONS = 50;
+const MAX_PERSISTED_BLOCKING_REQUESTS = 100;
+const MAX_PERSISTED_METADATA_ENTRIES = 20;
+const MAX_PERSISTED_STRING_LENGTH = 500;
 
 /**
  * Owns all per-session state derived from the OpenCode event stream:
@@ -283,7 +287,11 @@ export class SessionStateManager {
   private async persistInterruptedSessions() {
     const snapshots = [...this.busySessions]
       .toSorted()
-      .map((id) => ({ id, title: this.sessionTitles.get(id)?.trim() || undefined }));
+      .slice(0, MAX_PERSISTED_INTERRUPTED_SESSIONS)
+      .map((id) => ({
+        id,
+        title: trimOptionalString(this.sessionTitles.get(id)?.trim() || undefined),
+      }));
     await this.workspaceState.update(INTERRUPTED_SESSIONS_KEY, snapshots);
   }
 
@@ -293,10 +301,20 @@ export class SessionStateManager {
         id,
         sessionID: request.sessionID,
         kind: request.kind,
-        props: request.props,
+        props: this.serializeBlockingRequestProps(request.kind, request.props),
       }))
-      .toSorted((a, b) => a.id.localeCompare(b.id));
+      .toSorted((a, b) => a.id.localeCompare(b.id))
+      .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
     await this.workspaceState.update(BLOCKING_REQUESTS_KEY, snapshots);
+  }
+
+  private serializeBlockingRequestProps(
+    kind: PendingAttentionKind,
+    props: Record<string, unknown>
+  ): Record<string, unknown> {
+    return kind === 'permission'
+      ? serializePermissionRequestProps(props)
+      : serializeQuestionRequestProps(props);
   }
 
   private rememberSessionTitle(info: Record<string, unknown> | undefined) {
@@ -415,4 +433,136 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function getString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function trimOptionalString(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.length > MAX_PERSISTED_STRING_LENGTH
+    ? value.slice(0, MAX_PERSISTED_STRING_LENGTH)
+    : value;
+}
+
+function trimRequiredString(value: string, fallback = ''): string {
+  const trimmed = value.trim();
+  if (!trimmed) return fallback;
+  return trimmed.length > MAX_PERSISTED_STRING_LENGTH
+    ? trimmed.slice(0, MAX_PERSISTED_STRING_LENGTH)
+    : trimmed;
+}
+
+function serializePermissionRequestProps(props: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    id: getString(props.id) || getString(props.permissionID) || getString(props.requestID) || '',
+    sessionID: getString(props.sessionID) || '',
+  };
+
+  const permission = trimOptionalString(getString(props.permission));
+  if (permission) result.permission = permission;
+
+  const title = trimOptionalString(getString(props.title));
+  if (title) result.title = title;
+
+  const patterns = Array.isArray(props.patterns)
+    ? props.patterns
+        .map((item) => getString(item))
+        .filter((item): item is string => Boolean(item))
+        .slice(0, MAX_PERSISTED_METADATA_ENTRIES)
+        .map((item) => trimRequiredString(item))
+    : typeof props.patterns === 'string'
+      ? [trimRequiredString(props.patterns)]
+      : [];
+  if (patterns.length > 0) result.patterns = patterns;
+
+  const messageID =
+    getString(props.messageID) || getString(asRecord(props.tool)?.messageID) || undefined;
+  const callID = getString(props.callID) || getString(asRecord(props.tool)?.callID) || undefined;
+  if (messageID || callID) {
+    result.tool = {
+      ...(messageID ? { messageID: trimRequiredString(messageID) } : {}),
+      ...(callID ? { callID: trimRequiredString(callID) } : {}),
+    };
+  }
+
+  const metadata = asRecord(props.metadata);
+  if (metadata) {
+    const persistedMetadataEntries = Object.entries(metadata)
+      .filter((entry): entry is [string, string | number | boolean] =>
+        isPersistableMetadataValue(entry[1])
+      )
+      .slice(0, MAX_PERSISTED_METADATA_ENTRIES)
+      .map(([key, value]) => [trimRequiredString(key), trimMetadataValue(value)] as const);
+    if (persistedMetadataEntries.length > 0) {
+      result.metadata = Object.fromEntries(persistedMetadataEntries);
+    }
+  }
+
+  return result;
+}
+
+function serializeQuestionRequestProps(props: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    id: getString(props.id) || '',
+    sessionID: getString(props.sessionID) || '',
+  };
+
+  const questions = Array.isArray(props.questions)
+    ? props.questions
+        .map((item) => serializeQuestionDefinition(asRecord(item)))
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+    : [];
+  if (questions.length > 0) {
+    result.questions = questions;
+  }
+
+  const tool = asRecord(props.tool);
+  const messageID = getString(tool?.messageID);
+  const callID = getString(tool?.callID);
+  if (messageID && callID) {
+    result.tool = {
+      messageID: trimRequiredString(messageID),
+      callID: trimRequiredString(callID),
+    };
+  }
+
+  return result;
+}
+
+function serializeQuestionDefinition(question: Record<string, unknown> | undefined) {
+  if (!question) return null;
+  const prompt = trimOptionalString(getString(question.question));
+  const header = trimOptionalString(getString(question.header));
+  const options = Array.isArray(question.options)
+    ? question.options
+        .map((item) => serializeQuestionOption(asRecord(item)))
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .slice(0, MAX_PERSISTED_METADATA_ENTRIES)
+    : [];
+
+  if (!prompt && !header && options.length === 0) return null;
+  return {
+    ...(prompt ? { question: prompt } : {}),
+    ...(header ? { header } : {}),
+    ...(typeof question.multiple === 'boolean' ? { multiple: question.multiple } : {}),
+    ...(typeof question.custom === 'boolean' ? { custom: question.custom } : {}),
+    options,
+  };
+}
+
+function serializeQuestionOption(option: Record<string, unknown> | undefined) {
+  if (!option) return null;
+  const label = trimOptionalString(getString(option.label));
+  if (!label) return null;
+  const description = trimOptionalString(getString(option.description));
+  return {
+    label,
+    ...(description ? { description } : {}),
+  };
+}
+
+function isPersistableMetadataValue(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+function trimMetadataValue(value: string | number | boolean): string | number | boolean {
+  return typeof value === 'string' ? trimRequiredString(value) : value;
 }

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as FsModule from 'fs';
 import type { ServerStatus } from '../shared/protocol';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
@@ -27,8 +28,16 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof FsModule>('fs');
+  return {
+    ...actual,
+    existsSync: vi.fn(actual.existsSync),
+  };
+});
 
 import { OpenCodeServer } from './server';
+import { existsSync } from 'fs';
 
 function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve());
@@ -320,7 +329,10 @@ describe('OpenCodeServer event stream', () => {
     const secondStream = startEventStream(server);
     await flushMicrotasks();
 
-    releaseFirstRead?.();
+    const release = releaseFirstRead as unknown;
+    if (typeof release === 'function') {
+      release();
+    }
     await firstStream;
 
     expect(events).toEqual([]);
@@ -498,5 +510,22 @@ describe('OpenCodeServer maintenance', () => {
     });
     expect(terminal.show).toHaveBeenCalledWith(false);
     expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+  });
+});
+
+describe('OpenCodeServer command resolution', () => {
+  it('caches the resolved CLI path across repeated lookups', () => {
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      getResolvedCommandCacheKey: () => string;
+      resolveCommand: () => string;
+      resolvedCommandCache: { key: string; value: string } | null;
+    };
+    api.getResolvedCommandCacheKey = vi.fn(() => 'stable-key');
+    api.resolvedCommandCache = { key: 'stable-key', value: '/tmp/bin/opencode' };
+
+    expect(api.resolveCommand()).toBe('/tmp/bin/opencode');
+    expect(api.getResolvedCommandCacheKey).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(existsSync)).not.toHaveBeenCalled();
   });
 });

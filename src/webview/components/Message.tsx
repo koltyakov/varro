@@ -1,4 +1,12 @@
-import { For, Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+} from 'solid-js';
 import { client } from '../lib/client';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import { retryMessage } from '../hooks/useOpenCode';
@@ -13,6 +21,7 @@ import type {
   ToolPart,
 } from '../types';
 import { DiffView } from './DiffView';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { MessagePart } from './MessagePart';
 import { isLoading, state } from '../lib/state';
 import {
@@ -431,6 +440,14 @@ export function getUserMessagePreviewText(parts: Part[]): string {
   return '(no content)';
 }
 
+function shouldShowReadModeToggle(text: string): boolean {
+  const normalized = text.replace(/\r\n?/g, '\n').trim();
+  if (normalized.length === 0) return false;
+
+  const lineCount = normalized.split('\n').length;
+  return normalized.length >= 420 || lineCount >= 8;
+}
+
 function UserMessageContent(props: { parts: Part[] }) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));
 
@@ -755,6 +772,7 @@ function AssistantMessageContent(props: {
   streamedTextForPart: (part: Part) => string | null;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
+  const [readModeOpen, setReadModeOpen] = createSignal(false);
   const displayParts = createMemo(() =>
     props.suppressHighlightedCardMetaParts
       ? dedupedParts().filter((part) => {
@@ -769,6 +787,44 @@ function AssistantMessageContent(props: {
   const finalTextPartId = createMemo(() =>
     getFinalAssistantTextPartId(displayParts(), !!props.highlightFinalAnswer)
   );
+  const finalTextPart = createMemo(() => {
+    const partId = finalTextPartId();
+    if (!partId) return null;
+    const part = displayParts().find(
+      (candidate): candidate is TextPart => candidate.type === 'text' && candidate.id === partId
+    );
+    return part || null;
+  });
+  const finalTextContent = createMemo(() => {
+    const part = finalTextPart();
+    if (!part) return '';
+    return props.streamedTextForPart(part) || part.text;
+  });
+  const showReadModeToggle = createMemo(() => shouldShowReadModeToggle(finalTextContent()));
+
+  createEffect(() => {
+    if (!readModeOpen()) return;
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setReadModeOpen(false);
+    };
+
+    window.addEventListener('keydown', handleKeydown);
+    document.body.classList.add('chat-read-mode-open');
+
+    onCleanup(() => {
+      window.removeEventListener('keydown', handleKeydown);
+      document.body.classList.remove('chat-read-mode-open');
+    });
+  });
+
+  createEffect(() => {
+    if (finalTextPart()) return;
+    setReadModeOpen(false);
+  });
+
   const renderItems = createMemo(() => {
     const items: Array<
       { kind: 'part'; part: Part } | { kind: 'file-edit-stack'; parts: ToolPart[] }
@@ -819,6 +875,25 @@ function AssistantMessageContent(props: {
                 !!props.highlightPlanningAnswer
               )}
             >
+              <Show
+                when={
+                  item.part.type === 'text' &&
+                  item.part.id === finalTextPartId() &&
+                  showReadModeToggle()
+                }
+              >
+                <div class="assistant-read-mode-toggle-shell">
+                  <button
+                    type="button"
+                    class="assistant-read-mode-toggle"
+                    aria-label="Open read mode"
+                    title="Open read mode"
+                    onClick={() => setReadModeOpen(true)}
+                  >
+                    <ExpandCornersIcon />
+                  </button>
+                </div>
+              </Show>
               <MessagePart
                 part={item.part}
                 messageInfo={props.info}
@@ -845,6 +920,35 @@ function AssistantMessageContent(props: {
           </Show>
         </div>
       </Show>
+      <Show when={readModeOpen() && finalTextContent().trim().length > 0}>
+        <div
+          class="assistant-read-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Read mode"
+          onClick={() => setReadModeOpen(false)}
+        >
+          <button
+            type="button"
+            class="assistant-read-mode-close"
+            aria-label="Exit read mode"
+            title="Exit read mode"
+            onClick={(event) => {
+              event.stopPropagation();
+              setReadModeOpen(false);
+            }}
+          >
+            <CloseIcon />
+          </button>
+          <div class="assistant-read-overlay-scroll">
+            <div class="assistant-read-overlay-inner" onClick={(event) => event.stopPropagation()}>
+              <div class="assistant-read-mode-content">
+                <MarkdownRenderer content={finalTextContent()} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 }
@@ -857,7 +961,30 @@ function getAssistantFlowItemClass(
   const className = 'assistant-message-flow-item';
   if (part.type !== 'text' || part.id !== finalTextPartId) return className;
 
-  return `${className} assistant-message-flow-item-final${highlightPlanningAnswer ? ' assistant-message-flow-item-final-planning' : ''}`;
+  return `${className} assistant-message-flow-item-final assistant-message-flow-item-final-readable${highlightPlanningAnswer ? ' assistant-message-flow-item-final-planning' : ''}`;
+}
+
+function ExpandCornersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M9.29 13.29 4 18.59V17a1 1 0 0 0-2 0v4a1 1 0 0 0 .08.38 1 1 0 0 0 .54.54A1 1 0 0 0 3 22H7a1 1 0 0 0 0-2H5.41l5.3-5.29a1 1 0 0 0-1.42-1.42ZM5.41 4H7a1 1 0 0 0 0-2H3a1 1 0 0 0-.38.08 1 1 0 0 0-.54.54A1 1 0 0 0 2 3V7a1 1 0 0 0 2 0V5.41l5.29 5.3a1 1 0 0 0 1.42 0 1 1 0 0 0 0-1.42ZM21 16a1 1 0 0 0-1 1v1.59l-5.29-5.3a1 1 0 0 0-1.42 1.42L18.59 20H17a1 1 0 0 0 0 2h4a1 1 0 0 0 .38-.08 1 1 0 0 0 .54-.54A1 1 0 0 0 22 21V17a1 1 0 0 0-1-1Zm.92-13.38a1 1 0 0 0-.54-.54A1 1 0 0 0 21 2H17a1 1 0 0 0 0 2h1.59l-5.3 5.29a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0L20 5.41V7a1 1 0 0 0 2 0V3a1 1 0 0 0-.08-.38Z" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.7"
+      aria-hidden="true"
+    >
+      <path d="m4 4 8 8" stroke-linecap="round" />
+      <path d="m12 4-8 8" stroke-linecap="round" />
+    </svg>
+  );
 }
 
 function DiffSummary(props: { diffs: FileDiff[] }) {

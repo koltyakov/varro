@@ -691,7 +691,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return Array.isArray(config?.providers)
         ? config.providers.filter((item): item is ProviderMetadata => Boolean(asRecord(item)))
         : [];
-    })();
+    })().catch((err) => {
+      if (this.providerMetadataPromise) {
+        this.providerMetadataPromise = null;
+        this.providerMetadataFetchedAt = 0;
+      }
+      throw err;
+    });
 
     return this.providerMetadataPromise;
   }

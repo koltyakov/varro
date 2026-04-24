@@ -58,6 +58,10 @@ export class OpenCodeServer extends EventEmitter {
   private lastSuggestedCliVersion = '';
   private lastLoggedUnmanagedRestartKey = '';
   private readonly pendingAttentionRequests = new Map<string, string>();
+  private resolvedCommandCache: {
+    key: string;
+    value: string;
+  } | null = null;
 
   constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
     super();
@@ -1019,6 +1023,11 @@ export class OpenCodeServer extends EventEmitter {
   private resolveCommand(): string {
     if (this.command) return this.command;
 
+    const cacheKey = this.getResolvedCommandCacheKey();
+    if (this.resolvedCommandCache?.key === cacheKey) {
+      return this.resolvedCommandCache.value;
+    }
+
     const candidates =
       process.platform === 'win32'
         ? ['opencode.exe', 'opencode.cmd', 'opencode.bat']
@@ -1027,11 +1036,16 @@ export class OpenCodeServer extends EventEmitter {
     for (const dir of this.serverPathEntries()) {
       for (const candidate of candidates) {
         const fullPath = join(dir, candidate);
-        if (existsSync(fullPath)) return fullPath;
+        if (existsSync(fullPath)) {
+          this.resolvedCommandCache = { key: cacheKey, value: fullPath };
+          return fullPath;
+        }
       }
     }
 
-    return process.platform === 'win32' ? 'opencode.cmd' : 'opencode';
+    const fallback = process.platform === 'win32' ? 'opencode.cmd' : 'opencode';
+    this.resolvedCommandCache = { key: cacheKey, value: fallback };
+    return fallback;
   }
 
   private buildServerEnv(): NodeJS.ProcessEnv {
@@ -1040,6 +1054,17 @@ export class OpenCodeServer extends EventEmitter {
 
   private serverPathEntries(): string[] {
     return getServerPathEntries();
+  }
+
+  private getResolvedCommandCacheKey() {
+    return JSON.stringify({
+      platform: process.platform,
+      pathEntries: this.serverPathEntries(),
+      home: process.env.HOME || process.env.USERPROFILE || '',
+      pnpmHome: process.env.PNPM_HOME || '',
+      appData: process.env.APPDATA || '',
+      localAppData: process.env.LOCALAPPDATA || '',
+    });
   }
 
   private throwIfStartCancelled(disposeGeneration: number) {
@@ -1124,6 +1149,9 @@ function waitForProcessExit(proc: ChildProcess, timeoutMs: number): Promise<bool
 }
 
 function anySignal(...signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === 'function') {
+    return AbortSignal.any(signals);
+  }
   const controller = new AbortController();
   const onAbort = (event: Event) => {
     controller.abort((event.target as AbortSignal | null)?.reason);

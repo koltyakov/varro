@@ -428,6 +428,102 @@ describe('Message streamed assistant text rendering', () => {
 });
 
 describe('Message assistant final answer rendering', () => {
+  it('shows the read mode toggle for large final answers', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-read-large'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', 'Status update.'),
+            textPart(
+              'text-2',
+              [
+                'Implemented the final fix across the highlighted layout and kept the intermediate updates separate.',
+                'The final answer now has enough detail to warrant read mode.',
+                'It includes multiple lines of explanation so longer responses stay comfortable to read.',
+                'This also gives the toggle a clear threshold-based behavior.',
+                'Users will no longer see the expand affordance for very short replies.',
+                'Only responses with enough content should show the button.',
+                'That keeps the card cleaner for compact confirmations.',
+                'This paragraph pushes the response over the large-response threshold.',
+              ].join('\n\n')
+            ),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    const toggle = container?.querySelector('.assistant-read-mode-toggle');
+    expect(toggle).toBeInstanceOf(HTMLButtonElement);
+  });
+
+  it('hides the read mode toggle for short final answers', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-read-short'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', 'Status update.'),
+            textPart('text-2', 'Final answer for reading.'),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
+  });
+
+  it('opens the final answer in read mode and closes with Escape', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-read-1'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', 'Status update.'),
+            textPart(
+              'text-2',
+              [
+                'Final answer for reading.',
+                'This version is intentionally long enough to trigger the read mode affordance.',
+                'It spans several paragraphs so the expanded reading surface is useful.',
+                'That keeps the test aligned with the production behavior for large responses.',
+                'The extra lines ensure the threshold is crossed without depending on exact markdown rendering.',
+                'Read mode should open from the final answer only.',
+                'Earlier status updates must stay out of the overlay.',
+                'Escape should still close the overlay cleanly.',
+              ].join('\n\n')
+            ),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    const toggle = container?.querySelector('.assistant-read-mode-toggle');
+    expect(toggle).toBeInstanceOf(HTMLButtonElement);
+
+    (toggle as HTMLButtonElement).click();
+
+    const overlay = container?.querySelector('.assistant-read-overlay');
+    const overlayContent = container?.querySelector('.assistant-read-mode-content');
+
+    expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(document.body.classList.contains('chat-read-mode-open')).toBe(true);
+    expect(overlayContent?.textContent).toContain('Final answer for reading.');
+    expect(overlayContent?.textContent).not.toContain('Status update.');
+    expect(overlayContent?.textContent).not.toContain('Thinking');
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(container?.querySelector('.assistant-read-overlay')).toBeNull();
+    expect(document.body.classList.contains('chat-read-mode-open')).toBe(false);
+  });
+
   it('marks the final text update inside a mixed assistant turn as a dedicated final answer block', () => {
     cleanup = render(
       () =>

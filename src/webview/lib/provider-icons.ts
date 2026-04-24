@@ -1,3 +1,4 @@
+// Provider SVGs sourced from https://lobehub.com
 // Provider SVGs sourced from https://github.com/pheralb/svgl
 import openaiIcon from '../assets/provider-icons/openai.svg';
 import anthropicIcon from '../assets/provider-icons/anthropic.svg';

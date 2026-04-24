@@ -1063,7 +1063,6 @@ let messageById: Map<string, number> = new Map();
 let partById: Map<string, { msgIdx: number; partIdx: number }> = new Map();
 let streamingDeltaFlushScheduled = false;
 let streamingDeltaGeneration = 0;
-const MAX_PENDING_STREAMING_DELTAS = 128;
 const pendingStreamingDeltas = new Map<
   string,
   { messageId: string; partId: string; sessionId?: string; text: string }
@@ -1156,16 +1155,17 @@ function flushPendingStreamingDeltas() {
       'messages',
       produce((msgs) => {
         for (const item of deltas) {
-          const msgIdx = findMessageIndex(msgs, item.messageId);
-          if (msgIdx === -1) continue;
-          const partIdx = msgs[msgIdx].parts.findIndex((part) => part.id === item.partId);
-          if (partIdx !== -1) {
-            const part = msgs[msgIdx].parts[partIdx];
+          const location = findPartLocation(msgs, item.partId);
+          if (location) {
+            const part = msgs[location.msgIdx]?.parts[location.partIdx];
             if (part.type === 'text' || part.type === 'reasoning') {
               part.text = item.text;
             }
             continue;
           }
+
+          const msgIdx = findMessageIndex(msgs, item.messageId);
+          if (msgIdx === -1) continue;
           msgs[msgIdx].parts.push({
             id: item.partId,
             messageID: item.messageId,
@@ -1296,16 +1296,7 @@ export function applyMessagePartDelta(
     sessionId,
     text: currentStreamingText + delta,
   });
-  evictOldPendingStreamingDeltas();
   scheduleStreamingDeltaFlush();
-}
-
-function evictOldPendingStreamingDeltas() {
-  while (pendingStreamingDeltas.size > MAX_PENDING_STREAMING_DELTAS) {
-    const oldest = pendingStreamingDeltas.keys().next().value;
-    if (!oldest) break;
-    pendingStreamingDeltas.delete(oldest);
-  }
 }
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
@@ -1557,63 +1548,56 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
     return;
   }
 
-  if (current.length !== incoming.length) {
-    let prefixMatch = true;
-    const minLen = Math.min(current.length, incoming.length);
-    for (let i = 0; i < minLen && prefixMatch; i++) {
-      if (current[i].info.id !== incoming[i].info.id) prefixMatch = false;
-    }
-    if (prefixMatch) {
-      setState(
-        'messages',
-        produce((msgs) => {
-          let changed = false;
-          for (let i = 0; i < incoming.length; i++) {
-            if (i < msgs.length) {
-              if (!areMessageEntriesEquivalent(msgs[i], incoming[i])) {
-                msgs[i] = incoming[i];
-                changed = true;
-              }
-            } else {
-              msgs.push(incoming[i]);
-              changed = true;
-            }
-          }
-          if (msgs.length !== incoming.length) {
-            msgs.length = incoming.length;
+  const sharedPrefixLength = getSharedMessagePrefixLength(current, incoming);
+
+  if (sharedPrefixLength === 0) {
+    replaceMessages(incoming);
+    return;
+  }
+
+  setState(
+    'messages',
+    produce((msgs) => {
+      let changed = false;
+      for (let i = 0; i < incoming.length; i++) {
+        const next = incoming[i];
+        if (i < sharedPrefixLength) {
+          if (!areMessageEntriesEquivalent(msgs[i], next)) {
+            msgs[i] = next;
             changed = true;
           }
-          if (changed) invalidateIndex();
-        })
-      );
-      return;
-    }
-  }
+          continue;
+        }
 
-  if (current.length === incoming.length) {
-    let identical = true;
-    for (let i = 0; i < current.length && identical; i++) {
-      if (current[i].info.id !== incoming[i].info.id) identical = false;
-    }
-    if (identical) {
-      setState(
-        'messages',
-        produce((msgs) => {
-          let changed = false;
-          for (let i = 0; i < incoming.length; i++) {
-            if (msgs[i] !== incoming[i]) {
-              msgs[i] = incoming[i];
-              changed = true;
-            }
+        if (i < msgs.length) {
+          if (msgs[i] !== next) {
+            msgs[i] = next;
+            changed = true;
           }
-          if (changed) invalidateIndex();
-        })
-      );
-      return;
-    }
-  }
+        } else {
+          msgs.push(next);
+          changed = true;
+        }
+      }
+      if (msgs.length !== incoming.length) {
+        msgs.length = incoming.length;
+        changed = true;
+      }
+      if (changed) invalidateIndex();
+    })
+  );
+}
 
-  replaceMessages(incoming);
+function getSharedMessagePrefixLength(
+  current: Array<{ info: Message; parts: Part[] }>,
+  incoming: Array<{ info: Message; parts: Part[] }>
+) {
+  const minLen = Math.min(current.length, incoming.length);
+  let index = 0;
+  while (index < minLen && current[index].info.id === incoming[index].info.id) {
+    index += 1;
+  }
+  return index;
 }
 
 function areMessageEntriesEquivalent(
