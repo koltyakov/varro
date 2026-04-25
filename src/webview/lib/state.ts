@@ -407,6 +407,15 @@ export function markSessionSeen(id: string, updatedAt?: number) {
   writeStored(STORAGE_KEYS.lastSeenSessions, next);
 }
 
+export function clearSessionSeen(id: string) {
+  if (!(id in state.lastSeenSessions)) return;
+  const next = Object.fromEntries(
+    Object.entries(state.lastSeenSessions).filter(([key]) => key !== id)
+  );
+  setState('lastSeenSessions', reconcile(next));
+  writeStored(STORAGE_KEYS.lastSeenSessions, next);
+}
+
 export function skipPlanSession(sessionId: string, updatedAt?: number) {
   const sessionUpdatedAt =
     updatedAt ?? state.sessions.find((session) => session.id === sessionId)?.time.updated;

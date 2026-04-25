@@ -43,6 +43,7 @@ import {
   removeContextFile,
   addContextFiles,
   markSessionSeen,
+  clearSessionSeen,
   clearSkippedPlanSession,
   skipPlanSession,
   setSessionCompacting,
@@ -51,6 +52,7 @@ import {
   getSelectedMcpsForSession,
   clearSelectedAgentForSession,
   clearSelectedModelForSession,
+  clearSelectedMcpsForSession,
   getPermissionModeForSession,
   removePermissionModeForSession,
   resetDraftPermissionMode,
@@ -187,8 +189,10 @@ function clearDeletedSessionState(id: string) {
   removePermissionModeForSession(id);
   clearCurrentDocumentStateForSession(id);
   clearSelectedAgentForSession(id);
+  clearSelectedMcpsForSession(id);
   clearSkippedPlanSession(id);
   clearSelectedModelForSession(id);
+  clearSessionSeen(id);
   setState('sessionStatus', (statuses) => {
     const next = { ...statuses };
     delete next[id];
@@ -1132,6 +1136,7 @@ async function syncSessionMessages(sessionId: string) {
   if (sessionId === state.activeSessionId) {
     setMessagesIncremental(msgs);
     syncFailedSessionsFromMessages(msgs);
+    resetTodoSync();
     syncTodosFromMessages(msgs);
   }
 }

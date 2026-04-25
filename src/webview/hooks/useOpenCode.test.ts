@@ -1029,6 +1029,29 @@ describe('sendMessage', () => {
     expect(stateModule.state.activeSessionId).toBe('session-2');
   });
 
+  it('removes deleted-session MCP and seen-state entries', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('sessions', [session('session-1'), session('session-2')]);
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('lastSeenSessions', { 'session-1': 100, 'session-2': 200 });
+    stateModule.setSelectedMcpsForSession('session-1', ['browser-bridge']);
+    stateModule.setSelectedMcpsForSession('session-2', ['docs']);
+
+    clientMocks.sessionDelete.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-2'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    await hookModule.deleteSession('session-1');
+
+    expect(stateModule.state.lastSeenSessions['session-1']).toBeUndefined();
+    expect(stateModule.state.lastSeenSessions['session-2']).toBeGreaterThanOrEqual(200);
+    expect(stateModule.getSelectedMcpsForSession('session-1')).toBeNull();
+    expect(stateModule.getSelectedMcpsForSession('session-2')).toEqual(['docs']);
+  });
+
   it('switches the active session to build and sends the implementation prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
 
@@ -1779,6 +1802,87 @@ describe('useOpenCode initialization', () => {
         'user-1',
         'assistant-1',
       ]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('rebuilds todos from refreshed messages after stale todo events', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1', 'user-1'),
+        parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'completed')],
+      },
+    ]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [
+        { info: userMessage('user-1'), parts: [] },
+        {
+          info: assistantMessage('assistant-1', 'user-1'),
+          parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'in_progress')],
+        },
+      ]);
+
+      handlers.get('todo.updated')?.({
+        properties: {
+          sessionID: 'session-1',
+          todos: [
+            {
+              id: 'todo-part-1-todo',
+              content: 'Summarize findings',
+              status: 'in_progress',
+              priority: 'medium',
+            },
+          ],
+        },
+      });
+
+      expect(stateModule.state.todos).toEqual([
+        {
+          id: 'todo-part-1-todo',
+          content: 'Summarize findings',
+          status: 'in_progress',
+          priority: 'medium',
+        },
+      ]);
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+      await vi.waitFor(() => {
+        expect(stateModule.state.todos).toEqual([
+          {
+            id: 'todo-part-1-todo',
+            content: 'Summarize findings',
+            status: 'completed',
+            priority: 'medium',
+          },
+        ]);
+      });
     } finally {
       dispose();
     }

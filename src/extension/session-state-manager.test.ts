@@ -140,6 +140,28 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
+  it('does not show a failure notification for aborted assistant messages', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Build release' } },
+    });
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          agent: 'build',
+          error: { name: 'aborted', data: { message: 'Aborted' } },
+        },
+      },
+    });
+
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
   it('persists trimmed interrupted sessions and blocking requests', async () => {
     const workspaceState: WorkspaceStateMock = {
       get: vi.fn((_key: string, fallback?: unknown) => fallback),

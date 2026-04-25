@@ -75,6 +75,7 @@ export class ContextProvider implements vscode.Disposable {
     );
     let selectionText = '';
     let clipboardChanged = false;
+    let capturedSelection = false;
 
     try {
       await withTimeout(
@@ -89,9 +90,12 @@ export class ContextProvider implements vscode.Disposable {
           ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
           'Timed out reading clipboard while capturing terminal selection'
         );
-        if (selectionText.trim().length > 0) {
-          clipboardChanged = selectionText !== previousClipboard;
-          break;
+        if (selectionText !== previousClipboard) {
+          clipboardChanged = true;
+          if (selectionText.trim().length > 0) {
+            capturedSelection = true;
+            break;
+          }
         }
       }
     } finally {
@@ -104,7 +108,7 @@ export class ContextProvider implements vscode.Disposable {
       }
     }
 
-    if (!selectionText.trim()) {
+    if (!capturedSelection || !selectionText.trim()) {
       return { ok: false, reason: 'empty-selection' };
     }
 
@@ -328,7 +332,7 @@ export class ContextProvider implements vscode.Disposable {
       try {
         await vscode.workspace.fs.stat(uri);
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-        return workspaceFolder ? { uri, workspaceFolder } : null;
+        return workspaceFolder ? { uri, workspaceFolder } : { uri };
       } catch {
         return null;
       }

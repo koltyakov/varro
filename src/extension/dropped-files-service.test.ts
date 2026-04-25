@@ -72,4 +72,25 @@ describe('DroppedFilesService', () => {
 
     await expect(access(dropsDir)).rejects.toBeDefined();
   });
+
+  it('keeps absolute dropped files outside the workspace', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+    services.push(service);
+    const externalPath = '/tmp/varro-drop.txt';
+    const externalUri = { fsPath: externalPath };
+
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.Uri.file.mockReturnValueOnce(externalUri);
+
+    const files = await service.fromPaths([externalPath]);
+
+    expect(files).toEqual([
+      {
+        path: externalPath,
+        relativePath: 'varro-drop.txt',
+        type: 'file',
+      },
+    ]);
+  });
 });

@@ -3,6 +3,7 @@ import type { Memento } from 'vscode';
 import type { ServerEvent } from '../shared/protocol';
 import { normalizeSessionTitle } from '../shared/session-title';
 import { logger } from './logger';
+import { isAbortedAssistantError } from '../webview/lib/aborted';
 
 export type PendingAttentionKind = 'permission' | 'question';
 
@@ -166,6 +167,17 @@ export class SessionStateManager {
 
         const error = asRecord(info?.error);
         if (error) {
+          if (
+            isAbortedAssistantError({
+              name: getString(error.name) || '',
+              data: asRecord(error.data)
+                ? { message: getString(asRecord(error.data)?.message) }
+                : undefined,
+            })
+          ) {
+            changed = this.failedSessions.delete(sessionID) || changed;
+            break;
+          }
           const wasFailed = this.failedSessions.has(sessionID);
           this.failedSessions.add(sessionID);
           this.completedSessions.delete(sessionID);
