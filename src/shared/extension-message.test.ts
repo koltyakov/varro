@@ -33,6 +33,23 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({ type: 'server/status', payload: { state: 'running' } })
     ).toBeNull();
+    expect(parseExtensionMessage({ type: 'server/status', payload: { state: 'starting' } })).toEqual({
+      type: 'server/status',
+      payload: { state: 'starting' },
+    });
+    expect(parseExtensionMessage({ type: 'server/status', payload: { state: 'stopped' } })).toEqual({
+      type: 'server/status',
+      payload: { state: 'stopped' },
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'server/status',
+        payload: { state: 'error', message: 'failed to bind port' },
+      })
+    ).toEqual({
+      type: 'server/status',
+      payload: { state: 'error', message: 'failed to bind port' },
+    });
     expect(
       parseExtensionMessage({ type: 'server/status', payload: { state: 'unknown' } })
     ).toBeNull();
@@ -65,6 +82,16 @@ describe('parseExtensionMessage', () => {
     });
 
     expect(parseExtensionMessage({ type: 'server/event', payload: {} })).toBeNull();
+
+    expect(
+      parseExtensionMessage({
+        type: 'server/event',
+        payload: { type: 'session.updated' },
+      })
+    ).toEqual({
+      type: 'server/event',
+      payload: { type: 'session.updated' },
+    });
 
     expect(
       parseExtensionMessage({
@@ -141,6 +168,26 @@ describe('parseExtensionMessage', () => {
         payload: { workspacePath: '/repo', activeFile: { path: '/repo/src/app.ts' } },
       })
     ).toBeNull();
+
+    expect(
+      parseExtensionMessage({
+        type: 'context/update',
+        payload: {
+          workspacePath: null,
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      })
+    ).toEqual({
+      type: 'context/update',
+      payload: {
+        workspacePath: null,
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    });
   });
 
   it('rejects malformed dropped file payloads', () => {
@@ -176,6 +223,27 @@ describe('parseExtensionMessage', () => {
         payload: [{ path: '/repo/src/app.ts', type: 'file' }],
       })
     ).toBeNull();
+
+    expect(
+      parseExtensionMessage({
+        type: 'files/dropped',
+        payload: [{ path: '/repo/src', relativePath: 'src', type: 'directory' }],
+      })
+    ).toEqual({
+      type: 'files/dropped',
+      payload: [{ path: '/repo/src', relativePath: 'src', type: 'directory' }],
+    });
+  });
+
+  it('parses files/removed with a path and rejects malformed payloads', () => {
+    expect(
+      parseExtensionMessage({ type: 'files/removed', payload: { path: '/repo/src/app.ts' } })
+    ).toEqual({
+      type: 'files/removed',
+      payload: { path: '/repo/src/app.ts' },
+    });
+
+    expect(parseExtensionMessage({ type: 'files/removed', payload: {} })).toBeNull();
   });
 
   it('rejects malformed files/search-results payloads', () => {
@@ -207,12 +275,36 @@ describe('parseExtensionMessage', () => {
         },
       })
     ).toBeNull();
+
+    expect(
+      parseExtensionMessage({
+        type: 'files/search-results',
+        payload: {
+          requestId: 2,
+          query: 'src',
+          files: [{ path: '/repo/src', relativePath: 'src', type: 'directory' }],
+        },
+      })
+    ).toEqual({
+      type: 'files/search-results',
+      payload: {
+        requestId: 2,
+        query: 'src',
+        files: [{ path: '/repo/src', relativePath: 'src', type: 'directory' }],
+      },
+    });
   });
 
   it('rejects malformed theme/update payloads', () => {
     expect(parseExtensionMessage({ type: 'theme/update', payload: { theme: 'dark' } })).toEqual({
       type: 'theme/update',
       payload: { theme: 'dark' },
+    });
+    expect(
+      parseExtensionMessage({ type: 'theme/update', payload: { theme: 'high-contrast-light' } })
+    ).toEqual({
+      type: 'theme/update',
+      payload: { theme: 'high-contrast-light' },
     });
 
     expect(

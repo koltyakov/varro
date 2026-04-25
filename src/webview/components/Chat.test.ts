@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import type { Session } from '../types';
-import { normalizeSessionTitle } from '../../shared/session-title';
 import * as openCodeModule from '../hooks/useOpenCode';
 import {
   archiveSessionGroup,
@@ -438,22 +437,6 @@ describe('shouldShowSessionHeaderBadge', () => {
     expect(shouldShowSessionHeaderBadge('failed', 'running')).toBe(true);
     expect(shouldShowSessionHeaderBadge(null, 'plan-ready')).toBe(true);
     expect(shouldShowSessionHeaderBadge('completed', 'running')).toBe(true);
-  });
-});
-
-describe('normalizeSessionTitle', () => {
-  it('collapses generated timestamped new-session titles', () => {
-    expect(normalizeSessionTitle('New session - 2026-04-22T17:00:10.819Z')).toBe('New session');
-  });
-
-  it('collapses generated timestamped titles with timezone offsets', () => {
-    expect(normalizeSessionTitle('New session - 2026-04-22T17:00:10+05:30')).toBe('New session');
-  });
-
-  it('preserves custom titles', () => {
-    expect(normalizeSessionTitle('New session - onboarding notes')).toBe(
-      'New session - onboarding notes'
-    );
   });
 });
 

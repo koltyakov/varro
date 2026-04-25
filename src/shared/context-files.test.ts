@@ -3,6 +3,7 @@ import {
   areContextFilesEqual,
   formatContextLineRanges,
   formatSelectionReference,
+  getFirstContextLine,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
   mergeContextFile,
@@ -24,6 +25,17 @@ describe('context file helpers', () => {
       { startLine: 2, endLine: 6 },
       { startLine: 8, endLine: 10 },
       { startLine: 12, endLine: 12 },
+    ]);
+
+    expect(
+      normalizeContextLineRanges([
+        { startLine: 9, endLine: 4 },
+        { startLine: 0, endLine: -3 },
+        { startLine: -2, endLine: 1 },
+      ])
+    ).toEqual([
+      { startLine: 1, endLine: 1 },
+      { startLine: 4, endLine: 9 },
     ]);
   });
 
@@ -96,6 +108,53 @@ describe('context file helpers', () => {
     ).toEqual([{ startLine: 1, endLine: 20 }]);
   });
 
+  it('replaces context when the incoming file path differs', () => {
+    expect(
+      mergeContextFile(
+        {
+          path: '/repo/a.ts',
+          relativePath: 'a.ts',
+          type: 'file',
+          lineRanges: [{ startLine: 1, endLine: 10 }],
+        },
+        {
+          path: '/repo/b.ts',
+          relativePath: 'b.ts',
+          type: 'file',
+          lineRanges: [{ startLine: 20, endLine: 30 }],
+        }
+      )
+    ).toEqual({
+      path: '/repo/b.ts',
+      relativePath: 'b.ts',
+      type: 'file',
+      lineRanges: [{ startLine: 20, endLine: 30 }],
+    });
+  });
+
+  it('drops line ranges when either merged context item is a directory', () => {
+    expect(
+      mergeContextFile(
+        {
+          path: '/repo/src',
+          relativePath: 'src',
+          type: 'directory',
+        },
+        {
+          path: '/repo/src',
+          relativePath: 'src',
+          type: 'file',
+          lineRanges: [{ startLine: 5, endLine: 8 }],
+        }
+      )
+    ).toEqual({
+      path: '/repo/src',
+      relativePath: 'src',
+      type: 'file',
+      lineRanges: undefined,
+    });
+  });
+
   it('formats and parses aggregated selection references', () => {
     const text = formatSelectionReference('src/a.ts', [
       { startLine: 3, endLine: 3 },
@@ -116,6 +175,14 @@ describe('context file helpers', () => {
         { startLine: 8, endLine: 10 },
       ])
     ).toBe('L3, L8-10');
+  });
+
+  it('rejects malformed selection references', () => {
+    expect(parseSelectionReference('')).toBeNull();
+    expect(parseSelectionReference('[Selection from src/a.ts lines ]')).toBeNull();
+    expect(parseSelectionReference('Selection from src/a.ts lines 3-4]')).toBeNull();
+    expect(parseSelectionReference('[Selection from src/a.ts lines two-4]')).toBeNull();
+    expect(parseSelectionReference('[Selection from terminal zsh lines 3-4]')).toBeNull();
   });
 
   it('finds explicit context by path and compares merged items', () => {
@@ -154,5 +221,36 @@ describe('context file helpers', () => {
       { startLine: 5, endLine: 7 },
       { startLine: 11, endLine: 11 },
     ]);
+  });
+
+  it('handles subtract edge cases and returns the first normalized line', () => {
+    expect(
+      subtractContextLineRanges(
+        [{ startLine: 3, endLine: 6 }],
+        [{ startLine: 10, endLine: 12 }]
+      )
+    ).toEqual([{ startLine: 3, endLine: 6 }]);
+
+    expect(
+      subtractContextLineRanges(
+        [{ startLine: 3, endLine: 6 }],
+        [{ startLine: 1, endLine: 10 }]
+      )
+    ).toEqual([]);
+
+    expect(
+      subtractContextLineRanges(
+        [{ startLine: 3, endLine: 6 }],
+        [{ startLine: 7, endLine: 9 }]
+      )
+    ).toEqual([{ startLine: 3, endLine: 6 }]);
+
+    expect(
+      getFirstContextLine([
+        { startLine: 9, endLine: 12 },
+        { startLine: 4, endLine: 5 },
+      ])
+    ).toBe(4);
+    expect(getFirstContextLine(null)).toBeUndefined();
   });
 });
