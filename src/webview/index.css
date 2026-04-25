@@ -3438,6 +3438,75 @@ kbd {
   background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-list-bg));
 }
 
+.chat-tool-invocation-part .structured-tool-card {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 64%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, black 14%, var(--color-vscode-list-bg));
+  font-family: var(--font-mono);
+}
+
+.chat-tool-invocation-part .structured-tool-row {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  align-items: start;
+}
+
+.chat-tool-invocation-part .structured-tool-row + .structured-tool-row {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
+}
+
+.chat-tool-invocation-part .structured-tool-label {
+  padding: 8px 10px;
+  color: var(--color-vscode-fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  user-select: none;
+  opacity: 0.78;
+  white-space: nowrap;
+}
+
+.chat-tool-invocation-part .structured-tool-value {
+  min-width: 0;
+  max-height: 220px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  color: var(--color-vscode-fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-tool-invocation-part a.structured-tool-value {
+  display: block;
+  text-decoration: none;
+}
+
+.chat-tool-invocation-part a.structured-tool-value:hover {
+  text-decoration: underline;
+}
+
+.chat-tool-invocation-part .structured-tool-row-block {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chat-tool-invocation-part .structured-tool-row-block .structured-tool-label {
+  padding-bottom: 0;
+}
+
+.chat-tool-invocation-part .structured-tool-row-block .structured-tool-value {
+  padding-top: 6px;
+}
+
+.chat-tool-invocation-part .structured-tool-value-result {
+  padding-top: 6px;
+  opacity: 0.92;
+}
+
 .chat-tool-invocation-part .tool-invocation-error {
   font-size: 11px;
   color: var(--color-vscode-error);

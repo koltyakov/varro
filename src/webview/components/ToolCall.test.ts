@@ -163,6 +163,68 @@ describe('ToolCall', () => {
     );
   });
 
+  it('hides a duplicated description from expanded task details', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: completedState(
+        {
+          description: 'Research test suite improvements',
+          subagent_type: 'explore',
+          prompt: 'Thoroughly explore the test suite for this project',
+        },
+        'Research test suite improvements'
+      ),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const detailText = container?.querySelector('.tool-invocation-detail')?.textContent || '';
+
+    expect(detailText).not.toContain('descriptionResearch test suite improvements');
+    expect(detailText).toContain('subagent_typeexplore');
+    expect(detailText).toContain('promptThoroughly explore the test suite for this project');
+  });
+
+  it('renders prompt as a block row immediately before the task result', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'completed',
+        input: {
+          subagent_type: 'explore',
+          prompt: 'Thoroughly explore the test suite for this project',
+          task_id: 'task-1',
+        },
+        output: '<task_result>Full report</task_result>',
+        title: 'Research test suite improvements',
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
+    const labels = rows.map((row) => row.querySelector('.structured-tool-label')?.textContent);
+
+    expect(labels).toEqual(['subagent_type', 'task_id', 'prompt', 'task_result']);
+    expect(rows[2]?.classList.contains('structured-tool-row-block')).toBe(true);
+  });
+
   it('renders aborted tool errors with neutral aborted styling', () => {
     const part: ToolPart = {
       id: 'tool-1',

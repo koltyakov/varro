@@ -15,6 +15,7 @@ export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
+const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch']);
 type ToolPreview = { text: string; key: string };
 
 export function getToolCallExpansionKey(part: ToolPart) {
@@ -29,6 +30,10 @@ function normalizeToolName(toolName: string) {
 
 function isQuestionToolName(toolName: string) {
   return normalizeToolName(toolName) === 'question';
+}
+
+function isStructuredToolName(toolName: string) {
+  return STRUCTURED_TOOL_NAMES.has(normalizeToolName(toolName));
 }
 
 function getSearchPattern(input: Record<string, unknown>) {
@@ -48,6 +53,10 @@ function hasVisibleInputValue(value: unknown) {
   if (value === undefined || value === null) return false;
   if (typeof value === 'string') return value.trim().length > 0;
   return true;
+}
+
+function normalizedComparableText(value: unknown) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
 export function getVisibleInputEntries(input: Record<string, unknown>) {
@@ -83,6 +92,13 @@ function parseIntLike(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
   if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value, 10);
   return null;
+}
+
+function extractTaggedOutput(output: string, tagName: string): string | null {
+  const match = output.match(new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*<\\/${tagName}>`, 'i'));
+  if (!match) return null;
+  const [, content = ''] = match;
+  return content.trim();
 }
 
 function extractReadRange(
@@ -208,7 +224,11 @@ export function ToolCall(props: { part: ToolPart }) {
 
   const inputEntries = () => {
     const input = (state().input || {}) as Record<string, unknown>;
-    return getVisibleInputEntries(input);
+    const normalizedTitle = normalizedComparableText(title());
+    return getVisibleInputEntries(input).filter(([key, value]) => {
+      if (key !== 'description') return true;
+      return normalizedComparableText(value) !== normalizedTitle;
+    });
   };
 
   const truncatedOutput = () => {
@@ -541,8 +561,11 @@ function GenericToolCall(props: {
   const openFile = (path: string) => {
     postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
   };
+  const toolName = () => normalizeToolName(props.tool.tool);
   const isAborted = () => isAbortedToolError(props.state);
-  const isBash = () => normalizeToolName(props.tool.tool) === 'bash';
+  const isBash = () => toolName() === 'bash';
+  const isTask = () => toolName() === 'task';
+  const isStructuredTool = () => isStructuredToolName(props.tool.tool);
   const bashCommand = () => {
     const command = props.state.input?.command;
     return typeof command === 'string'
@@ -554,6 +577,17 @@ function GenericToolCall(props: {
     return props.truncatedOutput || '(no output)';
   };
   const bashOutputIsEmpty = () => props.state.status === 'completed' && !props.truncatedOutput;
+  const taskResult = () => {
+    if (props.state.status !== 'completed') return { label: 'result', value: '' };
+    const extracted = extractTaggedOutput(props.truncatedOutput, 'task_result');
+    if (extracted !== null) return { label: 'task_result', value: extracted || '(no output)' };
+    return { label: 'result', value: props.truncatedOutput || '(no output)' };
+  };
+  const structuredResult = () => {
+    if (props.state.status !== 'completed') return null;
+    if (isTask()) return taskResult();
+    return { label: 'result', value: props.truncatedOutput || '(no output)' };
+  };
 
   return (
     <div class="chat-tool-invocation-part">
@@ -612,30 +646,44 @@ function GenericToolCall(props: {
           <Show
             when={isBash() && bashCommand()}
             fallback={
-              <Show when={props.inputEntries.length > 0}>
-                <div class="tool-invocation-input">
-                  <For each={props.inputEntries}>
-                    {([key, value]) => (
-                      <div class="tool-input-entry">
-                        <span class="tool-input-key">{key}</span>
-                        {isPathKey(key) && typeof value === 'string' ? (
-                          <a
-                            href="#"
-                            class="file-path-link tool-input-value"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              openFile(String(value));
-                            }}
-                          >
-                            {formatDisplayPath(String(value), appState.editorContext.workspacePath)}
-                          </a>
-                        ) : (
-                          <span class="tool-input-value">{formatValue(key, value)}</span>
+              <Show
+                when={isStructuredTool()}
+                fallback={
+                  <Show when={props.inputEntries.length > 0}>
+                    <div class="tool-invocation-input">
+                      <For each={props.inputEntries}>
+                        {([key, value]) => (
+                          <div class="tool-input-entry">
+                            <span class="tool-input-key">{key}</span>
+                            {isPathKey(key) && typeof value === 'string' ? (
+                              <a
+                                href="#"
+                                class="file-path-link tool-input-value"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  openFile(String(value));
+                                }}
+                              >
+                                {formatDisplayPath(
+                                  String(value),
+                                  appState.editorContext.workspacePath
+                                )}
+                              </a>
+                            ) : (
+                              <span class="tool-input-value">{formatValue(key, value)}</span>
+                            )}
+                          </div>
                         )}
-                      </div>
-                    )}
-                  </For>
-                </div>
+                      </For>
+                    </div>
+                  </Show>
+                }
+              >
+                <StructuredToolCard
+                  inputEntries={props.inputEntries}
+                  result={structuredResult()}
+                  onOpenPath={openFile}
+                />
               </Show>
             }
           >
@@ -657,7 +705,14 @@ function GenericToolCall(props: {
               </Show>
             </div>
           </Show>
-          <Show when={!isBash() && props.state.status === 'completed' && props.truncatedOutput}>
+          <Show
+            when={
+              !isBash() &&
+              !isStructuredTool() &&
+              props.state.status === 'completed' &&
+              props.truncatedOutput
+            }
+          >
             <pre class="tool-invocation-output">{props.truncatedOutput}</pre>
           </Show>
           <Show when={props.state.status === 'error'}>
@@ -677,6 +732,60 @@ function GenericToolCall(props: {
   );
 }
 
+function StructuredToolCard(props: {
+  inputEntries: Array<[string, unknown]>;
+  result: { label: string; value: string } | null;
+  onOpenPath: (path: string) => void;
+}) {
+  const promptEntry = () => props.inputEntries.find(([key]) => key === 'prompt') || null;
+  const nonPromptEntries = () => props.inputEntries.filter(([key]) => key !== 'prompt');
+
+  return (
+    <div class="structured-tool-card">
+      <For each={nonPromptEntries()}>
+        {([key, value]) => {
+          const blockValue = shouldShowStructuredToolValueAsBlock(key, value);
+          return (
+            <div class={`structured-tool-row${blockValue ? ' structured-tool-row-block' : ''}`}>
+              <span class="structured-tool-label">{key}</span>
+              {isPathKey(key) && typeof value === 'string' ? (
+                <a
+                  href="#"
+                  class="file-path-link structured-tool-value"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    props.onOpenPath(String(value));
+                  }}
+                >
+                  {formatDisplayPath(String(value), appState.editorContext.workspacePath)}
+                </a>
+              ) : (
+                <pre class="structured-tool-value">{formatExpandedValue(key, value)}</pre>
+              )}
+            </div>
+          );
+        }}
+      </For>
+      <Show when={promptEntry()}>
+        {(entry) => (
+          <div class="structured-tool-row structured-tool-row-block">
+            <span class="structured-tool-label">{entry()[0]}</span>
+            <pre class="structured-tool-value">{formatExpandedValue(entry()[0], entry()[1])}</pre>
+          </div>
+        )}
+      </Show>
+      <Show when={props.result}>
+        {(result) => (
+          <div class="structured-tool-row structured-tool-row-block structured-tool-row-result">
+            <span class="structured-tool-label">{result().label}</span>
+            <pre class="structured-tool-value structured-tool-value-result">{result().value}</pre>
+          </div>
+        )}
+      </Show>
+    </div>
+  );
+}
+
 function formatDuration(ms: number): string {
   if (ms <= 0) return '';
   if (ms < 1000) return `${ms}ms`;
@@ -687,6 +796,22 @@ function formatPreviewValue(key: string, value: string): string {
   return key === 'command'
     ? formatCommandDisplay(value, appState.editorContext.workspacePath)
     : value;
+}
+
+function shouldShowStructuredToolValueAsBlock(key: string, value: unknown): boolean {
+  if (isPathKey(key)) return false;
+  if (typeof value === 'string') return value.includes('\n') || value.length > 100;
+  return typeof value === 'object' && value !== null;
+}
+
+function formatExpandedValue(key: string, value: unknown): string {
+  if (typeof value === 'string') {
+    return key === 'command'
+      ? formatCommandDisplay(value, appState.editorContext.workspacePath)
+      : value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value, null, 2);
 }
 
 function formatValue(key: string, value: unknown): string {
