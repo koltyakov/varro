@@ -1116,7 +1116,7 @@ describe('usage-limit session status precedence', () => {
     expect(indicators.failedIds.has('session-1')).toBe(false);
   });
 
-  it('renders a completed indicator for unread plan sessions', () => {
+  it('renders a plan-ready indicator for unread plan sessions', () => {
     setState('sessions', [session('active', 600), session('plan-1', 500)]);
     setState('activeSessionId', 'active');
     setState('sessionSelectedAgents', { 'plan-1': 'plan' });
@@ -1127,9 +1127,9 @@ describe('usage-limit session status precedence', () => {
 
     const indicator = container?.querySelector('.session-item .session-item-indicator');
 
-    expect(indicator?.classList.contains('is-completed')).toBe(true);
-    expect(indicator?.classList.contains('is-plan-completed')).toBe(false);
-    expect(indicator?.getAttribute('aria-label')).toBe('Completed');
+    expect(indicator?.classList.contains('is-completed')).toBe(false);
+    expect(indicator?.classList.contains('is-plan-completed')).toBe(true);
+    expect(indicator?.getAttribute('aria-label')).toBe('Plan ready');
   });
 
   it('returns to running once the 429 notice is cleared', () => {

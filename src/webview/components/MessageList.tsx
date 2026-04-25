@@ -758,7 +758,7 @@ export function MessageList() {
 
     if (shouldHideStickyUserMessagePreviewImmediately(current)) {
       setStickyUserMessagePreview(null);
-      previousStickyPreviewId = current.id;
+      previousStickyPreviewId = current?.id ?? null;
       return;
     }
 

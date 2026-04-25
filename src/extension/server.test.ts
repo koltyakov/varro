@@ -358,6 +358,77 @@ describe('OpenCodeServer event stream', () => {
 
     expect(kill).not.toHaveBeenCalled();
   });
+
+  it('detaches managed process listeners during disconnect', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const stdoutOff = vi.fn();
+    const stderrOff = vi.fn();
+    const procOff = vi.fn();
+    const stdoutHandler = vi.fn();
+    const stderrHandler = vi.fn();
+    const exitHandler = vi.fn();
+    const errorHandler = vi.fn();
+    (
+      server as unknown as {
+        process: {
+          stdout: { off: typeof stdoutOff };
+          stderr: { off: typeof stderrOff };
+          off: typeof procOff;
+          exitCode: null;
+          signalCode: null;
+        };
+        processStdoutHandler: (data: Buffer) => void;
+        processStderrHandler: (data: Buffer) => void;
+        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
+        processErrorHandler: (err: Error) => void;
+      }
+    ).process = {
+      stdout: { off: stdoutOff },
+      stderr: { off: stderrOff },
+      off: procOff,
+      exitCode: null,
+      signalCode: null,
+    };
+    (
+      server as unknown as {
+        processStdoutHandler: (data: Buffer) => void;
+        processStderrHandler: (data: Buffer) => void;
+        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
+        processErrorHandler: (err: Error) => void;
+      }
+    ).processStdoutHandler = stdoutHandler;
+    (
+      server as unknown as {
+        processStdoutHandler: (data: Buffer) => void;
+        processStderrHandler: (data: Buffer) => void;
+        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
+        processErrorHandler: (err: Error) => void;
+      }
+    ).processStderrHandler = stderrHandler;
+    (
+      server as unknown as {
+        processStdoutHandler: (data: Buffer) => void;
+        processStderrHandler: (data: Buffer) => void;
+        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
+        processErrorHandler: (err: Error) => void;
+      }
+    ).processExitHandler = exitHandler;
+    (
+      server as unknown as {
+        processStdoutHandler: (data: Buffer) => void;
+        processStderrHandler: (data: Buffer) => void;
+        processExitHandler: (code: number | null, signal: NodeJS.Signals | null) => void;
+        processErrorHandler: (err: Error) => void;
+      }
+    ).processErrorHandler = errorHandler;
+
+    await server.disconnect();
+
+    expect(stdoutOff).toHaveBeenCalledWith('data', stdoutHandler);
+    expect(stderrOff).toHaveBeenCalledWith('data', stderrHandler);
+    expect(procOff).toHaveBeenCalledWith('exit', exitHandler);
+    expect(procOff).toHaveBeenCalledWith('error', errorHandler);
+  });
 });
 
 describe('OpenCodeServer maintenance', () => {

@@ -1231,8 +1231,8 @@ function SessionListItem(props: {
     if (props.isFailed) return 'is-failed';
     if (props.isRunning) return 'is-running';
     if (props.needsAttention) return 'is-attention';
-    if (hasUnreadCompletion()) return 'is-completed';
     if (props.isCompletedPlanSession) return 'is-plan-completed';
+    if (hasUnreadCompletion()) return 'is-completed';
     return 'is-completed';
   };
   const indicatorTitle = () => {
@@ -1242,8 +1242,8 @@ function SessionListItem(props: {
     if (props.hasPermissionRequest) return 'Permission request pending';
     if (props.hasQuestionRequest) return 'Attention needed';
     if (props.needsAttention) return 'Attention needed';
-    if (hasUnreadCompletion()) return 'Completed';
     if (props.isCompletedPlanSession) return 'Plan ready';
+    if (hasUnreadCompletion()) return 'Completed';
     return 'Completed';
   };
 

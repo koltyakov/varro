@@ -33,14 +33,18 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({ type: 'server/status', payload: { state: 'running' } })
     ).toBeNull();
-    expect(parseExtensionMessage({ type: 'server/status', payload: { state: 'starting' } })).toEqual({
+    expect(
+      parseExtensionMessage({ type: 'server/status', payload: { state: 'starting' } })
+    ).toEqual({
       type: 'server/status',
       payload: { state: 'starting' },
     });
-    expect(parseExtensionMessage({ type: 'server/status', payload: { state: 'stopped' } })).toEqual({
-      type: 'server/status',
-      payload: { state: 'stopped' },
-    });
+    expect(parseExtensionMessage({ type: 'server/status', payload: { state: 'stopped' } })).toEqual(
+      {
+        type: 'server/status',
+        payload: { state: 'stopped' },
+      }
+    );
     expect(
       parseExtensionMessage({
         type: 'server/status',

@@ -62,6 +62,12 @@ export class OpenCodeServer extends EventEmitter {
     key: string;
     value: string;
   } | null = null;
+  private processStdoutHandler: ((data: Buffer) => void) | null = null;
+  private processStderrHandler: ((data: Buffer) => void) | null = null;
+  private processExitHandler:
+    | ((code: number | null, signal: NodeJS.Signals | null) => void)
+    | null = null;
+  private processErrorHandler: ((err: Error) => void) | null = null;
 
   constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
     super();
@@ -255,20 +261,22 @@ export class OpenCodeServer extends EventEmitter {
           });
           this.managedProcess = true;
 
-          this.process.stdout?.on('data', (data: Buffer) => {
+          this.processStdoutHandler = (data: Buffer) => {
             logger.info(`[server] ${data.toString().trim()}`);
-          });
-
-          this.process.stderr?.on('data', (data: Buffer) => {
+          };
+          this.processStderrHandler = (data: Buffer) => {
             const text = data.toString().trim();
             rememberStderr(text);
             if (isPortInUseMessage(text)) {
               this.portInUseDetected = true;
             }
             logger.error(`[server] ${text}`);
-          });
+          };
+          this.process.stdout?.on('data', this.processStdoutHandler);
+          this.process.stderr?.on('data', this.processStderrHandler);
 
-          this.process.on('exit', (code, signal) => {
+          this.processExitHandler = (code, signal) => {
+            this.detachProcessListeners(this.process);
             logger.info(`Server process exited with code ${code}`);
             this.process = null;
             this.managedProcess = false;
@@ -299,9 +307,10 @@ export class OpenCodeServer extends EventEmitter {
             void recoverOrFailStartup(
               `OpenCode server exited during startup${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
             );
-          });
+          };
 
-          this.process.on('error', (err) => {
+          this.processErrorHandler = (err) => {
+            this.detachProcessListeners(this.process);
             logger.error(`Server process error: ${err.message}`);
             if (err.message.includes('ENOENT')) {
               failStartup(OpenCodeServer.MISSING_CLI_MESSAGE);
@@ -309,7 +318,9 @@ export class OpenCodeServer extends EventEmitter {
             }
 
             void recoverOrFailStartup(`OpenCode server failed to spawn: ${err.message}`);
-          });
+          };
+          this.process.on('exit', this.processExitHandler);
+          this.process.on('error', this.processErrorHandler);
         } catch (err) {
           failStartup(String(err), err instanceof Error ? err : new Error(String(err)));
           return;
@@ -657,6 +668,26 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
+  private detachProcessListeners(proc: ChildProcess | null) {
+    if (!proc) return;
+    if (this.processStdoutHandler) {
+      proc.stdout?.off('data', this.processStdoutHandler);
+    }
+    if (this.processStderrHandler) {
+      proc.stderr?.off('data', this.processStderrHandler);
+    }
+    if (this.processExitHandler) {
+      proc.off('exit', this.processExitHandler);
+    }
+    if (this.processErrorHandler) {
+      proc.off('error', this.processErrorHandler);
+    }
+    this.processStdoutHandler = null;
+    this.processStderrHandler = null;
+    this.processExitHandler = null;
+    this.processErrorHandler = null;
+  }
+
   private startMaintenanceLoop() {
     if (this.maintenanceTimer) return;
     this.maintenanceTimer = setInterval(() => {
@@ -752,6 +783,7 @@ export class OpenCodeServer extends EventEmitter {
     this.process = null;
     this.managedProcess = false;
     if (!proc) return;
+    this.detachProcessListeners(proc);
 
     if (proc.exitCode === null && proc.signalCode === null) {
       proc.kill('SIGTERM');
@@ -967,6 +999,7 @@ export class OpenCodeServer extends EventEmitter {
       const proc = this.process;
       this.process = null;
       this.managedProcess = false;
+      this.detachProcessListeners(proc);
       if (proc.exitCode === null && proc.signalCode === null) {
         proc.kill('SIGTERM');
       }
@@ -974,6 +1007,10 @@ export class OpenCodeServer extends EventEmitter {
       if (!exited && proc.exitCode === null && proc.signalCode === null) {
         proc.kill('SIGKILL');
       }
+    } else if (!options.stopProcess && this.process) {
+      this.detachProcessListeners(this.process);
+      this.process = null;
+      this.managedProcess = false;
     }
     this.setStatus({ state: 'stopped' });
   }

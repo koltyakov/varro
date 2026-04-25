@@ -225,24 +225,15 @@ describe('context file helpers', () => {
 
   it('handles subtract edge cases and returns the first normalized line', () => {
     expect(
-      subtractContextLineRanges(
-        [{ startLine: 3, endLine: 6 }],
-        [{ startLine: 10, endLine: 12 }]
-      )
+      subtractContextLineRanges([{ startLine: 3, endLine: 6 }], [{ startLine: 10, endLine: 12 }])
     ).toEqual([{ startLine: 3, endLine: 6 }]);
 
     expect(
-      subtractContextLineRanges(
-        [{ startLine: 3, endLine: 6 }],
-        [{ startLine: 1, endLine: 10 }]
-      )
+      subtractContextLineRanges([{ startLine: 3, endLine: 6 }], [{ startLine: 1, endLine: 10 }])
     ).toEqual([]);
 
     expect(
-      subtractContextLineRanges(
-        [{ startLine: 3, endLine: 6 }],
-        [{ startLine: 7, endLine: 9 }]
-      )
+      subtractContextLineRanges([{ startLine: 3, endLine: 6 }], [{ startLine: 7, endLine: 9 }])
     ).toEqual([{ startLine: 3, endLine: 6 }]);
 
     expect(

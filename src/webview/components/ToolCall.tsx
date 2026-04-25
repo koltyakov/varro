@@ -214,50 +214,45 @@ export function ToolCall(props: { part: ToolPart }) {
     setExpanded(next);
   };
 
+  const inlinePrompt = () => {
+    const question = questionRequest();
+    if (question) return <QuestionPrompt request={question} />;
+
+    const permission = permissionRequest();
+    return permission ? <PermissionPrompt permission={permission} /> : null;
+  };
+
+  const toolContent = () => {
+    if (fileChange()) {
+      return <FileChangeCard toolState={state()} change={fileChange()!} />;
+    }
+
+    if (isRead()) {
+      return (
+        <ReadToolCard toolState={state()} filePath={filePath()!} sessionID={tool().sessionID} />
+      );
+    }
+
+    return (
+      <GenericToolCall
+        tool={tool()}
+        state={state()}
+        statusClass={statusClass()}
+        title={title()}
+        preview={preview()}
+        expanded={expanded()}
+        toggleExpand={toggleExpand}
+        inputEntries={inputEntries()}
+        truncatedOutput={truncatedOutput()}
+      />
+    );
+  };
+
   return (
-    <Show
-      when={questionRequest()}
-      fallback={
-        <Show
-          when={permissionRequest()}
-          fallback={
-            <Show
-              when={fileChange()}
-              fallback={
-                <Show
-                  when={isRead()}
-                  fallback={
-                    <GenericToolCall
-                      tool={tool()}
-                      state={state()}
-                      statusClass={statusClass()}
-                      title={title()}
-                      preview={preview()}
-                      expanded={expanded()}
-                      toggleExpand={toggleExpand}
-                      inputEntries={inputEntries()}
-                      truncatedOutput={truncatedOutput()}
-                    />
-                  }
-                >
-                  <ReadToolCard
-                    toolState={state()}
-                    filePath={filePath()!}
-                    sessionID={tool().sessionID}
-                  />
-                </Show>
-              }
-            >
-              <FileChangeCard toolState={state()} change={fileChange()!} />
-            </Show>
-          }
-        >
-          <PermissionPrompt permission={permissionRequest()!} />
-        </Show>
-      }
-    >
-      <QuestionPrompt request={questionRequest()!} />
-    </Show>
+    <>
+      {toolContent()}
+      <Show when={inlinePrompt()}>{(prompt) => prompt()}</Show>
+    </>
   );
 }
 

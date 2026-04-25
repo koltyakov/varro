@@ -4280,7 +4280,7 @@ kbd {
   height: 36px;
   width: 100%;
   min-width: 0;
-  padding: 0 6px 0 12px;
+  padding: 0 10px 0 16px;
   gap: 8px;
 }
 
@@ -5344,8 +5344,8 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   .chat-header-chat-desktop .chat-header-inner {
     width: min(100%, var(--chat-content-max-width));
     margin-inline: auto;
-    padding-left: 12px;
-    padding-right: 6px;
+    padding-left: 16px;
+    padding-right: 10px;
   }
 
   .chat-transport-banner.chat-main-column {

@@ -21,7 +21,14 @@ export function isNormalizedPermission(props: Record<string, unknown>): props is
 
 export function normalizePermissionEvent(props: Record<string, unknown>): Permission | null {
   if (isNormalizedPermission(props)) return props;
-  const id = typeof props.id === 'string' ? props.id : null;
+  const id =
+    typeof props.id === 'string'
+      ? props.id
+      : typeof props.permissionID === 'string'
+        ? props.permissionID
+        : typeof props.requestID === 'string'
+          ? props.requestID
+          : null;
   const sessionID = typeof props.sessionID === 'string' ? props.sessionID : null;
   if (!id || !sessionID) return null;
 

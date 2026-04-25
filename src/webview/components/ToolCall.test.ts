@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
-import { setExpandThinkingByDefaultPreference } from '../lib/state';
-import type { ToolPart } from '../types';
+import { setExpandThinkingByDefaultPreference, setState } from '../lib/state';
+import type { Permission, QuestionRequest, ToolPart } from '../types';
 import {
   ToolCall,
   formatToolTitle,
@@ -27,6 +27,8 @@ afterEach(() => {
   container?.remove();
   container = null;
   setExpandThinkingByDefaultPreference(false);
+  setState('permissions', []);
+  setState('questions', []);
   resetToolCallExpansionState();
 });
 
@@ -193,5 +195,73 @@ describe('ToolCall', () => {
 
     expect(detail?.classList.contains('is-aborted')).toBe(true);
     expect(detail?.textContent).toContain('Aborted');
+  });
+
+  it('keeps the command card visible when a linked permission prompt is pending', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command: 'git status' }, 'git status'),
+    };
+
+    const permission: Permission = {
+      id: 'perm-1',
+      type: 'bash',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      callID: 'call-1',
+      title: 'bash git status',
+      metadata: {},
+      time: { created: 1 },
+    };
+
+    setState('permissions', [permission]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-header')?.textContent).toContain(
+      'git status'
+    );
+    expect(container?.querySelector('.permission-prompt')).not.toBeNull();
+    expect(container?.textContent).toContain('Permission Required');
+  });
+
+  it('keeps the command card visible when a linked question prompt is pending', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command: 'git status' }, 'git status'),
+    };
+
+    const question: QuestionRequest = {
+      id: 'question-1',
+      sessionID: 'session-1',
+      tool: { messageID: 'message-1', callID: 'call-1' },
+      questions: [
+        {
+          question: 'Which command should run?',
+          header: 'Choose command',
+          options: [{ label: 'git status', description: 'Inspect working tree' }],
+        },
+      ],
+    };
+
+    setState('questions', [question]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-header')?.textContent).toContain(
+      'git status'
+    );
+    expect(container?.querySelector('.question-prompt-card')).not.toBeNull();
+    expect(container?.textContent).toContain('Which command should run?');
   });
 });

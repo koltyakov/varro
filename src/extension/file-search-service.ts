@@ -42,6 +42,7 @@ export class FileSearchService {
     limit: number,
     onResult: (result: FileSearchResult) => void
   ): void {
+    this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = new vscode.CancellationTokenSource();
     const token = this.fileSearchCts.token;
@@ -49,6 +50,7 @@ export class FileSearchService {
   }
 
   dispose(): void {
+    this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = null;
     this.workspaceFileCache = [];

@@ -1056,7 +1056,11 @@ export function ChatInput() {
       state.droppedFiles.length > 0 ||
       hasSendableClipboardImages());
 
-  const currentModel = () => {
+  const assistantMessages = createMemo(() =>
+    state.messages.map((entry) => entry.info).filter(isAssistantMessage)
+  );
+
+  const currentModel = createMemo(() => {
     const selected = resolveSelectedModel(
       state.selectedModel,
       state.providers,
@@ -1129,7 +1133,7 @@ export function ChatInput() {
       modelName: '',
       contextLimit: null as number | null,
     };
-  };
+  });
 
   function currentModelSupportsVision() {
     const current = currentModel();
@@ -1151,10 +1155,6 @@ export function ChatInput() {
 
   const clipboardImagesDisabled = () =>
     clipboardImages().length > 0 && !currentModelSupportsVision();
-
-  const assistantMessages = createMemo(() =>
-    state.messages.map((entry) => entry.info).filter(isAssistantMessage)
-  );
 
   const contextUsage = createMemo(() => {
     const assistants = assistantMessages();
