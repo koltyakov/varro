@@ -1,8 +1,7 @@
 node_modules/
 dist/
 *.vsix
-.vscode-test/
-src/webview/index.html
 tmp/
 .DS_Store
 coverage/
+test-results/

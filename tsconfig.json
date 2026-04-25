@@ -18,6 +18,7 @@
   "files": [],
   "references": [
     { "path": "./tsconfig.extension.json" },
-    { "path": "./tsconfig.webview.json" }
+    { "path": "./tsconfig.webview.json" },
+    { "path": "./tsconfig.e2e.json" }
   ]
 }

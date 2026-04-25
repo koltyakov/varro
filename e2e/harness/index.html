@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Varro E2E Harness</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --preview-page-bg: #1e1e1e;
+        --preview-page-fg: #cccccc;
+        --preview-frame-border: #333333;
+        --vscode-sideBar-background: #252526;
+        --vscode-sideBar-foreground: #cccccc;
+        --vscode-editor-background: #1e1e1e;
+        --vscode-editor-foreground: #cccccc;
+        --vscode-panel-border: #474747;
+        --vscode-input-background: #3c3c3c;
+        --vscode-input-border: #3c3c3c;
+        --vscode-input-foreground: #cccccc;
+        --vscode-button-background: #0e639c;
+        --vscode-button-foreground: #ffffff;
+        --vscode-button-hoverBackground: #1177bb;
+        --vscode-button-secondaryBackground: #3a3d41;
+        --vscode-button-secondaryForeground: #ffffff;
+        --vscode-button-secondaryHoverBackground: #45494e;
+        --vscode-focusBorder: #007fd4;
+        --vscode-descriptionForeground: #8b8b8b;
+        --vscode-errorForeground: #f44747;
+        --vscode-editorWarning-foreground: #cca700;
+        --vscode-list-hoverBackground: #2a2d2e;
+        --vscode-toolbar-hoverBackground: rgba(90, 93, 94, 0.31);
+        --vscode-icon-foreground: #c5c5c5;
+        --vscode-widget-border: #474747;
+        --vscode-editorWidget-background: #252526;
+        --vscode-widget-shadow: rgba(0, 0, 0, 0.24);
+        --vscode-textLink-foreground: #3794ff;
+        --vscode-textLink-activeForeground: #4ca0ff;
+        --vscode-textSeparator-foreground: rgba(255, 255, 255, 0.18);
+        --vscode-contrastBorder: transparent;
+        --vscode-contrastActiveBorder: transparent;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--preview-page-bg);
+        color: var(--preview-page-fg);
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      #root {
+        width: min(100vw, 480px);
+        height: 100vh;
+        margin: 0 auto;
+        border-left: 1px solid var(--preview-frame-border);
+        border-right: 1px solid var(--preview-frame-border);
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
