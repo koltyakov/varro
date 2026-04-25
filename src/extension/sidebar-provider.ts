@@ -1,27 +1,27 @@
 import * as vscode from 'vscode';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { tmpdir } from 'os';
-import { Buffer } from 'buffer';
-import { randomBytes } from 'crypto';
-import { resolve, join, isAbsolute } from 'path';
+import { readFile } from 'fs/promises';
+import { resolve, join } from 'path';
 import type {
   DesktopSessionPaneSide,
   DroppedFile,
   ExtensionMessage,
   InitialWebviewState,
-  ProviderLimitStatus,
-  ServerEventName,
+  ServerEvent,
   ServerStatus,
   WebviewThemeKind,
   WebviewMessage,
 } from '../shared/protocol';
+import { parseServerEvent } from '../shared/protocol';
 import { areContextFilesEqual, mergeContextFile } from '../shared/context-files';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
-import { getRelativePath } from './util/path';
+import { DroppedFilesService } from './dropped-files-service';
+import { ProviderLimitService } from './provider-limit-service';
+import { renderWebviewHtml, type WebviewAssetContent } from './webview-html';
 import { FileSearchService } from './file-search-service';
+import { getRelativePath } from './util/path';
 import {
   SessionStateManager,
   type BlockingRequestSnapshot,
@@ -33,16 +33,6 @@ import {
   parseWebviewMessage,
 } from './util/webview-message';
 import {
-  buildProviderLimitProbe,
-  extractOpenCodeConsoleLimit,
-  extractOpenCodeProviderLimit,
-  getOpenCodeAuthFilePath,
-  parseProviderAuthStore,
-  parseProviderLimitHeaders,
-  type ProviderAuthRecord,
-  type ProviderMetadata,
-} from './util/provider-limit';
-import {
   getOpenCodePlansDirectory,
   getPlanFileName,
   normalizePlanMarkdown,
@@ -50,7 +40,6 @@ import {
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
-  private static readonly PROVIDER_LIMIT_CACHE_TTL_MS = 60_000;
   private view?: vscode.WebviewView;
   private contextProvider: ContextProvider;
   private server: OpenCodeServer;
@@ -67,15 +56,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private webviewDisposables: vscode.Disposable[] = [];
   private windowStateDisposable?: vscode.Disposable;
   private readonly statusBarItem: vscode.StatusBarItem;
+  private readonly droppedFilesService: DroppedFilesService;
+  private readonly providerLimitService: ProviderLimitService;
   private webviewHasFocus = false;
-  private readonly providerLimitCache = new Map<
-    string,
-    { expiresAt: number; promise: Promise<ProviderLimitStatus> }
-  >();
-  private providerMetadataPromise: Promise<ProviderMetadata[]> | null = null;
-  private providerMetadataFetchedAt = 0;
-  private providerAuthStorePromise: Promise<Record<string, ProviderAuthRecord>> | null = null;
-  private providerAuthStoreFetchedAt = 0;
   private webviewLoadGeneration = 0;
   private webviewReady = false;
   private lastStatusBarStateKey = '';
@@ -93,6 +76,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   ) {
     this.contextProvider = contextProvider;
     this.server = server;
+    this.droppedFilesService = new DroppedFilesService(contextProvider);
+    this.providerLimitService = new ProviderLimitService(server);
     this.sessionState = new SessionStateManager(
       workspaceState,
       {
@@ -128,20 +113,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.serverStatusHandler = (status: ServerStatus) => {
       const previousStatus = this._status;
       this._status = status;
-      if (shouldClearProviderLimitCache(previousStatus, status)) {
-        this.providerLimitCache.clear();
+      if (this.providerLimitService.shouldClearCache(previousStatus, status)) {
+        this.providerLimitService.clearCache();
       }
       this.post({ type: 'server/status', payload: status });
     };
     this.serverEventHandler = (event: unknown) => {
-      const evt = event as Record<string, unknown>;
+      const evt = parseServerEvent(event);
+      if (!evt) return;
       this.sessionState.handleServerEvent(evt);
       this.post({
         type: 'server/event',
-        payload: {
-          type: (evt.type ?? 'event') as ServerEventName,
-          properties: evt.properties as Record<string, unknown> | undefined,
-        },
+        payload: evt satisfies ServerEvent,
       });
     };
 
@@ -425,6 +408,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'terminal/run':
           this.runInTerminal(msg.payload.command, msg.payload.title);
           break;
+        case 'vscode/open-settings':
+          await vscode.commands.executeCommand(
+            'workbench.action.openSettings',
+            msg.payload.query ?? '@ext:koltyakov.varro'
+          );
+          break;
         case 'files/drop':
           await this.handleDroppedPaths(msg.payload.paths);
           break;
@@ -521,7 +510,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       const providerLimitRequest = this.parseProviderLimitRequest(method, payload.path);
       if (providerLimitRequest) {
-        const data = await this.getProviderLimit(
+        const data = await this.providerLimitService.get(
           providerLimitRequest.providerID,
           providerLimitRequest.modelID
         );
@@ -608,283 +597,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return { path: fileUri.fsPath };
   }
 
-  private getProviderLimit(providerID: string, modelID: string | null) {
-    const cacheKey = `${providerID}:${modelID || ''}`;
-    const now = Date.now();
-    const cached = this.providerLimitCache.get(cacheKey);
-    if (cached && cached.expiresAt > now) return cached.promise;
-
-    const promise = this.loadProviderLimit(providerID, modelID).catch((err) => {
-      if (this.providerLimitCache.get(cacheKey)?.promise === promise) {
-        this.providerLimitCache.delete(cacheKey);
-      }
-      throw err;
-    });
-
-    this.providerLimitCache.set(cacheKey, {
-      expiresAt: now + SidebarProvider.PROVIDER_LIMIT_CACHE_TTL_MS,
-      promise,
-    });
-    return promise;
-  }
-
-  private async loadProviderLimit(
-    providerID: string,
-    modelID: string | null
-  ): Promise<ProviderLimitStatus> {
-    const checkedAt = Date.now();
-    const providers = await this.getProviderMetadata();
-    const provider = providers.find((item) => item.id === providerID);
-
-    if (!provider) {
-      return {
-        providerID,
-        modelID,
-        status: 'error',
-        source: 'opencode',
-        checkedAt,
-        note: 'Provider not found in OpenCode config',
-      };
-    }
-
-    const direct = extractOpenCodeProviderLimit(provider, modelID, checkedAt);
-    if (direct) return direct;
-
-    try {
-      const rawConsole = await this.server.request('GET', '/experimental/console');
-      const consoleLimit = extractOpenCodeConsoleLimit(rawConsole, providerID, modelID, checkedAt);
-      if (consoleLimit) return consoleLimit;
-    } catch {}
-
-    const authStore = await this.readProviderAuthStore();
-    const probe = buildProviderLimitProbe(provider, authStore);
-    if (!probe) {
-      return {
-        providerID,
-        modelID,
-        status: 'unsupported',
-        source: 'provider',
-        checkedAt,
-        note: 'No zero-cost provider quota endpoint is known for this provider',
-      };
-    }
-
-    try {
-      const response = await fetch(probe.url, {
-        headers: probe.headers,
-        signal: AbortSignal.timeout(10_000),
-      });
-      const windows = parseProviderLimitHeaders(response.headers, checkedAt);
-      if (windows.length > 0) {
-        return {
-          providerID,
-          modelID,
-          status: 'available',
-          source: 'provider',
-          checkedAt,
-          windows,
-          note: 'Polled provider metadata headers',
-        };
-      }
-
-      return {
-        providerID,
-        modelID,
-        status: 'unsupported',
-        source: 'provider',
-        checkedAt,
-        note: response.ok
-          ? 'Provider metadata endpoint did not expose remaining limits'
-          : `Provider metadata endpoint returned ${response.status}`,
-      };
-    } catch {
-      return {
-        providerID,
-        modelID,
-        status: 'error',
-        source: 'provider',
-        checkedAt,
-        note: 'Failed to poll the provider metadata endpoint',
-      };
-    }
-  }
-
-  private async readProviderAuthStore() {
-    const now = Date.now();
-    if (
-      this.providerAuthStorePromise &&
-      now - this.providerAuthStoreFetchedAt < SidebarProvider.PROVIDER_LIMIT_CACHE_TTL_MS
-    ) {
-      return this.providerAuthStorePromise;
-    }
-
-    this.providerAuthStoreFetchedAt = now;
-    this.providerAuthStorePromise = (async () => {
-      try {
-        const raw = await readFile(getOpenCodeAuthFilePath(), 'utf-8');
-        return parseProviderAuthStore(raw);
-      } catch {
-        return {};
-      }
-    })();
-
-    return this.providerAuthStorePromise;
-  }
-
-  private async getProviderMetadata() {
-    const now = Date.now();
-    if (
-      this.providerMetadataPromise &&
-      now - this.providerMetadataFetchedAt < SidebarProvider.PROVIDER_LIMIT_CACHE_TTL_MS
-    ) {
-      return this.providerMetadataPromise;
-    }
-
-    this.providerMetadataFetchedAt = now;
-    this.providerMetadataPromise = (async () => {
-      const rawConfig = (await this.server.request('GET', '/config/providers')) as unknown;
-      const config = asRecord(rawConfig);
-      return Array.isArray(config?.providers)
-        ? config.providers.filter((item): item is ProviderMetadata => Boolean(asRecord(item)))
-        : [];
-    })().catch((err) => {
-      if (this.providerMetadataPromise) {
-        this.providerMetadataPromise = null;
-        this.providerMetadataFetchedAt = 0;
-      }
-      throw err;
-    });
-
-    return this.providerMetadataPromise;
-  }
-
   post(msg: ExtensionMessage) {
     // oxlint-disable-next-line require-post-message-target-origin
     this.view?.webview.postMessage(msg);
   }
 
   async handleDroppedContent(files: Array<{ name: string; content: string; size: number }>) {
-    const dropsDir = join(tmpdir(), 'varro-drops');
-    try {
-      await mkdir(dropsDir, { recursive: true });
-    } catch (err) {
-      logger.warn(
-        `Failed to create drop temp dir: ${err instanceof Error ? err.message : String(err)}`
-      );
-      return;
-    }
-
-    const results = await Promise.all(
-      files.map(async (file) => {
-        try {
-          const buffer = Buffer.from(file.content, 'base64');
-          const safeName = sanitizeDroppedFileName(file.name);
-          const targetPath = join(
-            dropsDir,
-            `${Date.now()}-${randomBytes(4).toString('hex')}-${safeName}`
-          );
-          await writeFile(targetPath, buffer);
-          const uri = vscode.Uri.file(targetPath);
-          return {
-            path: uri.fsPath,
-            relativePath: safeName,
-            type: 'file' as 'file' | 'directory',
-          };
-        } catch (err) {
-          logger.warn(
-            `Failed to write dropped file ${file.name}: ${err instanceof Error ? err.message : String(err)}`
-          );
-          return null;
-        }
-      })
-    );
-
-    const valid = results.filter(
-      (item): item is { path: string; relativePath: string; type: 'file' | 'directory' } =>
-        item !== null
-    );
+    const valid = await this.droppedFilesService.fromContent(files);
     if (valid.length > 0) {
       this.postDroppedFiles(valid);
     }
   }
 
   async handleDroppedPaths(paths: string[]) {
-    const dropped = await Promise.all(
-      Array.from(new Set(paths)).map(async (path) => {
-        try {
-          const uri = await this.resolveDroppedUri(path);
-          if (!uri) {
-            throw new Error('Path does not exist');
-          }
-          const stat = await vscode.workspace.fs.stat(uri);
-          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-          const relativePath = getRelativePath(uri, workspaceFolder);
-
-          return {
-            path: uri.fsPath,
-            relativePath,
-            type:
-              stat.type & vscode.FileType.Directory ? ('directory' as const) : ('file' as const),
-          };
-        } catch (err) {
-          logger.warn(
-            `Ignoring dropped path ${path}: ${err instanceof Error ? err.message : String(err)}`
-          );
-          return null;
-        }
-      })
-    );
-
-    const normalized = dropped.filter(
-      (item): item is { path: string; relativePath: string; type: 'file' | 'directory' } =>
-        Boolean(item)
-    );
-
+    const normalized = await this.droppedFilesService.fromPaths(paths);
     if (normalized.length > 0) {
       this.postDroppedFiles(normalized);
     }
-  }
-
-  private async resolveDroppedUri(rawPath: string): Promise<vscode.Uri | null> {
-    const input = rawPath.trim();
-    if (!input) return null;
-
-    const absoluteUri = vscode.Uri.file(input);
-    if (isAbsolute(input)) {
-      try {
-        await vscode.workspace.fs.stat(absoluteUri);
-        return absoluteUri;
-      } catch {
-        return null;
-      }
-    }
-
-    const relativePath = input.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
-    if (!relativePath) return null;
-
-    const preferredWorkspacePath = this.contextProvider.context.workspacePath;
-    const folders = vscode.workspace.workspaceFolders || [];
-    const preferredFolder = preferredWorkspacePath
-      ? folders.find((folder) => folder.uri.fsPath === preferredWorkspacePath)
-      : undefined;
-    const resolutionOrder = preferredFolder
-      ? [
-          preferredFolder,
-          ...folders.filter((folder) => folder.uri.fsPath !== preferredWorkspacePath),
-        ]
-      : folders;
-
-    for (const folder of resolutionOrder) {
-      const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
-      try {
-        await vscode.workspace.fs.stat(candidate);
-        if (vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath === folder.uri.fsPath) {
-          return candidate;
-        }
-      } catch {}
-    }
-
-    return null;
   }
 
   setOnContextFilesChanged(fn: () => void) {
@@ -971,9 +700,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  postDroppedFiles(
-    files: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>
-  ) {
+  postDroppedFiles(files: Array<Pick<DroppedFile, 'path' | 'relativePath' | 'type'>>) {
     const updates: DroppedFile[] = [];
     for (const file of files) {
       const incoming = file as DroppedFile;
@@ -1014,7 +741,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async getHtml(): Promise<string> {
     const webview = this.view?.webview;
-    const { scriptContent, cssContent } = await this.loadWebviewAssets();
+    const assets = await this.loadWebviewAssets();
     const [interruptedSessions, blockingRequests] = await Promise.all([
       this.sessionState.consumeInterruptedSessions(),
       this.sessionState.consumeBlockingRequests(),
@@ -1025,11 +752,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionState.publishPendingAttention();
     this.updateStatusBarItem();
 
-    const nonce = randomNonce();
     const emptyStateLogoUri = webview?.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'assets', 'icon.png')
     );
-    const initialState = serializeForInlineScript({
+    const initialState = {
       theme: this.currentTheme(),
       serverStatus: this._status,
       editorContext: this.contextProvider.context,
@@ -1046,29 +772,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       pendingQuestions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'question')
         .map((item) => item.props),
-    } satisfies InitialWebviewState);
+    } satisfies InitialWebviewState;
 
-    return /*html*/ `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; img-src ${webview?.cspSource || ''} data: https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
-  <title>Varro</title>
-  <style>${cssContent}</style>
-</head>
-<body>
-  <div id="root"></div>
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    window.__initialWebviewState = ${initialState};
-    window.__initialTheme = window.__initialWebviewState.theme;
-    window.__sendToExtension = function(msg) { vscode.postMessage(msg); };
-  </script>
-  <script nonce="${nonce}">${scriptContent}</script>
-</body>
-</html>`;
+    return renderWebviewHtml(webview?.cspSource || '', initialState, assets);
   }
 
   private async loadWebviewAssets(): Promise<WebviewAssetContent> {
@@ -1109,52 +815,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 }
 
-type WebviewAssetContent = {
-  scriptContent: string;
-  cssContent: string;
-};
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
-}
-
-function sanitizeDroppedFileName(name: string): string {
-  const base = name.split(/[\\/]/).pop() || 'dropped';
-  const sanitized = base.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
-  return sanitized || 'dropped';
-}
-
-function shouldClearProviderLimitCache(previous: ServerStatus, next: ServerStatus) {
-  if (previous.state !== next.state) return true;
-  if (previous.state === 'running' && next.state === 'running') {
-    return previous.url !== next.url;
-  }
-  if (previous.state === 'error' && next.state === 'error') {
-    return previous.message !== next.message;
-  }
-  return false;
-}
-
-function randomNonce(): string {
-  const bytes = randomBytes(24);
-  return bytes.toString('base64url');
-}
-
-function serializeForInlineScript(value: unknown): string {
-  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (char) => {
-    switch (char) {
-      case '<':
-        return '\\u003C';
-      case '>':
-        return '\\u003E';
-      case '&':
-        return '\\u0026';
-      case '\u2028':
-        return '\\u2028';
-      case '\u2029':
-        return '\\u2029';
-      default:
-        return char;
-    }
-  });
 }

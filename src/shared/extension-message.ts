@@ -1,4 +1,4 @@
-import type { ExtensionMessage, ServerEventName, ServerStatus } from './protocol';
+import { parseServerEvent, type ExtensionMessage, type ServerStatus } from './protocol';
 
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'server/status',
@@ -43,17 +43,8 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
     }
 
     case 'server/event': {
-      const payload = asRecord(record.payload);
-      if (!payload) return null;
-      const eventType = typeof payload.type === 'string' ? payload.type : null;
-      if (!eventType) return null;
-      return {
-        type,
-        payload: {
-          type: eventType as ServerEventName,
-          properties: asRecord(payload.properties) as Record<string, unknown> | undefined,
-        },
-      };
+      const payload = parseServerEvent(record.payload);
+      return payload ? { type, payload } : null;
     }
 
     case 'pending-attention/update': {

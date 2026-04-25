@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { Memento } from 'vscode';
+import type { ServerEvent } from '../shared/protocol';
 import { normalizeSessionTitle } from '../shared/session-title';
 import { logger } from './logger';
 
@@ -91,10 +92,8 @@ export class SessionStateManager {
     this.listener.onStatusChange();
   }
 
-  handleServerEvent(event: Record<string, unknown>): void {
-    const type = typeof event.type === 'string' ? event.type : undefined;
-    const props = asRecord(event.properties);
-    if (!type) return;
+  handleServerEvent(event: ServerEvent): void {
+    const { type, properties: props } = event;
     let changed = false;
 
     switch (type) {

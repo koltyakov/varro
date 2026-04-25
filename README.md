@@ -44,7 +44,7 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
    - Drag files or folders into the chat
    - Paste an image into the input box
    - Type `@` to search workspace files or mention an agent
-8. Use `/models`, `/mcps`, or `/settings` from the composer when you want to adjust the active session.
+8. Use `/models` or `/mcps` from the composer to adjust the active session, or `/settings` to open VS Code Settings filtered to Varro.
 9. Approve or reject tool permissions and answer follow-up questions directly in the chat panel. If the sidebar is hidden, Varro can surface waiting or completed work in notifications and the status bar.
 
 ## Documentation

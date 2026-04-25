@@ -11,7 +11,12 @@ import type {
   QuestionRequest,
   PermissionRule,
 } from '../types';
-import type { McpStatus, ProviderLimitStatus, ServerEventName } from '../../shared/protocol';
+import type {
+  McpStatus,
+  ProviderLimitStatus,
+  ServerEvent,
+  ServerEventName,
+} from '../../shared/protocol';
 
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
@@ -179,7 +184,15 @@ function getSharedQuestionList(): Promise<QuestionRequest[]> {
   return promise;
 }
 
-type EventHandler = (data: unknown) => void;
+type EventHandler<TEvent extends ServerEvent = ServerEvent> = (data: TEvent) => void;
+
+type ServerEventsApi = {
+  on<TEventName extends ServerEventName>(
+    type: TEventName,
+    handler: EventHandler<Extract<ServerEvent, { type: TEventName }>>
+  ): () => void;
+  on(type: '*', handler: EventHandler<ServerEvent>): () => void;
+};
 
 const eventListeners = new Map<string, Set<EventHandler>>();
 
@@ -214,7 +227,7 @@ onMessage((msg) => {
   }
 });
 
-export const serverEvents = {
+export const serverEvents: ServerEventsApi = {
   on(type: ServerEventName | '*', handler: EventHandler): () => void {
     if (!eventListeners.has(type)) eventListeners.set(type, new Set());
     eventListeners.get(type)!.add(handler);

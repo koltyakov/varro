@@ -72,7 +72,7 @@ Current built-in slash commands include:
 - `/mcps`
 - `/connect`
 - `/attach`
-- `/settings`
+- `/settings` opens VS Code Settings filtered to Varro
 - `/thinking`
 - `/compact`
 - `/review`
@@ -114,7 +114,7 @@ Varro loads agents, models, and MCP tools from your local OpenCode configuration
 - Pick the provider/model from the model picker.
 - Choose a reasoning variant when the selected model exposes variants.
 - Open the MCP picker to connect or disconnect session MCPs.
-- Open `/settings` to hide or show providers and individual models.
+- Open the model picker footer to hide or show providers and individual models.
 
 The model settings view also shows whether a model exposes tools, variants, vision support, and a known context-window size.
 

@@ -2,7 +2,7 @@
   "name": "varro",
   "displayName": "Varro",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "publisher": "koltyakov",
   "repository": "https://github.com/koltyakov/varro",
   "license": "MIT",
@@ -12,9 +12,7 @@
   },
   "categories": [
     "AI",
-    "Chat",
-    "Programming Languages",
-    "Machine Learning"
+    "Chat"
   ],
   "keywords": [
     "ai",

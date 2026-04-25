@@ -27,52 +27,15 @@ import type {
 import { mergeContextFile } from '../../shared/context-files';
 import type { UsageLimitNotice } from './usage-limit';
 import { isAbortedAssistantError } from './aborted';
-
-const STORAGE_KEYS = {
-  selectedAgent: 'varro.selectedAgent',
-  sessionSelectedAgents: 'varro.sessionSelectedAgents',
-  skippedPlanSessions: 'varro.skippedPlanSessions',
-  selectedModel: 'varro.selectedModel',
-  sessionSelectedModels: 'varro.sessionSelectedModels',
-  draftPermissionMode: 'varro.draftPermissionMode',
-  sessionPermissionModes: 'varro.sessionPermissionModes',
-  sessionSelectedMcps: 'varro.sessionSelectedMcps',
-  projectPermissionModes: 'varro.projectPermissionModes',
-  hiddenProviders: 'varro.hiddenProviders',
-  hiddenModels: 'varro.hiddenModels',
-  lastSeenSessions: 'varro.lastSeenSessions',
-  lastActiveSessionId: 'varro.lastActiveSessionId',
-  showThinking: 'varro.showThinking',
-  expandThinkingByDefault: 'varro.expandThinkingByDefault',
-  legacyexpandThinkingByDefault: 'varro.expandThinkingByDefault',
-  showStickyUserPrompt: 'varro.showStickyUserPrompt',
-} as const;
+import { createMessageIndex } from './message-index';
+import { createSessionTreeIndex, collectSessionTreeIds } from './session-tree-index';
+import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
+import { createStreamingDeltaQueue } from './streaming-deltas';
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
 export type SessionSelectedAgents = Record<string, string>;
 export type SessionSelectedModels = Record<string, SelectedModel>;
 export type SessionSelectedMcps = Record<string, string[]>;
-
-function readStored<T>(key: string): T | null {
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStored(key: string, value: unknown) {
-  try {
-    if (value === null || value === undefined) {
-      window.localStorage.removeItem(key);
-      return;
-    }
-    const serialized = JSON.stringify(value);
-    if (window.localStorage.getItem(key) === serialized) return;
-    window.localStorage.setItem(key, serialized);
-  } catch {}
-}
 
 interface AppState {
   serverStatus: ServerStatus;
@@ -506,6 +469,8 @@ export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
 export const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
 export const [messageStructureVersion, setMessageStructureVersion] = createSignal(0);
+const sessionTreeIndex = createSessionTreeIndex();
+const messageIndex = createMessageIndex(() => bumpMessageStructureVersion());
 let permissionWorkspace: string | null = initialWebviewState.editorContext?.workspacePath ?? null;
 
 function bumpMessageStructureVersion() {
@@ -858,7 +823,7 @@ export function setSessions(nextSessions: Session[]) {
     setState('skippedPlanSessions', reconcile(nextSkippedPlanSessions));
     writeStored(STORAGE_KEYS.skippedPlanSessions, nextSkippedPlanSessions);
   }
-  invalidateSessionTreeIndex();
+  sessionTreeIndex.invalidate();
 }
 
 export function upsertQuestion(question: QuestionRequest) {
@@ -1057,95 +1022,11 @@ export function resolveSelectedModel(
   return candidate;
 }
 
-let messageIndexVersion = 0;
-let indexedVersion = -1;
-let messageById: Map<string, number> = new Map();
-let partById: Map<string, { msgIdx: number; partIdx: number }> = new Map();
-let streamingDeltaFlushScheduled = false;
-let streamingDeltaGeneration = 0;
-const pendingStreamingDeltas = new Map<
-  string,
-  { messageId: string; partId: string; sessionId?: string; text: string }
->();
-
-function ensureIndex(msgs: Array<{ info: Message; parts: Part[] }>) {
-  if (indexedVersion === messageIndexVersion) return;
-  messageById = new Map();
-  partById = new Map();
-  for (let i = 0; i < msgs.length; i++) {
-    messageById.set(msgs[i].info.id, i);
-    for (let j = 0; j < msgs[i].parts.length; j++) {
-      partById.set(msgs[i].parts[j].id, { msgIdx: i, partIdx: j });
-    }
-  }
-  indexedVersion = messageIndexVersion;
-}
-
-function invalidateIndex() {
-  messageIndexVersion++;
-  bumpMessageStructureVersion();
-}
-
-function findMessageIndex(msgs: Array<{ info: Message; parts: Part[] }>, id: string): number {
-  ensureIndex(msgs);
-  const idx = messageById.get(id);
-  if (idx !== undefined && idx < msgs.length && msgs[idx].info.id === id) return idx;
-  return msgs.findIndex((m) => m.info.id === id);
-}
-
-function findPartLocation(
-  msgs: Array<{ info: Message; parts: Part[] }>,
-  partId: string
-): { msgIdx: number; partIdx: number } | null {
-  ensureIndex(msgs);
-  const indexed = partById.get(partId);
-  if (indexed) {
-    const message = msgs[indexed.msgIdx];
-    if (message?.parts[indexed.partIdx]?.id === partId) {
-      return indexed;
-    }
-  }
-
-  for (let msgIdx = 0; msgIdx < msgs.length; msgIdx++) {
-    const partIdx = msgs[msgIdx].parts.findIndex((part) => part.id === partId);
-    if (partIdx !== -1) {
-      const location = { msgIdx, partIdx };
-      partById.set(partId, location);
-      return location;
-    }
-  }
-
-  return null;
-}
-
-function scheduleStreamingDeltaFlush() {
-  if (streamingDeltaFlushScheduled) return;
-  streamingDeltaFlushScheduled = true;
-  const generation = streamingDeltaGeneration;
-  const flush = () => {
-    streamingDeltaFlushScheduled = false;
-    if (generation !== streamingDeltaGeneration) return;
-    flushPendingStreamingDeltas();
-  };
-
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(flush);
-    return;
-  }
-  setTimeout(flush, 16);
-}
-
-function resetPendingStreamingDeltas() {
-  pendingStreamingDeltas.clear();
-  streamingDeltaFlushScheduled = false;
-  streamingDeltaGeneration++;
-}
+const streamingDeltaQueue = createStreamingDeltaQueue(() => flushPendingStreamingDeltas());
 
 function flushPendingStreamingDeltas() {
-  if (pendingStreamingDeltas.size === 0) return;
-  const deltas = [...pendingStreamingDeltas.values()];
-  pendingStreamingDeltas.clear();
-  streamingDeltaFlushScheduled = false;
+  const deltas = streamingDeltaQueue.takeAll();
+  if (deltas.length === 0) return;
   const latest = deltas[deltas.length - 1];
 
   batch(() => {
@@ -1155,7 +1036,7 @@ function flushPendingStreamingDeltas() {
       'messages',
       produce((msgs) => {
         for (const item of deltas) {
-          const location = findPartLocation(msgs, item.partId);
+          const location = messageIndex.findPartLocation(msgs, item.partId);
           if (location) {
             const part = msgs[location.msgIdx]?.parts[location.partIdx];
             if (part.type === 'text' || part.type === 'reasoning') {
@@ -1164,7 +1045,7 @@ function flushPendingStreamingDeltas() {
             continue;
           }
 
-          const msgIdx = findMessageIndex(msgs, item.messageId);
+          const msgIdx = messageIndex.findMessageIndex(msgs, item.messageId);
           if (msgIdx === -1) continue;
           msgs[msgIdx].parts.push({
             id: item.partId,
@@ -1173,7 +1054,7 @@ function flushPendingStreamingDeltas() {
             type: 'text',
             text: item.text,
           });
-          invalidateIndex();
+          messageIndex.invalidate();
         }
       })
     );
@@ -1185,13 +1066,13 @@ export function upsertMessage(msg: { info: Message; parts: Part[] }) {
   setState(
     'messages',
     produce((msgs) => {
-      const idx = findMessageIndex(msgs, msg.info.id);
+      const idx = messageIndex.findMessageIndex(msgs, msg.info.id);
       if (idx !== -1) {
         msgs[idx] = msg;
       } else {
         msgs.push(msg);
       }
-      invalidateIndex();
+      messageIndex.invalidate();
     })
   );
 }
@@ -1200,13 +1081,13 @@ export function upsertMessageInfo(info: Message) {
   setState(
     'messages',
     produce((msgs) => {
-      const idx = findMessageIndex(msgs, info.id);
+      const idx = messageIndex.findMessageIndex(msgs, info.id);
       if (idx !== -1) {
         msgs[idx].info = info;
         return;
       } else {
         msgs.push({ info, parts: [] });
-        invalidateIndex();
+        messageIndex.invalidate();
       }
     })
   );
@@ -1218,16 +1099,16 @@ export function upsertPart(part: Part) {
   setState(
     'messages',
     produce((msgs) => {
-      const idx = findMessageIndex(msgs, msgId);
+      const idx = messageIndex.findMessageIndex(msgs, msgId);
       if (idx === -1) return;
-      const location = findPartLocation(msgs, part.id);
+      const location = messageIndex.findPartLocation(msgs, part.id);
       if (location && location.msgIdx === idx) {
         msgs[idx].parts[location.partIdx] = part;
         return;
       }
 
       msgs[idx].parts.push(part);
-      invalidateIndex();
+      messageIndex.invalidate();
     })
   );
   if (state.streamingPartId === part.id) {
@@ -1244,7 +1125,7 @@ export function updateMessagePart(part: Part) {
   setState(
     'messages',
     produce((msgs) => {
-      const location = findPartLocation(msgs, partId);
+      const location = messageIndex.findPartLocation(msgs, partId);
       if (!location) return;
       const msg = msgs[location.msgIdx];
       if (msg) {
@@ -1263,17 +1144,15 @@ export function applyMessagePartDelta(
 ) {
   if (field !== 'text' || !delta) return;
 
-  const pending = pendingStreamingDeltas.get(partId);
+  const pending = streamingDeltaQueue.get(partId);
   if (pending && pending.messageId === messageId) {
-    pending.text += delta;
-    pendingStreamingDeltas.delete(partId);
-    pendingStreamingDeltas.set(partId, pending);
-    scheduleStreamingDeltaFlush();
+    streamingDeltaQueue.bump(partId, pending.text + delta);
+    streamingDeltaQueue.scheduleFlush();
     return;
   }
 
-  ensureIndex(state.messages);
-  const location = partById.get(partId);
+  messageIndex.ensureIndex(state.messages);
+  const location = messageIndex.getIndexedPartLocation(partId);
   const message =
     location && state.messages[location.msgIdx]?.info.id === messageId
       ? state.messages[location.msgIdx]
@@ -1290,13 +1169,13 @@ export function applyMessagePartDelta(
       : '';
   const currentStreamingText =
     state.streamingPartId === partId ? state.streamingText : existingText;
-  pendingStreamingDeltas.set(partId, {
+  streamingDeltaQueue.set({
     messageId,
     partId,
     sessionId,
     text: currentStreamingText + delta,
   });
-  scheduleStreamingDeltaFlush();
+  streamingDeltaQueue.scheduleFlush();
 }
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
@@ -1304,12 +1183,12 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
   setState(
     'messages',
     produce((msgs) => {
-      const idx = findMessageIndex(msgs, messageId);
+      const idx = messageIndex.findMessageIndex(msgs, messageId);
       if (idx !== -1 && msgs[idx].info.sessionID === sessionId) {
-        const location = findPartLocation(msgs, partId);
+        const location = messageIndex.findPartLocation(msgs, partId);
         if (location && location.msgIdx === idx) {
           msgs[idx].parts.splice(location.partIdx, 1);
-          invalidateIndex();
+          messageIndex.invalidate();
         }
       }
     })
@@ -1344,7 +1223,7 @@ export function removePermission(permissionId: string) {
 }
 
 export function clearStreamingState() {
-  resetPendingStreamingDeltas();
+  streamingDeltaQueue.reset();
   batch(() => {
     setState('streamingPartId', null);
     setState('streamingText', '');
@@ -1386,126 +1265,27 @@ export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice
       current[sessionId] = notice;
     })
   );
-  invalidateSessionTreeIndex();
-}
-
-let sessionTreeIndexVersion = 0;
-let sessionTreeIndexedVersion = -1;
-let sessionTreeIdsBySession: Map<string, string[]> = new Map();
-let nearestPrimarySessionById: Map<string, string> = new Map();
-let activeUsageLimitByRoot: Map<string, UsageLimitNotice | null> = new Map();
-let indexedSessionsRef: Session[] | null = null;
-let indexedUsageLimitsRef: Record<string, UsageLimitNotice | null> | null = null;
-
-function invalidateSessionTreeIndex() {
-  sessionTreeIndexVersion++;
-}
-
-function ensureSessionTreeIndex(sessions = state.sessions, usageLimits = state.sessionUsageLimits) {
-  if (
-    sessionTreeIndexedVersion === sessionTreeIndexVersion &&
-    indexedSessionsRef === sessions &&
-    indexedUsageLimitsRef === usageLimits
-  )
-    return;
-
-  const childrenByParent = new Map<string, string[]>();
-  nearestPrimarySessionById = new Map();
-
-  for (const session of sessions) {
-    if (!session.parentID) continue;
-    const children = childrenByParent.get(session.parentID);
-    if (children) children.push(session.id);
-    else childrenByParent.set(session.parentID, [session.id]);
-  }
-
-  const primarySessions = sessions.filter((session) => !session.parentID);
-  if (primarySessions.length === 0) {
-    sessionTreeIdsBySession = new Map();
-    activeUsageLimitByRoot = new Map();
-    for (const session of sessions) {
-      nearestPrimarySessionById.set(session.id, session.id);
-      sessionTreeIdsBySession.set(session.id, [session.id]);
-      activeUsageLimitByRoot.set(session.id, usageLimits[session.id] || null);
-    }
-    sessionTreeIndexedVersion = sessionTreeIndexVersion;
-    indexedSessionsRef = sessions;
-    indexedUsageLimitsRef = usageLimits;
-    return;
-  }
-  sessionTreeIdsBySession = new Map();
-
-  const collectSessionTreeIds = (sessionId: string, rootId: string): string[] => {
-    nearestPrimarySessionById.set(sessionId, rootId);
-
-    const treeIds = [sessionId];
-    const children = childrenByParent.get(sessionId) || [];
-    for (const childId of children) {
-      treeIds.push(...collectSessionTreeIds(childId, rootId));
-    }
-
-    sessionTreeIdsBySession.set(sessionId, treeIds);
-    return treeIds;
-  };
-
-  for (const root of primarySessions) {
-    collectSessionTreeIds(root.id, root.id);
-  }
-
-  activeUsageLimitByRoot = new Map();
-  for (const root of primarySessions) {
-    const treeIds = sessionTreeIdsBySession.get(root.id) || [root.id];
-    const activeNotice = treeIds.map((id) => usageLimits[id] || null).find((notice) => !!notice);
-    activeUsageLimitByRoot.set(root.id, activeNotice || null);
-  }
-
-  sessionTreeIndexedVersion = sessionTreeIndexVersion;
-  indexedSessionsRef = sessions;
-  indexedUsageLimitsRef = usageLimits;
+  sessionTreeIndex.invalidate();
 }
 
 export function getSessionTreeIds(rootId: string | null | undefined, sessions = state.sessions) {
   if (!rootId) return [];
   if (sessions === state.sessions) {
-    ensureSessionTreeIndex();
-    return [...(sessionTreeIdsBySession.get(rootId) || [rootId])];
+    return sessionTreeIndex.getTreeIds(rootId, state.sessions, state.sessionUsageLimits);
   }
-
-  const childrenByParent = new Map<string, string[]>();
-  for (const session of sessions) {
-    if (!session.parentID) continue;
-    const children = childrenByParent.get(session.parentID);
-    if (children) children.push(session.id);
-    else childrenByParent.set(session.parentID, [session.id]);
-  }
-
-  const visited = new Set<string>();
-  const pending = [rootId];
-
-  while (pending.length > 0) {
-    const currentId = pending.pop();
-    if (!currentId || visited.has(currentId)) continue;
-    visited.add(currentId);
-
-    for (const childId of childrenByParent.get(currentId) || []) {
-      pending.push(childId);
-    }
-  }
-
-  return [...visited];
+  return collectSessionTreeIds(rootId, sessions);
 }
 
 export function getSessionTreeRootId(sessionId: string | null | undefined) {
-  if (!sessionId) return null;
-  ensureSessionTreeIndex();
-  return nearestPrimarySessionById.get(sessionId) || sessionId;
+  return sessionTreeIndex.getRootId(sessionId, state.sessions, state.sessionUsageLimits);
 }
 
 export function getActiveUsageLimitNotice(sessionId: string | null | undefined) {
-  if (!sessionId) return null;
-  ensureSessionTreeIndex();
-  const rootId = nearestPrimarySessionById.get(sessionId) || sessionId;
-  return activeUsageLimitByRoot.get(rootId) || null;
+  return sessionTreeIndex.getActiveUsageLimitNotice(
+    sessionId,
+    state.sessions,
+    state.sessionUsageLimits
+  );
 }
 
 export function hasActiveUsageLimit(sessionId: string | null | undefined) {
@@ -1534,9 +1314,9 @@ export function syncFailedSessionsFromMessages(
 }
 
 export function replaceMessages(incoming: Array<{ info: Message; parts: Part[] }>) {
-  resetPendingStreamingDeltas();
+  streamingDeltaQueue.reset();
   setState('messages', incoming);
-  invalidateIndex();
+  messageIndex.invalidate();
 }
 
 export function setMessagesIncremental(incoming: Array<{ info: Message; parts: Part[] }>) {
@@ -1583,7 +1363,7 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
         msgs.length = incoming.length;
         changed = true;
       }
-      if (changed) invalidateIndex();
+      if (changed) messageIndex.invalidate();
     })
   );
 }

@@ -72,27 +72,51 @@ export type ServerStatus =
   | { state: 'stopped' }
   | { state: 'error'; message: string };
 
-export type ServerEventName =
-  | 'session.created'
-  | 'session.updated'
-  | 'session.deleted'
-  | 'session.status'
-  | 'session.idle'
-  | 'session.diff'
-  | 'message.updated'
-  | 'message.part.updated'
-  | 'message.part.delta'
-  | 'message.part.removed'
-  | 'message.removed'
-  | 'permission.updated'
-  | 'permission.asked'
-  | 'permission.replied'
-  | 'question.asked'
-  | 'question.replied'
-  | 'question.rejected'
-  | 'todo.updated'
-  | 'mcp.tools.changed'
-  | 'mcp.browser.open.failed';
+export const SERVER_EVENT_NAMES = [
+  'session.created',
+  'session.updated',
+  'session.deleted',
+  'session.status',
+  'session.idle',
+  'session.diff',
+  'message.updated',
+  'message.part.updated',
+  'message.part.delta',
+  'message.part.removed',
+  'message.removed',
+  'permission.updated',
+  'permission.asked',
+  'permission.replied',
+  'question.asked',
+  'question.replied',
+  'question.rejected',
+  'todo.updated',
+  'mcp.tools.changed',
+  'mcp.browser.open.failed',
+] as const;
+
+const SERVER_EVENT_NAME_SET = new Set<string>(SERVER_EVENT_NAMES);
+
+export type ServerEventName = (typeof SERVER_EVENT_NAMES)[number];
+
+export type ServerEvent = {
+  [Name in ServerEventName]: {
+    type: Name;
+    properties?: Record<string, unknown>;
+  };
+}[ServerEventName];
+
+export function isServerEventName(value: unknown): value is ServerEventName {
+  return typeof value === 'string' && SERVER_EVENT_NAME_SET.has(value);
+}
+
+export function parseServerEvent(value: unknown): ServerEvent | null {
+  const record = asRecord(value);
+  if (!record || !isServerEventName(record.type)) return null;
+
+  const properties = asRecord(record.properties);
+  return properties ? { type: record.type, properties } : { type: record.type };
+}
 
 export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light';
 
@@ -115,10 +139,7 @@ export type InitialWebviewState = {
 
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
-  | {
-      type: 'server/event';
-      payload: { type: ServerEventName; properties?: Record<string, unknown> };
-    }
+  | { type: 'server/event'; payload: ServerEvent }
   | { type: 'pending-attention/update'; payload: { sessionIds: string[] } }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
@@ -147,6 +168,7 @@ export type WebviewMessage =
   | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
+  | { type: 'vscode/open-settings'; payload: { query?: string } }
   | { type: 'files/drop'; payload: { paths: string[] } }
   | {
       type: 'files/drop-content';
@@ -176,3 +198,9 @@ export type WebviewMessage =
       type: 'log';
       payload: { msg: string; data?: string; error?: string; level?: 'info' | 'warn' | 'error' };
     };
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}

@@ -55,4 +55,18 @@ describe('webview message validation', () => {
       })
     ).toEqual({ type: 'api/request', payload: { id: 1, method: 'GET', path: '/session' } });
   });
+
+  it('accepts a request to open filtered VS Code settings', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-settings',
+        payload: { query: 'Varro' },
+      })
+    ).toEqual({ type: 'vscode/open-settings', payload: { query: 'Varro' } });
+
+    expect(parseWebviewMessage({ type: 'vscode/open-settings', payload: {} })).toEqual({
+      type: 'vscode/open-settings',
+      payload: {},
+    });
+  });
 });

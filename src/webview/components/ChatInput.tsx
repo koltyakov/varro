@@ -18,7 +18,6 @@ import {
   showModelPicker,
   setShowModelPicker,
   setShowSessionPicker,
-  setShowSettings,
   composerFocusKey,
   removeClipboardImage,
   addContextFile,
@@ -308,7 +307,8 @@ export function ChatInput() {
       onOpenModels: () => setShowModelPicker(true),
       onOpenMcps: () => setShowMcpPicker(true),
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
-      onOpenSettings: () => setShowSettings(true),
+      onOpenSettings: () =>
+        postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro' } }),
     })
   );
 
@@ -2465,7 +2465,7 @@ function getSlashCommands(props: {
     {
       name: 'settings',
       aliases: [],
-      description: 'Open settings',
+      description: 'Open VS Code settings for Varro',
       action: props.onOpenSettings,
     },
     {

@@ -1,6 +1,6 @@
 import { onMount, onCleanup, createEffect } from 'solid-js';
 import { produce } from 'solid-js/store';
-import { client, serverEvents } from '../lib/client';
+import { client } from '../lib/client';
 import {
   state,
   setState,
@@ -85,9 +85,6 @@ function logError(context: string, err: unknown) {
   });
 }
 
-import { normalizePermissionEvent } from '../lib/session-event-reducer';
-import { isAbortedAssistantError } from '../lib/aborted';
-
 function getDefaultPrimaryAgentName() {
   return (
     state.agents.find((agent) => agent.name === 'build')?.name || state.agents[0]?.name || null
@@ -98,17 +95,7 @@ function getBuildAgentName() {
   return state.agents.find((agent) => agent.name === 'build')?.name || null;
 }
 
-import type {
-  Session,
-  SessionStatus,
-  Message,
-  Part,
-  Permission,
-  PermissionRule,
-  QuestionRequest,
-  Todo,
-  FileDiff,
-} from '../types';
+import type { Session, SessionStatus, Message, Part, Permission, Todo } from '../types';
 import { getWorkspaceRelativePath, isSamePath } from '../lib/path-display';
 import {
   formatSelectionReference,
@@ -120,7 +107,8 @@ import { applyWebviewTheme } from '../lib/theme';
 import { getPreferredVariant } from '../lib/model-variants';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
-import { isAssistantMessage } from '../lib/message-metrics';
+import { getSessionPermissionRulesForMode } from './permission-rules';
+import { registerSessionEventHandlers } from './session-event-handlers';
 import {
   deriveUsageLimitNotice,
   parseUsageLimitNotice,
@@ -136,52 +124,11 @@ let connectionGeneration = 0;
 let sessionSelectionGeneration = 0;
 let sessionSyncGeneration = 0;
 const pendingAbortRetryAttempts = new Map<string, number | null>();
-const FULL_ACCESS_PERMISSION_NAMES = [
-  'read',
-  'edit',
-  'glob',
-  'grep',
-  'list',
-  'bash',
-  'task',
-  'external_directory',
-  'todowrite',
-  'question',
-  'webfetch',
-  'websearch',
-  'codesearch',
-  'lsp',
-  'doom_loop',
-  'skill',
-] as const;
-const FULL_ACCESS_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.map(
-  (permission) => ({
-    permission,
-    pattern: '*',
-    action: 'allow',
-  })
-);
-const READ_ONLY_PERMISSIONS = new Set(['read', 'glob', 'grep', 'list', 'codesearch', 'lsp']);
-const DEFAULT_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.map(
-  (permission) => ({
-    permission,
-    pattern: '*',
-    action: READ_ONLY_PERMISSIONS.has(permission) ? 'allow' : 'ask',
-  })
-);
 const INTERRUPTED_SESSION_CONTINUE_PROMPT =
   'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.';
 
 function shouldAutoApprovePermissions(sessionId: string) {
   return getPermissionModeForSession(sessionId) === 'full';
-}
-
-function getSessionPermissionRulesForMode(
-  mode: 'default' | 'full',
-  _target: 'create' | 'update'
-): PermissionRule[] {
-  if (mode === 'full') return FULL_ACCESS_PERMISSION_RULES;
-  return DEFAULT_PERMISSION_RULES;
 }
 
 function normalizeProjectPath(path: string | null | undefined): string | null {
@@ -491,7 +438,50 @@ export function useOpenCode() {
     applyTheme(theme());
 
     if (eventHandlerCleanups.length === 0) {
-      registerEventHandlers();
+      eventHandlerCleanups = registerSessionEventHandlers({
+        getActiveSessionId: () => state.activeSessionId,
+        getMessages: () => state.messages,
+        setTodoStateAuthority: (value) => {
+          todoStateAuthority = value;
+        },
+        setTodos: (todos) => setState('todos', todos),
+        upsertSession,
+        setSessionCompacting,
+        removeDeletedSessionTree,
+        shouldIgnorePendingAbortStatus,
+        hasPendingAbort,
+        clearPendingAbort,
+        setSessionStatusEntry,
+        clearUsageLimitOnResumedProgress,
+        updateUsageLimitState,
+        startLoading,
+        stopLoading,
+        markSessionSeen,
+        syncSession,
+        shouldResyncSessionAfterIdle,
+        syncSessionMessages,
+        markLoadingActivity,
+        upsertMessageInfo,
+        setSessionFailed,
+        parseUsageLimitNotice: (message) => parseUsageLimitNotice(message),
+        applyUsageLimitNotice: (sessionId, notice, options) =>
+          applyUsageLimitNotice(sessionId, notice as UsageLimitNotice | null, options),
+        setSessionUsageLimit,
+        upsertPart,
+        syncTodosFromMessages,
+        applyMessagePartDelta,
+        removeMessagePart,
+        clearStreamingState,
+        replaceMessages,
+        shouldAutoApprovePermissions,
+        respondPermission,
+        addPermission,
+        removePermission,
+        upsertQuestion,
+        removeQuestion,
+        extractTodos,
+        setDiffs: (diffs) => setState('diffs', diffs),
+      });
     }
 
     const disposeBridge = onMessage((msg: ExtensionMessage) => {
@@ -1569,255 +1559,6 @@ export async function rejectQuestion(requestID: string) {
   } catch (err) {
     setError(err instanceof Error ? err.message : 'Failed to reject question');
   }
-}
-
-type EventData = { properties?: Record<string, unknown> };
-
-function getProps(data: unknown): Record<string, unknown> | undefined {
-  return (data as EventData).properties;
-}
-
-function registerEventHandlers() {
-  eventHandlerCleanups.push(
-    serverEvents.on('session.created', (data) => {
-      const info = getProps(data)?.info as Session | undefined;
-      if (info) upsertSession(info);
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('session.updated', (data) => {
-      const info = getProps(data)?.info as Session | undefined;
-      if (info) {
-        if (!info.time.compacting) setSessionCompacting(info.id, false);
-        upsertSession(info);
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('session.deleted', (data) => {
-      const id = (getProps(data)?.info as { id: string } | undefined)?.id;
-      if (id) {
-        removeDeletedSessionTree(id);
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('session.status', (data) => {
-      const props = getProps(data);
-      if (!props) return;
-      const sessionID = props.sessionID as string;
-      const status = props.status as SessionStatus;
-      if (shouldIgnorePendingAbortStatus(sessionID, status)) return;
-      const abortedRetry = hasPendingAbort(sessionID);
-      setSessionStatusEntry(sessionID, status);
-      if (status.type === 'busy') {
-        clearUsageLimitOnResumedProgress(sessionID, status);
-      }
-      if (!(abortedRetry && status.type === 'idle')) {
-        updateUsageLimitState(sessionID, status);
-      }
-      if (status.type === 'idle') {
-        clearPendingAbort(sessionID);
-      }
-      if (sessionID === state.activeSessionId) {
-        const statusType = (status as { type: string }).type;
-        if (statusType === 'busy' || statusType === 'retry') {
-          startLoading();
-        } else {
-          stopLoading();
-        }
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('session.idle', (data) => {
-      const sid = getProps(data)?.sessionID as string | undefined;
-      const abortedRetry = hasPendingAbort(sid);
-      clearPendingAbort(sid);
-      if (sid) setSessionCompacting(sid, false);
-      if (sid && !abortedRetry) {
-        updateUsageLimitState(sid, { type: 'idle' });
-      }
-      if (!sid || sid === state.activeSessionId) stopLoading();
-      if (sid && sid === state.activeSessionId) {
-        markSessionSeen(sid);
-        syncSession(sid).catch(() => {});
-        if (shouldResyncSessionAfterIdle(sid)) {
-          syncSessionMessages(sid).catch(() => {});
-        }
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('message.updated', (data) => {
-      const info = getProps(data)?.info as { sessionID?: string } | undefined;
-      const message = info as Message | undefined;
-      if (!message?.sessionID) return;
-      if (message.sessionID === state.activeSessionId) {
-        markLoadingActivity();
-        upsertMessageInfo(message);
-      }
-      if (isAssistantMessage(message)) {
-        setSessionFailed(
-          message.sessionID,
-          !!message.error && !isAbortedAssistantError(message.error)
-        );
-        const notice = parseUsageLimitNotice(message.error?.data?.message || message.error?.name);
-        if (notice) {
-          applyUsageLimitNotice(message.sessionID, {
-            ...notice,
-            source: 'message',
-            sessionID: message.sessionID,
-            providerID: message.providerID,
-            modelID: message.modelID,
-          });
-        } else if (message.error) {
-          setSessionUsageLimit(message.sessionID, null);
-        } else {
-          clearUsageLimitOnResumedProgress(message.sessionID);
-        }
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('message.part.updated', (data) => {
-      const part = getProps(data)?.part as { sessionID?: string } | undefined;
-      if (part?.sessionID && (part as Part).type === 'compaction') {
-        setSessionCompacting(part.sessionID, false);
-      }
-      if (part?.sessionID === state.activeSessionId) {
-        markLoadingActivity();
-        upsertPart(part as Part);
-        if ((part as Part).type === 'tool') {
-          syncTodosFromMessages();
-        }
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('message.part.delta', (data) => {
-      const p = getProps(data);
-      if (!p) return;
-      if ((p.sessionID as string) === state.activeSessionId) {
-        markLoadingActivity();
-        applyMessagePartDelta(
-          p.messageID as string,
-          p.partID as string,
-          p.delta as string,
-          p.sessionID as string,
-          p.field as string
-        );
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('message.part.removed', (data) => {
-      const p = getProps(data);
-      if (p) {
-        if ((p.sessionID as string) === state.activeSessionId) {
-          markLoadingActivity();
-        }
-        removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
-        if ((p.sessionID as string) === state.activeSessionId) {
-          syncTodosFromMessages();
-        }
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('message.removed', (data) => {
-      const p = getProps(data);
-      if (!p) return;
-      if ((p.sessionID as string) === state.activeSessionId) {
-        markLoadingActivity();
-        clearStreamingState();
-        const nextMessages = state.messages.filter((m) => m.info.id !== (p.messageID as string));
-        replaceMessages(nextMessages);
-        syncTodosFromMessages(nextMessages);
-      }
-    })
-  );
-
-  function handlePermissionEvent(props: Record<string, unknown>) {
-    const permission = normalizePermissionEvent(props);
-    if (!permission) return;
-    if (shouldAutoApprovePermissions(permission.sessionID)) {
-      void respondPermission(permission.sessionID, permission.id, 'always');
-      return;
-    }
-    addPermission(permission);
-  }
-
-  eventHandlerCleanups.push(
-    serverEvents.on('permission.updated', (data) => {
-      const props = getProps(data);
-      if (props) handlePermissionEvent(props);
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('permission.asked', (data) => {
-      const props = getProps(data);
-      if (props) handlePermissionEvent(props);
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('permission.replied', (data) => {
-      const props = getProps(data);
-      if (!props) return;
-      const pid = (props.permissionID || props.requestID) as string | undefined;
-      if (pid) removePermission(pid);
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('question.asked', (data) => {
-      const props = getProps(data);
-      if (props) upsertQuestion(props as QuestionRequest);
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('question.replied', (data) => {
-      const requestID = getProps(data)?.requestID as string | undefined;
-      if (requestID) removeQuestion(requestID);
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('question.rejected', (data) => {
-      const requestID = getProps(data)?.requestID as string | undefined;
-      if (requestID) removeQuestion(requestID);
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('todo.updated', (data) => {
-      const p = getProps(data);
-      if ((p?.sessionID as string) === state.activeSessionId) {
-        todoStateAuthority = 'event';
-        setState('todos', extractTodos(p?.todos) || []);
-      }
-    })
-  );
-
-  eventHandlerCleanups.push(
-    serverEvents.on('session.diff', (data) => {
-      const p = getProps(data);
-      if ((p?.sessionID as string) === state.activeSessionId)
-        setState('diffs', p!.diff as FileDiff[]);
-    })
-  );
 }
 
 function updateUsageLimitState(

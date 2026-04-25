@@ -24,6 +24,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'files/pick':
       return { type } as WebviewMessage;
 
+    case 'vscode/open-settings': {
+      const payload = asRecord(message?.payload);
+      const query = getOptionalBoundedString(payload?.query, 200);
+      return query ? { type, payload: { query } } : { type, payload: {} };
+    }
+
     case 'webview/focus': {
       const payload = asRecord(message?.payload);
       return typeof payload?.focused === 'boolean'
