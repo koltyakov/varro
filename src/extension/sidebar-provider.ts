@@ -145,6 +145,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.interruptedSessionsForWebview = [];
   }
 
+  private replayBlockingRequests() {
+    for (const item of this.blockingRequestsForWebview) {
+      this.post({
+        type: 'server/event',
+        payload: {
+          type: item.kind === 'question' ? 'question.asked' : 'permission.asked',
+          properties: item.props,
+        },
+      });
+    }
+  }
+
   private updateStatusBarItem() {
     const next = this.getStatusBarState();
     const nextKey = JSON.stringify(next);
@@ -277,6 +289,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.postConfigState();
           this.post({ type: 'server/status', payload: this._status });
+          this.replayBlockingRequests();
           this.sessionState.publishPendingAttention();
           this.flushPendingInputFocus();
           this.flushPendingOpenAttentionSessions();
@@ -381,6 +394,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postConfigState();
           this.post({ type: 'server/status', payload: this._status });
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
+          this.replayBlockingRequests();
           this.sessionState.publishPendingAttention();
           this.flushPendingInputFocus();
           this.flushPendingOpenAttentionSessions();
