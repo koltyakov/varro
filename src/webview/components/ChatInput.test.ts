@@ -109,6 +109,21 @@ describe('getMentionCompletionItems', () => {
     );
   });
 
+  it('terminates file mentions after selection', () => {
+    const completions = getMentionCompletionItems({
+      rawQuery: 'readme',
+      agents,
+      files,
+    });
+
+    const fileItem = completions.find(
+      (item): item is Extract<(typeof completions)[number], { type: 'file' }> =>
+        item.type === 'file'
+    );
+
+    expect(fileItem?.value).toBe('@README.md ');
+  });
+
   it('shows file results for empty @ queries', () => {
     const completions = getMentionCompletionItems({
       rawQuery: '',

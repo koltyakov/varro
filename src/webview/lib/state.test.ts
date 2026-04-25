@@ -2,12 +2,18 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { AssistantMessage, Part } from '../types';
 import {
   applyMessagePartDelta,
+  addClipboardImage,
   clearMessages,
+  clearClipboardImages,
   clearStreamingState,
   getActiveUsageLimitNotice,
+  getMessageById,
   getSessionTreeIds,
   hasActiveUsageLimit,
+  inputText,
+  removeClipboardImage,
   setSessionFailed,
+  setInputText,
   setState,
   state,
   syncFailedSessionsFromMessages,
@@ -214,6 +220,64 @@ describe('failed session tracking', () => {
     setSessionFailed('session-1', false);
 
     expect(state.failedSessionIds).toEqual(['session-2']);
+  });
+});
+
+describe('clipboard image placeholders', () => {
+  beforeEach(() => {
+    setState('clipboardImages', []);
+    setInputText('');
+  });
+
+  it('replaces every placeholder match when removing a clipboard image', () => {
+    addClipboardImage({
+      id: 'img-1',
+      url: 'blob:one',
+      mime: 'image/png',
+      filename: 'image.png',
+      size: 1,
+    });
+    setInputText('Before [image.png] middle [image.png] after');
+
+    removeClipboardImage('img-1');
+
+    expect(inputText()).toBe('Before _____ middle _____ after');
+  });
+
+  it('replaces placeholders for all clipboard images when clearing them', () => {
+    addClipboardImage({
+      id: 'img-1',
+      url: 'blob:one',
+      mime: 'image/png',
+      filename: 'image-1.png',
+      size: 1,
+    });
+    addClipboardImage({
+      id: 'img-2',
+      url: 'blob:two',
+      mime: 'image/png',
+      filename: 'image-2.png',
+      size: 1,
+    });
+    setInputText('[image-1.png] [image-2.png] [image-1.png]');
+
+    clearClipboardImages();
+
+    expect(inputText()).toBe('_____ _____ _____');
+    expect(state.clipboardImages).toEqual([]);
+  });
+});
+
+describe('message lookup helpers', () => {
+  beforeEach(() => {
+    clearMessages();
+  });
+
+  it('returns messages by id using the shared message index', () => {
+    upsertMessage({ info: assistantMessage('message-1'), parts: [] });
+
+    expect(getMessageById('message-1')?.info.id).toBe('message-1');
+    expect(getMessageById('missing')).toBeNull();
   });
 });
 

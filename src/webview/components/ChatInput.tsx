@@ -312,9 +312,10 @@ export function ChatInput() {
     })
   );
 
-  const activeCompletion = createMemo(() =>
-    getActiveCompletion(inputText(), textareaRef?.selectionStart ?? caretPosition())
-  );
+  const activeCompletion = createMemo(() => {
+    const fallbackCursor = caretPosition();
+    return getActiveCompletion(inputText(), textareaRef?.selectionStart ?? fallbackCursor);
+  });
 
   createEffect(() => {
     const completion = activeCompletion();
@@ -2620,7 +2621,7 @@ export function getMentionCompletionItems({
     value:
       file.type === 'directory'
         ? `@${formatMentionPath(file.relativePath)}/`
-        : `@${formatMentionPath(file.relativePath)}`,
+        : `@${formatMentionPath(file.relativePath)} `,
     file,
   }));
 

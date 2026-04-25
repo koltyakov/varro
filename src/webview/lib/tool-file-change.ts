@@ -65,6 +65,8 @@ const FILE_READ_TOOLS = new Set(['read', 'file_read']);
 function looksLikePath(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return false;
+  if (/^[^\s/\\]+\.[^\s/\\]+$/.test(trimmed) && !trimmed.startsWith('.')) return false;
   return (
     /[\\/]/.test(trimmed) ||
     /^[A-Za-z]:[\\/]/.test(trimmed) ||

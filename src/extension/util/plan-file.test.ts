@@ -38,7 +38,7 @@ describe('plan file helpers', () => {
   it('creates a stable short hash-based file name', () => {
     const content = '# Plan\n\n1. Ship it';
 
-    expect(getPlanHash(content)).toHaveLength(10);
+    expect(getPlanHash(content)).toHaveLength(16);
     expect(getPlanFileName(content)).toBe(`plan-${getPlanHash(content)}.md`);
   });
 

@@ -25,7 +25,7 @@ export function getFileEditVisualSignature(part: Part): string | null {
   if (part.type !== 'tool') return null;
   const change = getToolFileChange(part.tool, part.state);
   if (!change) return null;
-  return `${part.state.status}:${change.dedupeKey}${getDiffStatsSignature(part)}`;
+  return `${change.dedupeKey}${getDiffStatsSignature(part)}`;
 }
 
 export function collapseLeadingDuplicateFileEvents(

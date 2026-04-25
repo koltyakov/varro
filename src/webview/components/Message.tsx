@@ -49,6 +49,13 @@ import { isAbortedAssistantError } from '../lib/aborted';
 
 export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
 
+const COMPACTION_BOUNDARY_RE =
+  /^(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*\r?\n)+|(?:\r?\n(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*))+[ \t]*(?:\r?\n\s*)*$/g;
+
+export function stripCompactionBoundaryMarkdown(text: string) {
+  return text.replace(COMPACTION_BOUNDARY_RE, '').trim();
+}
+
 export function getAssistantContainerVariant(params: {
   isUser: boolean;
   visibleDiffCount: number;
@@ -139,12 +146,15 @@ export function Message(props: {
         )
       : props.parts
   );
-  const getEffectivePartText = (part: Part) =>
-    part.type === 'text' && part.id === props.streamingPartId
-      ? props.streamingText || part.text
-      : part.type === 'text'
-        ? part.text
-        : null;
+  const isCompactedSummaryMessage = createMemo(
+    () => !!assistant()?.summary || normalizedParts().some((part) => part.type === 'compaction')
+  );
+  const getEffectivePartText = (part: Part) => {
+    if (part.type !== 'text') return null;
+
+    const text = part.id === props.streamingPartId ? props.streamingText || part.text : part.text;
+    return isCompactedSummaryMessage() ? stripCompactionBoundaryMarkdown(text) : text;
+  };
   const visibleAssistantParts = createMemo(() =>
     assistant()
       ? normalizedParts().filter((part) => {
@@ -210,10 +220,6 @@ export function Message(props: {
       hasError: !!assistantErrorMessage(),
     });
   };
-  const streamedTextForPart = (part: Part) =>
-    part.type === 'text' && part.id === props.streamingPartId
-      ? props.streamingText || part.text
-      : null;
   const assistantContainerClass = () => {
     const variant = assistantContainerVariant();
     if (variant === 'bare') return 'assistant-turn-content assistant-turn-content-bare';
@@ -258,7 +264,7 @@ export function Message(props: {
                 suppressHighlightedCardMetaParts={
                   !!props.highlightFinalAnswer && assistantContainerVariant() !== 'plain'
                 }
-                streamedTextForPart={streamedTextForPart}
+                textForPart={getEffectivePartText}
               />
             </Show>
             <Show when={assistant() && visibleDiffs().length > 0}>
@@ -769,7 +775,7 @@ function AssistantMessageContent(props: {
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
   suppressHighlightedCardMetaParts?: boolean;
-  streamedTextForPart: (part: Part) => string | null;
+  textForPart: (part: Part) => string | null;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const [readModeOpen, setReadModeOpen] = createSignal(false);
@@ -777,7 +783,7 @@ function AssistantMessageContent(props: {
     props.suppressHighlightedCardMetaParts
       ? dedupedParts().filter((part) => {
           if (part.type === 'text') {
-            const effectiveText = props.streamedTextForPart(part) || part.text;
+            const effectiveText = props.textForPart(part) ?? part.text;
             return shouldShowAssistantPartInHighlightedCard({ ...part, text: effectiveText });
           }
           return shouldShowAssistantPartInHighlightedCard(part);
@@ -798,7 +804,7 @@ function AssistantMessageContent(props: {
   const finalTextContent = createMemo(() => {
     const part = finalTextPart();
     if (!part) return '';
-    return props.streamedTextForPart(part) || part.text;
+    return props.textForPart(part) ?? part.text;
   });
   const showReadModeToggle = createMemo(() => shouldShowReadModeToggle(finalTextContent()));
 
@@ -861,7 +867,7 @@ function AssistantMessageContent(props: {
                     <MessagePart
                       part={part}
                       messageInfo={props.info}
-                      streamedText={props.streamedTextForPart(part)}
+                      streamedText={props.textForPart(part)}
                     />
                   )}
                 </For>
@@ -897,7 +903,7 @@ function AssistantMessageContent(props: {
               <MessagePart
                 part={item.part}
                 messageInfo={props.info}
-                streamedText={props.streamedTextForPart(item.part)}
+                streamedText={props.textForPart(item.part)}
               />
             </div>
           )

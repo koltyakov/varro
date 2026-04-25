@@ -1,5 +1,5 @@
 import { Show, createMemo, createSignal } from 'solid-js';
-import { expandThinkingByDefault, state, showThinking } from '../lib/state';
+import { expandThinkingByDefault, getMessageById, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
@@ -189,12 +189,9 @@ function BrainTopicIcon(props: { class?: string }) {
 function getReasoningDetailLabel(messageInfo?: AssistantMessage) {
   if (!messageInfo || messageInfo.mode !== 'subagent') return null;
 
-  const parent = state.messages.find(
-    (entry): entry is { info: AssistantMessage; parts: Part[] } =>
-      entry.info.role === 'assistant' && entry.info.id === messageInfo.parentID
-  )?.info;
+  const parent = getMessageById(messageInfo.parentID)?.info;
 
-  if (!parent) return null;
+  if (!parent || parent.role !== 'assistant') return null;
 
   const modelChanged =
     parent.providerID !== messageInfo.providerID || parent.modelID !== messageInfo.modelID;

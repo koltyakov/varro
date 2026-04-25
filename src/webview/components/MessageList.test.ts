@@ -18,6 +18,7 @@ import {
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
   getLatestPlanImplementationMessageId,
+  pruneMeasuredHeights,
   shouldShowStickyUserMessagePreview,
   MessageList,
   calculateVirtualRange,
@@ -235,6 +236,17 @@ describe('calculateVirtualRange', () => {
       })
     ).toEqual({ start: 1, end: 3, topPad: 50, bottomPad: 0 });
   });
+
+  it('prunes measured heights for removed messages', () => {
+    const measuredHeights = new Map([
+      ['a', 50],
+      ['stale', 90],
+    ]);
+
+    expect(pruneMeasuredHeights(measuredHeights, ['a', 'b'])).toBe(true);
+    expect(Array.from(measuredHeights.entries())).toEqual([['a', 50]]);
+    expect(pruneMeasuredHeights(measuredHeights, ['a'])).toBe(false);
+  });
 });
 
 describe('getStickyUserMessagePreview', () => {
@@ -270,6 +282,21 @@ describe('getStickyUserMessagePreview', () => {
       index: 0,
       text: 'Attachment: diagram.png',
     });
+  });
+
+  it('skips empty user prompts when picking a sticky preview', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [
+          {
+            info: userMessage('user-1'),
+            parts: [textPart('text-1', '(no content)', { ignored: true })],
+          },
+          { info: assistantMessage('assistant-1'), parts: [] },
+        ],
+        1
+      )
+    ).toBeNull();
   });
 
   it('returns null when the first visible message is already a user prompt', () => {

@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
 import type { FilePart, Part, ToolPart } from '../types';
-import { Message, getAssistantContainerVariant, getUserMessagePreviewText } from './Message';
+import {
+  Message,
+  getAssistantContainerVariant,
+  getUserMessagePreviewText,
+  stripCompactionBoundaryMarkdown,
+} from './Message';
 import { resetToolCallExpansionState } from './ToolCall';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
@@ -49,6 +54,17 @@ function reasoningPart(id: string, text: string): Part {
   };
 }
 
+function compactionPart(id: string, options?: { auto?: boolean; overflow?: boolean }): Part {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'compaction',
+    auto: options?.auto ?? false,
+    overflow: options?.overflow,
+  };
+}
+
 function userMessage(id: string) {
   return {
     id,
@@ -78,6 +94,13 @@ function assistantMessage(id: string) {
       reasoning: 0,
       cache: { read: 0, write: 0 },
     },
+  };
+}
+
+function assistantSummaryMessage(id: string) {
+  return {
+    ...assistantMessage(id),
+    summary: true,
   };
 }
 
@@ -231,6 +254,22 @@ describe('getAssistantContainerVariant', () => {
         hasError: true,
       })
     ).toBe('plain');
+  });
+});
+
+describe('stripCompactionBoundaryMarkdown', () => {
+  it('removes leading and trailing hr markers used by compacted sessions', () => {
+    expect(stripCompactionBoundaryMarkdown('---\n\nPlan summary\n\n---')).toBe('Plan summary');
+  });
+
+  it('removes other markdown thematic-break variants at the boundaries', () => {
+    expect(stripCompactionBoundaryMarkdown('* * *\n\nPlan summary\n\n_ _ _')).toBe('Plan summary');
+  });
+
+  it('keeps interior hr markers intact', () => {
+    expect(stripCompactionBoundaryMarkdown('Intro\n\n---\n\nDetails')).toBe(
+      'Intro\n\n---\n\nDetails'
+    );
   });
 });
 
@@ -424,6 +463,36 @@ describe('Message streamed assistant text rendering', () => {
     );
 
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+  });
+
+  it('hides compaction boundary hr markers from rendered streamed text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantMessage('message-stream-4'), time: { created: 0 } },
+          parts: [compactionPart('compaction-1', { auto: true }), textPart('text-1', 'Loading...')],
+          streamingPartId: 'text-1',
+          streamingText: '---\n\nCompacted session summary.\n\n---',
+        }),
+      container!
+    );
+
+    expect(container?.textContent).toContain('Compacted session summary.');
+    expect(container?.querySelectorAll('hr')).toHaveLength(0);
+  });
+
+  it('hides compaction boundary hr markers for assistant summary messages', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantSummaryMessage('message-stream-5'),
+          parts: [textPart('text-1', '---\n\nGoal\n\n- Fix issue\n\n---')],
+        }),
+      container!
+    );
+
+    expect(container?.textContent).toContain('Goal');
+    expect(container?.querySelectorAll('hr')).toHaveLength(0);
   });
 });
 

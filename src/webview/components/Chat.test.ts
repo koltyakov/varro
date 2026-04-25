@@ -446,6 +446,10 @@ describe('normalizeSessionTitle', () => {
     expect(normalizeSessionTitle('New session - 2026-04-22T17:00:10.819Z')).toBe('New session');
   });
 
+  it('collapses generated timestamped titles with timezone offsets', () => {
+    expect(normalizeSessionTitle('New session - 2026-04-22T17:00:10+05:30')).toBe('New session');
+  });
+
   it('preserves custom titles', () => {
     expect(normalizeSessionTitle('New session - onboarding notes')).toBe(
       'New session - onboarding notes'

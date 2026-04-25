@@ -33,7 +33,7 @@ export function getOpenCodePlansDirectory(
 }
 
 export function getPlanHash(content: string) {
-  return createHash('sha256').update(normalizePlanMarkdown(content)).digest('hex').slice(0, 10);
+  return createHash('sha256').update(normalizePlanMarkdown(content)).digest('hex').slice(0, 16);
 }
 
 export function getPlanFileName(content: string) {

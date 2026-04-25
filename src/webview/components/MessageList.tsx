@@ -217,6 +217,20 @@ export function calculateVirtualRange(args: {
   };
 }
 
+export function pruneMeasuredHeights(
+  measuredHeights: Map<string, number>,
+  itemIds: readonly string[]
+) {
+  const itemIdSet = new Set(itemIds);
+  let changed = false;
+  for (const id of measuredHeights.keys()) {
+    if (itemIdSet.has(id)) continue;
+    measuredHeights.delete(id);
+    changed = true;
+  }
+  return changed;
+}
+
 function lowerBound(values: number[], target: number) {
   let low = 0;
   let high = values.length - 1;
@@ -246,6 +260,7 @@ type StickyUserMessagePreview = {
 
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
+const EMPTY_USER_MESSAGE_PREVIEW = '(no content)';
 
 export function getStickyUserMessagePreview(
   messages: Array<{ info: Message; parts: Part[] }>,
@@ -257,10 +272,12 @@ export function getStickyUserMessagePreview(
   for (let i = firstVisibleMessageIndex; i >= 0; i--) {
     const entry = messages[i];
     if (entry.info.role !== 'user') continue;
+    const text = getUserMessagePreviewText(entry.parts);
+    if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
     return {
       id: entry.info.id,
       index: i,
-      text: getUserMessagePreviewText(entry.parts),
+      text,
     };
   }
 
@@ -441,6 +458,12 @@ export function MessageList() {
   let lastTrackHeight = 0;
 
   const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
+
+  createEffect(() => {
+    if (pruneMeasuredHeights(measuredHeights, messageIds())) {
+      setMeasurementVersion((version) => version + 1);
+    }
+  });
 
   const visibleRange = createMemo(() => {
     const msgs = messages();

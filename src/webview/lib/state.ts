@@ -798,9 +798,8 @@ export function clearClipboardImages() {
 function replaceClipboardImagePlaceholder(filename: string) {
   const placeholder = `[${filename}]`;
   const text = inputText();
-  const index = text.indexOf(placeholder);
-  if (index === -1) return;
-  setInputText(`${text.slice(0, index)}_____${text.slice(index + placeholder.length)}`);
+  if (!text.includes(placeholder)) return;
+  setInputText(text.split(placeholder).join('_____'));
 }
 
 export function resetPastedImageIndex() {
@@ -1133,6 +1132,11 @@ export function updateMessagePart(part: Part) {
       }
     })
   );
+}
+
+export function getMessageById(id: string) {
+  const index = messageIndex.findMessageIndex(state.messages, id);
+  return index === -1 ? null : state.messages[index] || null;
 }
 
 export function applyMessagePartDelta(

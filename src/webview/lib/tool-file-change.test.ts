@@ -95,6 +95,15 @@ describe('tool file change helpers', () => {
     expect(getToolFileChange('tool', completedState({}, { title: 'Updated value' }))).toBeNull();
   });
 
+  it('does not mistake URLs or plain dotted strings for file paths', () => {
+    expect(
+      getToolFileChange('tool', completedState({}, { title: 'Updated https://example.com' }))
+    ).toBeNull();
+    expect(
+      getToolFileChange('tool', completedState({}, { title: 'Updated example.com' }))
+    ).toBeNull();
+  });
+
   it('reuses cached results for the same tool state object', () => {
     const state = completedState({ path: 'src/app.ts' }, { title: 'Edited src/app.ts' });
     const first = getToolFileChange('edit', state);
