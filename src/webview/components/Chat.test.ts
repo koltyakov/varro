@@ -1023,6 +1023,32 @@ describe('getHeaderFailedCount', () => {
       getHeaderFailedCount(sessions, (sessionId) => isFailedSession(sessionId), null, true)
     ).toBe(1);
   });
+
+  it('surfaces child-session permission prompts on the primary session', () => {
+    const sessions = [
+      session('session-1', 500),
+      session('child-1', 400, { parentID: 'session-1' }),
+    ];
+
+    setState('sessions', sessions);
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'child-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(indicators.permissionIds.has('session-1')).toBe(true);
+    expect(indicators.attentionIds.has('session-1')).toBe(true);
+  });
 });
 
 describe('getHeaderRunningCount', () => {

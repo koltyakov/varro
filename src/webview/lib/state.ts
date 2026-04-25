@@ -446,20 +446,25 @@ export function markLoadingActivity(now = Date.now()) {
 
 export function hasActiveQuestion() {
   const sid = state.activeSessionId;
-  return sid ? state.questions.some((q) => q.sessionID === sid) : false;
+  if (!sid) return false;
+  const sessionIds = new Set(getSessionTreeIds(sid));
+  return state.questions.some((question) => sessionIds.has(question.sessionID));
 }
 
 export function hasActivePermission() {
   const sid = state.activeSessionId;
-  return sid ? state.permissions.some((p) => p.sessionID === sid) : false;
+  if (!sid) return false;
+  const sessionIds = new Set(getSessionTreeIds(sid));
+  return state.permissions.some((permission) => sessionIds.has(permission.sessionID));
 }
 
 export function isSessionAwaitingInput(sessionId: string) {
-  return (
-    state.pendingAttentionSessionIds.includes(sessionId) ||
-    state.permissions.some((permission) => permission.sessionID === sessionId) ||
-    state.questions.some((question) => question.sessionID === sessionId)
-  );
+  const sessionIds = new Set(getSessionTreeIds(sessionId));
+  return [
+    ...state.pendingAttentionSessionIds,
+    ...state.permissions.map((permission) => permission.sessionID),
+    ...state.questions.map((question) => question.sessionID),
+  ].some((candidateSessionId) => sessionIds.has(candidateSessionId));
 }
 
 export const [error, setError] = createSignal<string | null>(null);

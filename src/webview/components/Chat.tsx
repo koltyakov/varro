@@ -9,6 +9,7 @@ import {
   isSessionAwaitingInput,
   getSelectedAgentForSession,
   isSkippedPlanSession,
+  getSessionTreeRootId,
 } from '../lib/state';
 import {
   Show,
@@ -1434,18 +1435,21 @@ function CompletedSessionsBadge(props: { count: number; onClick: () => void }) {
 export function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
-  const pendingAttentionIds = new Set(state.pendingAttentionSessionIds);
-  const permissionIds = new Set(state.permissions.map((permission) => permission.sessionID));
-  const questionIds = new Set(state.questions.map((question) => question.sessionID));
+  const rootSessionId = (sessionId: string) => getSessionTreeRootId(sessionId) || sessionId;
+  const pendingAttentionIds = new Set(state.pendingAttentionSessionIds.map(rootSessionId));
+  const permissionIds = new Set(
+    state.permissions.map((permission) => rootSessionId(permission.sessionID))
+  );
+  const questionIds = new Set(state.questions.map((question) => rootSessionId(question.sessionID)));
   const runningIds = new Set<string>();
   const failedIds = new Set<string>();
   const attentionIds = new Set<string>();
   const planReadyIds = new Set<string>();
   const newlyCompletedIds = new Set<string>();
   const isAwaitingInput = (sessionId: string) =>
-    pendingAttentionIds.has(sessionId) ||
-    permissionIds.has(sessionId) ||
-    questionIds.has(sessionId);
+    pendingAttentionIds.has(rootSessionId(sessionId)) ||
+    permissionIds.has(rootSessionId(sessionId)) ||
+    questionIds.has(rootSessionId(sessionId));
   const isFailed = (sessionId: string) =>
     failedSessionIds.has(sessionId) || hasActiveUsageLimit(sessionId);
   const isRunning = (sessionId: string) => {
@@ -1461,21 +1465,22 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     }
 
     const sessionId = session.id;
+    const displaySessionId = rootSessionId(sessionId);
     const failed = isFailed(sessionId);
-    const hasPrompt = permissionIds.has(sessionId) || questionIds.has(sessionId);
+    const hasPrompt = permissionIds.has(displaySessionId) || questionIds.has(displaySessionId);
     const needsAttention = !failed && (hasPrompt || isAwaitingInput(sessionId));
     const running = !needsAttention && isRunning(sessionId);
 
     if (failed) {
-      failedIds.add(sessionId);
+      failedIds.add(displaySessionId);
       continue;
     }
     if (needsAttention) {
-      attentionIds.add(sessionId);
+      attentionIds.add(displaySessionId);
       continue;
     }
     if (running) {
-      runningIds.add(sessionId);
+      runningIds.add(displaySessionId);
       continue;
     }
     const selectedAgent = getSelectedAgentForSession(sessionId);

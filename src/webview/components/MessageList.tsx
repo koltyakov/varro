@@ -24,6 +24,7 @@ import {
   messageStructureVersion,
   getChildRunsByParentId,
   getActiveUsageLimitNotice,
+  getSessionTreeIds,
   showStickyUserPrompt,
   skipPlanSession,
 } from '../lib/state';
@@ -100,9 +101,11 @@ export function getStandalonePermissionPrompts(
 ) {
   if (!activeSessionId) return [];
 
+  const sessionIds = new Set(getSessionTreeIds(activeSessionId));
+
   return permissions.filter(
     (permission) =>
-      permission.sessionID === activeSessionId &&
+      sessionIds.has(permission.sessionID) &&
       !hasLinkedToolCall(messages, permission.sessionID, permission.messageID, permission.callID)
   );
 }
@@ -114,9 +117,11 @@ export function getStandaloneQuestionPrompts(
 ) {
   if (!activeSessionId) return [];
 
+  const sessionIds = new Set(getSessionTreeIds(activeSessionId));
+
   return questions.filter(
     (question) =>
-      question.sessionID === activeSessionId &&
+      sessionIds.has(question.sessionID) &&
       !hasLinkedToolCall(
         messages,
         question.sessionID,

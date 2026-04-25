@@ -639,6 +639,74 @@ describe('standalone action prompts', () => {
       )
     ).toEqual([]);
   });
+
+  it('keeps child-session permissions visible for the active root session', () => {
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 1',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 20 },
+      },
+    ]);
+
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'child-1',
+        messageID: '',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ];
+
+    expect(getStandalonePermissionPrompts([], permissions, 'session-1')).toEqual(permissions);
+  });
+
+  it('keeps child-session questions visible for the active root session', () => {
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 1',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 20 },
+      },
+    ]);
+
+    const questions: QuestionRequest[] = [
+      {
+        id: 'question-1',
+        sessionID: 'child-1',
+        questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+      },
+    ];
+
+    expect(getStandaloneQuestionPrompts([], questions, 'session-1')).toEqual(questions);
+  });
 });
 
 describe('MessageList sticky prompt preview', () => {

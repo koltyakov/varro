@@ -264,4 +264,52 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.question-prompt-card')).not.toBeNull();
     expect(container?.textContent).toContain('Which command should run?');
   });
+
+  it('matches a linked permission prompt across the same session tree', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'child-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command: 'git status' }, 'git status'),
+    };
+
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 1 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        parentID: 'session-1',
+        title: 'Child 1',
+        version: '1',
+        time: { created: 0, updated: 2 },
+      },
+    ]);
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'bash git status',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.permission-prompt')).not.toBeNull();
+  });
 });

@@ -643,7 +643,6 @@ body.vscode-high-contrast-light .interactive-session {
 }
 
 .assistant-turn-content.assistant-turn-content-highlighted {
-  padding-right: 48px;
   background: color-mix(
     in srgb,
     var(--color-vscode-accent) 4%,
@@ -713,7 +712,7 @@ body.vscode-high-contrast-light .interactive-session {
 }
 
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-final {
-  padding: 12px 48px 14px 14px;
+  padding: 12px 14px 14px;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 26%, var(--color-vscode-border));
   background: color-mix(
@@ -787,6 +786,11 @@ body.vscode-light
 }
 
 .assistant-read-mode-toggle:hover,
+.assistant-read-mode-toggle:focus-visible {
+  opacity: 0.58;
+}
+
+.assistant-read-mode-toggle:hover,
 .assistant-read-mode-close:hover {
   background: color-mix(
     in srgb,
@@ -798,7 +802,7 @@ body.vscode-light
 }
 
 .assistant-read-mode-toggle {
-  opacity: 0.7;
+  opacity: 0.28;
   pointer-events: auto;
 }
 
@@ -872,14 +876,6 @@ body.vscode-light
 }
 
 @media (max-width: 720px) {
-  .assistant-turn-content.assistant-turn-content-highlighted {
-    padding-right: 44px;
-  }
-
-  .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-final {
-    padding-right: 44px;
-  }
-
   .assistant-read-overlay-scroll {
     padding: 16px 14px 28px;
   }
@@ -890,7 +886,7 @@ body.vscode-light
   }
 
   .assistant-read-mode-toggle {
-    opacity: 0.78;
+    opacity: 0.28;
   }
 
   .assistant-read-mode-content {

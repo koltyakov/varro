@@ -1,7 +1,7 @@
 import { Show, For, createEffect, createMemo, createSignal, createResource } from 'solid-js';
 import type { RepoFileStatus, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
-import { state as appState } from '../lib/state';
+import { state as appState, getSessionTreeRootId } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
@@ -136,10 +136,11 @@ export function ToolCall(props: { part: ToolPart }) {
   const expansionKey = () => getToolCallExpansionKey(tool());
   const [expanded, setExpanded] = createSignal(getToolCallExpanded(expansionKey()));
   const state = () => tool().state;
+  const toolSessionRootId = () => getSessionTreeRootId(tool().sessionID) || tool().sessionID;
   const questionRequest = () =>
     appState.questions.find(
       (request) =>
-        request.sessionID === tool().sessionID &&
+        (getSessionTreeRootId(request.sessionID) || request.sessionID) === toolSessionRootId() &&
         request.tool?.messageID === tool().messageID &&
         request.tool?.callID === tool().callID
     );
@@ -147,7 +148,7 @@ export function ToolCall(props: { part: ToolPart }) {
   const permissionRequest = () =>
     appState.permissions.find(
       (perm) =>
-        perm.sessionID === tool().sessionID &&
+        (getSessionTreeRootId(perm.sessionID) || perm.sessionID) === toolSessionRootId() &&
         perm.messageID === tool().messageID &&
         perm.callID === tool().callID
     );
