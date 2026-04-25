@@ -115,6 +115,7 @@ describe('SidebarProvider blocking request replay', () => {
         kind: 'permission' | 'question';
         props: Record<string, unknown>;
       }>;
+      sessionState: { handleServerEvent(event: unknown): void };
     };
     providerState.view = webviewView;
     providerState.blockingRequestsForWebview = [
@@ -132,9 +133,131 @@ describe('SidebarProvider blocking request replay', () => {
       },
     ];
 
+    providerState.sessionState.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'perm-1',
+        sessionID: 'session-1',
+        permission: 'bash',
+        title: 'Run Bash command',
+        tool: { messageID: 'msg-1', callID: 'call-1' },
+      },
+    });
+
     await provider.handleMessage({ type: 'ready' });
 
     expect(posted).toContainEqual({
+      type: 'server/event',
+      payload: {
+        type: 'permission.asked',
+        properties: {
+          id: 'perm-1',
+          sessionID: 'session-1',
+          permission: 'bash',
+          title: 'Run Bash command',
+          tool: { messageID: 'msg-1', callID: 'call-1' },
+        },
+      },
+    });
+  });
+
+  it('clears resolved embedded permission requests before replay on ready', async () => {
+    const workspaceState = {
+      get: vi.fn((_key: string, fallback?: unknown) => fallback),
+      update: vi.fn(() => Promise.resolve()),
+    };
+
+    const contextProvider = {
+      context: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+    };
+
+    const server = {
+      status: { state: 'running', url: 'http://127.0.0.1:4096' },
+      on: vi.fn(),
+      off: vi.fn(),
+      start: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
+      request: vi.fn(),
+    };
+
+    const provider = new SidebarProvider(
+      { fsPath: '/extension' } as never,
+      workspaceState as never,
+      contextProvider as never,
+      server as never
+    );
+
+    const posted: unknown[] = [];
+    const webviewView = {
+      visible: true,
+      webview: {
+        options: {},
+        html: '',
+        postMessage: vi.fn((msg: unknown) => {
+          posted.push(msg);
+          return true;
+        }),
+        onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
+        asWebviewUri: vi.fn((uri: { toString?: () => string }) => uri),
+      },
+      onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+    };
+
+    const providerState = provider as unknown as {
+      view: unknown;
+      blockingRequestsForWebview: Array<{
+        id: string;
+        sessionID: string;
+        kind: 'permission' | 'question';
+        props: Record<string, unknown>;
+      }>;
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+    providerState.view = webviewView;
+    providerState.blockingRequestsForWebview = [
+      {
+        id: 'perm-1',
+        sessionID: 'session-1',
+        kind: 'permission',
+        props: {
+          id: 'perm-1',
+          sessionID: 'session-1',
+          permission: 'bash',
+          title: 'Run Bash command',
+          tool: { messageID: 'msg-1', callID: 'call-1' },
+        },
+      },
+    ];
+
+    providerState.sessionState.handleServerEvent({
+      type: 'permission.replied',
+      properties: {
+        permissionID: 'perm-1',
+        sessionID: 'session-1',
+      },
+    });
+
+    await provider.handleMessage({ type: 'ready' });
+
+    expect(posted).toContainEqual({
+      type: 'server/event',
+      payload: {
+        type: 'permission.replied',
+        properties: {
+          id: 'perm-1',
+          permissionID: 'perm-1',
+          requestID: 'perm-1',
+          sessionID: 'session-1',
+        },
+      },
+    });
+    expect(posted).not.toContainEqual({
       type: 'server/event',
       payload: {
         type: 'permission.asked',

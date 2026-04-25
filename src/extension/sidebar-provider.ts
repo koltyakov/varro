@@ -145,8 +145,41 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.interruptedSessionsForWebview = [];
   }
 
-  private replayBlockingRequests() {
-    for (const item of this.blockingRequestsForWebview) {
+  private getCurrentBlockingRequests(): BlockingRequestSnapshot[] {
+    return [...this.sessionState.pending.entries()].map(([id, request]) => ({
+      id,
+      sessionID: request.sessionID,
+      kind: request.kind,
+      props: request.props,
+    }));
+  }
+
+  private replayBlockingRequests(options?: { clearResolvedEmbedded?: boolean }) {
+    const currentRequests = this.getCurrentBlockingRequests();
+    const currentRequestIds = new Set(currentRequests.map((item) => item.id));
+
+    if (options?.clearResolvedEmbedded) {
+      for (const item of this.blockingRequestsForWebview) {
+        if (currentRequestIds.has(item.id)) continue;
+        this.post({
+          type: 'server/event',
+          payload: {
+            type: item.kind === 'question' ? 'question.replied' : 'permission.replied',
+            properties:
+              item.kind === 'question'
+                ? { id: item.id, requestID: item.id, sessionID: item.sessionID }
+                : {
+                    id: item.id,
+                    permissionID: item.id,
+                    requestID: item.id,
+                    sessionID: item.sessionID,
+                  },
+          },
+        });
+      }
+    }
+
+    for (const item of currentRequests) {
       this.post({
         type: 'server/event',
         payload: {
@@ -394,7 +427,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postConfigState();
           this.post({ type: 'server/status', payload: this._status });
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
-          this.replayBlockingRequests();
+          this.replayBlockingRequests({ clearResolvedEmbedded: true });
           this.sessionState.publishPendingAttention();
           this.flushPendingInputFocus();
           this.flushPendingOpenAttentionSessions();
