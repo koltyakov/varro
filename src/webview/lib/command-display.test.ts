@@ -7,6 +7,9 @@ describe('command display helpers', () => {
     expect(stripRedundantWorkspaceCdPrefix('  cd "C:\\repo" && pnpm lint', 'C:/repo')).toBe(
       '  pnpm lint'
     );
+    expect(stripRedundantWorkspaceCdPrefix('cd "C:\\Repo" && pnpm lint', 'c:/repo')).toBe(
+      'pnpm lint'
+    );
     expect(stripRedundantWorkspaceCdPrefix("cd '/project/path' && yarn build", null)).toBe(
       'yarn build'
     );

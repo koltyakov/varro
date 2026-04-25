@@ -26,11 +26,19 @@ export class ErrorHub {
   private readonly recentKeys = new Map<string, number>();
   private static readonly DEDUPE_WINDOW_MS = 5_000;
 
+  private pruneRecentKeys(now: number): void {
+    const expiry = now - ErrorHub.DEDUPE_WINDOW_MS * 2;
+    for (const [key, timestamp] of this.recentKeys) {
+      if (timestamp < expiry) this.recentKeys.delete(key);
+    }
+  }
+
   report(error: ReportedError): void {
     const message = error.message.trim();
     if (!message) return;
     const key = `${error.code}:${message}`;
     const now = Date.now();
+    this.pruneRecentKeys(now);
     const last = this.recentKeys.get(key);
     if (last && now - last < ErrorHub.DEDUPE_WINDOW_MS) return;
     this.recentKeys.set(key, now);

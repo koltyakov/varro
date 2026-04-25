@@ -244,7 +244,6 @@ type StickyUserMessagePreview = {
   text: string;
 };
 
-const STICKY_PREVIEW_VISIBILITY_BUFFER_PX = 12;
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
 
@@ -274,8 +273,11 @@ export function shouldShowStickyUserMessagePreview(args: {
   visibleRange: { start: number; end: number };
   rowTop: number | null;
   rowBottom: number | null;
+  nextUserMessageTop?: number | null;
   viewportHeight: number;
   previousPreviewId?: string | null;
+  stickyPreviewTop?: number | null;
+  stickyPreviewBottom?: number | null;
 }) {
   const { preview } = args;
   if (!preview) return false;
@@ -283,14 +285,57 @@ export function shouldShowStickyUserMessagePreview(args: {
   if (args.viewportHeight < STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX) return false;
 
   const isPreviousPreview = args.previousPreviewId === preview.id;
-  const showThreshold = isPreviousPreview
-    ? STICKY_PREVIEW_VISIBILITY_BUFFER_PX
-    : -STICKY_PREVIEW_VISIBILITY_BUFFER_PX;
 
-  if (args.shouldVirtualize && preview.index < args.visibleRange.start) return true;
+  if (args.shouldVirtualize && preview.index < args.visibleRange.start) {
+    if (
+      isPreviousPreview &&
+      args.stickyPreviewBottom !== null &&
+      args.stickyPreviewBottom !== undefined &&
+      args.nextUserMessageTop !== null &&
+      args.nextUserMessageTop !== undefined &&
+      args.nextUserMessageTop <= args.stickyPreviewBottom
+    ) {
+      return false;
+    }
+
+    return true;
+  }
 
   if (args.rowTop === null || args.rowBottom === null) return false;
-  return args.rowBottom <= showThreshold;
+  if (
+    isPreviousPreview &&
+    args.stickyPreviewTop !== null &&
+    args.stickyPreviewTop !== undefined &&
+    args.stickyPreviewBottom !== null &&
+    args.stickyPreviewBottom !== undefined
+  ) {
+    if (args.rowBottom > 0) return false;
+    return (
+      args.nextUserMessageTop === null ||
+      args.nextUserMessageTop === undefined ||
+      args.nextUserMessageTop > args.stickyPreviewBottom
+    );
+  }
+
+  return args.rowBottom <= 0;
+}
+
+function isMessageHiddenBehindStickyPreview(args: {
+  rowBottom: number;
+  nextUserMessageTop?: number | null;
+  stickyPreviewBottom: number;
+}) {
+  if (args.rowBottom > 0) return false;
+
+  if (
+    args.nextUserMessageTop !== null &&
+    args.nextUserMessageTop !== undefined &&
+    args.nextUserMessageTop <= args.stickyPreviewBottom
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 export function MessageList() {
@@ -314,6 +359,7 @@ export function MessageList() {
   let pendingInitialScrollSessionId: string | null = null;
   let initialScrollRafId = 0;
   let previousStickyPreviewId: string | null = null;
+  let previousStickyPreviewBounds: { top: number; bottom: number } | null = null;
   let stickyPreviewDebounceTimer: ReturnType<typeof setTimeout> | 0 = 0;
   const SCROLL_INTERVAL_MS = 700;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
@@ -368,16 +414,24 @@ export function MessageList() {
     const preview = getStickyUserMessagePreview(messages(), firstVisibleMessageIndex);
     if (!preview) return null;
 
-    const row = containerRef.querySelector<HTMLElement>(`[data-msg-id="${preview.id}"]`);
-    const rowRect = row?.getBoundingClientRect();
+    const previewElement = getStickyUserMessageSourceElement(preview.id);
+    const rowRect = previewElement?.getBoundingClientRect();
+    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(preview.index, containerRect);
+    const stickyPreviewBounds =
+      previousStickyPreviewId === preview.id
+        ? (getStickyUserMessagePreviewBounds(containerRect) ?? previousStickyPreviewBounds)
+        : null;
     const shouldShow = shouldShowStickyUserMessagePreview({
       preview,
       shouldVirtualize: shouldVirtualize(),
       visibleRange: visibleRange(),
       rowTop: rowRect ? rowRect.top - containerRect.top : null,
       rowBottom: rowRect ? rowRect.bottom - containerRect.top : null,
+      nextUserMessageTop,
       viewportHeight: currentViewportHeight,
       previousPreviewId: previousStickyPreviewId,
+      stickyPreviewTop: stickyPreviewBounds?.top ?? null,
+      stickyPreviewBottom: stickyPreviewBounds?.bottom ?? null,
     });
     return shouldShow ? preview : null;
   });
@@ -421,6 +475,44 @@ export function MessageList() {
     return changed;
   }
 
+  function getStickyUserMessagePreviewBounds(containerRect: DOMRect) {
+    if (!containerRef) return null;
+    const sticky = containerRef.querySelector<HTMLElement>('.latest-user-message-sticky');
+    const stickyRect = sticky?.getBoundingClientRect();
+    if (!stickyRect) return null;
+
+    return {
+      top: stickyRect.top - containerRect.top,
+      bottom: stickyRect.bottom - containerRect.top,
+    };
+  }
+
+  function getStickyUserMessageSourceElement(messageId: string) {
+    if (!containerRef) return null;
+    const row = containerRef.querySelector<HTMLElement>(`[data-msg-id="${messageId}"]`);
+    return row?.querySelector<HTMLElement>('.user-message-card') ?? row;
+  }
+
+  function getStickyUserMessageNextUserMessageTop(messageIndex: number, containerRect: DOMRect) {
+    if (!containerRef) return null;
+    for (let index = messageIndex + 1; index < messages().length; index += 1) {
+      const nextMessage = messages()[index];
+      if (nextMessage?.info.role !== 'user') continue;
+
+      const nextElement = getStickyUserMessageSourceElement(nextMessage.info.id);
+      const nextRect = nextElement?.getBoundingClientRect();
+      if (!nextRect) return null;
+
+      const nextTop = nextRect.top - containerRect.top;
+      const nextBottom = nextRect.bottom - containerRect.top;
+      if (nextBottom <= 0) continue;
+
+      return nextTop;
+    }
+
+    return null;
+  }
+
   function updateScrollbarInset() {
     if (!containerRef) return;
     const scrollbarInset = Math.max(0, containerRef.offsetWidth - containerRef.clientWidth);
@@ -428,6 +520,36 @@ export function MessageList() {
       '--interactive-list-scrollbar-inset',
       `${scrollbarInset}px`
     );
+  }
+
+  function shouldHideStickyUserMessagePreviewImmediately(preview: StickyUserMessagePreview | null) {
+    if (!containerRef || !preview) return false;
+
+    const containerRect = containerRef.getBoundingClientRect();
+    const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
+    if (!stickyBounds) return false;
+
+    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(preview.index, containerRect);
+    if (
+      nextUserMessageTop !== null &&
+      nextUserMessageTop !== undefined &&
+      nextUserMessageTop <= stickyBounds.bottom
+    ) {
+      return true;
+    }
+
+    const row = getStickyUserMessageSourceElement(preview.id);
+    if (!row) return false;
+
+    if (containerRef.clientHeight <= 0) return false;
+
+    const rowRect = row.getBoundingClientRect();
+    const rowBottom = rowRect.bottom - containerRect.top;
+    return !isMessageHiddenBehindStickyPreview({
+      rowBottom,
+      nextUserMessageTop,
+      stickyPreviewBottom: stickyBounds.bottom,
+    });
   }
 
   function distanceFromBottom() {
@@ -603,8 +725,17 @@ export function MessageList() {
     }
 
     if (candidate) {
+      if (previousStickyPreviewId !== candidate.id) {
+        previousStickyPreviewBounds = null;
+      }
       setStickyUserMessagePreview(candidate);
       previousStickyPreviewId = candidate.id;
+      return;
+    }
+
+    if (shouldHideStickyUserMessagePreviewImmediately(current)) {
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = current.id;
       return;
     }
 
@@ -612,7 +743,25 @@ export function MessageList() {
       stickyPreviewDebounceTimer = 0;
       setStickyUserMessagePreview(candidate);
       previousStickyPreviewId = null;
+      previousStickyPreviewBounds = null;
     }, STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS);
+  });
+
+  createEffect(() => {
+    const current = stickyUserMessagePreview();
+    if (!current) return;
+
+    queueMicrotask(() => {
+      const activePreview = stickyUserMessagePreview();
+      if (!activePreview || activePreview.id !== current.id || !containerRef) return;
+
+      const containerRect = containerRef.getBoundingClientRect();
+      previousStickyPreviewBounds = getStickyUserMessagePreviewBounds(containerRect);
+      if (!shouldHideStickyUserMessagePreviewImmediately(activePreview)) return;
+
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = activePreview.id;
+    });
   });
 
   createEffect(() => {
@@ -624,6 +773,7 @@ export function MessageList() {
     ignoreScrollUntil = 0;
     setStickyUserMessagePreview(null);
     previousStickyPreviewId = null;
+    previousStickyPreviewBounds = null;
     setAutoScroll(true);
     queueMicrotask(() => performScroll());
   });

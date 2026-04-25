@@ -812,6 +812,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.windowStateDisposable?.dispose();
     this.statusBarItem.dispose();
     this.fileSearch.dispose();
+    await this.droppedFilesService.dispose();
   }
 }
 

@@ -468,7 +468,7 @@ body.vscode-high-contrast-light .interactive-session {
   --latest-user-message-sticky-bottom-gap: calc(var(--latest-user-message-sticky-gap) * 2);
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 4;
   height: 0;
   pointer-events: none;
   width: 100%;
@@ -544,12 +544,37 @@ body.vscode-high-contrast-light .interactive-session {
   max-height: calc(1.35em * 4);
   overflow-x: hidden;
   overflow-y: auto;
+  margin-right: -8px;
+  padding-right: 8px;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent) transparent;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.35;
+}
+
+.latest-user-message-sticky:hover .latest-user-message-sticky-text {
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent) transparent;
+}
+
+.latest-user-message-sticky-text::-webkit-scrollbar {
+  width: 10px;
+}
+
+.latest-user-message-sticky-text::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.latest-user-message-sticky-text::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.latest-user-message-sticky:hover .latest-user-message-sticky-text::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
 }
 
 .interactive-item-container {

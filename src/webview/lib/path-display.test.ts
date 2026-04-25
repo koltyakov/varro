@@ -31,6 +31,7 @@ describe('path display helpers', () => {
   it('resolves workspace-relative paths only when nested', () => {
     expect(getWorkspaceRelativePath('/repo/src/index.ts', '/repo')).toBe('src/index.ts');
     expect(getWorkspaceRelativePath('/repo/src/index.ts', '/repo/')).toBe('src/index.ts');
+    expect(getWorkspaceRelativePath('C:\\Repo\\src\\index.ts', 'c:/repo')).toBe('src/index.ts');
     expect(getWorkspaceRelativePath('/repo', '/repo')).toBe('.');
     expect(getWorkspaceRelativePath('/other/src/index.ts', '/repo')).toBeNull();
     expect(getWorkspaceRelativePath('/repo/src/index.ts', null)).toBeNull();
@@ -54,6 +55,7 @@ describe('path display helpers', () => {
     expect(isSamePath('/repo/src/index.ts', '/repo/src/index.ts')).toBe(true);
     expect(isSamePath('/repo/src/index.ts/', '/repo/src/index.ts')).toBe(true);
     expect(isSamePath('C:\\repo\\src\\index.ts', 'C:/repo/src/index.ts')).toBe(true);
+    expect(isSamePath('C:\\Repo\\src\\index.ts', 'c:/repo/src/index.ts')).toBe(true);
     expect(isSamePath('/repo/src/index.ts', '/repo/src/other.ts')).toBe(false);
     expect(isSamePath('/repo/src/index.ts', null)).toBe(false);
   });

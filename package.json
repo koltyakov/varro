@@ -229,6 +229,7 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "1.14.20",
+    "dompurify": "^3.4.1",
     "marked": "18.0.2",
     "solid-js": "1.9.12"
   }

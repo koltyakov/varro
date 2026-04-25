@@ -1,4 +1,5 @@
 import { createSignal, createEffect, onMount, onCleanup } from 'solid-js';
+import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { postMessage } from '../lib/bridge';
 import { state } from '../lib/state';
@@ -17,7 +18,7 @@ const checkSvg =
 const renderer = new marked.Renderer();
 const SHELL_LANGS = new Set(['', 'bash', 'console', 'shell', 'sh', 'zsh']);
 const COMPACT_FIRST_COLUMN_HEADERS = new Set(['#', 'no', 'no.', 'num', 'id']);
-const ALLOWED_HTML_TAGS = new Set([
+const ALLOWED_HTML_TAGS = [
   'a',
   'blockquote',
   'br',
@@ -52,52 +53,35 @@ const ALLOWED_HTML_TAGS = new Set([
   'thead',
   'tr',
   'ul',
-]);
-const STRIP_HTML_TAGS = new Set([
-  'base',
-  'iframe',
-  'img',
-  'link',
-  'meta',
-  'object',
-  'script',
-  'style',
-]);
-const GLOBAL_ALLOWED_ATTRIBUTES = new Set(['aria-hidden', 'aria-label', 'class', 'role', 'title']);
-const TAG_ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
-  a: new Set(['data-external', 'data-file', 'href']),
-  button: new Set(['data-copy', 'data-copy-text', 'type']),
-  div: new Set(['data-lang']),
-  line: new Set([
-    'stroke',
-    'stroke-linecap',
-    'stroke-linejoin',
-    'stroke-width',
-    'x1',
-    'x2',
-    'y1',
-    'y2',
-  ]),
-  path: new Set(['d', 'fill', 'stroke', 'stroke-linecap', 'stroke-linejoin', 'stroke-width']),
-  polyline: new Set([
-    'fill',
-    'points',
-    'stroke',
-    'stroke-linecap',
-    'stroke-linejoin',
-    'stroke-width',
-  ]),
-  svg: new Set([
-    'fill',
-    'height',
-    'stroke',
-    'stroke-linecap',
-    'stroke-linejoin',
-    'stroke-width',
-    'viewBox',
-    'width',
-  ]),
-};
+];
+const ALLOWED_HTML_ATTRIBUTES = [
+  'aria-hidden',
+  'aria-label',
+  'class',
+  'data-copy',
+  'data-copy-text',
+  'data-external',
+  'data-file',
+  'data-lang',
+  'd',
+  'fill',
+  'height',
+  'href',
+  'points',
+  'role',
+  'stroke',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'stroke-width',
+  'title',
+  'type',
+  'viewBox',
+  'width',
+  'x1',
+  'x2',
+  'y1',
+  'y2',
+];
 const CODE_BLOCK_CACHE_LIMIT = 100;
 const codeBlockHtmlCache = new Map<string, string>();
 
@@ -276,42 +260,17 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
 }
 
 function sanitizeHtml(html: string): string {
+  const sanitized = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ALLOWED_HTML_TAGS,
+    ALLOWED_ATTR: ALLOWED_HTML_ATTRIBUTES,
+    FORBID_ATTR: ['style'],
+  });
+
   const template = document.createElement('template');
-  template.innerHTML = html;
-
-  for (const element of Array.from(
-    template.content.querySelectorAll<HTMLElement | SVGElement>('*')
-  )) {
-    const tag = element.tagName.toLowerCase();
-
-    if (!ALLOWED_HTML_TAGS.has(tag)) {
-      if (STRIP_HTML_TAGS.has(tag)) {
-        element.remove();
-        continue;
-      }
-      const text = element.textContent || '';
-      element.replaceWith(document.createTextNode(text));
-      continue;
-    }
-
-    const allowedAttributes = TAG_ALLOWED_ATTRIBUTES[tag];
-    for (const attr of Array.from(element.attributes)) {
-      const name = attr.name.toLowerCase();
-      if (name.startsWith('on') || name === 'style') {
-        element.removeAttribute(attr.name);
-        continue;
-      }
-
-      if (!GLOBAL_ALLOWED_ATTRIBUTES.has(name) && !allowedAttributes?.has(name)) {
-        element.removeAttribute(attr.name);
-      }
-    }
-
-    if (element instanceof HTMLAnchorElement) {
-      sanitizeAnchorHref(element);
-    }
+  template.innerHTML = sanitized;
+  for (const anchor of Array.from(template.content.querySelectorAll<HTMLAnchorElement>('a'))) {
+    sanitizeAnchorHref(anchor);
   }
-
   return template.innerHTML;
 }
 

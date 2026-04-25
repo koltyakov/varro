@@ -1,4 +1,4 @@
-import { normalizePath } from './path-display';
+import { isSamePath, normalizePath } from './path-display';
 
 function trimTrailingSlashes(value: string) {
   return value.replace(/\/+$/, '');
@@ -19,7 +19,7 @@ function shouldStripWorkspacePrefix(path: string, workspacePath: string | null |
   if (!normalizedPath) return false;
   if (normalizedPath === '/project/path') return true;
   if (!workspacePath) return false;
-  return normalizedPath === trimTrailingSlashes(normalizePath(workspacePath));
+  return isSamePath(normalizedPath, trimTrailingSlashes(normalizePath(workspacePath)));
 }
 
 const REDUNDANT_CD_PREFIX_RE = /^(\s*)cd\s+("[^"]+"|'[^']+'|\S+)\s*&&\s*/;

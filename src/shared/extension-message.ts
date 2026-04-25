@@ -1,4 +1,12 @@
-import { parseServerEvent, type ExtensionMessage, type ServerStatus } from './protocol';
+import {
+  parseServerEvent,
+  type DesktopSessionPaneSide,
+  type DroppedFile,
+  type EditorContext,
+  type ExtensionMessage,
+  type ServerStatus,
+  type WebviewThemeKind,
+} from './protocol';
 
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'server/status',
@@ -58,7 +66,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
 
     case 'context/update': {
       const payload = asRecord(record.payload);
-      return payload ? ({ type, payload } as unknown as ExtensionMessage) : null;
+      return isEditorContext(payload) ? { type, payload } : null;
     }
 
     case 'terminal-selection/update': {
@@ -76,7 +84,8 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
 
     case 'files/dropped': {
       if (!Array.isArray(record.payload)) return null;
-      return { type, payload: record.payload } as unknown as ExtensionMessage;
+      const payload = record.payload.filter(isDroppedFile);
+      return payload.length === record.payload.length ? { type, payload } : null;
     }
 
     case 'files/removed': {
@@ -91,7 +100,8 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
         !payload ||
         typeof payload.requestId !== 'number' ||
         typeof payload.query !== 'string' ||
-        !Array.isArray(payload.files)
+        !Array.isArray(payload.files) ||
+        !payload.files.every(isDroppedFile)
       ) {
         return null;
       }
@@ -102,7 +112,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
           query: payload.query,
           files: payload.files,
         },
-      } as unknown as ExtensionMessage;
+      };
     }
 
     case 'config/update': {
@@ -111,7 +121,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
         !payload ||
         typeof payload.expandThinkingByDefault !== 'boolean' ||
         typeof payload.showStickyUserPrompt !== 'boolean' ||
-        (payload.desktopSessionPaneSide !== 'left' && payload.desktopSessionPaneSide !== 'right')
+        !isDesktopSessionPaneSide(payload.desktopSessionPaneSide)
       ) {
         return null;
       }
@@ -127,8 +137,8 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
 
     case 'theme/update': {
       const payload = asRecord(record.payload);
-      if (!payload || typeof payload.theme !== 'string') return null;
-      return { type, payload: { theme: payload.theme as never } };
+      if (!payload || !isWebviewThemeKind(payload.theme)) return null;
+      return { type, payload: { theme: payload.theme } };
     }
 
     case 'api/response': {
@@ -162,6 +172,86 @@ function isServerStatus(value: Record<string, unknown> | null): value is ServerS
     default:
       return false;
   }
+}
+
+function isDesktopSessionPaneSide(value: unknown): value is DesktopSessionPaneSide {
+  return value === 'left' || value === 'right';
+}
+
+function isWebviewThemeKind(value: unknown): value is WebviewThemeKind {
+  return (
+    value === 'light' ||
+    value === 'dark' ||
+    value === 'high-contrast' ||
+    value === 'high-contrast-light'
+  );
+}
+
+function isEditorContext(value: unknown): value is EditorContext {
+  const record = asRecord(value);
+  if (!record) return false;
+  if (record.workspacePath !== null && typeof record.workspacePath !== 'string') return false;
+  if (!isActiveFile(record.activeFile)) return false;
+  if (!isSelection(record.selection)) return false;
+  if (!Array.isArray(record.diagnostics)) return false;
+  return record.diagnostics.every(isDiagnostic);
+}
+
+function isActiveFile(
+  value: unknown
+): value is { path: string; relativePath: string; language: string } | null {
+  if (value === null) return true;
+  const record = asRecord(value);
+  return (
+    !!record &&
+    typeof record.path === 'string' &&
+    typeof record.relativePath === 'string' &&
+    typeof record.language === 'string'
+  );
+}
+
+function isSelection(value: unknown): value is { startLine: number; endLine: number } | null {
+  if (value === null) return true;
+  const record = asRecord(value);
+  return (
+    !!record &&
+    typeof record.startLine === 'number' &&
+    typeof record.endLine === 'number' &&
+    Number.isFinite(record.startLine) &&
+    Number.isFinite(record.endLine)
+  );
+}
+
+function isDiagnostic(value: unknown): boolean {
+  const record = asRecord(value);
+  return (
+    !!record &&
+    typeof record.path === 'string' &&
+    (record.severity === 'error' || record.severity === 'warning' || record.severity === 'info') &&
+    typeof record.message === 'string' &&
+    typeof record.line === 'number' &&
+    Number.isFinite(record.line)
+  );
+}
+
+function isLineRange(value: unknown): boolean {
+  const record = asRecord(value);
+  return (
+    !!record &&
+    typeof record.startLine === 'number' &&
+    typeof record.endLine === 'number' &&
+    Number.isFinite(record.startLine) &&
+    Number.isFinite(record.endLine)
+  );
+}
+
+function isDroppedFile(value: unknown): value is DroppedFile {
+  const record = asRecord(value);
+  if (!record) return false;
+  if (typeof record.path !== 'string' || typeof record.relativePath !== 'string') return false;
+  if (record.type !== 'file' && record.type !== 'directory') return false;
+  if (record.lineRanges === undefined) return true;
+  return Array.isArray(record.lineRanges) && record.lineRanges.every(isLineRange);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

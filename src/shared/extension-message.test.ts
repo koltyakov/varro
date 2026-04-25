@@ -114,6 +114,112 @@ describe('parseExtensionMessage', () => {
     ).toEqual({ type: 'pending-attention/update', payload: { sessionIds: ['a', 'b'] } });
   });
 
+  it('rejects malformed context/update payloads', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'context/update',
+        payload: {
+          workspacePath: '/repo',
+          activeFile: { path: '/repo/src/app.ts', relativePath: 'src/app.ts', language: 'ts' },
+          selection: { startLine: 1, endLine: 3 },
+          diagnostics: [{ path: '/repo/src/app.ts', severity: 'error', message: 'bad', line: 1 }],
+        },
+      })
+    ).toEqual({
+      type: 'context/update',
+      payload: {
+        workspacePath: '/repo',
+        activeFile: { path: '/repo/src/app.ts', relativePath: 'src/app.ts', language: 'ts' },
+        selection: { startLine: 1, endLine: 3 },
+        diagnostics: [{ path: '/repo/src/app.ts', severity: 'error', message: 'bad', line: 1 }],
+      },
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'context/update',
+        payload: { workspacePath: '/repo', activeFile: { path: '/repo/src/app.ts' } },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects malformed dropped file payloads', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'files/dropped',
+        payload: [
+          { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },
+          {
+            path: '/repo/src/lib.ts',
+            relativePath: 'src/lib.ts',
+            type: 'file',
+            lineRanges: [{ startLine: 3, endLine: 8 }],
+          },
+        ],
+      })
+    ).toEqual({
+      type: 'files/dropped',
+      payload: [
+        { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },
+        {
+          path: '/repo/src/lib.ts',
+          relativePath: 'src/lib.ts',
+          type: 'file',
+          lineRanges: [{ startLine: 3, endLine: 8 }],
+        },
+      ],
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'files/dropped',
+        payload: [{ path: '/repo/src/app.ts', type: 'file' }],
+      })
+    ).toBeNull();
+  });
+
+  it('rejects malformed files/search-results payloads', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'files/search-results',
+        payload: {
+          requestId: 1,
+          query: 'app',
+          files: [{ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' }],
+        },
+      })
+    ).toEqual({
+      type: 'files/search-results',
+      payload: {
+        requestId: 1,
+        query: 'app',
+        files: [{ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' }],
+      },
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'files/search-results',
+        payload: {
+          requestId: 1,
+          query: 'app',
+          files: [{ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'weird' }],
+        },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects malformed theme/update payloads', () => {
+    expect(parseExtensionMessage({ type: 'theme/update', payload: { theme: 'dark' } })).toEqual({
+      type: 'theme/update',
+      payload: { theme: 'dark' },
+    });
+
+    expect(
+      parseExtensionMessage({ type: 'theme/update', payload: { theme: 'neon-future' } })
+    ).toBeNull();
+  });
+
   it('parses config/update with strict payload', () => {
     expect(
       parseExtensionMessage({

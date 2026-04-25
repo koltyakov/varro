@@ -6,9 +6,11 @@ import {
   ToolCall,
   formatToolTitle,
   getVisibleInputEntries,
+  getToolCallExpansionKey,
   resetToolCallExpansionState,
   shouldShowToolPreview,
 } from './ToolCall';
+import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -95,6 +97,27 @@ describe('getVisibleInputEntries', () => {
 });
 
 describe('ToolCall', () => {
+  it('uses shared expansion state helpers', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command: 'git status' }, 'git status'),
+    };
+
+    const key = getToolCallExpansionKey(part);
+    setToolCallExpanded(key, true);
+
+    expect(getToolCallExpanded(key)).toBe(true);
+
+    resetToolCallExpansionState();
+
+    expect(getToolCallExpanded(key)).toBe(false);
+  });
+
   it('keeps command blocks collapsed by default even when thinking auto-expand is enabled', () => {
     setExpandThinkingByDefaultPreference(true);
 

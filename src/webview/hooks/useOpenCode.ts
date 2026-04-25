@@ -107,6 +107,7 @@ import { applyWebviewTheme } from '../lib/theme';
 import { getPreferredVariant } from '../lib/model-variants';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
+import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { getSessionPermissionRulesForMode } from './permission-rules';
 import { registerSessionEventHandlers } from './session-event-handlers';
 import {
@@ -172,6 +173,7 @@ function setSessionStatusEntry(sessionId: string, status: SessionStatus) {
 
 function clearActiveSessionState() {
   resetTodoSync();
+  resetToolCallExpansionState();
   setState('activeSessionId', null);
   persistActiveSessionId(null);
   clearMessages();
@@ -997,6 +999,7 @@ async function hydrateSessionStatuses() {
 export async function selectSession(id: string, options?: { markSeen?: boolean }) {
   const generation = ++sessionSelectionGeneration;
   clearDraftCurrentDocumentState();
+  resetToolCallExpansionState();
   setState('activeSessionId', id);
   persistActiveSessionId(id);
   if (options?.markSeen ?? true) {
@@ -1112,6 +1115,7 @@ export async function createSession(
       permission: getSessionPermissionRulesForMode(initialPermissionMode, 'create'),
     });
     upsertSession(session);
+    resetToolCallExpansionState();
     setState('activeSessionId', session.id);
     if (previousActiveSessionId) {
       clearDraftCurrentDocumentState();

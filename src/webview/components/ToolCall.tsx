@@ -6,21 +6,19 @@ import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-d
 import { formatCommandDisplay } from '../lib/command-display';
 import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
 import { client } from '../lib/client';
+import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 import { isAbortedToolError } from '../lib/aborted';
 
+export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
+
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
 type ToolPreview = { text: string; key: string };
-const toolCallExpansionState = new Map<string, boolean>();
 
-function getToolCallExpansionKey(part: ToolPart) {
+export function getToolCallExpansionKey(part: ToolPart) {
   return `${part.sessionID}\u0000${part.messageID}\u0000${part.callID}`;
-}
-
-export function resetToolCallExpansionState() {
-  toolCallExpansionState.clear();
 }
 
 function normalizeToolName(toolName: string) {
@@ -136,7 +134,7 @@ function isDirectoryOutput(toolState: ToolPart['state']): boolean {
 export function ToolCall(props: { part: ToolPart }) {
   const tool = () => props.part;
   const expansionKey = () => getToolCallExpansionKey(tool());
-  const [expanded, setExpanded] = createSignal(toolCallExpansionState.get(expansionKey()) ?? false);
+  const [expanded, setExpanded] = createSignal(getToolCallExpanded(expansionKey()));
   const state = () => tool().state;
   const questionRequest = () =>
     appState.questions.find(
@@ -207,12 +205,12 @@ export function ToolCall(props: { part: ToolPart }) {
   };
 
   createEffect(() => {
-    setExpanded(toolCallExpansionState.get(expansionKey()) ?? false);
+    setExpanded(getToolCallExpanded(expansionKey()));
   });
 
   const toggleExpand = () => {
     const next = !expanded();
-    toolCallExpansionState.set(expansionKey(), next);
+    setToolCallExpanded(expansionKey(), next);
     setExpanded(next);
   };
 

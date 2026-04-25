@@ -1,4 +1,4 @@
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, mkdtemp, mkdir, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { Buffer } from 'buffer';
 import { randomBytes } from 'crypto';
@@ -12,47 +12,52 @@ import { getRelativePath } from './util/path';
 type DroppedFileInput = Pick<DroppedFile, 'path' | 'relativePath' | 'type'>;
 
 export class DroppedFilesService {
+  private tempDropsDir: string | null = null;
+
   constructor(private readonly contextProvider: Pick<ContextProvider, 'context'>) {}
 
   async fromContent(files: Array<{ name: string; content: string; size: number }>) {
-    const dropsDir = join(tmpdir(), 'varro-drops');
+    const dropsDir = await this.ensureDropsDir();
+    if (!dropsDir) return [];
+
+    const createdPaths: string[] = [];
     try {
-      await mkdir(dropsDir, { recursive: true });
+      const results = await Promise.all(
+        files.map(async (file) => {
+          try {
+            const buffer = Buffer.from(file.content, 'base64');
+            const safeName = sanitizeDroppedFileName(file.name);
+            const targetPath = join(
+              dropsDir,
+              `${Date.now()}-${randomBytes(4).toString('hex')}-${safeName}`
+            );
+            await writeFile(targetPath, buffer, { mode: 0o600 });
+            createdPaths.push(targetPath);
+            const uri = vscode.Uri.file(targetPath);
+            return {
+              path: uri.fsPath,
+              relativePath: safeName,
+              type: 'file' as const,
+            } satisfies DroppedFileInput;
+          } catch (err) {
+            logger.warn(
+              `Failed to write dropped file ${file.name}: ${err instanceof Error ? err.message : String(err)}`
+            );
+            return null;
+          }
+        })
+      );
+
+      return results.filter(
+        (item): item is { path: string; relativePath: string; type: 'file' } => item !== null
+      );
     } catch (err) {
+      await Promise.allSettled(createdPaths.map((path) => rm(path, { force: true })));
       logger.warn(
-        `Failed to create drop temp dir: ${err instanceof Error ? err.message : String(err)}`
+        `Failed to persist dropped files: ${err instanceof Error ? err.message : String(err)}`
       );
       return [];
     }
-
-    const results = await Promise.all(
-      files.map(async (file) => {
-        try {
-          const buffer = Buffer.from(file.content, 'base64');
-          const safeName = sanitizeDroppedFileName(file.name);
-          const targetPath = join(
-            dropsDir,
-            `${Date.now()}-${randomBytes(4).toString('hex')}-${safeName}`
-          );
-          await writeFile(targetPath, buffer);
-          const uri = vscode.Uri.file(targetPath);
-          return {
-            path: uri.fsPath,
-            relativePath: safeName,
-            type: 'file' as const,
-          } satisfies DroppedFileInput;
-        } catch (err) {
-          logger.warn(
-            `Failed to write dropped file ${file.name}: ${err instanceof Error ? err.message : String(err)}`
-          );
-          return null;
-        }
-      })
-    );
-
-    return results.filter(
-      (item): item is { path: string; relativePath: string; type: 'file' } => item !== null
-    );
   }
 
   async fromPaths(paths: string[]) {
@@ -125,6 +130,36 @@ export class DroppedFilesService {
     }
 
     return null;
+  }
+
+  async dispose() {
+    const dropsDir = this.tempDropsDir;
+    this.tempDropsDir = null;
+    if (!dropsDir) return;
+
+    try {
+      await rm(dropsDir, { recursive: true, force: true });
+    } catch (err) {
+      logger.warn(
+        `Failed to remove drop temp dir: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  private async ensureDropsDir(): Promise<string | null> {
+    if (this.tempDropsDir) return this.tempDropsDir;
+
+    const dropsRoot = join(tmpdir(), 'varro-drops');
+    try {
+      await mkdir(dropsRoot, { recursive: true, mode: 0o700 });
+      this.tempDropsDir = await mkdtemp(join(dropsRoot, 'drop-'));
+      return this.tempDropsDir;
+    } catch (err) {
+      logger.warn(
+        `Failed to create drop temp dir: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return null;
+    }
   }
 }
 

@@ -335,18 +335,101 @@ describe('shouldShowStickyUserMessagePreview', () => {
     ).toBe(false);
   });
 
-  it('keeps the current sticky preview visible within the debounce buffer', () => {
+  it('hides the current sticky preview while any part of the prompt is visible', () => {
     expect(
       shouldShowStickyUserMessagePreview({
         preview: { id: 'user-1', index: 2, text: 'Prompt' },
         shouldVirtualize: false,
         visibleRange: { start: 0, end: 4 },
-        rowTop: -10,
-        rowBottom: 8,
+        rowTop: 12,
+        rowBottom: 40,
         viewportHeight: 500,
         previousPreviewId: 'user-1',
+        stickyPreviewTop: 10,
+        stickyPreviewBottom: 60,
+      })
+    ).toBe(false);
+  });
+
+  it('hides the current sticky preview once the prompt peeks above it', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: -5,
+        rowBottom: 40,
+        viewportHeight: 500,
+        previousPreviewId: 'user-1',
+        stickyPreviewTop: 10,
+        stickyPreviewBottom: 60,
+      })
+    ).toBe(false);
+  });
+
+  it('hides the current sticky preview once the prompt extends below it', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: 10,
+        rowBottom: 61,
+        viewportHeight: 500,
+        previousPreviewId: 'user-1',
+        stickyPreviewTop: 10,
+        stickyPreviewBottom: 60,
+      })
+    ).toBe(false);
+  });
+
+  it('hides the current sticky preview once the next user message rises into it', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: 10,
+        rowBottom: 60,
+        nextUserMessageTop: 58,
+        viewportHeight: 500,
+        previousPreviewId: 'user-1',
+        stickyPreviewTop: 10,
+        stickyPreviewBottom: 60,
+      })
+    ).toBe(false);
+  });
+
+  it('keeps the previous sticky preview only until the next user message reaches it', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: -120,
+        rowBottom: -20,
+        nextUserMessageTop: 62,
+        viewportHeight: 500,
+        previousPreviewId: 'user-1',
+        stickyPreviewTop: 10,
+        stickyPreviewBottom: 60,
       })
     ).toBe(true);
+
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 4 },
+        rowTop: -120,
+        rowBottom: -20,
+        nextUserMessageTop: 59,
+        viewportHeight: 500,
+        previousPreviewId: 'user-1',
+        stickyPreviewTop: 10,
+        stickyPreviewBottom: 60,
+      })
+    ).toBe(false);
   });
 
   it('does not show a new sticky preview until the prompt is clearly above the viewport', () => {
@@ -600,7 +683,7 @@ describe('MessageList sticky prompt preview', () => {
     expect(container?.querySelector('.latest-user-message-sticky [data-msg-id]')).toBeNull();
   });
 
-  it('debounces sticky preview removal during brief boundary flicker', async () => {
+  it('hides the sticky preview as soon as any part of the prompt is visible outside it', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -620,17 +703,22 @@ describe('MessageList sticky prompt preview', () => {
 
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    const user2Card = container?.querySelector(
+      '[data-msg-id="user-2"] .user-message-card'
+    ) as HTMLDivElement | null;
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
     expect(user2Row).toBeInstanceOf(HTMLDivElement);
+    expect(user2Card).toBeInstanceOf(HTMLDivElement);
     expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
 
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
     rectMap.set(list!, new DOMRect(0, 0, 500, 500));
     rectMap.set(user2Row!, new DOMRect(0, -90, 500, 52));
+    rectMap.set(user2Card!, new DOMRect(120, -90, 320, 52));
     rectMap.set(assistant2Row!, new DOMRect(0, 40, 500, 320));
 
     list?.dispatchEvent(new Event('scroll'));
@@ -638,16 +726,14 @@ describe('MessageList sticky prompt preview', () => {
 
     let sticky = container?.querySelector('.latest-user-message-sticky');
     expect(sticky?.textContent).toContain('Prompt 2');
+    expect(sticky).toBeInstanceOf(HTMLDivElement);
 
-    rectMap.set(user2Row!, new DOMRect(0, 0, 500, 52));
+    rectMap.set(sticky!, new DOMRect(0, 10, 500, 50));
+
+    rectMap.set(user2Card!, new DOMRect(120, 30, 320, 40));
     list!.scrollTop = 1210;
     list?.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
-
-    sticky = container?.querySelector('.latest-user-message-sticky');
-    expect(sticky?.textContent).toContain('Prompt 2');
-
-    await vi.advanceTimersByTimeAsync(100);
 
     sticky = container?.querySelector('.latest-user-message-sticky');
     expect(sticky).toBeNull();

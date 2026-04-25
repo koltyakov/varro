@@ -59,6 +59,25 @@ describe('MarkdownRenderer', () => {
     });
   });
 
+  it('strips dangerous attributes from allowed html', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            '<a href="https://example.test" onclick="alert(1)" style="color:red">Link</a><svg><path d="M0 0" onload="alert(1)" /></svg>',
+        }),
+      container!
+    );
+
+    const link = container?.querySelector('a');
+    const path = container?.querySelector('path');
+
+    expect(link?.hasAttribute('onclick')).toBe(false);
+    expect(link?.hasAttribute('style')).toBe(false);
+    expect(link?.getAttribute('data-external')).toBe('true');
+    expect(path?.hasAttribute('onload')).toBe(false);
+  });
+
   it('opens local markdown file links through VS Code', () => {
     const send = vi.fn();
     window.__sendToExtension = send;

@@ -844,6 +844,23 @@ describe('sendMessage', () => {
     expect(stateModule.getPersistedSelectedAgent()).toBe('build');
   });
 
+  it('clears remembered tool expansion state when switching sessions', async () => {
+    const expansionStateModule = await import('../lib/tool-call-expansion-state');
+    const { hookModule } = await loadModules();
+
+    const expansionKey = 'session-1\u0000message-1\u0000call-1';
+    expansionStateModule.setToolCallExpanded(expansionKey, true);
+
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    await hookModule.selectSession('session-1');
+
+    expect(expansionStateModule.getToolCallExpanded(expansionKey)).toBe(false);
+  });
+
   it('marks the next session seen when archive auto-selects it', async () => {
     const { stateModule, hookModule } = await loadModules();
 
