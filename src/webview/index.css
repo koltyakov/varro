@@ -5505,6 +5505,14 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
     border-color 0.1s,
     color 0.1s;
   position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.question-option-input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .question-option + .question-option {
@@ -5518,37 +5526,42 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .question-option.selected {
   border-left-color: var(--color-vscode-accent);
   background: color-mix(in srgb, var(--color-vscode-accent) 8%, var(--color-vscode-list-bg));
-  padding-left: 10px;
 }
 
-.question-option:focus-visible {
-  outline: 1px solid var(--color-vscode-accent);
-  outline-offset: -1px;
-  z-index: 1;
+.question-option:focus-within {
+  outline: none;
 }
 
-.question-radio {
+.question-option-input:focus-visible {
+  outline: none;
+}
+
+.question-radio,
+.question-checkbox {
   display: flex;
   width: 14px;
   height: 14px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
+  margin-top: 1px;
+}
+
+.question-radio {
   border-radius: 50%;
   border: 1.5px solid color-mix(in srgb, var(--color-vscode-muted) 58%, transparent);
   transition:
     border-color 0.1s,
     background-color 0.1s;
-  margin-top: 1px;
-}
-
-.question-option:hover .question-radio {
-  border-color: color-mix(in srgb, var(--color-vscode-muted) 78%, transparent);
 }
 
 .question-radio.checked {
   border-color: var(--color-vscode-accent);
   background: color-mix(in srgb, var(--color-vscode-accent) 10%, transparent);
+}
+
+.question-option:hover .question-radio {
+  border-color: color-mix(in srgb, var(--color-vscode-muted) 78%, transparent);
 }
 
 .question-radio-dot {
@@ -5559,27 +5572,20 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .question-checkbox {
-  display: flex;
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
   border-radius: 3px;
   border: 1.5px solid color-mix(in srgb, var(--color-vscode-muted) 58%, transparent);
   transition:
     border-color 0.1s,
     background-color 0.1s;
-  margin-top: 1px;
-}
-
-.question-option:hover .question-checkbox {
-  border-color: color-mix(in srgb, var(--color-vscode-muted) 78%, transparent);
 }
 
 .question-checkbox.checked {
   border-color: var(--color-vscode-accent);
   background: var(--color-vscode-accent);
+}
+
+.question-option:hover .question-checkbox {
+  border-color: color-mix(in srgb, var(--color-vscode-muted) 78%, transparent);
 }
 
 .question-option-text {
@@ -5620,10 +5626,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .question-option-custom:focus-within {
-  outline: 1px solid var(--color-vscode-accent);
-  outline-offset: -1px;
-  position: relative;
-  z-index: 1;
+  outline: none;
 }
 
 .question-custom-content {
@@ -5644,6 +5647,8 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   box-shadow: none;
   border-radius: 6px;
   font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
   line-height: 1.35;
   color: var(--color-vscode-fg);
   min-width: 0;

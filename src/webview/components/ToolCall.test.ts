@@ -265,6 +265,116 @@ describe('ToolCall', () => {
     expect(container?.textContent).toContain('Which command should run?');
   });
 
+  it('hides the synthetic question tool row when a linked question prompt is pending', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'question',
+      state: completedState({}, 'question'),
+    };
+
+    const question: QuestionRequest = {
+      id: 'question-1',
+      sessionID: 'session-1',
+      tool: { messageID: 'message-1', callID: 'call-1' },
+      questions: [
+        {
+          question: 'Which command should run?',
+          header: 'Choose command',
+          options: [{ label: 'git status', description: 'Inspect working tree' }],
+        },
+      ],
+    };
+
+    setState('questions', [question]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+    expect(container?.querySelector('.question-prompt-card')).not.toBeNull();
+  });
+
+  it('lets users select a survey option', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'question',
+      state: completedState({}, 'question'),
+    };
+
+    const question: QuestionRequest = {
+      id: 'question-1',
+      sessionID: 'session-1',
+      tool: { messageID: 'message-1', callID: 'call-1' },
+      questions: [
+        {
+          question: 'Which command should run?',
+          header: 'Choose command',
+          options: [{ label: 'git status', description: 'Inspect working tree' }],
+        },
+      ],
+    };
+
+    setState('questions', [question]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const option = container?.querySelector<HTMLLabelElement>('.question-option');
+    option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(option?.classList.contains('selected')).toBe(true);
+    expect(container?.querySelector('.question-radio.checked')).not.toBeNull();
+    expect(container?.querySelector<HTMLButtonElement>('.question-btn-primary')?.disabled).toBe(
+      false
+    );
+  });
+
+  it('shows the custom answer radio and enables submit when custom text is entered', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'question',
+      state: completedState({}, 'question'),
+    };
+
+    const question: QuestionRequest = {
+      id: 'question-1',
+      sessionID: 'session-1',
+      tool: { messageID: 'message-1', callID: 'call-1' },
+      questions: [
+        {
+          question: 'Which command should run?',
+          header: 'Choose command',
+          options: [{ label: 'npm test', description: 'Run the test suite' }],
+        },
+      ],
+    };
+
+    setState('questions', [question]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
+    if (!input) throw new Error('Expected custom answer input');
+    input.value = 'npm run dev';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(container?.querySelector('.question-option-custom.selected')).not.toBeNull();
+    expect(container?.querySelector('.question-radio.checked')).not.toBeNull();
+    expect(container?.querySelector<HTMLButtonElement>('.question-btn-primary')?.disabled).toBe(
+      false
+    );
+  });
+
   it('matches a linked permission prompt across the same session tree', () => {
     const part: ToolPart = {
       id: 'tool-1',

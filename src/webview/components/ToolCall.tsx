@@ -27,6 +27,10 @@ function normalizeToolName(toolName: string) {
   return parts[parts.length - 1] || normalized;
 }
 
+function isQuestionToolName(toolName: string) {
+  return normalizeToolName(toolName) === 'question';
+}
+
 function getSearchPattern(input: Record<string, unknown>) {
   for (const key of ['pattern', 'query']) {
     const value = input[key];
@@ -215,13 +219,8 @@ export function ToolCall(props: { part: ToolPart }) {
     setExpanded(next);
   };
 
-  const inlinePrompt = () => {
-    const question = questionRequest();
-    if (question) return <QuestionPrompt request={question} />;
-
-    const permission = permissionRequest();
-    return permission ? <PermissionPrompt permission={permission} /> : null;
-  };
+  const shouldHideToolCard = () => Boolean(questionRequest()) && isQuestionToolName(tool().tool);
+  const showPermission = () => !questionRequest() && permissionRequest();
 
   const toolContent = () => {
     if (fileChange()) {
@@ -251,8 +250,11 @@ export function ToolCall(props: { part: ToolPart }) {
 
   return (
     <>
-      {toolContent()}
-      <Show when={inlinePrompt()}>{(prompt) => prompt()}</Show>
+      <Show when={!shouldHideToolCard()}>{toolContent()}</Show>
+      <Show when={questionRequest()}>{(question) => <QuestionPrompt request={question()} />}</Show>
+      <Show when={showPermission()}>
+        {(permission) => <PermissionPrompt permission={permission()} />}
+      </Show>
     </>
   );
 }

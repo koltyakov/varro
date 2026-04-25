@@ -2,11 +2,23 @@ import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import type { QuestionRequest } from '../types';
 import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
 
+type QuestionDraft = {
+  selected: Array<Array<string>>;
+  customValues: string[];
+  currentStep: number;
+};
+
+const questionDrafts = new Map<string, QuestionDraft>();
+
 export function QuestionPrompt(props: { request: QuestionRequest }) {
   const questions = () => props.request.questions || [];
   const isCustomEnabled = (questionIndex: number) => questions()[questionIndex]?.custom !== false;
-  const [selected, setSelected] = createSignal<Array<Array<string>>>([]);
-  const [customValues, setCustomValues] = createSignal<string[]>([]);
+  const ensureAnswerSlots = <T,>(values: T[], fallback: T) =>
+    Array.from({ length: questions().length }, (_, index) => values[index] ?? fallback);
+  const savedDraft = () => questionDrafts.get(props.request.id);
+  const [selected, setSelected] = createSignal<Array<Array<string>>>(savedDraft()?.selected || []);
+  const [customValues, setCustomValues] = createSignal<string[]>(savedDraft()?.customValues || []);
+  const [currentStep, setCurrentStep] = createSignal(savedDraft()?.currentStep || 0);
 
   createEffect(() => {
     const count = questions().length;
@@ -18,9 +30,17 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       if (prev.length === count) return prev;
       return Array.from({ length: count }, (_, i) => prev[i] || '');
     });
+    setCurrentStep((step) => Math.min(step, Math.max(0, count - 1)));
+  });
+
+  createEffect(() => {
+    questionDrafts.set(props.request.id, {
+      selected: selected().map((entry) => [...entry]),
+      customValues: [...customValues()],
+      currentStep: currentStep(),
+    });
   });
   const [isSubmitting, setIsSubmitting] = createSignal(false);
-  const [currentStep, setCurrentStep] = createSignal(0);
 
   const normalizedAnswers = createMemo(() =>
     questions().map((question, index) => {
@@ -39,7 +59,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
 
   const toggleOption = (questionIndex: number, label: string, multiple?: boolean) => {
     setSelected((prev) =>
-      prev.map((entry, index) => {
+      ensureAnswerSlots(prev, []).map((entry, index) => {
         if (index !== questionIndex) return entry;
         if (multiple) {
           return entry.includes(label) ? entry.filter((item) => item !== label) : [...entry, label];
@@ -48,16 +68,20 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       })
     );
     if (!multiple && isCustomEnabled(questionIndex)) {
-      setCustomValues((prev) => prev.map((entry, index) => (index === questionIndex ? '' : entry)));
+      setCustomValues((prev) =>
+        ensureAnswerSlots(prev, '').map((entry, index) => (index === questionIndex ? '' : entry))
+      );
     }
   };
 
   const updateCustom = (questionIndex: number, value: string) => {
     setCustomValues((prev) =>
-      prev.map((entry, index) => (index === questionIndex ? value : entry))
+      ensureAnswerSlots(prev, '').map((entry, index) => (index === questionIndex ? value : entry))
     );
     if (value.trim() && !questions()[questionIndex]?.multiple) {
-      setSelected((prev) => prev.map((entry, index) => (index === questionIndex ? [] : entry)));
+      setSelected((prev) =>
+        ensureAnswerSlots(prev, []).map((entry, index) => (index === questionIndex ? [] : entry))
+      );
     }
   };
 
@@ -76,6 +100,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     setIsSubmitting(true);
     try {
       await respondQuestion(props.request.id, normalizedAnswers());
+      questionDrafts.delete(props.request.id);
     } finally {
       setIsSubmitting(false);
     }
@@ -86,6 +111,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     setIsSubmitting(true);
     try {
       await rejectQuestion(props.request.id);
+      questionDrafts.delete(props.request.id);
     } finally {
       setIsSubmitting(false);
     }
@@ -148,14 +174,19 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                         (selected()[questionIndex()] || []).includes(option.label);
                       const isMultiple = () => question().multiple;
                       return (
-                        <button
-                          type="button"
+                        <div
                           class={`question-option ${checked() ? 'selected' : ''}`}
                           role={isMultiple() ? 'checkbox' : 'radio'}
                           aria-checked={checked()}
+                          tabIndex={0}
                           onClick={() =>
                             toggleOption(questionIndex(), option.label, question().multiple)
                           }
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            toggleOption(questionIndex(), option.label, question().multiple);
+                          }}
                         >
                           <Show
                             when={isMultiple()}
@@ -181,59 +212,86 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                               <span class="question-option-desc">{option.description}</span>
                             </Show>
                           </div>
-                        </button>
+                        </div>
                       );
                     }}
                   </For>
                   <Show when={question().custom !== false}>
-                    <div
-                      class={`question-option question-option-custom ${(customValues()[questionIndex()] || '').trim() ? 'selected' : ''}`}
-                      onClick={(e) => {
-                        if (e.target instanceof HTMLInputElement) return;
-                        e.currentTarget
-                          .querySelector<HTMLInputElement>('.question-custom-input')
-                          ?.focus();
-                      }}
-                    >
-                      <Show
-                        when={question().multiple}
-                        fallback={
-                          <div
-                            class={`question-radio ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
-                          >
-                            <Show when={(customValues()[questionIndex()] || '').trim()}>
-                              <div class="question-radio-dot" />
-                            </Show>
-                          </div>
-                        }
-                      >
+                    {(() => {
+                      let customInputRef: HTMLInputElement | undefined;
+                      return (
                         <div
-                          class={`question-checkbox ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
-                        >
-                          <Show when={(customValues()[questionIndex()] || '').trim()}>
-                            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                              <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
-                            </svg>
-                          </Show>
-                        </div>
-                      </Show>
-                      <div class="question-option-text question-custom-content">
-                        <span class="question-option-label">Custom answer</span>
-                        <input
-                          type="text"
-                          value={customValues()[questionIndex()] || ''}
-                          placeholder="Type your own answer"
-                          class="question-custom-input"
-                          onInput={(e) => updateCustom(questionIndex(), e.currentTarget.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.isComposing) {
-                              e.preventDefault();
-                              void handlePrimaryAction();
+                          class={`question-option question-option-custom ${(customValues()[questionIndex()] || '').trim() ? 'selected' : ''}`}
+                          role={question().multiple ? 'checkbox' : 'radio'}
+                          aria-checked={!!(customValues()[questionIndex()] || '').trim()}
+                          tabIndex={0}
+                          onClick={(event) => {
+                            if (event.target instanceof HTMLInputElement) return;
+                            if (!question().multiple) {
+                              setSelected((prev) =>
+                                ensureAnswerSlots(prev, []).map((entry, index) =>
+                                  index === questionIndex() ? [] : entry
+                                )
+                              );
                             }
+                            customInputRef?.focus();
                           }}
-                        />
-                      </div>
-                    </div>
+                          onKeyDown={(event) => {
+                            if (event.target instanceof HTMLInputElement) return;
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            customInputRef?.focus();
+                          }}
+                        >
+                          <Show
+                            when={question().multiple}
+                            fallback={
+                              <div
+                                class={`question-radio ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
+                              >
+                                <Show when={(customValues()[questionIndex()] || '').trim()}>
+                                  <div class="question-radio-dot" />
+                                </Show>
+                              </div>
+                            }
+                          >
+                            <div
+                              class={`question-checkbox ${(customValues()[questionIndex()] || '').trim() ? 'checked' : ''}`}
+                            >
+                              <Show when={(customValues()[questionIndex()] || '').trim()}>
+                                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                                  <path d="M6.5 12.5l-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z" />
+                                </svg>
+                              </Show>
+                            </div>
+                          </Show>
+                          <div class="question-option-text question-custom-content">
+                            <span class="question-option-label">Custom answer</span>
+                            <input
+                              type="text"
+                              value={customValues()[questionIndex()] || ''}
+                              placeholder="Type your own answer"
+                              class="question-custom-input"
+                              ref={(el) => {
+                                customInputRef = el;
+                              }}
+                              onInput={(event) =>
+                                updateCustom(questionIndex(), event.currentTarget.value)
+                              }
+                              onChange={(event) =>
+                                updateCustom(questionIndex(), event.currentTarget.value)
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' && !event.isComposing) {
+                                  event.preventDefault();
+                                  void handlePrimaryAction();
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </Show>
                 </div>
               </div>

@@ -16,7 +16,6 @@ export function registerCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('varro.chat.focus', async () => {
       try {
-        await captureTerminalSelectionForContext(sidebar, contextProvider, { silent: true });
         await vscode.commands.executeCommand('workbench.view.extension.varro');
         sidebar.requestInputFocus();
       } catch (err) {
