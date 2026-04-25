@@ -161,6 +161,7 @@ export type ExtensionMessage =
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session' }
   | { type: 'command/focus-input' }
+  | { type: 'command/open-attention-sessions' }
   | { type: 'command/abort' };
 
 export type WebviewMessage =

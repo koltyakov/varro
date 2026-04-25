@@ -586,6 +586,23 @@ describe('standalone action prompts', () => {
     expect(getStandalonePermissionPrompts([], permissions, 'session-1')).toEqual(permissions);
   });
 
+  it('keeps one standalone permission prompt for duplicate requests', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'external_directory',
+        sessionID: 'session-1',
+        messageID: '',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 1 },
+        duplicateIDs: ['perm-1', 'perm-2'],
+      },
+    ];
+
+    expect(getStandalonePermissionPrompts([], permissions, 'session-1')).toEqual(permissions);
+  });
+
   it('does not duplicate permissions already linked to a tool call', () => {
     const permissions: Permission[] = [
       {

@@ -102,4 +102,15 @@ describe('normalizePermissionEvent', () => {
     });
     expect(out?.pattern).toEqual(['ls']);
   });
+
+  it('preserves an incoming permission event timestamp', () => {
+    const out = normalizePermissionEvent({
+      id: 'perm-1',
+      sessionID: 'session-1',
+      permission: 'bash',
+      time: { created: 123 },
+    });
+
+    expect(out?.time.created).toBe(123);
+  });
 });

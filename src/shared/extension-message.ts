@@ -22,6 +22,7 @@ const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'api/response',
   'command/new-session',
   'command/focus-input',
+  'command/open-attention-sessions',
   'command/abort',
 ]);
 
@@ -42,6 +43,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
   switch (type) {
     case 'command/new-session':
     case 'command/focus-input':
+    case 'command/open-attention-sessions':
     case 'command/abort':
       return { type };
 

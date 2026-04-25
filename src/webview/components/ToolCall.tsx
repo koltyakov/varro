@@ -1,7 +1,7 @@
 import { Show, For, createEffect, createMemo, createSignal, createResource } from 'solid-js';
 import type { RepoFileStatus, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
-import { state as appState, getSessionTreeRootId } from '../lib/state';
+import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
@@ -149,13 +149,28 @@ export function ToolCall(props: { part: ToolPart }) {
         request.tool?.callID === tool().callID
     );
 
-  const permissionRequest = () =>
-    appState.permissions.find(
-      (perm) =>
-        (getSessionTreeRootId(perm.sessionID) || perm.sessionID) === toolSessionRootId() &&
-        perm.messageID === tool().messageID &&
-        perm.callID === tool().callID
+  const isPermissionMemberMatch = (perm: (typeof appState.permissions)[number]) =>
+    getPermissionGroupMembers(perm).some(
+      (member) =>
+        (getSessionTreeRootId(member.sessionID) || member.sessionID) === toolSessionRootId() &&
+        member.messageID === tool().messageID &&
+        member.callID === tool().callID
     );
+
+  const permissionRequest = () =>
+    appState.permissions.find((perm) => isPermissionMemberMatch(perm));
+
+  const isPrimaryPermissionOwner = () => {
+    const permission = permissionRequest();
+    if (!permission) return false;
+    const [primaryMember] = getPermissionGroupMembers(permission);
+    return (
+      (getSessionTreeRootId(primaryMember.sessionID) || primaryMember.sessionID) ===
+        toolSessionRootId() &&
+      primaryMember.messageID === tool().messageID &&
+      primaryMember.callID === tool().callID
+    );
+  };
 
   const filePath = () => {
     return getToolReadPath(tool().tool, state());
@@ -219,8 +234,15 @@ export function ToolCall(props: { part: ToolPart }) {
     setExpanded(next);
   };
 
-  const shouldHideToolCard = () => Boolean(questionRequest()) && isQuestionToolName(tool().tool);
-  const showPermission = () => !questionRequest() && permissionRequest();
+  const shouldHideToolCard = () => {
+    if (permissionRequest()) return true;
+    return Boolean(questionRequest()) && isQuestionToolName(tool().tool);
+  };
+  const showPermission = () => {
+    const permission = permissionRequest();
+    if (questionRequest() || !permission || !isPrimaryPermissionOwner()) return null;
+    return permission;
+  };
 
   const toolContent = () => {
     if (fileChange()) {

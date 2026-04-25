@@ -5,6 +5,7 @@ import type {
   Message,
   Part,
   Permission,
+  PermissionGroupMember,
   QuestionRequest,
   Todo,
   SessionStatus,
@@ -230,6 +231,79 @@ function normalizeInitialPermission(value: Record<string, unknown>): Permission 
   };
 }
 
+function stableSerializePermissionValue(value: unknown): string {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableSerializePermissionValue(item)).join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).toSorted(([a], [b]) =>
+      a.localeCompare(b)
+    );
+    return `{${entries
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableSerializePermissionValue(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function getPermissionGroupMembers(permission: Permission): PermissionGroupMember[] {
+  if (permission.groupMembers?.length) {
+    return permission.groupMembers.map((member) => ({ ...member }));
+  }
+
+  return [
+    {
+      id: permission.id,
+      sessionID: permission.sessionID,
+      messageID: permission.messageID,
+      callID: permission.callID,
+    },
+  ];
+}
+
+export function getPermissionSignature(permission: Permission): string {
+  const pattern = Array.isArray(permission.pattern)
+    ? [...permission.pattern]
+    : (permission.pattern ?? null);
+  return stableSerializePermissionValue({
+    type: permission.type,
+    pattern,
+    sessionID: permission.sessionID,
+    title: permission.title,
+    metadata: permission.metadata,
+  });
+}
+
+export function groupPermissions(permissions: Permission[]): Permission[] {
+  const grouped = new Map<string, Permission>();
+  const sortedPermissions = [...permissions].toSorted((a, b) => a.time.created - b.time.created);
+
+  for (const permission of sortedPermissions) {
+    const signature = getPermissionSignature(permission);
+    const existing = grouped.get(signature);
+    if (!existing) {
+      grouped.set(signature, {
+        ...permission,
+        duplicateIDs: [
+          ...new Set(getPermissionGroupMembers(permission).map((member) => member.id)),
+        ],
+        groupMembers: getPermissionGroupMembers(permission),
+      });
+      continue;
+    }
+
+    const existingMembers = getPermissionGroupMembers(existing);
+    const incomingMembers = getPermissionGroupMembers(permission);
+    existing.groupMembers = [...existingMembers, ...incomingMembers];
+    existing.duplicateIDs = [...new Set(existing.groupMembers.map((member) => member.id))];
+  }
+
+  return [...grouped.values()];
+}
+
 function normalizeInitialQuestion(value: Record<string, unknown>): QuestionRequest | null {
   const id = typeof value.id === 'string' ? value.id : null;
   const sessionID = typeof value.sessionID === 'string' ? value.sessionID : null;
@@ -256,13 +330,15 @@ function normalizeInitialQuestion(value: Record<string, unknown>): QuestionReque
 
 function normalizeInitialPermissions(values: unknown): Permission[] {
   if (!Array.isArray(values)) return [];
-  return values
-    .map((item) =>
-      item && typeof item === 'object'
-        ? normalizeInitialPermission(item as Record<string, unknown>)
-        : null
-    )
-    .filter((item): item is Permission => item !== null);
+  return groupPermissions(
+    values
+      .map((item) =>
+        item && typeof item === 'object'
+          ? normalizeInitialPermission(item as Record<string, unknown>)
+          : null
+      )
+      .filter((item): item is Permission => item !== null)
+  );
 }
 
 function normalizeInitialQuestions(values: unknown): QuestionRequest[] {
@@ -472,6 +548,7 @@ export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
 export const [showModelPicker, setShowModelPicker] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
+export const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
 export const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
 export const [messageStructureVersion, setMessageStructureVersion] = createSignal(0);
 const sessionTreeIndex = createSessionTreeIndex();
@@ -501,6 +578,10 @@ export const [theme, setTheme] = createSignal<WebviewThemeKind>(
 
 export function requestComposerFocus() {
   setComposerFocusKey((value) => value + 1);
+}
+
+export function requestOpenAttentionSessions() {
+  setOpenAttentionSessionsKey((value) => value + 1);
 }
 
 export function requestMessageListScrollToBottom() {
@@ -1214,9 +1295,17 @@ export function addPermission(permission: Permission) {
   setState(
     'permissions',
     produce((perms) => {
-      if (!perms.find((p) => p.id === permission.id)) {
-        perms.push(permission);
+      if (
+        perms.find(
+          (p) =>
+            p.id === permission.id ||
+            p.duplicateIDs?.includes(permission.id) ||
+            p.groupMembers?.some((member) => member.id === permission.id)
+        )
+      ) {
+        return;
       }
+      perms.splice(0, perms.length, ...groupPermissions([...perms, permission]));
     })
   );
 }
@@ -1225,8 +1314,30 @@ export function removePermission(permissionId: string) {
   setState(
     'permissions',
     produce((perms) => {
-      const idx = perms.findIndex((p) => p.id === permissionId);
-      if (idx !== -1) perms.splice(idx, 1);
+      const idx = perms.findIndex(
+        (p) =>
+          p.id === permissionId ||
+          p.duplicateIDs?.includes(permissionId) ||
+          p.groupMembers?.some((member) => member.id === permissionId)
+      );
+      if (idx === -1) return;
+      const permission = perms[idx];
+      const groupMembers = getPermissionGroupMembers(permission).filter(
+        (member) => member.id !== permissionId
+      );
+      if (groupMembers.length === 0) {
+        perms.splice(idx, 1);
+        return;
+      }
+
+      const nextLeader = groupMembers[0];
+      permission.id = nextLeader.id;
+      permission.sessionID = nextLeader.sessionID;
+      permission.messageID = nextLeader.messageID;
+      permission.callID = nextLeader.callID;
+      permission.groupMembers = groupMembers.length > 1 ? groupMembers : undefined;
+      permission.duplicateIDs =
+        groupMembers.length > 1 ? groupMembers.map((member) => member.id) : undefined;
     })
   );
 }

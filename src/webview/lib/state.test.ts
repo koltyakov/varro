@@ -1,18 +1,22 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AssistantMessage, Part } from '../types';
+import type { AssistantMessage, Part, Permission } from '../types';
 import {
   applyMessagePartDelta,
   addClipboardImage,
   clearMessages,
   clearClipboardImages,
   clearStreamingState,
+  addPermission,
   getActiveUsageLimitNotice,
   getMessageById,
   getSessionTreeIds,
+  getPermissionSignature,
+  groupPermissions,
   hasActivePermission,
   hasActiveQuestion,
   hasActiveUsageLimit,
   inputText,
+  removePermission,
   removeClipboardImage,
   setSessionFailed,
   setInputText,
@@ -120,6 +124,209 @@ describe('state streaming deltas', () => {
     });
     expect(state.streamingPartId).toBe('reason-1');
     expect(state.streamingText).toBe('Thinking carefully now');
+  });
+});
+
+describe('permission deduping', () => {
+  beforeEach(() => {
+    setState('permissions', []);
+  });
+
+  it('groups identical permissions into one visible prompt', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'external_directory',
+        pattern: '/tmp/*',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 2 },
+      },
+      {
+        id: 'perm-2',
+        type: 'external_directory',
+        pattern: '/tmp/*',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 1 },
+      },
+    ];
+
+    expect(groupPermissions(permissions)).toEqual([
+      expect.objectContaining({
+        id: 'perm-2',
+        duplicateIDs: expect.arrayContaining(['perm-1', 'perm-2']),
+        groupMembers: expect.arrayContaining([
+          expect.objectContaining({ id: 'perm-1', messageID: 'message-1', callID: 'call-1' }),
+          expect.objectContaining({ id: 'perm-2', messageID: 'message-1', callID: 'call-1' }),
+        ]),
+      }),
+    ]);
+  });
+
+  it('groups identical permissions across different tool calls while both are pending', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'external_directory',
+        pattern: '/tmp/*',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 1 },
+      },
+      {
+        id: 'perm-2',
+        type: 'external_directory',
+        pattern: '/tmp/*',
+        sessionID: 'session-1',
+        messageID: 'message-2',
+        callID: 'call-2',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 1.4 },
+      },
+    ];
+
+    expect(groupPermissions(permissions)).toEqual([
+      expect.objectContaining({
+        id: 'perm-1',
+        duplicateIDs: expect.arrayContaining(['perm-1', 'perm-2']),
+        groupMembers: expect.arrayContaining([
+          expect.objectContaining({ id: 'perm-1', messageID: 'message-1', callID: 'call-1' }),
+          expect.objectContaining({ id: 'perm-2', messageID: 'message-2', callID: 'call-2' }),
+        ]),
+      }),
+    ]);
+  });
+
+  it('groups identical permissions that arrive later while the earlier one is still pending', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'external_directory',
+        pattern: '/tmp/*',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 1 },
+      },
+      {
+        id: 'perm-2',
+        type: 'external_directory',
+        pattern: '/tmp/*',
+        sessionID: 'session-1',
+        messageID: 'message-2',
+        callID: 'call-2',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 3 },
+      },
+    ];
+
+    expect(groupPermissions(permissions)).toEqual([
+      expect.objectContaining({
+        id: 'perm-1',
+        duplicateIDs: expect.arrayContaining(['perm-1', 'perm-2']),
+        groupMembers: expect.arrayContaining([
+          expect.objectContaining({ id: 'perm-1', messageID: 'message-1', callID: 'call-1' }),
+          expect.objectContaining({ id: 'perm-2', messageID: 'message-2', callID: 'call-2' }),
+        ]),
+      }),
+    ]);
+  });
+
+  it('keeps distinct permission payloads separate', () => {
+    const first: Permission = {
+      id: 'perm-1',
+      type: 'external_directory',
+      pattern: '/tmp/*',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      callID: 'call-1',
+      title: 'external_directory /tmp/*',
+      metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+      time: { created: 1 },
+    };
+    const second: Permission = {
+      ...first,
+      id: 'perm-2',
+      metadata: { filepath: '/tmp/file-b', parentDir: '/tmp' },
+    };
+
+    expect(getPermissionSignature(first)).not.toBe(getPermissionSignature(second));
+    expect(groupPermissions([first, second])).toHaveLength(2);
+  });
+
+  it('dedupes identical permissions added live', () => {
+    addPermission({
+      id: 'perm-1',
+      type: 'external_directory',
+      pattern: '/tmp/*',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      callID: 'call-1',
+      title: 'external_directory /tmp/*',
+      metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+      time: { created: 2 },
+    });
+    addPermission({
+      id: 'perm-2',
+      type: 'external_directory',
+      pattern: '/tmp/*',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      callID: 'call-1',
+      title: 'external_directory /tmp/*',
+      metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+      time: { created: 1 },
+    });
+
+    expect(state.permissions).toEqual([
+      expect.objectContaining({
+        id: 'perm-2',
+        duplicateIDs: expect.arrayContaining(['perm-1', 'perm-2']),
+      }),
+    ]);
+  });
+
+  it('keeps remaining duplicates visible when one permission id is removed', () => {
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'external_directory',
+        pattern: '/tmp/*',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 1 },
+        duplicateIDs: ['perm-1', 'perm-2'],
+        groupMembers: [
+          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+          { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
+        ],
+      },
+    ]);
+
+    removePermission('perm-1');
+
+    expect(state.permissions).toHaveLength(1);
+    expect(state.permissions[0]?.id).toBe('perm-2');
+    expect(state.permissions[0]?.duplicateIDs).toBeUndefined();
+    expect(state.permissions[0]?.messageID).toBe('message-2');
+    expect(state.permissions[0]?.callID).toBe('call-2');
   });
 });
 

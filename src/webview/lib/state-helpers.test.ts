@@ -582,12 +582,14 @@ describe('state helpers', () => {
     const stateModule = await loadState();
 
     expect(stateModule.composerFocusKey()).toBe(0);
+    expect(stateModule.openAttentionSessionsKey()).toBe(0);
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
     expect(stateModule.expandThinkingByDefault()).toBe(false);
     expect(stateModule.showStickyUserPrompt()).toBe(true);
 
     stateModule.requestComposerFocus();
+    stateModule.requestOpenAttentionSessions();
     stateModule.requestMessageListScrollToBottom();
     stateModule.toggleThinking();
     stateModule.setExpandThinkingByDefaultPreference(true);
@@ -595,6 +597,7 @@ describe('state helpers', () => {
     stateModule.resetPastedImageIndex();
 
     expect(stateModule.composerFocusKey()).toBe(1);
+    expect(stateModule.openAttentionSessionsKey()).toBe(1);
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
     expect(stateModule.showThinking()).toBe(false);
     expect(stateModule.expandThinkingByDefault()).toBe(true);

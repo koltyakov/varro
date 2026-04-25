@@ -11,6 +11,8 @@ function formatMetadataValue(value: unknown): string {
 export function PermissionPrompt(props: { permission: Permission }) {
   const sessionId = () => props.permission.sessionID;
   const [responding, setResponding] = createSignal(false);
+  const duplicateCount = () =>
+    props.permission.groupMembers?.length || props.permission.duplicateIDs?.length || 0;
 
   const handleRespond = async (response: 'once' | 'always' | 'reject') => {
     if (responding()) return;
@@ -35,6 +37,9 @@ export function PermissionPrompt(props: { permission: Permission }) {
           <path d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1zm4 6c0 2.8-1.8 5.2-4 6.2C5.8 12.2 4 9.8 4 7V4l4-1.5L12 4v3z" />
         </svg>
         <span class="permission-prompt-label">Permission Required</span>
+        <Show when={duplicateCount() > 1}>
+          <span class="permission-prompt-count">{duplicateCount()}</span>
+        </Show>
       </div>
 
       <div class="permission-prompt-text">{props.permission.title}</div>

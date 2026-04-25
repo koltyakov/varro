@@ -4,6 +4,7 @@ import {
   showSessionPicker,
   setShowSessionPicker,
   showSettings,
+  openAttentionSessionsKey,
   hasActiveUsageLimit,
   isSessionUnread,
   isSessionAwaitingInput,
@@ -167,6 +168,16 @@ export function Chat() {
     }
   });
 
+  createEffect(
+    on(
+      openAttentionSessionsKey,
+      () => {
+        openAttentionSessionsFromCommand();
+      },
+      { defer: true }
+    )
+  );
+
   const openAllSessions = async () => {
     setSessionFilter(null);
     setSubagentParentId(null);
@@ -185,6 +196,18 @@ export function Chat() {
 
   const openAttentionSessions = () => {
     void openSessionFilter('attention', attentionSessionsCount());
+  };
+
+  const openAttentionSessionsFromCommand = () => {
+    void openSessionFilter(
+      'attention',
+      getHeaderAttentionCount(
+        primarySessions(),
+        (sessionId) => sessionIndicators().attentionIds.has(sessionId),
+        state.activeSessionId,
+        false
+      )
+    );
   };
 
   const openFailedSessions = () => {

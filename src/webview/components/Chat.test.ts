@@ -26,6 +26,7 @@ import {
   shouldShowSessionHeaderBadge,
 } from './Chat';
 import {
+  requestOpenAttentionSessions,
   setDesktopSessionPaneSide,
   hasActiveUsageLimit,
   state,
@@ -748,6 +749,24 @@ describe('header status badges', () => {
 
     expect(selectSessionSpy).not.toHaveBeenCalled();
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('opens attention sessions from state and auto-selects a single match', async () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+
+    setState('sessions', [session('active', 500), session('attention-target', 400)]);
+    setState('activeSessionId', 'active');
+    setState('questions', [{ id: 'question-1', sessionID: 'attention-target', questions: [] }]);
+
+    cleanup = render(() => Chat(), container!);
+
+    requestOpenAttentionSessions();
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('attention-target');
+    expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
   });
 
   it('hides skipped plans from the plan-ready badge', () => {

@@ -23,6 +23,21 @@ export function registerCommands(
       }
     }),
 
+    vscode.commands.registerCommand('varro.chat.statusBarClick', async () => {
+      try {
+        await vscode.commands.executeCommand('workbench.view.extension.varro');
+        if (sidebar.hasPendingAttention()) {
+          sidebar.openAttentionSessions();
+          return;
+        }
+        sidebar.requestInputFocus();
+      } catch (err) {
+        logger.error(
+          `varro.chat.statusBarClick: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }),
+
     vscode.commands.registerCommand('varro.chat.newSession', () => {
       sidebar.postCommand('new-session');
     }),

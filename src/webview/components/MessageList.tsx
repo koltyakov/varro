@@ -11,6 +11,7 @@ import {
 } from 'solid-js';
 import {
   getSelectedAgentForSession,
+  getPermissionGroupMembers,
   state,
   isLoading,
   isSkippedPlanSession,
@@ -106,7 +107,9 @@ export function getStandalonePermissionPrompts(
   return permissions.filter(
     (permission) =>
       sessionIds.has(permission.sessionID) &&
-      !hasLinkedToolCall(messages, permission.sessionID, permission.messageID, permission.callID)
+      !getPermissionGroupMembers(permission).some((member) =>
+        hasLinkedToolCall(messages, member.sessionID, member.messageID, member.callID)
+      )
   );
 }
 

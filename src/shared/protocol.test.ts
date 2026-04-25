@@ -24,6 +24,7 @@ describe('protocol conformance', () => {
       'api/response': true,
       'command/new-session': true,
       'command/focus-input': true,
+      'command/open-attention-sessions': true,
       'command/abort': true,
     };
 

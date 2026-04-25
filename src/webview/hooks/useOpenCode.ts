@@ -16,10 +16,12 @@ import {
   markLoadingActivity,
   setError,
   requestComposerFocus,
+  requestOpenAttentionSessions,
   persistActiveSessionId,
   getPersistedActiveSessionId,
   getPersistedSelectedAgent,
   getPersistedSelectedModel,
+  requestMessageListScrollToBottom,
   clearClipboardImages,
   clearMessages,
   replaceMessages,
@@ -323,7 +325,10 @@ function extractTodosFromPart(part: Part): Todo[] | null {
   const toolState = part.state as Record<string, unknown>;
 
   if (toolName === 'parallel' || toolName.endsWith('.parallel')) {
-    return extractTodosFromParallelTool(toolState.input) || extractTodosFromParallelTool(toolState.metadata);
+    return (
+      extractTodosFromParallelTool(toolState.input) ||
+      extractTodosFromParallelTool(toolState.metadata)
+    );
   }
 
   if (!toolName.includes('todo') && !TODO_TOOL_NAMES.has(toolName)) {
@@ -572,6 +577,9 @@ export function useOpenCode() {
           break;
         case 'command/focus-input':
           requestComposerFocus();
+          break;
+        case 'command/open-attention-sessions':
+          requestOpenAttentionSessions();
           break;
         case 'command/abort':
           abortSession();
@@ -1074,6 +1082,7 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
     upsertSession(session);
     setMessagesIncremental(msgs);
     syncFailedSessionsFromMessages(msgs);
+    requestMessageListScrollToBottom();
     const inferredAgent = !persistedAgent ? deriveSelectedAgentFromMessages(msgs) : null;
     if (inferredAgent) {
       setSelectedAgent(inferredAgent, { sessionId: id, persistGlobal: false });
@@ -1531,8 +1540,21 @@ export async function respondPermission(
   options?: { rethrow?: boolean }
 ) {
   try {
-    await client.session.respondPermission(sessionId, permissionId, response);
-    removePermission(permissionId);
+    const permission = state.permissions.find(
+      (item) =>
+        item.id === permissionId ||
+        item.duplicateIDs?.includes(permissionId) ||
+        item.groupMembers?.some((member) => member.id === permissionId)
+    );
+    const groupMembers = permission?.groupMembers?.length
+      ? permission.groupMembers
+      : [{ id: permissionId, sessionID: sessionId }];
+    await Promise.all(
+      groupMembers.map((member) =>
+        client.session.respondPermission(member.sessionID, member.id, response)
+      )
+    );
+    groupMembers.forEach((member) => removePermission(member.id));
   } catch (err) {
     setError(err instanceof Error ? err.message : 'Failed to respond to permission');
     if (options?.rethrow) {

@@ -51,6 +51,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly fileSearch = new FileSearchService();
   private readonly sessionState: SessionStateManager;
   private pendingInputFocus = false;
+  private pendingOpenAttentionSessions = false;
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
   private serverEventHandler: ((event: unknown) => void) | undefined;
   private webviewDisposables: vscode.Disposable[] = [];
@@ -96,7 +97,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       1000
     );
     this.statusBarItem.name = 'Varro Session Status';
-    this.statusBarItem.command = 'varro.chat.focus';
+    this.statusBarItem.command = 'varro.chat.statusBarClick';
     this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
       this.updateStatusBarItem();
     });
@@ -141,16 +142,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private showInterruptedSessionNotification() {
     if (this.interruptedSessionsForWebview.length === 0) return;
-    const labels = this.interruptedSessionsForWebview
-      .map((item) => item.title?.trim() || item.id)
-      .filter(Boolean);
-    const preview = labels.slice(0, 3).join(', ');
-    const suffix = labels.length > 3 ? ` +${labels.length - 3} more` : '';
-    const message = preview
-      ? `Varro is reconnecting to previously running sessions: ${preview}${suffix}.`
-      : `Varro is reconnecting to ${this.interruptedSessionsForWebview.length} previously running sessions.`;
     this.interruptedSessionsForWebview = [];
-    void vscode.window.showInformationMessage(message);
   }
 
   private updateStatusBarItem() {
@@ -287,6 +279,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.post({ type: 'server/status', payload: this._status });
           this.sessionState.publishPendingAttention();
           this.flushPendingInputFocus();
+          this.flushPendingOpenAttentionSessions();
           void this.ensureServerStarted().catch(() => {});
         } else {
           this.webviewHasFocus = false;
@@ -390,6 +383,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
           this.sessionState.publishPendingAttention();
           this.flushPendingInputFocus();
+          this.flushPendingOpenAttentionSessions();
           this.showInterruptedSessionNotification();
           void this.ensureServerStarted().catch(() => {});
           break;
@@ -733,10 +727,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.flushPendingInputFocus();
   }
 
+  hasPendingAttention() {
+    return this.sessionState.pending.size > 0;
+  }
+
+  openAttentionSessions() {
+    this.pendingOpenAttentionSessions = true;
+    this.flushPendingOpenAttentionSessions();
+  }
+
   private flushPendingInputFocus() {
     if (!this.pendingInputFocus || !this.view?.visible || !this.webviewReady) return;
     this.pendingInputFocus = false;
     this.post({ type: 'command/focus-input' });
+  }
+
+  private flushPendingOpenAttentionSessions() {
+    if (!this.pendingOpenAttentionSessions || !this.view?.visible || !this.webviewReady) return;
+    this.pendingOpenAttentionSessions = false;
+    this.post({ type: 'command/open-attention-sessions' });
   }
 
   private async getHtml(): Promise<string> {

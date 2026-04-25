@@ -23,14 +23,8 @@
   "main": "./dist/extension/extension.js",
   "icon": "assets/icon.png",
   "activationEvents": [
-    "onView:varro.chat",
     "onCommand:varro.chat.focus",
-    "onCommand:varro.chat.newSession",
-    "onCommand:varro.chat.abort",
-    "onCommand:varro.server.restart",
-    "onCommand:varro.chat.addToContext",
-    "onCommand:varro.chat.addSelectionToContext",
-    "onCommand:varro.chat.addTerminalSelectionToContext"
+    "onCommand:varro.chat.statusBarClick"
   ],
   "contributes": {
     "viewsContainers": {

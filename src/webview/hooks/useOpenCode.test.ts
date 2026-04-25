@@ -154,7 +154,12 @@ function todoPart(id: string, messageID: string, content: string, status = 'comp
   } as Part;
 }
 
-function parallelTodoPart(id: string, messageID: string, content: string, status = 'completed'): Part {
+function parallelTodoPart(
+  id: string,
+  messageID: string,
+  content: string,
+  status = 'completed'
+): Part {
   return {
     id,
     sessionID: 'session-1',
@@ -891,7 +896,9 @@ describe('sendMessage', () => {
       { info: userMessage('user-1'), parts: [] },
       {
         info: assistantMessage('assistant-1', 'user-1'),
-        parts: [parallelTodoPart('todo-part-1', 'assistant-1', 'Follow up on review', 'in_progress')],
+        parts: [
+          parallelTodoPart('todo-part-1', 'assistant-1', 'Follow up on review', 'in_progress'),
+        ],
       },
     ]);
     clientMocks.sessionStatus.mockResolvedValue({});
@@ -907,6 +914,59 @@ describe('sendMessage', () => {
         priority: 'medium',
       },
     ]);
+  });
+
+  it('requests scrolling to the latest message when selecting an existing session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([
+      { info: userMessage('user-1'), parts: [] },
+      { info: assistantMessage('assistant-1', 'user-1'), parts: [] },
+    ]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    expect(stateModule.messageListScrollRequestKey()).toBe(0);
+
+    await hookModule.selectSession('session-1');
+
+    expect(stateModule.messageListScrollRequestKey()).toBe(1);
+  });
+
+  it('requests opening attention sessions when the extension sends that command', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      expect(stateModule.openAttentionSessionsKey()).toBe(0);
+
+      bridgeHandler({ type: 'command/open-attention-sessions' });
+
+      expect(stateModule.openAttentionSessionsKey()).toBe(1);
+    } finally {
+      dispose();
+    }
   });
 
   it('marks the next session seen when archive auto-selects it', async () => {

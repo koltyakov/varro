@@ -38,6 +38,12 @@ export function normalizePermissionEvent(props: Record<string, unknown>): Permis
     ? (props.patterns.filter((p): p is string => typeof p === 'string') as string[])
     : undefined;
   const title = [permissionName, patterns ? patterns.join(', ') : ''].filter(Boolean).join(' ');
+  const createdAt =
+    props.time &&
+    typeof props.time === 'object' &&
+    typeof (props.time as { created?: unknown }).created === 'number'
+      ? (props.time as { created: number }).created
+      : Date.now() / 1000;
 
   return {
     id,
@@ -48,6 +54,6 @@ export function normalizePermissionEvent(props: Record<string, unknown>): Permis
     callID: tool?.callID,
     title,
     metadata: (props.metadata as { [key: string]: unknown } | undefined) || {},
-    time: { created: Date.now() / 1000 },
+    time: { created: createdAt },
   };
 }

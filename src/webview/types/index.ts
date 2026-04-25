@@ -265,6 +265,13 @@ export type RepoFileStatus = {
   status: 'added' | 'deleted' | 'modified';
 };
 
+export type PermissionGroupMember = {
+  id: string;
+  sessionID: string;
+  messageID: string;
+  callID?: string;
+};
+
 export type Permission = {
   id: string;
   type: string;
@@ -275,6 +282,8 @@ export type Permission = {
   title: string;
   metadata: { [key: string]: unknown };
   time: { created: number };
+  duplicateIDs?: string[];
+  groupMembers?: PermissionGroupMember[];
 };
 
 export type QuestionOption = {

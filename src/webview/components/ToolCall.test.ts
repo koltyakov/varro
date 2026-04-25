@@ -197,7 +197,7 @@ describe('ToolCall', () => {
     expect(detail?.textContent).toContain('Aborted');
   });
 
-  it('keeps the command card visible when a linked permission prompt is pending', () => {
+  it('hides the command card when a linked permission prompt is pending', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -223,11 +223,79 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.tool-invocation-header')?.textContent).toContain(
-      'git status'
-    );
+    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
     expect(container?.textContent).toContain('Permission Required');
+  });
+
+  it('shows one linked permission prompt for duplicate permission requests', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command: 'git status' }, 'git status'),
+    };
+
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'external_directory',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 2 },
+        duplicateIDs: ['perm-1', 'perm-2'],
+        groupMembers: [
+          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+          { id: 'perm-2', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
+    expect(container?.querySelector('.permission-prompt-count')?.textContent).toBe('2');
+  });
+
+  it('shows the collapsed permission prompt only on the primary linked tool call', () => {
+    const part: ToolPart = {
+      id: 'tool-2',
+      sessionID: 'session-1',
+      messageID: 'message-2',
+      type: 'tool',
+      callID: 'call-2',
+      tool: 'bash',
+      state: completedState({ command: 'git status' }, 'git status'),
+    };
+
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'external_directory',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 1 },
+        duplicateIDs: ['perm-1', 'perm-2'],
+        groupMembers: [
+          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+          { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(0);
+    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
   });
 
   it('keeps the command card visible when a linked question prompt is pending', () => {
