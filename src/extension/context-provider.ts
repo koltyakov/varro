@@ -65,6 +65,7 @@ export class ContextProvider implements vscode.Disposable {
   > {
     const terminal = vscode.window.activeTerminal;
     if (!terminal) {
+      this._terminalSelection = null;
       return { ok: false, reason: 'no-terminal' };
     }
 
@@ -109,6 +110,7 @@ export class ContextProvider implements vscode.Disposable {
     }
 
     if (!capturedSelection || !selectionText.trim()) {
+      this._terminalSelection = null;
       return { ok: false, reason: 'empty-selection' };
     }
 

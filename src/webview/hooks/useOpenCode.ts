@@ -1330,6 +1330,7 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
 
   if (parts.length === 0) return;
 
+  requestMessageListScrollToBottom();
   startLoading();
   setError(null);
 

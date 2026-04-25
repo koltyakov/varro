@@ -602,8 +602,6 @@ export function ChatInput() {
     const hasSendableImages = hasSendableClipboardImages();
     if (!sendableText.trim() && state.droppedFiles.length === 0 && !hasSendableImages) return;
 
-    requestMessageListScrollToBottom();
-
     if (
       mode !== 'steer' &&
       isLoading() &&
@@ -614,6 +612,7 @@ export function ChatInput() {
       state.droppedFiles.length === 0 &&
       !hasSendableImages
     ) {
+      requestMessageListScrollToBottom();
       enqueueMessage({
         id: createAttachmentID(),
         sessionId: state.activeSessionId,

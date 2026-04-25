@@ -751,7 +751,12 @@ describe('Message assistant final answer rendering', () => {
     ]);
 
     cleanup = render(
-      () => Message({ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }),
+      () =>
+        Message({
+          info: assistant,
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+          isLastAssistant: true,
+        }),
       container!
     );
 

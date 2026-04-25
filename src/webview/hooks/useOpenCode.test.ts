@@ -218,6 +218,21 @@ beforeEach(() => {
 });
 
 describe('sendMessage', () => {
+  it('requests scrolling to the latest message when sending', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    expect(stateModule.messageListScrollRequestKey()).toBe(0);
+
+    await hookModule.sendMessage('Review this');
+
+    expect(stateModule.messageListScrollRequestKey()).toBe(1);
+  });
+
   it('omits pasted images and placeholder tags for non-vision models', async () => {
     const { stateModule, hookModule } = await loadModules();
 

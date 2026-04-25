@@ -43,7 +43,7 @@ export function normalizePermissionEvent(props: Record<string, unknown>): Permis
     typeof props.time === 'object' &&
     typeof (props.time as { created?: unknown }).created === 'number'
       ? (props.time as { created: number }).created
-      : Date.now() / 1000;
+      : Date.now();
 
   return {
     id,

@@ -132,12 +132,6 @@ export function Message(props: {
     return !!error && !isAbortedAssistantError(error);
   });
   const isSubagent = () => assistant()?.mode === 'subagent';
-  const isLatestAssistant = () => {
-    const latestAssistant = [...state.messages]
-      .toReversed()
-      .find((entry) => entry.info.role === 'assistant');
-    return latestAssistant?.info.id === assistant()?.id;
-  };
   const normalizedParts = createMemo(() =>
     assistant()
       ? collapseLeadingDuplicateFileEvents(
@@ -255,7 +249,7 @@ export function Message(props: {
                 parts={visibleAssistantParts()}
                 errorMessage={assistantErrorMessage()}
                 onRetry={
-                  isLatestAssistant() && canRetryAssistant()
+                  (props.isLastAssistant ?? false) && canRetryAssistant()
                     ? () => void retryMessage(assistant()!.id, assistant()!.sessionID)
                     : undefined
                 }

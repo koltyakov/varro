@@ -116,6 +116,32 @@ describe('ContextProvider', () => {
     }
   });
 
+  it('clears stale terminal selection when a later capture fails', async () => {
+    clipboardState.values = [
+      'existing clipboard',
+      'new terminal output',
+      'existing clipboard',
+      'existing clipboard',
+      'existing clipboard',
+    ];
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await provider.captureTerminalSelection();
+      expect(provider.terminalSelection).toEqual({
+        text: 'new terminal output',
+        terminalName: 'Terminal 1',
+      });
+
+      const result = await provider.captureTerminalSelection();
+
+      expect(result).toEqual({ ok: false, reason: 'empty-selection' });
+      expect(provider.terminalSelection).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('opens absolute paths outside the workspace', async () => {
     const provider = new ContextProvider(vi.fn());
     const uri = { fsPath: '/tmp/varro-drop.txt' };

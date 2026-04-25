@@ -187,8 +187,8 @@ function normalizeInitialPermission(value: Record<string, unknown>): Permission 
     value.time &&
     typeof value.time === 'object' &&
     typeof (value.time as { created?: unknown }).created === 'number'
-      ? ((value.time as { created: number }).created ?? Date.now() / 1000)
-      : Date.now() / 1000;
+      ? ((value.time as { created: number }).created ?? Date.now())
+      : Date.now();
   const title =
     typeof value.title === 'string' && value.title.trim().length > 0
       ? value.title
