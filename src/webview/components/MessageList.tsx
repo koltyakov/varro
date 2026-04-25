@@ -48,7 +48,12 @@ import {
   collapseLeadingDuplicateFileEvents,
   getTrailingFileEventSignature,
 } from '../lib/message-event-collapse';
-import { isFileEditPart, isFileReadPart, shouldShowAssistantPartInline } from '../lib/part-utils';
+import {
+  isFileEditPart,
+  isFileReadPart,
+  isWorkspaceDirectoryText,
+  shouldShowAssistantPartInline,
+} from '../lib/part-utils';
 import { PermissionPrompt } from './PermissionPrompt';
 import { QuestionPrompt } from './QuestionPrompt';
 
@@ -363,6 +368,33 @@ function isMessageHiddenBehindStickyPreview(args: {
   return true;
 }
 
+function hasVisibleBlockingStreamingPart(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  streamingPartId: string | null,
+  streamingText: string
+) {
+  if (!streamingPartId) return false;
+
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.id !== streamingPartId) continue;
+
+      if (part.type === 'text') {
+        const text = (streamingText || part.text).trim();
+        return text.length > 0 && !isWorkspaceDirectoryText(text);
+      }
+
+      if (part.type === 'reasoning') {
+        return false;
+      }
+
+      return shouldShowAssistantPartInline(part);
+    }
+  }
+
+  return false;
+}
+
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
@@ -408,6 +440,9 @@ export function MessageList() {
   );
   const standaloneQuestions = createMemo(() =>
     getStandaloneQuestionPrompts(messages(), state.questions, state.activeSessionId)
+  );
+  const visibleBlockingStreamingPart = createMemo(() =>
+    hasVisibleBlockingStreamingPart(messages(), state.streamingPartId, state.streamingText)
   );
   const messageIndexById = createMemo(() => {
     const result = new Map<string, number>();
@@ -1032,7 +1067,7 @@ export function MessageList() {
             (isLoading() || isSessionCompacting()) &&
             !hasActiveQuestion() &&
             !hasActivePermission() &&
-            !state.streamingPartId &&
+            !visibleBlockingStreamingPart() &&
             !activeUsageLimit()
           }
         >

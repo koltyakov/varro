@@ -210,7 +210,18 @@ export function isAllowedApiRequest(method: string, path: string) {
       Boolean(url.searchParams.get('providerID')?.trim())
     );
   }
+  if (pathname === '/varro/session-trash') {
+    return (method === 'GET' || method === 'DELETE') && noQuery();
+  }
   if (pathname === '/varro/plan/open') return method === 'POST' && noQuery();
+
+  if (segments[0] === 'varro' && segments[1] === 'session-trash' && segments.length === 4) {
+    return (
+      noQuery() &&
+      ((method === 'POST' && segments[3] === 'restore') ||
+        (method === 'DELETE' && segments[3] === 'delete'))
+    );
+  }
 
   if (segments[0] === 'question' && segments.length === 3) {
     return method === 'POST' && noQuery() && (segments[2] === 'reply' || segments[2] === 'reject');

@@ -27,6 +27,7 @@ import {
   type BlockingRequestSnapshot,
   type InterruptedSessionSnapshot,
 } from './session-state-manager';
+import { SessionTrashManager } from './session-trash-manager';
 import {
   isAllowedApiRequest,
   isAllowedExternalUrl,
@@ -50,6 +51,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private onContextFilesChanged?: () => void;
   private readonly fileSearch = new FileSearchService();
   private readonly sessionState: SessionStateManager;
+  private readonly sessionTrash: SessionTrashManager;
   private pendingInputFocus = false;
   private pendingOpenAttentionSessions = false;
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
@@ -67,6 +69,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private webviewAssets: WebviewAssetContent | null = null;
   private interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
   private blockingRequestsForWebview: BlockingRequestSnapshot[] = [];
+  private recycleBinMaintenanceInFlight = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -79,11 +82,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.server = server;
     this.droppedFilesService = new DroppedFilesService(contextProvider);
     this.providerLimitService = new ProviderLimitService(server);
+    this.sessionTrash = new SessionTrashManager(workspaceState);
     this.sessionState = new SessionStateManager(
       workspaceState,
       {
         onPendingAttentionChange: (sessionIds) => {
-          this.post({ type: 'pending-attention/update', payload: { sessionIds } });
+          this.post({
+            type: 'pending-attention/update',
+            payload: {
+              sessionIds: sessionIds.filter((sessionId) => !this.sessionTrash.isHidden(sessionId)),
+            },
+          });
         },
         onStatusChange: () => this.updateStatusBarItem(),
       },
@@ -122,6 +131,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.serverEventHandler = (event: unknown) => {
       const evt = parseServerEvent(event);
       if (!evt) return;
+      if (this.shouldSuppressServerEvent(evt)) return;
       this.sessionState.handleServerEvent(evt);
       this.post({
         type: 'server/event',
@@ -146,12 +156,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getCurrentBlockingRequests(): BlockingRequestSnapshot[] {
-    return [...this.sessionState.pending.entries()].map(([id, request]) => ({
-      id,
-      sessionID: request.sessionID,
-      kind: request.kind,
-      props: request.props,
-    }));
+    return [...this.sessionState.pending.entries()]
+      .map(([id, request]) => ({
+        id,
+        sessionID: request.sessionID,
+        kind: request.kind,
+        props: request.props,
+      }))
+      .filter((item) => !this.sessionTrash.isHidden(item.sessionID));
   }
 
   private replayBlockingRequests(options?: { clearResolvedEmbedded?: boolean }) {
@@ -221,7 +233,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return { visible: false };
     }
 
-    const pendingRequests = [...this.sessionState.pending.values()];
+    const pendingRequests = [...this.sessionState.pending.values()].filter(
+      (request) => !this.sessionTrash.isHidden(request.sessionID)
+    );
     if (pendingRequests.length > 0) {
       return {
         visible: true,
@@ -240,7 +254,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       };
     }
 
-    const completedSessions = [...this.sessionState.completed];
+    const completedSessions = [...this.sessionState.completed].filter(
+      (sessionID) => !this.sessionTrash.isHidden(sessionID)
+    );
     if (completedSessions.length > 0) {
       return {
         visible: true,
@@ -321,11 +337,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postContext();
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.postConfigState();
+          this.postRecycleBinUpdate();
           this.post({ type: 'server/status', payload: this._status });
           this.replayBlockingRequests();
           this.sessionState.publishPendingAttention();
           this.flushPendingInputFocus();
           this.flushPendingOpenAttentionSessions();
+          void this.cleanupExpiredRecycleBin().catch(() => {});
           void this.ensureServerStarted().catch(() => {});
         } else {
           this.webviewHasFocus = false;
@@ -425,6 +443,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.postTerminalSelection(this.contextProvider.terminalSelection);
           this.postContextFiles();
           this.postConfigState();
+          this.postRecycleBinUpdate();
           this.post({ type: 'server/status', payload: this._status });
           this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } });
           this.replayBlockingRequests({ clearResolvedEmbedded: true });
@@ -432,6 +451,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.flushPendingInputFocus();
           this.flushPendingOpenAttentionSessions();
           this.showInterruptedSessionNotification();
+          void this.cleanupExpiredRecycleBin().catch(() => {});
           void this.ensureServerStarted().catch(() => {});
           break;
         case 'webview/focus':
@@ -546,9 +566,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (!isAllowedApiRequest(method, payload.path)) {
         throw new Error('Unsupported API request');
       }
+
+      const recycleBinRequest = this.parseRecycleBinRequest(method, payload.path);
+      if (recycleBinRequest) {
+        const data = await this.handleRecycleBinRequest(recycleBinRequest);
+        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        return;
+      }
+
       if (this._status.state !== 'running') {
         await this.ensureServerStarted();
       }
+      await this.cleanupExpiredRecycleBin();
+
       const providerLimitRequest = this.parseProviderLimitRequest(method, payload.path);
       if (providerLimitRequest) {
         const data = await this.providerLimitService.get(
@@ -574,14 +604,163 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      const hiddenSessionID = this.getHiddenSessionIdFromPath(payload.path);
+      if (hiddenSessionID) {
+        throw new Error('404 Session not found');
+      }
+
+      const softDeleteSessionID = this.parseSoftDeleteSessionRequest(method, payload.path);
+      if (softDeleteSessionID) {
+        const data = await this.moveSessionToRecycleBin(softDeleteSessionID);
+        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        return;
+      }
+
       const data = await this.server.request(method, payload.path, payload.body);
-      this.post({ type: 'api/response', payload: { id: payload.id, data } });
+      this.post({
+        type: 'api/response',
+        payload: { id: payload.id, data: this.filterApiResponse(method, payload.path, data) },
+      });
     } catch (err) {
       this.post({
         type: 'api/response',
         payload: { id: payload.id, error: err instanceof Error ? err.message : String(err) },
       });
     }
+  }
+
+  private parseRecycleBinRequest(method: string, path: string) {
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname === '/varro/session-trash') {
+      if (method === 'GET') return { kind: 'list' } as const;
+      if (method === 'DELETE') return { kind: 'empty' } as const;
+      return null;
+    }
+
+    const restoreMatch = url.pathname.match(/^\/varro\/session-trash\/([^/]+)\/restore$/);
+    if (restoreMatch && method === 'POST') {
+      return { kind: 'restore', rootID: decodeURIComponent(restoreMatch[1]) } as const;
+    }
+
+    const deleteMatch = url.pathname.match(/^\/varro\/session-trash\/([^/]+)\/delete$/);
+    if (deleteMatch && method === 'DELETE') {
+      return { kind: 'delete', rootID: decodeURIComponent(deleteMatch[1]) } as const;
+    }
+
+    return null;
+  }
+
+  private parseSoftDeleteSessionRequest(method: string, path: string) {
+    if (method !== 'DELETE') return null;
+    const url = new URL(path, 'http://localhost');
+    const match = url.pathname.match(/^\/session\/([^/]+)$/);
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  private getHiddenSessionIdFromPath(path: string) {
+    const url = new URL(path, 'http://localhost');
+    const match = url.pathname.match(/^\/session\/([^/]+)/);
+    if (!match) return null;
+    const sessionID = decodeURIComponent(match[1]);
+    return this.sessionTrash.isHidden(sessionID) ? sessionID : null;
+  }
+
+  private filterApiResponse(method: string, path: string, data: unknown) {
+    const url = new URL(path, 'http://localhost');
+    if (method === 'GET' && url.pathname === '/session' && Array.isArray(data)) {
+      return this.sessionTrash.filterVisibleSessions(data as Array<{ id: string }>);
+    }
+    if (
+      method === 'GET' &&
+      url.pathname === '/session/status' &&
+      data &&
+      typeof data === 'object'
+    ) {
+      return this.sessionTrash.filterVisibleSessionStatuses(data as Record<string, unknown>);
+    }
+    if (method === 'GET' && url.pathname === '/question' && Array.isArray(data)) {
+      return this.sessionTrash.filterVisibleSessionRequests(data as Array<{ sessionID: string }>);
+    }
+    return data;
+  }
+
+  private async handleRecycleBinRequest(
+    request:
+      | { kind: 'list' }
+      | { kind: 'empty' }
+      | { kind: 'restore'; rootID: string }
+      | { kind: 'delete'; rootID: string }
+  ) {
+    switch (request.kind) {
+      case 'list':
+        return this.sessionTrash.list();
+      case 'restore': {
+        const restored = await this.sessionTrash.restore(request.rootID);
+        this.postRecycleBinUpdate();
+        return Boolean(restored);
+      }
+      case 'delete': {
+        const removed = await this.sessionTrash.deletePermanently(request.rootID, (sessionID) =>
+          this.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`)
+        );
+        if (removed) {
+          this.sessionState.removeSessions(removed.sessions.map((session) => session.id));
+          this.postRecycleBinUpdate();
+        }
+        return Boolean(removed);
+      }
+      case 'empty': {
+        const removed = await this.sessionTrash.empty((sessionID) =>
+          this.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`)
+        );
+        if (removed.length > 0) {
+          this.sessionState.removeSessions(
+            removed.flatMap((entry) => entry.sessions.map((session) => session.id))
+          );
+          this.postRecycleBinUpdate();
+        }
+        return true;
+      }
+    }
+  }
+
+  private async moveSessionToRecycleBin(sessionID: string) {
+    const sessions = (await this.server.request('GET', '/session')) as Array<
+      Record<string, unknown>
+    >;
+    const entry = await this.sessionTrash.moveToTrash(sessionID, sessions as never[]);
+    if (!entry) {
+      throw new Error('404 Session not found');
+    }
+    this.sessionState.removeSessions(entry.sessions.map((session) => session.id));
+    this.postRecycleBinUpdate();
+    return true;
+  }
+
+  private async cleanupExpiredRecycleBin() {
+    if (this.recycleBinMaintenanceInFlight || this._status.state !== 'running') return;
+    this.recycleBinMaintenanceInFlight = true;
+    try {
+      const removed = await this.sessionTrash.cleanupExpired((sessionID) =>
+        this.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`)
+      );
+      if (removed.length > 0) {
+        this.sessionState.removeSessions(
+          removed.flatMap((entry) => entry.sessions.map((session) => session.id))
+        );
+        this.postRecycleBinUpdate();
+      }
+    } finally {
+      this.recycleBinMaintenanceInFlight = false;
+    }
+  }
+
+  private postRecycleBinUpdate() {
+    this.post({ type: 'recycle-bin/update', payload: { entries: this.sessionTrash.list() } });
+  }
+
+  private shouldSuppressServerEvent(event: ServerEvent) {
+    return getSessionIdsForEvent(event).some((sessionID) => this.sessionTrash.isHidden(sessionID));
   }
 
   private parseProviderLimitRequest(method: string, path: string) {
@@ -824,10 +1003,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')
+        .filter((item) => !this.sessionTrash.isHidden(item.sessionID))
         .map((item) => item.props),
       pendingQuestions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'question')
+        .filter((item) => !this.sessionTrash.isHidden(item.sessionID))
         .map((item) => item.props),
+      recycleBinEntries: this.sessionTrash.list(),
     } satisfies InitialWebviewState;
 
     return renderWebviewHtml(webview?.cspSource || '', initialState, assets);
@@ -874,4 +1056,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function getSessionIdsForEvent(event: ServerEvent) {
+  const ids = new Set<string>();
+  const properties = asRecord(event.properties);
+  const add = (value: unknown) => {
+    if (typeof value === 'string' && value) ids.add(value);
+  };
+
+  add(properties?.sessionID);
+  add(asRecord(properties?.info)?.id);
+  add(asRecord(properties?.info)?.sessionID);
+  add(asRecord(properties?.part)?.sessionID);
+
+  return [...ids];
 }

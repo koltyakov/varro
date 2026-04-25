@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
-import { replaceMessages, setSessions, setState, skipPlanSession } from '../lib/state';
+import {
+  replaceMessages,
+  setSessions,
+  setShowThinkingPreference,
+  setState,
+  skipPlanSession,
+  startLoading,
+  stopLoading,
+} from '../lib/state';
 import type {
   AssistantMessage,
   FilePart,
@@ -118,6 +126,17 @@ function toolPart(id: string, messageID = 'message-1', callID = 'call-1'): Part 
   };
 }
 
+function reasoningPart(id: string, text: string): Part {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'reasoning',
+    text,
+    time: { start: 1 },
+  };
+}
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -157,6 +176,8 @@ afterEach(() => {
   setState('streamingText', '');
   setState('sessionStatus', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
+  setShowThinkingPreference(true);
+  stopLoading();
   globalThis.ResizeObserver = originalResizeObserver;
   globalThis.requestAnimationFrame = originalRequestAnimationFrame;
   globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -849,6 +870,54 @@ describe('MessageList sticky prompt preview', () => {
 
     sticky = container?.querySelector('.latest-user-message-sticky');
     expect(sticky).toBeNull();
+  });
+});
+
+describe('MessageList loading row', () => {
+  it('shows the loading row while visible reasoning is streaming', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: assistantMessage('message-1'), parts: [reasoningPart('reason-1', 'Analyzing')] },
+    ]);
+    setState('streamingPartId', 'reason-1');
+    setState('streamingText', 'Analyzing');
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('shows the loading row while hidden reasoning is streaming', async () => {
+    setState('activeSessionId', 'session-1');
+    setShowThinkingPreference(false);
+    replaceMessages([
+      { info: assistantMessage('message-1'), parts: [reasoningPart('reason-1', 'Analyzing')] },
+    ]);
+    setState('streamingPartId', 'reason-1');
+    setState('streamingText', 'Analyzing');
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('hides the loading row while visible text is streaming', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Drafting')] },
+    ]);
+    setState('streamingPartId', 'text-1');
+    setState('streamingText', 'Drafting');
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 });
 

@@ -13,6 +13,7 @@ describe('protocol conformance', () => {
     const covered: Record<ExtensionMessage['type'], true> = {
       'server/status': true,
       'server/event': true,
+      'recycle-bin/update': true,
       'pending-attention/update': true,
       'context/update': true,
       'terminal-selection/update': true,

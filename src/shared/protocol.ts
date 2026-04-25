@@ -72,6 +72,29 @@ export type ServerStatus =
   | { state: 'stopped' }
   | { state: 'error'; message: string };
 
+export type RecycleBinSession = {
+  id: string;
+  projectID: string;
+  directory: string;
+  parentID?: string;
+  summary?: {
+    additions: number;
+    deletions: number;
+    files: number;
+  };
+  title: string;
+  version: string;
+  time: { created: number; updated: number; compacting?: number };
+};
+
+export type RecycleBinEntry = {
+  rootID: string;
+  deletedAt: number;
+  expiresAt: number;
+  root: RecycleBinSession;
+  sessions: RecycleBinSession[];
+};
+
 export const SERVER_EVENT_NAMES = [
   'session.created',
   'session.updated',
@@ -135,11 +158,13 @@ export type InitialWebviewState = {
   interruptedSessionIds?: string[];
   pendingPermissions?: Array<Record<string, unknown>>;
   pendingQuestions?: Array<Record<string, unknown>>;
+  recycleBinEntries?: RecycleBinEntry[];
 };
 
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
   | { type: 'server/event'; payload: ServerEvent }
+  | { type: 'recycle-bin/update'; payload: { entries: RecycleBinEntry[] } }
   | { type: 'pending-attention/update'; payload: { sessionIds: string[] } }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }

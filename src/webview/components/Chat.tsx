@@ -22,11 +22,19 @@ import {
   createMemo,
   on,
 } from 'solid-js';
-import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
+import {
+  selectSession,
+  createSession,
+  deleteSession,
+  restoreSession,
+  deleteSessionPermanently,
+  emptyRecycleBin,
+} from '../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { SettingsPanel } from './SettingsPanel';
+import type { RecycleBinEntry } from '../../shared/protocol';
 
 type SessionGroups = {
   failed: (typeof state.sessions)[number][];
@@ -67,6 +75,8 @@ const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
 
 export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
+
+type SessionListGroupedSection = 'recent' | 'archive' | 'recycle-bin';
 
 export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
@@ -815,13 +825,18 @@ async function archiveSessions(
 }
 
 export function SessionListSectionHeader(props: {
+  ref?: (el: HTMLDivElement) => void;
   title: string;
   count: number;
   expanded: boolean;
   onToggle: () => void;
   onArchive?: () => unknown;
+  archiveLabel?: string;
 }) {
   const [isConfirmingArchive, setIsConfirmingArchive] = createSignal(false);
+  const archiveActionLabel = () => props.archiveLabel || 'Archive';
+  const archiveTargetLabel = () =>
+    archiveActionLabel().toLowerCase() === props.title.toLowerCase() ? 'sessions' : props.title;
 
   createEffect(
     on(
@@ -838,7 +853,7 @@ export function SessionListSectionHeader(props: {
   };
 
   return (
-    <div class="session-list-section-header">
+    <div ref={(el) => props.ref?.(el)} class="session-list-section-header">
       <button type="button" class="session-list-section-toggle" onClick={props.onToggle}>
         <span class="session-list-section-title">{props.title}</span>
         <span class="session-list-section-count">{props.count}</span>
@@ -852,8 +867,8 @@ export function SessionListSectionHeader(props: {
                 type="button"
                 class="session-list-section-archive"
                 onClick={() => setIsConfirmingArchive(true)}
-                title={`Archive ${props.title}`}
-                aria-label={`Archive ${props.title}`}
+                title={`${archiveActionLabel()} ${archiveTargetLabel()}`}
+                aria-label={`${archiveActionLabel()} ${archiveTargetLabel()}`}
               >
                 <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                   <path d="M14.5 1h-13a.5.5 0 00-.5.5V4h14V1.5a.5.5 0 00.5-.5zM1 5v9.5a.5.5 0 00.5.5h13a.5.5 0 00.5-.5V5H1zm5 3h4v1H6V8z" />
@@ -866,8 +881,8 @@ export function SessionListSectionHeader(props: {
                 type="button"
                 class="session-list-section-confirm"
                 onClick={() => void confirmArchive()}
-                title={`Confirm archive ${props.title}`}
-                aria-label={`Confirm archive ${props.title}`}
+                title={`Confirm ${archiveActionLabel().toLowerCase()} ${archiveTargetLabel()}`}
+                aria-label={`Confirm ${archiveActionLabel().toLowerCase()} ${archiveTargetLabel()}`}
               >
                 Confirm
               </button>
@@ -875,8 +890,8 @@ export function SessionListSectionHeader(props: {
                 type="button"
                 class="session-list-section-cancel"
                 onClick={() => setIsConfirmingArchive(false)}
-                title={`Cancel archive ${props.title}`}
-                aria-label={`Cancel archive ${props.title}`}
+                title={`Cancel ${archiveActionLabel().toLowerCase()} ${archiveTargetLabel()}`}
+                aria-label={`Cancel ${archiveActionLabel().toLowerCase()} ${archiveTargetLabel()}`}
               >
                 Cancel
               </button>
@@ -915,10 +930,14 @@ function SessionListView(props: {
   onCleanup(() => clearInterval(clock));
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
-  const [showOtherSessions, setShowOtherSessions] = createSignal(false);
+  const [activeGroupedSection, setActiveGroupedSection] =
+    createSignal<SessionListGroupedSection | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
+  let recentHeaderRef: HTMLDivElement | undefined;
+  let archiveHeaderRef: HTMLDivElement | undefined;
+  let recycleBinHeaderRef: HTMLDivElement | undefined;
 
   const normalizedSearchQuery = createMemo(() => searchQuery().trim().toLowerCase());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
@@ -946,6 +965,7 @@ function SessionListView(props: {
   const subagentSessions = createMemo(() =>
     getSubagentSessionsForParent(state.sessions, props.subagentParentId ?? null)
   );
+  const recycleBinEntries = createMemo(() => state.recycleBinEntries || []);
   const filteredSessions = createMemo(() =>
     props.sessionFilter
       ? getPrimarySessionsForFilter(
@@ -969,22 +989,49 @@ function SessionListView(props: {
       ...surfacedOtherSessions(),
     ].toSorted((left, right) => right.time.updated - left.time.updated)
   );
+  const availableGroupedSections = createMemo(() => {
+    const sections: SessionListGroupedSection[] = [];
+    if (surfacedSessions().length > 0) sections.push('recent');
+    if (overflowOtherSessions().length > 0) sections.push('archive');
+    if (recycleBinEntries().length > 0) sections.push('recycle-bin');
+    return sections;
+  });
+  const isDefaultGroupedView = createMemo(
+    () => !props.sessionFilter && !props.subagentParentId && !normalizedSearchQuery()
+  );
+  const showBottomGroups = createMemo(
+    () =>
+      isDefaultGroupedView() &&
+      !activeGroupedSection() &&
+      (overflowOtherSessions().length > 0 || recycleBinEntries().length > 0)
+  );
   const directSessions = createMemo(() => {
     if (props.subagentParentId) return subagentSessions();
     if (props.sessionFilter) return filteredSessions();
     return [];
   });
+  const searchableSessions = createMemo(() => {
+    if (props.subagentParentId || props.sessionFilter) return directSessions();
+    return [...surfacedSessions(), ...overflowOtherSessions()];
+  });
   const baseVisibleSessions = createMemo(() => {
     if (props.subagentParentId || props.sessionFilter) return directSessions();
 
-    const sessions = showOtherSessions()
-      ? [...surfacedSessions(), ...overflowOtherSessions()]
-      : surfacedSessions();
-    return sessions;
+    switch (activeGroupedSection()) {
+      case 'recent':
+        return surfacedSessions();
+      case 'archive':
+        return overflowOtherSessions();
+      case 'recycle-bin':
+        return [];
+      default:
+        return surfacedSessions();
+    }
   });
   const visibleSessions = createMemo(() => {
     const query = normalizedSearchQuery();
-    const sessions = baseVisibleSessions();
+    const sessions =
+      shouldShowSearch() && query.length > 0 ? searchableSessions() : baseVisibleSessions();
     if (!shouldShowSearch() || query.length === 0) return sessions;
 
     return sessions.filter((session) => {
@@ -1001,12 +1048,18 @@ function SessionListView(props: {
     on(
       () => [props.sessionFilter, props.subagentParentId],
       () => {
-        setShowOtherSessions(false);
+        setActiveGroupedSection(null);
         setSearchQuery('');
         setFocusedIndex(-1);
       }
     )
   );
+
+  createEffect(() => {
+    const activeSection = activeGroupedSection();
+    if (!activeSection) return;
+    if (!availableGroupedSections().includes(activeSection)) setActiveGroupedSection(null);
+  });
 
   createEffect(() => {
     const sessions = visibleSessions();
@@ -1016,6 +1069,165 @@ function SessionListView(props: {
       return Math.min(current, sessions.length - 1);
     });
   });
+
+  createEffect(
+    on(
+      activeGroupedSection,
+      (section, previousSection) => {
+        if (!section || section === previousSection) return;
+        queueMicrotask(() => {
+          const ref =
+            section === 'recent'
+              ? recentHeaderRef
+              : section === 'archive'
+                ? archiveHeaderRef
+                : recycleBinHeaderRef;
+          if (typeof ref?.scrollIntoView === 'function') {
+            ref.scrollIntoView({ block: 'nearest' });
+          }
+        });
+      },
+      { defer: true }
+    )
+  );
+
+  const toggleGroupedSection = (section: SessionListGroupedSection) => {
+    if (section === 'recent') {
+      setActiveGroupedSection(null);
+      return;
+    }
+
+    setActiveGroupedSection((current) => (current === section ? null : section));
+  };
+
+  const renderSessionItems = (sessions: typeof state.sessions, indexOffset = 0) => (
+    <For each={sessions}>
+      {(session, index) => (
+        <SessionListItem
+          session={session}
+          itemIndex={() => indexOffset + index()}
+          focusedIndex={focusedIndex}
+          setFocusedIndex={setFocusedIndex}
+          now={now}
+          subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
+          hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
+          hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
+          isRunning={sessionIndicators().runningIds.has(session.id)}
+          isFailed={sessionIndicators().failedIds.has(session.id)}
+          needsAttention={sessionIndicators().attentionIds.has(session.id)}
+          isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
+          isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
+          onOpenSubagents={props.onOpenSubagents}
+          embedded={props.embedded}
+        />
+      )}
+    </For>
+  );
+
+  const renderBottomGroups = () => (
+    <div class="session-list-bottom-groups">
+      <Show when={overflowOtherSessions().length > 0}>
+        <SessionListSectionHeader
+          ref={(el) => {
+            archiveHeaderRef = el;
+          }}
+          title="Archive"
+          count={overflowOtherSessions().length}
+          expanded={false}
+          onToggle={() => toggleGroupedSection('archive')}
+          onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
+        />
+      </Show>
+      <Show when={recycleBinEntries().length > 0}>
+        <SessionListSectionHeader
+          ref={(el) => {
+            recycleBinHeaderRef = el;
+          }}
+          title="Recycle Bin"
+          count={recycleBinEntries().length}
+          expanded={false}
+          onToggle={() => toggleGroupedSection('recycle-bin')}
+          onArchive={() => emptyRecycleBin()}
+          archiveLabel="Empty"
+        />
+      </Show>
+    </div>
+  );
+
+  const renderScrollableContent = () => (
+    <div class="session-list-scroll">
+      <Show when={props.subagentParentId || props.sessionFilter || normalizedSearchQuery()}>
+        {renderSessionItems(visibleSessions())}
+      </Show>
+      <Show
+        when={isDefaultGroupedView() && !activeGroupedSection() && surfacedSessions().length > 0}
+      >
+        {renderSessionItems(surfacedSessions())}
+      </Show>
+      <Show when={isDefaultGroupedView() && !!activeGroupedSection()}>
+        <For each={availableGroupedSections()}>{(section) => renderGroupedSection(section)}</For>
+      </Show>
+    </div>
+  );
+
+  const renderGroupedSection = (section: SessionListGroupedSection) => {
+    const expanded = () => activeGroupedSection() === section;
+
+    switch (section) {
+      case 'recent':
+        return (
+          <>
+            <SessionListSectionHeader
+              ref={(el) => {
+                recentHeaderRef = el;
+              }}
+              title="Recent"
+              count={surfacedSessions().length}
+              expanded={expanded()}
+              onToggle={() => toggleGroupedSection('recent')}
+            />
+            <Show when={expanded()}>{renderSessionItems(surfacedSessions())}</Show>
+          </>
+        );
+      case 'archive':
+        return (
+          <>
+            <SessionListSectionHeader
+              ref={(el) => {
+                archiveHeaderRef = el;
+              }}
+              title="Archive"
+              count={overflowOtherSessions().length}
+              expanded={expanded()}
+              onToggle={() => toggleGroupedSection('archive')}
+              onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
+            />
+            <Show when={expanded()}>{renderSessionItems(overflowOtherSessions())}</Show>
+          </>
+        );
+      case 'recycle-bin':
+        return (
+          <>
+            <SessionListSectionHeader
+              ref={(el) => {
+                recycleBinHeaderRef = el;
+              }}
+              title="Recycle Bin"
+              count={recycleBinEntries().length}
+              expanded={expanded()}
+              onToggle={() => toggleGroupedSection('recycle-bin')}
+              onArchive={() => emptyRecycleBin()}
+              archiveLabel="Empty"
+            />
+            <Show when={expanded()}>
+              <For each={recycleBinEntries()}>
+                {(entry) => <RecycleBinListItem entry={entry} now={now} />}
+              </For>
+            </Show>
+          </>
+        );
+    }
+  };
 
   function handleKeydown(e: KeyboardEvent) {
     const sessions = visibleSessions();
@@ -1078,7 +1290,7 @@ function SessionListView(props: {
     if (props.subagentParentId) return subagentSessions().length > 0;
     if (props.sessionFilter) return filteredSessions().length > 0;
     if (normalizedSearchQuery()) return visibleSessions().length > 0;
-    return state.sessions.length > 0;
+    return state.sessions.length > 0 || recycleBinEntries().length > 0;
   });
 
   return (
@@ -1122,104 +1334,62 @@ function SessionListView(props: {
           </Show>
         </div>
       </Show>
-      <div class="session-list-scroll">
-        <Show
-          when={hasVisibleContent()}
-          fallback={<div class="session-empty">{emptyMessage()}</div>}
-        >
-          <Show when={props.subagentParentId || props.sessionFilter || normalizedSearchQuery()}>
-            <For each={visibleSessions()}>
-              {(session, index) => (
-                <SessionListItem
-                  session={session}
-                  itemIndex={() => index()}
-                  focusedIndex={focusedIndex}
-                  setFocusedIndex={setFocusedIndex}
-                  now={now}
-                  subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
-                  hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
-                  hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
-                  isRunning={sessionIndicators().runningIds.has(session.id)}
-                  isFailed={sessionIndicators().failedIds.has(session.id)}
-                  needsAttention={sessionIndicators().attentionIds.has(session.id)}
-                  isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
-                  isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
-                  onOpenSubagents={props.onOpenSubagents}
-                  embedded={props.embedded}
-                />
-              )}
-            </For>
-          </Show>
-          <Show
-            when={
-              !props.sessionFilter &&
-              !props.subagentParentId &&
-              !normalizedSearchQuery() &&
-              surfacedSessions().length > 0
-            }
-          >
-            <For each={surfacedSessions()}>
-              {(session, index) => (
-                <SessionListItem
-                  session={session}
-                  itemIndex={() => index()}
-                  focusedIndex={focusedIndex}
-                  setFocusedIndex={setFocusedIndex}
-                  now={now}
-                  subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
-                  hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
-                  hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
-                  isRunning={sessionIndicators().runningIds.has(session.id)}
-                  isFailed={sessionIndicators().failedIds.has(session.id)}
-                  needsAttention={sessionIndicators().attentionIds.has(session.id)}
-                  isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
-                  isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
-                  onOpenSubagents={props.onOpenSubagents}
-                  embedded={props.embedded}
-                />
-              )}
-            </For>
-          </Show>
-          <Show
-            when={
-              !props.sessionFilter &&
-              !props.subagentParentId &&
-              !normalizedSearchQuery() &&
-              overflowOtherSessions().length > 0
-            }
-          >
-            <SessionListSectionHeader
-              title="Show more"
-              count={overflowOtherSessions().length}
-              expanded={showOtherSessions()}
-              onToggle={() => setShowOtherSessions((value) => !value)}
-              onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
-            />
-            <Show when={showOtherSessions()}>
-              <For each={overflowOtherSessions()}>
-                {(session, index) => (
-                  <SessionListItem
-                    session={session}
-                    itemIndex={() => surfacedSessions().length + index()}
-                    focusedIndex={focusedIndex}
-                    setFocusedIndex={setFocusedIndex}
-                    now={now}
-                    subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
-                    hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
-                    hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
-                    isRunning={sessionIndicators().runningIds.has(session.id)}
-                    isFailed={sessionIndicators().failedIds.has(session.id)}
-                    needsAttention={sessionIndicators().attentionIds.has(session.id)}
-                    isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
-                    isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
-                    onOpenSubagents={props.onOpenSubagents}
-                    embedded={props.embedded}
-                  />
-                )}
-              </For>
-            </Show>
-          </Show>
+      <Show when={hasVisibleContent()} fallback={<div class="session-empty">{emptyMessage()}</div>}>
+        <Show when={showBottomGroups()} fallback={renderScrollableContent()}>
+          <div class="session-list-layout">
+            <div class="session-list-scroll session-list-scroll-primary">
+              {renderSessionItems(surfacedSessions())}
+            </div>
+            {renderBottomGroups()}
+          </div>
         </Show>
+      </Show>
+    </div>
+  );
+}
+
+function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }) {
+  const childCount = () => Math.max(0, props.entry.sessions.length - 1);
+
+  return (
+    <div class="session-item recycle-bin-item">
+      <div class="session-item-main recycle-bin-item-main">
+        <span class="session-item-indicator-spacer" />
+        <div class="session-item-content">
+          <span class="session-item-title">
+            {normalizeSessionTitle(props.entry.root.title) || 'Untitled'}
+          </span>
+          <span class="session-item-meta">
+            Deleted {formatSessionAge(props.entry.deletedAt, props.now())} ago
+            <Show when={childCount() > 0}>
+              {' '}
+              · {childCount()} sub-agent{childCount() === 1 ? '' : 's'}
+            </Show>
+            {' · '}expires in {formatDurationFromNow(props.entry.expiresAt, props.now())}
+          </span>
+        </div>
+      </div>
+      <div class="session-item-trailing">
+        <button
+          type="button"
+          class="session-item-subagents recycle-bin-restore"
+          onClick={() => void restoreSession(props.entry.rootID)}
+          title="Restore"
+          aria-label="Restore"
+        >
+          Restore
+        </button>
+        <button
+          type="button"
+          class="session-item-archive recycle-bin-delete"
+          onClick={() => void deleteSessionPermanently(props.entry.rootID)}
+          title="Delete permanently"
+          aria-label="Delete permanently"
+        >
+          <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+            <path d="M17 24h-2v-9h2v9zm4-9h-2v9h2v-9zm-8 0h-2v9h2v-9zm14-2h-1.064l-1 15H7.064l-1-15H5V7h7V4h8v3h7v6zM14 7h4V6h-4v1zm-7 4h18V9H7v2zm16.931 2H8.069l.866 13h14.129l.867-13z" />
+          </svg>
+        </button>
       </div>
     </div>
   );
@@ -1362,6 +1532,10 @@ function formatSessionAge(timestamp: number, now: number): string {
   if (days > 0) return `${days}d`;
   if (hours > 0) return `${hours}h`;
   return `${totalMinutes}m`;
+}
+
+function formatDurationFromNow(timestamp: number, now: number): string {
+  return formatSessionAge(now + Math.max(0, timestamp - now), now);
 }
 
 function RunningSessionsBadge(props: { count: number; onClick: () => void }) {

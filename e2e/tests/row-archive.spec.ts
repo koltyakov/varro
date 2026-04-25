@@ -13,7 +13,11 @@ test('archives an individual session row', async ({ page }) => {
     const value = (window as Window & {
       __varroE2E?: { requests: Array<{ method: string; path: string }> };
     }).__varroE2E;
-    return value?.requests.find((request) => request.method === 'DELETE' && request.path === '/session/session-row-archive-a') || null;
+    return (
+      value?.requests.find(
+        (request) => request.method === 'DELETE' && request.path === '/session/session-row-archive-a'
+      ) || null
+    );
   });
 
   expect(deleteRequest).toMatchObject({ method: 'DELETE', path: '/session/session-row-archive-a' });

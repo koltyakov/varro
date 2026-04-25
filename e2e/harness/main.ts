@@ -1,4 +1,9 @@
-import type { InitialWebviewState, ServerStatus, WebviewMessage } from '../../src/shared/protocol';
+import type {
+  InitialWebviewState,
+  RecycleBinEntry,
+  ServerStatus,
+  WebviewMessage,
+} from '../../src/shared/protocol';
 import type {
   Agent,
   AssistantMessage,
@@ -68,6 +73,7 @@ type ScenarioState = {
   agents: Agent[];
   questions: QuestionRequest[];
   pendingPermissions: Array<Record<string, unknown>>;
+  recycleBinEntries: RecycleBinEntry[];
   persistedActiveSessionId: string | null;
   requests: RequestLog[];
   permissionResponses: PermissionResponse[];
@@ -649,6 +655,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     agents: structuredClone(agents),
     questions: [],
     pendingPermissions: [],
+    recycleBinEntries: [],
     persistedActiveSessionId: null,
     requests: [],
     permissionResponses: [],
@@ -1692,6 +1699,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     showStickyUserPrompt: true,
     pendingPermissions: state.pendingPermissions,
     pendingQuestions: [],
+    recycleBinEntries: state.recycleBinEntries,
   };
 }
 
@@ -1735,6 +1743,10 @@ async function handleApiRequest(
 
   if (method === 'GET' && path === '/session') {
     return state.sessions;
+  }
+
+  if (method === 'GET' && path === '/varro/session-trash') {
+    return state.recycleBinEntries;
   }
 
   if (method === 'GET' && path === '/session/status') {
@@ -1856,9 +1868,65 @@ async function handleApiRequest(
 
   if (sessionMatch && method === 'DELETE') {
     const sessionId = decodeURIComponent(sessionMatch[1]);
-    state.sessions = state.sessions.filter((item) => item.id !== sessionId);
-    delete state.messagesBySessionId[sessionId];
-    delete state.sessionStatuses[sessionId];
+    const root = state.sessions.find((item) => item.id === sessionId);
+    if (!root) return true;
+    const hidden = new Set<string>();
+    const pending = [sessionId];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (!current || hidden.has(current)) continue;
+      hidden.add(current);
+      for (const session of state.sessions) {
+        if (session.parentID === current) pending.push(session.id);
+      }
+    }
+    state.recycleBinEntries = [
+      {
+        rootID: sessionId,
+        deletedAt: Date.now(),
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        root: { ...root },
+        sessions: state.sessions.filter((item) => hidden.has(item.id)).map((item) => ({ ...item })),
+      },
+      ...state.recycleBinEntries.filter((entry) => entry.rootID !== sessionId),
+    ];
+    state.sessions = state.sessions.filter((item) => !hidden.has(item.id));
+    return true;
+  }
+
+  if (method === 'POST' && path.match(/^\/varro\/session-trash\/[^/]+\/restore$/)) {
+    const match = path.match(/^\/varro\/session-trash\/([^/]+)\/restore$/);
+    const rootID = match ? decodeURIComponent(match[1]) : null;
+    const entry = rootID ? state.recycleBinEntries.find((item) => item.rootID === rootID) : null;
+    if (!entry) return false;
+    state.recycleBinEntries = state.recycleBinEntries.filter((item) => item.rootID !== rootID);
+    state.sessions = [...entry.sessions.map((session) => ({ ...session })), ...state.sessions].toSorted(
+      (left, right) => right.time.updated - left.time.updated
+    );
+    return true;
+  }
+
+  if (method === 'DELETE' && path.match(/^\/varro\/session-trash\/[^/]+\/delete$/)) {
+    const match = path.match(/^\/varro\/session-trash\/([^/]+)\/delete$/);
+    const rootID = match ? decodeURIComponent(match[1]) : null;
+    const entry = rootID ? state.recycleBinEntries.find((item) => item.rootID === rootID) : null;
+    if (!entry) return false;
+    state.recycleBinEntries = state.recycleBinEntries.filter((item) => item.rootID !== rootID);
+    for (const session of entry.sessions) {
+      delete state.messagesBySessionId[session.id];
+      delete state.sessionStatuses[session.id];
+    }
+    return true;
+  }
+
+  if (method === 'DELETE' && path === '/varro/session-trash') {
+    for (const entry of state.recycleBinEntries) {
+      for (const session of entry.sessions) {
+        delete state.messagesBySessionId[session.id];
+        delete state.sessionStatuses[session.id];
+      }
+    }
+    state.recycleBinEntries = [];
     return true;
   }
 

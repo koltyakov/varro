@@ -5,14 +5,14 @@ test('confirms and cancels archive actions for overflow sessions', async ({ page
   await page.goto('/e2e/harness/index.html?scenario=archive-overflow');
   await page.getByTitle('Back to sessions').click();
 
-  await page.getByLabel('Expand Show more').click();
-  await page.getByLabel('Archive Show more').click();
-  await expect(page.getByRole('button', { name: 'Confirm archive Show more' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel archive Show more' }).click();
-  await expect(page.getByRole('button', { name: 'Confirm archive Show more' })).toHaveCount(0);
+  await page.getByLabel('Expand Archive').click();
+  await page.getByLabel('Archive sessions').click();
+  await expect(page.getByRole('button', { name: 'Confirm archive sessions' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel archive sessions' }).click();
+  await expect(page.getByRole('button', { name: 'Confirm archive sessions' })).toHaveCount(0);
 
-  await page.getByLabel('Archive Show more').click();
-  await page.getByRole('button', { name: 'Confirm archive Show more' }).click();
+  await page.getByLabel('Archive sessions').click();
+  await page.getByRole('button', { name: 'Confirm archive sessions' }).click();
 
   const deleteCount = await getE2EState(page, () => {
     const value = (window as Window & {

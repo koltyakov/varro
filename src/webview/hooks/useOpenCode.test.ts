@@ -21,6 +21,10 @@ const clientMocks = vi.hoisted(() => ({
   mcpDisconnect: vi.fn(),
   questionList: vi.fn(),
   varroOpenPlan: vi.fn(),
+  recycleBinList: vi.fn(),
+  recycleBinRestore: vi.fn(),
+  recycleBinDelete: vi.fn(),
+  recycleBinEmpty: vi.fn(),
   serverEventsOn: vi.fn(() => () => {}),
 }));
 
@@ -52,6 +56,12 @@ vi.mock('../lib/client', () => ({
     },
     varro: {
       openPlan: clientMocks.varroOpenPlan,
+      recycleBin: {
+        list: clientMocks.recycleBinList,
+        restore: clientMocks.recycleBinRestore,
+        delete: clientMocks.recycleBinDelete,
+        empty: clientMocks.recycleBinEmpty,
+      },
     },
     mcp: {
       status: clientMocks.mcpStatus,
@@ -208,6 +218,10 @@ beforeEach(() => {
   clientMocks.mcpDisconnect.mockReset();
   clientMocks.questionList.mockReset();
   clientMocks.varroOpenPlan.mockReset();
+  clientMocks.recycleBinList.mockReset();
+  clientMocks.recycleBinRestore.mockReset();
+  clientMocks.recycleBinDelete.mockReset();
+  clientMocks.recycleBinEmpty.mockReset();
   clientMocks.serverEventsOn.mockClear();
   bridgeMocks.onMessage.mockClear();
   bridgeMocks.postMessage.mockReset();
@@ -215,6 +229,10 @@ beforeEach(() => {
   clientMocks.mcpConnect.mockResolvedValue(true);
   clientMocks.mcpDisconnect.mockResolvedValue(true);
   clientMocks.varroOpenPlan.mockResolvedValue({ path: '/tmp/plan.md' });
+  clientMocks.recycleBinList.mockResolvedValue([]);
+  clientMocks.recycleBinRestore.mockResolvedValue(true);
+  clientMocks.recycleBinDelete.mockResolvedValue(true);
+  clientMocks.recycleBinEmpty.mockResolvedValue(true);
 });
 
 describe('sendMessage', () => {
@@ -1044,7 +1062,7 @@ describe('sendMessage', () => {
     expect(stateModule.state.activeSessionId).toBe('session-2');
   });
 
-  it('removes deleted-session MCP and seen-state entries', async () => {
+  it('preserves deleted-session MCP and seen-state entries until permanent deletion', async () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('sessions', [session('session-1'), session('session-2')]);
@@ -1058,13 +1076,27 @@ describe('sendMessage', () => {
     clientMocks.sessionMessages.mockResolvedValue([]);
     clientMocks.sessionStatus.mockResolvedValue({});
     clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.recycleBinList.mockResolvedValue([
+      {
+        rootID: 'session-1',
+        deletedAt: 1_000,
+        expiresAt: 2_000,
+        root: session('session-1'),
+        sessions: [session('session-1')],
+      },
+    ]);
 
     await hookModule.deleteSession('session-1');
 
-    expect(stateModule.state.lastSeenSessions['session-1']).toBeUndefined();
+    expect(stateModule.state.lastSeenSessions['session-1']).toBe(100);
     expect(stateModule.state.lastSeenSessions['session-2']).toBeGreaterThanOrEqual(200);
-    expect(stateModule.getSelectedMcpsForSession('session-1')).toBeNull();
+    expect(stateModule.getSelectedMcpsForSession('session-1')).toEqual(['browser-bridge']);
     expect(stateModule.getSelectedMcpsForSession('session-2')).toEqual(['docs']);
+
+    await hookModule.deleteSessionPermanently('session-1');
+
+    expect(stateModule.state.lastSeenSessions['session-1']).toBeUndefined();
+    expect(stateModule.getSelectedMcpsForSession('session-1')).toBeNull();
   });
 
   it('switches the active session to build and sends the implementation prompt', async () => {

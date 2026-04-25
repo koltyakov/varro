@@ -14,6 +14,7 @@ import type {
 import type {
   McpStatus,
   ProviderLimitStatus,
+  RecycleBinEntry,
   ServerEvent,
   ServerEventName,
 } from '../../shared/protocol';
@@ -108,6 +109,20 @@ export const client = {
   varro: {
     async openPlan(content: string): Promise<{ path: string }> {
       return apiCall('POST', '/varro/plan/open', { content });
+    },
+    recycleBin: {
+      async list(): Promise<RecycleBinEntry[]> {
+        return apiCall('GET', '/varro/session-trash');
+      },
+      async restore(rootID: string): Promise<boolean> {
+        return apiCall('POST', `/varro/session-trash/${encodeURIComponent(rootID)}/restore`);
+      },
+      async delete(rootID: string): Promise<boolean> {
+        return apiCall('DELETE', `/varro/session-trash/${encodeURIComponent(rootID)}/delete`);
+      },
+      async empty(): Promise<boolean> {
+        return apiCall('DELETE', '/varro/session-trash');
+      },
     },
   },
 

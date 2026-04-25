@@ -88,6 +88,18 @@ export class SessionStateManager {
     return this.sessionAgents.get(sessionID) === 'plan';
   }
 
+  removeSessions(sessionIDs: Iterable<string>): void {
+    let changed = false;
+    for (const sessionID of sessionIDs) {
+      changed = this.removeSession(sessionID) || changed;
+    }
+    if (changed) {
+      this.listener.onStatusChange();
+      this.publishPendingAttention();
+      void this.persist();
+    }
+  }
+
   clearCompleted(): void {
     if (this.completedSessions.size === 0) return;
     this.completedSessions.clear();
@@ -107,18 +119,7 @@ export class SessionStateManager {
       case 'session.deleted': {
         const sessionID = getString(asRecord(props?.info)?.id);
         if (!sessionID) break;
-        this.busySessions.delete(sessionID);
-        this.completedSessions.delete(sessionID);
-        this.failedSessions.delete(sessionID);
-        this.sessionAgents.delete(sessionID);
-        this.sessionTitles.delete(sessionID);
-        for (const [requestID, request] of this.pendingAttention.entries()) {
-          if (request.sessionID === sessionID) {
-            this.pendingAttention.delete(requestID);
-            changed = true;
-          }
-        }
-        changed = true;
+        changed = this.removeSession(sessionID) || changed;
         break;
       }
       case 'session.status': {
@@ -363,6 +364,21 @@ export class SessionStateManager {
     this.completedSessions.delete(sessionID);
     this.showBlockingNotification(kind, sessionID, label);
     return true;
+  }
+
+  private removeSession(sessionID: string) {
+    let changed = false;
+    changed = this.busySessions.delete(sessionID) || changed;
+    changed = this.completedSessions.delete(sessionID) || changed;
+    changed = this.failedSessions.delete(sessionID) || changed;
+    changed = this.sessionAgents.delete(sessionID) || changed;
+    changed = this.sessionTitles.delete(sessionID) || changed;
+    for (const [requestID, request] of this.pendingAttention.entries()) {
+      if (request.sessionID !== sessionID) continue;
+      this.pendingAttention.delete(requestID);
+      changed = true;
+    }
+    return changed;
   }
 
   private clearBlockingRequest(requestID: string | undefined): boolean {

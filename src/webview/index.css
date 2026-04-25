@@ -4658,6 +4658,22 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   overflow-y: auto;
 }
 
+.session-list-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.session-list-scroll-primary {
+  flex: 1;
+}
+
+.session-list-bottom-groups {
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+
 .session-empty {
   padding: 48px 16px;
   font-size: 12px;
@@ -5030,6 +5046,34 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-item-archive svg {
   width: 14px;
   height: 14px;
+}
+
+.recycle-bin-item {
+  opacity: 0.9;
+}
+
+.recycle-bin-item-main {
+  cursor: default;
+}
+
+.recycle-bin-restore {
+  width: auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-success) 35%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-success) 10%, transparent);
+  color: var(--color-vscode-fg);
+  font-size: 10px;
+}
+
+.recycle-bin-restore:hover {
+  background: color-mix(in srgb, var(--color-vscode-success) 18%, transparent);
+}
+
+.recycle-bin-delete {
+  opacity: 0.7;
+  visibility: visible;
 }
 
 /* Settings panel */

@@ -42,6 +42,7 @@ let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 let originalMatchMedia: typeof globalThis.matchMedia | undefined;
+let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
 let desktopMediaQueryMatches = false;
 let desktopMediaQueryListeners = new Set<(event: MediaQueryListEvent) => void>();
 
@@ -56,6 +57,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
   originalMatchMedia = globalThis.matchMedia;
+  originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
   desktopMediaQueryMatches = false;
   desktopMediaQueryListeners = new Set();
   globalThis.ResizeObserver = class ResizeObserver {
@@ -92,6 +94,7 @@ afterEach(() => {
   setState('sessionStatus', reconcile({}));
   setState('sessionUsageLimits', reconcile({}));
   setState('failedSessionIds', []);
+  setState('recycleBinEntries', []);
   setState('questions', []);
   setState('permissions', []);
   setState('lastSeenSessions', reconcile({}));
@@ -110,6 +113,7 @@ afterEach(() => {
   setShowSettings(false);
   globalThis.ResizeObserver = originalResizeObserver;
   globalThis.matchMedia = originalMatchMedia;
+  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   vi.restoreAllMocks();
 });
 
@@ -544,6 +548,26 @@ describe('SessionListSectionHeader', () => {
     expect(onArchive).toHaveBeenCalledTimes(1);
     expect(container?.querySelector('button.session-list-section-confirm')).toBeNull();
   });
+
+  it('uses a custom action label when provided', () => {
+    cleanup = render(
+      () =>
+        SessionListSectionHeader({
+          title: 'Recycle Bin',
+          count: 1,
+          expanded: false,
+          onToggle: vi.fn(),
+          onArchive: vi.fn(),
+          archiveLabel: 'Empty',
+        }),
+      container!
+    );
+
+    const actionButton = container?.querySelector(
+      'button.session-list-section-archive'
+    ) as HTMLButtonElement | null;
+    expect(actionButton?.getAttribute('aria-label')).toBe('Empty Recycle Bin');
+  });
 });
 
 describe('header status badges', () => {
@@ -892,6 +916,250 @@ describe('header status badges', () => {
     expect(container?.querySelector('.session-empty')?.textContent?.trim()).toBe(
       'No matching sessions'
     );
+  });
+
+  it('pins archive groups outside the scrolling recent sessions list', () => {
+    const now = Date.now();
+    setState('sessions', [
+      session('recent-session', now - 1_000, { title: 'Recent session' }),
+      session('older-session', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session' }),
+    ]);
+    setState('activeSessionId', 'recent-session');
+    setState('lastSeenSessions', {
+      'recent-session': now - 1_000,
+      'older-session': now - (24 * 60 * 60 * 1_000 + 1),
+    });
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const scrollRegion = container?.querySelector(
+      '.session-list-scroll-primary'
+    ) as HTMLDivElement | null;
+    const bottomGroups = container?.querySelector(
+      '.session-list-bottom-groups'
+    ) as HTMLDivElement | null;
+
+    expect(scrollRegion).toBeInstanceOf(HTMLDivElement);
+    expect(bottomGroups).toBeInstanceOf(HTMLDivElement);
+    expect(
+      Array.from(scrollRegion?.querySelectorAll('.session-item-title') ?? []).map((item) =>
+        item.textContent?.trim()
+      )
+    ).toEqual(['Recent session']);
+    expect(
+      Array.from(bottomGroups?.querySelectorAll('.session-list-section-title') ?? []).map((item) =>
+        item.textContent?.trim()
+      )
+    ).toEqual(['Archive']);
+  });
+
+  it('scrolls the show more header into view when expanded', async () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    const now = Date.now();
+    setState('sessions', [
+      session('recent-session', now - 1_000),
+      session('older-session', now - (24 * 60 * 60 * 1_000 + 1)),
+    ]);
+    setState('activeSessionId', 'recent-session');
+    setState('lastSeenSessions', {
+      'recent-session': now - 1_000,
+      'older-session': now - (24 * 60 * 60 * 1_000 + 1),
+    });
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const button = Array.from(
+      container?.querySelectorAll('button.session-list-section-toggle') ?? []
+    ).find((item) => item.textContent?.includes('Archive')) as HTMLButtonElement | undefined;
+    expect(button).toBeInstanceOf(HTMLButtonElement);
+
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    const sectionTitles = Array.from(
+      container?.querySelectorAll('.session-list-section-title') ?? []
+    ).map((item) => item.textContent?.trim());
+    const sessionTitles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
+    );
+
+    expect(sectionTitles).toEqual(['Recent', 'Archive']);
+    expect(sessionTitles).toEqual(['older-session']);
+  });
+
+  it('shows recent sessions in an ephemeral group when archive is open', async () => {
+    const now = Date.now();
+    setState('sessions', [
+      session('recent-session', now - 1_000, { title: 'Recent session' }),
+      session('older-session', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session' }),
+    ]);
+    setState('activeSessionId', 'recent-session');
+    setState('lastSeenSessions', {
+      'recent-session': now - 1_000,
+      'older-session': now - (24 * 60 * 60 * 1_000 + 1),
+    });
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const archiveToggle = Array.from(
+      container?.querySelectorAll('button.session-list-section-toggle') ?? []
+    ).find((item) => item.textContent?.includes('Archive')) as HTMLButtonElement | undefined;
+    expect(archiveToggle).toBeInstanceOf(HTMLButtonElement);
+
+    archiveToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const sectionTitles = Array.from(
+      container?.querySelectorAll('.session-list-section-title') ?? []
+    ).map((item) => item.textContent?.trim());
+    const sessionTitles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
+    );
+
+    expect(sectionTitles).toEqual(['Recent', 'Archive']);
+    expect(sessionTitles).toEqual(['Older session']);
+
+    const recentToggle = Array.from(
+      container?.querySelectorAll('button.session-list-section-toggle') ?? []
+    ).find((item) => item.textContent?.includes('Recent')) as HTMLButtonElement | undefined;
+    expect(recentToggle).toBeInstanceOf(HTMLButtonElement);
+
+    recentToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const expandedSectionTitles = Array.from(
+      container?.querySelectorAll('.session-list-section-title') ?? []
+    ).map((item) => item.textContent?.trim());
+    const expandedSessionTitles = Array.from(
+      container?.querySelectorAll('.session-item-title') ?? []
+    ).map((item) => item.textContent?.trim());
+
+    expect(expandedSectionTitles).toEqual(['Archive']);
+    expect(expandedSessionTitles).toEqual(['Recent session']);
+  });
+
+  it('scrolls the recycle bin header into view when expanded', async () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    const now = Date.now();
+    setState('sessions', [session('active', now - 1_000)]);
+    setState('activeSessionId', 'active');
+    setState('recycleBinEntries', [
+      {
+        rootID: 'deleted-session',
+        deletedAt: now - 10_000,
+        expiresAt: now + 10_000,
+        root: {
+          id: 'deleted-session',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Deleted session',
+          version: '1',
+          time: { created: now - 20_000, updated: now - 10_000 },
+        },
+        sessions: [
+          {
+            id: 'deleted-session',
+            projectID: 'project-1',
+            directory: '/repo',
+            title: 'Deleted session',
+            version: '1',
+            time: { created: now - 20_000, updated: now - 10_000 },
+          },
+        ],
+      },
+    ]);
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const button = Array.from(
+      container?.querySelectorAll('button.session-list-section-toggle') ?? []
+    ).find((item) => item.textContent?.includes('Recycle Bin')) as HTMLButtonElement | undefined;
+    expect(button).toBeInstanceOf(HTMLButtonElement);
+
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(
+      Array.from(container?.querySelectorAll('.session-list-section-title') ?? []).map((item) =>
+        item.textContent?.trim()
+      )
+    ).toEqual(['Recent', 'Recycle Bin']);
+    expect(
+      Array.from(container?.querySelectorAll('.session-item-title') ?? []).some(
+        (item) => item.textContent?.trim() === 'Deleted session'
+      )
+    ).toBe(true);
+  });
+
+  it('invokes recycle bin row actions', async () => {
+    const restoreSpy = vi.spyOn(openCodeModule, 'restoreSession').mockResolvedValue(undefined);
+    const deleteSpy = vi
+      .spyOn(openCodeModule, 'deleteSessionPermanently')
+      .mockResolvedValue(undefined);
+
+    const now = Date.now();
+    setState('sessions', [session('active', now - 1_000)]);
+    setState('activeSessionId', 'active');
+    setState('recycleBinEntries', [
+      {
+        rootID: 'deleted-session',
+        deletedAt: now - 10_000,
+        expiresAt: now + 10_000,
+        root: {
+          id: 'deleted-session',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Deleted session',
+          version: '1',
+          time: { created: now - 20_000, updated: now - 10_000 },
+        },
+        sessions: [
+          {
+            id: 'deleted-session',
+            projectID: 'project-1',
+            directory: '/repo',
+            title: 'Deleted session',
+            version: '1',
+            time: { created: now - 20_000, updated: now - 10_000 },
+          },
+        ],
+      },
+    ]);
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const toggle = Array.from(
+      container?.querySelectorAll('button.session-list-section-toggle') ?? []
+    ).find((item) => item.textContent?.includes('Recycle Bin')) as HTMLButtonElement | undefined;
+
+    toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const restoreButton = container?.querySelector(
+      'button.recycle-bin-restore'
+    ) as HTMLButtonElement | null;
+    const deleteButton = container?.querySelector(
+      'button.recycle-bin-delete'
+    ) as HTMLButtonElement | null;
+
+    restoreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(restoreSpy).toHaveBeenCalledWith('deleted-session');
+    expect(deleteSpy).toHaveBeenCalledWith('deleted-session');
   });
 
   it('does not render the embedded session sidebar when the session picker is open', () => {

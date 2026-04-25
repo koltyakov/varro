@@ -4,6 +4,7 @@ import { client } from '../lib/client';
 import {
   state,
   setState,
+  setRecycleBinEntries,
   setSessions,
   setSelectedAgent,
   setSelectedModel,
@@ -207,6 +208,24 @@ function clearDeletedSessionState(id: string) {
   if (state.activeSessionId === id) {
     clearActiveSessionState();
   }
+}
+
+function hideDeletedSessionTree(id: string, sessions = state.sessions) {
+  const deletedIds = getDeletedSessionTreeIds(id, sessions);
+
+  setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
+  clearPendingAbortTree([...deletedIds]);
+  setState('questions', (items) => items.filter((item) => !deletedIds.has(item.sessionID)));
+  setState('permissions', (items) => items.filter((item) => !deletedIds.has(item.sessionID)));
+  setState('pendingAttentionSessionIds', (items) =>
+    items.filter((sessionId) => !deletedIds.has(sessionId))
+  );
+
+  if (state.activeSessionId && deletedIds.has(state.activeSessionId)) {
+    clearActiveSessionState();
+  }
+
+  return deletedIds;
 }
 
 function getDeletedSessionTreeIds(rootId: string, sessions = state.sessions) {
@@ -596,6 +615,9 @@ export function useOpenCode() {
             void loadMcps();
           }
           break;
+        case 'recycle-bin/update':
+          setRecycleBinEntries(msg.payload.entries);
+          break;
       }
     });
 
@@ -780,7 +802,14 @@ async function initConnection() {
   try {
     await client.health();
     if (!isCurrentGeneration(generation, connectionGeneration)) return;
-    await Promise.all([loadSessions(), loadAgents(), loadProviders(), loadMcps(), loadQuestions()]);
+    await Promise.all([
+      loadSessions(),
+      loadAgents(),
+      loadProviders(),
+      loadMcps(),
+      loadQuestions(),
+      loadRecycleBin(),
+    ]);
     if (!isCurrentGeneration(generation, connectionGeneration)) return;
     await hydrateSessionStatuses();
     if (!isCurrentGeneration(generation, connectionGeneration)) return;
@@ -1024,6 +1053,15 @@ async function loadSessions() {
   }
 }
 
+async function loadRecycleBin() {
+  try {
+    const entries = await client.varro.recycleBin.list();
+    setRecycleBinEntries(entries || []);
+  } catch (err) {
+    logError('loadRecycleBin', err);
+  }
+}
+
 async function hydrateSessionStatuses() {
   try {
     const statuses = await client.session.status();
@@ -1206,13 +1244,51 @@ export async function deleteSession(id: string) {
 
     await client.session.delete(id);
 
-    removeDeletedSessionTree(id);
+    hideDeletedSessionTree(id);
+    await loadRecycleBin();
 
     if (nextActiveId) {
       await selectSession(nextActiveId, { markSeen: false });
     }
   } catch (err) {
     logError('deleteSession', err);
+  }
+}
+
+export async function restoreSession(rootID: string) {
+  try {
+    await client.varro.recycleBin.restore(rootID);
+    await Promise.all([loadSessions(), loadRecycleBin(), hydrateSessionStatuses()]);
+  } catch (err) {
+    logError('restoreSession', err);
+  }
+}
+
+export async function deleteSessionPermanently(rootID: string) {
+  try {
+    const entry = state.recycleBinEntries.find((item) => item.rootID === rootID);
+    await client.varro.recycleBin.delete(rootID);
+    await loadRecycleBin();
+    for (const session of entry?.sessions || []) {
+      clearDeletedSessionState(session.id);
+    }
+  } catch (err) {
+    logError('deleteSessionPermanently', err);
+  }
+}
+
+export async function emptyRecycleBin() {
+  try {
+    const entries = [...state.recycleBinEntries];
+    await client.varro.recycleBin.empty();
+    await loadRecycleBin();
+    for (const entry of entries) {
+      for (const session of entry.sessions) {
+        clearDeletedSessionState(session.id);
+      }
+    }
+  } catch (err) {
+    logError('emptyRecycleBin', err);
   }
 }
 

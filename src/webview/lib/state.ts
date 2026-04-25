@@ -22,6 +22,7 @@ import type {
   McpStatus,
   PermissionMode,
   ProviderLimitStatus,
+  RecycleBinEntry,
   ServerStatus,
   WebviewThemeKind,
 } from '../../shared/protocol';
@@ -48,6 +49,7 @@ interface AppState {
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
   sessions: Session[];
+  recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
@@ -118,6 +120,7 @@ export const [state, setState] = createStore<AppState>({
   droppedFiles: initialWebviewState.droppedFiles ?? [],
   clipboardImages: [],
   sessions: [],
+  recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
   activeSessionId: null,
   currentDocumentEnabledBySession: {},
   sessionStatus: {},
@@ -918,6 +921,10 @@ export function setSessions(nextSessions: Session[]) {
     writeStored(STORAGE_KEYS.skippedPlanSessions, nextSkippedPlanSessions);
   }
   sessionTreeIndex.invalidate();
+}
+
+export function setRecycleBinEntries(entries: RecycleBinEntry[]) {
+  setState('recycleBinEntries', entries);
 }
 
 export function upsertQuestion(question: QuestionRequest) {
