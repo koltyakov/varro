@@ -43,6 +43,7 @@ const MAX_PERSISTED_INTERRUPTED_SESSIONS = 50;
 const MAX_PERSISTED_BLOCKING_REQUESTS = 100;
 const MAX_PERSISTED_METADATA_ENTRIES = 20;
 const MAX_PERSISTED_STRING_LENGTH = 500;
+const MAX_SESSION_METADATA_ENTRIES = 200;
 
 /**
  * Owns all per-session state derived from the OpenCode event stream:
@@ -158,6 +159,7 @@ export class SessionStateManager {
         const agent = getString(info?.agent);
         if (agent) {
           this.sessionAgents.set(sessionID, agent);
+          this.evictOldestSessionMetadata(this.sessionAgents);
         }
 
         if (getString(info?.role) !== 'assistant') break;
@@ -321,6 +323,15 @@ export class SessionStateManager {
     const title = normalizeSessionTitle(getString(info?.title));
     if (sessionID && title) {
       this.sessionTitles.set(sessionID, title);
+      this.evictOldestSessionMetadata(this.sessionTitles);
+    }
+  }
+
+  private evictOldestSessionMetadata(map: Map<string, string>) {
+    while (map.size > MAX_SESSION_METADATA_ENTRIES) {
+      const oldestKey = map.keys().next().value;
+      if (!oldestKey) break;
+      map.delete(oldestKey);
     }
   }
 

@@ -1499,13 +1499,17 @@ export async function compactSession() {
 export async function respondPermission(
   sessionId: string,
   permissionId: string,
-  response: 'once' | 'always' | 'reject'
+  response: 'once' | 'always' | 'reject',
+  options?: { rethrow?: boolean }
 ) {
   try {
     await client.session.respondPermission(sessionId, permissionId, response);
     removePermission(permissionId);
   } catch (err) {
     setError(err instanceof Error ? err.message : 'Failed to respond to permission');
+    if (options?.rethrow) {
+      throw err;
+    }
   }
 }
 

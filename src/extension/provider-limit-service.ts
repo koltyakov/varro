@@ -44,6 +44,7 @@ export class ProviderLimitService {
   get(providerID: string, modelID: string | null) {
     const cacheKey = `${providerID}:${modelID || ''}`;
     const now = Date.now();
+    this.pruneExpiredProviderLimitCache(now);
     const cached = this.providerLimitCache.get(cacheKey);
     if (cached && cached.expiresAt > now) return cached.promise;
 
@@ -59,6 +60,14 @@ export class ProviderLimitService {
       promise,
     });
     return promise;
+  }
+
+  private pruneExpiredProviderLimitCache(now: number) {
+    for (const [key, entry] of this.providerLimitCache.entries()) {
+      if (entry.expiresAt <= now) {
+        this.providerLimitCache.delete(key);
+      }
+    }
   }
 
   private async load(providerID: string, modelID: string | null): Promise<ProviderLimitStatus> {

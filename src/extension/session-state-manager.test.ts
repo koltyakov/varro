@@ -218,4 +218,28 @@ describe('SessionStateManager notifications', () => {
       20
     );
   });
+
+  it('evicts old session metadata entries as new sessions arrive', () => {
+    const manager = createManager(() => false);
+
+    for (let i = 0; i < 250; i += 1) {
+      manager.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: `session-${i}`, title: `Session ${i}` } },
+      });
+      manager.handleServerEvent({
+        type: 'message.updated',
+        properties: {
+          info: { sessionID: `session-${i}`, role: 'assistant', agent: 'plan' },
+        },
+      });
+    }
+
+    expect(manager.titleFor('session-0')).toBeUndefined();
+    expect(manager.titleFor('session-49')).toBeUndefined();
+    expect(manager.titleFor('session-50')).toBe('Session 50');
+    expect(manager.titleFor('session-249')).toBe('Session 249');
+    expect(manager.isPlanSession('session-0')).toBe(false);
+    expect(manager.isPlanSession('session-249')).toBe(true);
+  });
 });

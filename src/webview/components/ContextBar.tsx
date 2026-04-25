@@ -11,6 +11,7 @@ import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
+  subtractContextLineRanges,
 } from '../../shared/context-files';
 import { postMessage } from '../lib/bridge';
 import { DocumentIcon } from './DocumentIcon';
@@ -30,11 +31,16 @@ export function ContextBar() {
     !!terminalSelection();
   const activeContext = () => {
     const file = activeFile();
-    const selectedLines = getSelectionRangesFromEditorContext(selection());
     if (!file) return null;
-    if (explicitContextForActiveFile() && selectedLines.length === 0) return null;
 
-    const lineRange = formatContextLineRanges(selectedLines);
+    const explicitContext = explicitContextForActiveFile();
+    const selectedLines = getSelectionRangesFromEditorContext(selection());
+    const explicitSelectionRanges =
+      explicitContext?.type === 'file' ? explicitContext.lineRanges : undefined;
+    const uniqueSelectedLines = subtractContextLineRanges(selectedLines, explicitSelectionRanges);
+    if (explicitContext && uniqueSelectedLines.length === 0) return null;
+
+    const lineRange = formatContextLineRanges(uniqueSelectedLines);
 
     return { filename: getLeafPathName(file.relativePath), lineRange };
   };

@@ -60,7 +60,8 @@ type EventHandlerDependencies = {
   respondPermission(
     sessionId: string,
     permissionId: string,
-    response: 'once' | 'always' | 'reject'
+    response: 'once' | 'always' | 'reject',
+    options?: { rethrow?: boolean }
   ): Promise<void>;
   addPermission(permission: Permission): void;
   removePermission(permissionId: string): void;
@@ -244,7 +245,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const permission = normalizePermissionEvent(props);
     if (!permission) return;
     if (deps.shouldAutoApprovePermissions(permission.sessionID)) {
-      void deps.respondPermission(permission.sessionID, permission.id, 'always');
+      void deps
+        .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
+        .catch(() => {
+          deps.addPermission(permission);
+        });
       return;
     }
     deps.addPermission(permission);
