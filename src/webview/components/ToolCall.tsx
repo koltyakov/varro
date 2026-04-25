@@ -641,12 +641,13 @@ function GenericToolCall(props: {
           >
             <div class="terminal-command-card">
               <div class="terminal-command-row terminal-command-row-input">
-                <span class="terminal-command-label">IN</span>
+                <span class="terminal-command-prompt" aria-hidden="true">
+                  $
+                </span>
                 <pre class="terminal-command-text">{bashCommand()}</pre>
               </div>
               <Show when={props.state.status === 'completed'}>
                 <div class="terminal-command-row terminal-command-row-output">
-                  <span class="terminal-command-label">OUT</span>
                   <pre
                     class={`terminal-command-text terminal-command-output${bashOutputIsEmpty() ? ' terminal-command-output-empty' : ''}`}
                   >
