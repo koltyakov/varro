@@ -7,12 +7,14 @@ test('host abort command stops the active busy session', async ({ page }) => {
   await expect(page.getByTitle('Stop')).toHaveCount(0);
   await expect(page.locator('textarea')).toBeVisible();
 
-  const abortCount = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ path: string }> };
-    }).__varroE2E;
-    return value?.requests.filter((request) => request.path.endsWith('/abort')).length || 0;
-  });
-
-  expect(abortCount).toBe(1);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (window as Window & {
+          __varroE2E?: { requests: Array<{ path: string }> };
+        }).__varroE2E;
+        return value?.requests.filter((request) => request.path.endsWith('/abort')).length || 0;
+      })
+    )
+    .toBe(1);
 });
