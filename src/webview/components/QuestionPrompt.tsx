@@ -1,6 +1,7 @@
-import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import type { QuestionRequest } from '../types';
 import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
+import { state } from '../lib/state';
 
 type QuestionDraft = {
   selected: Array<Array<string>>;
@@ -40,6 +41,15 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       currentStep: currentStep(),
     });
   });
+
+  onCleanup(() => {
+    queueMicrotask(() => {
+      if (!state.questions.some((question) => question.id === props.request.id)) {
+        questionDrafts.delete(props.request.id);
+      }
+    });
+  });
+
   const [isSubmitting, setIsSubmitting] = createSignal(false);
 
   const normalizedAnswers = createMemo(() =>

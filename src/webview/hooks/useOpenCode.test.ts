@@ -154,6 +154,28 @@ function todoPart(id: string, messageID: string, content: string, status = 'comp
   } as Part;
 }
 
+function parallelTodoPart(id: string, messageID: string, content: string, status = 'completed'): Part {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID,
+    type: 'tool',
+    tool: 'multi_tool_use.parallel',
+    state: {
+      input: {
+        tool_uses: [
+          {
+            recipient_name: 'functions.todowrite',
+            parameters: {
+              todos: [{ id: `${id}-todo`, content, status, priority: 'medium' }],
+            },
+          },
+        ],
+      },
+    },
+  } as Part;
+}
+
 async function loadModules() {
   const stateModule = await import('../lib/state');
   const hookModule = await import('./useOpenCode');
@@ -859,6 +881,32 @@ describe('sendMessage', () => {
     await hookModule.selectSession('session-1');
 
     expect(expansionStateModule.getToolCallExpanded(expansionKey)).toBe(false);
+  });
+
+  it('restores todos from parallel tool calls when selecting a session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1', 'user-1'),
+        parts: [parallelTodoPart('todo-part-1', 'assistant-1', 'Follow up on review', 'in_progress')],
+      },
+    ]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    await hookModule.selectSession('session-1');
+
+    expect(stateModule.state.todos).toEqual([
+      {
+        id: 'todo-part-1-todo',
+        content: 'Follow up on review',
+        status: 'in_progress',
+        priority: 'medium',
+      },
+    ]);
   });
 
   it('marks the next session seen when archive auto-selects it', async () => {

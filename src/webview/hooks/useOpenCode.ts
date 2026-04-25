@@ -181,6 +181,7 @@ function clearActiveSessionState() {
 }
 
 function clearDeletedSessionState(id: string) {
+  clearPendingAbort(id);
   removePermissionModeForSession(id);
   clearCurrentDocumentStateForSession(id);
   clearSelectedAgentForSession(id);
@@ -254,6 +255,27 @@ function upsertSession(session: Session) {
 
 const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
 
+function extractTodosFromParallelTool(raw: unknown): Todo[] | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const toolUses = (raw as Record<string, unknown>).tool_uses;
+  if (!Array.isArray(toolUses)) return null;
+
+  for (const toolUse of toolUses) {
+    if (!toolUse || typeof toolUse !== 'object') continue;
+
+    const record = toolUse as Record<string, unknown>;
+    const recipientName =
+      typeof record.recipient_name === 'string' ? record.recipient_name.trim().toLowerCase() : '';
+    if (!recipientName.includes('todowrite')) continue;
+
+    const todos = extractTodos(record.parameters);
+    if (todos) return todos;
+  }
+
+  return null;
+}
+
 function normalizeTodo(raw: unknown): Todo | null {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -298,11 +320,16 @@ function extractTodosFromPart(part: Part): Todo[] | null {
   if (part.type !== 'tool') return null;
 
   const toolName = part.tool.trim().toLowerCase();
+  const toolState = part.state as Record<string, unknown>;
+
+  if (toolName === 'parallel' || toolName.endsWith('.parallel')) {
+    return extractTodosFromParallelTool(toolState.input) || extractTodosFromParallelTool(toolState.metadata);
+  }
+
   if (!toolName.includes('todo') && !TODO_TOOL_NAMES.has(toolName)) {
     return null;
   }
 
-  const toolState = part.state as Record<string, unknown>;
   return extractTodos(toolState.input) || extractTodos(toolState.metadata) || null;
 }
 
@@ -592,6 +619,7 @@ export function useOpenCode() {
       eventHandlerCleanups = [];
       initialized = false;
       initializing = false;
+      pendingAbortRetryAttempts.clear();
     });
   });
 
