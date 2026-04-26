@@ -154,4 +154,26 @@ describe('FileSearchService', () => {
     expect(onResult).toHaveBeenCalledWith({ requestId: 7, query: 'missing', files: [] });
     expect(loggerMock.warn).toHaveBeenCalledWith('searchFiles failed: boom');
   });
+
+  it('reuses an empty workspace cache until dispose clears it', async () => {
+    vscodeMock.workspace.findFiles.mockResolvedValue([]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const firstResult = vi.fn();
+    const secondResult = vi.fn();
+
+    service.search(1, 'missing', 5, firstResult);
+    await vi.waitFor(() => {
+      expect(firstResult).toHaveBeenCalledTimes(1);
+    });
+
+    service.search(2, 'missing', 5, secondResult);
+    await vi.waitFor(() => {
+      expect(secondResult).toHaveBeenCalledTimes(1);
+    });
+
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(1);
+    expect(firstResult).toHaveBeenCalledWith({ requestId: 1, query: 'missing', files: [] });
+    expect(secondResult).toHaveBeenCalledWith({ requestId: 2, query: 'missing', files: [] });
+  });
 });

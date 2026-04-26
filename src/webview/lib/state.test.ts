@@ -651,4 +651,49 @@ describe('getSessionTreeIds', () => {
     expect(hasActivePermission()).toBe(true);
     expect(hasActiveQuestion()).toBe(true);
   });
+
+  it('treats root-session prompts as active on a child session', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 1',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 20 },
+      },
+    ]);
+    setState('activeSessionId', 'child-1');
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+    setState('questions', [
+      {
+        id: 'question-1',
+        sessionID: 'session-1',
+        questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+      },
+    ]);
+
+    expect(hasActivePermission()).toBe(true);
+    expect(hasActiveQuestion()).toBe(true);
+  });
 });

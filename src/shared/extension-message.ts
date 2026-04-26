@@ -4,6 +4,8 @@ import {
   type DroppedFile,
   type EditorContext,
   type ExtensionMessage,
+  type RecycleBinEntry,
+  type RecycleBinSession,
   type ServerStatus,
   type WebviewThemeKind,
 } from './protocol';
@@ -11,6 +13,7 @@ import {
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'server/status',
   'server/event',
+  'recycle-bin/update',
   'pending-attention/update',
   'context/update',
   'terminal-selection/update',
@@ -64,6 +67,18 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
         (item): item is string => typeof item === 'string'
       );
       return { type, payload: { sessionIds } };
+    }
+
+    case 'recycle-bin/update': {
+      const payload = asRecord(record.payload);
+      if (
+        !payload ||
+        !Array.isArray(payload.entries) ||
+        !payload.entries.every(isRecycleBinEntry)
+      ) {
+        return null;
+      }
+      return { type, payload: { entries: payload.entries } };
     }
 
     case 'context/update': {
@@ -174,6 +189,36 @@ function isServerStatus(value: Record<string, unknown> | null): value is ServerS
     default:
       return false;
   }
+}
+
+function isRecycleBinEntry(value: unknown): value is RecycleBinEntry {
+  const record = asRecord(value);
+  return (
+    !!record &&
+    typeof record.rootID === 'string' &&
+    typeof record.deletedAt === 'number' &&
+    typeof record.expiresAt === 'number' &&
+    isRecycleBinSession(record.root) &&
+    Array.isArray(record.sessions) &&
+    record.sessions.every(isRecycleBinSession)
+  );
+}
+
+function isRecycleBinSession(value: unknown): value is RecycleBinSession {
+  const record = asRecord(value);
+  const time = asRecord(record?.time);
+  return (
+    !!record &&
+    typeof record.id === 'string' &&
+    typeof record.projectID === 'string' &&
+    typeof record.directory === 'string' &&
+    typeof record.title === 'string' &&
+    typeof record.version === 'string' &&
+    !!time &&
+    typeof time.created === 'number' &&
+    typeof time.updated === 'number' &&
+    (time.compacting === undefined || typeof time.compacting === 'number')
+  );
 }
 
 function isDesktopSessionPaneSide(value: unknown): value is DesktopSessionPaneSide {

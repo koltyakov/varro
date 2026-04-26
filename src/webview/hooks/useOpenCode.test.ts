@@ -1618,6 +1618,75 @@ describe('useOpenCode initialization', () => {
     }
   });
 
+  it('refreshes provider limits after the webview becomes visible again', async () => {
+    vi.useFakeTimers();
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({
+      providers: [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ],
+      default: { openai: 'gpt-4o' },
+    });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      stateModule.setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+      stateModule.setState('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ]);
+      stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+      stateModule.setState('providersLoaded', true);
+
+      expect(clientMocks.providerLimit).not.toHaveBeenCalled();
+
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+
+      expect(clientMocks.providerLimit).toHaveBeenCalledWith('openai', 'gpt-4o');
+    } finally {
+      dispose();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: originalVisibility,
+      });
+      vi.useRealTimers();
+    }
+  });
+
   it('syncs session-selected mcps when selecting a session', async () => {
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([session('session-1')]);
@@ -2106,6 +2175,155 @@ describe('useOpenCode initialization', () => {
           },
         ]);
       });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('rebuilds todos from messages when the active assistant message completes', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [
+        { info: userMessage('user-1'), parts: [] },
+        {
+          info: assistantMessage('assistant-1', 'user-1'),
+          parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'completed')],
+        },
+      ]);
+
+      handlers.get('todo.updated')?.({
+        properties: {
+          sessionID: 'session-1',
+          todos: [
+            {
+              id: 'todo-part-1-todo',
+              content: 'Summarize findings',
+              status: 'in_progress',
+              priority: 'medium',
+            },
+          ],
+        },
+      });
+
+      expect(stateModule.state.todos).toEqual([
+        {
+          id: 'todo-part-1-todo',
+          content: 'Summarize findings',
+          status: 'in_progress',
+          priority: 'medium',
+        },
+      ]);
+
+      handlers.get('message.updated')?.({
+        properties: {
+          info: {
+            ...assistantMessage('assistant-1', 'user-1'),
+            time: { created: 0, completed: 1 },
+          },
+        },
+      });
+
+      expect(stateModule.state.todos).toEqual([
+        {
+          id: 'todo-part-1-todo',
+          content: 'Summarize findings',
+          status: 'completed',
+          priority: 'medium',
+        },
+      ]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('ignores stale todo events after the active assistant message completes', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [
+        { info: userMessage('user-1'), parts: [] },
+        {
+          info: {
+            ...assistantMessage('assistant-1', 'user-1'),
+            time: { created: 0, completed: 1 },
+          },
+          parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'completed')],
+        },
+      ]);
+      stateModule.setState('todos', [
+        {
+          id: 'todo-part-1-todo',
+          content: 'Summarize findings',
+          status: 'completed',
+          priority: 'medium',
+        },
+      ]);
+
+      handlers.get('todo.updated')?.({
+        properties: {
+          sessionID: 'session-1',
+          todos: [
+            {
+              id: 'todo-part-1-todo',
+              content: 'Summarize findings',
+              status: 'in_progress',
+              priority: 'medium',
+            },
+          ],
+        },
+      });
+
+      expect(stateModule.state.todos).toEqual([
+        {
+          id: 'todo-part-1-todo',
+          content: 'Summarize findings',
+          status: 'completed',
+          priority: 'medium',
+        },
+      ]);
     } finally {
       dispose();
     }

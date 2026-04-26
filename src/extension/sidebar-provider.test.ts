@@ -182,6 +182,78 @@ describe('SidebarProvider blocking request replay', () => {
     });
   });
 
+  it('handles local config routes without starting the server', async () => {
+    vscodeMock.workspace.fs.readFile.mockResolvedValue(
+      new TextEncoder().encode(JSON.stringify({ small_model: 'openai/gpt-5-mini' }))
+    );
+
+    const workspaceState = {
+      get: vi.fn((_key: string, fallback?: unknown) => fallback),
+      update: vi.fn(() => Promise.resolve()),
+    };
+
+    const contextProvider = {
+      context: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+    };
+
+    const server = {
+      status: { state: 'error', message: 'offline' },
+      on: vi.fn(),
+      off: vi.fn(),
+      start: vi.fn(() => Promise.reject(new Error('should not start'))),
+      request: vi.fn(),
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+    };
+
+    const provider = new SidebarProvider(
+      { fsPath: '/extension' } as never,
+      workspaceState as never,
+      contextProvider as never,
+      server as never
+    );
+
+    const posted: unknown[] = [];
+    const providerState = provider as unknown as { view: unknown };
+    providerState.view = {
+      visible: true,
+      webview: {
+        options: {},
+        html: '',
+        postMessage: vi.fn((msg: unknown) => {
+          posted.push(msg);
+          return true;
+        }),
+        onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
+        asWebviewUri: vi.fn((uri: { toString?: () => string }) => uri),
+      },
+      onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+    };
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 7, method: 'GET', path: '/varro/opencode-config' },
+    });
+
+    expect(server.start).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 7,
+        data: {
+          smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+          agentModels: {},
+        },
+      },
+    });
+  });
+
   it('writes small_model routing to project opencode.json', async () => {
     vscodeMock.workspace.fs.readFile.mockRejectedValueOnce({ code: 'FileNotFound' });
 
@@ -837,5 +909,68 @@ describe('SidebarProvider blocking request replay', () => {
       language: 'json',
       content,
     });
+  });
+
+  it('times out a hung export process and reports an error', async () => {
+    const kill = vi.fn();
+    spawnMock.mockReturnValue({
+      stderr: {
+        on: vi.fn(),
+      },
+      once: vi.fn(),
+      kill,
+      exitCode: null,
+      signalCode: null,
+    });
+
+    const workspaceState = {
+      get: vi.fn((_key: string, fallback?: unknown) => fallback),
+      update: vi.fn(() => Promise.resolve()),
+    };
+
+    const contextProvider = {
+      context: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+    };
+
+    const server = {
+      status: { state: 'running', url: 'http://127.0.0.1:4096' },
+      on: vi.fn(),
+      off: vi.fn(),
+      start: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
+      request: vi.fn(),
+      resolveCommand: vi.fn(() => 'opencode'),
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+    };
+
+    const provider = new SidebarProvider(
+      { fsPath: '/extension' } as never,
+      workspaceState as never,
+      contextProvider as never,
+      server as never
+    );
+
+    const providerClass = SidebarProvider as unknown as { EXPORT_TIMEOUT_MS: number };
+    const originalTimeout = providerClass.EXPORT_TIMEOUT_MS;
+    providerClass.EXPORT_TIMEOUT_MS = 10;
+
+    try {
+      await provider.handleMessage({
+        type: 'session/export',
+        payload: { sessionId: 'session-1' },
+      });
+
+      expect(kill).toHaveBeenCalledWith('SIGTERM');
+      expect(vscodeMock.window.showErrorMessage).toHaveBeenCalledWith(
+        'Failed to export session: OpenCode CLI export timed out'
+      );
+    } finally {
+      providerClass.EXPORT_TIMEOUT_MS = originalTimeout;
+    }
   });
 });

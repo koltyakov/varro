@@ -14,6 +14,10 @@ import type {
   Todo,
 } from '../types';
 
+function getPermissionReplyId(props: Record<string, unknown>) {
+  return (props.id || props.permissionID || props.requestID) as string | undefined;
+}
+
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
   getMessages(): Array<{ info: Message; parts: Part[] }>;
@@ -70,6 +74,17 @@ type EventHandlerDependencies = {
   extractTodos(raw: unknown): Todo[] | null;
   setDiffs(diffs: FileDiff[]): void;
 };
+
+function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role === 'user') return false;
+    return !message.error && !message.time.completed;
+  }
+
+  return false;
+}
 
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
@@ -152,6 +167,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (message.sessionID === deps.getActiveSessionId()) {
         deps.markLoadingActivity();
         deps.upsertMessageInfo(message);
+        if (isAssistantMessage(message) && (!!message.error || !!message.time.completed)) {
+          deps.setTodoStateAuthority('messages');
+          deps.syncTodosFromMessages();
+        }
       }
       if (isAssistantMessage(message)) {
         deps.setSessionFailed(
@@ -273,7 +292,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('permission.replied', (data) => {
       const props = data.properties;
       if (!props) return;
-      const pid = (props.permissionID || props.requestID) as string | undefined;
+      const pid = getPermissionReplyId(props);
       if (pid) deps.removePermission(pid);
     })
   );
@@ -303,6 +322,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('todo.updated', (data) => {
       const p = data.properties;
       if ((p?.sessionID as string) === deps.getActiveSessionId()) {
+        if (!hasActiveAssistantReply(deps.getMessages())) return;
         deps.setTodoStateAuthority('event');
         deps.setTodos(deps.extractTodos(p?.todos) || []);
       }

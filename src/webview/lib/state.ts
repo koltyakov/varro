@@ -538,19 +538,22 @@ export function markLoadingActivity(now = Date.now()) {
 export function hasActiveQuestion() {
   const sid = state.activeSessionId;
   if (!sid) return false;
-  const sessionIds = new Set(getSessionTreeIds(sid));
+  const rootId = getSessionTreeRootId(sid) || sid;
+  const sessionIds = new Set(getSessionTreeIds(rootId));
   return state.questions.some((question) => sessionIds.has(question.sessionID));
 }
 
 export function hasActivePermission() {
   const sid = state.activeSessionId;
   if (!sid) return false;
-  const sessionIds = new Set(getSessionTreeIds(sid));
+  const rootId = getSessionTreeRootId(sid) || sid;
+  const sessionIds = new Set(getSessionTreeIds(rootId));
   return state.permissions.some((permission) => sessionIds.has(permission.sessionID));
 }
 
 export function isSessionAwaitingInput(sessionId: string) {
-  const sessionIds = new Set(getSessionTreeIds(sessionId));
+  const rootId = getSessionTreeRootId(sessionId) || sessionId;
+  const sessionIds = new Set(getSessionTreeIds(rootId));
   return [
     ...state.pendingAttentionSessionIds,
     ...state.permissions.map((permission) => permission.sessionID),
@@ -1191,7 +1194,9 @@ export function upsertMessageInfo(info: Message) {
     produce((msgs) => {
       const idx = messageIndex.findMessageIndex(msgs, info.id);
       if (idx !== -1) {
+        if (msgs[idx].info === info) return;
         msgs[idx].info = info;
+        bumpMessageStructureVersion();
         return;
       } else {
         msgs.push({ info, parts: [] });
@@ -1528,14 +1533,14 @@ function areMessageEntriesEquivalent(
   right: { info: Message; parts: Part[] }
 ) {
   if (left === right) return true;
-  if (left.info !== right.info && !areMessagesEquivalent(left.info, right.info)) return false;
+  if (left.info !== right.info && !deepEqual(left.info, right.info)) return false;
   if (left.parts === right.parts) return true;
   if (left.parts.length !== right.parts.length) return false;
 
   for (let index = 0; index < left.parts.length; index += 1) {
     if (
       left.parts[index] !== right.parts[index] &&
-      !arePartsEquivalent(left.parts[index], right.parts[index])
+      !deepEqual(left.parts[index], right.parts[index])
     ) {
       return false;
     }
@@ -1564,35 +1569,6 @@ function deepEqual(a: unknown, b: unknown): boolean {
     }
   }
   return true;
-}
-
-function areMessagesEquivalent(left: Message, right: Message) {
-  if (left.id !== right.id) return false;
-  if (left.sessionID !== right.sessionID) return false;
-  if (left.role !== right.role) return false;
-  if (left.time.created !== right.time.created) return false;
-  if (
-    (left.time as { completed?: number }).completed !==
-    (right.time as { completed?: number }).completed
-  ) {
-    return false;
-  }
-  const leftError = (left as { error?: unknown }).error ?? null;
-  const rightError = (right as { error?: unknown }).error ?? null;
-  if (leftError !== rightError && !deepEqual(leftError, rightError)) return false;
-  return true;
-}
-
-function arePartsEquivalent(left: Part, right: Part) {
-  if (left.id !== right.id) return false;
-  if (left.type !== right.type) return false;
-  if (left.messageID !== right.messageID) return false;
-  if (left.sessionID !== right.sessionID) return false;
-  if ((left as { text?: unknown }).text !== (right as { text?: unknown }).text) return false;
-  const leftState = (left as { state?: unknown }).state ?? null;
-  const rightState = (right as { state?: unknown }).state ?? null;
-  if (leftState === rightState) return true;
-  return deepEqual(leftState, rightState);
 }
 
 export function getChildRunsByParentId(

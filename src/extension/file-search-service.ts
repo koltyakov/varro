@@ -29,6 +29,7 @@ export class FileSearchService {
 
   private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
   private workspaceFileCacheAt = 0;
+  private hasWorkspaceFileCache = false;
   private workspaceFileCachePromise: Promise<WorkspaceFileSearchEntry[]> | null = null;
   private fileSearchCts: vscode.CancellationTokenSource | null = null;
 
@@ -54,6 +55,7 @@ export class FileSearchService {
     this.fileSearchCts?.dispose();
     this.fileSearchCts = null;
     this.workspaceFileCache = [];
+    this.hasWorkspaceFileCache = false;
     this.workspaceFileCachePromise = null;
   }
 
@@ -86,7 +88,7 @@ export class FileSearchService {
   ): Promise<WorkspaceFileSearchEntry[]> {
     const now = Date.now();
     if (
-      this.workspaceFileCache.length > 0 &&
+      this.hasWorkspaceFileCache &&
       now - this.workspaceFileCacheAt < FileSearchService.CACHE_TTL_MS
     ) {
       return this.workspaceFileCache;
@@ -114,6 +116,7 @@ export class FileSearchService {
           };
         });
         this.workspaceFileCache = entries;
+        this.hasWorkspaceFileCache = true;
         this.workspaceFileCacheAt = Date.now();
         return entries;
       })

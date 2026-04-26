@@ -165,10 +165,11 @@ function buildFileLink(raw: string, label?: string) {
 }
 
 renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
+  const workspacePath = state.editorContext.workspacePath || '';
   const normalizedText = SHELL_LANGS.has((lang || '').toLowerCase())
-    ? formatCommandDisplay(text, state.editorContext.workspacePath)
+    ? formatCommandDisplay(text, workspacePath || null)
     : text;
-  const cacheKey = `${lang || ''}\u0000${normalizedText}`;
+  const cacheKey = `${workspacePath}\u0000${lang || ''}\u0000${normalizedText}`;
   const cached = codeBlockHtmlCache.get(cacheKey);
   if (cached) {
     codeBlockHtmlCache.delete(cacheKey);
@@ -224,6 +225,8 @@ const FILE_PATH_RE =
 const ANCHOR_RE = /(<a[\s\S]*?<\/a>)/gi;
 const SVG_RE = /(<svg[\s\S]*?<\/svg>)/gi;
 const BUTTON_RE = /(<button[\s\S]*?<\/button>)/gi;
+const INLINE_CODE_RE = /(<code[\s\S]*?<\/code>)/gi;
+const PRE_RE = /(<pre[\s\S]*?<\/pre>)/gi;
 
 function isLocalFileHref(href: string | null): boolean {
   if (!href) return false;
@@ -288,6 +291,8 @@ function linkifyPaths(html: string): string {
   protect(SVG_RE);
   protect(BUTTON_RE);
   protect(ANCHOR_RE);
+  protect(PRE_RE);
+  protect(INLINE_CODE_RE);
 
   html = html.replace(FILE_PATH_RE, (full, path: string) => {
     const link = buildFileLink(path);
@@ -394,12 +399,14 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   createEffect(() => {
     const content = props.content || '';
+    const workspacePath = state.editorContext.workspacePath;
     if (rafId !== null) {
       pendingContent = content;
       return;
     }
     pendingContent = content;
     rafId = requestAnimationFrame(flushPending);
+    void workspacePath;
   });
 
   const copyTimeouts = new Set<ReturnType<typeof setTimeout>>();

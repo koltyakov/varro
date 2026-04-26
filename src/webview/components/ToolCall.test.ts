@@ -225,6 +225,36 @@ describe('ToolCall', () => {
     expect(rows[2]?.classList.contains('structured-tool-row-block')).toBe(true);
   });
 
+  it('does not duplicate the running status dot in expanded task details', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          subagent_type: 'explore',
+          prompt: 'Review the codebase for performance issues',
+        },
+        title: 'Scan hotspots',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    expect(container?.querySelectorAll('.tool-status-dot')).toHaveLength(1);
+    expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
+      'Running...'
+    );
+  });
+
   it('renders aborted tool errors with neutral aborted styling', () => {
     const part: ToolPart = {
       id: 'tool-1',

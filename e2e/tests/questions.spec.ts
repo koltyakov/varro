@@ -4,9 +4,17 @@ import { getE2EState } from './helpers';
 test('answers a standalone question prompt', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=question-prompt');
 
+  const submitButton = page.getByRole('button', { name: 'Submit' });
+  const canaryOption = page.getByRole('radio', { name: /Canary/ });
+
   await expect(page.getByText('Rollout choice', { exact: true })).toBeVisible();
-  await page.getByText('Canary', { exact: true }).click();
-  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(submitButton).toBeDisabled();
+
+  await canaryOption.click();
+
+  await expect(canaryOption).toHaveAttribute('aria-checked', 'true');
+  await expect(submitButton).toBeEnabled();
+  await submitButton.click();
 
   const replyRequest = await getE2EState(page, () => {
     const value = (window as Window & {

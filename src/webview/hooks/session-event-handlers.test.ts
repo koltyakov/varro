@@ -94,4 +94,70 @@ describe('registerSessionEventHandlers', () => {
       );
     });
   });
+
+  it('removes permissions when a reply only includes id', () => {
+    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(
+        event as string,
+        handler as (data: { properties?: Record<string, unknown> }) => void
+      );
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    const removePermission = vi.fn();
+
+    registerSessionEventHandlers({
+      getActiveSessionId: () => null,
+      getMessages: () => [],
+      setTodoStateAuthority: vi.fn(),
+      setTodos: vi.fn(),
+      upsertSession: vi.fn(),
+      setSessionCompacting: vi.fn(),
+      removeDeletedSessionTree: vi.fn(),
+      shouldIgnorePendingAbortStatus: () => false,
+      hasPendingAbort: () => false,
+      clearPendingAbort: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      clearUsageLimitOnResumedProgress: vi.fn(),
+      updateUsageLimitState: vi.fn(),
+      startLoading: vi.fn(),
+      stopLoading: vi.fn(),
+      markSessionSeen: vi.fn(),
+      syncSession: vi.fn().mockResolvedValue(undefined),
+      shouldResyncSessionAfterIdle: () => false,
+      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+      markLoadingActivity: vi.fn(),
+      upsertMessageInfo: vi.fn(),
+      setSessionFailed: vi.fn(),
+      parseUsageLimitNotice: () => null,
+      applyUsageLimitNotice: vi.fn(),
+      setSessionUsageLimit: vi.fn(),
+      upsertPart: vi.fn(),
+      syncTodosFromMessages: vi.fn(),
+      applyMessagePartDelta: vi.fn(),
+      removeMessagePart: vi.fn(),
+      clearStreamingState: vi.fn(),
+      replaceMessages: vi.fn(),
+      shouldAutoApprovePermissions: () => false,
+      respondPermission: vi.fn().mockResolvedValue(undefined),
+      addPermission: vi.fn(),
+      removePermission,
+      upsertQuestion: vi.fn(),
+      removeQuestion: vi.fn(),
+      extractTodos: () => null,
+      setDiffs: vi.fn(),
+    });
+
+    handlers.get('permission.replied')?.({
+      properties: {
+        id: 'perm-1',
+        sessionID: 'session-1',
+      },
+    });
+
+    expect(removePermission).toHaveBeenCalledWith('perm-1');
+  });
 });

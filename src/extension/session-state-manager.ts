@@ -198,7 +198,7 @@ export class SessionStateManager {
       case 'permission.replied': {
         changed =
           this.clearBlockingRequest(
-            getString(props?.permissionID) || getString(props?.requestID)
+            getString(props?.id) || getString(props?.permissionID) || getString(props?.requestID)
           ) || changed;
         break;
       }

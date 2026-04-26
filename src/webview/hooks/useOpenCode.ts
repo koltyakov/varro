@@ -1,4 +1,4 @@
-import { onMount, onCleanup, createEffect } from 'solid-js';
+import { onMount, onCleanup, createEffect, createSignal } from 'solid-js';
 import { produce } from 'solid-js/store';
 import { client } from '../lib/client';
 import {
@@ -131,6 +131,7 @@ let connectionGeneration = 0;
 let sessionSelectionGeneration = 0;
 let sessionSyncGeneration = 0;
 const pendingAbortRetryAttempts = new Map<string, number | null>();
+const [documentVisible, setDocumentVisible] = createSignal(document.visibilityState === 'visible');
 const INTERRUPTED_SESSION_CONTINUE_PROMPT =
   'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.';
 
@@ -634,6 +635,7 @@ export function useOpenCode() {
     postFocusState();
 
     const handleVisibilityChange = () => {
+      setDocumentVisible(document.visibilityState === 'visible');
       postFocusState();
       if (document.visibilityState === 'visible' && isLoading() && state.activeSessionId) {
         recheckSessionStatus(state.activeSessionId);
@@ -662,12 +664,13 @@ export function useOpenCode() {
   createEffect(() => {
     const loading = isLoading();
     const sessionId = state.activeSessionId;
-    if (!loading || !sessionId || !isDocumentVisible()) return;
+    const visible = documentVisible();
+    if (!loading || !sessionId || !visible) return;
 
     let delay = 8000;
     const schedulePoll = () => {
       return setTimeout(() => {
-        if (!isLoading() || !state.activeSessionId || !isDocumentVisible()) return;
+        if (!isLoading() || !state.activeSessionId || !documentVisible()) return;
         recheckSessionStatus(state.activeSessionId);
         delay = Math.min(delay * 2, 60_000);
         timer = schedulePoll();
@@ -679,8 +682,8 @@ export function useOpenCode() {
   });
 
   createEffect(() => {
-    if (state.serverStatus.state !== 'running' || !state.providersLoaded || !isDocumentVisible())
-      return;
+    const visible = documentVisible();
+    if (state.serverStatus.state !== 'running' || !state.providersLoaded || !visible) return;
 
     const active = getActiveProviderSelection();
     if (!active) return;
@@ -765,7 +768,7 @@ function shouldResyncSessionAfterIdle(sessionId: string) {
 }
 
 function isDocumentVisible() {
-  return document.visibilityState === 'visible';
+  return documentVisible();
 }
 
 function isCurrentGeneration(current: number, expected: number) {

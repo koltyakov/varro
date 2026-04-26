@@ -10,6 +10,7 @@ import { logger } from './logger';
 import { getRelativePath } from './util/path';
 
 type DroppedFileInput = Pick<DroppedFile, 'path' | 'relativePath' | 'type'>;
+const MAX_CONCURRENT_DROPPED_CONTENT_WRITES = 2;
 
 export class DroppedFilesService {
   private tempDropsDir: string | null = null;
@@ -22,31 +23,36 @@ export class DroppedFilesService {
 
     const createdPaths: string[] = [];
     try {
-      const results = await Promise.all(
-        files.map(async (file) => {
-          try {
-            const buffer = Buffer.from(file.content, 'base64');
-            const safeName = sanitizeDroppedFileName(file.name);
-            const targetPath = join(
-              dropsDir,
-              `${Date.now()}-${randomBytes(4).toString('hex')}-${safeName}`
-            );
-            await writeFile(targetPath, buffer, { mode: 0o600 });
-            createdPaths.push(targetPath);
-            const uri = vscode.Uri.file(targetPath);
-            return {
-              path: uri.fsPath,
-              relativePath: safeName,
-              type: 'file' as const,
-            } satisfies DroppedFileInput;
-          } catch (err) {
-            logger.warn(
-              `Failed to write dropped file ${file.name}: ${err instanceof Error ? err.message : String(err)}`
-            );
-            return null;
-          }
-        })
-      );
+      const results: Array<DroppedFileInput | null> = [];
+      for (let index = 0; index < files.length; index += MAX_CONCURRENT_DROPPED_CONTENT_WRITES) {
+        const chunk = files.slice(index, index + MAX_CONCURRENT_DROPPED_CONTENT_WRITES);
+        const chunkResults = await Promise.all(
+          chunk.map(async (file) => {
+            try {
+              const buffer = Buffer.from(file.content, 'base64');
+              const safeName = sanitizeDroppedFileName(file.name);
+              const targetPath = join(
+                dropsDir,
+                `${Date.now()}-${randomBytes(4).toString('hex')}-${safeName}`
+              );
+              await writeFile(targetPath, buffer, { mode: 0o600 });
+              createdPaths.push(targetPath);
+              const uri = vscode.Uri.file(targetPath);
+              return {
+                path: uri.fsPath,
+                relativePath: safeName,
+                type: 'file' as const,
+              } satisfies DroppedFileInput;
+            } catch (err) {
+              logger.warn(
+                `Failed to write dropped file ${file.name}: ${err instanceof Error ? err.message : String(err)}`
+              );
+              return null;
+            }
+          })
+        );
+        results.push(...chunkResults);
+      }
 
       return results.filter(
         (item): item is { path: string; relativePath: string; type: 'file' } => item !== null

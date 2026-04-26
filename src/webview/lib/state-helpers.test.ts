@@ -505,6 +505,43 @@ describe('state helpers', () => {
     expect(stateModule.isSessionAwaitingInput('session-4')).toBe(false);
   });
 
+  it('treats root-session prompts as awaiting input on child sessions', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 1',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 20 },
+      },
+    ]);
+    stateModule.setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'write',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        title: 'Write file',
+        metadata: {},
+        time: { created: 0 },
+      },
+    ]);
+
+    expect(stateModule.isSessionAwaitingInput('child-1')).toBe(true);
+  });
+
   it('handles incremental message updates and subagent grouping', async () => {
     const stateModule = await loadState();
 
@@ -515,7 +552,7 @@ describe('state helpers', () => {
 
     const afterMessageInsert = stateModule.messageStructureVersion();
     stateModule.upsertMessageInfo(userMessage('message-1', 'session-1', 1));
-    expect(stateModule.messageStructureVersion()).toBe(afterMessageInsert);
+    expect(stateModule.messageStructureVersion()).toBe(afterMessageInsert + 1);
 
     stateModule.applyMessagePartDelta('message-1', 'part-1', 'Hello', 'session-1');
     await nextFrame();
@@ -606,6 +643,83 @@ describe('state helpers', () => {
     expect(window.localStorage.getItem('varro.showThinking')).toBe(JSON.stringify(false));
     expect(window.localStorage.getItem('varro.expandThinkingByDefault')).toBe(JSON.stringify(true));
     expect(window.localStorage.getItem('varro.showStickyUserPrompt')).toBe(JSON.stringify(false));
+  });
+
+  it('updates incremental message entries when only metadata changes', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setMessagesIncremental([
+      {
+        info: assistantMessage('message-1', 'session-1', 10),
+        parts: [
+          {
+            id: 'tool-1',
+            sessionID: 'session-1',
+            messageID: 'message-1',
+            type: 'tool',
+            callID: 'call-1',
+            tool: 'bash',
+            state: {
+              status: 'running',
+              input: { command: 'pwd' },
+              title: 'Run pwd',
+              time: { start: 1 },
+            },
+          },
+        ],
+      },
+    ]);
+
+    const beforeVersion = stateModule.messageStructureVersion();
+
+    stateModule.setMessagesIncremental([
+      {
+        info: {
+          ...assistantMessage('message-1', 'session-1', 10),
+          providerID: 'provider-2',
+          modelID: 'model-2',
+          variant: 'high',
+          cost: 42,
+          summary: true,
+        },
+        parts: [
+          {
+            id: 'tool-1',
+            sessionID: 'session-1',
+            messageID: 'message-1',
+            type: 'tool',
+            callID: 'call-1',
+            tool: 'bash',
+            metadata: { cwd: '/repo' },
+            state: {
+              status: 'completed',
+              input: { command: 'pwd' },
+              output: '/repo',
+              title: 'Run pwd',
+              metadata: { exitCode: 0 },
+              time: { start: 1, end: 2 },
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(stateModule.messageStructureVersion()).toBe(beforeVersion + 1);
+    expect(stateModule.state.messages[0]?.info).toMatchObject({
+      providerID: 'provider-2',
+      modelID: 'model-2',
+      variant: 'high',
+      cost: 42,
+      summary: true,
+    });
+    expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
+      metadata: { cwd: '/repo' },
+      state: expect.objectContaining({
+        status: 'completed',
+        output: '/repo',
+        metadata: { exitCode: 0 },
+      }),
+    });
   });
 
   it('reads desktop session pane side from initial webview state', async () => {

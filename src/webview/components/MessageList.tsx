@@ -25,6 +25,7 @@ import {
   messageStructureVersion,
   getChildRunsByParentId,
   getActiveUsageLimitNotice,
+  getSessionTreeRootId,
   getSessionTreeIds,
   showStickyUserPrompt,
   skipPlanSession,
@@ -107,7 +108,8 @@ export function getStandalonePermissionPrompts(
 ) {
   if (!activeSessionId) return [];
 
-  const sessionIds = new Set(getSessionTreeIds(activeSessionId));
+  const rootId = getSessionTreeRootId(activeSessionId) || activeSessionId;
+  const sessionIds = new Set(getSessionTreeIds(rootId));
 
   return permissions.filter(
     (permission) =>
@@ -125,7 +127,8 @@ export function getStandaloneQuestionPrompts(
 ) {
   if (!activeSessionId) return [];
 
-  const sessionIds = new Set(getSessionTreeIds(activeSessionId));
+  const rootId = getSessionTreeRootId(activeSessionId) || activeSessionId;
+  const sessionIds = new Set(getSessionTreeIds(rootId));
 
   return questions.filter(
     (question) =>

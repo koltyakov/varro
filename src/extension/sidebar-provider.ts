@@ -46,6 +46,8 @@ import { buildServerEnv } from './util/server-path';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
+  private static readonly EXPORT_TIMEOUT_MS = 30_000;
+  private static readonly RECYCLE_BIN_CLEANUP_INTERVAL_MS = 60_000;
   private view?: vscode.WebviewView;
   private contextProvider: ContextProvider;
   private server: OpenCodeServer;
@@ -75,6 +77,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
   private blockingRequestsForWebview: BlockingRequestSnapshot[] = [];
   private recycleBinMaintenanceInFlight = false;
+  private lastRecycleBinCleanupAt = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -582,21 +585,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      if (this._status.state !== 'running') {
-        await this.ensureServerStarted();
-      }
-      await this.cleanupExpiredRecycleBin();
-
-      const providerLimitRequest = this.parseProviderLimitRequest(method, payload.path);
-      if (providerLimitRequest) {
-        const data = await this.providerLimitService.get(
-          providerLimitRequest.providerID,
-          providerLimitRequest.modelID
-        );
-        this.post({ type: 'api/response', payload: { id: payload.id, data } });
-        return;
-      }
-
       const planOpenRequest = this.parsePlanOpenRequest(method, payload.path, payload.body);
       if (planOpenRequest) {
         const data = await this.openPlanDocument(planOpenRequest.content);
@@ -614,6 +602,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           openCodeConfigRequest.kind === 'get'
             ? await this.readOpenCodeModelRouting()
             : await this.updateOpenCodeModelRouting(openCodeConfigRequest);
+        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        return;
+      }
+
+      if (this._status.state !== 'running') {
+        await this.ensureServerStarted();
+      }
+      await this.cleanupExpiredRecycleBin();
+
+      const providerLimitRequest = this.parseProviderLimitRequest(method, payload.path);
+      if (providerLimitRequest) {
+        const data = await this.providerLimitService.get(
+          providerLimitRequest.providerID,
+          providerLimitRequest.modelID
+        );
         this.post({ type: 'api/response', payload: { id: payload.id, data } });
         return;
       }
@@ -761,7 +764,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async cleanupExpiredRecycleBin() {
     if (this.recycleBinMaintenanceInFlight || this._status.state !== 'running') return;
+    const now = Date.now();
+    if (now - this.lastRecycleBinCleanupAt < SidebarProvider.RECYCLE_BIN_CLEANUP_INTERVAL_MS)
+      return;
     this.recycleBinMaintenanceInFlight = true;
+    this.lastRecycleBinCleanupAt = now;
     try {
       const removed = await this.sessionTrash.cleanupExpired((sessionID) =>
         this.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`)
@@ -1082,10 +1089,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return new Promise((resolveOutput, reject) => {
       let stderr = '';
       let settled = false;
+      let proc: ReturnType<typeof spawn> | null = null;
+      const timeout = setTimeout(() => {
+        if (proc && proc.exitCode === null && proc.signalCode === null) {
+          proc.kill('SIGTERM');
+        }
+        finish(new Error('OpenCode CLI export timed out'));
+      }, SidebarProvider.EXPORT_TIMEOUT_MS);
 
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timeout);
         void fileHandle
           .close()
           .catch(() => undefined)
@@ -1101,7 +1116,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       try {
         const command = this.server.resolveCommand();
         const launch = resolveServerLaunch(command, args);
-        const proc = spawn(launch.command, launch.args, {
+        proc = spawn(launch.command, launch.args, {
           stdio: ['ignore', fileHandle.fd, 'pipe'],
           cwd: this.server.getWorkspaceCwd(),
           env: buildServerEnv(),

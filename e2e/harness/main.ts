@@ -57,7 +57,8 @@ type ScenarioName =
   | 'row-archive'
   | 'tool-card-errors'
   | 'grouped-permissions'
-  | 'tool-open-actions';
+  | 'tool-open-actions'
+  | 'todo-completion';
 type WorkspaceFile = {
   path: string;
   relativePath: string;
@@ -828,6 +829,44 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = [user, assistant];
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 60;
+    return state;
+  }
+
+  if (name === 'todo-completion') {
+    const session = makeSessionWithPermission(
+      'session-todo-completion',
+      'Todo completion refresh',
+      BASE_TIME - 500,
+      DEFAULT_PERMISSION_RULES as unknown as Session['permission']
+    );
+    const user = makeUserMessage(
+      session.id,
+      'message-todo-completion-user',
+      ['Finish the remaining implementation tasks.'],
+      BASE_TIME - 8_000
+    );
+    const assistant = makeCompletedAssistantMessageWithParts(
+      session.id,
+      'message-todo-completion-assistant',
+      user.info.id,
+      BASE_TIME - 6_000,
+      'Finished the remaining tasks and recorded the final todo state.',
+      [
+        makeTodoToolPart(session.id, 'message-todo-completion-assistant', 'todo-tool-1', [
+          {
+            id: 'todo-1',
+            content: 'Patch stale incremental message equivalence and add regression coverage',
+            status: 'completed',
+            priority: 'high',
+          },
+        ]),
+      ]
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'busy' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 70;
     return state;
   }
 
@@ -1664,7 +1703,8 @@ function getScenarioName(): ScenarioName {
     value === 'row-archive' ||
     value === 'tool-card-errors' ||
     value === 'grouped-permissions' ||
-    value === 'tool-open-actions'
+    value === 'tool-open-actions' ||
+    value === 'todo-completion'
   ) {
     return value;
   }

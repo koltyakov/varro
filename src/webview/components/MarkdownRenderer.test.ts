@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { setState } from '../lib/state';
 
 declare global {
   interface Window {
@@ -15,6 +16,12 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   delete window.__sendToExtension;
+  setState('editorContext', {
+    workspacePath: null,
+    activeFile: null,
+    selection: null,
+    diagnostics: [],
+  });
 });
 
 afterEach(() => {
@@ -81,6 +88,12 @@ describe('MarkdownRenderer', () => {
   it('opens local markdown file links through VS Code', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
 
     cleanup = render(
       () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
@@ -94,7 +107,44 @@ describe('MarkdownRenderer', () => {
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: './src/webview/App.tsx', kind: 'file', line: undefined },
+      payload: { path: '/repo/src/webview/App.tsx', kind: 'file', line: undefined },
     });
+  });
+
+  it('re-renders workspace-relative links when the workspace changes', async () => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
+      container!
+    );
+
+    expect(container?.querySelector('a.file-path-link')?.getAttribute('href')).toBe(
+      './src/webview/App.tsx'
+    );
+
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const link = container?.querySelector('a.file-path-link');
+    expect(link?.getAttribute('href')).toBe('/repo/src/webview/App.tsx');
+    expect(link?.getAttribute('data-file')).toContain('/repo/src/webview/App.tsx');
+  });
+
+  it('does not linkify file-like text inside code blocks or inline code', async () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: '`./src/webview/App.tsx`\n\n```txt\n./src/webview/App.tsx\n```',
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
+    expect(container?.querySelectorAll('code')).not.toHaveLength(0);
   });
 });

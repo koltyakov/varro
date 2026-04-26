@@ -721,10 +721,7 @@ function GenericToolCall(props: {
             </div>
           </Show>
           <Show when={props.state.status === 'running'}>
-            <div class="tool-invocation-running">
-              <span class="tool-status-dot tool-status-running" />
-              Running...
-            </div>
+            <div class="tool-invocation-running">Running...</div>
           </Show>
         </div>
       </Show>

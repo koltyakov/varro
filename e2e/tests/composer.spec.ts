@@ -50,6 +50,86 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   );
 });
 
+test('refreshes todos from the final assistant message after stale todo events', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=todo-completion');
+
+  const todoButton = page.getByRole('button', { name: /Todos/i });
+  await expect(todoButton).toBeVisible();
+  await expect(todoButton).toContainText('1/1');
+  await todoButton.click();
+  await expect(page.locator('.todo-block-item.status-completed')).toContainText(
+    'Patch stale incremental message equivalence and add regression coverage'
+  );
+
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'todo.updated',
+          properties: {
+            sessionID: 'session-todo-completion',
+            todos: [
+              {
+                id: 'todo-1',
+                content: 'Patch stale incremental message equivalence and add regression coverage',
+                status: 'in_progress',
+                priority: 'high',
+              },
+            ],
+          },
+        },
+      },
+      '*'
+    );
+  });
+
+  await expect(todoButton).toContainText('1/1');
+  await expect(page.locator('.todo-block-item.status-completed')).toContainText(
+    'Patch stale incremental message equivalence and add regression coverage'
+  );
+
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: 'message-todo-completion-assistant',
+              sessionID: 'session-todo-completion',
+              role: 'assistant',
+              time: { created: 0, completed: 1 },
+              parentID: 'message-todo-completion-user',
+              modelID: 'gpt-5-mini',
+              providerID: 'copilot',
+              mode: 'primary',
+              agent: 'build',
+              path: { cwd: '/workspace/varro', root: '/workspace/varro' },
+              summary: false,
+              cost: 0,
+              tokens: {
+                input: 32,
+                output: 64,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+              finish: 'stop',
+            },
+          },
+        },
+      },
+      '*'
+    );
+  });
+
+  await expect(todoButton).toContainText('1/1');
+  await expect(page.locator('.todo-block-item.status-completed')).toContainText(
+    'Patch stale incremental message equivalence and add regression coverage'
+  );
+});
+
 test('attaches files from @ search using the tmp workspace fixture', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 

@@ -148,6 +148,77 @@ describe('parseExtensionMessage', () => {
     ).toEqual({ type: 'pending-attention/update', payload: { sessionIds: ['a', 'b'] } });
   });
 
+  it('parses recycle-bin/update entries', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'recycle-bin/update',
+        payload: {
+          entries: [
+            {
+              rootID: 'session-1',
+              deletedAt: 1,
+              expiresAt: 2,
+              root: {
+                id: 'session-1',
+                projectID: 'project-1',
+                directory: '/repo',
+                title: 'Session 1',
+                version: '1',
+                time: { created: 0, updated: 1 },
+              },
+              sessions: [
+                {
+                  id: 'session-1',
+                  projectID: 'project-1',
+                  directory: '/repo',
+                  title: 'Session 1',
+                  version: '1',
+                  time: { created: 0, updated: 1 },
+                },
+              ],
+            },
+          ],
+        },
+      })
+    ).toEqual({
+      type: 'recycle-bin/update',
+      payload: {
+        entries: [
+          {
+            rootID: 'session-1',
+            deletedAt: 1,
+            expiresAt: 2,
+            root: {
+              id: 'session-1',
+              projectID: 'project-1',
+              directory: '/repo',
+              title: 'Session 1',
+              version: '1',
+              time: { created: 0, updated: 1 },
+            },
+            sessions: [
+              {
+                id: 'session-1',
+                projectID: 'project-1',
+                directory: '/repo',
+                title: 'Session 1',
+                version: '1',
+                time: { created: 0, updated: 1 },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'recycle-bin/update',
+        payload: { entries: [{ rootID: 'session-1' }] },
+      })
+    ).toBeNull();
+  });
+
   it('rejects malformed context/update payloads', () => {
     expect(
       parseExtensionMessage({
