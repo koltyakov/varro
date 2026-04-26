@@ -20,4 +20,5 @@
 - Tests live beside source as `*.test.ts`; e2e specs live in `e2e/tests/*.spec.ts`.
 - Error handling: throw informative `Error`s, preserve actionable messages, and silently ignore only intentional best-effort cleanup/parsing fallbacks.
 - In Solid code, follow existing signal/memo/effect patterns and signal accessors like `value()`, not React-style state APIs.
+- Post-change actions: after code changes, run the narrowest relevant verification commands you can (`npm run lint` or `npm run lint:check`, targeted `npm run test -- ...`, and `npm run typecheck` when types changed). Do not stop after implementation without reporting what you ran and the result.
 - Repo-local Cursor/Copilot rules: none found in `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`.
