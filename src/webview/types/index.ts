@@ -10,6 +10,16 @@ export type UserMessage = {
   tools?: { [key: string]: boolean };
 };
 
+export type OpenCodeModelRoute = {
+  providerID: string;
+  modelID: string;
+};
+
+export type OpenCodeModelRouting = {
+  smallModel: OpenCodeModelRoute | null;
+  agentModels: Record<string, OpenCodeModelRoute>;
+};
+
 export type AssistantMessage = {
   id: string;
   sessionID: string;

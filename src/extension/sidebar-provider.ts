@@ -1,12 +1,14 @@
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
-import { readFile } from 'fs/promises';
+import { mkdtemp, open, readFile, rm } from 'fs/promises';
 import { resolve, join } from 'path';
+import { tmpdir } from 'os';
 import type {
   DesktopSessionPaneSide,
   DroppedFile,
   ExtensionMessage,
   InitialWebviewState,
+  OpenCodeModelRouting,
   ServerEvent,
   ServerStatus,
   WebviewThemeKind,
@@ -602,6 +604,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      const openCodeConfigRequest = this.parseOpenCodeConfigRequest(
+        method,
+        payload.path,
+        payload.body
+      );
+      if (openCodeConfigRequest) {
+        const data =
+          openCodeConfigRequest.kind === 'get'
+            ? await this.readOpenCodeModelRouting()
+            : await this.updateOpenCodeModelRouting(openCodeConfigRequest);
+        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        return;
+      }
+
       if (this.simulateNoProviders && method === 'GET' && payload.path === '/config/providers') {
         this.post({
           type: 'api/response',
@@ -799,6 +815,123 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return { content };
   }
 
+  private parseOpenCodeConfigRequest(method: string, path: string, body: unknown) {
+    if (method === 'GET' && path === '/varro/opencode-config') {
+      return { kind: 'get' } as const;
+    }
+
+    if (method !== 'POST' || path !== '/varro/opencode-config/model-routing') return null;
+
+    const payload = asRecord(body);
+    const target = typeof payload?.target === 'string' ? payload.target : null;
+    const providerID = typeof payload?.providerID === 'string' ? payload.providerID.trim() : '';
+    const modelID = typeof payload?.modelID === 'string' ? payload.modelID.trim() : '';
+
+    if (!target || !providerID || !modelID) {
+      throw new Error('Invalid model routing update');
+    }
+
+    if (target === 'small_model') {
+      return { kind: 'update', target, providerID, modelID } as const;
+    }
+
+    if (target === 'agent') {
+      const agentName = typeof payload?.agentName === 'string' ? payload.agentName.trim() : '';
+      if (!agentName) {
+        throw new Error('Agent name is required');
+      }
+      return { kind: 'update', target, agentName, providerID, modelID } as const;
+    }
+
+    throw new Error('Unsupported model routing target');
+  }
+
+  private getOpenCodeConfigUri() {
+    const workspacePath =
+      this.contextProvider.context.workspacePath || this.server.getWorkspaceCwd();
+    if (!workspacePath) {
+      throw new Error('Open a workspace folder before editing project opencode.json');
+    }
+    return vscode.Uri.file(join(workspacePath, 'opencode.json'));
+  }
+
+  private async readOpenCodeConfigObject() {
+    const uri = this.getOpenCodeConfigUri();
+
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      const raw = new TextDecoder().decode(bytes).trim();
+      if (!raw) return { uri, config: {} as Record<string, unknown>, existed: true };
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Project opencode.json must contain a JSON object');
+      }
+      return { uri, config: parsed as Record<string, unknown>, existed: true };
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'FileNotFound') {
+        return { uri, config: {} as Record<string, unknown>, existed: false };
+      }
+      throw err;
+    }
+  }
+
+  private normalizeOpenCodeModelRouting(config: Record<string, unknown>): OpenCodeModelRouting {
+    const smallModel = parseModelRoute(config.small_model);
+    const agentModels: Record<string, { providerID: string; modelID: string }> = {};
+    const agents = asRecord(config.agent);
+
+    if (agents) {
+      for (const [name, value] of Object.entries(agents)) {
+        const agentConfig = asRecord(value);
+        const route = parseModelRoute(agentConfig?.model);
+        if (route) {
+          agentModels[name] = route;
+        }
+      }
+    }
+
+    return { smallModel, agentModels };
+  }
+
+  private async readOpenCodeModelRouting(): Promise<OpenCodeModelRouting> {
+    const { config } = await this.readOpenCodeConfigObject();
+    return this.normalizeOpenCodeModelRouting(config);
+  }
+
+  private async updateOpenCodeModelRouting(request: {
+    kind: 'update';
+    target: 'small_model' | 'agent';
+    providerID: string;
+    modelID: string;
+    agentName?: string;
+  }): Promise<OpenCodeModelRouting> {
+    const { uri, config } = await this.readOpenCodeConfigObject();
+    const next = { ...config };
+    if (typeof next.$schema !== 'string' || !next.$schema.trim()) {
+      next.$schema = 'https://opencode.ai/config.json';
+    }
+
+    const modelRef = `${request.providerID}/${request.modelID}`;
+    if (request.target === 'small_model') {
+      next.small_model = modelRef;
+    } else {
+      const agentName = request.agentName!;
+      const existingAgents = asRecord(next.agent);
+      const existingAgentConfig = asRecord(existingAgents?.[agentName]);
+      next.agent = {
+        ...existingAgents,
+        [agentName]: {
+          ...existingAgentConfig,
+          model: modelRef,
+        },
+      };
+    }
+
+    const encoded = new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`);
+    await vscode.workspace.fs.writeFile(uri, encoded);
+    return this.normalizeOpenCodeModelRouting(next);
+  }
+
   private async openPlanDocument(content: string) {
     const normalized = normalizePlanMarkdown(content);
     if (!normalized) {
@@ -917,7 +1050,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async exportSession(sessionId: string) {
     try {
-      const content = await this.runCliCommand(['export', sessionId]);
+      const content = await this.readExportContentFromTempFile(sessionId);
       assertValidJson(content, 'OpenCode export');
       const document = await vscode.workspace.openTextDocument({
         language: 'json',
@@ -931,36 +1064,51 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async runCliCommand(args: string[]): Promise<string> {
+  private async readExportContentFromTempFile(sessionId: string): Promise<string> {
+    const tempDir = await mkdtemp(join(tmpdir(), 'varro-opencode-export-'));
+    const tempFile = join(tempDir, 'session-export.json');
+
+    try {
+      await this.runCliCommandToFile(['export', sessionId], tempFile);
+      return normalizeCliOutput(await readFile(tempFile, 'utf-8'));
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  private async runCliCommandToFile(args: string[], outputPath: string): Promise<void> {
+    const fileHandle = await open(outputPath, 'w');
+
     return new Promise((resolveOutput, reject) => {
-      let stdout = '';
       let stderr = '';
       let settled = false;
 
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolveOutput(stdout.trim());
+        void fileHandle
+          .close()
+          .catch(() => undefined)
+          .finally(() => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolveOutput();
+          });
       };
 
       try {
         const command = this.server.resolveCommand();
         const launch = resolveServerLaunch(command, args);
         const proc = spawn(launch.command, launch.args, {
-          stdio: ['ignore', 'pipe', 'pipe'],
+          stdio: ['ignore', fileHandle.fd, 'pipe'],
           cwd: this.server.getWorkspaceCwd(),
           env: buildServerEnv(),
           windowsHide: true,
           ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         });
 
-        proc.stdout?.on('data', (data: Buffer) => {
-          stdout += data.toString();
-        });
         proc.stderr?.on('data', (data: Buffer) => {
           stderr += data.toString();
         });
@@ -973,7 +1121,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           finish(
             new Error(
               stderr.trim() ||
-                stdout.trim() ||
                 `OpenCode CLI command failed${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
             )
           );
@@ -1142,6 +1289,22 @@ function assertValidJson(value: string, label: string) {
       { cause: err }
     );
   }
+}
+
+function normalizeCliOutput(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (Buffer.isBuffer(value)) return value.toString('utf-8').trim();
+  return String(value ?? '').trim();
+}
+
+function parseModelRoute(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const separatorIndex = value.indexOf('/');
+  if (separatorIndex <= 0 || separatorIndex === value.length - 1) return null;
+  return {
+    providerID: value.slice(0, separatorIndex),
+    modelID: value.slice(separatorIndex + 1),
+  };
 }
 
 function getSessionIdsForEvent(event: ServerEvent) {

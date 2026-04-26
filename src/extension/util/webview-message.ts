@@ -217,6 +217,12 @@ export function isAllowedApiRequest(method: string, path: string) {
       Boolean(url.searchParams.get('providerID')?.trim())
     );
   }
+  if (pathname === '/varro/opencode-config') {
+    return method === 'GET' && noQuery();
+  }
+  if (pathname === '/varro/opencode-config/model-routing') {
+    return method === 'POST' && noQuery();
+  }
   if (pathname === '/varro/session-trash') {
     return (method === 'GET' || method === 'DELETE') && noQuery();
   }

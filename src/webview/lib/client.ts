@@ -6,6 +6,7 @@ import type {
   SessionStatus,
   Agent,
   Command,
+  OpenCodeModelRouting,
   Provider,
   FileDiff,
   RepoFileStatus,
@@ -131,6 +132,17 @@ export const client = {
   varro: {
     async openPlan(content: string): Promise<{ path: string }> {
       return apiCall('POST', '/varro/plan/open', { content });
+    },
+    async openCodeConfig(): Promise<OpenCodeModelRouting> {
+      return apiCall('GET', '/varro/opencode-config');
+    },
+    async saveModelRouting(body: {
+      target: 'small_model' | 'agent';
+      providerID: string;
+      modelID: string;
+      agentName?: string;
+    }): Promise<OpenCodeModelRouting> {
+      return apiCall('POST', '/varro/opencode-config/model-routing', body);
     },
     recycleBin: {
       async list(): Promise<RecycleBinEntry[]> {

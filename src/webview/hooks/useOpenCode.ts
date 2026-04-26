@@ -1046,6 +1046,10 @@ async function loadProviders() {
   }
 }
 
+export async function refreshRoutingState() {
+  await Promise.all([loadAgents(), loadProviders()]);
+}
+
 async function refreshProviderLimit(providerID: string, modelID?: string | null) {
   try {
     const limit = await client.config.providerLimit(providerID, modelID);

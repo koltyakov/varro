@@ -12,6 +12,8 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session/abc/unrevert')).toBe(true);
     expect(isAllowedApiRequest('POST', '/question/request-1/reply')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/provider-limit?providerID=openai')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/opencode-config')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session-trash')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/restore')).toBe(true);
     expect(isAllowedApiRequest('DELETE', '/varro/session-trash/session-1/delete')).toBe(true);
@@ -29,6 +31,8 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('DELETE', '/config/providers')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=1&extra=1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/provider-limit?modelID=gpt')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/opencode-config')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/varro/opencode-config/model-routing')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/plan/open')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/delete')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/varro/session-trash/session-1/restore')).toBe(false);

@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import {
   isModelVisible,
   setModelVisible,
@@ -13,13 +14,30 @@ import {
   modelSupportsVision,
 } from '../lib/model-capabilities';
 import { openProviderSetup } from '../lib/provider-setup';
+import { client } from '../lib/client';
+import { refreshRoutingState } from '../hooks/useOpenCode';
+import type { OpenCodeModelRouting } from '../types';
 
 type SettingsProvider = (typeof state.providers)[number];
 type SettingsModel = SettingsProvider['models'][string];
+type ModelContextMenuState = {
+  x: number;
+  y: number;
+  providerID: string;
+  modelID: string;
+};
 
 export function SettingsPanel() {
   const [query, setQuery] = createSignal('');
+  const [routing, setRouting] = createSignal<OpenCodeModelRouting>({
+    smallModel: null,
+    agentModels: {},
+  });
+  const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
+  const [isSaving, setIsSaving] = createSignal(false);
   let bodyRef: HTMLDivElement | undefined;
+
+  const routableAgents = () => state.allAgents.filter((agent) => agent.mode === 'subagent');
 
   const normalizedQuery = () => query().trim().toLocaleLowerCase();
 
@@ -56,12 +74,55 @@ export function SettingsPanel() {
     bodyRef.parentElement?.style.setProperty('--settings-scrollbar-inset', `${scrollbarInset}px`);
   }
 
+  async function loadRouting() {
+    try {
+      setRouting(await client.varro.openCodeConfig());
+    } catch {
+      setRouting({ smallModel: null, agentModels: {} });
+    }
+  }
+
+  async function saveRouting(body: {
+    target: 'small_model' | 'agent';
+    providerID: string;
+    modelID: string;
+    agentName?: string;
+  }) {
+    setIsSaving(true);
+    try {
+      const nextRouting = await client.varro.saveModelRouting(body);
+      setRouting(nextRouting);
+      await refreshRoutingState();
+    } finally {
+      setIsSaving(false);
+      setContextMenu(null);
+    }
+  }
+
+  function closeContextMenu() {
+    setContextMenu(null);
+  }
+
   onMount(() => {
     updateScrollbarInset();
+    void loadRouting();
     if (!bodyRef) return;
     const observer = new ResizeObserver(() => updateScrollbarInset());
     observer.observe(bodyRef);
     onCleanup(() => observer.disconnect());
+  });
+
+  onMount(() => {
+    const onPointerDown = () => closeContextMenu();
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeContextMenu();
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onEscape);
+    onCleanup(() => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onEscape);
+    });
   });
 
   return (
@@ -137,6 +198,8 @@ export function SettingsPanel() {
                     provider={provider}
                     models={models}
                     forceExpanded={normalizedQuery().length > 0}
+                    routing={routing()}
+                    onOpenContextMenu={(next) => setContextMenu(next)}
                   />
                 )}
               </For>
@@ -144,6 +207,52 @@ export function SettingsPanel() {
           </Show>
         </div>
       </div>
+
+      <Show when={contextMenu()} keyed>
+        {(menu) => (
+          <Portal>
+            <div
+              class="settings-context-menu"
+              style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                class="settings-context-menu-item"
+                disabled={isSaving()}
+                onClick={() =>
+                  void saveRouting({
+                    target: 'small_model',
+                    providerID: menu.providerID,
+                    modelID: menu.modelID,
+                  })
+                }
+              >
+                Use for small_model
+              </button>
+              <For each={routableAgents()}>
+                {(agent) => (
+                  <button
+                    type="button"
+                    class="settings-context-menu-item"
+                    disabled={isSaving()}
+                    onClick={() =>
+                      void saveRouting({
+                        target: 'agent',
+                        agentName: agent.name,
+                        providerID: menu.providerID,
+                        modelID: menu.modelID,
+                      })
+                    }
+                  >
+                    Use for agent: {agent.name}
+                  </button>
+                )}
+              </For>
+            </div>
+          </Portal>
+        )}
+      </Show>
     </div>
   );
 }
@@ -152,6 +261,8 @@ function ProviderSection(props: {
   provider: SettingsProvider;
   models: SettingsModel[];
   forceExpanded: boolean;
+  routing: OpenCodeModelRouting;
+  onOpenContextMenu: (menu: ModelContextMenuState) => void;
 }) {
   const [expanded, setExpanded] = createSignal(true);
 
@@ -218,9 +329,21 @@ function ProviderSection(props: {
                 modelSupportsVariants(props.provider.id, model.id, state.providers);
               const supportsVision = () =>
                 modelSupportsVision(props.provider.id, model.id, state.providers);
+              const routeTags = () => getModelRouteTags(props.routing, props.provider.id, model.id);
 
               return (
-                <label class="settings-model-row">
+                <label
+                  class="settings-model-row"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    props.onOpenContextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      providerID: props.provider.id,
+                      modelID: model.id,
+                    });
+                  }}
+                >
                   <input
                     type="checkbox"
                     class="settings-checkbox"
@@ -235,10 +358,16 @@ function ProviderSection(props: {
                       supportsTools() ||
                       supportsVariants() ||
                       supportsVision() ||
-                      model.limit?.context
+                      model.limit?.context ||
+                      routeTags().length > 0
                     }
                   >
                     <span class="settings-model-meta">
+                      <For each={routeTags()}>
+                        {(tag) => (
+                          <span class="model-capability-tag settings-route-tag">{tag}</span>
+                        )}
+                      </For>
                       <Show when={supportsTools()}>
                         <span class="model-capability-tag model-capability-tag-tools">Tools</span>
                       </Show>
@@ -265,6 +394,22 @@ function ProviderSection(props: {
       </Show>
     </div>
   );
+}
+
+function getModelRouteTags(routing: OpenCodeModelRouting, providerID: string, modelID: string) {
+  const tags: string[] = [];
+
+  if (routing.smallModel?.providerID === providerID && routing.smallModel.modelID === modelID) {
+    tags.push('small_model');
+  }
+
+  for (const [agentName, route] of Object.entries(routing.agentModels)) {
+    if (route.providerID === providerID && route.modelID === modelID) {
+      tags.push(`agent: ${agentName}`);
+    }
+  }
+
+  return tags;
 }
 
 function ProviderCheckbox(props: {

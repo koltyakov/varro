@@ -95,6 +95,16 @@ export type RecycleBinEntry = {
   sessions: RecycleBinSession[];
 };
 
+export type OpenCodeModelRoute = {
+  providerID: string;
+  modelID: string;
+};
+
+export type OpenCodeModelRouting = {
+  smallModel: OpenCodeModelRoute | null;
+  agentModels: Record<string, OpenCodeModelRoute>;
+};
+
 export const SERVER_EVENT_NAMES = [
   'session.created',
   'session.updated',
