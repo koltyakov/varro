@@ -42,8 +42,8 @@ beforeEach(() => {
     agentModels: { build: { providerID: 'openai', modelID: 'gpt-5' } },
   });
   clientMocks.saveModelRouting.mockResolvedValue({
-    smallModel: { providerID: 'openai', modelID: 'gpt-5' },
-    agentModels: { build: { providerID: 'openai', modelID: 'gpt-5' } },
+    small_model: 'openai/gpt-5',
+    agent: { build: { model: 'openai/gpt-5' } },
   });
   setState('providers', [
     {
@@ -119,6 +119,19 @@ describe('SettingsPanel', () => {
 
     expect(container?.textContent).toContain('small_model');
     expect(container?.textContent).toContain('agent: build');
+  });
+
+  it('accepts preview routing payloads without normalized agentModels', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({
+      small_model: 'openai/gpt-5-mini',
+      agent: { review: { model: 'openai/gpt-5' } },
+    });
+
+    cleanup = render(() => SettingsPanel(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('small_model');
+    expect(container?.textContent).toContain('agent: review');
   });
 
   it('opens the model context menu and saves a routing assignment', async () => {

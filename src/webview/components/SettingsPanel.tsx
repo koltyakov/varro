@@ -29,10 +29,7 @@ type ModelContextMenuState = {
 
 export function SettingsPanel() {
   const [query, setQuery] = createSignal('');
-  const [routing, setRouting] = createSignal<OpenCodeModelRouting>({
-    smallModel: null,
-    agentModels: {},
-  });
+  const [routing, setRouting] = createSignal<OpenCodeModelRouting>(createEmptyRouting());
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [isSaving, setIsSaving] = createSignal(false);
   let bodyRef: HTMLDivElement | undefined;
@@ -76,9 +73,9 @@ export function SettingsPanel() {
 
   async function loadRouting() {
     try {
-      setRouting(await client.varro.openCodeConfig());
+      setRouting(normalizeModelRouting(await client.varro.openCodeConfig()));
     } catch {
-      setRouting({ smallModel: null, agentModels: {} });
+      setRouting(createEmptyRouting());
     }
   }
 
@@ -90,7 +87,7 @@ export function SettingsPanel() {
   }) {
     setIsSaving(true);
     try {
-      const nextRouting = await client.varro.saveModelRouting(body);
+      const nextRouting = normalizeModelRouting(await client.varro.saveModelRouting(body));
       setRouting(nextRouting);
       await refreshRoutingState();
     } finally {
@@ -403,13 +400,74 @@ function getModelRouteTags(routing: OpenCodeModelRouting, providerID: string, mo
     tags.push('small_model');
   }
 
-  for (const [agentName, route] of Object.entries(routing.agentModels)) {
+  for (const [agentName, route] of Object.entries(routing.agentModels ?? {})) {
     if (route.providerID === providerID && route.modelID === modelID) {
       tags.push(`agent: ${agentName}`);
     }
   }
 
   return tags;
+}
+
+function createEmptyRouting(): OpenCodeModelRouting {
+  return {
+    smallModel: null,
+    agentModels: {},
+  };
+}
+
+function normalizeModelRouting(value: unknown): OpenCodeModelRouting {
+  const record = asRecord(value);
+  if (!record) return createEmptyRouting();
+
+  // preview.html proxies directly to OpenCode, which may expose raw opencode.json keys.
+  const smallModel = parseModelRoute(record.smallModel) ?? parseModelRoute(record.small_model);
+  const agentModels: OpenCodeModelRouting['agentModels'] = {};
+  const rawAgents = asRecord(record.agent);
+
+  if (rawAgents) {
+    for (const [agentName, rawAgent] of Object.entries(rawAgents)) {
+      const route = parseModelRoute(asRecord(rawAgent)?.model);
+      if (route) agentModels[agentName] = route;
+    }
+  }
+
+  const rawAgentModels = asRecord(record.agentModels);
+
+  if (rawAgentModels) {
+    for (const [agentName, routeValue] of Object.entries(rawAgentModels)) {
+      const route = parseModelRoute(routeValue);
+      if (route) agentModels[agentName] = route;
+    }
+  }
+
+  return { smallModel, agentModels };
+}
+
+function parseModelRoute(value: unknown): OpenCodeModelRouting['smallModel'] {
+  if (typeof value === 'string') {
+    const separatorIndex = value.indexOf('/');
+    if (separatorIndex <= 0 || separatorIndex === value.length - 1) return null;
+    return {
+      providerID: value.slice(0, separatorIndex),
+      modelID: value.slice(separatorIndex + 1),
+    };
+  }
+
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const providerID = typeof record.providerID === 'string' ? record.providerID.trim() : '';
+  const modelID = typeof record.modelID === 'string' ? record.modelID.trim() : '';
+
+  if (!providerID || !modelID) return null;
+  return { providerID, modelID };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function ProviderCheckbox(props: {
