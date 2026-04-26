@@ -13,5 +13,13 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
+    coverage: {
+      thresholds: {
+        statements: 55,
+        branches: 45,
+        functions: 58,
+        lines: 58,
+      },
+    },
   },
 });

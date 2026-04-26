@@ -2538,7 +2538,7 @@ function describeUsageLimit(
   return parts.join(' · ');
 }
 
-function getActiveCompletion(text: string, cursor: number) {
+export function getActiveCompletion(text: string, cursor: number) {
   if (cursor < 0 || cursor > text.length) return null;
 
   const prefix = text.slice(0, cursor);
@@ -2823,7 +2823,7 @@ function readDroppedItem(item: DataTransferItem): Promise<string> {
   });
 }
 
-function parseDroppedText(value: string): string[] {
+export function parseDroppedText(value: string): string[] {
   if (!value) return [];
   const paths = new Set<string>();
 
@@ -2985,7 +2985,7 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-function shouldPadInlineInsertion(value: string | undefined) {
+export function shouldPadInlineInsertion(value: string | undefined) {
   return !!value && !/\s/.test(value);
 }
 

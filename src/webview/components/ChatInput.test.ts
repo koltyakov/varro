@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getActiveCompletion,
   getMentionCompletionItems,
+  parseDroppedText,
+  shouldPadInlineInsertion,
   isToolbarControlCompacted,
   isToolbarControlHidden,
 } from './ChatInput';
@@ -136,5 +139,111 @@ describe('getMentionCompletionItems', () => {
       true
     );
     expect(completions.some((item) => item.type === 'file')).toBe(false);
+  });
+
+  it('suppresses suggestions for exact agent and file matches', () => {
+    expect(
+      getMentionCompletionItems({
+        rawQuery: 'helper',
+        agents,
+        files,
+      })
+    ).toEqual([]);
+
+    expect(
+      getMentionCompletionItems({
+        rawQuery: 'README.md',
+        agents,
+        files,
+      })
+    ).toEqual([]);
+  });
+
+  it('formats directory mentions with a trailing slash', () => {
+    const completions = getMentionCompletionItems({
+      rawQuery: 'do',
+      agents,
+      files: [
+        {
+          path: '/workspace/docs',
+          relativePath: 'docs',
+          type: 'directory' as const,
+        },
+      ],
+    });
+
+    expect(completions).toContainEqual(
+      expect.objectContaining({
+        type: 'file',
+        label: '@docs',
+        detail: 'Folder',
+        value: '@docs/',
+      })
+    );
+  });
+});
+
+describe('getActiveCompletion', () => {
+  it('detects slash commands only at the start of the input', () => {
+    expect(getActiveCompletion('/rev', 4)).toEqual({
+      type: 'slash',
+      query: 'rev',
+      start: 0,
+      end: 4,
+    });
+    expect(getActiveCompletion('prefix /rev', 11)).toBeNull();
+  });
+
+  it('detects mention completions for the active token', () => {
+    expect(getActiveCompletion('review @hel', 11)).toEqual({
+      type: 'mention',
+      query: 'hel',
+      start: 7,
+      end: 11,
+    });
+    expect(getActiveCompletion('review test', 11)).toBeNull();
+  });
+
+  it('rejects cursor positions outside the input bounds', () => {
+    expect(getActiveCompletion('abc', -1)).toBeNull();
+    expect(getActiveCompletion('abc', 4)).toBeNull();
+  });
+});
+
+describe('parseDroppedText', () => {
+  it('parses absolute, relative, and uri-list entries while dropping comments and duplicates', () => {
+    expect(
+      parseDroppedText(
+        [
+          '# comment',
+          'file:///tmp/demo.ts',
+          './src/app.ts',
+          './src/app.ts',
+          '/Users/andrew/Projects/GitHub/varro/README.md',
+        ].join('\n')
+      )
+    ).toEqual(['/tmp/demo.ts', 'src/app.ts', '/Users/andrew/Projects/GitHub/varro/README.md']);
+  });
+
+  it('extracts paths from structured vscode drag payloads', () => {
+    expect(
+      parseDroppedText(
+        JSON.stringify({
+          resource: 'file:///tmp/from-resource.ts',
+          nested: ['src/test.ts', { path: '../docs/guide.md' }],
+          ignored: 'not a plain sentence with spaces',
+        })
+      )
+    ).toEqual(['/tmp/from-resource.ts', 'src/test.ts', '../docs/guide.md']);
+  });
+});
+
+describe('shouldPadInlineInsertion', () => {
+  it('pads only when adjacent content is non-whitespace', () => {
+    expect(shouldPadInlineInsertion('a')).toBe(true);
+    expect(shouldPadInlineInsertion('/')).toBe(true);
+    expect(shouldPadInlineInsertion(' ')).toBe(false);
+    expect(shouldPadInlineInsertion('\n')).toBe(false);
+    expect(shouldPadInlineInsertion(undefined)).toBe(false);
   });
 });
