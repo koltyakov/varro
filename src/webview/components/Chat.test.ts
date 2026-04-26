@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
-import type { Session } from '../types';
+import type { AssistantMessage, Session } from '../types';
 import * as openCodeModule from '../hooks/useOpenCode';
 import {
   archiveSessionGroup,
@@ -130,6 +130,29 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
     time: { created: updated - 1_000, updated },
     ...overrides,
   };
+}
+
+function assistantMessageEntry(id: string) {
+  const info: AssistantMessage = {
+    id,
+    sessionID: 'session-1',
+    role: 'assistant',
+    time: { created: 1, completed: 2 },
+    parentID: 'parent-1',
+    modelID: 'gpt-5.4',
+    providerID: 'openai',
+    mode: 'default',
+    path: { cwd: '/workspace', root: '/workspace' },
+    cost: 0,
+    tokens: {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    },
+  };
+
+  return { info, parts: [] };
 }
 
 describe('groupSessions', () => {
@@ -1414,6 +1437,29 @@ describe('header status badges', () => {
     expect(mainShell).toBeInstanceOf(HTMLDivElement);
     expect(workspace?.firstElementChild).toBe(mainShell);
     expect(workspace?.lastElementChild).toBe(sidebar);
+  });
+
+  it('keeps the message list available when switching the desktop session pane from right to left', async () => {
+    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
+    setState('activeSessionId', 'session-1');
+    setState(
+      'messages',
+      Array.from({ length: 60 }, (_, index) => assistantMessageEntry(`assistant-${index + 1}`))
+    );
+    setDesktopSessionPaneSide('right');
+    dispatchDesktopMediaQueryChange(true);
+
+    cleanup = render(() => Chat(), container!);
+    await Promise.resolve();
+
+    setDesktopSessionPaneSide('left');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-workspace-pane-right')).toBeNull();
+    expect(container?.querySelector('.interactive-list[role="log"]')).toBeInstanceOf(
+      HTMLDivElement
+    );
   });
 });
 

@@ -311,6 +311,13 @@ type MessageRowSharedProps = {
   latestPlanImplementationMessageId: string | null;
 };
 
+type VisibleRange = {
+  start: number;
+  end: number;
+  topPad: number;
+  bottomPad: number;
+};
+
 type StickyUserMessagePreview = {
   id: string;
   index: number;
@@ -554,6 +561,15 @@ export function MessageList() {
     }
   });
 
+  const virtualMetrics = createMemo(() => {
+    if (!shouldVirtualize()) {
+      return { prefix: [0], totalHeight: 0, itemCount: 0 } satisfies VirtualMetrics;
+    }
+
+    measurementVersion();
+    return buildVirtualMetrics({ itemIds: messageIds(), measuredHeights });
+  });
+
   const visibleRange = createMemo(() => {
     const msgs = messages();
     if (!shouldVirtualize() || msgs.length === 0) {
@@ -564,15 +580,6 @@ export function MessageList() {
       scrollTop: scrollTop(),
       viewportHeight: viewportHeight(),
     });
-  });
-
-  const virtualMetrics = createMemo(() => {
-    if (!shouldVirtualize()) {
-      return { prefix: [0], totalHeight: 0, itemCount: 0 } satisfies VirtualMetrics;
-    }
-
-    measurementVersion();
-    return buildVirtualMetrics({ itemIds: messageIds(), measuredHeights });
   });
 
   function measureVisibleItems() {
@@ -1178,16 +1185,20 @@ function VirtualizedContent(props: {
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
-  visibleRange: { start: number; end: number; topPad: number; bottomPad: number };
+  visibleRange?: Partial<VisibleRange>;
 }) {
-  const visible = createMemo(() =>
-    props.messages.slice(props.visibleRange.start, props.visibleRange.end)
-  );
+  const visibleRange = createMemo<VisibleRange>(() => ({
+    start: props.visibleRange?.start ?? 0,
+    end: props.visibleRange?.end ?? props.messages.length,
+    topPad: props.visibleRange?.topPad ?? 0,
+    bottomPad: props.visibleRange?.bottomPad ?? 0,
+  }));
+  const visible = createMemo(() => props.messages.slice(visibleRange().start, visibleRange().end));
 
   return (
     <>
-      <Show when={props.visibleRange.topPad > 0}>
-        <div style={{ height: `${props.visibleRange.topPad}px` }} />
+      <Show when={visibleRange().topPad > 0}>
+        <div style={{ height: `${visibleRange().topPad}px` }} />
       </Show>
       <MessageRows
         messages={visible()}
@@ -1199,8 +1210,8 @@ function VirtualizedContent(props: {
         hasBuildAgent={props.hasBuildAgent}
         latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
       />
-      <Show when={props.visibleRange.bottomPad > 0}>
-        <div style={{ height: `${props.visibleRange.bottomPad}px` }} />
+      <Show when={visibleRange().bottomPad > 0}>
+        <div style={{ height: `${visibleRange().bottomPad}px` }} />
       </Show>
     </>
   );
