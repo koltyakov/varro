@@ -73,6 +73,8 @@ type SessionIndicatorSets = {
 
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
+const RECONNECT_BANNER_SHOW_DELAY_MS = 1500;
+const RECONNECT_BANNER_MIN_VISIBLE_MS = 4000;
 
 export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
 
@@ -82,13 +84,32 @@ export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
+  const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
   const isDesktopSessionPaneRight = () => desktopSessionPaneSide() === 'right';
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const sessionsById = createMemo(
     () => new Map(state.sessions.map((session) => [session.id, session]))
   );
+  const isEventStreamDegraded = createMemo(
+    () => state.serverStatus.state === 'running' && state.serverStatus.eventStream === 'degraded'
+  );
   const shouldRenderWorkspace = () => !showSessionPicker() || isDesktopSessionLayout();
+  let reconnectBannerShowTimer: number | undefined;
+  let reconnectBannerHideTimer: number | undefined;
+  let reconnectBannerVisibleSince = 0;
+
+  const clearReconnectBannerShowTimer = () => {
+    if (reconnectBannerShowTimer == null) return;
+    window.clearTimeout(reconnectBannerShowTimer);
+    reconnectBannerShowTimer = undefined;
+  };
+
+  const clearReconnectBannerHideTimer = () => {
+    if (reconnectBannerHideTimer == null) return;
+    window.clearTimeout(reconnectBannerHideTimer);
+    reconnectBannerHideTimer = undefined;
+  };
 
   onMount(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -101,6 +122,45 @@ export function Chat() {
     setIsDesktopSessionLayout(mediaQuery.matches);
     mediaQuery.addEventListener('change', handleChange);
     onCleanup(() => mediaQuery.removeEventListener('change', handleChange));
+  });
+
+  createEffect(
+    on(isEventStreamDegraded, (isDegraded) => {
+      if (isDegraded) {
+        clearReconnectBannerHideTimer();
+        if (showReconnectBanner() || reconnectBannerShowTimer != null) return;
+
+        reconnectBannerShowTimer = window.setTimeout(() => {
+          reconnectBannerShowTimer = undefined;
+          reconnectBannerVisibleSince = Date.now();
+          setShowReconnectBanner(true);
+        }, RECONNECT_BANNER_SHOW_DELAY_MS);
+        return;
+      }
+
+      clearReconnectBannerShowTimer();
+      if (!showReconnectBanner()) return;
+
+      const remainingVisibleMs =
+        RECONNECT_BANNER_MIN_VISIBLE_MS - (Date.now() - reconnectBannerVisibleSince);
+      if (remainingVisibleMs <= 0) {
+        reconnectBannerVisibleSince = 0;
+        setShowReconnectBanner(false);
+        return;
+      }
+
+      if (reconnectBannerHideTimer != null) return;
+      reconnectBannerHideTimer = window.setTimeout(() => {
+        reconnectBannerHideTimer = undefined;
+        reconnectBannerVisibleSince = 0;
+        if (!isEventStreamDegraded()) setShowReconnectBanner(false);
+      }, remainingVisibleMs);
+    })
+  );
+
+  onCleanup(() => {
+    clearReconnectBannerShowTimer();
+    clearReconnectBannerHideTimer();
   });
 
   const shouldDiscardActiveBlankSession = () => {
@@ -456,11 +516,7 @@ export function Chat() {
         </div>
       </div>
 
-      <Show
-        when={
-          state.serverStatus.state === 'running' && state.serverStatus.eventStream === 'degraded'
-        }
-      >
+      <Show when={showReconnectBanner()}>
         <div
           class={`chat-transport-banner ${shouldRenderWorkspace() ? 'chat-main-column' : ''}`}
           role="status"

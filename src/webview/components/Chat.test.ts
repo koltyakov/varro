@@ -53,6 +53,7 @@ function dispatchDesktopMediaQueryChange(matches: boolean) {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
@@ -86,6 +87,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
   cleanup?.();
   cleanup = undefined;
   container?.remove();
@@ -571,6 +574,65 @@ describe('SessionListSectionHeader', () => {
 });
 
 describe('header status badges', () => {
+  it('does not show the reconnect banner for brief event stream degradation', () => {
+    setState('serverStatus', {
+      state: 'running',
+      url: 'http://127.0.0.1:4096',
+      eventStream: 'healthy',
+    });
+
+    cleanup = render(() => Chat(), container!);
+
+    setState('serverStatus', {
+      state: 'running',
+      url: 'http://127.0.0.1:4096',
+      eventStream: 'degraded',
+    });
+    vi.advanceTimersByTime(1000);
+    setState('serverStatus', {
+      state: 'running',
+      url: 'http://127.0.0.1:4096',
+      eventStream: 'healthy',
+    });
+
+    expect(container?.querySelector('.chat-transport-banner')).toBeNull();
+  });
+
+  it('keeps the reconnect banner visible briefly after recovery once shown', () => {
+    setState('serverStatus', {
+      state: 'running',
+      url: 'http://127.0.0.1:4096',
+      eventStream: 'healthy',
+    });
+
+    cleanup = render(() => Chat(), container!);
+
+    setState('serverStatus', {
+      state: 'running',
+      url: 'http://127.0.0.1:4096',
+      eventStream: 'degraded',
+    });
+    vi.advanceTimersByTime(1500);
+
+    expect(container?.querySelector('.chat-transport-banner')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-transport-title')?.textContent).toBe(
+      'Live updates are reconnecting'
+    );
+
+    setState('serverStatus', {
+      state: 'running',
+      url: 'http://127.0.0.1:4096',
+      eventStream: 'healthy',
+    });
+    vi.advanceTimersByTime(3999);
+
+    expect(container?.querySelector('.chat-transport-banner')).toBeInstanceOf(HTMLDivElement);
+
+    vi.advanceTimersByTime(1);
+
+    expect(container?.querySelector('.chat-transport-banner')).toBeNull();
+  });
+
   it('shows a count only for running sessions', () => {
     setState('sessions', [
       session('running-1', 500),

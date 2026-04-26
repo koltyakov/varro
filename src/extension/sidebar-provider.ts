@@ -916,16 +916,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async exportSession(sessionId: string) {
-    const content = await this.runCliCommand(['export', sessionId]);
-    const document = await vscode.workspace.openTextDocument({
-      language: 'json',
-      content,
-    });
-    await vscode.window.showTextDocument(document, { preview: false });
+    try {
+      const content = await this.runCliCommand(['export', sessionId]);
+      assertValidJson(content, 'OpenCode export');
+      const document = await vscode.workspace.openTextDocument({
+        language: 'json',
+        content,
+      });
+      await vscode.window.showTextDocument(document, { preview: false });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await vscode.window.showErrorMessage(`Failed to export session: ${message}`);
+      throw err;
+    }
   }
 
   private async runCliCommand(args: string[]): Promise<string> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolveOutput, reject) => {
       let stdout = '';
       let stderr = '';
       let settled = false;
@@ -937,7 +944,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           reject(error);
           return;
         }
-        resolve(stdout.trim());
+        resolveOutput(stdout.trim());
       };
 
       try {
@@ -958,7 +965,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           stderr += data.toString();
         });
         proc.once('error', (err) => finish(err));
-        proc.once('exit', (code, signal) => {
+        proc.once('close', (code, signal) => {
           if (code === 0) {
             finish();
             return;
@@ -1124,6 +1131,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function assertValidJson(value: string, label: string) {
+  try {
+    JSON.parse(value);
+  } catch (err) {
+    throw new Error(
+      `${label} returned invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err }
+    );
+  }
 }
 
 function getSessionIdsForEvent(event: ServerEvent) {

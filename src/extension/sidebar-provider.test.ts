@@ -23,6 +23,7 @@ const { loggerMock, vscodeMock, spawnMock } = vi.hoisted(() => ({
       onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
       activeColorTheme: { kind: 2 },
       showTextDocument: vi.fn(() => Promise.resolve()),
+      showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
     },
     workspace: {
       onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
@@ -280,7 +281,7 @@ describe('SidebarProvider blocking request replay', () => {
   it('exports a session through the OpenCode CLI and opens the result', async () => {
     const stdoutHandlers: Array<(data: Buffer) => void> = [];
     const stderrHandlers: Array<(data: Buffer) => void> = [];
-    const exitHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
+    const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
     spawnMock.mockReturnValue({
       stdout: {
         on: vi.fn((_event: string, handler: (data: Buffer) => void) =>
@@ -292,9 +293,9 @@ describe('SidebarProvider blocking request replay', () => {
           stderrHandlers.push(handler)
         ),
       },
-      once: vi.fn((event: string, handler: (...args: any[]) => void) => {
-        if (event === 'exit')
-          exitHandlers.push(
+      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'close')
+          closeHandlers.push(
             handler as (code: number | null, signal: NodeJS.Signals | null) => void
           );
       }),
@@ -338,7 +339,7 @@ describe('SidebarProvider blocking request replay', () => {
     });
 
     stdoutHandlers.forEach((handler) => handler(Buffer.from('{"id":"session-1"}')));
-    exitHandlers.forEach((handler) => handler(0, null));
+    closeHandlers.forEach((handler) => handler(0, null));
     await exportPromise;
 
     expect(spawnMock).toHaveBeenCalled();
@@ -347,5 +348,145 @@ describe('SidebarProvider blocking request replay', () => {
       content: '{"id":"session-1"}',
     });
     expect(vscodeMock.window.showTextDocument).toHaveBeenCalled();
+  });
+
+  it('waits for close before opening a large export result', async () => {
+    const stdoutHandlers: Array<(data: Buffer) => void> = [];
+    const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
+    spawnMock.mockReturnValue({
+      stdout: {
+        on: vi.fn((_event: string, handler: (data: Buffer) => void) =>
+          stdoutHandlers.push(handler)
+        ),
+      },
+      stderr: {
+        on: vi.fn(),
+      },
+      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'close') {
+          closeHandlers.push(
+            handler as (code: number | null, signal: NodeJS.Signals | null) => void
+          );
+        }
+      }),
+    });
+
+    const workspaceState = {
+      get: vi.fn((_key: string, fallback?: unknown) => fallback),
+      update: vi.fn(() => Promise.resolve()),
+    };
+
+    const contextProvider = {
+      context: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+    };
+
+    const server = {
+      status: { state: 'running', url: 'http://127.0.0.1:4096' },
+      on: vi.fn(),
+      off: vi.fn(),
+      start: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
+      request: vi.fn(),
+      resolveCommand: vi.fn(() => 'opencode'),
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+    };
+
+    const provider = new SidebarProvider(
+      { fsPath: '/extension' } as never,
+      workspaceState as never,
+      contextProvider as never,
+      server as never
+    );
+
+    const exportPromise = provider.handleMessage({
+      type: 'session/export',
+      payload: { sessionId: 'session-1' },
+    });
+
+    stdoutHandlers.forEach((handler) => handler(Buffer.from('{"items":[')));
+    expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+
+    stdoutHandlers.forEach((handler) => handler(Buffer.from('{"id":1}]}')));
+    closeHandlers.forEach((handler) => handler(0, null));
+    await exportPromise;
+
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+      language: 'json',
+      content: '{"items":[{"id":1}]}',
+    });
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('shows an error when export output is invalid JSON', async () => {
+    const stdoutHandlers: Array<(data: Buffer) => void> = [];
+    const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
+    spawnMock.mockReturnValue({
+      stdout: {
+        on: vi.fn((_event: string, handler: (data: Buffer) => void) =>
+          stdoutHandlers.push(handler)
+        ),
+      },
+      stderr: {
+        on: vi.fn(),
+      },
+      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'close') {
+          closeHandlers.push(
+            handler as (code: number | null, signal: NodeJS.Signals | null) => void
+          );
+        }
+      }),
+    });
+
+    const workspaceState = {
+      get: vi.fn((_key: string, fallback?: unknown) => fallback),
+      update: vi.fn(() => Promise.resolve()),
+    };
+
+    const contextProvider = {
+      context: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+    };
+
+    const server = {
+      status: { state: 'running', url: 'http://127.0.0.1:4096' },
+      on: vi.fn(),
+      off: vi.fn(),
+      start: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
+      request: vi.fn(),
+      resolveCommand: vi.fn(() => 'opencode'),
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+    };
+
+    const provider = new SidebarProvider(
+      { fsPath: '/extension' } as never,
+      workspaceState as never,
+      contextProvider as never,
+      server as never
+    );
+
+    const exportPromise = provider.handleMessage({
+      type: 'session/export',
+      payload: { sessionId: 'session-1' },
+    });
+
+    stdoutHandlers.forEach((handler) => handler(Buffer.from('{"items":[')));
+    closeHandlers.forEach((handler) => handler(0, null));
+    await exportPromise;
+
+    expect(vscodeMock.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to export session: OpenCode export returned invalid JSON')
+    );
+    expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
   });
 });
