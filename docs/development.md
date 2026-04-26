@@ -25,6 +25,12 @@ npm run typecheck
 npm run test
 ```
 
+After making changes, the recommended local verification and install flow is:
+
+```sh
+npm run fmt && npm run lint && npm run test && npm run test:e2e && npm run vscode:install
+```
+
 ## Build
 
 ```sh
@@ -75,13 +81,23 @@ After installation, reload the window:
 3. If prompted, select **VS Code Extension Development**.
 4. A new Extension Development Host window opens with the extension loaded.
 
-To rebuild while developing:
+To rebuild while developing and open the webview preview:
 
 ```sh
 npm run dev
 ```
 
-Then reload the Extension Development Host window after changes.
+This starts the extension watcher, the webview bundle watcher, and serves `preview.html` in Vite so you can inspect style changes immediately in the browser.
+
+Reload the Extension Development Host window after extension changes.
+
+If you only want the standalone browser preview:
+
+```sh
+npm run preview:webview
+```
+
+This serves the existing `preview.html`, which proxies to your local OpenCode server and hot-reloads the webview source via Vite.
 
 ## Runtime Overview
 
@@ -323,9 +339,10 @@ docs/
 | `npm run build` | Build extension and webview |
 | `npm run build:extension` | Build the extension host bundle |
 | `npm run build:webview` | Build the webview bundle |
+| `npm run preview:webview` | Serve `preview.html` for standalone webview preview |
 | `npm run watch:extension` | Watch and rebuild the extension host |
 | `npm run watch:webview` | Watch and rebuild the webview |
-| `npm run dev` | Run both watch tasks |
+| `npm run dev` | Run both watch tasks and open `preview.html` |
 | `npm run lint` | Run oxlint with `--fix` on `src/` |
 | `npm run lint:check` | Run oxlint without fixing |
 | `npm run fmt` | Format `src/` with oxfmt |

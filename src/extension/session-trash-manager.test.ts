@@ -39,7 +39,7 @@ describe('SessionTrashManager', () => {
       session('child-1', 2_000, { parentID: 'root' }),
       session('child-2', 1_000, { parentID: 'child-1' }),
     ];
-    const deleteSession = vi.fn(async () => undefined);
+    const deleteSession = vi.fn(async (_id: string) => undefined);
 
     await manager.moveToTrash('root', sessions as never[], 5_000);
     await manager.deletePermanently('root', deleteSession);

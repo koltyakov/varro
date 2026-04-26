@@ -4578,6 +4578,10 @@ kbd {
   min-width: 0;
 }
 
+.chat-header-subagents {
+  margin-left: 2px;
+}
+
 @media (max-width: 1399px) {
   .chat-header-left > .chat-header-btn:first-child {
     margin-left: -6px;
@@ -5046,6 +5050,25 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
     opacity 0.1s,
     color 0.1s,
     background-color 0.1s;
+}
+
+.session-item-plan-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 45%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-warning) 14%, transparent);
+  color: var(--color-vscode-fg);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
 }
 
 .session-item-subagents:hover {

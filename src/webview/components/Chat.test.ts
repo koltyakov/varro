@@ -635,6 +635,69 @@ describe('header status badges', () => {
     expect(desktopHeader?.querySelector('.chat-header-btn[title="New chat"]')).toBeNull();
   });
 
+  it('shows the active session subagent button beside the title and opens its sub-agent list', async () => {
+    setState('sessions', [
+      session('parent', 500),
+      session('child-1', 400, { parentID: 'parent' }),
+      session('child-2', 300, { parentID: 'parent' }),
+      session('other', 200),
+    ]);
+    setState('activeSessionId', 'parent');
+
+    cleanup = render(() => Chat(), container!);
+
+    const headerLeft = container?.querySelector('.chat-header-left');
+    const title = headerLeft?.querySelector('.chat-header-title-text');
+    const subagentsButton = headerLeft?.querySelector(
+      '.chat-header-subagents'
+    ) as HTMLButtonElement | null;
+    const headerChildren = Array.from(headerLeft?.children ?? []);
+
+    expect(title?.textContent).toBe('parent');
+    expect(subagentsButton?.getAttribute('title')).toBe('Show 2 sub-agent sessions');
+    expect(headerChildren.indexOf(title as Element)).toBeLessThan(
+      headerChildren.indexOf(subagentsButton as Element)
+    );
+
+    subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Sub-agents'
+    );
+    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
+    );
+    expect(titles).toEqual(['child-1', 'child-2']);
+  });
+
+  it('shows the root session subagent button when the active session is a sub-agent', async () => {
+    setState('sessions', [
+      session('parent', 500),
+      session('child-1', 400, { parentID: 'parent' }),
+      session('child-2', 300, { parentID: 'parent' }),
+    ]);
+    setState('activeSessionId', 'child-1');
+
+    cleanup = render(() => Chat(), container!);
+
+    const subagentsButton = container?.querySelector(
+      '.chat-header-subagents'
+    ) as HTMLButtonElement | null;
+    expect(subagentsButton?.getAttribute('title')).toBe('Show 2 sub-agent sessions');
+
+    subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Sub-agents'
+    );
+    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
+    );
+    expect(titles).toEqual(['child-1', 'child-2']);
+  });
+
   it('shows session status badges in the desktop session sidebar header', () => {
     setState('sessions', [
       session('running-1', 500),
@@ -850,6 +913,51 @@ describe('header status badges', () => {
         (item) => item.textContent?.trim() === 'plan-1'
       )
     ).toBe(true);
+  });
+
+  it('shows a plan tag before the trailing action buttons for running plan sessions', () => {
+    setState('sessions', [
+      session('plan-1', 300),
+      session('plan-child', 250, { parentID: 'plan-1' }),
+      session('session-1', 200),
+    ]);
+    setState('activeSessionId', 'session-1');
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState('sessionStatus', { 'plan-1': { type: 'busy' } });
+
+    cleanup = render(() => Chat(), container!);
+
+    const planRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
+      (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
+    );
+    const trailing = planRow?.querySelector('.session-item-trailing') as HTMLDivElement | null;
+    const planTag = trailing?.querySelector('.session-item-plan-tag');
+    const subagentsButton = trailing?.querySelector('.session-item-subagents');
+    const archiveButton = trailing?.querySelector('.session-item-archive');
+    const trailingChildren = Array.from(trailing?.children ?? []);
+    const planTagIndex = trailingChildren.indexOf(planTag as Element);
+    const subagentsIndex = trailingChildren.indexOf(subagentsButton as Element);
+    const archiveIndex = trailingChildren.indexOf(archiveButton as Element);
+
+    expect(planTag?.textContent?.trim()).toBe('Plan');
+    expect(planTagIndex).toBeGreaterThanOrEqual(0);
+    if (subagentsIndex >= 0) expect(planTagIndex).toBeLessThan(subagentsIndex);
+    expect(planTagIndex).toBeLessThan(archiveIndex);
+  });
+
+  it('does not show a plan tag for completed plan sessions', () => {
+    setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
+    setState('activeSessionId', 'session-1');
+    setState('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 });
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+
+    cleanup = render(() => Chat(), container!);
+
+    const planRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
+      (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
+    );
+
+    expect(planRow?.querySelector('.session-item-plan-tag')).toBeNull();
   });
 
   it('orders the default session list by age only', () => {

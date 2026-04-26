@@ -235,7 +235,19 @@ export function Chat() {
   const openSubagentSessions = (parentSessionId: string) => {
     setSessionFilter(null);
     setSubagentParentId(parentSessionId);
+    setShowSessionPicker(true);
   };
+
+  const activeRootSessionId = createMemo(() => getSessionTreeRootId(state.activeSessionId) || null);
+  const activeSubagentCount = createMemo(() => {
+    const rootSessionId = activeRootSessionId();
+    if (!rootSessionId) return 0;
+    return sessionIndicators().subagentCounts.get(rootSessionId) || 0;
+  });
+  const activeSubagentLabel = createMemo(() => {
+    const count = activeSubagentCount();
+    return `Show ${count} sub-agent session${count === 1 ? '' : 's'}`;
+  });
 
   const clearSessionListView = () => {
     setSessionFilter(null);
@@ -359,6 +371,21 @@ export function Chat() {
           </button>
         </Show>
         <span class="chat-header-title-text">{activeTitle()}</span>
+        <Show when={activeSubagentCount() > 0 && activeRootSessionId()}>
+          {(rootSessionId) => (
+            <button
+              type="button"
+              class="session-item-subagents chat-header-subagents"
+              onClick={() => openSubagentSessions(rootSessionId())}
+              title={activeSubagentLabel()}
+              aria-label={activeSubagentLabel()}
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M5.5 2.5a2 2 0 110 4 2 2 0 010-4zm5 1a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM2 9.25c0-1.8 2.1-2.75 3.5-2.75S9 7.45 9 9.25V10H2v-.75zm7.5.75v-.5c0-.66-.2-1.23-.54-1.7.5-.19 1.04-.3 1.54-.3 1.22 0 3 .73 3 2.25V10h-4z" />
+              </svg>
+            </button>
+          )}
+        </Show>
       </div>
       <Show when={showActions}>
         <div class="chat-header-actions">
@@ -1419,6 +1446,9 @@ function SessionListItem(props: {
     props.isNewlyCompleted ||
     (props.isCompletedPlanSession && isSessionUnread(props.session.id, props.session.time.updated));
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
+  const showsPlanModeTag = () =>
+    getSelectedAgentForSession(props.session.id) === 'plan' &&
+    (props.isRunning || props.needsAttention);
   const subagentLabel = () =>
     `Show ${props.subagentCount} sub-agent session${props.subagentCount === 1 ? '' : 's'}`;
   const indicatorClass = () => {
@@ -1485,6 +1515,11 @@ function SessionListItem(props: {
         </div>
       </button>
       <div class="session-item-trailing">
+        <Show when={showsPlanModeTag()}>
+          <span class="session-item-plan-tag" title="Plan mode" aria-label="Plan mode">
+            Plan
+          </span>
+        </Show>
         <Show when={hasSubagents()}>
           <button
             type="button"

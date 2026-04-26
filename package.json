@@ -199,10 +199,11 @@
   "scripts": {
     "build:extension": "node esbuild.config.mjs",
     "build:webview": "vite build",
+    "preview:webview": "vite --open /preview.html",
     "build": "npm run build:extension && npm run build:webview",
     "watch:extension": "node esbuild.config.mjs --watch",
     "watch:webview": "vite build --watch",
-    "dev": "npm run watch:extension & npm run watch:webview",
+    "dev": "npm run watch:extension & npm run watch:webview & npm run preview:webview",
     "lint": "oxlint src/ --fix",
     "lint:check": "oxlint src/",
     "fmt": "oxfmt src/",
