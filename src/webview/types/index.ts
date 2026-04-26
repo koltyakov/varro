@@ -238,11 +238,23 @@ export type Session = {
     files: number;
     diffs?: FileDiff[];
   };
+  share?: {
+    url: string;
+  };
   title: string;
   version: string;
   time: { created: number; updated: number; compacting?: number };
   permission?: PermissionRule[];
   revert?: { messageID: string; partID?: string; snapshot?: string; diff?: string };
+};
+
+export type Command = {
+  name: string;
+  description?: string;
+  agent?: string;
+  model?: string;
+  template: string;
+  subtask?: boolean;
 };
 
 export type SessionStatus =

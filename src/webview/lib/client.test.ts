@@ -48,11 +48,17 @@ describe('client', () => {
     bridgeMocks.apiCall.mockResolvedValue(undefined);
 
     await client.health();
+    await client.command.list();
     await client.session.list();
     await client.session.get('session-1');
     await client.session.update('session-1', { title: 'Renamed' });
     await client.session.delete('session-1');
     await client.session.abort('session-1');
+    await client.session.init('session-1', {
+      messageID: 'message-1',
+      providerID: 'openai',
+      modelID: 'gpt-4.1',
+    });
     await client.session.diff('session-1');
     await client.session.diff('session-1', 'message-1');
     await client.session.status();
@@ -66,7 +72,15 @@ describe('client', () => {
     });
     await client.session.respondPermission('session-1', 'perm-1', 'always');
     await client.session.revert('session-1', 'message-1');
+    await client.session.unrevert('session-1');
     await client.session.compact('session-1', { providerID: 'openai', modelID: 'gpt-4.1' });
+    await client.session.command('session-1', {
+      command: 'test',
+      arguments: '--watch',
+      agent: 'build',
+      model: 'openai/gpt-4.1',
+      messageID: 'message-1',
+    });
     await client.config.providers();
     await client.agent.list();
     await client.question.list();
@@ -75,11 +89,17 @@ describe('client', () => {
 
     expect(bridgeMocks.apiCall.mock.calls).toEqual([
       ['GET', '/global/health'],
+      ['GET', '/command'],
       ['GET', '/session'],
       ['GET', '/session/session-1'],
       ['PATCH', '/session/session-1', { title: 'Renamed' }],
       ['DELETE', '/session/session-1'],
       ['POST', '/session/session-1/abort'],
+      [
+        'POST',
+        '/session/session-1/init',
+        { messageID: 'message-1', providerID: 'openai', modelID: 'gpt-4.1' },
+      ],
       ['GET', '/session/session-1/diff'],
       ['GET', '/session/session-1/diff?messageID=message-1'],
       ['GET', '/session/status'],
@@ -97,7 +117,19 @@ describe('client', () => {
       ],
       ['POST', '/session/session-1/permissions/perm-1', { response: 'always' }],
       ['POST', '/session/session-1/revert', { messageID: 'message-1' }],
+      ['POST', '/session/session-1/unrevert'],
       ['POST', '/session/session-1/summarize', { providerID: 'openai', modelID: 'gpt-4.1' }],
+      [
+        'POST',
+        '/session/session-1/command',
+        {
+          command: 'test',
+          arguments: '--watch',
+          agent: 'build',
+          model: 'openai/gpt-4.1',
+          messageID: 'message-1',
+        },
+      ],
       ['GET', '/config/providers'],
       ['GET', '/agent'],
       ['GET', '/question'],

@@ -24,6 +24,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'files/pick':
       return { type } as WebviewMessage;
 
+    case 'session/export': {
+      const payload = asRecord(message?.payload);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      return sessionId ? { type, payload: { sessionId } } : null;
+    }
+
     case 'vscode/open-settings': {
       const payload = asRecord(message?.payload);
       const query = getOptionalBoundedString(payload?.query, 200);
@@ -197,6 +203,7 @@ export function isAllowedApiRequest(method: string, path: string) {
 
   if (pathname === '/global/health') return method === 'GET' && noQuery();
   if (pathname === '/config/providers') return method === 'GET' && noQuery();
+  if (pathname === '/command') return method === 'GET' && noQuery();
   if (pathname === '/mcp') return method === 'GET' && noQuery();
   if (pathname === '/file/status') return method === 'GET' && noQuery();
   if (pathname === '/agent') return method === 'GET' && noQuery();
@@ -243,7 +250,9 @@ export function isAllowedApiRequest(method: string, path: string) {
     return (
       method === 'POST' &&
       noQuery() &&
-      ['abort', 'prompt_async', 'revert', 'summarize'].includes(segments[2])
+      ['abort', 'prompt_async', 'revert', 'summarize', 'unrevert', 'init', 'command'].includes(
+        segments[2]
+      )
     );
   }
   if (segments.length === 4 && segments[2] === 'permissions') {

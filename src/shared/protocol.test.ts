@@ -42,6 +42,7 @@ describe('protocol conformance', () => {
       'webview/focus': true,
       'terminal-selection/clear': true,
       'terminal/run': true,
+      'session/export': true,
       'vscode/open-settings': true,
       'files/drop': true,
       'files/drop-content': true,

@@ -6,6 +6,7 @@ import {
   shouldPadInlineInsertion,
   isToolbarControlCompacted,
   isToolbarControlHidden,
+  getSlashCommands,
 } from './ChatInput';
 
 describe('isToolbarControlCompacted', () => {
@@ -207,6 +208,41 @@ describe('getActiveCompletion', () => {
   it('rejects cursor positions outside the input bounds', () => {
     expect(getActiveCompletion('abc', -1)).toBeNull();
     expect(getActiveCompletion('abc', 4)).toBeNull();
+  });
+});
+
+describe('getSlashCommands', () => {
+  it('includes init, export, redo, and custom commands while preserving built-ins', () => {
+    const commands = getSlashCommands({
+      isBusy: false,
+      canUndo: true,
+      canRedo: true,
+      onConnectProvider: () => {},
+      onOpenSessions: () => {},
+      onOpenModels: () => {},
+      onOpenMcps: () => {},
+      onOpenFiles: () => {},
+      onOpenSettings: () => {},
+      onExportSession: () => {},
+      customCommands: [
+        {
+          name: 'test',
+          description: 'Run tests',
+          template: 'Run tests',
+        },
+        {
+          name: 'settings',
+          description: 'Override built-in',
+          template: 'ignored',
+        },
+      ],
+    });
+
+    expect(commands.some((command) => command.name === 'init')).toBe(true);
+    expect(commands.some((command) => command.name === 'export')).toBe(true);
+    expect(commands.some((command) => command.name === 'redo')).toBe(true);
+    expect(commands.some((command) => command.name === 'test')).toBe(true);
+    expect(commands.filter((command) => command.name === 'settings')).toHaveLength(1);
   });
 });
 

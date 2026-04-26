@@ -4,13 +4,17 @@ import type { Message, Part, Provider, Session } from '../types';
 
 const clientMocks = vi.hoisted(() => ({
   health: vi.fn(),
+  commandList: vi.fn(),
   sessionList: vi.fn(),
   sessionCreate: vi.fn(),
   sessionDelete: vi.fn(),
   sessionGet: vi.fn(),
   sessionMessages: vi.fn(),
   sessionSendAsync: vi.fn(),
+  sessionCommand: vi.fn(),
+  sessionInit: vi.fn(),
   sessionRevert: vi.fn(),
+  sessionUnrevert: vi.fn(),
   sessionAbort: vi.fn(),
   sessionStatus: vi.fn(),
   agentList: vi.fn(),
@@ -36,6 +40,9 @@ const bridgeMocks = vi.hoisted(() => ({
 vi.mock('../lib/client', () => ({
   client: {
     health: clientMocks.health,
+    command: {
+      list: clientMocks.commandList,
+    },
     session: {
       list: clientMocks.sessionList,
       create: clientMocks.sessionCreate,
@@ -43,7 +50,10 @@ vi.mock('../lib/client', () => ({
       get: clientMocks.sessionGet,
       messages: clientMocks.sessionMessages,
       sendAsync: clientMocks.sessionSendAsync,
+      command: clientMocks.sessionCommand,
+      init: clientMocks.sessionInit,
       revert: clientMocks.sessionRevert,
+      unrevert: clientMocks.sessionUnrevert,
       abort: clientMocks.sessionAbort,
       status: clientMocks.sessionStatus,
     },
@@ -201,13 +211,17 @@ beforeEach(() => {
   vi.resetModules();
   delete (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState;
   clientMocks.health.mockReset();
+  clientMocks.commandList.mockReset();
   clientMocks.sessionList.mockReset();
   clientMocks.sessionCreate.mockReset();
   clientMocks.sessionDelete.mockReset();
   clientMocks.sessionGet.mockReset();
   clientMocks.sessionMessages.mockReset();
   clientMocks.sessionSendAsync.mockReset();
+  clientMocks.sessionCommand.mockReset();
+  clientMocks.sessionInit.mockReset();
   clientMocks.sessionRevert.mockReset();
+  clientMocks.sessionUnrevert.mockReset();
   clientMocks.sessionAbort.mockReset();
   clientMocks.sessionStatus.mockReset();
   clientMocks.agentList.mockReset();
@@ -226,6 +240,13 @@ beforeEach(() => {
   bridgeMocks.onMessage.mockClear();
   bridgeMocks.postMessage.mockReset();
   clientMocks.mcpStatus.mockResolvedValue({});
+  clientMocks.commandList.mockResolvedValue([]);
+  clientMocks.sessionCommand.mockResolvedValue({
+    info: assistantMessage('assistant-command', 'user-1'),
+    parts: [],
+  });
+  clientMocks.sessionInit.mockResolvedValue(true);
+  clientMocks.sessionUnrevert.mockResolvedValue(session());
   clientMocks.mcpConnect.mockResolvedValue(true);
   clientMocks.mcpDisconnect.mockResolvedValue(true);
   clientMocks.varroOpenPlan.mockResolvedValue({ path: '/tmp/plan.md' });
@@ -1208,6 +1229,87 @@ describe('sendMessage', () => {
         },
       ],
     });
+  });
+});
+
+describe('command helpers', () => {
+  it('runs custom slash commands against the session command API', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('commands', [
+      {
+        name: 'test',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    stateModule.setState('messages', [{ info: userMessage('user-1'), parts: [] }]);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    const result = await hookModule.runSlashCommandByName('test', '--watch');
+
+    expect(result).toBe(true);
+    expect(clientMocks.sessionCommand).toHaveBeenCalledWith('session-1', {
+      command: 'test',
+      arguments: '--watch',
+    });
+  });
+
+  it('initializes the current project through the session init API', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          options: {},
+          headers: {},
+          limit: { context: 1, output: 1 },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          capabilities: {
+            temperature: true,
+            reasoning: true,
+            attachment: true,
+            toolcall: true,
+            input: { text: true, audio: false, image: true, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+          },
+          status: 'active',
+          api: { id: 'openai', url: '', npm: '' },
+        },
+      }),
+    ]);
+    stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('messages', [
+      { info: userMessage('user-1'), parts: [] },
+      { info: assistantMessage('assistant-1', 'user-1'), parts: [] },
+    ]);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.initSession();
+
+    expect(clientMocks.sessionInit).toHaveBeenCalledWith('session-1', {
+      messageID: 'assistant-1',
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+    });
+  });
+
+  it('redos through the session unrevert API', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.redoSession();
+
+    expect(clientMocks.sessionUnrevert).toHaveBeenCalledWith('session-1');
   });
 });
 

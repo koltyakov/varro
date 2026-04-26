@@ -18,6 +18,7 @@ import {
   setError,
   requestComposerFocus,
   requestOpenAttentionSessions,
+  setCommands,
   persistActiveSessionId,
   getPersistedActiveSessionId,
   getPersistedSelectedAgent,
@@ -805,6 +806,7 @@ async function initConnection() {
     await Promise.all([
       loadSessions(),
       loadAgents(),
+      loadCommands(),
       loadProviders(),
       loadMcps(),
       loadQuestions(),
@@ -997,6 +999,15 @@ async function loadAgents() {
     }
   } catch (err) {
     logError('loadAgents', err);
+  }
+}
+
+async function loadCommands() {
+  try {
+    const commands = await client.command.list();
+    setCommands(commands || []);
+  } catch (err) {
+    logError('loadCommands', err);
   }
 }
 
@@ -1576,6 +1587,103 @@ export async function undoSession() {
   } catch (err) {
     stopLoading();
     setError(err instanceof Error ? err.message : 'Failed to undo');
+  }
+}
+
+export async function redoSession() {
+  if (!state.activeSessionId) return;
+  try {
+    startLoading();
+    const session = await client.session.unrevert(state.activeSessionId);
+    upsertSession(session);
+    await Promise.all([
+      syncSession(state.activeSessionId),
+      syncSessionMessages(state.activeSessionId),
+    ]);
+    stopLoading();
+  } catch (err) {
+    stopLoading();
+    setError(err instanceof Error ? err.message : 'Failed to redo');
+  }
+}
+
+export async function initSession() {
+  if (!state.activeSessionId) {
+    setError('Start a session before running init');
+    return;
+  }
+
+  const lastAssistant = [...state.messages]
+    .toReversed()
+    .find((message) => message.info.role === 'assistant');
+  if (!lastAssistant) {
+    setError('Run the assistant at least once before running init');
+    return;
+  }
+
+  const effectiveModel = resolveSelectedModel(
+    state.selectedModel,
+    state.providers,
+    state.providerDefaults
+  );
+  if (!effectiveModel) {
+    setError('Select a model before running init');
+    return;
+  }
+
+  try {
+    startLoading();
+    await client.session.init(state.activeSessionId, {
+      messageID: lastAssistant.info.id,
+      providerID: effectiveModel.providerID,
+      modelID: effectiveModel.modelID,
+    });
+    await Promise.all([
+      syncSession(state.activeSessionId),
+      syncSessionMessages(state.activeSessionId),
+    ]);
+    stopLoading();
+  } catch (err) {
+    stopLoading();
+    setError(err instanceof Error ? err.message : 'Failed to initialize project');
+  }
+}
+
+export async function runSlashCommandByName(name: string, args: string) {
+  const command = state.commands.find((item) => item.name === name);
+  if (!command) {
+    setError(`Unknown command: /${name}`);
+    return false;
+  }
+
+  let sessionId = state.activeSessionId;
+  if (!sessionId) {
+    const createdId = await createSession(undefined, getPermissionModeForSession(null));
+    if (!createdId) return false;
+    sessionId = createdId;
+  }
+
+  try {
+    startLoading();
+    const result = await client.session.command(sessionId, {
+      command: name,
+      arguments: args,
+    });
+    if (state.activeSessionId === sessionId) {
+      upsertMessageInfo(result.info);
+      for (const part of result.parts) {
+        upsertPart(part);
+      }
+      syncTodosFromMessages();
+      requestMessageListScrollToBottom();
+    }
+    await Promise.all([syncSession(sessionId), recheckSessionStatus(sessionId)]).catch(() => {});
+    stopLoading();
+    return true;
+  } catch (err) {
+    stopLoading();
+    setError(err instanceof Error ? err.message : `Failed to run /${name}`);
+    return false;
   }
 }
 

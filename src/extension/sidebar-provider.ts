@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { spawn } from 'child_process';
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import type {
@@ -38,6 +39,8 @@ import {
   getPlanFileName,
   normalizePlanMarkdown,
 } from './util/plan-file';
+import { resolveServerLaunch } from './util/server-launch';
+import { buildServerEnv } from './util/server-path';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -468,6 +471,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'terminal/run':
           this.runInTerminal(msg.payload.command, msg.payload.title);
+          break;
+        case 'session/export':
+          await this.exportSession(msg.payload.sessionId);
           break;
         case 'vscode/open-settings':
           await vscode.commands.executeCommand(
@@ -907,6 +913,68 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const terminal = vscode.window.createTerminal({ name: title, cwd });
     terminal.show(false);
     terminal.sendText(text, true);
+  }
+
+  private async exportSession(sessionId: string) {
+    const content = await this.runCliCommand(['export', sessionId]);
+    const document = await vscode.workspace.openTextDocument({
+      language: 'json',
+      content,
+    });
+    await vscode.window.showTextDocument(document, { preview: false });
+  }
+
+  private async runCliCommand(args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(stdout.trim());
+      };
+
+      try {
+        const command = this.server.resolveCommand();
+        const launch = resolveServerLaunch(command, args);
+        const proc = spawn(launch.command, launch.args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          cwd: this.server.getWorkspaceCwd(),
+          env: buildServerEnv(),
+          windowsHide: true,
+          ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+        });
+
+        proc.stdout?.on('data', (data: Buffer) => {
+          stdout += data.toString();
+        });
+        proc.stderr?.on('data', (data: Buffer) => {
+          stderr += data.toString();
+        });
+        proc.once('error', (err) => finish(err));
+        proc.once('exit', (code, signal) => {
+          if (code === 0) {
+            finish();
+            return;
+          }
+          finish(
+            new Error(
+              stderr.trim() ||
+                stdout.trim() ||
+                `OpenCode CLI command failed${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
+            )
+          );
+        });
+      } catch (err) {
+        finish(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
   }
 
   private postContextFiles() {

@@ -5,6 +5,7 @@ import type {
   Part,
   SessionStatus,
   Agent,
+  Command,
   Provider,
   FileDiff,
   RepoFileStatus,
@@ -45,6 +46,12 @@ export const client = {
     },
     async abort(id: string): Promise<boolean> {
       return apiCall('POST', `/session/${id}/abort`);
+    },
+    async init(
+      id: string,
+      body: { messageID: string; providerID: string; modelID: string }
+    ): Promise<boolean> {
+      return apiCall('POST', `/session/${id}/init`, body);
     },
     async diff(id: string, messageID?: string): Promise<FileDiff[]> {
       const query = messageID ? `?messageID=${messageID}` : '';
@@ -87,8 +94,23 @@ export const client = {
     async revert(id: string, messageID: string): Promise<boolean> {
       return apiCall('POST', `/session/${id}/revert`, { messageID });
     },
+    async unrevert(id: string): Promise<Session> {
+      return apiCall('POST', `/session/${id}/unrevert`);
+    },
     async compact(id: string, model: { providerID: string; modelID: string }): Promise<boolean> {
       return apiCall('POST', `/session/${id}/summarize`, model);
+    },
+    async command(
+      id: string,
+      body: {
+        command: string;
+        arguments: string;
+        messageID?: string;
+        agent?: string;
+        model?: string;
+      }
+    ): Promise<{ info: Message; parts: Part[] }> {
+      return apiCall('POST', `/session/${id}/command`, body);
     },
   },
 
@@ -147,6 +169,12 @@ export const client = {
   agent: {
     async list(): Promise<Agent[]> {
       return apiCall('GET', '/agent');
+    },
+  },
+
+  command: {
+    async list(): Promise<Command[]> {
+      return apiCall('GET', '/command');
     },
   },
 

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { loggerMock, vscodeMock } = vi.hoisted(() => ({
+const { loggerMock, vscodeMock, spawnMock } = vi.hoisted(() => ({
   loggerMock: {
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
   },
+  spawnMock: vi.fn(),
   vscodeMock: {
     window: {
       createStatusBarItem: vi.fn(() => ({
@@ -21,6 +22,7 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
       onDidChangeWindowState: vi.fn(() => ({ dispose: vi.fn() })),
       onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
       activeColorTheme: { kind: 2 },
+      showTextDocument: vi.fn(() => Promise.resolve()),
     },
     workspace: {
       onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
@@ -28,6 +30,7 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
         get: vi.fn((_key: string, fallback?: unknown) => fallback),
         update: vi.fn(() => Promise.resolve()),
       })),
+      openTextDocument: vi.fn(() => Promise.resolve({})),
     },
     StatusBarAlignment: { Left: 1 },
     ThemeColor: vi.fn((value: string) => ({ value })),
@@ -39,11 +42,13 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
     },
     Uri: {
       joinPath: vi.fn(() => ({ toString: () => 'vscode-resource://icon.png' })),
+      file: vi.fn((fsPath: string) => ({ fsPath, toString: () => fsPath })),
     },
   },
 }));
 
 vi.mock('vscode', () => vscodeMock);
+vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('./error-hub', () => ({
   errorHub: {
@@ -270,5 +275,77 @@ describe('SidebarProvider blocking request replay', () => {
         },
       },
     });
+  });
+
+  it('exports a session through the OpenCode CLI and opens the result', async () => {
+    const stdoutHandlers: Array<(data: Buffer) => void> = [];
+    const stderrHandlers: Array<(data: Buffer) => void> = [];
+    const exitHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
+    spawnMock.mockReturnValue({
+      stdout: {
+        on: vi.fn((_event: string, handler: (data: Buffer) => void) =>
+          stdoutHandlers.push(handler)
+        ),
+      },
+      stderr: {
+        on: vi.fn((_event: string, handler: (data: Buffer) => void) =>
+          stderrHandlers.push(handler)
+        ),
+      },
+      once: vi.fn((event: string, handler: (...args: any[]) => void) => {
+        if (event === 'exit')
+          exitHandlers.push(
+            handler as (code: number | null, signal: NodeJS.Signals | null) => void
+          );
+      }),
+    });
+
+    const workspaceState = {
+      get: vi.fn((_key: string, fallback?: unknown) => fallback),
+      update: vi.fn(() => Promise.resolve()),
+    };
+
+    const contextProvider = {
+      context: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+    };
+
+    const server = {
+      status: { state: 'running', url: 'http://127.0.0.1:4096' },
+      on: vi.fn(),
+      off: vi.fn(),
+      start: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
+      request: vi.fn(),
+      resolveCommand: vi.fn(() => 'opencode'),
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+    };
+
+    const provider = new SidebarProvider(
+      { fsPath: '/extension' } as never,
+      workspaceState as never,
+      contextProvider as never,
+      server as never
+    );
+
+    const exportPromise = provider.handleMessage({
+      type: 'session/export',
+      payload: { sessionId: 'session-1' },
+    });
+
+    stdoutHandlers.forEach((handler) => handler(Buffer.from('{"id":"session-1"}')));
+    exitHandlers.forEach((handler) => handler(0, null));
+    await exportPromise;
+
+    expect(spawnMock).toHaveBeenCalled();
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+      language: 'json',
+      content: '{"id":"session-1"}',
+    });
+    expect(vscodeMock.window.showTextDocument).toHaveBeenCalled();
   });
 });

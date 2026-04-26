@@ -1015,7 +1015,7 @@ export class OpenCodeServer extends EventEmitter {
     this.setStatus({ state: 'stopped' });
   }
 
-  private getWorkspaceCwd(): string | undefined {
+  getWorkspaceCwd(): string | undefined {
     const activeUri = vscode.window.activeTextEditor?.document.uri;
     const activeFolder = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri) : undefined;
     if (activeFolder) {
@@ -1057,7 +1057,7 @@ export class OpenCodeServer extends EventEmitter {
     return { 'x-opencode-directory': encodeURIComponent(directory) };
   }
 
-  private resolveCommand(): string {
+  resolveCommand(): string {
     if (this.command) return this.command;
 
     const cacheKey = this.getResolvedCommandCacheKey();

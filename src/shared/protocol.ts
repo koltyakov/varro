@@ -194,6 +194,7 @@ export type WebviewMessage =
   | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
+  | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'vscode/open-settings'; payload: { query?: string } }
   | { type: 'files/drop'; payload: { paths: string[] } }
   | {

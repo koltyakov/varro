@@ -3,9 +3,13 @@ import { isAllowedApiRequest, parseWebviewMessage } from './webview-message';
 
 describe('webview message validation', () => {
   it('accepts known API routes used by the webview client', () => {
+    expect(isAllowedApiRequest('GET', '/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/init')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=msg-1')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/unrevert')).toBe(true);
     expect(isAllowedApiRequest('POST', '/question/request-1/reply')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/provider-limit?providerID=openai')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session-trash')).toBe(true);
@@ -74,5 +78,16 @@ describe('webview message validation', () => {
       type: 'vscode/open-settings',
       payload: {},
     });
+  });
+
+  it('accepts session export messages with a valid session id', () => {
+    expect(
+      parseWebviewMessage({ type: 'session/export', payload: { sessionId: 'session-1' } })
+    ).toEqual({
+      type: 'session/export',
+      payload: { sessionId: 'session-1' },
+    });
+
+    expect(parseWebviewMessage({ type: 'session/export', payload: {} })).toBeNull();
   });
 });

@@ -43,8 +43,11 @@ import {
   abortSession,
   createSession,
   compactSession,
+  initSession,
+  redoSession,
   undoSession,
   reviewSession,
+  runSlashCommandByName,
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel } from './ModelPicker';
@@ -76,7 +79,7 @@ import {
 } from '../../shared/context-files';
 import { TodoList } from './TodoList';
 import { DocumentIcon } from './DocumentIcon';
-import type { Agent, Part, TextPart } from '../types';
+import type { Agent, Command, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
 import { getProviderIcon } from '../lib/provider-icons';
@@ -302,6 +305,9 @@ export function ChatInput() {
     getSlashCommands({
       isBusy: isLoading(),
       canUndo: !!state.activeSessionId && state.messages.some((m) => m.info.role === 'assistant'),
+      canRedo:
+        !!state.activeSessionId &&
+        !!state.sessions.find((session) => session.id === state.activeSessionId)?.revert,
       onConnectProvider: openProviderSetup,
       onOpenSessions: () => setShowSessionPicker(true),
       onOpenModels: () => setShowModelPicker(true),
@@ -309,6 +315,11 @@ export function ChatInput() {
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
       onOpenSettings: () =>
         postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro' } }),
+      onExportSession: () => {
+        if (!state.activeSessionId) return;
+        postMessage({ type: 'session/export', payload: { sessionId: state.activeSessionId } });
+      },
+      customCommands: state.commands,
     })
   );
 
@@ -578,7 +589,8 @@ export function ChatInput() {
 
   async function runSlashCommand(raw: string) {
     const normalized = raw.trim().replace(/^\/+/, '');
-    const [name] = normalized.split(/\s+/, 1);
+    const [name, ...rest] = normalized.split(/\s+/);
+    const args = rest.join(' ');
     const command = slashCommands().find(
       (item) => item.name === name || item.aliases.includes(name)
     );
@@ -593,7 +605,7 @@ export function ChatInput() {
     resetPastedImageIndex();
     setCompletionIndex(0);
     if (textareaRef) textareaRef.style.height = 'auto';
-    command.action();
+    await command.action(args);
   }
 
   async function handleSend(mode?: 'queue' | 'steer') {
@@ -2178,7 +2190,7 @@ type SlashCommand = {
   name: string;
   aliases: string[];
   description: string;
-  action: () => void;
+  action: (args: string) => void | Promise<void>;
 };
 
 type CompletionItem =
@@ -2413,15 +2425,18 @@ function PermissionModeIcon(props: { mode: PermissionMode }) {
   );
 }
 
-function getSlashCommands(props: {
+export function getSlashCommands(props: {
   isBusy: boolean;
   canUndo: boolean;
+  canRedo: boolean;
   onConnectProvider: () => void;
   onOpenSessions: () => void;
   onOpenModels: () => void;
   onOpenMcps: () => void;
   onOpenFiles: () => void;
   onOpenSettings: () => void;
+  onExportSession: () => void;
+  customCommands: Command[];
 }): SlashCommand[] {
   const commands: SlashCommand[] = [
     {
@@ -2436,37 +2451,53 @@ function getSlashCommands(props: {
       name: 'sessions',
       aliases: ['resume'],
       description: 'Open the session list',
-      action: props.onOpenSessions,
+      action: () => props.onOpenSessions(),
     },
     {
       name: 'models',
       aliases: [],
       description: 'Open the model picker',
-      action: props.onOpenModels,
+      action: () => props.onOpenModels(),
     },
     {
       name: 'mcps',
       aliases: ['mcp'],
       description: 'Open the MCP picker for this session',
-      action: props.onOpenMcps,
+      action: () => props.onOpenMcps(),
     },
     {
       name: 'connect',
       aliases: [],
       description: 'Open provider login in the terminal',
-      action: props.onConnectProvider,
+      action: () => props.onConnectProvider(),
     },
     {
       name: 'attach',
       aliases: ['files'],
       description: 'Pick files or folders to attach',
-      action: props.onOpenFiles,
+      action: () => props.onOpenFiles(),
     },
     {
       name: 'settings',
       aliases: [],
       description: 'Open VS Code settings for Varro',
-      action: props.onOpenSettings,
+      action: () => props.onOpenSettings(),
+    },
+    {
+      name: 'init',
+      aliases: [],
+      description: 'Analyze the project and create AGENTS.md',
+      action: () => {
+        initSession();
+      },
+    },
+    {
+      name: 'export',
+      aliases: [],
+      description: 'Export the current session',
+      action: () => {
+        props.onExportSession();
+      },
     },
     {
       name: 'thinking',
@@ -2497,6 +2528,17 @@ function getSlashCommands(props: {
     });
   }
 
+  if (props.canRedo) {
+    commands.push({
+      name: 'redo',
+      aliases: [],
+      description: 'Redo the last undone response',
+      action: () => {
+        redoSession();
+      },
+    });
+  }
+
   commands.push({
     name: 'review',
     aliases: [],
@@ -2513,6 +2555,19 @@ function getSlashCommands(props: {
       description: 'Stop the current run',
       action: () => {
         abortSession();
+      },
+    });
+  }
+
+  const builtInNames = new Set(commands.flatMap((command) => [command.name, ...command.aliases]));
+  for (const command of props.customCommands) {
+    if (builtInNames.has(command.name)) continue;
+    commands.push({
+      name: command.name,
+      aliases: [],
+      description: command.description || command.template,
+      action: (args) => {
+        void runSlashCommandByName(command.name, args);
       },
     });
   }

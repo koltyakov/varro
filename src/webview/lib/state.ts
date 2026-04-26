@@ -11,6 +11,7 @@ import type {
   SessionStatus,
   FileDiff,
   Agent,
+  Command,
   Provider,
   AssistantMessage,
 } from '../types';
@@ -63,6 +64,7 @@ interface AppState {
   streamingText: string;
   agents: Agent[];
   allAgents: Agent[];
+  commands: Command[];
   providers: Provider[];
   providerLimits: Record<string, ProviderLimitStatus | null>;
   mcpStatus: Record<string, McpStatus>;
@@ -134,6 +136,7 @@ export const [state, setState] = createStore<AppState>({
   streamingText: '',
   agents: [],
   allAgents: [],
+  commands: [],
   providers: [],
   providerLimits: {},
   mcpStatus: {},
@@ -906,6 +909,10 @@ export function resetPastedImageIndex() {
 
 export function setQuestions(questions: QuestionRequest[]) {
   setState('questions', questions);
+}
+
+export function setCommands(commands: Command[]) {
+  setState('commands', commands);
 }
 
 export function setSessions(nextSessions: Session[]) {
