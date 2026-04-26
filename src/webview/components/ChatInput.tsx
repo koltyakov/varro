@@ -543,22 +543,22 @@ export function ChatInput() {
     const completion = activeCompletion();
     const items = composerCompletions();
     const item = items[Math.min(completionIndex(), items.length - 1)];
-    const selection = getCompletionSelection(completion, item, confirm);
-    if (!selection) return;
+    const completionSelection = getCompletionSelection(completion, item, confirm);
+    if (!completionSelection) return;
 
-    if (selection.type === 'run-slash') {
-      await runSlashCommand(selection.value);
+    if (completionSelection.type === 'run-slash') {
+      await runSlashCommand(completionSelection.value);
       return;
     }
 
-    if (selection.type === 'set-slash') {
-      setComposerValue(selection.value);
+    if (completionSelection.type === 'set-slash') {
+      setComposerValue(completionSelection.value);
       return;
     }
 
-    if (selection.file) addContextFile(selection.file);
+    if (completionSelection.file) addContextFile(completionSelection.file);
     if (completion?.type !== 'mention') return;
-    applyMentionValue(completion, selection.value);
+    applyMentionValue(completion, completionSelection.value);
   }
 
   function applyMentionValue(
@@ -1601,22 +1601,22 @@ export function ChatInput() {
               header={showFileSearchHint() ? 'Type to search workspace files' : undefined}
               onSelect={(item) => {
                 const completion = activeCompletion();
-                const selection = getCompletionSelection(completion, item, true);
-                if (!selection) return;
+                const completionSelection = getCompletionSelection(completion, item, true);
+                if (!completionSelection) return;
 
-                if (selection.type === 'run-slash') {
-                  void runSlashCommand(selection.value);
+                if (completionSelection.type === 'run-slash') {
+                  void runSlashCommand(completionSelection.value);
                   return;
                 }
 
-                if (selection.type === 'set-slash') {
-                  setComposerValue(selection.value);
+                if (completionSelection.type === 'set-slash') {
+                  setComposerValue(completionSelection.value);
                   return;
                 }
 
-                if (selection.file) addContextFile(selection.file);
+                if (completionSelection.file) addContextFile(completionSelection.file);
                 if (completion?.type !== 'mention') return;
-                applyMentionValue(completion, selection.value);
+                applyMentionValue(completion, completionSelection.value);
               }}
             />
           </Show>
