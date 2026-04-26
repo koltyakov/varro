@@ -970,6 +970,32 @@ describe('sendMessage', () => {
     ]);
   });
 
+  it('does not keep todos from earlier assistant messages in the latest turn', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1', 'user-1'),
+        parts: [todoPart('todo-part-1', 'assistant-1', 'Old completed task')],
+      },
+      {
+        info: {
+          ...assistantMessage('assistant-2', 'user-1'),
+          time: { created: 1, completed: 2 },
+        },
+        parts: [],
+      },
+    ]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    await hookModule.selectSession('session-1');
+
+    expect(stateModule.state.todos).toEqual([]);
+  });
+
   it('requests scrolling to the latest message when selecting an existing session', async () => {
     const { stateModule, hookModule } = await loadModules();
 

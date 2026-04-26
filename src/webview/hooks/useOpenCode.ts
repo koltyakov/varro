@@ -411,16 +411,14 @@ function deriveTodosFromMessages(messages: Array<{ info: Message; parts: Part[] 
     }
   }
 
-  for (
-    let messageIndex = messages.length - 1;
-    messageIndex > lastUserMessageIndex;
-    messageIndex -= 1
-  ) {
-    const parts = messages[messageIndex].parts;
-    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const todos = extractTodosFromPart(parts[partIndex]);
-      if (todos) return todos;
-    }
+  const latestAssistantMessage = messages
+    .slice(lastUserMessageIndex + 1)
+    .findLast((message) => message.info.role === 'assistant');
+  if (!latestAssistantMessage) return [];
+
+  for (let partIndex = latestAssistantMessage.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+    const todos = extractTodosFromPart(latestAssistantMessage.parts[partIndex]);
+    if (todos) return todos;
   }
 
   return [];
