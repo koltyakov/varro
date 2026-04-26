@@ -116,6 +116,18 @@ function imageFilePart(id: string, filename: string): FilePart {
   };
 }
 
+function filePart(id: string, filename: string, mime = 'application/pdf'): FilePart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'file',
+    mime,
+    filename,
+    url: `https://example.test/${id}`,
+  };
+}
+
 function toolPart(id: string, state: ToolPart['state']): ToolPart {
   return {
     id,
@@ -330,6 +342,34 @@ describe('Message user prompt rendering', () => {
 
     expect(attachments).toBeInstanceOf(HTMLDivElement);
     expect(attachments?.classList.contains('message-attachments-standalone')).toBe(true);
+  });
+
+  it('renders sent attachments above the user text while leaving images below', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-1'),
+          parts: [
+            textPart('text-1', '[Active file: src/shared/extension-message.ts]'),
+            filePart('file-1', 'spec.pdf'),
+            textPart('text-2', 'Please review this.'),
+            imageFilePart('image-1', 'diagram.png'),
+          ],
+        }),
+      container!
+    );
+
+    const rendered = container?.querySelector('.rendered-markdown');
+    const children = Array.from(rendered?.children ?? []);
+
+    expect(children[0]?.classList.contains('message-attachments')).toBe(true);
+    expect(children[0]?.textContent).toContain('extension-message.ts');
+    expect(children[1]?.classList.contains('chat-attachment-chip')).toBe(true);
+    expect(children[1]?.textContent).toContain('spec.pdf');
+    expect(children[2]?.classList.contains('user-message-text-scroll')).toBe(true);
+    expect(children[2]?.textContent).toContain('Please review this.');
+    expect(children[3]?.classList.contains('chat-image-figure')).toBe(true);
+    expect(children[3]?.textContent).toContain('diagram.png');
   });
 });
 

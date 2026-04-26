@@ -1,0 +1,23 @@
+# Agent Notes for Varro
+
+- Package manager: `npm`; install with `npm install`; use Node 20+.
+- Build: `npm run build` (`build:extension` + `build:webview`).
+- Dev/watch: `npm run dev`; preview only: `npm run preview:webview`.
+- Lint fix: `npm run lint`; lint check: `npm run lint:check`; format: `npm run fmt`.
+- Typecheck: `npm run typecheck`.
+- Unit tests: `npm run test`; coverage: `npm run test:coverage`.
+- Run one Vitest file: `npm run test -- src/webview/components/ChatInput.test.ts`.
+- Run one Vitest case: `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`.
+- E2E tests: `npm run test:e2e`; run one Playwright spec: `npm run test:e2e -- e2e/tests/layout.spec.ts`.
+- Main code areas: `src/extension`, `src/webview`, and `src/shared`.
+- TypeScript is `strict`; prefer explicit types at module boundaries and shared protocol shapes.
+- Avoid `any`; prefer `unknown` in `catch` blocks and narrow before use.
+- Imports: builtins/external first, then local relative imports; keep `import type` separate where practical.
+- Use relative imports; do not introduce new path aliases.
+- Formatting follows existing `oxfmt`: 2-space indent, semicolons, single quotes, trailing commas in multiline literals.
+- Naming: `PascalCase` for components/classes/types, `camelCase` for functions/vars, `UPPER_SNAKE_CASE` or `static readonly` for constants.
+- Keep changes minimal and local; extract helpers only when reuse or readability clearly improves.
+- Tests live beside source as `*.test.ts`; e2e specs live in `e2e/tests/*.spec.ts`.
+- Error handling: throw informative `Error`s, preserve actionable messages, and silently ignore only intentional best-effort cleanup/parsing fallbacks.
+- In Solid code, follow existing signal/memo/effect patterns and signal accessors like `value()`, not React-style state APIs.
+- Repo-local Cursor/Copilot rules: none found in `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`.

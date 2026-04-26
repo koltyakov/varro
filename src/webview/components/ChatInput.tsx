@@ -131,6 +131,11 @@ type MentionCompletionMeta = {
   showFileSearchHint: boolean;
 };
 
+type CompletionSelection =
+  | { type: 'set-slash'; value: string }
+  | { type: 'run-slash'; value: string }
+  | { type: 'apply-mention'; value: string; file?: DroppedFile };
+
 const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
   'permission',
   'attachments',
@@ -308,6 +313,7 @@ export function ChatInput() {
       canRedo:
         !!state.activeSessionId &&
         !!state.sessions.find((session) => session.id === state.activeSessionId)?.revert,
+      canInit: !state.activeSessionId || state.messages.length === 0,
       onConnectProvider: openProviderSetup,
       onOpenSessions: () => setShowSessionPicker(true),
       onOpenModels: () => setShowModelPicker(true),
@@ -472,7 +478,7 @@ export function ChatInput() {
 
       if (e.key === 'Tab') {
         e.preventDefault();
-        applyActiveCompletion();
+        void applyActiveCompletion();
         return;
       }
 
@@ -490,18 +496,8 @@ export function ChatInput() {
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       if (showingCompletions) {
-        const completion = activeCompletion();
-        const selected =
-          composerCompletions()[Math.min(completionIndex(), composerCompletions().length - 1)];
-
-        if (completion?.type === 'slash' && selected && 'name' in selected) {
-          e.preventDefault();
-          runSlashCommand(`/${selected.name}`);
-          return;
-        }
-
         e.preventDefault();
-        applyActiveCompletion();
+        void applyActiveCompletion(true);
         return;
       }
 
@@ -543,27 +539,26 @@ export function ChatInput() {
     });
   }
 
-  function applyActiveCompletion() {
+  async function applyActiveCompletion(confirm = false) {
     const completion = activeCompletion();
-    if (!completion) return;
-
     const items = composerCompletions();
     const item = items[Math.min(completionIndex(), items.length - 1)];
-    if (!item) return;
+    const selection = getCompletionSelection(completion, item, confirm);
+    if (!selection) return;
 
-    if (completion.type === 'slash') {
-      if (!('name' in item)) return;
-      setComposerValue(`/${item.name}`);
+    if (selection.type === 'run-slash') {
+      await runSlashCommand(selection.value);
       return;
     }
 
-    if (!('value' in item)) return;
-
-    if ('file' in item && item.type === 'file') {
-      addContextFile(item.file as DroppedFile);
+    if (selection.type === 'set-slash') {
+      setComposerValue(selection.value);
+      return;
     }
 
-    applyMentionValue(completion, item.value);
+    if (selection.file) addContextFile(selection.file);
+    if (completion?.type !== 'mention') return;
+    applyMentionValue(completion, selection.value);
   }
 
   function applyMentionValue(
@@ -1606,14 +1601,22 @@ export function ChatInput() {
               header={showFileSearchHint() ? 'Type to search workspace files' : undefined}
               onSelect={(item) => {
                 const completion = activeCompletion();
-                if (!completion) return;
-                if (completion.type === 'slash') {
-                  if (!('name' in item)) return;
-                  setComposerValue(`/${item.name}`);
+                const selection = getCompletionSelection(completion, item, true);
+                if (!selection) return;
+
+                if (selection.type === 'run-slash') {
+                  void runSlashCommand(selection.value);
                   return;
                 }
-                if (!('value' in item)) return;
-                applyMentionValue(completion, item.value);
+
+                if (selection.type === 'set-slash') {
+                  setComposerValue(selection.value);
+                  return;
+                }
+
+                if (selection.file) addContextFile(selection.file);
+                if (completion?.type !== 'mention') return;
+                applyMentionValue(completion, selection.value);
               }}
             />
           </Show>
@@ -2429,6 +2432,7 @@ export function getSlashCommands(props: {
   isBusy: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  canInit: boolean;
   onConnectProvider: () => void;
   onOpenSessions: () => void;
   onOpenModels: () => void;
@@ -2438,6 +2442,29 @@ export function getSlashCommands(props: {
   onExportSession: () => void;
   customCommands: Command[];
 }): SlashCommand[] {
+  const reservedBuiltInNames = new Set([
+    'new',
+    'agents',
+    'models',
+    'mcp',
+    'connect',
+    'attach',
+    'files',
+    'settings',
+    'export',
+    'thinking',
+    'reasoning',
+    'compact',
+    'summarize',
+    'init',
+    'undo',
+    'revert',
+    'redo',
+    'review',
+    'abort',
+    'stop',
+  ]);
+
   const commands: SlashCommand[] = [
     {
       name: 'new',
@@ -2484,14 +2511,6 @@ export function getSlashCommands(props: {
       action: () => props.onOpenSettings(),
     },
     {
-      name: 'init',
-      aliases: [],
-      description: 'Analyze the project and create AGENTS.md',
-      action: () => {
-        initSession();
-      },
-    },
-    {
       name: 'export',
       aliases: [],
       description: 'Export the current session',
@@ -2516,6 +2535,17 @@ export function getSlashCommands(props: {
       },
     },
   ];
+
+  if (props.canInit) {
+    commands.push({
+      name: 'init',
+      aliases: [],
+      description: 'Analyze the project and create AGENTS.md',
+      action: () => {
+        initSession();
+      },
+    });
+  }
 
   if (props.canUndo) {
     commands.push({
@@ -2559,9 +2589,8 @@ export function getSlashCommands(props: {
     });
   }
 
-  const builtInNames = new Set(commands.flatMap((command) => [command.name, ...command.aliases]));
   for (const command of props.customCommands) {
-    if (builtInNames.has(command.name)) continue;
+    if (reservedBuiltInNames.has(command.name)) continue;
     commands.push({
       name: command.name,
       aliases: [],
@@ -2616,6 +2645,30 @@ export function getActiveCompletion(text: string, cursor: number) {
     query: token.slice(1),
     start: tokenStart,
     end: cursor,
+  };
+}
+
+export function getCompletionSelection(
+  completion: ReturnType<typeof getActiveCompletion> | null,
+  item: CompletionItem | undefined,
+  confirm = false
+): CompletionSelection | null {
+  if (!completion || !item) return null;
+
+  if (completion.type === 'slash') {
+    if (!('name' in item)) return null;
+    return {
+      type: confirm ? 'run-slash' : 'set-slash',
+      value: `/${item.name}`,
+    };
+  }
+
+  if (!('value' in item)) return null;
+
+  return {
+    type: 'apply-mention',
+    value: item.value,
+    file: 'file' in item && item.type === 'file' ? item.file : undefined,
   };
 }
 

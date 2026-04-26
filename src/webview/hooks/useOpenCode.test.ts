@@ -1257,7 +1257,7 @@ describe('command helpers', () => {
     });
   });
 
-  it('initializes the current project through the session init API', async () => {
+  it('initializes a blank session by sending an AGENTS.md prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
@@ -1284,20 +1284,94 @@ describe('command helpers', () => {
       }),
     ]);
     stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
-    stateModule.setState('messages', [
-      { info: userMessage('user-1'), parts: [] },
-      { info: assistantMessage('assistant-1', 'user-1'), parts: [] },
-    ]);
+    stateModule.setState('messages', []);
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.initSession();
 
-    expect(clientMocks.sessionInit).toHaveBeenCalledWith('session-1', {
-      messageID: 'assistant-1',
-      providerID: 'openai',
-      modelID: 'gpt-4o',
-    });
+    expect(clientMocks.sessionInit).not.toHaveBeenCalled();
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledTimes(1);
+    const [calledSessionId, calledBody] = clientMocks.sessionSendAsync.mock.calls[0];
+    expect(calledSessionId).toBe('session-1');
+    expect(calledBody.parts[0].text).toContain('AGENTS.md');
+  });
+
+  it('creates a new session before initializing when none is active', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', null);
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          options: {},
+          headers: {},
+          limit: { context: 1, output: 1 },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          capabilities: {
+            temperature: true,
+            reasoning: true,
+            attachment: true,
+            toolcall: true,
+            input: { text: true, audio: false, image: true, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+          },
+          status: 'active',
+          api: { id: 'openai', url: '', npm: '' },
+        },
+      }),
+    ]);
+    stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('messages', []);
+    clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-2'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.initSession();
+
+    expect(clientMocks.sessionCreate).toHaveBeenCalled();
+    expect(clientMocks.sessionInit).not.toHaveBeenCalled();
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledTimes(1);
+    expect(clientMocks.sessionSendAsync.mock.calls[0][0]).toBe('session-2');
+  });
+
+  it('does not initialize sessions that already contain messages', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          options: {},
+          headers: {},
+          limit: { context: 1, output: 1 },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          capabilities: {
+            temperature: true,
+            reasoning: true,
+            attachment: true,
+            toolcall: true,
+            input: { text: true, audio: false, image: true, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+          },
+          status: 'active',
+          api: { id: 'openai', url: '', npm: '' },
+        },
+      }),
+    ]);
+    stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    stateModule.setState('messages', [{ info: userMessage('user-1'), parts: [] }]);
+
+    await hookModule.initSession();
+
+    expect(clientMocks.sessionInit).not.toHaveBeenCalled();
+    expect(stateModule.error()).toBe('Init is only available for blank sessions');
   });
 
   it('redos through the session unrevert API', async () => {

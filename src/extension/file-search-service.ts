@@ -96,7 +96,7 @@ export class FileSearchService {
     const promise = Promise.resolve(
       vscode.workspace.findFiles(
         '**/*',
-        '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/coverage/**}',
+        '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}',
         FileSearchService.MAX_CANDIDATES,
         token
       )

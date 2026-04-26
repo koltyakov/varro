@@ -1611,46 +1611,27 @@ export async function redoSession() {
   }
 }
 
+const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file containing:
+1. Build, lint, and test commands - especially the command to run a single test.
+2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
+
+The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
+If there's already an AGENTS.md, improve it. If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), include them.`;
+
 export async function initSession() {
-  if (!state.activeSessionId) {
-    setError('Start a session before running init');
+  let sessionId = state.activeSessionId;
+  if (!sessionId) {
+    const createdId = await createSession(undefined, getPermissionModeForSession(null));
+    if (!createdId) return;
+    sessionId = createdId;
+  }
+
+  if (sessionId === state.activeSessionId && state.messages.length > 0) {
+    setError('Init is only available for blank sessions');
     return;
   }
 
-  const lastAssistant = [...state.messages]
-    .toReversed()
-    .find((message) => message.info.role === 'assistant');
-  if (!lastAssistant) {
-    setError('Run the assistant at least once before running init');
-    return;
-  }
-
-  const effectiveModel = resolveSelectedModel(
-    state.selectedModel,
-    state.providers,
-    state.providerDefaults
-  );
-  if (!effectiveModel) {
-    setError('Select a model before running init');
-    return;
-  }
-
-  try {
-    startLoading();
-    await client.session.init(state.activeSessionId, {
-      messageID: lastAssistant.info.id,
-      providerID: effectiveModel.providerID,
-      modelID: effectiveModel.modelID,
-    });
-    await Promise.all([
-      syncSession(state.activeSessionId),
-      syncSessionMessages(state.activeSessionId),
-    ]);
-    stopLoading();
-  } catch (err) {
-    stopLoading();
-    setError(err instanceof Error ? err.message : 'Failed to initialize project');
-  }
+  await sendMessage(INIT_PROMPT);
 }
 
 export async function runSlashCommandByName(name: string, args: string) {

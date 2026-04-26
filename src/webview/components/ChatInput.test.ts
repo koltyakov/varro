@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getActiveCompletion,
+  getCompletionSelection,
   getMentionCompletionItems,
   parseDroppedText,
   shouldPadInlineInsertion,
@@ -211,12 +212,71 @@ describe('getActiveCompletion', () => {
   });
 });
 
+describe('getCompletionSelection', () => {
+  it('confirms slash selections by invoking the command path', () => {
+    expect(
+      getCompletionSelection(
+        { type: 'slash', query: 'in', start: 0, end: 3 },
+        {
+          key: 'slash:init',
+          type: 'slash',
+          name: 'init',
+          aliases: [],
+          description: 'Analyze the project and create AGENTS.md',
+          action: () => {},
+        },
+        true
+      )
+    ).toEqual({ type: 'run-slash', value: '/init' });
+  });
+
+  it('keeps tab-style slash selections as composer text updates', () => {
+    expect(
+      getCompletionSelection(
+        { type: 'slash', query: 'in', start: 0, end: 3 },
+        {
+          key: 'slash:init',
+          type: 'slash',
+          name: 'init',
+          aliases: [],
+          description: 'Analyze the project and create AGENTS.md',
+          action: () => {},
+        }
+      )
+    ).toEqual({ type: 'set-slash', value: '/init' });
+  });
+
+  it('returns mention selections with attached file metadata', () => {
+    const file = {
+      path: '/workspace/README.md',
+      relativePath: 'README.md',
+      type: 'file' as const,
+    };
+
+    expect(
+      getCompletionSelection(
+        { type: 'mention', query: 'read', start: 0, end: 5 },
+        {
+          key: 'file:/workspace/README.md',
+          type: 'file',
+          label: '@README.md',
+          detail: 'File',
+          value: '@README.md ',
+          file,
+        },
+        true
+      )
+    ).toEqual({ type: 'apply-mention', value: '@README.md ', file });
+  });
+});
+
 describe('getSlashCommands', () => {
-  it('includes init, export, redo, and custom commands while preserving built-ins', () => {
+  it('includes init for blank sessions alongside built-ins and custom commands', () => {
     const commands = getSlashCommands({
       isBusy: false,
       canUndo: true,
       canRedo: true,
+      canInit: true,
       onConnectProvider: () => {},
       onOpenSessions: () => {},
       onOpenModels: () => {},
@@ -243,6 +303,50 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.name === 'redo')).toBe(true);
     expect(commands.some((command) => command.name === 'test')).toBe(true);
     expect(commands.filter((command) => command.name === 'settings')).toHaveLength(1);
+  });
+
+  it('hides init outside blank sessions', () => {
+    const commands = getSlashCommands({
+      isBusy: false,
+      canUndo: false,
+      canRedo: false,
+      canInit: false,
+      onConnectProvider: () => {},
+      onOpenSessions: () => {},
+      onOpenModels: () => {},
+      onOpenMcps: () => {},
+      onOpenFiles: () => {},
+      onOpenSettings: () => {},
+      onExportSession: () => {},
+      customCommands: [],
+    });
+
+    expect(commands.some((command) => command.name === 'init')).toBe(false);
+  });
+
+  it('keeps reserved built-ins hidden when a custom command reuses the name', () => {
+    const commands = getSlashCommands({
+      isBusy: false,
+      canUndo: false,
+      canRedo: false,
+      canInit: false,
+      onConnectProvider: () => {},
+      onOpenSessions: () => {},
+      onOpenModels: () => {},
+      onOpenMcps: () => {},
+      onOpenFiles: () => {},
+      onOpenSettings: () => {},
+      onExportSession: () => {},
+      customCommands: [
+        {
+          name: 'init',
+          description: 'Should stay hidden',
+          template: 'ignored',
+        },
+      ],
+    });
+
+    expect(commands.some((command) => command.name === 'init')).toBe(false);
   });
 });
 

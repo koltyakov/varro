@@ -3,5 +3,3 @@ dist/
 *.vsix
 tmp/
 .DS_Store
-coverage/
-test-results/

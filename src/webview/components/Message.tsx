@@ -462,11 +462,21 @@ function UserMessageContent(props: { parts: Part[] }) {
     parsed().messageTexts.length > 0 ||
     parsed().fileParts.length > 0 ||
     parsed().attachments.length > 0;
-  const hasLeadingAttachmentSeparator = () =>
-    parsed().messageTexts.length > 0 || parsed().fileParts.length > 0;
+  const hasTrailingAttachmentContent = () =>
+    otherFileParts().length > 0 || parsed().messageTexts.length > 0 || imageParts().length > 0;
 
   return (
     <div class="rendered-markdown">
+      <Show when={parsed().attachments.length > 0}>
+        <div
+          class={`message-attachments${hasTrailingAttachmentContent() ? ' message-attachments-leading' : ' message-attachments-standalone'}`}
+        >
+          <For each={parsed().attachments}>
+            {(att) => <MessageAttachmentChip attachment={att} />}
+          </For>
+        </div>
+      </Show>
+      <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
       <Show when={parsed().messageTexts.length > 0}>
         <div class="user-message-text-scroll">
           <For each={parsed().messageTexts}>{(text) => <UserMessageTextContent text={text} />}</For>
@@ -475,22 +485,12 @@ function UserMessageContent(props: { parts: Part[] }) {
       <Show when={!hasContent()}>
         <p class="user-message-empty">(no content)</p>
       </Show>
-      <Show when={parsed().attachments.length > 0}>
-        <div
-          class={`message-attachments${hasLeadingAttachmentSeparator() ? '' : ' message-attachments-standalone'}`}
-        >
-          <For each={parsed().attachments}>
-            {(att) => <MessageAttachmentChip attachment={att} />}
-          </For>
-        </div>
-      </Show>
       <Show
         when={imageParts().length > 1}
         fallback={<For each={imageParts()}>{(part) => <MessagePart part={part} />}</For>}
       >
         <UserImageCarousel imageParts={imageParts()} />
       </Show>
-      <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
     </div>
   );
 }

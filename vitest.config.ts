@@ -14,6 +14,7 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
+      reportsDirectory: './tmp/coverage',
       thresholds: {
         statements: 55,
         branches: 45,
