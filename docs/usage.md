@@ -125,6 +125,81 @@ The composer can show two pieces of model metadata:
 
 If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers.
 
+### Recommended OpenCode Configuration
+
+Varro loads agents, providers, models, and MCP tools from your local OpenCode configuration. The most reliable setup is to treat model selection as an agent-level concern in OpenCode.
+
+Recommended approach:
+
+- Use one strong default primary agent for normal build work.
+- Create focused subagents for distinct task types such as exploration, planning, review, or documentation.
+- Pin each subagent to the provider/model that best fits that task.
+- Let the main agent decide which subagent to invoke for a task instead of manually switching models for every step.
+- Keep the visible model list in Varro small and practical so the picker stays useful.
+
+This allows a flow where the main agent orchestrates work across different models:
+
+- the primary agent handles the main conversation
+- it invokes a fast read-only subagent for search or codebase exploration
+- it invokes a stronger analysis model for review or planning
+- it invokes a cheaper documentation-oriented model for docs or summaries
+
+In OpenCode, this is configured by assigning `model` per agent or subagent. If a subagent does not define its own model, it inherits the model of the primary agent that invoked it.
+
+Example:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "openai/gpt-5",
+  "small_model": "openai/gpt-5-mini",
+  "agent": {
+    "build": {
+      "mode": "primary",
+      "model": "openai/gpt-5"
+    },
+    "plan": {
+      "mode": "primary",
+      "model": "openai/gpt-5-mini",
+      "temperature": 0.1
+    },
+    "explore": {
+      "mode": "subagent",
+      "description": "Fast read-only codebase exploration",
+      "model": "openai/gpt-5-mini"
+    },
+    "review": {
+      "mode": "subagent",
+      "description": "Read-only code review",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "temperature": 0.1
+    },
+    "general": {
+      "mode": "subagent",
+      "description": "General multi-step execution",
+      "model": "openai/gpt-5"
+    }
+  }
+}
+```
+
+A practical default setup is:
+
+- `build`: strongest coding model
+- `explore`: cheaper, fast model
+- `plan`: cheaper or reasoning-tuned model
+- `review`: strong analysis model with low temperature
+- `docs`: cheaper general model unless documentation quality is especially important
+
+Additional recommendations:
+
+- Set one strong global default `model`.
+- Set `small_model` for cheap background or lightweight tasks.
+- Explicitly pin important subagents to their own models.
+- Use project `opencode.json` or `.opencode/agents/` if you want team-shared routing.
+- Keep provider credentials and secrets in your user-level OpenCode config instead of project config.
+- Use `permission.task` if you want to control which subagents a primary agent is allowed to invoke.
+
 ## Permissions And Questions
 
 OpenCode approval flows stay inside the chat UI.
