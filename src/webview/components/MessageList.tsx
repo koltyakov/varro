@@ -196,6 +196,66 @@ const DEFAULT_ITEM_HEIGHT = 120;
 const OVERSCAN = 5;
 const VIRTUALIZE_THRESHOLD = 50;
 
+type VirtualMetrics = {
+  prefix: number[];
+  totalHeight: number;
+  itemCount: number;
+};
+
+function buildVirtualMetrics(args: {
+  itemIds: string[];
+  measuredHeights: Map<string, number>;
+  defaultItemHeight?: number;
+}): VirtualMetrics {
+  const itemCount = args.itemIds.length;
+  const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
+  const prefix = Array.from<number>({ length: itemCount + 1 });
+  prefix[0] = 0;
+
+  for (let index = 0; index < itemCount; index += 1) {
+    prefix[index + 1] =
+      prefix[index] + (args.measuredHeights.get(args.itemIds[index]) ?? defaultItemHeight);
+  }
+
+  return {
+    prefix,
+    totalHeight: prefix[itemCount] || 0,
+    itemCount,
+  };
+}
+
+function calculateVirtualRangeFromMetrics(args: {
+  metrics: VirtualMetrics;
+  scrollTop: number;
+  viewportHeight: number;
+  defaultItemHeight?: number;
+  overscan?: number;
+}) {
+  const itemCount = args.metrics.itemCount;
+  const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
+  const overscan = args.overscan ?? OVERSCAN;
+  if (itemCount === 0) return { start: 0, end: 0, topPad: 0, bottomPad: 0 };
+
+  const overscanPx = overscan * defaultItemHeight;
+  const startOffset = Math.max(0, args.scrollTop - overscanPx);
+  const endOffset = Math.max(startOffset, args.scrollTop + args.viewportHeight + overscanPx);
+  const start = Math.max(
+    0,
+    Math.min(itemCount - 1, lowerBound(args.metrics.prefix, startOffset + 1) - 1)
+  );
+  const end = Math.min(
+    itemCount,
+    Math.max(start + 1, lowerBound(args.metrics.prefix, endOffset + 1))
+  );
+
+  return {
+    start,
+    end,
+    topPad: args.metrics.prefix[start] || 0,
+    bottomPad: args.metrics.totalHeight - (args.metrics.prefix[end] || 0),
+  };
+}
+
 export function calculateVirtualRange(args: {
   itemIds: string[];
   measuredHeights: Map<string, number>;
@@ -204,30 +264,13 @@ export function calculateVirtualRange(args: {
   defaultItemHeight?: number;
   overscan?: number;
 }) {
-  const itemCount = args.itemIds.length;
-  const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
-  const overscan = args.overscan ?? OVERSCAN;
-  if (itemCount === 0) return { start: 0, end: 0, topPad: 0, bottomPad: 0 };
-
-  const heights = args.itemIds.map((id) => args.measuredHeights.get(id) ?? defaultItemHeight);
-  const prefix = Array.from<number>({ length: itemCount + 1 });
-  prefix[0] = 0;
-  for (let index = 0; index < itemCount; index += 1) {
-    prefix[index + 1] = prefix[index] + heights[index];
-  }
-
-  const overscanPx = overscan * defaultItemHeight;
-  const startOffset = Math.max(0, args.scrollTop - overscanPx);
-  const endOffset = Math.max(startOffset, args.scrollTop + args.viewportHeight + overscanPx);
-  const start = Math.max(0, Math.min(itemCount - 1, lowerBound(prefix, startOffset + 1) - 1));
-  const end = Math.min(itemCount, Math.max(start + 1, lowerBound(prefix, endOffset + 1)));
-
-  return {
-    start,
-    end,
-    topPad: prefix[start],
-    bottomPad: prefix[itemCount] - prefix[end],
-  };
+  return calculateVirtualRangeFromMetrics({
+    metrics: buildVirtualMetrics(args),
+    scrollTop: args.scrollTop,
+    viewportHeight: args.viewportHeight,
+    defaultItemHeight: args.defaultItemHeight,
+    overscan: args.overscan,
+  });
 }
 
 export function pruneMeasuredHeights(
@@ -510,16 +553,23 @@ export function MessageList() {
 
   const visibleRange = createMemo(() => {
     const msgs = messages();
-    measurementVersion();
     if (!shouldVirtualize() || msgs.length === 0) {
       return { start: 0, end: msgs.length, topPad: 0, bottomPad: 0 };
     }
-    return calculateVirtualRange({
-      itemIds: messageIds(),
-      measuredHeights,
+    return calculateVirtualRangeFromMetrics({
+      metrics: virtualMetrics(),
       scrollTop: scrollTop(),
       viewportHeight: viewportHeight(),
     });
+  });
+
+  const virtualMetrics = createMemo(() => {
+    if (!shouldVirtualize()) {
+      return { prefix: [0], totalHeight: 0, itemCount: 0 } satisfies VirtualMetrics;
+    }
+
+    measurementVersion();
+    return buildVirtualMetrics({ itemIds: messageIds(), measuredHeights });
   });
 
   function measureVisibleItems() {
@@ -1372,12 +1422,13 @@ function LoadingRow(props: { compacting: boolean }) {
   const STALE_INACTIVITY_THRESHOLD_MS = 60_000;
 
   const isStale = () => {
+    const currentNow = now();
     const startedAt = loadingStartedAt();
-    if (!startedAt) return false;
-    const total = Date.now() - startedAt;
+    if (startedAt === null) return false;
+    const total = currentNow - startedAt;
     if (total < STALE_TOTAL_THRESHOLD_MS) return false;
     const lastActivity = loadingLastActivityAt() ?? startedAt;
-    return Date.now() - lastActivity >= STALE_INACTIVITY_THRESHOLD_MS;
+    return currentNow - lastActivity >= STALE_INACTIVITY_THRESHOLD_MS;
   };
 
   const timer = setInterval(() => {
@@ -1390,7 +1441,7 @@ function LoadingRow(props: { compacting: boolean }) {
 
   const totalElapsedMs = () => {
     const startedAt = loadingStartedAt();
-    return startedAt ? Math.max(0, now() - startedAt) : 0;
+    return startedAt === null ? 0 : Math.max(0, now() - startedAt);
   };
   const elapsedSeconds = () => Math.floor(totalElapsedMs() / 1000);
 

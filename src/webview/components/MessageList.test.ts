@@ -874,6 +874,24 @@ describe('MessageList sticky prompt preview', () => {
 });
 
 describe('MessageList loading row', () => {
+  it('marks the loading row as stale after prolonged inactivity', async () => {
+    vi.setSystemTime(0);
+    setState('activeSessionId', 'session-1');
+    startLoading(0);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.textContent).not.toContain('Session may be stale');
+
+    vi.advanceTimersByTime(91_000);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Session may be stale');
+    expect(container?.querySelector('.loading-action')).toBeInstanceOf(HTMLButtonElement);
+  });
+
   it('shows the loading row while visible reasoning is streaming', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([

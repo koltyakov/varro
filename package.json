@@ -2,7 +2,7 @@
   "name": "varro",
   "displayName": "Varro",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "publisher": "koltyakov",
   "repository": "https://github.com/koltyakov/varro",
   "license": "MIT",
@@ -212,7 +212,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.webview.json && tsc --noEmit -p tsconfig.e2e.json",
     "package": "npm run build && npx vsce package --no-dependencies",
-    "vscode:install": "npm run package && code --install-extension varro-*.vsix"
+    "vscode:install": "rm -f varro-*.vsix && npm run package && code --install-extension varro-*.vsix"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

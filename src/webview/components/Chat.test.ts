@@ -430,6 +430,22 @@ describe('getSubagentSessionsForParent', () => {
     ]);
     expect(getSubagentSessionsForParent(sessions, null)).toEqual([]);
   });
+
+  it('includes nested descendants for the selected parent', () => {
+    const sessions = [
+      session('parent-1', 700),
+      session('child-1', 600, { parentID: 'parent-1' }),
+      session('grandchild-1', 550, { parentID: 'child-1' }),
+      session('child-2', 500, { parentID: 'parent-1' }),
+      session('parent-2', 400),
+    ];
+
+    expect(getSubagentSessionsForParent(sessions, 'parent-1').map((item) => item.id)).toEqual([
+      'child-1',
+      'grandchild-1',
+      'child-2',
+    ]);
+  });
 });
 
 describe('shouldShowSessionHeaderBadge', () => {
@@ -1505,6 +1521,22 @@ describe('getHeaderFailedCount', () => {
 
     expect(indicators.permissionIds.has('session-1')).toBe(true);
     expect(indicators.attentionIds.has('session-1')).toBe(true);
+  });
+
+  it('counts nested descendants in subagent counts for both root and active descendants', () => {
+    const sessions = [
+      session('session-1', 500),
+      session('child-1', 400, { parentID: 'session-1' }),
+      session('grandchild-1', 300, { parentID: 'child-1' }),
+    ];
+
+    setState('sessions', sessions);
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(indicators.subagentCounts.get('session-1')).toBe(2);
+    expect(indicators.subagentCounts.get('child-1')).toBe(2);
+    expect(indicators.subagentCounts.get('grandchild-1')).toBe(2);
   });
 });
 

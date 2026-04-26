@@ -11,6 +11,7 @@ import {
   getSelectedAgentForSession,
   isSkippedPlanSession,
   getSessionTreeRootId,
+  getSessionTreeIds,
 } from '../lib/state';
 import {
   Show,
@@ -650,7 +651,9 @@ export function getSubagentSessionsForParent(
   parentSessionId: string | null
 ) {
   if (!parentSessionId) return [];
-  return sessions.filter((session) => session.parentID === parentSessionId);
+  const descendantIds = new Set(getSessionTreeIds(parentSessionId, sessions));
+  descendantIds.delete(parentSessionId);
+  return sessions.filter((session) => descendantIds.has(session.id));
 }
 
 export function shouldShowSessionHeaderBadge(
@@ -1734,6 +1737,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const attentionIds = new Set<string>();
   const planReadyIds = new Set<string>();
   const newlyCompletedIds = new Set<string>();
+  const descendantSubagentCountByRoot = new Map<string, number>();
   const isAwaitingInput = (sessionId: string) =>
     pendingAttentionIds.has(rootSessionId(sessionId)) ||
     permissionIds.has(rootSessionId(sessionId)) ||
@@ -1749,7 +1753,11 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
 
   for (const session of sessions) {
     if (session.parentID) {
-      subagentCounts.set(session.parentID, (subagentCounts.get(session.parentID) || 0) + 1);
+      const rootId = rootSessionId(session.id);
+      descendantSubagentCountByRoot.set(
+        rootId,
+        (descendantSubagentCountByRoot.get(rootId) || 0) + 1
+      );
     }
 
     const sessionId = session.id;
@@ -1782,6 +1790,14 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
       continue;
     }
     newlyCompletedIds.add(sessionId);
+  }
+
+  for (const session of sessions) {
+    const rootId = rootSessionId(session.id);
+    const count = descendantSubagentCountByRoot.get(rootId) || 0;
+    if (count > 0) {
+      subagentCounts.set(session.id, count);
+    }
   }
 
   return {
