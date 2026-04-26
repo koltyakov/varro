@@ -108,11 +108,9 @@ type HarnessWindow = Window & {
   };
 };
 
-type TerminalCommandLog = { command: string; title?: string };
-
 const WORKSPACE_PATH = '/workspace/varro';
 const TMP_WORKSPACE_PATH = '/workspace/varro/tmp/e2e-workspace';
-const BASE_TIME = Date.UTC(2026, 3, 25, 12, 0, 0);
+const BASE_TIME = Date.now();
 const THEME = 'dark';
 const DEFAULT_PROVIDER_ID = 'copilot';
 const DEFAULT_MODEL_ID = 'gpt-5-mini';

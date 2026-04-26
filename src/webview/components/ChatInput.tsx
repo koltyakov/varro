@@ -2196,9 +2196,7 @@ type SlashCommand = {
   action: (args: string) => void | Promise<void>;
 };
 
-type CompletionItem =
-  | (SlashCommand & { key: string; type: 'slash' })
-  | { key: string; type: 'agent' | 'file'; label: string; detail: string; value: string };
+type CompletionItem = (SlashCommand & { key: string; type: 'slash' }) | MentionCompletionItem;
 
 function CompletionMenu(props: {
   items: CompletionItem[];
@@ -2665,10 +2663,12 @@ export function getCompletionSelection(
 
   if (!('value' in item)) return null;
 
+  const file = item.type === 'file' ? item.file : undefined;
+
   return {
     type: 'apply-mention',
     value: item.value,
-    file: 'file' in item && item.type === 'file' ? item.file : undefined,
+    file,
   };
 }
 
