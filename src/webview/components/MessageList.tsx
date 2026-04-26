@@ -1135,9 +1135,7 @@ function StickyUserMessagePreviewCard(props: { preview: StickyUserMessagePreview
         <div class="latest-user-message-sticky-top" />
         <div class="latest-user-message-sticky-shell">
           <div class="latest-user-message-sticky">
-            <div class="latest-user-message-sticky-text" title={props.preview.text}>
-              {props.preview.text}
-            </div>
+            <div class="latest-user-message-sticky-text">{props.preview.text}</div>
           </div>
         </div>
         <div class="latest-user-message-sticky-bottom-solid" />

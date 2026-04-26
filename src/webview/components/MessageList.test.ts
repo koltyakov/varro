@@ -480,6 +480,50 @@ describe('shouldShowStickyUserMessagePreview', () => {
     ).toBe(false);
   });
 
+  it('does not attach a native title tooltip to the sticky preview text', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    const rectMap = new Map<Element, DOMRect>();
+    const defaultRect = new DOMRect(0, -600, 500, 40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return rectMap.get(this) || defaultRect;
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    const assistant2Row = container?.querySelector(
+      '[data-msg-id="assistant-2"]'
+    ) as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    expect(user2Row).toBeInstanceOf(HTMLDivElement);
+    expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
+    rectMap.set(list!, new DOMRect(0, 0, 500, 500));
+    rectMap.set(user2Row!, new DOMRect(0, -90, 500, 52));
+    rectMap.set(assistant2Row!, new DOMRect(0, 40, 500, 320));
+
+    list?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    const stickyText = container?.querySelector(
+      '.latest-user-message-sticky-text'
+    ) as HTMLDivElement | null;
+    expect(stickyText).toBeInstanceOf(HTMLDivElement);
+    expect(stickyText?.textContent).toContain('Prompt 2');
+    expect(stickyText?.getAttribute('title')).toBeNull();
+  });
+
   it('does not show a new sticky preview until the prompt is clearly above the viewport', () => {
     expect(
       shouldShowStickyUserMessagePreview({
