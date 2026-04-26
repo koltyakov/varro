@@ -21,7 +21,17 @@ If OpenCode does not have any providers configured yet, log in:
 opencode auth login
 ```
 
+From inside Varro, `/connect` opens a VS Code terminal and runs `opencode auth login` for you.
+
 Varro connects to `http://127.0.0.1:4096` by default. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it.
+
+If you disable `varro.server.autoStart`, start OpenCode manually:
+
+```sh
+opencode serve --port 4096
+```
+
+If the CLI is installed somewhere that is not on `PATH`, set `varro.server.command` to the executable path.
 
 ## What Varro Sends As Context
 
@@ -66,20 +76,25 @@ Use any of these flows to add more context.
 
 Current built-in slash commands include:
 
-- `/new`
-- `/sessions`
-- `/models`
-- `/mcps`
-- `/connect`
-- `/attach`
+- `/new` or `/clear` starts a new chat session
+- `/sessions` or `/resume` opens the session list
+- `/models` opens the model picker
+- `/mcps` or `/mcp` opens the MCP picker for the current session
+- `/connect` opens provider login in a VS Code terminal
+- `/attach` or `/files` picks files or folders to attach
 - `/settings` opens VS Code Settings filtered to Varro
-- `/thinking`
-- `/compact`
-- `/review`
-- `/undo`
-- `/abort`
+- `/export` opens a JSON export of the current session in the editor
+- `/thinking` or `/reasoning` toggles thinking block visibility
+- `/compact` or `/summarize` compacts conversation context
+- `/init` analyzes the workspace and creates or improves `AGENTS.md`
+- `/undo` or `/revert` undoes the last assistant response
+- `/redo` replays the last undone response
+- `/review` asks the agent to review current workspace changes
+- `/abort` or `/stop` stops the current run
 
-Some commands only appear when they apply. For example, `/undo` only appears when there is an assistant response to revert, and `/abort` only appears while a session is active.
+Custom OpenCode commands loaded from your local config also appear in the same completion list.
+
+Some commands only appear when they apply. For example, `/init` only appears in blank sessions, `/undo` only appears when there is an assistant response to revert, `/redo` only appears after an undo, and `/abort` only appears while a session is active.
 
 ## Sessions
 
@@ -92,10 +107,11 @@ Sessions are filtered to the current workspace directory, then sorted by most re
 - Open sub-agent sessions from the parent session row when they exist.
 - Archive sessions from the session list.
 - Stop the active run with `Varro: Abort Session`.
+- Use `/export` to open the current session as JSON in the editor.
 
 On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.desktopSessionPaneSide` to choose whether that pane appears on the left or right.
 
-If the sidebar is hidden, Varro can show VS Code notifications when a background session finishes or when the agent is blocked on a permission or question. It also exposes a status bar item that summarizes waiting or completed sessions.
+If the sidebar is hidden, Varro can show VS Code notifications when a background session finishes or when the agent is blocked on a permission or question. It also exposes a status bar item that summarizes waiting or completed sessions. Clicking that item opens pending-attention sessions first, otherwise it focuses Varro.
 
 If VS Code reloads while a session was running, Varro reconnects to those sessions and can continue interrupted work automatically when the session is still resumable.
 
@@ -207,6 +223,7 @@ OpenCode approval flows stay inside the chat UI.
 - Permission requests appear inline and can be answered with `Reject`, `Once`, or `Always`.
 - Follow-up questions appear inline with selectable options and optional custom input.
 - Each session can run in `Default` or `Full access` permission mode.
+- Use the permission control in the composer toolbar to switch the active session between those modes.
 
 `Default` allows read-style tools by default and asks for tool calls that can modify state. `Full access` updates the session permission rules and auto-approves pending permission prompts for that session.
 
@@ -262,8 +279,9 @@ There are also hidden debug settings used in development builds:
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - OpenCode already running on another port: update `varro.server.port` and optionally disable `varro.server.autoStart`.
-- No models available: run `opencode auth login` and reopen Varro.
+- No models available: run `/connect` or `opencode auth login`, then reopen Varro.
 - Provider badge missing: quota metadata is only shown when OpenCode or the provider exposes usable limit information.
 - Images do not send: select a model with vision support.
 - Live updates are reconnecting: REST requests still work, but session status can lag until the event stream recovers.
+- Session export fails: ensure the OpenCode CLI is installed and `varro.server.command` points to it if the executable is outside `PATH`.
 - Server needs a clean reconnect: run `Varro: Restart Server`.

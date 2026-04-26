@@ -18,18 +18,39 @@ npm install -g opencode-ai
 npm install
 ```
 
-## Validate The Project
+If you plan to run e2e tests locally for the first time, install the Playwright browser bundle once:
 
 ```sh
+npx playwright install
+```
+
+## Validate The Project
+
+For a quick contributor sanity check:
+
+```sh
+npm run lint:check
 npm run typecheck
 npm run test
 ```
 
-After making changes, the recommended local verification and install flow is:
+While iterating, run the narrowest relevant command for the area you changed. Useful targeted commands include:
+
+- `npm run test -- src/webview/components/ChatInput.test.ts`
+- `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`
+- `npm run test:e2e -- e2e/tests/layout.spec.ts`
+
+Before packaging or publishing, a fuller verification sweep is:
 
 ```sh
-npm run fmt && npm run lint && npm run test && npm run test:e2e && npm run vscode:install
+npm run fmt
+npm run lint
+npm run typecheck
+npm run test
+npm run test:e2e
 ```
+
+Use `npm run vscode:install` when you specifically want to package and install the VSIX into your local VS Code.
 
 ## Build
 
@@ -88,6 +109,8 @@ npm run dev
 ```
 
 This starts the extension watcher, the webview bundle watcher, and serves `preview.html` in Vite so you can inspect style changes immediately in the browser.
+
+This script relies on shell backgrounding. If your shell does not keep all three processes running, start `npm run watch:extension`, `npm run watch:webview`, and `npm run preview:webview` in separate terminals.
 
 Reload the Extension Development Host window after extension changes.
 

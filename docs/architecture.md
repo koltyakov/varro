@@ -75,6 +75,7 @@ This is the main extension-side coordinator.
 - Receives UI messages from the webview
 - Proxies HTTP requests to `OpenCodeServer`
 - Tracks dropped files, file search cache, and provider limit cache
+- Exports sessions by invoking the OpenCode CLI and opening the JSON in VS Code
 - Sends notifications and updates a status bar item when background sessions finish or need attention
 
 It also restores pending permission or question prompts across reloads and serializes that state into the initial webview payload.
@@ -203,7 +204,8 @@ The webview sends:
 
 - `api/request` for OpenCode REST calls
 - `files/search`, `files/pick`, `files/drop`, `files/drop-content`, and `files/remove` for context management
-- `vscode/open` for editor integration
+- `vscode/open` and `vscode/open-settings` for editor integration
+- `session/export` to open a JSON export of the current session
 - `terminal/run` to launch setup commands such as `opencode auth login`
 - `config/update` and `webview/focus` for UI preference and focus synchronization
 

@@ -18,7 +18,7 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
 
 - [VS Code](https://code.visualstudio.com/) 1.91 or newer
 - [Node.js](https://nodejs.org/) 20 or newer
-- The OpenCode CLI installed
+- The OpenCode CLI installed (if the CLI is not on your `PATH`, set `varro.server.command` to the executable path in VS Code Settings)
 
 ## Quick Start
 
@@ -35,8 +35,10 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
    opencode auth login
    ```
 
-4. Open `Varro` from the Activity Bar. For the best layout, move it to the `Secondary Side Bar` so you can keep the editor visible while chatting.
-5. Varro connects to `http://127.0.0.1:4096` when the chat first needs OpenCode and can auto-start a local OpenCode server for you.
+   You can also open Varro and run `/connect` to launch the same login flow in a VS Code terminal.
+
+4. Open a folder or workspace in VS Code, then open `Varro` from the Activity Bar. For the best layout, move it to the `Secondary Side Bar` so you can keep the editor visible while chatting.
+5. Varro connects to `http://127.0.0.1:4096` the first time chat needs OpenCode. If `varro.server.autoStart` is enabled, Varro can auto-start a local OpenCode server for you. If you prefer manual server management, run `opencode serve --port 4096` yourself and disable auto-start.
 6. Start prompting. Varro automatically includes the active file and current selection by default.
 7. Add more context when needed:
    - Right-click a file or folder in Explorer and choose `Varro: Add to Context`
@@ -44,7 +46,7 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
    - Drag files or folders into the chat
    - Paste an image into the input box
    - Type `@` to search workspace files or mention an agent
-8. Use `/models` or `/mcps` from the composer to adjust the active session, or `/settings` to open VS Code Settings filtered to Varro.
+8. Use slash commands such as `/models`, `/mcps`, `/attach`, `/review`, `/sessions`, `/export`, and `/settings`. In a blank session, `/init` asks OpenCode to create or improve `AGENTS.md` for the current project.
 9. Approve or reject tool permissions and answer follow-up questions directly in the chat panel. If the sidebar is hidden, Varro can surface waiting or completed work in notifications and the status bar.
 
 ## Documentation

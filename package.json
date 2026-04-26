@@ -2,7 +2,7 @@
   "name": "varro",
   "displayName": "Varro",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "publisher": "koltyakov",
   "repository": "https://github.com/koltyakov/varro",
   "license": "MIT",
@@ -145,12 +145,12 @@
         "varro.server.command": {
           "type": "string",
           "default": "",
-          "description": "Optional path to the OpenCode CLI executable used to start the server"
+          "description": "Optional path to the OpenCode CLI executable Varro uses for server startup and other CLI-backed actions"
         },
         "varro.server.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically start the OpenCode server when the extension activates"
+          "description": "Automatically start the OpenCode server when Varro first needs it"
         },
         "varro.chat.expandThinkingByDefault": {
           "type": "boolean",
