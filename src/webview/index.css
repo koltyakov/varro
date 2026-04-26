@@ -35,7 +35,7 @@
   --color-vscode-request-bubble-hover: var(--vscode-chat-requestBubbleHoverBackground, #2f3233);
   --color-vscode-result-editor-bg: var(
     --vscode-interactive-result-editor-background-color,
-    #1e1e1e
+    var(--color-vscode-widget-bg)
   );
   --color-vscode-preformat-fg: var(--vscode-textPreformat-foreground, #d67a00);
   --color-vscode-preformat-bg: var(--vscode-textPreformat-background, rgba(255, 255, 255, 0.1));
@@ -5845,6 +5845,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   transition:
     border-color 0.1s,
     background-color 0.1s;
+}
+
+body.vscode-light .question-custom-input,
+body.vscode-high-contrast-light .question-custom-input {
+  border-color: color-mix(in srgb, var(--color-vscode-border) 26%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-fg) 1.5%, var(--color-vscode-input-bg));
 }
 
 .question-option-custom:hover .question-custom-input,
