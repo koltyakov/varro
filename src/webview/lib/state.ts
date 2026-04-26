@@ -1444,9 +1444,11 @@ export function syncFailedSessionsFromMessages(
   messages: Array<{ info: Message; parts: Part[] }> = state.messages
 ) {
   const failedSessionIds = new Set<string>();
+  const scopedSessionIds = new Set<string>();
 
   const latestBySession = new Map<string, Message>();
   for (const entry of messages) {
+    scopedSessionIds.add(entry.info.sessionID);
     latestBySession.set(entry.info.sessionID, entry.info);
   }
 
@@ -1458,7 +1460,10 @@ export function syncFailedSessionsFromMessages(
     failedSessionIds.add(sessionId);
   }
 
-  setState('failedSessionIds', [...failedSessionIds]);
+  setState('failedSessionIds', [
+    ...state.failedSessionIds.filter((sessionId) => !scopedSessionIds.has(sessionId)),
+    ...failedSessionIds,
+  ]);
 }
 
 export function replaceMessages(incoming: Array<{ info: Message; parts: Part[] }>) {

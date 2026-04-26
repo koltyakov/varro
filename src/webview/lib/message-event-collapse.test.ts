@@ -42,6 +42,18 @@ describe('message event collapse helpers', () => {
     expect(getFileEditVisualSignature(part)).toBe('edited:src/app.ts:3,1');
   });
 
+  it('accepts alternate diff stat metadata names', () => {
+    const part = toolPart(
+      'p1',
+      completedState(
+        'Edited src/app.ts',
+        { path: 'src/app.ts' },
+        { linesAdded: 2, linesRemoved: 4 }
+      )
+    );
+    expect(getFileEditVisualSignature(part)).toBe('edited:src/app.ts:2,4');
+  });
+
   it('returns null for non-file-change parts', () => {
     const part: Part = {
       id: 'text-1',
@@ -61,6 +73,16 @@ describe('message event collapse helpers', () => {
       'edited:src/app.ts'
     );
     expect(result).toEqual([kept]);
+  });
+
+  it('keeps leading file events when diff stats change their signature', () => {
+    const previous = 'edited:src/app.ts:3,1';
+    const changed = toolPart(
+      'p1',
+      completedState('Edited src/app.ts', { path: 'src/app.ts' }, { additions: 4, deletions: 1 })
+    );
+
+    expect(collapseLeadingDuplicateFileEvents([changed], previous)).toEqual([changed]);
   });
 
   it('treats matching file edits as duplicates across tool statuses', () => {
@@ -98,5 +120,18 @@ describe('message event collapse helpers', () => {
 
     expect(getTrailingFileEventSignature([edit, stepFinish])).toBe('edited:src/app.ts');
     expect(getTrailingFileEventSignature([stepFinish])).toBeNull();
+  });
+
+  it('stops scanning trailing signatures at non-step-finish parts', () => {
+    const edit = toolPart('p1', completedState('Edited src/app.ts', { path: 'src/app.ts' }));
+    const trailingText: Part = {
+      id: 'text-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'text',
+      text: 'follow-up',
+    };
+
+    expect(getTrailingFileEventSignature([edit, trailingText])).toBeNull();
   });
 });

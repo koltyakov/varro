@@ -22,6 +22,7 @@ type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
   getMessages(): Array<{ info: Message; parts: Part[] }>;
   setTodoStateAuthority(value: 'messages' | 'event'): void;
+  handoffTodosToMessages(messages?: Array<{ info: Message; parts: Part[] }>): boolean;
   setTodos(todos: Todo[]): void;
   upsertSession(info: Session): void;
   setSessionCompacting(sessionId: string, compacting: boolean): void;
@@ -168,8 +169,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         deps.markLoadingActivity();
         deps.upsertMessageInfo(message);
         if (isAssistantMessage(message) && (!!message.error || !!message.time.completed)) {
-          deps.setTodoStateAuthority('messages');
-          deps.syncTodosFromMessages();
+          deps.handoffTodosToMessages();
         }
       }
       if (isAssistantMessage(message)) {
@@ -323,8 +323,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if ((p?.sessionID as string) === deps.getActiveSessionId()) {
         if (!hasActiveAssistantReply(deps.getMessages())) return;
+        const todos = deps.extractTodos(p?.todos);
+        if (!todos) return;
         deps.setTodoStateAuthority('event');
-        deps.setTodos(deps.extractTodos(p?.todos) || []);
+        deps.setTodos(todos);
       }
     })
   );

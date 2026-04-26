@@ -101,7 +101,15 @@ function getBuildAgentName() {
   return state.agents.find((agent) => agent.name === 'build')?.name || null;
 }
 
-import type { Session, SessionStatus, Message, Part, Permission, Todo } from '../types';
+import type {
+  AssistantMessage,
+  Session,
+  SessionStatus,
+  Message,
+  Part,
+  Permission,
+  Todo,
+} from '../types';
 import { getWorkspaceRelativePath, isSamePath } from '../lib/path-display';
 import {
   formatSelectionReference,
@@ -411,17 +419,66 @@ function deriveTodosFromMessages(messages: Array<{ info: Message; parts: Part[] 
     }
   }
 
-  const latestAssistantMessage = messages
-    .slice(lastUserMessageIndex + 1)
-    .findLast((message) => message.info.role === 'assistant');
-  if (!latestAssistantMessage) return [];
+  for (
+    let messageIndex = messages.length - 1;
+    messageIndex > lastUserMessageIndex;
+    messageIndex -= 1
+  ) {
+    const message = messages[messageIndex];
+    if (message.info.role !== 'assistant') continue;
 
-  for (let partIndex = latestAssistantMessage.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-    const todos = extractTodosFromPart(latestAssistantMessage.parts[partIndex]);
-    if (todos) return todos;
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const todos = extractTodosFromPart(message.parts[partIndex]);
+      if (todos) return todos;
+    }
   }
 
   return [];
+}
+
+function getLatestAssistantMessageInTurn(
+  messages: Array<{ info: Message; parts: Part[] }>
+): { info: AssistantMessage; parts: Part[] } | undefined {
+  let lastUserMessageIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].info.role === 'user') {
+      lastUserMessageIndex = index;
+      break;
+    }
+  }
+
+  return messages
+    .slice(lastUserMessageIndex + 1)
+    .findLast(
+      (message): message is { info: AssistantMessage; parts: Part[] } =>
+        message.info.role === 'assistant'
+    );
+}
+
+function getLatestTodoMessageId(messages: Array<{ info: Message; parts: Part[] }>) {
+  let lastUserMessageIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].info.role === 'user') {
+      lastUserMessageIndex = index;
+      break;
+    }
+  }
+
+  for (
+    let messageIndex = messages.length - 1;
+    messageIndex > lastUserMessageIndex;
+    messageIndex -= 1
+  ) {
+    const message = messages[messageIndex];
+    if (message.info.role !== 'assistant') continue;
+
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const todos = extractTodosFromPart(message.parts[partIndex]);
+      if (todos) return message.info.id;
+    }
+  }
+
+  return null;
 }
 
 function resetTodoSync() {
@@ -435,6 +492,37 @@ function applyTheme(nextTheme: WebviewThemeKind) {
 function syncTodosFromMessages(messages = state.messages) {
   if (todoStateAuthority === 'event') return;
   setState('todos', deriveTodosFromMessages(messages));
+}
+
+function handoffTodosToMessages(messages = state.messages) {
+  const nextTodos = deriveTodosFromMessages(messages);
+  const latestAssistant = getLatestAssistantMessageInTurn(messages);
+  const currentTodoMessageId = getLatestTodoMessageId(state.messages);
+
+  // Keep the last event-driven todo snapshot visible until messages catch up.
+  if (todoStateAuthority === 'event' && state.todos.length > 0 && nextTodos.length === 0) {
+    return false;
+  }
+
+  // Refreshed message snapshots can briefly lose todo-bearing parts for the same reply,
+  // or introduce a newer unfinished assistant shell before its todo state arrives.
+  if (state.todos.length > 0 && nextTodos.length === 0) {
+    if (!latestAssistant) {
+      return false;
+    }
+
+    if (!latestAssistant.info.time.completed && !latestAssistant.info.error) {
+      return false;
+    }
+
+    if (currentTodoMessageId && latestAssistant.info.id === currentTodoMessageId) {
+      return false;
+    }
+  }
+
+  todoStateAuthority = 'messages';
+  setState('todos', nextTodos);
+  return true;
 }
 
 function deriveSelectedModelFromMessages(messages: Array<{ info: Message; parts: Part[] }>) {
@@ -501,6 +589,7 @@ export function useOpenCode() {
         setTodoStateAuthority: (value) => {
           todoStateAuthority = value;
         },
+        handoffTodosToMessages,
         setTodos: (todos) => setState('todos', todos),
         upsertSession,
         setSessionCompacting,
@@ -1115,6 +1204,13 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
   );
   if (persistedModel) {
     setSelectedModel(persistedModel, { sessionId: id, persistGlobal: false });
+  } else {
+    const defaultModel = resolveSelectedModel(
+      getPersistedSelectedModel(),
+      state.providers,
+      state.providerDefaults
+    );
+    setSelectedModel(defaultModel, { sessionId: id, persistGlobal: false });
   }
   if (!getSelectedMcpsForSession(id)) {
     setSelectedMcpsForSession(
@@ -1190,8 +1286,7 @@ async function syncSessionMessages(sessionId: string) {
   if (sessionId === state.activeSessionId) {
     setMessagesIncremental(msgs);
     syncFailedSessionsFromMessages(msgs);
-    resetTodoSync();
-    syncTodosFromMessages(msgs);
+    handoffTodosToMessages(msgs);
   }
 }
 

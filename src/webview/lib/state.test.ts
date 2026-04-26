@@ -423,6 +423,19 @@ describe('failed session tracking', () => {
     expect(state.failedSessionIds).toEqual([]);
   });
 
+  it('preserves failed flags for sessions outside the synced message set', () => {
+    setSessionFailed('session-2', true);
+
+    syncFailedSessionsFromMessages([
+      {
+        info: assistantMessage('message-1', 'session-1'),
+        parts: [],
+      },
+    ]);
+
+    expect(state.failedSessionIds).toEqual(['session-2']);
+  });
+
   it('allows clearing an individual failed session flag', () => {
     setSessionFailed('session-1', true);
     setSessionFailed('session-2', true);

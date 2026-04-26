@@ -25,4 +25,24 @@ describe('server launch helpers', () => {
       windowsVerbatimArguments: true,
     });
   });
+
+  it('falls back to cmd.exe and quotes Windows shim arguments safely', () => {
+    expect(
+      resolveServerLaunch(
+        'C:\\Program Files\\OpenCode\\opencode.BAT',
+        ['serve', '--label', 'hello world', 'say"hi', 'a&b'],
+        {},
+        'win32'
+      )
+    ).toEqual({
+      command: 'cmd.exe',
+      args: [
+        '/d',
+        '/s',
+        '/c',
+        '"C:\\Program Files\\OpenCode\\opencode.BAT" serve --label "hello world" "say""hi" "a&b"',
+      ],
+      windowsVerbatimArguments: true,
+    });
+  });
 });
