@@ -90,6 +90,7 @@ const MAX_COPY_TEXT_LENGTH = 20_000;
 const codeBlockHtmlCache = new Map<string, string>();
 const highlightedCodeCache = new Map<string, string>();
 const renderedMarkdownCache = new Map<string, string>();
+const renderedMarkdownCacheKeyCache = new Map<string, string>();
 const CODE_LANGUAGE_ALIASES = new Map<string, string>([
   ['console', 'bash'],
   ['plain', 'plaintext'],
@@ -133,6 +134,14 @@ function setRenderedMarkdownCacheValue(key: string, value: string) {
   }
 }
 
+function setRenderedMarkdownCacheKeyValue(key: string, value: string) {
+  renderedMarkdownCacheKeyCache.set(key, value);
+  if (renderedMarkdownCacheKeyCache.size > RENDERED_MARKDOWN_CACHE_LIMIT) {
+    const oldest = renderedMarkdownCacheKeyCache.keys().next().value;
+    if (oldest) renderedMarkdownCacheKeyCache.delete(oldest);
+  }
+}
+
 function hashContent(value: string) {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++) {
@@ -143,7 +152,18 @@ function hashContent(value: string) {
 }
 
 function getRenderedMarkdownCacheKey(content: string) {
-  return `${state.editorContext.workspacePath || ''}\u0000${hashContent(content)}`;
+  const workspacePath = state.editorContext.workspacePath || '';
+  const memoKey = `${workspacePath}\u0000${content}`;
+  const cached = renderedMarkdownCacheKeyCache.get(memoKey);
+  if (cached) {
+    renderedMarkdownCacheKeyCache.delete(memoKey);
+    renderedMarkdownCacheKeyCache.set(memoKey, cached);
+    return cached;
+  }
+
+  const cacheKey = `${workspacePath}\u0000${hashContent(content)}`;
+  setRenderedMarkdownCacheKeyValue(memoKey, cacheKey);
+  return cacheKey;
 }
 
 function resolveCodeLanguage(lang?: string) {
@@ -226,12 +246,7 @@ function decodeCopyPayload(value: string) {
 function sanitizeCopyText(value: string) {
   return value
     .replace(/\r\n?/g, '\n')
-    .split('')
-    .filter((char) => {
-      const code = char.charCodeAt(0);
-      return code === 0x09 || code === 0x0a || code >= 0x20;
-    })
-    .join('')
+    .replace(/[^\t\n -\uFFFF]/g, '')
     .slice(0, MAX_COPY_TEXT_LENGTH);
 }
 
@@ -334,6 +349,8 @@ marked.setOptions({
 
 const FILE_PATH_RE =
   /(?:^|[\s(])(\.?\/?(?:[\w.-]+\/)*[\w.-]+\.[\w]+(?::\d+(?:-\d+)?)?)(?=[\s),.]|$)/g;
+const FILE_PATH_CANDIDATE_RE = /\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/;
+const PRESERVED_HTML_PLACEHOLDER_RE = /@@VARRO_PRESERVE_(\d+)@@/g;
 const ANCHOR_RE = /(<a[\s\S]*?<\/a>)/gi;
 const SVG_RE = /(<svg[\s\S]*?<\/svg>)/gi;
 const BUTTON_RE = /(<button[\s\S]*?<\/button>)/gi;
@@ -381,6 +398,8 @@ function sanitizeHtml(html: string): string {
     FORBID_ATTR: ['style'],
   });
 
+  if (!sanitized.includes('<a')) return sanitized;
+
   const template = document.createElement('template');
   template.innerHTML = sanitized;
   for (const anchor of Array.from(template.content.querySelectorAll<HTMLAnchorElement>('a'))) {
@@ -415,13 +434,15 @@ function parseMarkdown(content: string, cacheByContent: boolean): string {
 }
 
 function linkifyPaths(html: string): string {
+  if (!FILE_PATH_CANDIDATE_RE.test(html)) return html;
+
   const preserved: string[] = [];
   let idx = 0;
-  const placeholder = (_m: string) => `\x00${idx++}\x00`;
+  const placeholder = () => `@@VARRO_PRESERVE_${idx++}@@`;
   const protect = (re: RegExp) => {
     html = html.replace(re, (m) => {
       preserved.push(m);
-      return placeholder(m);
+      return placeholder();
     });
   };
 
@@ -440,10 +461,10 @@ function linkifyPaths(html: string): string {
     );
   });
 
-  for (let i = preserved.length - 1; i >= 0; i--) {
-    html = html.replace(`\x00${i}\x00`, preserved[i]);
-  }
-  return html;
+  return html.replace(
+    PRESERVED_HTML_PLACEHOLDER_RE,
+    (_match, index: string) => preserved[Number(index)] || ''
+  );
 }
 
 function normalizeCellText(value: string): string {

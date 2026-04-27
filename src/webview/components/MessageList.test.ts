@@ -22,6 +22,7 @@ import type {
 import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
+  getFirstVisibleMessageIndexFromVirtualMetrics,
   getStickyUserMessagePreview,
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
@@ -267,6 +268,30 @@ describe('calculateVirtualRange', () => {
     expect(pruneMeasuredHeights(measuredHeights, ['a', 'b'])).toBe(true);
     expect(Array.from(measuredHeights.entries())).toEqual([['a', 50]]);
     expect(pruneMeasuredHeights(measuredHeights, ['a'])).toBe(false);
+  });
+
+  it('derives the first visible message index from virtual metrics', () => {
+    expect(
+      getFirstVisibleMessageIndexFromVirtualMetrics({
+        metrics: {
+          prefix: [0, 50, 150, 300, 500],
+          totalHeight: 500,
+          itemCount: 4,
+        },
+        scrollTop: 151,
+      })
+    ).toBe(2);
+
+    expect(
+      getFirstVisibleMessageIndexFromVirtualMetrics({
+        metrics: {
+          prefix: [0],
+          totalHeight: 0,
+          itemCount: 0,
+        },
+        scrollTop: 10,
+      })
+    ).toBeNull();
   });
 });
 

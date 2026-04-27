@@ -6,7 +6,6 @@ import {
   createSignal,
   onCleanup,
   onMount,
-  on,
   untrack,
 } from 'solid-js';
 import {
@@ -22,7 +21,6 @@ import {
   loadingStartedAt,
   loadingLastActivityAt,
   messageListScrollRequestKey,
-  messageStructureVersion,
   getChildRunsByParentId,
   getActiveUsageLimitNotice,
   getSessionTreeRootId,
@@ -57,27 +55,6 @@ import {
 } from '../lib/part-utils';
 import { PermissionPrompt } from './PermissionPrompt';
 import { QuestionPrompt } from './QuestionPrompt';
-
-function getAssistantTurnSubagentCount(messages: Array<{ info: Message; parts: Part[] }>): number {
-  let count = 0;
-
-  for (const message of messages) {
-    if (!isAssistantMessage(message.info) || message.info.mode === 'subagent') continue;
-
-    for (const part of message.parts) {
-      if (part.type === 'agent' && part.name.trim()) {
-        count++;
-        continue;
-      }
-
-      if (part.type === 'subtask') {
-        count++;
-      }
-    }
-  }
-
-  return count;
-}
 
 function isPlanningAssistantMessage(info: AssistantMessage): boolean {
   return info.agent === 'plan' || getSelectedAgentForSession(info.sessionID) === 'plan';
@@ -276,6 +253,15 @@ export function calculateVirtualRange(args: {
   });
 }
 
+export function getFirstVisibleMessageIndexFromVirtualMetrics(args: {
+  metrics: VirtualMetrics;
+  scrollTop: number;
+}) {
+  if (args.metrics.itemCount === 0) return null;
+  const start = lowerBound(args.metrics.prefix, Math.max(0, args.scrollTop) + 1) - 1;
+  return Math.max(0, Math.min(args.metrics.itemCount - 1, start));
+}
+
 export function pruneMeasuredHeights(
   measuredHeights: Map<string, number>,
   itemIds: readonly string[]
@@ -309,6 +295,7 @@ type MessageRowSharedProps = {
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
+  observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
 };
 
 type VisibleRange = {
@@ -324,9 +311,16 @@ type StickyUserMessagePreview = {
   text: string;
 };
 
+type ExpansionScrollAnchor = {
+  element: HTMLElement;
+  top: number;
+  expiresAt: number;
+};
+
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
 const EMPTY_USER_MESSAGE_PREVIEW = '(no content)';
+const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 
 export function getStickyUserMessagePreview(
   messages: Array<{ info: Message; parts: Part[] }>,
@@ -470,7 +464,13 @@ export function MessageList() {
   let initialScrollRafId = 0;
   let previousStickyPreviewId: string | null = null;
   let previousStickyPreviewBounds: { top: number; bottom: number } | null = null;
+  let pendingExpansionScrollAnchor: ExpansionScrollAnchor | null = null;
   let stickyPreviewDebounceTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let firstVisibleMessageObserver: IntersectionObserver | null = null;
+  let measuredRowObserver: ResizeObserver | null = null;
+  let measurementRafId = 0;
+  let measurementScheduled = false;
+  let pendingMeasurementAfterResize = false;
   const SCROLL_INTERVAL_MS = 700;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
   const INITIAL_SCROLL_STABLE_FRAMES = 3;
@@ -480,11 +480,15 @@ export function MessageList() {
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
+  const [observedFirstVisibleMessageId, setObservedFirstVisibleMessageId] = createSignal<
+    string | null
+  >(null);
   const [stickyUserMessagePreview, setStickyUserMessagePreview] =
     createSignal<StickyUserMessagePreview | null>(null);
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
+  const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
 
-  const messages = createMemo(on(messageStructureVersion, () => state.messages));
+  const messages = createMemo(() => state.messages);
   const latestPlanImplementationMessageId = createMemo(() =>
     getLatestPlanImplementationMessageId(messages())
   );
@@ -504,25 +508,67 @@ export function MessageList() {
     }
     return result;
   });
+
+  function recomputeObservedFirstVisibleMessageId() {
+    if (!containerRef || shouldVirtualize()) {
+      setObservedFirstVisibleMessageId(null);
+      return;
+    }
+
+    const currentViewportHeight = containerRef.clientHeight;
+    let nextMessageId: string | null = null;
+    let nextTop = Number.POSITIVE_INFINITY;
+    for (const [messageId, bounds] of observedVisibleMessageBounds) {
+      if (bounds.bottom <= 0 || bounds.top >= currentViewportHeight) continue;
+      if (bounds.top < nextTop) {
+        nextTop = bounds.top;
+        nextMessageId = messageId;
+      }
+    }
+    setObservedFirstVisibleMessageId(nextMessageId);
+  }
+
+  function clearObservedVisibleMessages() {
+    observedVisibleMessageBounds.clear();
+    setObservedFirstVisibleMessageId(null);
+  }
+
+  function syncObservedVisibleMessages() {
+    if (!firstVisibleMessageObserver || !containerRef || shouldVirtualize()) return;
+    firstVisibleMessageObserver.disconnect();
+    clearObservedVisibleMessages();
+    const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
+    for (const row of rows) {
+      firstVisibleMessageObserver.observe(row);
+    }
+  }
+
   const stickyUserMessagePreviewCandidate = createMemo(() => {
-    const currentScrollTop = scrollTop();
+    scrollTop();
     const currentViewportHeight = viewportHeight();
     if (!containerRef || currentViewportHeight <= 0) return null;
 
     const containerRect = containerRef.getBoundingClientRect();
-    const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
-    let firstVisibleMessageIndex: number | null = null;
-    for (const row of rows) {
-      const rowId = row.dataset.msgId;
-      if (!rowId) continue;
-      const rowRect = row.getBoundingClientRect();
-      const rowTop = rowRect.top - containerRect.top;
-      const rowBottom = rowRect.bottom - containerRect.top;
-      if (rowBottom <= 0 || rowTop >= currentViewportHeight) continue;
-      firstVisibleMessageIndex = messageIndexById().get(rowId) ?? null;
-      break;
+    let firstVisibleMessageIndex = shouldVirtualize()
+      ? getFirstVisibleMessageIndexFromVirtualMetrics({
+          metrics: virtualMetrics(),
+          scrollTop: scrollTop(),
+        })
+      : (messageIndexById().get(observedFirstVisibleMessageId() || '') ?? null);
+
+    if (firstVisibleMessageIndex === null) {
+      const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
+      for (const row of rows) {
+        const rowId = row.dataset.msgId;
+        if (!rowId) continue;
+        const rowRect = row.getBoundingClientRect();
+        const rowTop = rowRect.top - containerRect.top;
+        const rowBottom = rowRect.bottom - containerRect.top;
+        if (rowBottom <= 0 || rowTop >= currentViewportHeight) continue;
+        firstVisibleMessageIndex = messageIndexById().get(rowId) ?? null;
+        break;
+      }
     }
-    void currentScrollTop;
 
     const preview = getStickyUserMessagePreview(messages(), firstVisibleMessageIndex);
     if (!preview) return null;
@@ -583,6 +629,7 @@ export function MessageList() {
   });
 
   function measureVisibleItems() {
+    if (!shouldVirtualize()) return false;
     if (!trackRef) return;
     const items = trackRef.querySelectorAll<HTMLElement>('[data-msg-id]');
     let changed = false;
@@ -599,6 +646,57 @@ export function MessageList() {
       setMeasurementVersion((version) => version + 1);
     }
     return changed;
+  }
+
+  function setMeasuredHeightFor(id: string, height: number) {
+    if (height <= 0) return false;
+    if ((measuredHeights.get(id) ?? 0) === height) return false;
+    measuredHeights.set(id, height);
+    setMeasurementVersion((version) => version + 1);
+    return true;
+  }
+
+  function observeMeasuredRow(element: HTMLDivElement, messageId: string, active: boolean) {
+    if (!shouldVirtualize()) return;
+
+    if (!active) {
+      measuredRowObserver?.unobserve(element);
+      return;
+    }
+
+    setMeasuredHeightFor(messageId, element.getBoundingClientRect().height);
+    measuredRowObserver?.observe(element);
+  }
+
+  function cancelScheduledMeasurement() {
+    if (measurementRafId) cancelAnimationFrame(measurementRafId);
+    measurementRafId = 0;
+    measurementScheduled = false;
+  }
+
+  function scheduleVisibleMeasurement(options?: { afterResize?: boolean }) {
+    if (options?.afterResize) pendingMeasurementAfterResize = true;
+    if (measurementScheduled) return;
+
+    measurementScheduled = true;
+    const rafId = requestAnimationFrame(() => {
+      measurementScheduled = false;
+      measurementRafId = 0;
+      const hadResize = pendingMeasurementAfterResize;
+      pendingMeasurementAfterResize = false;
+      if (shouldVirtualize() && !measuredRowObserver) {
+        measureVisibleItems();
+      }
+      const previousTrackHeight = lastTrackHeight;
+      lastTrackHeight = trackRef?.getBoundingClientRect().height ?? previousTrackHeight;
+      if (hadResize && restoreExpansionScrollAnchor()) {
+        return;
+      }
+      if (hadResize && lastTrackHeight > previousTrackHeight + 1) {
+        scrollToBottom();
+      }
+    });
+    measurementRafId = measurementScheduled ? rafId : 0;
   }
 
   function getStickyUserMessagePreviewBounds(containerRect: DOMRect) {
@@ -646,6 +744,26 @@ export function MessageList() {
       '--interactive-list-scrollbar-inset',
       `${scrollbarInset}px`
     );
+  }
+
+  function restoreExpansionScrollAnchor() {
+    const anchor = pendingExpansionScrollAnchor;
+    pendingExpansionScrollAnchor = null;
+    if (!anchor || !containerRef) return false;
+    if (performance.now() > anchor.expiresAt || !anchor.element.isConnected) return false;
+
+    const containerRect = containerRef.getBoundingClientRect();
+    const nextTop = anchor.element.getBoundingClientRect().top - containerRect.top;
+    const delta = nextTop - anchor.top;
+    if (Math.abs(delta) < 1) return true;
+
+    const nextScrollTop = Math.max(0, containerRef.scrollTop + delta);
+    expectedScrollTop = nextScrollTop;
+    ignoreScrollUntil = performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS;
+    containerRef.scrollTop = nextScrollTop;
+    setScrollTop(nextScrollTop);
+    lastObservedScrollTop = nextScrollTop;
+    return true;
   }
 
   function shouldHideStickyUserMessagePreviewImmediately(preview: StickyUserMessagePreview | null) {
@@ -710,6 +828,7 @@ export function MessageList() {
       cancelAnimationFrame(initialScrollRafId);
       initialScrollRafId = 0;
     }
+    cancelScheduledMeasurement();
   }
 
   function scrollToBottomUntilStable(sessionId: string) {
@@ -724,7 +843,9 @@ export function MessageList() {
       if (state.activeSessionId !== sessionId) return;
       if (!autoScroll()) return;
 
-      measureVisibleItems();
+      if (shouldVirtualize()) {
+        measureVisibleItems();
+      }
       performScroll();
 
       const currentHeight = trackRef.getBoundingClientRect().height;
@@ -803,11 +924,71 @@ export function MessageList() {
     setAutoScroll(false);
   }
 
+  function handleClickCapture(event: MouseEvent) {
+    if (!containerRef) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const anchor = target.closest<HTMLElement>('[aria-expanded]');
+    if (!anchor || !containerRef.contains(anchor)) return;
+
+    const containerRect = containerRef.getBoundingClientRect();
+    pendingExpansionScrollAnchor = {
+      element: anchor,
+      top: anchor.getBoundingClientRect().top - containerRect.top,
+      expiresAt: performance.now() + EXPANSION_SCROLL_ANCHOR_WINDOW_MS,
+    };
+  }
+
   onMount(() => {
     if (!containerRef) return;
+    containerRef.addEventListener('click', handleClickCapture as EventListener, true);
     updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
     setScrollTop(containerRef.scrollTop);
+
+    if (typeof IntersectionObserver !== 'undefined') {
+      firstVisibleMessageObserver = new IntersectionObserver(
+        (entries) => {
+          if (!containerRef) return;
+          for (const entry of entries) {
+            const messageId = (entry.target as HTMLElement).dataset.msgId;
+            if (!messageId) continue;
+
+            if (!entry.isIntersecting) {
+              observedVisibleMessageBounds.delete(messageId);
+              continue;
+            }
+
+            const rootBounds = entry.rootBounds ?? containerRef.getBoundingClientRect();
+            observedVisibleMessageBounds.set(messageId, {
+              top: entry.boundingClientRect.top - rootBounds.top,
+              bottom: entry.boundingClientRect.bottom - rootBounds.top,
+            });
+          }
+          recomputeObservedFirstVisibleMessageId();
+        },
+        {
+          root: containerRef,
+          threshold: [0, 1],
+        }
+      );
+
+      queueMicrotask(() => {
+        syncObservedVisibleMessages();
+      });
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      measuredRowObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const element = entry.target as HTMLDivElement;
+          const messageId = element.dataset.msgId;
+          if (!messageId) continue;
+          setMeasuredHeightFor(messageId, element.getBoundingClientRect().height);
+        }
+      });
+    }
+
     lastObservedScrollTop = containerRef.scrollTop ?? 0;
     if (!trackRef) return;
     lastTrackHeight = trackRef.getBoundingClientRect().height;
@@ -815,20 +996,36 @@ export function MessageList() {
       if (!containerRef) return;
       updateScrollbarInset();
       setViewportHeight(containerRef.clientHeight);
-      const previousTrackHeight = lastTrackHeight;
-      measureVisibleItems();
-      lastTrackHeight = trackRef?.getBoundingClientRect().height ?? previousTrackHeight;
-      if (lastTrackHeight > previousTrackHeight + 1) {
-        scrollToBottom();
-      }
+      scheduleVisibleMeasurement({ afterResize: true });
     });
     observer.observe(containerRef);
     observer.observe(trackRef);
     onCleanup(() => {
+      containerRef?.removeEventListener('click', handleClickCapture as EventListener, true);
       observer.disconnect();
+      firstVisibleMessageObserver?.disconnect();
+      firstVisibleMessageObserver = null;
+      measuredRowObserver?.disconnect();
+      measuredRowObserver = null;
+      clearObservedVisibleMessages();
       if (scrollTimer) clearTimeout(scrollTimer);
       if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
+      cancelScheduledMeasurement();
+    });
+  });
+
+  createEffect(() => {
+    messageIds();
+    const virtualized = shouldVirtualize();
+    queueMicrotask(() => {
+      if (!firstVisibleMessageObserver) return;
+      if (virtualized) {
+        firstVisibleMessageObserver.disconnect();
+        clearObservedVisibleMessages();
+        return;
+      }
+      syncObservedVisibleMessages();
     });
   });
 
@@ -910,8 +1107,7 @@ export function MessageList() {
     if (msgs.length === 0) return;
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
-      measureVisibleItems();
-      lastTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
+      scheduleVisibleMeasurement();
       if (sessionId && pendingInitialScrollSessionId === sessionId) {
         pendingInitialScrollSessionId = null;
         performScroll();
@@ -942,8 +1138,7 @@ export function MessageList() {
     const { start, end } = visibleRange();
     queueMicrotask(() => {
       if (!shouldVirtualize()) return;
-      measureVisibleItems();
-      lastTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
+      scheduleVisibleMeasurement();
     });
     void start;
     void end;
@@ -1102,6 +1297,7 @@ export function MessageList() {
                 assistantDialogSummaryMap={assistantDialogSummaryMap()}
                 hasBuildAgent={hasBuildAgent()}
                 latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+                observeMeasuredRow={observeMeasuredRow}
               />
             }
           >
@@ -1115,6 +1311,7 @@ export function MessageList() {
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}
+              observeMeasuredRow={observeMeasuredRow}
             />
           </Show>
         </Show>
@@ -1186,6 +1383,7 @@ function VirtualizedContent(props: {
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
   visibleRange?: Partial<VisibleRange>;
+  observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
 }) {
   const visibleRange = createMemo<VisibleRange>(() => ({
     start: props.visibleRange?.start ?? 0,
@@ -1209,6 +1407,7 @@ function VirtualizedContent(props: {
         assistantDialogSummaryMap={props.assistantDialogSummaryMap}
         hasBuildAgent={props.hasBuildAgent}
         latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
+        observeMeasuredRow={props.observeMeasuredRow}
       />
       <Show when={visibleRange().bottomPad > 0}>
         <div style={{ height: `${visibleRange().bottomPad}px` }} />
@@ -1224,6 +1423,7 @@ function MessageRows(
 }
 
 function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps) {
+  let rowRef: HTMLDivElement | undefined;
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
@@ -1232,8 +1432,18 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
     isAssistantMessage(props.msg.info) &&
     isPlanningAssistantMessage(props.msg.info);
 
+  onMount(() => {
+    if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
+  });
+  onCleanup(() => {
+    if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, false);
+  });
+
   return (
     <div
+      ref={(el) => {
+        rowRef = el;
+      }}
       data-msg-id={props.msg.info.id}
       class={`interactive-item-container ${
         props.msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
@@ -1296,34 +1506,35 @@ type AssistantDialogSummaryInfo = {
 
 function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Part[] }>) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
+  const childRunsByParentId = getChildRunsByParentId(messages);
   let currentMessages: AssistantMessage[] = [];
-  let currentEntries: Array<{ info: Message; parts: Part[] }> = [];
+  let currentPrimaryMessageIds: string[] = [];
+  let currentSubagentHandoffCount = 0;
 
   const flush = () => {
     if (currentMessages.length === 0) {
       currentMessages = [];
-      currentEntries = [];
+      currentPrimaryMessageIds = [];
+      currentSubagentHandoffCount = 0;
       return;
     }
 
     const lastMessage = currentMessages[currentMessages.length - 1];
     if (!lastMessage?.time.completed) {
       currentMessages = [];
-      currentEntries = [];
+      currentPrimaryMessageIds = [];
+      currentSubagentHandoffCount = 0;
       return;
     }
 
     const completedMessages = currentMessages.filter((message) => !!message.time.completed);
     const end = Math.max(...completedMessages.map((message) => message.time.completed || 0));
     const tokens = sumAssistantTokens(currentMessages);
-    const childRunsByParentId = getChildRunsByParentId(currentEntries);
-    const primaryMessages = currentMessages.filter((message) => message.mode !== 'subagent');
-    const childRunCount = primaryMessages.reduce(
-      (count, message) => count + (childRunsByParentId.get(message.id)?.length || 0),
+    const childRunCount = currentPrimaryMessageIds.reduce(
+      (count, messageId) => count + (childRunsByParentId.get(messageId)?.length || 0),
       0
     );
-    const handoffCount = getAssistantTurnSubagentCount(currentEntries);
-    const agentCount = Math.max(childRunCount, handoffCount);
+    const agentCount = Math.max(childRunCount, currentSubagentHandoffCount);
     result.set(lastMessage.id, {
       durationMs: Math.max(0, end - currentMessages[0].time.created),
       inputTokens: tokens.input,
@@ -1332,7 +1543,8 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
     });
 
     currentMessages = [];
-    currentEntries = [];
+    currentPrimaryMessageIds = [];
+    currentSubagentHandoffCount = 0;
   };
 
   for (const entry of messages) {
@@ -1343,7 +1555,19 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
 
     const assistant = entry.info as AssistantMessage;
     currentMessages.push(assistant);
-    currentEntries.push(entry);
+    if (assistant.mode !== 'subagent') {
+      currentPrimaryMessageIds.push(assistant.id);
+    }
+    for (const part of entry.parts) {
+      if (part.type === 'agent' && part.name.trim()) {
+        currentSubagentHandoffCount++;
+        continue;
+      }
+
+      if (part.type === 'subtask') {
+        currentSubagentHandoffCount++;
+      }
+    }
   }
 
   flush();

@@ -1450,36 +1450,54 @@ function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
   const deltas = appState.streamingDeltaQueue.takeAll();
   if (deltas.length === 0) return;
   const latest = deltas[deltas.length - 1];
+  let appendedPart = false;
 
   batch(() => {
     appState.setState('streamingPartId', latest.partId);
     appState.setState('streamingText', latest.text);
-    appState.setState(
-      'messages',
-      produce((msgs) => {
-        for (const item of deltas) {
-          const location = appState.messageIndex.findPartLocation(msgs, item.partId);
-          if (location) {
-            const part = msgs[location.msgIdx]?.parts[location.partIdx];
-            if (part.type === 'text' || part.type === 'reasoning') {
-              part.text = item.text;
-            }
-            continue;
-          }
 
-          const msgIdx = appState.messageIndex.findMessageIndex(msgs, item.messageId);
-          if (msgIdx === -1) continue;
-          msgs[msgIdx].parts.push({
-            id: item.partId,
-            messageID: item.messageId,
-            sessionID: item.sessionId || msgs[msgIdx].info.sessionID,
-            type: 'text',
-            text: item.text,
-          });
-          appState.messageIndex.invalidate();
+    for (const item of deltas) {
+      const location = appState.messageIndex.findPartLocation(appState.state.messages, item.partId);
+      if (location) {
+        const part = appState.state.messages[location.msgIdx]?.parts[location.partIdx];
+        if (part.type === 'text' || part.type === 'reasoning') {
+          appState.setState(
+            'messages',
+            location.msgIdx,
+            'parts',
+            location.partIdx,
+            (currentPart) => ({
+              ...currentPart,
+              text: item.text,
+            })
+          );
         }
-      })
-    );
+        continue;
+      }
+
+      const msgIdx = appState.messageIndex.findMessageIndex(
+        appState.state.messages,
+        item.messageId
+      );
+      if (msgIdx === -1) continue;
+      appState.setState('messages', msgIdx, 'parts', (parts) => [
+        ...parts,
+        {
+          id: item.partId,
+          messageID: item.messageId,
+          sessionID: item.sessionId || appState.state.messages[msgIdx].info.sessionID,
+          type: 'text' as const,
+          text: item.text,
+        },
+      ]);
+      appendedPart = true;
+      appState.messageIndex.invalidate();
+    }
+
+    if (!appendedPart) {
+      // Keep the part index fresh after in-place streaming text updates.
+      appState.messageIndex.ensureIndex(appState.state.messages);
+    }
   });
 }
 
