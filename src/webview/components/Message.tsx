@@ -46,6 +46,8 @@ import {
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
 import { isAbortedAssistantError } from '../lib/aborted';
+import { ImagePreviewOverlay, createImagePreviewEffect } from './ImagePreview';
+import type { PreviewImage } from './ImagePreview';
 
 export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
 
@@ -527,8 +529,35 @@ function UserMessageTextContent(props: { text: string }) {
 
 function UserImageCarousel(props: { imageParts: FilePart[] }) {
   const [activeIndex, setActiveIndex] = createSignal(0);
+  const [previewIndex, setPreviewIndex] = createSignal<number | null>(null);
   const total = () => props.imageParts.length;
   const currentPart = () => props.imageParts[activeIndex()];
+  const previewPosition = () => {
+    const index = previewIndex();
+    return index === null ? undefined : index + 1;
+  };
+  const previewPart = () => {
+    const index = previewIndex();
+    if (index === null) return null;
+    return props.imageParts[index] ?? null;
+  };
+  const previewImage = (): PreviewImage | null => {
+    const part = previewPart();
+    if (!part) return null;
+
+    const name = part.source?.path
+      ? formatDisplayPath(part.source.path, state.editorContext.workspacePath)
+      : part.filename
+        ? formatDisplayPath(part.filename, state.editorContext.workspacePath)
+        : '(file)';
+
+    return {
+      url: part.url,
+      alt: name,
+      title: name,
+      mime: part.mime,
+    };
+  };
   const currentDisplayName = () => {
     const part = currentPart();
     if (!part) return '(file)';
@@ -547,6 +576,11 @@ function UserImageCarousel(props: { imageParts: FilePart[] }) {
       if (maxIndex < 0) return 0;
       return Math.min(index, maxIndex);
     });
+    setPreviewIndex((index) => {
+      if (index === null) return null;
+      if (maxIndex < 0) return null;
+      return Math.min(index, maxIndex);
+    });
   });
 
   const step = (delta: number) => {
@@ -554,68 +588,111 @@ function UserImageCarousel(props: { imageParts: FilePart[] }) {
     if (count <= 1) return;
     setActiveIndex((index) => (index + delta + count) % count);
   };
+  const openPreview = () => {
+    if (!currentPart()) return;
+    setPreviewIndex(activeIndex());
+  };
+  const stepPreview = (delta: number) => {
+    const count = total();
+    if (count <= 1) return;
+    setPreviewIndex((index) => {
+      if (index === null) return index;
+      const nextIndex = (index + delta + count) % count;
+      setActiveIndex(nextIndex);
+      return nextIndex;
+    });
+  };
+
+  createImagePreviewEffect(
+    () => previewIndex() !== null,
+    () => setPreviewIndex(null),
+    {
+      canNavigate: () => total() > 1,
+      onPrevious: () => stepPreview(-1),
+      onNext: () => stepPreview(1),
+    }
+  );
 
   return (
-    <div class="message-image-carousel">
-      <div class="message-image-carousel-frame">
-        <div class="message-image-carousel-slide">
-          <Show when={currentPart()}>
-            {(part) => (
-              <figure class="chat-image-figure message-image-carousel-figure">
-                <img src={part().url} alt={currentDisplayName()} class="chat-image-img" />
-                <figcaption class="chat-image-caption message-image-carousel-caption-row">
-                  <span class="message-image-carousel-caption" title={currentDisplayName()}>
-                    <span class="message-image-carousel-count">
-                      {activeIndex() + 1} / {total()}
+    <>
+      <div class="message-image-carousel">
+        <div class="message-image-carousel-frame">
+          <div class="message-image-carousel-slide">
+            <Show when={currentPart()}>
+              {(part) => (
+                <figure class="chat-image-figure message-image-carousel-figure">
+                  <button
+                    type="button"
+                    class="chat-image-preview-trigger message-image-carousel-preview-trigger"
+                    aria-label={`Open image preview: ${currentDisplayName()}`}
+                    title="Open image preview"
+                    onClick={openPreview}
+                  >
+                    <img src={part().url} alt={currentDisplayName()} class="chat-image-img" />
+                  </button>
+                  <figcaption class="chat-image-caption message-image-carousel-caption-row">
+                    <span class="message-image-carousel-caption" title={currentDisplayName()}>
+                      <span class="message-image-carousel-count">
+                        {activeIndex() + 1} / {total()}
+                      </span>
+                      <span class="message-image-carousel-separator">&middot;</span>
+                      {currentDisplayName()} <span class="chat-image-mime">· {part().mime}</span>
                     </span>
-                    <span class="message-image-carousel-separator">&middot;</span>
-                    {currentDisplayName()} <span class="chat-image-mime">· {part().mime}</span>
-                  </span>
-                  <div class="message-image-carousel-controls">
-                    <button
-                      type="button"
-                      class="message-image-carousel-nav"
-                      onClick={() => step(-1)}
-                      aria-label="Previous image"
-                      title="Previous image"
-                    >
-                      <svg
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        width="14"
-                        height="14"
+                    <div class="message-image-carousel-controls">
+                      <button
+                        type="button"
+                        class="message-image-carousel-nav"
+                        onClick={() => step(-1)}
+                        aria-label="Previous image"
+                        title="Previous image"
                       >
-                        <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      class="message-image-carousel-nav"
-                      onClick={() => step(1)}
-                      aria-label="Next image"
-                      title="Next image"
-                    >
-                      <svg
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        width="14"
-                        height="14"
+                        <svg
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          width="14"
+                          height="14"
+                        >
+                          <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="message-image-carousel-nav"
+                        onClick={() => step(1)}
+                        aria-label="Next image"
+                        title="Next image"
                       >
-                        <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
-                      </svg>
-                    </button>
-                  </div>
-                </figcaption>
-              </figure>
-            )}
-          </Show>
+                        <svg
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          width="14"
+                          height="14"
+                        >
+                          <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  </figcaption>
+                </figure>
+              )}
+            </Show>
+          </div>
         </div>
       </div>
-    </div>
+      <ImagePreviewOverlay
+        image={previewImage()}
+        onClose={() => setPreviewIndex(null)}
+        onPrevious={() => stepPreview(-1)}
+        onNext={() => stepPreview(1)}
+        showNavigation={total() > 1}
+        position={previewPosition()}
+        total={total()}
+      />
+    </>
   );
 }
 

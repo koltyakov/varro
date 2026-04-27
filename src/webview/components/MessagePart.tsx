@@ -4,6 +4,8 @@ import { formatAgentLabel, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ImagePreviewOverlay, createImagePreviewEffect } from './ImagePreview';
+import type { PreviewImage } from './ImagePreview';
 import { ToolCall } from './ToolCall';
 import { formatDisplayPath } from '../lib/path-display';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
@@ -233,6 +235,7 @@ function SubtaskBlock(props: { part: SubtaskPart }) {
 }
 
 function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
+  const [previewImage, setPreviewImage] = createSignal<PreviewImage | null>(null);
   const isImage = () => props.part.mime.startsWith('image/');
   const displayName = () => {
     if (props.part.source?.path) {
@@ -243,25 +246,49 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
     }
     return '(file)';
   };
+  const openPreview = () => {
+    setPreviewImage({
+      url: props.part.url,
+      alt: displayName(),
+      title: displayName(),
+      mime: props.part.mime,
+    });
+  };
+
+  createImagePreviewEffect(
+    () => previewImage() !== null,
+    () => setPreviewImage(null)
+  );
 
   return (
-    <Show
-      when={isImage()}
-      fallback={
-        <div class="chat-attachment-chip">
-          <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-            <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-          </svg>
-          <span class="chip-label">{displayName()}</span>
-        </div>
-      }
-    >
-      <figure class="chat-image-figure">
-        <img src={props.part.url} alt={displayName()} class="chat-image-img" />
-        <figcaption class="chat-image-caption">
-          {displayName()} <span class="chat-image-mime">· {props.part.mime}</span>
-        </figcaption>
-      </figure>
-    </Show>
+    <>
+      <Show
+        when={isImage()}
+        fallback={
+          <div class="chat-attachment-chip">
+            <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+              <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
+            </svg>
+            <span class="chip-label">{displayName()}</span>
+          </div>
+        }
+      >
+        <figure class="chat-image-figure">
+          <button
+            type="button"
+            class="chat-image-preview-trigger"
+            aria-label={`Open image preview: ${displayName()}`}
+            title="Open image preview"
+            onClick={openPreview}
+          >
+            <img src={props.part.url} alt={displayName()} class="chat-image-img" />
+          </button>
+          <figcaption class="chat-image-caption">
+            {displayName()} <span class="chat-image-mime">· {props.part.mime}</span>
+          </figcaption>
+        </figure>
+      </Show>
+      <ImagePreviewOverlay image={previewImage()} onClose={() => setPreviewImage(null)} />
+    </>
   );
 }

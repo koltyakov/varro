@@ -29,6 +29,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  document.body.classList.remove('chat-image-preview-open');
   retryMessageMock.mockReset();
   resetToolCallExpansionState();
 });
@@ -741,6 +742,108 @@ describe('Message assistant final answer rendering', () => {
     expect(captionRow?.textContent).toContain('1 / 2');
     expect(captionRow?.textContent).toContain('Image 1');
     expect(container?.querySelector('.message-image-carousel-footer')).toBeNull();
+  });
+
+  it('opens a larger preview for a single image and closes with Escape', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-image-preview-1'),
+          parts: [imageFilePart('image-1', 'diagram.png')],
+        }),
+      container!
+    );
+
+    const trigger = container?.querySelector<HTMLButtonElement>('.chat-image-preview-trigger');
+    expect(trigger).toBeInstanceOf(HTMLButtonElement);
+
+    trigger?.click();
+
+    const overlay = container?.querySelector('.chat-image-preview-overlay');
+    const overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
+
+    expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(document.body.classList.contains('chat-image-preview-open')).toBe(true);
+    expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-1.png');
+    expect(container?.querySelector('.chat-image-preview-caption')?.textContent).toContain(
+      'diagram.png'
+    );
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(container?.querySelector('.chat-image-preview-overlay')).toBeNull();
+    expect(document.body.classList.contains('chat-image-preview-open')).toBe(false);
+  });
+
+  it('opens the current carousel image in the larger preview', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-image-preview-2'),
+          parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
+        }),
+      container!
+    );
+
+    const nextButton = container?.querySelectorAll<HTMLButtonElement>(
+      '.message-image-carousel-nav'
+    )[1];
+    expect(nextButton).toBeInstanceOf(HTMLButtonElement);
+
+    nextButton?.click();
+
+    const trigger = container?.querySelector<HTMLButtonElement>(
+      '.message-image-carousel-preview-trigger'
+    );
+    trigger?.click();
+
+    const overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    const overlayCaption = container?.querySelector('.chat-image-preview-caption');
+
+    expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
+    expect(overlayCaption?.textContent).toContain('Image 2');
+    expect(overlayCaption?.textContent).toContain('image/png');
+  });
+
+  it('navigates between attached images from the larger preview', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-image-preview-3'),
+          parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
+        }),
+      container!
+    );
+
+    const trigger = container?.querySelector<HTMLButtonElement>(
+      '.message-image-carousel-preview-trigger'
+    );
+    trigger?.click();
+
+    const nextOverlayButton =
+      container?.querySelectorAll<HTMLButtonElement>('.chat-image-preview-nav')[1];
+    expect(nextOverlayButton).toBeInstanceOf(HTMLButtonElement);
+
+    nextOverlayButton?.click();
+
+    let overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    let overlayCaption = container?.querySelector('.chat-image-preview-caption');
+
+    expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
+    expect(overlayCaption?.textContent).toContain('2 / 2');
+    expect(overlayCaption?.textContent).toContain('Image 2');
+    expect(container?.querySelector('.message-image-carousel-caption-row')?.textContent).toContain(
+      '2 / 2'
+    );
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+
+    overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    overlayCaption = container?.querySelector('.chat-image-preview-caption');
+
+    expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-1.png');
+    expect(overlayCaption?.textContent).toContain('1 / 2');
+    expect(overlayCaption?.textContent).toContain('Image 1');
   });
 
   it('renders assistant message errors as an inline error block', () => {
