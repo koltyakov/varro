@@ -26,6 +26,9 @@ type ScenarioName =
   | 'blank'
   | 'pending-permission'
   | 'restored-session'
+  | 'maintenance-reconnect'
+  | 'dispose-during-start'
+  | 'startup-race'
   | 'plan-ready'
   | 'sticky-preview'
   | 'todo-queue'
@@ -91,6 +94,7 @@ type ScenarioState = {
   postReadyMessages: unknown[];
   readyStatus?: ServerStatus;
   nextSequence: number;
+  healthFailuresRemaining: number;
 };
 
 type HarnessWindow = Window & {
@@ -102,6 +106,7 @@ type HarnessWindow = Window & {
     permissionResponses: PermissionResponse[];
     externalUrls: string[];
     planOpenRequests: string[];
+    dispatchedMessages?: Array<{ type: string; payload?: unknown }>;
     terminalCommands?: Array<{ command: string; title?: string }>;
     settingsQueries?: string[];
     filePickCount?: number;
@@ -549,28 +554,6 @@ function makeCompletedAssistantMessageWithParts(
   return message;
 }
 
-function makeQuestionRequest(
-  sessionId: string,
-  id: string,
-  question: string,
-  header: string
-): QuestionRequest {
-  return {
-    id,
-    sessionID: sessionId,
-    questions: [
-      {
-        question,
-        header,
-        options: [
-          { label: 'Yes', description: 'Approve it' },
-          { label: 'No', description: 'Reject it' },
-        ],
-      },
-    ],
-  };
-}
-
 function getWorkspaceFilesForScenario(name: ScenarioName): WorkspaceFile[] {
   return name === 'file-search' ? structuredClone(TMP_WORKSPACE_FILES) : [];
 }
@@ -666,6 +649,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     postReadyMessages: [],
     readyStatus: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
     nextSequence: 0,
+    healthFailuresRemaining: 0,
   };
 
   if (name === 'restored-session') {
@@ -688,6 +672,121 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = [user, assistant];
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 10;
+    return state;
+  }
+
+  if (name === 'maintenance-reconnect') {
+    const session = makeSession(
+      'session-maintenance-reconnect',
+      'Maintenance reconnect',
+      BASE_TIME - 2_000
+    );
+    const user = makeUserMessage(
+      session.id,
+      'message-maintenance-user',
+      ['Keep the refactor context loaded through maintenance.'],
+      BASE_TIME - 8_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-maintenance-assistant',
+      user.info.id,
+      'The previous response should stay visible while the stream reconnects.',
+      BASE_TIME - 6_000
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.postReadyMessages.push(
+      {
+        __dispatchDelayMs: 200,
+        __message: {
+          type: 'server/status',
+          payload: { state: 'running', url: 'mock://opencode', eventStream: 'degraded' },
+        },
+      },
+      {
+        __dispatchDelayMs: 2_000,
+        __message: {
+          type: 'server/status',
+          payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
+        },
+      }
+    );
+    state.nextSequence = 15;
+    return state;
+  }
+
+  if (name === 'dispose-during-start') {
+    const session = makeSession('session-dispose-during-start', 'Startup handoff', BASE_TIME - 2_000);
+    const user = makeUserMessage(
+      session.id,
+      'message-dispose-start-user',
+      ['Resume this chat once startup finishes.'],
+      BASE_TIME - 8_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-dispose-start-assistant',
+      user.info.id,
+      'Startup completed without losing the restored session.',
+      BASE_TIME - 6_000
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.readyStatus = { state: 'starting' };
+    state.postReadyMessages.push({
+      __dispatchDelayMs: 800,
+      __message: {
+        type: 'server/status',
+        payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
+      },
+    });
+    state.nextSequence = 18;
+    return state;
+  }
+
+  if (name === 'startup-race') {
+    const session = makeSession('session-startup-race', 'Startup race recovery', BASE_TIME - 2_000);
+    const user = makeUserMessage(
+      session.id,
+      'message-startup-race-user',
+      ['Keep the restored session when the first startup attempt fails.'],
+      BASE_TIME - 8_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-startup-race-assistant',
+      user.info.id,
+      'The second startup attempt connected and restored the session state.',
+      BASE_TIME - 6_000
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.readyStatus = { state: 'starting' };
+    state.healthFailuresRemaining = 1;
+    state.postReadyMessages.push(
+      {
+        __dispatchDelayMs: 200,
+        __message: {
+          type: 'server/status',
+          payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
+        },
+      },
+      {
+        __dispatchDelayMs: 1_000,
+        __message: {
+          type: 'server/status',
+          payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
+        },
+      }
+    );
+    state.nextSequence = 21;
     return state;
   }
 
@@ -1670,6 +1769,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 function getScenarioName(): ScenarioName {
   const value = new URLSearchParams(window.location.search).get('scenario');
   if (
+    value === 'maintenance-reconnect' ||
+    value === 'dispose-during-start' ||
+    value === 'startup-race' ||
     value === 'restored-session' ||
     value === 'pending-permission' ||
     value === 'plan-ready' ||
@@ -1742,10 +1844,32 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
 }
 
 function dispatchToWebview(message: unknown) {
+  const typed =
+    message && typeof message === 'object' && 'type' in message
+      ? (message as { type: string; payload?: unknown })
+      : null;
+  if (typed) {
+    (window as HarnessWindow).__varroE2E?.dispatchedMessages?.push({
+      type: typed.type,
+      ...(typed.payload !== undefined ? { payload: typed.payload } : {}),
+    });
+  }
   window.postMessage(message, '*');
 }
 
 function dispatchPostReadyMessage(message: unknown) {
+  if (
+    message &&
+    typeof message === 'object' &&
+    '__message' in message &&
+    typeof (message as { __message: unknown }).__message !== 'undefined'
+  ) {
+    const scheduled = message as { __dispatchDelayMs?: unknown; __message: unknown };
+    const delayMs = typeof scheduled.__dispatchDelayMs === 'number' ? scheduled.__dispatchDelayMs : 0;
+    window.setTimeout(() => dispatchPostReadyMessage(scheduled.__message), delayMs);
+    return;
+  }
+
   if (
     message &&
     typeof message === 'object' &&
@@ -1776,6 +1900,10 @@ async function handleApiRequest(
   const path = url.pathname;
 
   if (method === 'GET' && path === '/global/health') {
+    if (state.healthFailuresRemaining > 0) {
+      state.healthFailuresRemaining -= 1;
+      throw new Error('offline');
+    }
     return { healthy: true, version: 'e2e' };
   }
 
@@ -2317,6 +2445,7 @@ function setUpHarness() {
     permissionResponses: scenarioState.permissionResponses,
     externalUrls: scenarioState.externalUrls,
     planOpenRequests: scenarioState.planOpenRequests,
+    dispatchedMessages: [],
     terminalCommands: [],
     settingsQueries: [],
     filePickCount: 0,
