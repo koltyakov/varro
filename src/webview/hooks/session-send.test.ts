@@ -1,0 +1,221 @@
+import { describe, expect, it } from 'vitest';
+import type { DroppedFile, EditorContext } from '../../shared/protocol';
+import type { Provider } from '../types';
+import { buildSessionSendBody, getAttachmentReference } from './session-send';
+
+function provider(id: string, models: Provider['models']): Provider {
+  return {
+    id,
+    name: id,
+    source: 'api',
+    models,
+  };
+}
+
+function createEditorContext(overrides?: Partial<EditorContext>): EditorContext {
+  return {
+    workspacePath: '/repo',
+    activeFile: null,
+    selection: null,
+    diagnostics: [],
+    ...overrides,
+  };
+}
+
+function createState(overrides?: {
+  selectedAgent?: string | null;
+  selectedModel?: { providerID: string; modelID: string; variant?: string } | null;
+  providers?: Provider[];
+  providerDefaults?: Record<string, string>;
+  editorContext?: EditorContext;
+  terminalSelection?: { text: string; terminalName: string } | null;
+  droppedFiles?: DroppedFile[];
+  clipboardImages?: Array<{
+    id: string;
+    url: string;
+    mime: string;
+    filename: string;
+    size: number;
+  }>;
+}) {
+  return {
+    selectedAgent: 'build',
+    selectedModel: { providerID: 'openai', modelID: 'gpt-4o' },
+    providers: [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ],
+    providerDefaults: { openai: 'gpt-4o' },
+    editorContext: createEditorContext(),
+    terminalSelection: null,
+    droppedFiles: [],
+    clipboardImages: [],
+    ...overrides,
+  };
+}
+
+describe('session-send helpers', () => {
+  it('builds payload with unique live selection and explicit same-file context', () => {
+    const result = buildSessionSendBody(
+      createState({
+        editorContext: createEditorContext({
+          activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+          selection: { startLine: 2, endLine: 12 },
+        }),
+        droppedFiles: [
+          {
+            path: '/repo/src/a.ts',
+            relativePath: 'src/a.ts',
+            type: 'file',
+            lineRanges: [
+              { startLine: 1, endLine: 4 },
+              { startLine: 8, endLine: 10 },
+              { startLine: 12, endLine: 20 },
+            ],
+          },
+        ],
+      }),
+      'session-1',
+      'Review overlap',
+      () => true
+    );
+
+    expect(result).toMatchObject({
+      body: {
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+        parts: [
+          { type: 'text', text: 'Review overlap' },
+          { type: 'text', text: '[Working directory: /repo]' },
+          { type: 'text', text: '[Selection from src/a.ts lines 5-7, 11]' },
+          { type: 'text', text: '[Selection from src/a.ts lines 1-4, 8-10, 12-20]' },
+        ],
+      },
+      effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
+  });
+
+  it('omits current document when disabled while keeping other attachments and vision files', () => {
+    const result = buildSessionSendBody(
+      createState({
+        editorContext: createEditorContext({
+          activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+          selection: { startLine: 4, endLine: 8 },
+        }),
+        droppedFiles: [
+          {
+            path: '/repo/src/extra.ts',
+            relativePath: 'src/extra.ts',
+            type: 'file',
+          },
+        ],
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'blob:1',
+            mime: 'image/png',
+            filename: 'img-1.png',
+            size: 10,
+          },
+        ],
+      }),
+      'session-1',
+      'Review this image',
+      () => false
+    );
+
+    expect(result).toEqual({
+      body: {
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+        parts: [
+          { type: 'text', text: 'Review this image' },
+          { type: 'text', text: '[Working directory: /repo]' },
+          { type: 'text', text: 'src/extra.ts' },
+          { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
+        ],
+      },
+      effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
+  });
+
+  it('strips clipboard placeholders for non-vision models and applies preferred variant fallback', () => {
+    const result = buildSessionSendBody(
+      createState({
+        selectedAgent: null,
+        selectedModel: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
+        providers: [
+          provider('openrouter', {
+            'qwen3-coder-30b': {
+              id: 'qwen3-coder-30b',
+              name: 'Qwen3 Coder 30B',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+              variants: {
+                low: {},
+                high: {},
+                max: {},
+              },
+            },
+          }),
+        ],
+        providerDefaults: { openrouter: 'qwen3-coder-30b' },
+        editorContext: createEditorContext({ workspacePath: null }),
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'blob:1',
+            mime: 'image/png',
+            filename: 'img-1.png',
+            size: 10,
+          },
+        ],
+      }),
+      'session-1',
+      'See [img-1.png] later',
+      () => true,
+      { noReply: true }
+    );
+
+    expect(result).toEqual({
+      body: {
+        model: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
+        noReply: true,
+        parts: [{ type: 'text', text: 'See later' }],
+        variant: 'high',
+      },
+      effectiveModel: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
+    });
+  });
+
+  it('returns null when there is no text or attachment content to send', () => {
+    const result = buildSessionSendBody(
+      createState({
+        selectedAgent: null,
+        selectedModel: null,
+        providers: [],
+        providerDefaults: {},
+        editorContext: createEditorContext({ workspacePath: null }),
+      }),
+      'session-1',
+      '   ',
+      () => false
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('formats attachment references for files, directories, and workspace root', () => {
+    expect(getAttachmentReference({ path: '/repo/src/a.ts', type: 'file' }, '/repo')).toBe(
+      'src/a.ts'
+    );
+    expect(getAttachmentReference({ path: '/repo/src', type: 'directory' }, '/repo')).toBe('src/');
+    expect(getAttachmentReference({ path: '/repo', type: 'directory' }, '/repo')).toBe('./');
+  });
+});

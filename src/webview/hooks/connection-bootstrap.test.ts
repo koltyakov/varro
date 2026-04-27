@@ -1,0 +1,231 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { Message, SessionStatus } from '../types';
+import {
+  buildInterruptedSessionContinueBody,
+  continueInterruptedSessionWithDependencies,
+  initConnectionWithDependencies,
+  INTERRUPTED_SESSION_CONTINUE_PROMPT,
+  recoverInterruptedSessionsWithDependencies,
+  shouldContinueInterruptedSession,
+} from './connection-bootstrap';
+
+function userMessage(id: string): Message {
+  return {
+    id,
+    sessionID: 'session-1',
+    role: 'user',
+    time: { created: 0 },
+    agent: 'build',
+    model: { providerID: 'openai', modelID: 'gpt-4o' },
+  };
+}
+
+function assistantMessage(
+  id: string,
+  overrides?: Partial<Extract<Message, { role: 'assistant' }>>
+): Message {
+  return {
+    id,
+    sessionID: 'session-1',
+    role: 'assistant',
+    time: { created: 1 },
+    parentID: 'user-1',
+    modelID: 'gpt-4o',
+    providerID: 'openai',
+    mode: 'default',
+    path: { cwd: '/repo', root: '/repo' },
+    cost: 0,
+    tokens: {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    },
+    ...overrides,
+  };
+}
+
+describe('connection-bootstrap helpers', () => {
+  it('builds the interrupted-session continue body with agent and variant', () => {
+    expect(
+      buildInterruptedSessionContinueBody({
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-5', variant: 'high' },
+      })
+    ).toEqual({
+      parts: [{ type: 'text', text: INTERRUPTED_SESSION_CONTINUE_PROMPT }],
+      agent: 'build',
+      model: { providerID: 'openai', modelID: 'gpt-5' },
+      variant: 'high',
+    });
+  });
+
+  it('detects whether an interrupted session should continue', () => {
+    expect(shouldContinueInterruptedSession([{ info: userMessage('user-1'), parts: [] }])).toBe(
+      true
+    );
+    expect(
+      shouldContinueInterruptedSession([
+        {
+          info: assistantMessage('assistant-1', { time: { created: 1, completed: 2 } }),
+          parts: [],
+        },
+      ])
+    ).toBe(false);
+    expect(
+      shouldContinueInterruptedSession([{ info: assistantMessage('assistant-2'), parts: [] }])
+    ).toBe(true);
+  });
+
+  it('continues interrupted sessions and swallows sync follow-up failures', async () => {
+    const syncSessionMcps = vi.fn(async () => {});
+    const sendAsync = vi.fn(async () => {});
+    const syncSession = vi.fn(async () => {
+      throw new Error('sync failed');
+    });
+    const recheckSessionStatus = vi.fn(async () => {});
+
+    await continueInterruptedSessionWithDependencies(
+      {
+        syncSessionMcps,
+        resolveModel: () => ({ providerID: 'openai', modelID: 'gpt-5', variant: 'high' }),
+        resolveAgent: () => 'build',
+        sendAsync,
+        syncSession,
+        recheckSessionStatus,
+      },
+      'session-1'
+    );
+
+    expect(syncSessionMcps).toHaveBeenCalledWith('session-1');
+    expect(sendAsync).toHaveBeenCalledWith('session-1', {
+      parts: [{ type: 'text', text: INTERRUPTED_SESSION_CONTINUE_PROMPT }],
+      agent: 'build',
+      model: { providerID: 'openai', modelID: 'gpt-5' },
+      variant: 'high',
+    });
+    expect(syncSession).toHaveBeenCalledWith('session-1');
+    expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+  });
+
+  it('recovers only resumable interrupted sessions', async () => {
+    const continueInterruptedSession = vi.fn(async () => {});
+    const logError = vi.fn();
+    const statuses: Record<string, SessionStatus> = {
+      'session-busy': { type: 'busy' },
+      'session-retry': { type: 'retry', attempt: 2, message: 'retry', next: 3 },
+      'session-idle': { type: 'idle' },
+    };
+
+    await recoverInterruptedSessionsWithDependencies(
+      {
+        consumeInterruptedSessionIds: () => [
+          'session-idle',
+          'session-idle',
+          'session-busy',
+          'session-retry',
+          'session-missing',
+          'session-question',
+          'session-permission',
+        ],
+        isCurrentGeneration: () => true,
+        hasSession: (sessionId) => sessionId !== 'session-missing',
+        getSessionStatus: (sessionId) => statuses[sessionId],
+        hasPendingQuestion: (sessionId) => sessionId === 'session-question',
+        hasPendingPermission: (sessionId) => sessionId === 'session-permission',
+        loadSessionMessages: async (sessionId) => {
+          if (sessionId === 'session-idle') {
+            return [{ info: userMessage('user-1'), parts: [] }];
+          }
+          return [
+            {
+              info: assistantMessage('assistant-1', { time: { created: 1, completed: 2 } }),
+              parts: [],
+            },
+          ];
+        },
+        continueInterruptedSession,
+        logError,
+      },
+      1
+    );
+
+    expect(continueInterruptedSession).toHaveBeenCalledTimes(1);
+    expect(continueInterruptedSession).toHaveBeenCalledWith('session-idle');
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('initializes connection data, restores persisted session selection, and recovers interruptions', async () => {
+    const callOrder: string[] = [];
+    const setInitialized = vi.fn();
+    const setError = vi.fn();
+
+    await initConnectionWithDependencies(
+      {
+        health: async () => {
+          callOrder.push('health');
+        },
+        loadInitialData: async () => {
+          callOrder.push('loadInitialData');
+        },
+        hydrateSessionStatuses: async () => {
+          callOrder.push('hydrateSessionStatuses');
+        },
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => 'session-1',
+        hasSession: (sessionId) => sessionId === 'session-1',
+        selectSession: async (sessionId) => {
+          callOrder.push(`select:${sessionId}`);
+        },
+        recoverInterruptedSessions: async (generation) => {
+          callOrder.push(`recover:${generation}`);
+        },
+        setInitialized,
+        setError,
+      },
+      {
+        next: () => 3,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(callOrder).toEqual([
+      'health',
+      'loadInitialData',
+      'hydrateSessionStatuses',
+      'select:session-1',
+      'recover:3',
+    ]);
+    expect(setInitialized).toHaveBeenCalledWith(true);
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it('reports startup failure when bootstrap throws', async () => {
+    const setInitialized = vi.fn();
+    const setError = vi.fn();
+
+    await initConnectionWithDependencies(
+      {
+        health: async () => {
+          throw new Error('offline');
+        },
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => null,
+        hasSession: () => false,
+        selectSession: vi.fn(async () => {}),
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized,
+        setError,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(setInitialized).toHaveBeenCalledWith(false);
+    expect(setError).toHaveBeenCalledWith('Failed to connect to OpenCode server');
+  });
+});

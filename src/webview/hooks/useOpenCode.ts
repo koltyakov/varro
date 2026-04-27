@@ -93,36 +93,8 @@ function logError(context: string, err: unknown) {
   });
 }
 
-function getDefaultPrimaryAgentName() {
-  return (
-    state.agents.find((agent) => agent.name === 'build')?.name || state.agents[0]?.name || null
-  );
-}
-
-function getBuildAgentName() {
-  return state.agents.find((agent) => agent.name === 'build')?.name || null;
-}
-
-import type {
-  AssistantMessage,
-  Session,
-  SessionStatus,
-  Message,
-  Part,
-  Permission,
-  Todo,
-} from '../types';
-import { getWorkspaceRelativePath, isSamePath } from '../lib/path-display';
-import {
-  formatSelectionReference,
-  getSelectionRangesFromEditorContext,
-  hasExplicitContextForPath,
-  subtractContextLineRanges,
-} from '../../shared/context-files';
+import type { Session, SessionStatus, Message, Part, Permission } from '../types';
 import { applyWebviewTheme } from '../lib/theme';
-import { getPreferredVariant } from '../lib/model-variants';
-import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
-import { modelSupportsVision } from '../lib/model-capabilities';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { getSessionPermissionRulesForMode } from './permission-rules';
 import { registerSessionEventHandlers } from './session-event-handlers';
@@ -131,6 +103,59 @@ import {
   parseUsageLimitNotice,
   type UsageLimitNotice,
 } from '../lib/usage-limit';
+import {
+  extractTodos,
+  handoffTodosToMessages as handoffTodosToMessagesWithState,
+  syncTodosFromMessages as syncTodosFromMessagesWithState,
+} from './todo-sync';
+import {
+  applySessions as applySessionsWithLifecycle,
+  clearDeletedSessionState as clearDeletedSessionStateWithLifecycle,
+  getDeletedSessionTreeIds,
+  getNextSessionIdAfterDeletion,
+  hideDeletedSessionTree as hideDeletedSessionTreeWithLifecycle,
+  normalizeProjectPath,
+  removeDeletedSessionTree as removeDeletedSessionTreeWithLifecycle,
+  upsertSession as upsertSessionWithLifecycle,
+} from './session-lifecycle';
+import {
+  selectSessionWithDependencies,
+  syncSessionMessagesWithDependencies,
+  syncSessionWithDependencies,
+} from './session-selection';
+import { buildSessionSendBody } from './session-send';
+import {
+  getActiveProviderSelection as getActiveProviderSelectionForState,
+  getBuildAgentName,
+  getDefaultPrimaryAgentName,
+  reconcileLoadedAgents,
+  reconcileLoadedProviders,
+} from './routing-state';
+import {
+  continueInterruptedSessionWithDependencies,
+  initConnectionWithDependencies,
+  recoverInterruptedSessionsWithDependencies,
+} from './connection-bootstrap';
+import {
+  implementPlanWithDependencies,
+  initSessionWithDependencies,
+  openPlanWithDependencies,
+  runSlashCommandWithDependencies,
+} from './session-actions';
+import {
+  abortSessionWithDependencies,
+  compactSessionWithDependencies,
+  redoSessionWithDependencies,
+  reviewSessionWithDependencies,
+  undoSessionWithDependencies,
+} from './session-controls';
+import {
+  autoApprovePermissionsForSessionWithDependencies,
+  rejectQuestionWithDependencies,
+  respondPermissionWithDependencies,
+  respondQuestionWithDependencies,
+  updatePermissionModeForSessionWithDependencies,
+} from './session-approvals';
 
 let initialized = false;
 let initializing = false;
@@ -142,41 +167,13 @@ let sessionSelectionGeneration = 0;
 let sessionSyncGeneration = 0;
 const pendingAbortRetryAttempts = new Map<string, number | null>();
 const [documentVisible, setDocumentVisible] = createSignal(document.visibilityState === 'visible');
-const INTERRUPTED_SESSION_CONTINUE_PROMPT =
-  'Continue from where you were interrupted before the extension reload. Review the existing conversation, do not repeat completed work, and proceed with the next unfinished step.';
 
 function shouldAutoApprovePermissions(sessionId: string) {
   return getPermissionModeForSession(sessionId) === 'full';
 }
 
-function normalizeProjectPath(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalizedPath || null;
-}
-
-function isSessionInWorkspace(session: Session, workspacePath: string | null | undefined): boolean {
-  const normalizedWorkspace = normalizeProjectPath(workspacePath);
-  if (!normalizedWorkspace) return true;
-  return normalizeProjectPath(session.directory) === normalizedWorkspace;
-}
-
-function sortSessions(sessions: Session[]) {
-  return [...sessions].toSorted((a, b) => b.time.updated - a.time.updated);
-}
-
 function applySessions(sessions: Session[]) {
-  const nextSessions = sortSessions(
-    sessions.filter((session) => isSessionInWorkspace(session, currentWorkspacePath))
-  );
-  setSessions(nextSessions);
-
-  if (
-    state.activeSessionId &&
-    !nextSessions.some((session) => session.id === state.activeSessionId)
-  ) {
-    clearActiveSessionState();
-  }
+  applySessionsWithLifecycle(getSessionLifecycleDeps(), sessions);
 }
 
 function setSessionStatusEntry(sessionId: string, status: SessionStatus) {
@@ -198,179 +195,55 @@ function clearActiveSessionState() {
 }
 
 function clearDeletedSessionState(id: string) {
-  clearPendingAbort(id);
-  removePermissionModeForSession(id);
-  clearCurrentDocumentStateForSession(id);
-  clearSelectedAgentForSession(id);
-  clearSelectedMcpsForSession(id);
-  clearSkippedPlanSession(id);
-  clearSelectedModelForSession(id);
-  clearSessionSeen(id);
-  setState('sessionStatus', (statuses) => {
-    const next = { ...statuses };
-    delete next[id];
-    return next;
-  });
-  setSessionUsageLimit(id, null);
-  setSessionFailed(id, false);
-  setState('questions', (items) => items.filter((item) => item.sessionID !== id));
-  setState('permissions', (items) => items.filter((item) => item.sessionID !== id));
-  setState('pendingAttentionSessionIds', (items) => items.filter((sessionId) => sessionId !== id));
-
-  if (state.activeSessionId === id) {
-    clearActiveSessionState();
-  }
+  clearDeletedSessionStateWithLifecycle(getSessionLifecycleDeps(), id);
 }
 
 function hideDeletedSessionTree(id: string, sessions = state.sessions) {
-  const deletedIds = getDeletedSessionTreeIds(id, sessions);
-
-  setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
-  clearPendingAbortTree([...deletedIds]);
-  setState('questions', (items) => items.filter((item) => !deletedIds.has(item.sessionID)));
-  setState('permissions', (items) => items.filter((item) => !deletedIds.has(item.sessionID)));
-  setState('pendingAttentionSessionIds', (items) =>
-    items.filter((sessionId) => !deletedIds.has(sessionId))
-  );
-
-  if (state.activeSessionId && deletedIds.has(state.activeSessionId)) {
-    clearActiveSessionState();
-  }
-
-  return deletedIds;
-}
-
-function getDeletedSessionTreeIds(rootId: string, sessions = state.sessions) {
-  const deleted = new Set<string>();
-  const pending = [rootId];
-
-  while (pending.length > 0) {
-    const currentId = pending.pop();
-    if (!currentId || deleted.has(currentId)) continue;
-    deleted.add(currentId);
-
-    for (const session of sessions) {
-      if (session.parentID === currentId) {
-        pending.push(session.id);
-      }
-    }
-  }
-
-  return deleted;
-}
-
-function getNextSessionIdAfterDeletion(sessions: Session[]) {
-  return sessions.find((session) => !session.parentID)?.id || sessions[0]?.id || null;
+  return hideDeletedSessionTreeWithLifecycle(getSessionLifecycleDeps(), id, sessions);
 }
 
 function removeDeletedSessionTree(id: string, sessions = state.sessions) {
-  const deletedIds = getDeletedSessionTreeIds(id, sessions);
-
-  setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
-
-  for (const deletedId of deletedIds) {
-    clearDeletedSessionState(deletedId);
-  }
-
-  return deletedIds;
+  return removeDeletedSessionTreeWithLifecycle(getSessionLifecycleDeps(), id, sessions);
 }
 
 function upsertSession(session: Session) {
-  if (!isSessionInWorkspace(session, currentWorkspacePath)) {
-    if (state.sessions.some((item) => item.id === session.id)) {
-      applySessions(state.sessions.filter((item) => item.id !== session.id));
-    }
-    return;
-  }
-
-  applySessions([session, ...state.sessions.filter((item) => item.id !== session.id)]);
-
-  if (session.id === state.activeSessionId) {
-    markSessionSeen(session.id, session.time.updated);
-  }
+  upsertSessionWithLifecycle(getSessionLifecycleDeps(), session);
 }
 
-const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
-
-function extractTodosFromParallelTool(raw: unknown): Todo[] | null {
-  if (!raw || typeof raw !== 'object') return null;
-
-  const toolUses = (raw as Record<string, unknown>).tool_uses;
-  if (!Array.isArray(toolUses)) return null;
-
-  for (const toolUse of toolUses) {
-    if (!toolUse || typeof toolUse !== 'object') continue;
-
-    const record = toolUse as Record<string, unknown>;
-    const recipientName =
-      typeof record.recipient_name === 'string' ? record.recipient_name.trim().toLowerCase() : '';
-    if (!recipientName.includes('todowrite')) continue;
-
-    const todos = extractTodos(record.parameters);
-    if (todos) return todos;
-  }
-
-  return null;
-}
-
-function normalizeTodo(raw: unknown): Todo | null {
-  if (!raw || typeof raw !== 'object') return null;
-
-  const record = raw as Record<string, unknown>;
-  const content =
-    typeof record.content === 'string'
-      ? record.content.trim()
-      : typeof record.title === 'string'
-        ? record.title.trim()
-        : '';
-
-  if (!content) return null;
-
-  const id =
-    typeof record.id === 'string' || typeof record.id === 'number' ? String(record.id) : content;
-
+function getSessionLifecycleDeps() {
   return {
-    content,
-    status: typeof record.status === 'string' ? record.status : 'pending',
-    priority: typeof record.priority === 'string' ? record.priority : 'medium',
-    id,
+    getState: () => ({ activeSessionId: state.activeSessionId, sessions: state.sessions }),
+    getCurrentWorkspacePath: () => currentWorkspacePath,
+    setSessions,
+    clearSessionStatusEntry: (sessionId: string) => {
+      setState('sessionStatus', (statuses) => {
+        const next = { ...statuses };
+        delete next[sessionId];
+        return next;
+      });
+    },
+    clearPendingAbort,
+    clearPendingAbortTree,
+    removePermissionModeForSession,
+    clearCurrentDocumentStateForSession,
+    clearSelectedAgentForSession,
+    clearSelectedMcpsForSession,
+    clearSkippedPlanSession,
+    clearSelectedModelForSession,
+    clearSessionSeen,
+    setSessionUsageLimit,
+    setSessionFailed,
+    filterQuestions: (predicate: (sessionId: string) => boolean) =>
+      setState('questions', (items) => items.filter((item) => predicate(item.sessionID))),
+    filterPermissions: (predicate: (sessionId: string) => boolean) =>
+      setState('permissions', (items) => items.filter((item) => predicate(item.sessionID))),
+    filterPendingAttentionSessionIds: (predicate: (sessionId: string) => boolean) =>
+      setState('pendingAttentionSessionIds', (items) =>
+        items.filter((sessionId) => predicate(sessionId))
+      ),
+    clearActiveSessionState,
+    markSessionSeen,
   };
-}
-
-function extractTodos(raw: unknown): Todo[] | null {
-  if (Array.isArray(raw)) {
-    return raw.map(normalizeTodo).filter((todo): todo is Todo => Boolean(todo));
-  }
-
-  if (!raw || typeof raw !== 'object') return null;
-
-  const record = raw as Record<string, unknown>;
-  for (const key of ['todos', 'items', 'plan']) {
-    const todos = extractTodos(record[key]);
-    if (todos) return todos;
-  }
-
-  return null;
-}
-
-function extractTodosFromPart(part: Part): Todo[] | null {
-  if (part.type !== 'tool') return null;
-
-  const toolName = part.tool.trim().toLowerCase();
-  const toolState = part.state as Record<string, unknown>;
-
-  if (toolName === 'parallel' || toolName.endsWith('.parallel')) {
-    return (
-      extractTodosFromParallelTool(toolState.input) ||
-      extractTodosFromParallelTool(toolState.metadata)
-    );
-  }
-
-  if (!toolName.includes('todo') && !TODO_TOOL_NAMES.has(toolName)) {
-    return null;
-  }
-
-  return extractTodos(toolState.input) || extractTodos(toolState.metadata) || null;
 }
 
 function clearPendingAbort(sessionId: string | null | undefined) {
@@ -412,77 +285,6 @@ function shouldIgnorePendingAbortStatus(
   return abortedAttempt == null || status.attempt >= abortedAttempt;
 }
 
-function deriveTodosFromMessages(messages: Array<{ info: Message; parts: Part[] }>): Todo[] {
-  let lastUserMessageIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].info.role === 'user') {
-      lastUserMessageIndex = index;
-      break;
-    }
-  }
-
-  for (
-    let messageIndex = messages.length - 1;
-    messageIndex > lastUserMessageIndex;
-    messageIndex -= 1
-  ) {
-    const message = messages[messageIndex];
-    if (message.info.role !== 'assistant') continue;
-
-    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const todos = extractTodosFromPart(message.parts[partIndex]);
-      if (todos) return todos;
-    }
-  }
-
-  return [];
-}
-
-function getLatestAssistantMessageInTurn(
-  messages: Array<{ info: Message; parts: Part[] }>
-): { info: AssistantMessage; parts: Part[] } | undefined {
-  let lastUserMessageIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].info.role === 'user') {
-      lastUserMessageIndex = index;
-      break;
-    }
-  }
-
-  return messages
-    .slice(lastUserMessageIndex + 1)
-    .findLast(
-      (message): message is { info: AssistantMessage; parts: Part[] } =>
-        message.info.role === 'assistant'
-    );
-}
-
-function getLatestTodoMessageId(messages: Array<{ info: Message; parts: Part[] }>) {
-  let lastUserMessageIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].info.role === 'user') {
-      lastUserMessageIndex = index;
-      break;
-    }
-  }
-
-  for (
-    let messageIndex = messages.length - 1;
-    messageIndex > lastUserMessageIndex;
-    messageIndex -= 1
-  ) {
-    const message = messages[messageIndex];
-    if (message.info.role !== 'assistant') continue;
-
-    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const todos = extractTodosFromPart(message.parts[partIndex]);
-      if (todos) return message.info.id;
-    }
-  }
-
-  return null;
-}
-
 function resetTodoSync() {
   todoStateAuthority = 'messages';
 }
@@ -492,39 +294,23 @@ function applyTheme(nextTheme: WebviewThemeKind) {
 }
 
 function syncTodosFromMessages(messages = state.messages) {
-  if (todoStateAuthority === 'event') return;
-  setState('todos', deriveTodosFromMessages(messages));
+  syncTodosFromMessagesWithState(
+    { authority: todoStateAuthority, todos: state.todos },
+    (todos) => setState('todos', todos),
+    messages
+  );
 }
 
 function handoffTodosToMessages(messages = state.messages) {
-  const nextTodos = deriveTodosFromMessages(messages);
-  const latestAssistant = getLatestAssistantMessageInTurn(messages);
-  const currentTodoMessageId = getLatestTodoMessageId(state.messages);
-
-  // Keep the last event-driven todo snapshot visible until messages catch up.
-  if (todoStateAuthority === 'event' && state.todos.length > 0 && nextTodos.length === 0) {
-    return false;
+  const handedOff = handoffTodosToMessagesWithState(
+    { authority: todoStateAuthority, todos: state.todos },
+    (todos) => setState('todos', todos),
+    messages
+  );
+  if (handedOff) {
+    todoStateAuthority = 'messages';
   }
-
-  // Refreshed message snapshots can briefly lose todo-bearing parts for the same reply,
-  // or introduce a newer unfinished assistant shell before its todo state arrives.
-  if (state.todos.length > 0 && nextTodos.length === 0) {
-    if (!latestAssistant) {
-      return false;
-    }
-
-    if (!latestAssistant.info.time.completed && !latestAssistant.info.error) {
-      return false;
-    }
-
-    if (currentTodoMessageId && latestAssistant.info.id === currentTodoMessageId) {
-      return false;
-    }
-  }
-
-  todoStateAuthority = 'messages';
-  setState('todos', nextTodos);
-  return true;
+  return handedOff;
 }
 
 function deriveSelectedModelFromMessages(messages: Array<{ info: Message; parts: Part[] }>) {
@@ -578,6 +364,14 @@ function getUsageLimitNoticeContext(
   }
 
   return getActiveProviderSelection();
+}
+
+function getDefaultPrimaryAgentNameFromState() {
+  return getDefaultPrimaryAgentName(state.agents);
+}
+
+function getBuildAgentNameFromState() {
+  return getBuildAgentName(state.agents);
 }
 
 export function useOpenCode() {
@@ -808,25 +602,11 @@ export function useOpenCode() {
 }
 
 function getActiveProviderSelection() {
-  const selected = resolveSelectedModel(
-    state.selectedModel,
-    state.providers,
-    state.providerDefaults
-  );
-  if (selected) {
-    return { providerID: selected.providerID, modelID: selected.modelID };
-  }
-
-  const firstProvider = state.providers[0];
-  if (!firstProvider) return null;
-
-  const defaultModelID = state.providerDefaults[firstProvider.id];
-  const fallbackModelID =
-    (defaultModelID && firstProvider.models[defaultModelID] ? defaultModelID : null) ||
-    Object.keys(firstProvider.models)[0];
-  if (!fallbackModelID) return null;
-
-  return { providerID: firstProvider.id, modelID: fallbackModelID };
+  return getActiveProviderSelectionForState({
+    selectedModel: state.selectedModel,
+    providers: state.providers,
+    providerDefaults: state.providerDefaults,
+  });
 }
 
 function clearUsageLimitOnResumedProgress(sessionID: string, nextStatus?: SessionStatus | null) {
@@ -893,37 +673,39 @@ export async function recheckSessionStatus(sessionId: string) {
   }
 }
 
-async function initConnection() {
-  const generation = ++connectionGeneration;
-  try {
-    await client.health();
-    if (!isCurrentGeneration(generation, connectionGeneration)) return;
-    await Promise.all([
-      loadSessions(),
-      loadAgents(),
-      loadCommands(),
-      loadProviders(),
-      loadMcps(),
-      loadQuestions(),
-      loadRecycleBin(),
-    ]);
-    if (!isCurrentGeneration(generation, connectionGeneration)) return;
-    await hydrateSessionStatuses();
-    if (!isCurrentGeneration(generation, connectionGeneration)) return;
-    if (!state.activeSessionId) {
-      const lastId = getPersistedActiveSessionId();
-      if (lastId && state.sessions.some((s) => s.id === lastId)) {
-        await selectSession(lastId);
-        if (!isCurrentGeneration(generation, connectionGeneration)) return;
-      }
+function initConnection() {
+  return initConnectionWithDependencies(
+    {
+      health: client.health,
+      loadInitialData: async () => {
+        await Promise.all([
+          loadSessions(),
+          loadAgents(),
+          loadCommands(),
+          loadProviders(),
+          loadMcps(),
+          loadQuestions(),
+          loadRecycleBin(),
+        ]);
+      },
+      hydrateSessionStatuses,
+      getActiveSessionId: () => state.activeSessionId,
+      getPersistedActiveSessionId,
+      hasSession: (sessionId) => state.sessions.some((session) => session.id === sessionId),
+      selectSession: async (sessionId) => {
+        await selectSession(sessionId);
+      },
+      recoverInterruptedSessions,
+      setInitialized: (value) => {
+        initialized = value;
+      },
+      setError,
+    },
+    {
+      next: () => ++connectionGeneration,
+      isCurrent: (generation) => isCurrentGeneration(generation, connectionGeneration),
     }
-    await recoverInterruptedSessions(generation);
-    if (!isCurrentGeneration(generation, connectionGeneration)) return;
-    initialized = true;
-  } catch (_err) {
-    initialized = false;
-    setError('Failed to connect to OpenCode server');
-  }
+  );
 }
 
 async function loadMcps() {
@@ -981,68 +763,42 @@ export async function applySessionMcps(names: string[], sessionId = state.active
 }
 
 async function recoverInterruptedSessions(generation: number) {
-  const sessionIds = consumeInterruptedSessionIds().filter(
-    (id, index, items) => items.indexOf(id) === index
+  await recoverInterruptedSessionsWithDependencies(
+    {
+      consumeInterruptedSessionIds,
+      isCurrentGeneration: (currentGeneration) =>
+        isCurrentGeneration(currentGeneration, connectionGeneration),
+      hasSession: (sessionId) => state.sessions.some((session) => session.id === sessionId),
+      getSessionStatus: (sessionId) => state.sessionStatus[sessionId],
+      hasPendingQuestion: (sessionId) =>
+        state.questions.some((item) => item.sessionID === sessionId),
+      hasPendingPermission: (sessionId) =>
+        state.permissions.some((item) => item.sessionID === sessionId),
+      loadSessionMessages: (sessionId) => client.session.messages(sessionId),
+      continueInterruptedSession,
+      logError,
+    },
+    generation
   );
-  if (sessionIds.length === 0) return;
-
-  for (const sessionId of sessionIds) {
-    if (!isCurrentGeneration(generation, connectionGeneration)) return;
-    if (!state.sessions.some((session) => session.id === sessionId)) continue;
-
-    const status = state.sessionStatus[sessionId];
-    if (status?.type === 'busy' || status?.type === 'retry') continue;
-    if (state.questions.some((item) => item.sessionID === sessionId)) continue;
-    if (state.permissions.some((item) => item.sessionID === sessionId)) continue;
-
-    try {
-      const messages = await client.session.messages(sessionId);
-      if (!isCurrentGeneration(generation, connectionGeneration)) return;
-      if (!shouldContinueInterruptedSession(messages)) continue;
-      await continueInterruptedSession(sessionId);
-    } catch (err) {
-      logError('recoverInterruptedSession', err);
-    }
-  }
-}
-
-function shouldContinueInterruptedSession(messages: Array<{ info: Message; parts: Part[] }>) {
-  const lastInfo = messages.at(-1)?.info;
-  if (!lastInfo) return false;
-  if (lastInfo.role === 'user') return true;
-  return !lastInfo.error && !lastInfo.time.completed;
 }
 
 async function continueInterruptedSession(sessionId: string) {
-  await syncSessionMcps(sessionId);
-  const model = resolveSelectedModel(
-    getSelectedModelForSession(sessionId),
-    state.providers,
-    state.providerDefaults
+  await continueInterruptedSessionWithDependencies(
+    {
+      syncSessionMcps,
+      resolveModel: (id) =>
+        resolveSelectedModel(
+          getSelectedModelForSession(id),
+          state.providers,
+          state.providerDefaults
+        ),
+      resolveAgent: (id) => getSelectedAgentForSession(id) || getDefaultPrimaryAgentNameFromState(),
+      sendAsync: (id, body) => client.session.sendAsync(id, body),
+      syncSession,
+      recheckSessionStatus,
+    },
+    sessionId
   );
-  const agent = getSelectedAgentForSession(sessionId) || getDefaultPrimaryAgentName();
-  const body: {
-    parts: Array<{ type: string; text: string }>;
-    model?: { providerID: string; modelID: string };
-    agent?: string;
-    variant?: string;
-  } = {
-    parts: [{ type: 'text', text: INTERRUPTED_SESSION_CONTINUE_PROMPT }],
-  };
-
-  if (agent) {
-    body.agent = agent;
-  }
-
-  if (model) {
-    body.model = { providerID: model.providerID, modelID: model.modelID };
-    if (model.variant) {
-      body.variant = model.variant;
-    }
-  }
-
-  await client.session.sendAsync(sessionId, body);
-  await Promise.all([syncSession(sessionId), recheckSessionStatus(sessionId)]).catch(() => {});
 }
 
 function ensureConnectionInitialized() {
@@ -1064,33 +820,22 @@ async function loadQuestions() {
 
 async function loadAgents() {
   try {
-    const agents = await client.agent.list();
-    const visible = agents.filter((a) => !a.hidden);
-    const primaries = visible.filter((a) => a.mode !== 'subagent');
-    setState('allAgents', visible);
-    setState('agents', primaries);
+    const loadedAgents = await client.agent.list();
     const activeSessionId = state.activeSessionId;
-    const activeAgent = state.selectedAgent;
-    if (activeAgent && !primaries.some((agent) => agent.name === activeAgent)) {
-      setSelectedAgent(null, { sessionId: activeSessionId, persistGlobal: !activeSessionId });
-    }
-    if (!activeSessionId) {
-      const defaultAgent = getDefaultPrimaryAgentName();
-      if (defaultAgent && state.selectedAgent !== defaultAgent) {
-        setSelectedAgent(defaultAgent, { persistGlobal: false });
-      }
-      return;
-    }
-    if (!state.selectedAgent) {
-      const sessionAgent = getSelectedAgentForSession(activeSessionId);
-      const globalAgent = getPersistedSelectedAgent();
-      const fallback = [sessionAgent, getDefaultPrimaryAgentName(), globalAgent].find(
-        (candidate): candidate is string =>
-          !!candidate && primaries.some((agent) => agent.name === candidate)
+    const routingState = reconcileLoadedAgents({
+      loadedAgents,
+      activeSessionId,
+      selectedAgent: state.selectedAgent,
+      sessionSelectedAgent: activeSessionId ? getSelectedAgentForSession(activeSessionId) : null,
+      persistedSelectedAgent: getPersistedSelectedAgent(),
+    });
+    setState('allAgents', routingState.visibleAgents);
+    setState('agents', routingState.primaryAgents);
+    if (routingState.nextSelectedAgent) {
+      setSelectedAgent(
+        routingState.nextSelectedAgent.value,
+        routingState.nextSelectedAgent.options
       );
-      if (fallback) {
-        setSelectedAgent(fallback, { sessionId: activeSessionId, persistGlobal: !activeSessionId });
-      }
     }
   } catch (err) {
     logError('loadAgents', err);
@@ -1113,28 +858,13 @@ async function loadProviders() {
     setState('providers', res.providers);
     setState('providerDefaults', res.default || {});
     setState('providersLoaded', true);
-    const effectiveModel = resolveSelectedModel(
-      state.selectedModel,
-      res.providers,
-      res.default || {}
-    );
-    if (state.selectedModel && !effectiveModel) {
-      setSelectedModel(null);
-    } else if (
-      effectiveModel &&
-      state.selectedModel &&
-      state.selectedModel.variant &&
-      !effectiveModel.variant
-    ) {
-      setSelectedModel({ providerID: effectiveModel.providerID, modelID: effectiveModel.modelID });
-    }
-    if (!state.selectedModel && res.providers.length > 0) {
-      const firstProvider = res.providers[0];
-      const defaultModelID = (res.default || {})[firstProvider.id];
-      const modelID = defaultModelID || Object.keys(firstProvider.models)[0];
-      if (modelID) {
-        setSelectedModel({ providerID: firstProvider.id, modelID });
-      }
+    const routingState = reconcileLoadedProviders({
+      selectedModel: state.selectedModel,
+      providers: res.providers,
+      providerDefaults: res.default || {},
+    });
+    if (routingState.nextSelectedModel !== undefined) {
+      setSelectedModel(routingState.nextSelectedModel);
     }
   } catch (err) {
     logError('loadProviders', err);
@@ -1185,119 +915,110 @@ async function hydrateSessionStatuses() {
 }
 
 export async function selectSession(id: string, options?: { markSeen?: boolean }) {
-  const generation = ++sessionSelectionGeneration;
-  clearDraftCurrentDocumentState();
-  resetToolCallExpansionState();
-  setState('activeSessionId', id);
-  persistActiveSessionId(id);
-  if (options?.markSeen ?? true) {
-    markSessionSeen(id);
-  }
-  const persistedAgent = getSelectedAgentForSession(id);
-  if (persistedAgent) {
-    setSelectedAgent(persistedAgent, { sessionId: id, persistGlobal: false });
-  } else {
-    const defaultAgent = getPersistedSelectedAgent() || getDefaultPrimaryAgentName();
-    if (defaultAgent) {
-      setSelectedAgent(defaultAgent, { sessionId: id, persistGlobal: false });
-    }
-  }
-  const persistedModel = resolveSelectedModel(
-    getSelectedModelForSession(id),
-    state.providers,
-    state.providerDefaults
+  await selectSessionWithDependencies(
+    {
+      getActiveSessionId: () => state.activeSessionId,
+      setActiveSessionId: (activeSessionId) => setState('activeSessionId', activeSessionId),
+      persistActiveSessionId,
+      markSessionSeen,
+      clearDraftCurrentDocumentState,
+      resetToolCallExpansionState,
+      resolvePersistedAgent: (sessionId) => ({
+        persistedAgent: getSelectedAgentForSession(sessionId),
+        fallbackAgent: getPersistedSelectedAgent() || getDefaultPrimaryAgentNameFromState(),
+      }),
+      applySelectedAgent: (agent, sessionId) =>
+        setSelectedAgent(agent, { sessionId, persistGlobal: false }),
+      resolvePersistedModel: (sessionId) =>
+        resolveSelectedModel(
+          getSelectedModelForSession(sessionId),
+          state.providers,
+          state.providerDefaults
+        ),
+      resolveFallbackModel: () =>
+        resolveSelectedModel(getPersistedSelectedModel(), state.providers, state.providerDefaults),
+      applySelectedModel: (model, sessionId) =>
+        setSelectedModel(model, { sessionId, persistGlobal: false }),
+      getConnectedMcpNames: () =>
+        Object.entries(state.mcpStatus)
+          .filter(([, value]) => value?.status === 'connected')
+          .map(([name]) => name),
+      hasSelectedMcps: (sessionId) => !!getSelectedMcpsForSession(sessionId),
+      setSelectedMcpsForSession,
+      syncSessionMcps,
+      resetTodoSync,
+      clearMessages,
+      loadSession: async (sessionId) => {
+        const [session, messages] = await Promise.all([
+          client.session.get(sessionId),
+          client.session.messages(sessionId),
+        ]);
+        return { session, messages };
+      },
+      isCurrentSelectionGeneration: (generation) =>
+        isCurrentGeneration(generation, sessionSelectionGeneration),
+      upsertSession,
+      setMessagesIncremental,
+      syncFailedSessionsFromMessages,
+      requestMessageListScrollToBottom,
+      deriveSelectedAgentFromMessages: (messages) => deriveSelectedAgentFromMessages(messages),
+      deriveSelectedModelFromMessages: (messages) =>
+        resolveSelectedModel(
+          deriveSelectedModelFromMessages(messages),
+          state.providers,
+          state.providerDefaults
+        ),
+      syncTodosFromMessages,
+      loadQuestions: async () => {
+        await loadQuestions().catch((err) => logError('loadQuestions', err));
+      },
+      loadSessionStatuses: async () =>
+        client.session.status().catch((err) => {
+          logError('session.status', err);
+          return {} as Record<string, SessionStatus>;
+        }),
+      mergeSessionStatuses: (statuses) =>
+        setState('sessionStatus', (current) => ({ ...current, ...statuses })),
+      updateUsageLimitState,
+      startLoading,
+      stopLoading,
+      setError,
+    },
+    {
+      next: () => ++sessionSelectionGeneration,
+    },
+    id,
+    options
   );
-  if (persistedModel) {
-    setSelectedModel(persistedModel, { sessionId: id, persistGlobal: false });
-  } else {
-    const defaultModel = resolveSelectedModel(
-      getPersistedSelectedModel(),
-      state.providers,
-      state.providerDefaults
-    );
-    setSelectedModel(defaultModel, { sessionId: id, persistGlobal: false });
-  }
-  if (!getSelectedMcpsForSession(id)) {
-    setSelectedMcpsForSession(
-      id,
-      Object.entries(state.mcpStatus)
-        .filter(([, value]) => value?.status === 'connected')
-        .map(([name]) => name)
-    );
-  }
-  await syncSessionMcps(id);
-  resetTodoSync();
-  clearMessages();
-  try {
-    const [session, msgs] = await Promise.all([
-      client.session.get(id),
-      client.session.messages(id),
-    ]);
-    if (
-      !isCurrentGeneration(generation, sessionSelectionGeneration) ||
-      state.activeSessionId !== id
-    )
-      return;
-    upsertSession(session);
-    setMessagesIncremental(msgs);
-    syncFailedSessionsFromMessages(msgs);
-    requestMessageListScrollToBottom();
-    const inferredAgent = !persistedAgent ? deriveSelectedAgentFromMessages(msgs) : null;
-    if (inferredAgent) {
-      setSelectedAgent(inferredAgent, { sessionId: id, persistGlobal: false });
-    }
-    const inferredModel = resolveSelectedModel(
-      deriveSelectedModelFromMessages(msgs),
-      state.providers,
-      state.providerDefaults
-    );
-    if (inferredModel) {
-      setSelectedModel(inferredModel, { sessionId: id, persistGlobal: false });
-    }
-    syncTodosFromMessages(msgs);
-    await loadQuestions().catch((err) => logError('loadQuestions', err));
-    if (
-      !isCurrentGeneration(generation, sessionSelectionGeneration) ||
-      state.activeSessionId !== id
-    )
-      return;
-    const statuses = await client.session.status().catch((err) => {
-      logError('session.status', err);
-      return {} as Record<string, SessionStatus>;
-    });
-    if (
-      !isCurrentGeneration(generation, sessionSelectionGeneration) ||
-      state.activeSessionId !== id
-    )
-      return;
-    setState('sessionStatus', (current) => ({ ...current, ...statuses }));
-    updateUsageLimitState(id, statuses[id], msgs);
-    const statusType = statuses[id]?.type;
-    if (statusType === 'busy' || statusType === 'retry') {
-      startLoading();
-    } else {
-      stopLoading();
-    }
-  } catch (_err) {
-    setError('Failed to load messages');
-  }
 }
 
 async function syncSessionMessages(sessionId: string) {
-  const generation = ++sessionSyncGeneration;
-  const msgs = await client.session.messages(sessionId);
-  if (!isCurrentGeneration(generation, sessionSyncGeneration)) return;
-  updateUsageLimitState(sessionId, state.sessionStatus[sessionId], msgs);
-  if (sessionId === state.activeSessionId) {
-    setMessagesIncremental(msgs);
-    syncFailedSessionsFromMessages(msgs);
-    handoffTodosToMessages(msgs);
-  }
+  await syncSessionMessagesWithDependencies(
+    {
+      getActiveSessionId: () => state.activeSessionId,
+      getSessionStatus: (id) => state.sessionStatus[id],
+      loadSessionMessages: (id) => client.session.messages(id),
+      updateUsageLimitState,
+      setMessagesIncremental,
+      syncFailedSessionsFromMessages,
+      handoffTodosToMessages,
+    },
+    {
+      next: () => ++sessionSyncGeneration,
+      isCurrent: (generation) => isCurrentGeneration(generation, sessionSyncGeneration),
+    },
+    sessionId
+  );
 }
 
 async function syncSession(sessionId: string) {
-  const session = await client.session.get(sessionId);
-  upsertSession(session);
+  await syncSessionWithDependencies(
+    {
+      loadSession: (id) => client.session.get(id),
+      upsertSession,
+    },
+    sessionId
+  );
 }
 
 export async function createSession(
@@ -1327,7 +1048,9 @@ export async function createSession(
       setSelectedModel(defaultModel, { sessionId: session.id, persistGlobal: false });
     }
     const defaultAgent =
-      getBuildAgentName() || getPersistedSelectedAgent() || getDefaultPrimaryAgentName();
+      getBuildAgentNameFromState() ||
+      getPersistedSelectedAgent() ||
+      getDefaultPrimaryAgentNameFromState();
     if (defaultAgent) {
       setSelectedAgent(defaultAgent, { sessionId: session.id, persistGlobal: false });
     }
@@ -1353,7 +1076,7 @@ export async function createSession(
 
 export async function deleteSession(id: string) {
   try {
-    const deletedIds = getDeletedSessionTreeIds(id);
+    const deletedIds = getDeletedSessionTreeIds(id, state.sessions);
     const remainingSessions = state.sessions.filter((session) => !deletedIds.has(session.id));
     const wasActive = state.activeSessionId ? deletedIds.has(state.activeSessionId) : false;
     const nextActiveId = wasActive ? getNextSessionIdAfterDeletion(remainingSessions) : null;
@@ -1429,130 +1152,31 @@ export async function sendMessage(text: string, options?: { noReply?: boolean })
   clearPendingAbort(sessionId);
   await syncSessionMcps(sessionId);
 
-  const effectiveModel = resolveSelectedModel(
-    state.selectedModel,
-    state.providers,
-    state.providerDefaults
-  );
-  const includeClipboardImages = effectiveModel
-    ? modelSupportsVision(effectiveModel.providerID, effectiveModel.modelID, state.providers)
-    : true;
-  const promptText = getPromptTextForClipboardImages(
+  const sendPayload = buildSessionSendBody(
+    {
+      selectedAgent: state.selectedAgent,
+      selectedModel: state.selectedModel,
+      providers: state.providers,
+      providerDefaults: state.providerDefaults,
+      editorContext: state.editorContext,
+      terminalSelection: state.terminalSelection,
+      droppedFiles: state.droppedFiles,
+      clipboardImages: state.clipboardImages,
+    },
+    sessionId,
     text,
-    state.clipboardImages,
-    includeClipboardImages
+    getCurrentDocumentEnabled,
+    options
   );
-
-  const parts: Array<{
-    type: string;
-    text?: string;
-    mime?: string;
-    filename?: string;
-    url?: string;
-  }> = [];
-  if (promptText.trim()) parts.push({ type: 'text', text: promptText });
-
-  const wp = state.editorContext.workspacePath;
-  if (wp) {
-    parts.push({ type: 'text', text: `[Working directory: ${wp}]` });
-  }
-
-  const sel = state.editorContext.selection;
-  const af = state.editorContext.activeFile;
-  const currentDocumentEnabled = getCurrentDocumentEnabled(sessionId);
-  if (af && currentDocumentEnabled) {
-    const activeFilePath = getAttachmentReference({ path: af.path, type: 'file' }, wp);
-    const explicitContext = hasExplicitContextForPath(state.droppedFiles, af.path);
-    const activeSelectionRanges = getSelectionRangesFromEditorContext(sel);
-    const explicitSelectionRanges =
-      explicitContext?.type === 'file' ? explicitContext.lineRanges : undefined;
-    const uniqueActiveSelectionRanges = subtractContextLineRanges(
-      activeSelectionRanges,
-      explicitSelectionRanges
-    );
-    if (explicitContext) {
-      if (uniqueActiveSelectionRanges.length > 0) {
-        parts.push({
-          type: 'text',
-          text: formatSelectionReference(activeFilePath, uniqueActiveSelectionRanges),
-        });
-      }
-      parts.push({
-        type: 'text',
-        text:
-          explicitSelectionRanges && explicitSelectionRanges.length > 0
-            ? formatSelectionReference(activeFilePath, explicitSelectionRanges)
-            : activeFilePath,
-      });
-    } else {
-      parts.push({
-        type: 'text',
-        text:
-          uniqueActiveSelectionRanges.length > 0
-            ? formatSelectionReference(activeFilePath, uniqueActiveSelectionRanges)
-            : `[Active file: ${activeFilePath}]`,
-      });
-    }
-  }
-
-  const terminalSelection = state.terminalSelection;
-  if (terminalSelection) {
-    parts.push({
-      type: 'text',
-      text: `[Selection from terminal ${terminalSelection.terminalName}]\n\`\`\`text\n${terminalSelection.text}\n\`\`\``,
-    });
-  }
-
-  for (const file of state.droppedFiles) {
-    if (isSamePath(file.path, af?.path)) continue;
-    const fileReference = getAttachmentReference(file, wp);
-    parts.push({
-      type: 'text',
-      text: file.lineRanges?.length
-        ? formatSelectionReference(fileReference, file.lineRanges)
-        : fileReference,
-    });
-  }
-
-  if (includeClipboardImages) {
-    for (const image of state.clipboardImages) {
-      parts.push({
-        type: 'file',
-        mime: image.mime,
-        filename: image.filename,
-        url: image.url,
-      });
-    }
-  }
-
-  if (parts.length === 0) return;
+  if (!sendPayload) return;
+  const { body, effectiveModel } = sendPayload;
 
   requestMessageListScrollToBottom();
   startLoading();
   setError(null);
-
-  const body: {
-    parts: typeof parts;
-    model?: { providerID: string; modelID: string };
-    agent?: string;
-    noReply?: boolean;
-    variant?: string;
-  } = { parts };
-  if (state.selectedAgent) body.agent = state.selectedAgent;
   if (effectiveModel) {
     setSelectedModel(effectiveModel, { sessionId });
-    body.model = {
-      providerID: effectiveModel.providerID,
-      modelID: effectiveModel.modelID,
-    };
   }
-  if (effectiveModel?.variant) {
-    body.variant = effectiveModel.variant;
-  } else if (body.model) {
-    body.variant =
-      getPreferredVariant(body.model.providerID, body.model.modelID, state.providers) || undefined;
-  }
-  if (options?.noReply) body.noReply = true;
 
   resetTodoSync();
   setState('todos', []);
@@ -1607,211 +1231,132 @@ export async function retryMessage(messageId: string, sessionId = state.activeSe
 }
 
 export async function implementPlan(prompt: string, sessionId = state.activeSessionId) {
-  if (!sessionId || sessionId !== state.activeSessionId) return;
-
-  const buildAgent = getBuildAgentName();
-  if (!buildAgent) {
-    setError('Build agent is unavailable');
-    return;
-  }
-
-  clearSkippedPlanSession(sessionId);
-  setSelectedAgent(buildAgent, { sessionId, persistGlobal: false });
-  await sendMessage(prompt);
+  await implementPlanWithDependencies(
+    {
+      getActiveSessionId: () => state.activeSessionId,
+      getBuildAgent: getBuildAgentNameFromState,
+      setError,
+      clearSkippedPlanSession,
+      applySelectedAgent: (agent, id) =>
+        setSelectedAgent(agent, { sessionId: id, persistGlobal: false }),
+      sendMessage,
+    },
+    prompt,
+    sessionId
+  );
 }
 
 export async function openPlan(markdown: string, sessionId = state.activeSessionId) {
-  if (!sessionId || sessionId !== state.activeSessionId) return;
-
-  const content = markdown.trim();
-  if (!content) {
-    setError('Plan content is empty');
-    return;
-  }
-
-  try {
-    setError(null);
-    await client.varro.openPlan(content);
-  } catch (err) {
-    setError(err instanceof Error ? err.message : 'Failed to open plan');
-  }
-}
-
-function getAttachmentReference(
-  file: { path: string; type: 'file' | 'directory' },
-  workspacePath: string | null
-) {
-  const relativePath = getWorkspaceRelativePath(file.path, workspacePath) ?? file.path;
-  const normalizedPath = relativePath.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (file.type === 'directory') {
-    return normalizedPath === '.' ? './' : `${normalizedPath}/`;
-  }
-  return normalizedPath;
+  await openPlanWithDependencies(
+    {
+      getActiveSessionId: () => state.activeSessionId,
+      setError,
+      openPlan: (content) => client.varro.openPlan(content),
+    },
+    markdown,
+    sessionId
+  );
 }
 
 export async function abortSession() {
-  if (!state.activeSessionId) return;
-  const sessionId = state.activeSessionId;
-  const sessionTreeIds = getSessionTreeIds(sessionId);
-  if (getSelectedAgentForSession(sessionId) === 'plan') {
-    skipPlanSession(sessionId);
-  }
-  const previousStatuses = new Map(
-    sessionTreeIds.map((id) => [id, state.sessionStatus[id]] as const)
-  );
-  const previousUsageLimits = new Map(
-    sessionTreeIds.map((id) => [id, state.sessionUsageLimits[id] || null] as const)
-  );
-  markPendingAbortTree(sessionTreeIds);
-  for (const id of sessionTreeIds) {
-    setSessionStatusEntry(id, { type: 'idle' });
-  }
-  stopLoading();
-  try {
-    await Promise.all(sessionTreeIds.map((id) => client.session.abort(id)));
-  } catch (err) {
-    clearPendingAbortTree(sessionTreeIds);
-    for (const id of sessionTreeIds) {
-      const previousStatus = previousStatuses.get(id);
-      if (previousStatus) {
-        setSessionStatusEntry(id, previousStatus);
-      }
-      setSessionUsageLimit(id, previousUsageLimits.get(id) || null);
-    }
-    logError('abortSession', err);
-  }
+  await abortSessionWithDependencies({
+    getActiveSessionId: () => state.activeSessionId,
+    getSessionTreeIds,
+    getSelectedAgentForSession,
+    skipPlanSession,
+    getSessionStatus: (sessionId) => state.sessionStatus[sessionId],
+    getSessionUsageLimit: (sessionId) => state.sessionUsageLimits[sessionId],
+    markPendingAbortTree,
+    setSessionStatusEntry,
+    stopLoading,
+    abortRemoteSession: (sessionId) => client.session.abort(sessionId),
+    clearPendingAbortTree,
+    setSessionUsageLimit,
+    logError,
+  });
 }
 
 export async function undoSession() {
-  if (!state.activeSessionId) return;
-  const lastAssistant = [...state.messages].toReversed().find((m) => m.info.role === 'assistant');
-  if (!lastAssistant) return;
-  try {
-    startLoading();
-    await client.session.revert(state.activeSessionId, lastAssistant.info.id);
-    await Promise.all([
-      syncSession(state.activeSessionId),
-      syncSessionMessages(state.activeSessionId),
-    ]);
-    stopLoading();
-  } catch (err) {
-    stopLoading();
-    setError(err instanceof Error ? err.message : 'Failed to undo');
-  }
+  await undoSessionWithDependencies({
+    getActiveSessionId: () => state.activeSessionId,
+    getMessages: () => state.messages,
+    startLoading,
+    revertSession: (sessionId, messageId) => client.session.revert(sessionId, messageId),
+    syncSession,
+    syncSessionMessages,
+    stopLoading,
+    setError,
+  });
 }
 
 export async function redoSession() {
-  if (!state.activeSessionId) return;
-  try {
-    startLoading();
-    const session = await client.session.unrevert(state.activeSessionId);
-    upsertSession(session);
-    await Promise.all([
-      syncSession(state.activeSessionId),
-      syncSessionMessages(state.activeSessionId),
-    ]);
-    stopLoading();
-  } catch (err) {
-    stopLoading();
-    setError(err instanceof Error ? err.message : 'Failed to redo');
-  }
+  await redoSessionWithDependencies({
+    getActiveSessionId: () => state.activeSessionId,
+    startLoading,
+    unrevertSession: (sessionId) => client.session.unrevert(sessionId),
+    upsertSession,
+    syncSession,
+    syncSessionMessages,
+    stopLoading,
+    setError,
+  });
 }
 
-const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file containing:
-1. Build, lint, and test commands - especially the command to run a single test.
-2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
-
-The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
-If there's already an AGENTS.md, improve it. If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), include them.`;
-
 export async function initSession() {
-  let sessionId = state.activeSessionId;
-  if (!sessionId) {
-    const createdId = await createSession(undefined, getPermissionModeForSession(null));
-    if (!createdId) return;
-    sessionId = createdId;
-  }
-
-  if (sessionId === state.activeSessionId && state.messages.length > 0) {
-    setError('Init is only available for blank sessions');
-    return;
-  }
-
-  await sendMessage(INIT_PROMPT);
+  await initSessionWithDependencies({
+    getActiveSessionId: () => state.activeSessionId,
+    createSession: () => createSession(undefined, getPermissionModeForSession(null)),
+    getMessageCount: () => state.messages.length,
+    setError,
+    sendMessage,
+  });
 }
 
 export async function runSlashCommandByName(name: string, args: string) {
-  const command = state.commands.find((item) => item.name === name);
-  if (!command) {
-    setError(`Unknown command: /${name}`);
-    return false;
-  }
-
-  let sessionId = state.activeSessionId;
-  if (!sessionId) {
-    const createdId = await createSession(undefined, getPermissionModeForSession(null));
-    if (!createdId) return false;
-    sessionId = createdId;
-  }
-
-  try {
-    startLoading();
-    const result = await client.session.command(sessionId, {
-      command: name,
-      arguments: args,
-    });
-    if (state.activeSessionId === sessionId) {
-      upsertMessageInfo(result.info);
-      for (const part of result.parts) {
-        upsertPart(part);
-      }
-      syncTodosFromMessages();
-      requestMessageListScrollToBottom();
-    }
-    await Promise.all([syncSession(sessionId), recheckSessionStatus(sessionId)]).catch(() => {});
-    stopLoading();
-    return true;
-  } catch (err) {
-    stopLoading();
-    setError(err instanceof Error ? err.message : `Failed to run /${name}`);
-    return false;
-  }
+  return runSlashCommandWithDependencies(
+    {
+      hasCommand: (commandName) => state.commands.some((item) => item.name === commandName),
+      getActiveSessionId: () => state.activeSessionId,
+      createSession: () => createSession(undefined, getPermissionModeForSession(null)),
+      startLoading,
+      runSessionCommand: (sessionId, input) => client.session.command(sessionId, input),
+      shouldApplyToActiveSession: (sessionId) => state.activeSessionId === sessionId,
+      upsertMessageInfo,
+      upsertPart,
+      syncTodosFromMessages,
+      requestMessageListScrollToBottom,
+      syncSession,
+      recheckSessionStatus,
+      stopLoading,
+      setError,
+    },
+    name,
+    args
+  );
 }
 
 export async function reviewSession() {
-  if (!state.activeSessionId) return;
-  await sendMessage('review the current changes in my code and provide feedback');
+  await reviewSessionWithDependencies({
+    getActiveSessionId: () => state.activeSessionId,
+    sendMessage,
+  });
 }
 
 export async function compactSession() {
-  if (!state.activeSessionId) return;
-  const sessionId = state.activeSessionId;
-  clearPendingAbort(sessionId);
-  const effectiveModel = resolveSelectedModel(
-    state.selectedModel,
-    state.providers,
-    state.providerDefaults
-  );
-  if (!effectiveModel) {
-    setError('Select a model before compacting the session');
-    return;
-  }
-  try {
-    setSessionCompacting(sessionId, true);
-    startLoading();
-    await client.session.compact(sessionId, {
-      providerID: effectiveModel.providerID,
-      modelID: effectiveModel.modelID,
-    });
-    await Promise.all([syncSession(sessionId), syncSessionMessages(sessionId)]);
-    const compacting = state.sessions.find((session) => session.id === sessionId)?.time.compacting;
-    if (!compacting) setSessionCompacting(sessionId, false);
-    stopLoading();
-  } catch (err) {
-    stopLoading();
-    setSessionCompacting(sessionId, false);
-    setError(err instanceof Error ? err.message : 'Failed to compact session');
-  }
+  await compactSessionWithDependencies({
+    getActiveSessionId: () => state.activeSessionId,
+    clearPendingAbort,
+    resolveSelectedModel: () =>
+      resolveSelectedModel(state.selectedModel, state.providers, state.providerDefaults),
+    setError,
+    setSessionCompacting,
+    startLoading,
+    compactRemoteSession: (sessionId, input) => client.session.compact(sessionId, input),
+    syncSession,
+    syncSessionMessages,
+    getSession: (sessionId) => state.sessions.find((session) => session.id === sessionId),
+    stopLoading,
+  });
 }
 
 export async function respondPermission(
@@ -1820,44 +1365,39 @@ export async function respondPermission(
   response: 'once' | 'always' | 'reject',
   options?: { rethrow?: boolean }
 ) {
-  try {
-    const permission = state.permissions.find(
-      (item) =>
-        item.id === permissionId ||
-        item.duplicateIDs?.includes(permissionId) ||
-        item.groupMembers?.some((member) => member.id === permissionId)
-    );
-    const groupMembers = permission?.groupMembers?.length
-      ? permission.groupMembers
-      : [{ id: permissionId, sessionID: sessionId }];
-    await Promise.all(
-      groupMembers.map((member) =>
-        client.session.respondPermission(member.sessionID, member.id, response)
-      )
-    );
-    groupMembers.forEach((member) => removePermission(member.id));
-  } catch (err) {
-    setError(err instanceof Error ? err.message : 'Failed to respond to permission');
-    if (options?.rethrow) {
-      throw err;
-    }
-  }
+  await respondPermissionWithDependencies(
+    {
+      getPermissions: () => state.permissions,
+      respondPermission: (targetSessionId, targetPermissionId, targetResponse) =>
+        client.session.respondPermission(targetSessionId, targetPermissionId, targetResponse),
+      removePermission,
+      setError,
+    },
+    sessionId,
+    permissionId,
+    response,
+    options
+  );
 }
 
 export async function respondQuestion(requestID: string, answers: Array<Array<string>>) {
-  try {
-    await client.question.reply(requestID, answers);
-    removeQuestion(requestID);
-  } catch (err) {
-    setError(err instanceof Error ? err.message : 'Failed to answer question');
-  }
+  await respondQuestionWithDependencies(
+    {
+      replyQuestion: (id, responseAnswers) => client.question.reply(id, responseAnswers),
+      removeQuestion,
+      setError,
+    },
+    requestID,
+    answers
+  );
 }
 
 async function autoApprovePermissionsForSession(permissions: Permission[]) {
-  await Promise.all(
-    permissions.map((permission) =>
-      respondPermission(permission.sessionID, permission.id, 'always').catch(() => {})
-    )
+  await autoApprovePermissionsForSessionWithDependencies(
+    {
+      respondPermission,
+    },
+    permissions
   );
 }
 
@@ -1865,39 +1405,35 @@ export async function updatePermissionModeForSession(
   mode: 'default' | 'full',
   sessionId = state.activeSessionId
 ) {
-  const previousMode = getPermissionModeForSession(sessionId);
-  const previousDraft = draftPermissionMode();
-  setPermissionModeForSession(sessionId, mode);
-  setDraftPermissionMode(mode);
-  saveProjectPermissionMode(mode);
-  if (!sessionId) return;
-
-  try {
-    const session = await client.session.update(sessionId, {
-      permission: getSessionPermissionRulesForMode(mode, 'update'),
-    });
-    upsertSession(session);
-  } catch (err) {
-    setPermissionModeForSession(sessionId, previousMode);
-    setDraftPermissionMode(previousDraft);
-    saveProjectPermissionMode(previousDraft);
-    setError(err instanceof Error ? err.message : 'Failed to update permissions');
-    return;
-  }
-
-  if (mode !== 'full') return;
-  await autoApprovePermissionsForSession(
-    state.permissions.filter((permission) => permission.sessionID === sessionId)
+  await updatePermissionModeForSessionWithDependencies(
+    {
+      getPermissionModeForSession,
+      getDraftPermissionMode: draftPermissionMode,
+      setPermissionModeForSession,
+      setDraftPermissionMode,
+      saveProjectPermissionMode,
+      updateSessionPermission: (id, input) => client.session.update(id, input),
+      upsertSession,
+      setError,
+      getPermissionsForSession: (id) =>
+        state.permissions.filter((permission) => permission.sessionID === id),
+      autoApprovePermissionsForSession,
+    },
+    mode,
+    getSessionPermissionRulesForMode(mode, 'update'),
+    sessionId
   );
 }
 
 export async function rejectQuestion(requestID: string) {
-  try {
-    await client.question.reject(requestID);
-    removeQuestion(requestID);
-  } catch (err) {
-    setError(err instanceof Error ? err.message : 'Failed to reject question');
-  }
+  await rejectQuestionWithDependencies(
+    {
+      rejectQuestion: (id) => client.question.reject(id),
+      removeQuestion,
+      setError,
+    },
+    requestID
+  );
 }
 
 function updateUsageLimitState(
