@@ -145,3 +145,104 @@ export async function updatePermissionModeForSessionWithDependencies(
 export function getQuestionById(questions: QuestionRequest[], requestId: string) {
   return questions.find((question) => question.id === requestId) || null;
 }
+
+export function createSessionApprovalOperations(deps: {
+  getPermissions(): Permission[];
+  respondRemotePermission(
+    sessionId: string,
+    permissionId: string,
+    response: PermissionResponse
+  ): Promise<unknown>;
+  removePermission(permissionId: string): void;
+  setError(message: string): void;
+  replyQuestion(requestId: string, answers: Array<Array<string>>): Promise<unknown>;
+  removeQuestion(requestId: string): void;
+  rejectRemoteQuestion(requestId: string): Promise<unknown>;
+  getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode;
+  getDraftPermissionMode(): PermissionMode;
+  setPermissionModeForSession(sessionId: string | null | undefined, mode: PermissionMode): void;
+  setDraftPermissionMode(mode: PermissionMode): void;
+  saveProjectPermissionMode(mode: PermissionMode): void;
+  updateSessionPermission(
+    sessionId: string,
+    input: { permission: Session['permission'] }
+  ): Promise<Session>;
+  upsertSession(session: Session): void;
+  getPermissionsForSession(sessionId: string): Permission[];
+}) {
+  const operations = {
+    respondPermission: async (
+      sessionId: string,
+      permissionId: string,
+      response: PermissionResponse,
+      options?: { rethrow?: boolean }
+    ) => {
+      await respondPermissionWithDependencies(
+        {
+          getPermissions: deps.getPermissions,
+          respondPermission: deps.respondRemotePermission,
+          removePermission: deps.removePermission,
+          setError: deps.setError,
+        },
+        sessionId,
+        permissionId,
+        response,
+        options
+      );
+    },
+    respondQuestion: async (requestId: string, answers: Array<Array<string>>) => {
+      await respondQuestionWithDependencies(
+        {
+          replyQuestion: deps.replyQuestion,
+          removeQuestion: deps.removeQuestion,
+          setError: deps.setError,
+        },
+        requestId,
+        answers
+      );
+    },
+    rejectQuestion: async (requestId: string) => {
+      await rejectQuestionWithDependencies(
+        {
+          rejectQuestion: deps.rejectRemoteQuestion,
+          removeQuestion: deps.removeQuestion,
+          setError: deps.setError,
+        },
+        requestId
+      );
+    },
+    autoApprovePermissionsForSession: async (permissions: Permission[]) => {
+      await autoApprovePermissionsForSessionWithDependencies(
+        {
+          respondPermission: operations.respondPermission,
+        },
+        permissions
+      );
+    },
+    updatePermissionModeForSession: async (
+      mode: PermissionMode,
+      permissionRules: Session['permission'],
+      sessionId: string | null | undefined
+    ) => {
+      await updatePermissionModeForSessionWithDependencies(
+        {
+          getPermissionModeForSession: deps.getPermissionModeForSession,
+          getDraftPermissionMode: deps.getDraftPermissionMode,
+          setPermissionModeForSession: deps.setPermissionModeForSession,
+          setDraftPermissionMode: deps.setDraftPermissionMode,
+          saveProjectPermissionMode: deps.saveProjectPermissionMode,
+          updateSessionPermission: deps.updateSessionPermission,
+          upsertSession: deps.upsertSession,
+          setError: deps.setError,
+          getPermissionsForSession: deps.getPermissionsForSession,
+          autoApprovePermissionsForSession: operations.autoApprovePermissionsForSession,
+        },
+        mode,
+        permissionRules,
+        sessionId
+      );
+    },
+  };
+
+  return operations;
+}

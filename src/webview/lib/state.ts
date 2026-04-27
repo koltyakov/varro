@@ -1,5 +1,7 @@
 import { batch, createSignal } from 'solid-js';
+import type { Accessor, Setter } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
+import type { SetStoreFunction, Store } from 'solid-js/store';
 import type {
   Session,
   Message,
@@ -31,18 +33,33 @@ import { mergeContextFile } from '../../shared/context-files';
 import type { UsageLimitNotice } from './usage-limit';
 import { isAbortedAssistantError } from './aborted';
 import { createMessageIndex } from './message-index';
+import {
+  getSessionMarkerWorkspaceScope,
+  isSessionUnreadMarker,
+  isSkippedPlanSessionMarker,
+  nextSeenSessions,
+  nextSkippedPlanSessions,
+  pruneSkippedPlanSessions,
+  readInitialSessionMarkerScope,
+  readScopedSessionMarkerState,
+  removeSessionMarker,
+  writeScopedSessionMarkerState,
+} from './state-session-markers';
 import { createSessionTreeIndex, collectSessionTreeIds } from './session-tree-index';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
+import {
+  areMessageEntriesEquivalent,
+  getSharedMessagePrefixLength,
+  type MessageEntry,
+} from './message-entry-sync';
 import { createStreamingDeltaQueue } from './streaming-deltas';
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
 export type SessionSelectedAgents = Record<string, string>;
 export type SessionSelectedModels = Record<string, SelectedModel>;
 export type SessionSelectedMcps = Record<string, string[]>;
-type SessionMarkerMap = Record<string, number>;
-type ScopedSessionMarkerStore = Record<string, SessionMarkerMap>;
 
-interface AppState {
+export interface AppState {
   serverStatus: ServerStatus;
   providersLoaded: boolean;
   editorContext: EditorContext;
@@ -112,62 +129,341 @@ const defaultEditorContext: EditorContext = {
   diagnostics: [],
 };
 
-const initialWebviewState = readInitialWebviewState();
-const NO_WORKSPACE_STORAGE_SCOPE = '__varro.no-workspace__';
-let sessionMarkerWorkspaceScope = getSessionMarkerWorkspaceScope(
-  initialWebviewState.editorContext?.workspacePath
-);
-const initialLastSeenSessions = readInitialSessionMarkerScope(STORAGE_KEYS.lastSeenSessions);
-const initialSkippedPlanSessions = readInitialSessionMarkerScope(STORAGE_KEYS.skippedPlanSessions);
+type SessionTreeIndex = ReturnType<typeof createSessionTreeIndex>;
+type MessageIndex = ReturnType<typeof createMessageIndex>;
+type StreamingDeltaQueue = ReturnType<typeof createStreamingDeltaQueue>;
 
-export const [state, setState] = createStore<AppState>({
-  serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
-  providersLoaded: false,
-  editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
-  terminalSelection: initialWebviewState.terminalSelection ?? null,
-  emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
-  draftCurrentDocumentEnabled: null,
-  droppedFiles: initialWebviewState.droppedFiles ?? [],
-  clipboardImages: [],
-  sessions: [],
-  recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
-  activeSessionId: null,
-  currentDocumentEnabledBySession: {},
-  sessionStatus: {},
-  messages: [],
-  todos: [],
-  permissions: normalizeInitialPermissions(initialWebviewState.pendingPermissions),
-  questions: normalizeInitialQuestions(initialWebviewState.pendingQuestions),
-  pendingAttentionSessionIds: collectInitialPendingAttentionSessionIds(initialWebviewState),
-  diffs: [],
-  streamingPartId: null,
-  streamingText: '',
-  agents: [],
-  allAgents: [],
-  commands: [],
-  providers: [],
-  providerLimits: {},
-  mcpStatus: {},
-  providerDefaults: {},
-  sessionPermissionModes:
-    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
-  selectedAgent: readStored<string>(STORAGE_KEYS.selectedAgent),
-  sessionSelectedAgents:
-    readStored<SessionSelectedAgents>(STORAGE_KEYS.sessionSelectedAgents) || {},
-  selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
-  sessionSelectedModels:
-    readStored<SessionSelectedModels>(STORAGE_KEYS.sessionSelectedModels) || {},
-  sessionSelectedMcps: readStored<SessionSelectedMcps>(STORAGE_KEYS.sessionSelectedMcps) || {},
-  hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
-  hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
-  lastSeenSessions: initialLastSeenSessions,
-  skippedPlanSessions: initialSkippedPlanSessions,
-  compactingSessionIds: [],
-  queuedMessages: [],
-  failedSessionIds: [],
-  sessionUsageLimits: {},
-  interruptedSessionIds: initialWebviewState.interruptedSessionIds ?? [],
-});
+export interface AppStateInstance {
+  state: Store<AppState>;
+  setState: SetStoreFunction<AppState>;
+  showThinking: Accessor<boolean>;
+  setShowThinking: Setter<boolean>;
+  expandThinkingByDefault: Accessor<boolean>;
+  setExpandThinkingByDefault: Setter<boolean>;
+  showStickyUserPrompt: Accessor<boolean>;
+  setShowStickyUserPrompt: Setter<boolean>;
+  desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
+  setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
+  inputText: Accessor<string>;
+  setInputText: Setter<string>;
+  nextPastedImageIndex: Accessor<number>;
+  setNextPastedImageIndex: Setter<number>;
+  isLoading: Accessor<boolean>;
+  setIsLoading: Setter<boolean>;
+  loadingStartedAt: Accessor<number | null>;
+  setLoadingStartedAt: Setter<number | null>;
+  loadingLastActivityAt: Accessor<number | null>;
+  setLoadingLastActivityAt: Setter<number | null>;
+  error: Accessor<string | null>;
+  setError: Setter<string | null>;
+  showSessionPicker: Accessor<boolean>;
+  setShowSessionPicker: Setter<boolean>;
+  showModelPicker: Accessor<boolean>;
+  setShowModelPicker: Setter<boolean>;
+  showSettings: Accessor<boolean>;
+  setShowSettings: Setter<boolean>;
+  composerFocusKey: Accessor<number>;
+  setComposerFocusKey: Setter<number>;
+  openAttentionSessionsKey: Accessor<number>;
+  setOpenAttentionSessionsKey: Setter<number>;
+  messageListScrollRequestKey: Accessor<number>;
+  setMessageListScrollRequestKey: Setter<number>;
+  messageStructureVersion: Accessor<number>;
+  setMessageStructureVersion: Setter<number>;
+  draftPermissionMode: Accessor<PermissionMode>;
+  setDraftPermissionMode: Setter<PermissionMode>;
+  theme: Accessor<WebviewThemeKind>;
+  setTheme: Setter<WebviewThemeKind>;
+  sessionMarkerWorkspaceScope: string;
+  permissionWorkspace: string | null;
+  sessionTreeIndex: SessionTreeIndex;
+  messageIndex: MessageIndex;
+  streamingDeltaQueue: StreamingDeltaQueue;
+}
+
+export function createAppState(): AppStateInstance {
+  const initialWebviewState = readInitialWebviewState();
+  const sessionMarkerWorkspaceScope = getSessionMarkerWorkspaceScope(
+    initialWebviewState.editorContext?.workspacePath
+  );
+  const sessionMarkerStorage = { readStored, writeStored };
+  const initialLastSeenSessions = readInitialSessionMarkerScope(
+    sessionMarkerStorage,
+    STORAGE_KEYS.lastSeenSessions,
+    sessionMarkerWorkspaceScope
+  );
+  const initialSkippedPlanSessions = readInitialSessionMarkerScope(
+    sessionMarkerStorage,
+    STORAGE_KEYS.skippedPlanSessions,
+    sessionMarkerWorkspaceScope
+  );
+
+  const [state, setState] = createStore<AppState>({
+    serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
+    providersLoaded: false,
+    editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
+    terminalSelection: initialWebviewState.terminalSelection ?? null,
+    emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
+    draftCurrentDocumentEnabled: null,
+    droppedFiles: initialWebviewState.droppedFiles ?? [],
+    clipboardImages: [],
+    sessions: [],
+    recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
+    activeSessionId: null,
+    currentDocumentEnabledBySession: {},
+    sessionStatus: {},
+    messages: [],
+    todos: [],
+    permissions: normalizeInitialPermissions(initialWebviewState.pendingPermissions),
+    questions: normalizeInitialQuestions(initialWebviewState.pendingQuestions),
+    pendingAttentionSessionIds: collectInitialPendingAttentionSessionIds(initialWebviewState),
+    diffs: [],
+    streamingPartId: null,
+    streamingText: '',
+    agents: [],
+    allAgents: [],
+    commands: [],
+    providers: [],
+    providerLimits: {},
+    mcpStatus: {},
+    providerDefaults: {},
+    sessionPermissionModes:
+      readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
+    selectedAgent: readStored<string>(STORAGE_KEYS.selectedAgent),
+    sessionSelectedAgents:
+      readStored<SessionSelectedAgents>(STORAGE_KEYS.sessionSelectedAgents) || {},
+    selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
+    sessionSelectedModels:
+      readStored<SessionSelectedModels>(STORAGE_KEYS.sessionSelectedModels) || {},
+    sessionSelectedMcps: readStored<SessionSelectedMcps>(STORAGE_KEYS.sessionSelectedMcps) || {},
+    hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
+    hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
+    lastSeenSessions: initialLastSeenSessions,
+    skippedPlanSessions: initialSkippedPlanSessions,
+    compactingSessionIds: [],
+    queuedMessages: [],
+    failedSessionIds: [],
+    sessionUsageLimits: {},
+    interruptedSessionIds: initialWebviewState.interruptedSessionIds ?? [],
+  });
+
+  const [showThinking, setShowThinking] = createSignal(readShowThinking());
+  const [expandThinkingByDefault, setExpandThinkingByDefault] = createSignal(
+    readExpandThinkingByDefault(initialWebviewState)
+  );
+  const [showStickyUserPrompt, setShowStickyUserPrompt] = createSignal(
+    readShowStickyUserPrompt(initialWebviewState)
+  );
+  const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
+    readDesktopSessionPaneSide(initialWebviewState)
+  );
+  const [inputText, setInputText] = createSignal('');
+  const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
+  const [isLoading, setIsLoading] = createSignal(false);
+  const [loadingStartedAt, setLoadingStartedAt] = createSignal<number | null>(null);
+  const [loadingLastActivityAt, setLoadingLastActivityAt] = createSignal<number | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
+  const [showSessionPicker, setShowSessionPicker] = createSignal(false);
+  const [showModelPicker, setShowModelPicker] = createSignal(false);
+  const [showSettings, setShowSettings] = createSignal(false);
+  const [composerFocusKey, setComposerFocusKey] = createSignal(0);
+  const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
+  const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
+  const [messageStructureVersion, setMessageStructureVersion] = createSignal(0);
+  const sessionTreeIndex = createSessionTreeIndex();
+  const messageIndex = createMessageIndex(() => {
+    setMessageStructureVersion((value) => value + 1);
+  });
+  const permissionWorkspace: string | null =
+    initialWebviewState.editorContext?.workspacePath ?? null;
+  const [draftPermissionMode, setDraftPermissionMode] = createSignal<PermissionMode>(
+    resolveInitialDraftMode(permissionWorkspace)
+  );
+  const [theme, setTheme] = createSignal<WebviewThemeKind>(
+    initialWebviewState.theme ||
+      ((window as unknown as Record<string, string>).__initialTheme as WebviewThemeKind) ||
+      'dark'
+  );
+
+  const appState = {
+    state,
+    setState,
+    showThinking,
+    setShowThinking,
+    expandThinkingByDefault,
+    setExpandThinkingByDefault,
+    showStickyUserPrompt,
+    setShowStickyUserPrompt,
+    desktopSessionPaneSide,
+    setDesktopSessionPaneSide,
+    inputText,
+    setInputText,
+    nextPastedImageIndex,
+    setNextPastedImageIndex,
+    isLoading,
+    setIsLoading,
+    loadingStartedAt,
+    setLoadingStartedAt,
+    loadingLastActivityAt,
+    setLoadingLastActivityAt,
+    error,
+    setError,
+    showSessionPicker,
+    setShowSessionPicker,
+    showModelPicker,
+    setShowModelPicker,
+    showSettings,
+    setShowSettings,
+    composerFocusKey,
+    setComposerFocusKey,
+    openAttentionSessionsKey,
+    setOpenAttentionSessionsKey,
+    messageListScrollRequestKey,
+    setMessageListScrollRequestKey,
+    messageStructureVersion,
+    setMessageStructureVersion,
+    draftPermissionMode,
+    setDraftPermissionMode,
+    theme,
+    setTheme,
+    sessionMarkerWorkspaceScope,
+    permissionWorkspace,
+    sessionTreeIndex,
+    messageIndex,
+    streamingDeltaQueue: null as unknown as StreamingDeltaQueue,
+  } satisfies AppStateInstance;
+
+  appState.streamingDeltaQueue = createStreamingDeltaQueue(() => {
+    flushPendingStreamingDeltasFor(appState);
+  });
+
+  return appState;
+}
+
+let currentAppState = createAppState();
+
+export let state: Store<AppState>;
+export let setState: SetStoreFunction<AppState>;
+export let showThinking: Accessor<boolean>;
+export let setShowThinking: Setter<boolean>;
+export let expandThinkingByDefault: Accessor<boolean>;
+export let setExpandThinkingByDefault: Setter<boolean>;
+export let showStickyUserPrompt: Accessor<boolean>;
+export let setShowStickyUserPrompt: Setter<boolean>;
+export let desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
+export let setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
+export let inputText: Accessor<string>;
+export let setInputText: Setter<string>;
+export let nextPastedImageIndex: Accessor<number>;
+export let setNextPastedImageIndex: Setter<number>;
+export let isLoading: Accessor<boolean>;
+export let setIsLoading: Setter<boolean>;
+export let loadingStartedAt: Accessor<number | null>;
+export let setLoadingStartedAt: Setter<number | null>;
+export let loadingLastActivityAt: Accessor<number | null>;
+export let setLoadingLastActivityAt: Setter<number | null>;
+export let error: Accessor<string | null>;
+export let setError: Setter<string | null>;
+export let showSessionPicker: Accessor<boolean>;
+export let setShowSessionPicker: Setter<boolean>;
+export let showModelPicker: Accessor<boolean>;
+export let setShowModelPicker: Setter<boolean>;
+export let showSettings: Accessor<boolean>;
+export let setShowSettings: Setter<boolean>;
+export let composerFocusKey: Accessor<number>;
+export let setComposerFocusKey: Setter<number>;
+export let openAttentionSessionsKey: Accessor<number>;
+export let setOpenAttentionSessionsKey: Setter<number>;
+export let messageListScrollRequestKey: Accessor<number>;
+export let setMessageListScrollRequestKey: Setter<number>;
+export let messageStructureVersion: Accessor<number>;
+export let setMessageStructureVersion: Setter<number>;
+export let draftPermissionMode: Accessor<PermissionMode>;
+export let setDraftPermissionMode: Setter<PermissionMode>;
+export let theme: Accessor<WebviewThemeKind>;
+export let setTheme: Setter<WebviewThemeKind>;
+
+let sessionTreeIndex: SessionTreeIndex;
+let messageIndex: MessageIndex;
+let streamingDeltaQueue: StreamingDeltaQueue;
+
+function syncAppStateBindings(appState: AppStateInstance) {
+  state = appState.state;
+  setState = appState.setState;
+  showThinking = appState.showThinking;
+  setShowThinking = appState.setShowThinking;
+  expandThinkingByDefault = appState.expandThinkingByDefault;
+  setExpandThinkingByDefault = appState.setExpandThinkingByDefault;
+  showStickyUserPrompt = appState.showStickyUserPrompt;
+  setShowStickyUserPrompt = appState.setShowStickyUserPrompt;
+  desktopSessionPaneSide = appState.desktopSessionPaneSide;
+  setDesktopSessionPaneSide = appState.setDesktopSessionPaneSide;
+  inputText = appState.inputText;
+  setInputText = appState.setInputText;
+  nextPastedImageIndex = appState.nextPastedImageIndex;
+  setNextPastedImageIndex = appState.setNextPastedImageIndex;
+  isLoading = appState.isLoading;
+  setIsLoading = appState.setIsLoading;
+  loadingStartedAt = appState.loadingStartedAt;
+  setLoadingStartedAt = appState.setLoadingStartedAt;
+  loadingLastActivityAt = appState.loadingLastActivityAt;
+  setLoadingLastActivityAt = appState.setLoadingLastActivityAt;
+  error = appState.error;
+  setError = appState.setError;
+  showSessionPicker = appState.showSessionPicker;
+  setShowSessionPicker = appState.setShowSessionPicker;
+  showModelPicker = appState.showModelPicker;
+  setShowModelPicker = appState.setShowModelPicker;
+  showSettings = appState.showSettings;
+  setShowSettings = appState.setShowSettings;
+  composerFocusKey = appState.composerFocusKey;
+  setComposerFocusKey = appState.setComposerFocusKey;
+  openAttentionSessionsKey = appState.openAttentionSessionsKey;
+  setOpenAttentionSessionsKey = appState.setOpenAttentionSessionsKey;
+  messageListScrollRequestKey = appState.messageListScrollRequestKey;
+  setMessageListScrollRequestKey = appState.setMessageListScrollRequestKey;
+  messageStructureVersion = appState.messageStructureVersion;
+  setMessageStructureVersion = appState.setMessageStructureVersion;
+  draftPermissionMode = appState.draftPermissionMode;
+  setDraftPermissionMode = appState.setDraftPermissionMode;
+  theme = appState.theme;
+  setTheme = appState.setTheme;
+  sessionTreeIndex = appState.sessionTreeIndex;
+  messageIndex = appState.messageIndex;
+  streamingDeltaQueue = appState.streamingDeltaQueue;
+}
+
+syncAppStateBindings(currentAppState);
+
+export function getCurrentAppState() {
+  return currentAppState;
+}
+
+export function installAppState(appState: AppStateInstance) {
+  const previous = currentAppState;
+  currentAppState = appState;
+  syncAppStateBindings(appState);
+  return () => {
+    currentAppState = previous;
+    syncAppStateBindings(previous);
+  };
+}
+
+function getSessionMarkerWorkspaceScopeValue() {
+  return getCurrentAppState().sessionMarkerWorkspaceScope;
+}
+
+function setSessionMarkerWorkspaceScopeValue(value: string) {
+  getCurrentAppState().sessionMarkerWorkspaceScope = value;
+}
+
+function getPermissionWorkspaceValue() {
+  return getCurrentAppState().permissionWorkspace;
+}
+
+function setPermissionWorkspaceValue(value: string | null) {
+  getCurrentAppState().permissionWorkspace = value;
+}
 
 export function consumeInterruptedSessionIds() {
   const ids = [...state.interruptedSessionIds];
@@ -415,47 +711,64 @@ export function getPersistedActiveSessionId(): string | null {
 }
 
 export function markSessionSeen(id: string, updatedAt?: number) {
-  const seenAt = Math.max(state.lastSeenSessions[id] ?? 0, updatedAt ?? 0, Date.now());
-  if (state.lastSeenSessions[id] === seenAt) return;
-  const nextSessions = { ...state.lastSeenSessions, [id]: seenAt };
+  const nextSessions = nextSeenSessions(state.lastSeenSessions, id, updatedAt);
+  if (!nextSessions) return;
   setState('lastSeenSessions', reconcile(nextSessions));
-  writeScopedSessionMarkerState(STORAGE_KEYS.lastSeenSessions, nextSessions);
+  writeScopedSessionMarkerState(
+    { readStored, writeStored },
+    STORAGE_KEYS.lastSeenSessions,
+    getSessionMarkerWorkspaceScopeValue(),
+    nextSessions
+  );
 }
 
 export function clearSessionSeen(id: string) {
-  if (!(id in state.lastSeenSessions)) return;
-  const nextSessions = { ...state.lastSeenSessions };
-  delete nextSessions[id];
+  const nextSessions = removeSessionMarker(state.lastSeenSessions, id);
+  if (!nextSessions) return;
   setState('lastSeenSessions', reconcile(nextSessions));
-  writeScopedSessionMarkerState(STORAGE_KEYS.lastSeenSessions, nextSessions);
+  writeScopedSessionMarkerState(
+    { readStored, writeStored },
+    STORAGE_KEYS.lastSeenSessions,
+    getSessionMarkerWorkspaceScopeValue(),
+    nextSessions
+  );
 }
 
 export function skipPlanSession(sessionId: string, updatedAt?: number) {
-  const sessionUpdatedAt =
-    updatedAt ?? state.sessions.find((session) => session.id === sessionId)?.time.updated;
-  if (typeof sessionUpdatedAt !== 'number') return;
-
-  const next = { ...state.skippedPlanSessions, [sessionId]: sessionUpdatedAt };
+  const next = nextSkippedPlanSessions(
+    state.skippedPlanSessions,
+    state.sessions,
+    sessionId,
+    updatedAt
+  );
+  if (!next) return;
   setState('skippedPlanSessions', reconcile(next));
-  writeScopedSessionMarkerState(STORAGE_KEYS.skippedPlanSessions, next);
+  writeScopedSessionMarkerState(
+    { readStored, writeStored },
+    STORAGE_KEYS.skippedPlanSessions,
+    getSessionMarkerWorkspaceScopeValue(),
+    next
+  );
 }
 
 export function clearSkippedPlanSession(sessionId: string) {
-  if (!(sessionId in state.skippedPlanSessions)) return;
-  const nextSessions = { ...state.skippedPlanSessions };
-  delete nextSessions[sessionId];
+  const nextSessions = removeSessionMarker(state.skippedPlanSessions, sessionId);
+  if (!nextSessions) return;
   setState('skippedPlanSessions', reconcile(nextSessions));
-  writeScopedSessionMarkerState(STORAGE_KEYS.skippedPlanSessions, nextSessions);
+  writeScopedSessionMarkerState(
+    { readStored, writeStored },
+    STORAGE_KEYS.skippedPlanSessions,
+    getSessionMarkerWorkspaceScopeValue(),
+    nextSessions
+  );
 }
 
 export function isSkippedPlanSession(sessionId: string, updatedAt: number) {
-  const skippedAt = state.skippedPlanSessions[sessionId];
-  return typeof skippedAt === 'number' && skippedAt >= updatedAt;
+  return isSkippedPlanSessionMarker(state.skippedPlanSessions, sessionId, updatedAt);
 }
 
 export function isSessionUnread(sessionId: string, updatedAt: number) {
-  const seen = state.lastSeenSessions[sessionId] ?? 0;
-  return updatedAt > seen;
+  return isSessionUnreadMarker(state.lastSeenSessions, sessionId, updatedAt);
 }
 
 export function setSessionCompacting(sessionId: string, compacting: boolean) {
@@ -479,8 +792,6 @@ export function isSessionCompacting() {
   return !!state.sessions.find((session) => session.id === sid)?.time.compacting;
 }
 
-export const [showThinking, setShowThinking] = createSignal(readShowThinking());
-
 export function toggleThinking() {
   const next = !showThinking();
   setShowThinkingPreference(next);
@@ -491,32 +802,15 @@ export function setShowThinkingPreference(next: boolean) {
   writeStored(STORAGE_KEYS.showThinking, next);
 }
 
-export const [expandThinkingByDefault, setExpandThinkingByDefault] = createSignal(
-  readExpandThinkingByDefault()
-);
-
 export function setExpandThinkingByDefaultPreference(next: boolean) {
   setExpandThinkingByDefault(next);
   writeStored(STORAGE_KEYS.expandThinkingByDefault, next);
 }
 
-export const [showStickyUserPrompt, setShowStickyUserPrompt] = createSignal(
-  readShowStickyUserPrompt()
-);
-
 export function setShowStickyUserPromptPreference(next: boolean) {
   setShowStickyUserPrompt(next);
   writeStored(STORAGE_KEYS.showStickyUserPrompt, next);
 }
-
-export const [desktopSessionPaneSide, setDesktopSessionPaneSide] =
-  createSignal<DesktopSessionPaneSide>(readDesktopSessionPaneSide());
-
-export const [inputText, setInputText] = createSignal('');
-export const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
-export const [isLoading, setIsLoading] = createSignal(false);
-export const [loadingStartedAt, setLoadingStartedAt] = createSignal<number | null>(null);
-export const [loadingLastActivityAt, setLoadingLastActivityAt] = createSignal<number | null>(null);
 
 export function startLoading(now = Date.now()) {
   if (!isLoading()) {
@@ -568,39 +862,6 @@ export function isSessionAwaitingInput(sessionId: string) {
   ].some((candidateSessionId) => sessionIds.has(candidateSessionId));
 }
 
-export const [error, setError] = createSignal<string | null>(null);
-export const [showSessionPicker, setShowSessionPicker] = createSignal(false);
-export const [showModelPicker, setShowModelPicker] = createSignal(false);
-export const [showSettings, setShowSettings] = createSignal(false);
-export const [composerFocusKey, setComposerFocusKey] = createSignal(0);
-export const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
-export const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
-export const [messageStructureVersion, setMessageStructureVersion] = createSignal(0);
-const sessionTreeIndex = createSessionTreeIndex();
-const messageIndex = createMessageIndex(() => bumpMessageStructureVersion());
-let permissionWorkspace: string | null = initialWebviewState.editorContext?.workspacePath ?? null;
-
-function bumpMessageStructureVersion() {
-  setMessageStructureVersion((value) => value + 1);
-}
-
-function resolveInitialDraftMode(): PermissionMode {
-  if (permissionWorkspace) {
-    const modes =
-      readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
-    if (modes[permissionWorkspace]) return modes[permissionWorkspace];
-  }
-  return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default';
-}
-
-export const [draftPermissionMode, setDraftPermissionMode] =
-  createSignal<PermissionMode>(resolveInitialDraftMode());
-export const [theme, setTheme] = createSignal<WebviewThemeKind>(
-  initialWebviewState.theme ||
-    ((window as unknown as Record<string, string>).__initialTheme as WebviewThemeKind) ||
-    'dark'
-);
-
 export function requestComposerFocus() {
   setComposerFocusKey((value) => value + 1);
 }
@@ -630,7 +891,9 @@ function readShowThinking(): boolean {
   return readStored<boolean>(STORAGE_KEYS.showThinking) ?? true;
 }
 
-function readExpandThinkingByDefault(): boolean {
+function readExpandThinkingByDefault(
+  initialWebviewState: Partial<InitialWebviewState> = readInitialWebviewState()
+): boolean {
   return (
     initialWebviewState.expandThinkingByDefault ??
     readStored<boolean>(STORAGE_KEYS.expandThinkingByDefault) ??
@@ -638,7 +901,9 @@ function readExpandThinkingByDefault(): boolean {
   );
 }
 
-function readShowStickyUserPrompt(): boolean {
+function readShowStickyUserPrompt(
+  initialWebviewState: Partial<InitialWebviewState> = readInitialWebviewState()
+): boolean {
   return (
     initialWebviewState.showStickyUserPrompt ??
     readStored<boolean>(STORAGE_KEYS.showStickyUserPrompt) ??
@@ -646,8 +911,19 @@ function readShowStickyUserPrompt(): boolean {
   );
 }
 
-function readDesktopSessionPaneSide(): DesktopSessionPaneSide {
+function readDesktopSessionPaneSide(
+  initialWebviewState: Partial<InitialWebviewState> = readInitialWebviewState()
+): DesktopSessionPaneSide {
   return initialWebviewState.desktopSessionPaneSide === 'right' ? 'right' : 'left';
+}
+
+function resolveInitialDraftMode(permissionWorkspace: string | null): PermissionMode {
+  if (permissionWorkspace) {
+    const modes =
+      readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+    if (modes[permissionWorkspace]) return modes[permissionWorkspace];
+  }
+  return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default';
 }
 
 export function setCurrentDocumentEnabled(
@@ -801,13 +1077,15 @@ export function clearSelectedMcpsForSession(sessionId: string) {
 export function resetDraftPermissionMode() {
   const modes =
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+  const permissionWorkspace = getPermissionWorkspaceValue();
   const projectMode = permissionWorkspace && modes[permissionWorkspace];
   setDraftPermissionMode(projectMode || 'default');
   writeStored(STORAGE_KEYS.draftPermissionMode, null);
 }
 
 export function syncDraftPermissionForWorkspace(workspacePath: string | null) {
-  permissionWorkspace = workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '') || null;
+  const permissionWorkspace = workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '') || null;
+  setPermissionWorkspaceValue(permissionWorkspace);
   const modes =
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
   const mode =
@@ -816,6 +1094,7 @@ export function syncDraftPermissionForWorkspace(workspacePath: string | null) {
 }
 
 export function saveProjectPermissionMode(mode: PermissionMode) {
+  const permissionWorkspace = getPermissionWorkspaceValue();
   if (!permissionWorkspace) return;
   const modes =
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
@@ -926,19 +1205,44 @@ export function setCommands(commands: Command[]) {
 
 export function setSessions(nextSessions: Session[]) {
   setState('sessions', nextSessions);
-  pruneScopedSkippedPlanSessions(new Set(nextSessions.map((session) => session.id)));
+  const nextMarkers = pruneSkippedPlanSessions(
+    state.skippedPlanSessions,
+    new Set(nextSessions.map((session) => session.id))
+  );
+  if (nextMarkers) {
+    setState('skippedPlanSessions', reconcile(nextMarkers));
+    writeScopedSessionMarkerState(
+      { readStored, writeStored },
+      STORAGE_KEYS.skippedPlanSessions,
+      getSessionMarkerWorkspaceScopeValue(),
+      nextMarkers
+    );
+  }
   sessionTreeIndex.invalidate();
 }
 
 export function syncSessionMarkersForWorkspace(workspacePath: string | null | undefined) {
-  sessionMarkerWorkspaceScope = getSessionMarkerWorkspaceScope(workspacePath);
+  const scope = getSessionMarkerWorkspaceScope(workspacePath);
+  setSessionMarkerWorkspaceScopeValue(scope);
   setState(
     'lastSeenSessions',
-    reconcile(readScopedSessionMarkerState(STORAGE_KEYS.lastSeenSessions))
+    reconcile(
+      readScopedSessionMarkerState(
+        { readStored, writeStored },
+        STORAGE_KEYS.lastSeenSessions,
+        scope
+      )
+    )
   );
   setState(
     'skippedPlanSessions',
-    reconcile(readScopedSessionMarkerState(STORAGE_KEYS.skippedPlanSessions))
+    reconcile(
+      readScopedSessionMarkerState(
+        { readStored, writeStored },
+        STORAGE_KEYS.skippedPlanSessions,
+        scope
+      )
+    )
   );
 }
 
@@ -1011,82 +1315,6 @@ function readInitialWebviewState(): Partial<InitialWebviewState> {
   const value = (window as unknown as { __initialWebviewState?: InitialWebviewState })
     .__initialWebviewState;
   return value && typeof value === 'object' ? value : {};
-}
-
-function normalizeWorkspacePath(path: string | null | undefined) {
-  if (!path) return null;
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized || null;
-}
-
-function getSessionMarkerWorkspaceScope(workspacePath: string | null | undefined) {
-  return normalizeWorkspacePath(workspacePath) || NO_WORKSPACE_STORAGE_SCOPE;
-}
-
-function isSessionMarkerMap(value: unknown): value is SessionMarkerMap {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  return Object.values(value as Record<string, unknown>).every(
-    (item) => typeof item === 'number' && Number.isFinite(item)
-  );
-}
-
-function sanitizeSessionMarkerMap(value: unknown): SessionMarkerMap {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const sanitized: SessionMarkerMap = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof item === 'number' && Number.isFinite(item)) {
-      sanitized[key] = item;
-    }
-  }
-  return sanitized;
-}
-
-function readScopedSessionMarkerStore(key: string): ScopedSessionMarkerStore {
-  const raw = readStored<unknown>(key);
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || isSessionMarkerMap(raw)) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>).map(([workspaceScope, value]) => [
-      workspaceScope,
-      sanitizeSessionMarkerMap(value),
-    ])
-  );
-}
-
-function readInitialSessionMarkerScope(key: string): SessionMarkerMap {
-  const raw = readStored<unknown>(key);
-  if (isSessionMarkerMap(raw)) {
-    const markers = sanitizeSessionMarkerMap(raw);
-    writeStored(key, { [sessionMarkerWorkspaceScope]: markers });
-    return markers;
-  }
-
-  return readScopedSessionMarkerState(key);
-}
-
-function readScopedSessionMarkerState(key: string): SessionMarkerMap {
-  return readScopedSessionMarkerStore(key)[sessionMarkerWorkspaceScope] || {};
-}
-
-function writeScopedSessionMarkerState(key: string, markers: SessionMarkerMap) {
-  const nextStore = readScopedSessionMarkerStore(key);
-  if (Object.keys(markers).length === 0) {
-    delete nextStore[sessionMarkerWorkspaceScope];
-  } else {
-    nextStore[sessionMarkerWorkspaceScope] = markers;
-  }
-  writeStored(key, nextStore);
-}
-
-function pruneScopedSkippedPlanSessions(sessionIds: Set<string>) {
-  const nextMarkers = Object.fromEntries(
-    Object.entries(state.skippedPlanSessions).filter(([id]) => sessionIds.has(id))
-  );
-  if (Object.keys(nextMarkers).length === Object.keys(state.skippedPlanSessions).length) return;
-  setState('skippedPlanSessions', reconcile(nextMarkers));
-  writeScopedSessionMarkerState(STORAGE_KEYS.skippedPlanSessions, nextMarkers);
 }
 
 export function isModelVisible(providerID: string, modelID: string) {
@@ -1218,21 +1446,19 @@ export function resolveSelectedModel(
   return candidate;
 }
 
-const streamingDeltaQueue = createStreamingDeltaQueue(() => flushPendingStreamingDeltas());
-
-function flushPendingStreamingDeltas() {
-  const deltas = streamingDeltaQueue.takeAll();
+function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
+  const deltas = appState.streamingDeltaQueue.takeAll();
   if (deltas.length === 0) return;
   const latest = deltas[deltas.length - 1];
 
   batch(() => {
-    setState('streamingPartId', latest.partId);
-    setState('streamingText', latest.text);
-    setState(
+    appState.setState('streamingPartId', latest.partId);
+    appState.setState('streamingText', latest.text);
+    appState.setState(
       'messages',
       produce((msgs) => {
         for (const item of deltas) {
-          const location = messageIndex.findPartLocation(msgs, item.partId);
+          const location = appState.messageIndex.findPartLocation(msgs, item.partId);
           if (location) {
             const part = msgs[location.msgIdx]?.parts[location.partIdx];
             if (part.type === 'text' || part.type === 'reasoning') {
@@ -1241,7 +1467,7 @@ function flushPendingStreamingDeltas() {
             continue;
           }
 
-          const msgIdx = messageIndex.findMessageIndex(msgs, item.messageId);
+          const msgIdx = appState.messageIndex.findMessageIndex(msgs, item.messageId);
           if (msgIdx === -1) continue;
           msgs[msgIdx].parts.push({
             id: item.partId,
@@ -1250,11 +1476,15 @@ function flushPendingStreamingDeltas() {
             type: 'text',
             text: item.text,
           });
-          messageIndex.invalidate();
+          appState.messageIndex.invalidate();
         }
       })
     );
   });
+}
+
+function flushPendingStreamingDeltas() {
+  flushPendingStreamingDeltasFor(getCurrentAppState());
 }
 
 export function upsertMessage(msg: { info: Message; parts: Part[] }) {
@@ -1526,9 +1756,7 @@ export function hasActiveUsageLimit(sessionId: string | null | undefined) {
   return !!getActiveUsageLimitNotice(sessionId);
 }
 
-export function syncFailedSessionsFromMessages(
-  messages: Array<{ info: Message; parts: Part[] }> = state.messages
-) {
+export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.messages) {
   const failedSessionIds = new Set<string>();
   const scopedSessionIds = new Set<string>();
 
@@ -1552,13 +1780,13 @@ export function syncFailedSessionsFromMessages(
   ]);
 }
 
-export function replaceMessages(incoming: Array<{ info: Message; parts: Part[] }>) {
+export function replaceMessages(incoming: MessageEntry[]) {
   streamingDeltaQueue.reset();
   setState('messages', incoming);
   messageIndex.invalidate();
 }
 
-export function setMessagesIncremental(incoming: Array<{ info: Message; parts: Part[] }>) {
+export function setMessagesIncremental(incoming: MessageEntry[]) {
   clearStreamingState();
   const current = state.messages;
   if (current === incoming) return;
@@ -1605,61 +1833,6 @@ export function setMessagesIncremental(incoming: Array<{ info: Message; parts: P
       if (changed) messageIndex.invalidate();
     })
   );
-}
-
-function getSharedMessagePrefixLength(
-  current: Array<{ info: Message; parts: Part[] }>,
-  incoming: Array<{ info: Message; parts: Part[] }>
-) {
-  const minLen = Math.min(current.length, incoming.length);
-  let index = 0;
-  while (index < minLen && current[index].info.id === incoming[index].info.id) {
-    index += 1;
-  }
-  return index;
-}
-
-function areMessageEntriesEquivalent(
-  left: { info: Message; parts: Part[] },
-  right: { info: Message; parts: Part[] }
-) {
-  if (left === right) return true;
-  if (left.info !== right.info && !deepEqual(left.info, right.info)) return false;
-  if (left.parts === right.parts) return true;
-  if (left.parts.length !== right.parts.length) return false;
-
-  for (let index = 0; index < left.parts.length; index += 1) {
-    if (
-      left.parts[index] !== right.parts[index] &&
-      !deepEqual(left.parts[index], right.parts[index])
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i += 1) {
-      if (!deepEqual(a[i], b[i])) return false;
-    }
-    return true;
-  }
-  if (Array.isArray(b)) return false;
-  const aKeys = Object.keys(a as Record<string, unknown>);
-  const bKeys = Object.keys(b as Record<string, unknown>);
-  if (aKeys.length !== bKeys.length) return false;
-  for (const key of aKeys) {
-    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-    if (!deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) {
-      return false;
-    }
-  }
-  return true;
 }
 
 export function getChildRunsByParentId(

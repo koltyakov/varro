@@ -1,7 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { MockedObject } from 'vitest';
+import type * as StateModule from '../lib/state';
 
-const { serverEventsOn } = vi.hoisted(() => ({
+const {
+  serverEventsOn,
+  addPermission,
+  removePermission,
+  setState,
+  getPermissionModeForSession,
+  state,
+} = vi.hoisted(() => ({
   serverEventsOn: vi.fn(),
+  addPermission: vi.fn(),
+  removePermission: vi.fn(),
+  setState: vi.fn(),
+  getPermissionModeForSession: vi.fn(),
+  state: {
+    activeSessionId: null,
+    messages: [],
+  },
 }));
 
 vi.mock('../lib/client', () => ({
@@ -10,7 +27,22 @@ vi.mock('../lib/client', () => ({
   },
 }));
 
-import { registerSessionEventHandlers } from './session-event-handlers';
+vi.mock('../lib/state', async () => {
+  const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
+  return {
+    ...actual,
+    state,
+    addPermission,
+    getPermissionModeForSession,
+    removePermission,
+    setState,
+  };
+});
+
+import {
+  createSessionEventHandlerOperations,
+  registerSessionEventHandlers,
+} from './session-event-handlers';
 
 describe('registerSessionEventHandlers', () => {
   it('restores the permission prompt when auto-approval fails', async () => {
@@ -25,7 +57,6 @@ describe('registerSessionEventHandlers', () => {
       };
     });
 
-    const addPermission = vi.fn();
     const respondPermission = vi
       .fn()
       .mockRejectedValue(new Error('Permission backend unavailable'));
@@ -45,30 +76,13 @@ describe('registerSessionEventHandlers', () => {
       setSessionStatusEntry: vi.fn(),
       clearUsageLimitOnResumedProgress: vi.fn(),
       updateUsageLimitState: vi.fn(),
-      startLoading: vi.fn(),
-      stopLoading: vi.fn(),
-      markSessionSeen: vi.fn(),
       syncSession: vi.fn().mockResolvedValue(undefined),
       shouldResyncSessionAfterIdle: () => false,
       syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      markLoadingActivity: vi.fn(),
-      upsertMessageInfo: vi.fn(),
-      setSessionFailed: vi.fn(),
-      parseUsageLimitNotice: () => null,
       applyUsageLimitNotice: vi.fn(),
-      setSessionUsageLimit: vi.fn(),
-      upsertPart: vi.fn(),
       syncTodosFromMessages: vi.fn(),
-      applyMessagePartDelta: vi.fn(),
-      removeMessagePart: vi.fn(),
-      clearStreamingState: vi.fn(),
-      replaceMessages: vi.fn(),
       shouldAutoApprovePermissions: () => true,
       respondPermission,
-      addPermission,
-      removePermission: vi.fn(),
-      upsertQuestion: vi.fn(),
-      removeQuestion: vi.fn(),
       extractTodos: () => null,
       setDiffs: vi.fn(),
     });
@@ -108,8 +122,6 @@ describe('registerSessionEventHandlers', () => {
       };
     });
 
-    const removePermission = vi.fn();
-
     registerSessionEventHandlers({
       getActiveSessionId: () => null,
       getMessages: () => [],
@@ -125,30 +137,13 @@ describe('registerSessionEventHandlers', () => {
       setSessionStatusEntry: vi.fn(),
       clearUsageLimitOnResumedProgress: vi.fn(),
       updateUsageLimitState: vi.fn(),
-      startLoading: vi.fn(),
-      stopLoading: vi.fn(),
-      markSessionSeen: vi.fn(),
       syncSession: vi.fn().mockResolvedValue(undefined),
       shouldResyncSessionAfterIdle: () => false,
       syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      markLoadingActivity: vi.fn(),
-      upsertMessageInfo: vi.fn(),
-      setSessionFailed: vi.fn(),
-      parseUsageLimitNotice: () => null,
       applyUsageLimitNotice: vi.fn(),
-      setSessionUsageLimit: vi.fn(),
-      upsertPart: vi.fn(),
       syncTodosFromMessages: vi.fn(),
-      applyMessagePartDelta: vi.fn(),
-      removeMessagePart: vi.fn(),
-      clearStreamingState: vi.fn(),
-      replaceMessages: vi.fn(),
       shouldAutoApprovePermissions: () => false,
       respondPermission: vi.fn().mockResolvedValue(undefined),
-      addPermission: vi.fn(),
-      removePermission,
-      upsertQuestion: vi.fn(),
-      removeQuestion: vi.fn(),
       extractTodos: () => null,
       setDiffs: vi.fn(),
     });
@@ -161,5 +156,77 @@ describe('registerSessionEventHandlers', () => {
     });
 
     expect(removePermission).toHaveBeenCalledWith('perm-1');
+  });
+
+  it('binds event handlers to shared state-backed dependencies', async () => {
+    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(
+        event as string,
+        handler as (data: { properties?: Record<string, unknown> }) => void
+      );
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    getPermissionModeForSession.mockReturnValue('full');
+    state.activeSessionId = 'session-1';
+    state.messages = [];
+    const respondPermission = vi.fn().mockResolvedValue(undefined);
+    const handoffTodosToMessages = vi.fn().mockReturnValue(true);
+    const syncTodosFromMessages = vi.fn();
+
+    const operations = createSessionEventHandlerOperations({
+      setTodoStateAuthority: vi.fn(),
+      todoSyncOperations: {
+        handoffTodosToMessages,
+        syncTodosFromMessages,
+      },
+      sessionLifecycleOperations: {
+        upsertSession: vi.fn(),
+        removeDeletedSessionTree: vi.fn(),
+      },
+      sessionStatusOperations: {
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        clearPendingAbort: vi.fn(),
+        clearUsageLimitOnResumedProgress: vi.fn(),
+        updateUsageLimitState: vi.fn(),
+        applyUsageLimitNotice: vi.fn(),
+      },
+      sessionSyncOperations: {
+        syncSession: vi.fn().mockResolvedValue(undefined),
+        syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      sessionApprovalOperations: {
+        respondPermission,
+      },
+      extractTodos: () => null,
+    });
+
+    operations.registerSessionEventHandlers();
+
+    handlers.get('permission.asked')?.({
+      properties: {
+        id: 'perm-2',
+        sessionID: 'session-1',
+        permission: 'edit',
+        title: 'Edit file',
+      },
+    });
+    handlers.get('session.status')?.({
+      properties: {
+        sessionID: 'session-1',
+        status: { type: 'busy' },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-2', 'always', {
+        rethrow: true,
+      });
+    });
+    expect(setState).toHaveBeenCalledWith('sessionStatus', expect.any(Function));
   });
 });

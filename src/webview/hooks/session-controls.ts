@@ -163,3 +163,101 @@ export async function compactSessionWithDependencies(deps: {
     deps.setError(err instanceof Error ? err.message : 'Failed to compact session');
   }
 }
+
+export function createSessionControlOperations(deps: {
+  getActiveSessionId(): string | null;
+  sendMessage(prompt: string): Promise<void>;
+  getSessionTreeIds(sessionId: string): string[];
+  getSelectedAgentForSession(sessionId: string): string | null;
+  skipPlanSession(sessionId: string): void;
+  getSessionStatus(sessionId: string): SessionStatus | undefined;
+  getSessionUsageLimit(sessionId: string): unknown;
+  markPendingAbortTree(sessionIds: string[]): void;
+  setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
+  stopLoading(): void;
+  abortRemoteSession(sessionId: string): Promise<unknown>;
+  clearPendingAbortTree(sessionIds: string[]): void;
+  setSessionUsageLimit(sessionId: string, notice: unknown): void;
+  logError(context: string, err: unknown): void;
+  getMessages(): Array<{ info: Message }>;
+  startLoading(): void;
+  revertSession(sessionId: string, messageId: string): Promise<unknown>;
+  syncSession(sessionId: string): Promise<void>;
+  syncSessionMessages(sessionId: string): Promise<void>;
+  setError(message: string): void;
+  unrevertSession(sessionId: string): Promise<Session>;
+  upsertSession(session: Session): void;
+  clearPendingAbort(sessionId: string): void;
+  resolveSelectedModel(): ResolvedModel | null;
+  setSessionCompacting(sessionId: string, compacting: boolean): void;
+  compactRemoteSession(
+    sessionId: string,
+    input: { providerID: string; modelID: string }
+  ): Promise<unknown>;
+  getSession(sessionId: string): Session | undefined;
+}) {
+  return {
+    reviewSession: async () => {
+      await reviewSessionWithDependencies({
+        getActiveSessionId: deps.getActiveSessionId,
+        sendMessage: deps.sendMessage,
+      });
+    },
+    abortSession: async () => {
+      await abortSessionWithDependencies({
+        getActiveSessionId: deps.getActiveSessionId,
+        getSessionTreeIds: deps.getSessionTreeIds,
+        getSelectedAgentForSession: deps.getSelectedAgentForSession,
+        skipPlanSession: deps.skipPlanSession,
+        getSessionStatus: deps.getSessionStatus,
+        getSessionUsageLimit: deps.getSessionUsageLimit,
+        markPendingAbortTree: deps.markPendingAbortTree,
+        setSessionStatusEntry: deps.setSessionStatusEntry,
+        stopLoading: deps.stopLoading,
+        abortRemoteSession: deps.abortRemoteSession,
+        clearPendingAbortTree: deps.clearPendingAbortTree,
+        setSessionUsageLimit: deps.setSessionUsageLimit,
+        logError: deps.logError,
+      });
+    },
+    undoSession: async () => {
+      await undoSessionWithDependencies({
+        getActiveSessionId: deps.getActiveSessionId,
+        getMessages: deps.getMessages,
+        startLoading: deps.startLoading,
+        revertSession: deps.revertSession,
+        syncSession: deps.syncSession,
+        syncSessionMessages: deps.syncSessionMessages,
+        stopLoading: deps.stopLoading,
+        setError: deps.setError,
+      });
+    },
+    redoSession: async () => {
+      await redoSessionWithDependencies({
+        getActiveSessionId: deps.getActiveSessionId,
+        startLoading: deps.startLoading,
+        unrevertSession: deps.unrevertSession,
+        upsertSession: deps.upsertSession,
+        syncSession: deps.syncSession,
+        syncSessionMessages: deps.syncSessionMessages,
+        stopLoading: deps.stopLoading,
+        setError: deps.setError,
+      });
+    },
+    compactSession: async () => {
+      await compactSessionWithDependencies({
+        getActiveSessionId: deps.getActiveSessionId,
+        clearPendingAbort: deps.clearPendingAbort,
+        resolveSelectedModel: deps.resolveSelectedModel,
+        setError: deps.setError,
+        setSessionCompacting: deps.setSessionCompacting,
+        startLoading: deps.startLoading,
+        compactRemoteSession: deps.compactRemoteSession,
+        syncSession: deps.syncSession,
+        syncSessionMessages: deps.syncSessionMessages,
+        getSession: deps.getSession,
+        stopLoading: deps.stopLoading,
+      });
+    },
+  };
+}

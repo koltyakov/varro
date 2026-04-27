@@ -1,5 +1,7 @@
 import { resolveSelectedModel, type SelectedModel } from '../lib/state';
-import type { Agent, Provider } from '../types';
+import type { Agent, Message, Part, Provider } from '../types';
+
+type SessionEntry = { info: Message; parts: Part[] };
 
 type AgentSelectionUpdate = {
   value: string | null;
@@ -12,6 +14,34 @@ export function getDefaultPrimaryAgentName(agents: Agent[]) {
 
 export function getBuildAgentName(agents: Agent[]) {
   return agents.find((agent) => agent.name === 'build')?.name || null;
+}
+
+export function deriveSelectedModelFromMessages(messages: SessionEntry[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role === 'user') {
+      return message.model;
+    }
+    return {
+      providerID: message.providerID,
+      modelID: message.modelID,
+      variant: message.variant,
+    } satisfies SelectedModel;
+  }
+
+  return null;
+}
+
+export function deriveSelectedAgentFromMessages(messages: SessionEntry[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role === 'user') return message.agent;
+    if (message.agent) return message.agent;
+  }
+
+  return null;
 }
 
 export function reconcileLoadedAgents(args: {
@@ -127,4 +157,37 @@ export function getActiveProviderSelection(args: {
   if (!fallbackModelID) return null;
 
   return { providerID: firstProvider.id, modelID: fallbackModelID };
+}
+
+export function getUsageLimitNoticeContext(args: {
+  sessionId: string;
+  messages?: SessionEntry[];
+  selectedModelForSession: SelectedModel | null;
+  providers: Provider[];
+  providerDefaults: Record<string, string>;
+  fallbackSelectedModel: SelectedModel | null;
+}) {
+  const selected = resolveSelectedModel(
+    args.selectedModelForSession,
+    args.providers,
+    args.providerDefaults
+  );
+  if (selected) {
+    return { providerID: selected.providerID, modelID: selected.modelID };
+  }
+
+  const derived = resolveSelectedModel(
+    deriveSelectedModelFromMessages(args.messages || []),
+    args.providers,
+    args.providerDefaults
+  );
+  if (derived) {
+    return { providerID: derived.providerID, modelID: derived.modelID };
+  }
+
+  return getActiveProviderSelection({
+    selectedModel: args.fallbackSelectedModel,
+    providers: args.providers,
+    providerDefaults: args.providerDefaults,
+  });
 }

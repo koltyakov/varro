@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Permission, Session } from '../types';
 import {
+  createSessionApprovalOperations,
   autoApprovePermissionsForSessionWithDependencies,
   rejectQuestionWithDependencies,
   respondPermissionWithDependencies,
@@ -170,5 +171,48 @@ describe('session-approvals helpers', () => {
     expect(saveProjectPermissionMode).toHaveBeenNthCalledWith(1, 'full');
     expect(saveProjectPermissionMode).toHaveBeenNthCalledWith(2, 'default');
     expect(setError).toHaveBeenCalledWith('permission update failed');
+  });
+
+  it('creates bound approval operations from shared dependencies', async () => {
+    const respondRemotePermission = vi.fn(async () => {});
+    const replyQuestion = vi.fn(async () => {});
+    const rejectRemoteQuestion = vi.fn(async () => {});
+    const updateSessionPermission = vi.fn(async () => session('session-1'));
+
+    const operations = createSessionApprovalOperations({
+      getPermissions: () => [permission('perm-1')],
+      respondRemotePermission,
+      removePermission: vi.fn(),
+      setError: vi.fn(),
+      replyQuestion,
+      removeQuestion: vi.fn(),
+      rejectRemoteQuestion,
+      getPermissionModeForSession: () => 'default',
+      getDraftPermissionMode: () => 'default',
+      setPermissionModeForSession: vi.fn(),
+      setDraftPermissionMode: vi.fn(),
+      saveProjectPermissionMode: vi.fn(),
+      updateSessionPermission,
+      upsertSession: vi.fn(),
+      getPermissionsForSession: () => [permission('perm-1')],
+    });
+
+    await operations.respondPermission('session-1', 'perm-1', 'always');
+    await operations.respondQuestion('question-1', [['yes']]);
+    await operations.rejectQuestion('question-2');
+    await operations.autoApprovePermissionsForSession([permission('perm-2')]);
+    await operations.updatePermissionModeForSession(
+      'full',
+      [{ permission: 'bash', pattern: '*', action: 'allow' }],
+      'session-1'
+    );
+
+    expect(respondRemotePermission).toHaveBeenCalledWith('session-1', 'perm-1', 'always');
+    expect(replyQuestion).toHaveBeenCalledWith('question-1', [['yes']]);
+    expect(rejectRemoteQuestion).toHaveBeenCalledWith('question-2');
+    expect(respondRemotePermission).toHaveBeenCalledWith('session-1', 'perm-2', 'always');
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', {
+      permission: [{ permission: 'bash', pattern: '*', action: 'allow' }],
+    });
   });
 });

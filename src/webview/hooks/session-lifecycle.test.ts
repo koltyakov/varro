@@ -1,8 +1,74 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { MockedObject } from 'vitest';
+import type * as StateModule from '../lib/state';
 import type { Session, SessionStatus } from '../types';
+
+const {
+  clearMessages,
+  clearCurrentDocumentStateForSession,
+  clearSelectedAgentForSession,
+  clearSelectedMcpsForSession,
+  clearSelectedModelForSession,
+  clearSessionSeen,
+  clearSkippedPlanSession,
+  markSessionSeenState,
+  persistActiveSessionId,
+  removePermissionModeForSession,
+  setSessionFailed,
+  setSessionsState,
+  setSessionUsageLimit,
+  setState,
+  state,
+  stopLoading,
+} = vi.hoisted(() => ({
+  clearMessages: vi.fn(),
+  clearCurrentDocumentStateForSession: vi.fn(),
+  clearSelectedAgentForSession: vi.fn(),
+  clearSelectedMcpsForSession: vi.fn(),
+  clearSelectedModelForSession: vi.fn(),
+  clearSessionSeen: vi.fn(),
+  clearSkippedPlanSession: vi.fn(),
+  markSessionSeenState: vi.fn(),
+  persistActiveSessionId: vi.fn(),
+  removePermissionModeForSession: vi.fn(),
+  setSessionFailed: vi.fn(),
+  setSessionsState: vi.fn(),
+  setSessionUsageLimit: vi.fn(),
+  setState: vi.fn(),
+  state: {
+    activeSessionId: null as string | null,
+    sessions: [] as Session[],
+  },
+  stopLoading: vi.fn(),
+}));
+
+vi.mock('../lib/state', async () => {
+  const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
+  return {
+    ...actual,
+    clearMessages,
+    clearCurrentDocumentStateForSession,
+    clearSelectedAgentForSession,
+    clearSelectedMcpsForSession,
+    clearSelectedModelForSession,
+    clearSessionSeen,
+    clearSkippedPlanSession,
+    markSessionSeen: markSessionSeenState,
+    persistActiveSessionId,
+    removePermissionModeForSession,
+    setSessionFailed,
+    setSessions: setSessionsState,
+    setSessionUsageLimit,
+    setState,
+    state,
+    stopLoading,
+  };
+});
+
 import {
   applySessions,
   clearDeletedSessionState,
+  createSessionLifecycleOperations,
   getDeletedSessionTreeIds,
   getNextSessionIdAfterDeletion,
   normalizeProjectPath,
@@ -137,5 +203,41 @@ describe('session-lifecycle helpers', () => {
 
     expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1', 'session-2']);
     expect(setup.deps.markSessionSeen).toHaveBeenCalledWith('session-1', 3);
+  });
+
+  it('creates bound lifecycle operations from shared state dependencies', () => {
+    const resetTodoSync = vi.fn();
+    const resetToolCallExpansionState = vi.fn();
+    const clearPendingAbort = vi.fn();
+
+    state.activeSessionId = 'session-2';
+    state.sessions = [session('session-1', '/repo-a', 1), session('session-2', '/repo-b', 2)];
+
+    const operations = createSessionLifecycleOperations({
+      getCurrentWorkspacePath: () => '/repo-a',
+      clearPendingAbort,
+      clearPendingAbortTree: vi.fn(),
+      resetTodoSync,
+      resetToolCallExpansionState,
+    });
+
+    operations.applySessions(state.sessions);
+
+    expect(setSessionsState).toHaveBeenCalledWith([session('session-1', '/repo-a', 1)]);
+    expect(resetTodoSync).toHaveBeenCalledTimes(1);
+    expect(resetToolCallExpansionState).toHaveBeenCalledTimes(1);
+    expect(setState).toHaveBeenCalledWith('activeSessionId', null);
+    expect(persistActiveSessionId).toHaveBeenCalledWith(null);
+    expect(clearMessages).toHaveBeenCalledTimes(1);
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    state.activeSessionId = 'session-1';
+    operations.clearDeletedSessionState('session-1');
+
+    expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
+    expect(clearCurrentDocumentStateForSession).toHaveBeenCalledWith('session-1');
+    expect(clearSelectedMcpsForSession).toHaveBeenCalledWith('session-1');
+    expect(setSessionUsageLimit).toHaveBeenCalledWith('session-1', null);
+    expect(setSessionFailed).toHaveBeenCalledWith('session-1', false);
   });
 });

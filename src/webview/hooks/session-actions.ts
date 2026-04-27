@@ -144,3 +144,88 @@ export async function runSlashCommandWithDependencies(
     return false;
   }
 }
+
+export function createSessionActionOperations(deps: {
+  getActiveSessionId(): string | null;
+  getBuildAgent(): string | null;
+  setError(message: string | null): void;
+  clearSkippedPlanSession(sessionId: string): void;
+  applySelectedAgent(agent: string, sessionId: string): void;
+  sendMessage(prompt: string): Promise<void>;
+  openPlan(markdown: string): Promise<unknown>;
+  createSession(): Promise<string | null>;
+  getMessageCount(): number;
+  hasCommand(name: string): boolean;
+  startLoading(): void;
+  runSessionCommand(
+    sessionId: string,
+    input: { command: string; arguments: string }
+  ): Promise<SessionEntry>;
+  shouldApplyToActiveSession(sessionId: string): boolean;
+  upsertMessageInfo(info: Message): void;
+  upsertPart(part: Part): void;
+  syncTodosFromMessages(): void;
+  requestMessageListScrollToBottom(): void;
+  syncSession(sessionId: string): Promise<void>;
+  recheckSessionStatus(sessionId: string): Promise<void>;
+  stopLoading(): void;
+}) {
+  return {
+    implementPlan: async (prompt: string, sessionId: string | null) => {
+      await implementPlanWithDependencies(
+        {
+          getActiveSessionId: deps.getActiveSessionId,
+          getBuildAgent: deps.getBuildAgent,
+          setError: deps.setError,
+          clearSkippedPlanSession: deps.clearSkippedPlanSession,
+          applySelectedAgent: deps.applySelectedAgent,
+          sendMessage: deps.sendMessage,
+        },
+        prompt,
+        sessionId
+      );
+    },
+    openPlan: async (markdown: string, sessionId: string | null) => {
+      await openPlanWithDependencies(
+        {
+          getActiveSessionId: deps.getActiveSessionId,
+          setError: deps.setError,
+          openPlan: deps.openPlan,
+        },
+        markdown,
+        sessionId
+      );
+    },
+    initSession: async () => {
+      await initSessionWithDependencies({
+        getActiveSessionId: deps.getActiveSessionId,
+        createSession: deps.createSession,
+        getMessageCount: deps.getMessageCount,
+        setError: deps.setError,
+        sendMessage: deps.sendMessage,
+      });
+    },
+    runSlashCommandByName: async (name: string, args: string) => {
+      return runSlashCommandWithDependencies(
+        {
+          hasCommand: deps.hasCommand,
+          getActiveSessionId: deps.getActiveSessionId,
+          createSession: deps.createSession,
+          startLoading: deps.startLoading,
+          runSessionCommand: deps.runSessionCommand,
+          shouldApplyToActiveSession: deps.shouldApplyToActiveSession,
+          upsertMessageInfo: deps.upsertMessageInfo,
+          upsertPart: deps.upsertPart,
+          syncTodosFromMessages: deps.syncTodosFromMessages,
+          requestMessageListScrollToBottom: deps.requestMessageListScrollToBottom,
+          syncSession: deps.syncSession,
+          recheckSessionStatus: deps.recheckSessionStatus,
+          stopLoading: deps.stopLoading,
+          setError: deps.setError,
+        },
+        name,
+        args
+      );
+    },
+  };
+}

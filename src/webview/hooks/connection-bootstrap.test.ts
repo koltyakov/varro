@@ -3,6 +3,8 @@ import type { Message, SessionStatus } from '../types';
 import {
   buildInterruptedSessionContinueBody,
   continueInterruptedSessionWithDependencies,
+  createConnectionBootstrapOperations,
+  ensureConnectionInitializedWithDependencies,
   initConnectionWithDependencies,
   INTERRUPTED_SESSION_CONTINUE_PROMPT,
   recoverInterruptedSessionsWithDependencies,
@@ -227,5 +229,82 @@ describe('connection-bootstrap helpers', () => {
 
     expect(setInitialized).toHaveBeenCalledWith(false);
     expect(setError).toHaveBeenCalledWith('Failed to connect to OpenCode server');
+  });
+
+  it('starts connection initialization only once at a time', async () => {
+    let initializing = false;
+    let resolveInit: (() => void) | null = null;
+    const initConnection = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveInit = resolve;
+        })
+    );
+
+    ensureConnectionInitializedWithDependencies({
+      isInitialized: () => false,
+      isInitializing: () => initializing,
+      initConnection,
+      setInitializing: (value) => {
+        initializing = value;
+      },
+    });
+
+    ensureConnectionInitializedWithDependencies({
+      isInitialized: () => false,
+      isInitializing: () => initializing,
+      initConnection,
+      setInitializing: (value) => {
+        initializing = value;
+      },
+    });
+
+    expect(initConnection).toHaveBeenCalledTimes(1);
+
+    resolveInit?.();
+    await Promise.resolve();
+    expect(initializing).toBe(false);
+  });
+
+  it('creates bound bootstrap operations from one dependency bag', async () => {
+    const callOrder: string[] = [];
+
+    const operations = createConnectionBootstrapOperations({
+      health: async () => {
+        callOrder.push('health');
+      },
+      loadInitialData: async () => {
+        callOrder.push('load');
+      },
+      hydrateSessionStatuses: async () => {
+        callOrder.push('hydrate');
+      },
+      getActiveSessionId: () => null,
+      getPersistedActiveSessionId: () => 'session-1',
+      hasSession: () => true,
+      selectSession: async (sessionId) => {
+        callOrder.push(`select:${sessionId}`);
+      },
+      setInitialized: vi.fn(),
+      setError: vi.fn(),
+      nextConnectionGeneration: () => 1,
+      isCurrentConnectionGeneration: () => true,
+      consumeInterruptedSessionIds: () => [],
+      getSessionStatus: () => ({ type: 'idle' }),
+      hasPendingQuestion: () => false,
+      hasPendingPermission: () => false,
+      loadSessionMessages: async () => [],
+      logError: vi.fn(),
+      syncSessionMcps: vi.fn(async () => {}),
+      resolveModel: () => null,
+      resolveAgent: () => null,
+      sendAsync: vi.fn(async () => {}),
+      syncSession: vi.fn(async () => {}),
+      recheckSessionStatus: vi.fn(async () => {}),
+    });
+
+    await operations.initConnection();
+
+    expect(callOrder).toEqual(['health', 'load', 'hydrate', 'select:session-1']);
   });
 });

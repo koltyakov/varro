@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
 import type { Provider } from '../types';
-import { buildSessionSendBody, getAttachmentReference } from './session-send';
+import {
+  buildSessionSendBody,
+  getAttachmentReference,
+  retryMessageWithDependencies,
+  sendMessageWithDependencies,
+} from './session-send';
 
 function provider(id: string, models: Provider['models']): Provider {
   return {
@@ -217,5 +222,72 @@ describe('session-send helpers', () => {
     );
     expect(getAttachmentReference({ path: '/repo/src', type: 'directory' }, '/repo')).toBe('src/');
     expect(getAttachmentReference({ path: '/repo', type: 'directory' }, '/repo')).toBe('./');
+  });
+
+  it('creates a session when needed and sends the built payload', async () => {
+    const sendAsync = vi.fn(async () => {});
+    const applyEffectiveModel = vi.fn();
+
+    await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => null,
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-2'),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: { parts: [{ type: 'text', text: 'hello' }] },
+          effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel,
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading: vi.fn(),
+      },
+      'hello'
+    );
+
+    expect(applyEffectiveModel).toHaveBeenCalledWith(
+      { providerID: 'openai', modelID: 'gpt-4o' },
+      'session-2'
+    );
+    expect(sendAsync).toHaveBeenCalledWith('session-2', {
+      parts: [{ type: 'text', text: 'hello' }],
+    });
+  });
+
+  it('retries only assistant messages in the active session', async () => {
+    const continueInterruptedSession = vi.fn(async () => {});
+
+    await retryMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        hasAssistantMessage: () => true,
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
+        continueInterruptedSession,
+        stopLoading: vi.fn(),
+      },
+      'assistant-1',
+      'session-1'
+    );
+
+    expect(continueInterruptedSession).toHaveBeenCalledWith('session-1');
   });
 });

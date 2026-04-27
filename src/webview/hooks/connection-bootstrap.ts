@@ -152,3 +152,113 @@ export async function initConnectionWithDependencies(
     deps.setError('Failed to connect to OpenCode server');
   }
 }
+
+export function ensureConnectionInitializedWithDependencies(deps: {
+  isInitialized(): boolean;
+  isInitializing(): boolean;
+  initConnection(): Promise<unknown>;
+  setInitializing(value: boolean): void;
+}) {
+  if (deps.isInitialized() || deps.isInitializing()) return;
+  deps.setInitializing(true);
+  void deps.initConnection().finally(() => {
+    deps.setInitializing(false);
+  });
+}
+
+export function createConnectionBootstrapOperations(deps: {
+  health(): Promise<unknown>;
+  loadInitialData(): Promise<void>;
+  hydrateSessionStatuses(): Promise<void>;
+  getActiveSessionId(): string | null;
+  getPersistedActiveSessionId(): string | null;
+  hasSession(sessionId: string): boolean;
+  selectSession(sessionId: string): Promise<void>;
+  setInitialized(value: boolean): void;
+  setError(message: string | null): void;
+  nextConnectionGeneration(): number;
+  isCurrentConnectionGeneration(generation: number): boolean;
+  consumeInterruptedSessionIds(): string[];
+  getSessionStatus(sessionId: string): SessionStatus | null | undefined;
+  hasPendingQuestion(sessionId: string): boolean;
+  hasPendingPermission(sessionId: string): boolean;
+  loadSessionMessages(sessionId: string): Promise<SessionEntry[]>;
+  logError(context: string, err: unknown): void;
+  syncSessionMcps(sessionId: string): Promise<void>;
+  resolveModel(sessionId: string): ResolvedModel | null;
+  resolveAgent(sessionId: string): string | null;
+  sendAsync(sessionId: string, body: InterruptedSessionContinueBody): Promise<void>;
+  syncSession(sessionId: string): Promise<void>;
+  recheckSessionStatus(sessionId: string): Promise<void>;
+}) {
+  const recoverInterruptedSessions = (generation: number) => {
+    return recoverInterruptedSessionsWithDependencies(
+      {
+        consumeInterruptedSessionIds: deps.consumeInterruptedSessionIds,
+        isCurrentGeneration: deps.isCurrentConnectionGeneration,
+        hasSession: deps.hasSession,
+        getSessionStatus: deps.getSessionStatus,
+        hasPendingQuestion: deps.hasPendingQuestion,
+        hasPendingPermission: deps.hasPendingPermission,
+        loadSessionMessages: deps.loadSessionMessages,
+        continueInterruptedSession,
+        logError: deps.logError,
+      },
+      generation
+    );
+  };
+
+  const continueInterruptedSession = (sessionId: string) => {
+    return continueInterruptedSessionWithDependencies(
+      {
+        syncSessionMcps: deps.syncSessionMcps,
+        resolveModel: deps.resolveModel,
+        resolveAgent: deps.resolveAgent,
+        sendAsync: deps.sendAsync,
+        syncSession: deps.syncSession,
+        recheckSessionStatus: deps.recheckSessionStatus,
+      },
+      sessionId
+    );
+  };
+
+  const initConnection = () => {
+    return initConnectionWithDependencies(
+      {
+        health: deps.health,
+        loadInitialData: deps.loadInitialData,
+        hydrateSessionStatuses: deps.hydrateSessionStatuses,
+        getActiveSessionId: deps.getActiveSessionId,
+        getPersistedActiveSessionId: deps.getPersistedActiveSessionId,
+        hasSession: deps.hasSession,
+        selectSession: deps.selectSession,
+        recoverInterruptedSessions,
+        setInitialized: deps.setInitialized,
+        setError: deps.setError,
+      },
+      {
+        next: deps.nextConnectionGeneration,
+        isCurrent: deps.isCurrentConnectionGeneration,
+      }
+    );
+  };
+
+  const ensureConnectionInitialized = (
+    state: { initialized: boolean; initializing: boolean },
+    setInitializing: (value: boolean) => void
+  ) => {
+    ensureConnectionInitializedWithDependencies({
+      isInitialized: () => state.initialized,
+      isInitializing: () => state.initializing,
+      initConnection,
+      setInitializing,
+    });
+  };
+
+  return {
+    recoverInterruptedSessions,
+    continueInterruptedSession,
+    initConnection,
+    ensureConnectionInitialized,
+  };
+}

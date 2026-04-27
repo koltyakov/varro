@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Provider, Agent } from '../types';
 import {
+  deriveSelectedAgentFromMessages,
+  deriveSelectedModelFromMessages,
   getActiveProviderSelection,
   getBuildAgentName,
   getDefaultPrimaryAgentName,
+  getUsageLimitNoticeContext,
   reconcileLoadedAgents,
   reconcileLoadedProviders,
 } from './routing-state';
@@ -171,6 +174,95 @@ describe('routing-state helpers', () => {
         selectedModel: null,
         providers,
         providerDefaults: { openai: 'gpt-4o', anthropic: 'claude' },
+      })
+    ).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
+  });
+
+  it('derives the latest selected model and agent from messages', () => {
+    const messages = [
+      {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant' as const,
+          time: { created: 1 },
+          parentID: 'user-1',
+          modelID: 'gpt-4o',
+          providerID: 'openai',
+          variant: 'high',
+          agent: 'build',
+          mode: 'default' as const,
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: {
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+        },
+        parts: [],
+      },
+    ];
+
+    expect(deriveSelectedModelFromMessages(messages)).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+      variant: 'high',
+    });
+    expect(deriveSelectedAgentFromMessages(messages)).toBe('build');
+  });
+
+  it('resolves usage-limit context from session, message, or fallback model selection', () => {
+    const providers = [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+      provider('anthropic', {
+        claude: {
+          id: 'claude',
+          name: 'Claude',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(
+      getUsageLimitNoticeContext({
+        sessionId: 'session-1',
+        selectedModelForSession: { providerID: 'anthropic', modelID: 'claude' },
+        providers,
+        providerDefaults: { openai: 'gpt-4o', anthropic: 'claude' },
+        fallbackSelectedModel: null,
+      })
+    ).toEqual({ providerID: 'anthropic', modelID: 'claude' });
+
+    expect(
+      getUsageLimitNoticeContext({
+        sessionId: 'session-1',
+        messages: [
+          {
+            info: {
+              id: 'user-1',
+              sessionID: 'session-1',
+              role: 'user',
+              time: { created: 0 },
+              agent: 'build',
+              model: { providerID: 'openai', modelID: 'gpt-4o' },
+            },
+            parts: [],
+          },
+        ],
+        selectedModelForSession: null,
+        providers,
+        providerDefaults: { openai: 'gpt-4o', anthropic: 'claude' },
+        fallbackSelectedModel: null,
       })
     ).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
   });

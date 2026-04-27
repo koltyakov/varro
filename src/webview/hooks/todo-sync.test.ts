@@ -1,6 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { MockedObject } from 'vitest';
+import type * as StateModule from '../lib/state';
 import type { AssistantMessage, Part, Todo, UserMessage } from '../types';
+
+const { setState, state } = vi.hoisted(() => ({
+  setState: vi.fn(),
+  state: {
+    todos: [] as Todo[],
+    messages: [] as Array<{ info: UserMessage | AssistantMessage; parts: Part[] }>,
+  },
+}));
+
+vi.mock('../lib/state', async () => {
+  const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
+  return {
+    ...actual,
+    setState,
+    state,
+  };
+});
+
 import {
+  createTodoSyncOperations,
   deriveTodosFromMessages,
   extractTodos,
   handoffTodosToMessages,
@@ -115,5 +136,46 @@ describe('todo-sync', () => {
     setTodos.mockClear();
     syncTodosFromMessages({ authority: 'event', todos: [] }, setTodos, messages);
     expect(setTodos).not.toHaveBeenCalled();
+  });
+
+  it('creates bound todo-sync operations from shared state dependencies', () => {
+    let authority: 'messages' | 'event' = 'messages';
+    const messages = [
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [
+          todoToolPart([{ id: 'todo-1', content: 'sync', status: 'pending', priority: 'medium' }]),
+        ],
+      },
+    ];
+
+    state.todos = [];
+    state.messages = messages;
+
+    const operations = createTodoSyncOperations({
+      getAuthority: () => authority,
+      setAuthority: (value) => {
+        authority = value;
+      },
+    });
+
+    operations.syncTodosFromMessages();
+    expect(setState).toHaveBeenCalledWith('todos', [
+      { id: 'todo-1', content: 'sync', status: 'pending', priority: 'medium' },
+    ]);
+
+    setState.mockClear();
+    authority = 'event';
+    state.todos = [{ id: 'todo-1', content: 'event', status: 'pending', priority: 'medium' }];
+    state.messages = [{ info: assistantMessage('assistant-1'), parts: [] }];
+
+    const handedOff = operations.handoffTodosToMessages();
+    expect(handedOff).toBe(false);
+    expect(setState).not.toHaveBeenCalled();
+
+    authority = 'event';
+    operations.resetTodoSync();
+    expect(authority).toBe('messages');
   });
 });

@@ -1,3 +1,21 @@
+import {
+  clearCurrentDocumentStateForSession,
+  clearMessages,
+  clearSelectedAgentForSession,
+  clearSelectedMcpsForSession,
+  clearSelectedModelForSession,
+  clearSessionSeen,
+  clearSkippedPlanSession,
+  markSessionSeen,
+  persistActiveSessionId,
+  removePermissionModeForSession,
+  setSessionFailed,
+  setSessions,
+  setSessionUsageLimit,
+  setState,
+  state,
+  stopLoading,
+} from '../lib/state';
 import type { Session } from '../types';
 
 type LifecycleState = {
@@ -27,6 +45,68 @@ type LifecycleDependencies = {
   clearActiveSessionState(): void;
   markSessionSeen(sessionId: string, updatedAt?: number): void;
 };
+
+export function createSessionLifecycleOperations(deps: {
+  getCurrentWorkspacePath(): string | null;
+  clearPendingAbort(sessionId: string | null | undefined): void;
+  clearPendingAbortTree(sessionIds: string[]): void;
+  resetTodoSync(): void;
+  resetToolCallExpansionState(): void;
+}) {
+  const clearActiveSessionState = () => {
+    deps.resetTodoSync();
+    deps.resetToolCallExpansionState();
+    setState('activeSessionId', null);
+    persistActiveSessionId(null);
+    clearMessages();
+    stopLoading();
+  };
+
+  const lifecycleDeps: LifecycleDependencies = {
+    getState: () => ({ activeSessionId: state.activeSessionId, sessions: state.sessions }),
+    getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
+    setSessions,
+    clearSessionStatusEntry: (sessionId: string) => {
+      setState('sessionStatus', (statuses) => {
+        const next = { ...statuses };
+        delete next[sessionId];
+        return next;
+      });
+    },
+    clearPendingAbort: deps.clearPendingAbort,
+    clearPendingAbortTree: deps.clearPendingAbortTree,
+    removePermissionModeForSession,
+    clearCurrentDocumentStateForSession,
+    clearSelectedAgentForSession,
+    clearSelectedMcpsForSession,
+    clearSkippedPlanSession,
+    clearSelectedModelForSession,
+    clearSessionSeen,
+    setSessionUsageLimit,
+    setSessionFailed,
+    filterQuestions: (predicate: (sessionId: string) => boolean) =>
+      setState('questions', (items) => items.filter((item) => predicate(item.sessionID))),
+    filterPermissions: (predicate: (sessionId: string) => boolean) =>
+      setState('permissions', (items) => items.filter((item) => predicate(item.sessionID))),
+    filterPendingAttentionSessionIds: (predicate: (sessionId: string) => boolean) =>
+      setState('pendingAttentionSessionIds', (items) =>
+        items.filter((sessionId) => predicate(sessionId))
+      ),
+    clearActiveSessionState,
+    markSessionSeen,
+  };
+
+  return {
+    clearActiveSessionState,
+    applySessions: (sessions: Session[]) => applySessions(lifecycleDeps, sessions),
+    clearDeletedSessionState: (id: string) => clearDeletedSessionState(lifecycleDeps, id),
+    hideDeletedSessionTree: (id: string, sessions = state.sessions) =>
+      hideDeletedSessionTree(lifecycleDeps, id, sessions),
+    removeDeletedSessionTree: (id: string, sessions = state.sessions) =>
+      removeDeletedSessionTree(lifecycleDeps, id, sessions),
+    upsertSession: (session: Session) => upsertSession(lifecycleDeps, session),
+  };
+}
 
 export function normalizeProjectPath(path: string | null | undefined): string | null {
   if (!path) return null;

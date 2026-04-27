@@ -1,15 +1,31 @@
-import { ErrorBoundary, Show } from 'solid-js';
+import { ErrorBoundary, Show, onCleanup } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
-import { state, error, setError } from './lib/state';
+import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/useOpenCode.runtime';
+import { AppStateProvider, useAppState } from './lib/app-state-context';
 import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
 
+export function AppRoot() {
+  const restoreOpenCodeRuntime = installOpenCodeRuntime(createOpenCodeRuntime());
+
+  onCleanup(() => {
+    restoreOpenCodeRuntime();
+  });
+
+  return (
+    <AppStateProvider>
+      <App />
+    </AppStateProvider>
+  );
+}
+
 export function App() {
   useOpenCode();
+  const appState = useAppState();
 
   const showChat = () =>
-    state.serverStatus.state === 'running' &&
-    !(state.providersLoaded && state.providers.length === 0);
+    appState.state.serverStatus.state === 'running' &&
+    !(appState.state.providersLoaded && appState.state.providers.length === 0);
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
@@ -18,12 +34,12 @@ export function App() {
           <Chat />
         </Show>
       </ErrorBoundary>
-      <Show when={error()}>
+      <Show when={appState.error()}>
         <div class="flex items-start justify-between gap-2 border-t border-vscode-error/30 bg-vscode-error/6 px-4 py-2 text-[11px] text-vscode-error">
-          <span class="break-words leading-relaxed">{error()}</span>
+          <span class="break-words leading-relaxed">{appState.error()}</span>
           <button
             class="shrink-0 px-1 text-vscode-error/60 transition-colors hover:text-vscode-error"
-            onClick={() => setError(null)}
+            onClick={() => appState.setError(null)}
             title="Dismiss"
           >
             <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">

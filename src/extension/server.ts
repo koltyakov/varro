@@ -6,6 +6,18 @@ import * as vscode from 'vscode';
 import { logger } from './logger';
 import { EventEmitter } from 'events';
 import type { ServerStatus } from '../shared/protocol';
+import { ServerLifecycleStateMachine } from './server-lifecycle';
+import {
+  anySignal,
+  asRecord,
+  compareVersions,
+  extractVersion,
+  findSseChunkBoundary,
+  getString,
+  isPortInUseMessage,
+  normalizeRunningStatus,
+  waitForProcessExit,
+} from './server-utils';
 import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 
@@ -45,14 +57,10 @@ export class OpenCodeServer extends EventEmitter {
   private eventStreamGeneration = 0;
   private static readonly EVENT_RECONNECT_WARNING_THRESHOLD = 10;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
-  private startAttemptId = 0;
-  private disposeGeneration = 0;
-  private isDisposing = false;
-  private startPromise: Promise<string> | null = null;
+  private readonly lifecycle = new ServerLifecycleStateMachine();
   private requestControllers = new Set<AbortController>();
   private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private maintenanceInFlight = false;
-  private automaticRestartInFlight = false;
   private managedProcess = false;
   private lastCliUpdateCheckAt = 0;
   private lastSuggestedCliVersion = '';
@@ -86,6 +94,26 @@ export class OpenCodeServer extends EventEmitter {
     return `http://127.0.0.1:${this.port}`;
   }
 
+  private get startAttemptId(): number {
+    return this.lifecycle.startAttemptId;
+  }
+
+  private set startAttemptId(value: number) {
+    this.lifecycle.startAttemptId = value;
+  }
+
+  private get disposeGeneration(): number {
+    return this.lifecycle.disposeGeneration;
+  }
+
+  private set disposeGeneration(value: number) {
+    this.lifecycle.disposeGeneration = value;
+  }
+
+  private get isDisposing(): boolean {
+    return this.lifecycle.isDisposing;
+  }
+
   private setStatus(s: ServerStatus) {
     const previousStatus = this._status;
     const nextStatus = normalizeRunningStatus(s, this._status);
@@ -109,25 +137,17 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private setStartPromise(factory: () => Promise<string>): Promise<string> {
-    if (this.startPromise) return this.startPromise;
-    const promise = factory().finally(() => {
-      if (this.startPromise === promise) {
-        this.startPromise = null;
-      }
-    });
-    this.startPromise = promise;
-    return promise;
+    return this.lifecycle.setStartPromise(factory);
   }
 
   private clearStartPromise() {
-    this.startPromise = null;
+    this.lifecycle.clearStartPromise();
   }
 
   async start(): Promise<string> {
     return this.setStartPromise(async () => {
       this.clearRestartTimer();
-      const disposeGeneration = this.disposeGeneration;
-      this.isDisposing = false;
+      const disposeGeneration = this.lifecycle.beginStart();
       if (this.simulateMissingCli) {
         this.stopEventStream();
         this.cancelPollHealth();
@@ -162,14 +182,12 @@ export class OpenCodeServer extends EventEmitter {
 
       return new Promise((resolve, reject) => {
         this.setStatus({ state: 'starting' });
-        const attemptId = ++this.startAttemptId;
+        const attemptId = this.lifecycle.beginStartAttempt();
         const stderrLines: string[] = [];
         let settled = false;
 
         const isStaleAttempt = () =>
-          settled ||
-          attemptId !== this.startAttemptId ||
-          this.disposeGeneration !== disposeGeneration;
+          settled || !this.lifecycle.isCurrentStartAttempt(attemptId, disposeGeneration);
 
         const rememberStderr = (text: string) => {
           for (const line of text
@@ -739,8 +757,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async restartManagedServer(serverVersion: string, installedCliVersion: string) {
-    if (this.automaticRestartInFlight) return;
-    this.automaticRestartInFlight = true;
+    if (this.lifecycle.beginManagedRestart() === null) return;
     try {
       logger.info(
         `Restarting managed OpenCode server to use CLI ${installedCliVersion} instead of server ${serverVersion}`
@@ -748,14 +765,11 @@ export class OpenCodeServer extends EventEmitter {
       await this.stopManagedProcessForRestart();
       await this.start();
     } finally {
-      this.automaticRestartInFlight = false;
+      this.lifecycle.finishManagedRestart();
     }
   }
 
   private async stopManagedProcessForRestart() {
-    this.isDisposing = true;
-    this.disposeGeneration += 1;
-    this.clearStartPromise();
     this.clearRestartTimer();
     this.cancelPollHealth();
     this.stopEventStream();
@@ -963,9 +977,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async disposeResources(options: { stopProcess: boolean }) {
-    this.isDisposing = true;
-    this.disposeGeneration += 1;
-    this.clearStartPromise();
+    this.lifecycle.beginDispose();
     this.clearRestartTimer();
     this.stopMaintenanceLoop();
     this.cancelPollHealth();
@@ -1090,9 +1102,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private throwIfStartCancelled(disposeGeneration: number) {
-    if (this.isDisposing || this.disposeGeneration !== disposeGeneration) {
-      throw new Error(OpenCodeServer.START_DISPOSED_MESSAGE);
-    }
+    this.lifecycle.throwIfStartCancelled(disposeGeneration, OpenCodeServer.START_DISPOSED_MESSAGE);
   }
 
   private getRestartDelay(attempt: number) {
@@ -1119,102 +1129,4 @@ export class OpenCodeServer extends EventEmitter {
     this.port = this.originalPort + this.portFallbackAttempts;
     return true;
   }
-}
-
-function isPortInUseMessage(text: string): boolean {
-  return /\bEADDRINUSE\b|address already in use|port .* (already )?in use/i.test(text);
-}
-
-function normalizeRunningStatus(next: ServerStatus, previous: ServerStatus): ServerStatus {
-  if (next.state !== 'running') return next;
-  if (next.eventStream) return next;
-  if (previous.state !== 'running') return { ...next, eventStream: 'healthy' };
-  return { ...next, eventStream: previous.eventStream || 'healthy' };
-}
-
-const SSE_CHUNK_BOUNDARY_RE = /\r\n\r\n|\n\n|\r\r|\r\n\n|\n\r\n/g;
-
-function findSseChunkBoundary(
-  buffer: string,
-  fromIndex: number
-): { index: number; length: number } | null {
-  SSE_CHUNK_BOUNDARY_RE.lastIndex = fromIndex;
-  const match = SSE_CHUNK_BOUNDARY_RE.exec(buffer);
-  if (!match) return null;
-  return { index: match.index, length: match[0].length };
-}
-
-function waitForProcessExit(proc: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (proc.exitCode !== null || proc.signalCode !== null) {
-    return Promise.resolve(true);
-  }
-
-  return new Promise((resolve) => {
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const finish = (result: boolean) => {
-      if (settled) return;
-      settled = true;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      proc.off('exit', handleExit);
-      resolve(result);
-    };
-
-    const handleExit = () => finish(true);
-    proc.once('exit', handleExit);
-    timer = setTimeout(() => finish(false), timeoutMs);
-  });
-}
-
-function anySignal(...signals: AbortSignal[]): AbortSignal {
-  if (typeof AbortSignal.any === 'function') {
-    return AbortSignal.any(signals);
-  }
-  const controller = new AbortController();
-  const onAbort = (event: Event) => {
-    controller.abort((event.target as AbortSignal | null)?.reason);
-    for (const signal of signals) {
-      signal.removeEventListener('abort', onAbort);
-    }
-  };
-
-  for (const signal of signals) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      return controller.signal;
-    }
-    signal.addEventListener('abort', onAbort, { once: true });
-  }
-
-  return controller.signal;
-}
-
-function extractVersion(value: string): string | null {
-  const match = value.trim().match(/\d+(?:\.\d+)+/);
-  return match ? match[0] : null;
-}
-
-function compareVersions(left: string, right: string): number {
-  const leftParts = left.split('.').map((part) => Number.parseInt(part, 10) || 0);
-  const rightParts = right.split('.').map((part) => Number.parseInt(part, 10) || 0);
-  const length = Math.max(leftParts.length, rightParts.length);
-  for (let index = 0; index < length; index += 1) {
-    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-  return 0;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-}
-
-function getString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
 }

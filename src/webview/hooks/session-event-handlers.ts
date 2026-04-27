@@ -2,12 +2,33 @@ import { serverEvents } from '../lib/client';
 import { normalizePermissionEvent } from '../lib/session-event-reducer';
 import { isAbortedAssistantError } from '../lib/aborted';
 import { isAssistantMessage } from '../lib/message-metrics';
-import type { UsageLimitNotice } from '../lib/usage-limit';
+import { parseUsageLimitNotice, type UsageLimitNotice } from '../lib/usage-limit';
+import {
+  getPermissionModeForSession,
+  addPermission,
+  applyMessagePartDelta,
+  clearStreamingState,
+  markLoadingActivity,
+  markSessionSeen,
+  removeMessagePart,
+  removePermission,
+  removeQuestion,
+  replaceMessages,
+  setSessionCompacting,
+  setSessionFailed,
+  setSessionUsageLimit,
+  setState,
+  state,
+  startLoading,
+  stopLoading,
+  upsertMessageInfo,
+  upsertPart,
+  upsertQuestion,
+} from '../lib/state';
 import type {
   FileDiff,
   Message,
   Part,
-  Permission,
   QuestionRequest,
   Session,
   SessionStatus,
@@ -33,34 +54,15 @@ type EventHandlerDependencies = {
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   clearUsageLimitOnResumedProgress(sessionId: string, status?: SessionStatus | null): void;
   updateUsageLimitState(sessionId: string, status: SessionStatus | null | undefined): void;
-  startLoading(): void;
-  stopLoading(): void;
-  markSessionSeen(sessionId: string): void;
   syncSession(sessionId: string): Promise<void>;
   shouldResyncSessionAfterIdle(sessionId: string): boolean;
   syncSessionMessages(sessionId: string): Promise<void>;
-  markLoadingActivity(): void;
-  upsertMessageInfo(message: Message): void;
-  setSessionFailed(sessionId: string, failed: boolean): void;
-  parseUsageLimitNotice(message: string | undefined): UsageLimitNotice | null;
   applyUsageLimitNotice(
     sessionId: string,
     notice: UsageLimitNotice | null,
     options?: { preserveExistingOnNull?: boolean }
   ): void;
-  setSessionUsageLimit(sessionId: string, notice: null): void;
-  upsertPart(part: Part): void;
   syncTodosFromMessages(messages?: Array<{ info: Message; parts: Part[] }>): void;
-  applyMessagePartDelta(
-    messageId: string,
-    partId: string,
-    delta: string,
-    sessionId?: string,
-    field?: string
-  ): void;
-  removeMessagePart(sessionId: string, messageId: string, partId: string): void;
-  clearStreamingState(): void;
-  replaceMessages(messages: Array<{ info: Message; parts: Part[] }>): void;
   shouldAutoApprovePermissions(sessionId: string): boolean;
   respondPermission(
     sessionId: string,
@@ -68,12 +70,32 @@ type EventHandlerDependencies = {
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
   ): Promise<void>;
-  addPermission(permission: Permission): void;
-  removePermission(permissionId: string): void;
-  upsertQuestion(question: QuestionRequest): void;
-  removeQuestion(requestId: string): void;
   extractTodos(raw: unknown): Todo[] | null;
   setDiffs(diffs: FileDiff[]): void;
+};
+
+type EventHandlerOperationDependencies = {
+  setTodoStateAuthority(value: 'messages' | 'event'): void;
+  todoSyncOperations: Pick<
+    EventHandlerDependencies,
+    'handoffTodosToMessages' | 'syncTodosFromMessages'
+  >;
+  sessionLifecycleOperations: Pick<
+    EventHandlerDependencies,
+    'upsertSession' | 'removeDeletedSessionTree'
+  >;
+  sessionStatusOperations: Pick<
+    EventHandlerDependencies,
+    | 'shouldIgnorePendingAbortStatus'
+    | 'hasPendingAbort'
+    | 'clearPendingAbort'
+    | 'clearUsageLimitOnResumedProgress'
+    | 'updateUsageLimitState'
+    | 'applyUsageLimitNotice'
+  >;
+  sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
+  sessionApprovalOperations: Pick<EventHandlerDependencies, 'respondPermission'>;
+  extractTodos(raw: unknown): Todo[] | null;
 };
 
 function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
@@ -85,6 +107,44 @@ function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] 
   }
 
   return false;
+}
+
+export function createSessionEventHandlerOperations(deps: EventHandlerOperationDependencies) {
+  const registerHandlers = () => {
+    return registerSessionEventHandlers({
+      getActiveSessionId: () => state.activeSessionId,
+      getMessages: () => state.messages,
+      setTodoStateAuthority: deps.setTodoStateAuthority,
+      handoffTodosToMessages: deps.todoSyncOperations.handoffTodosToMessages,
+      setTodos: (todos) => setState('todos', todos),
+      upsertSession: deps.sessionLifecycleOperations.upsertSession,
+      setSessionCompacting,
+      removeDeletedSessionTree: deps.sessionLifecycleOperations.removeDeletedSessionTree,
+      shouldIgnorePendingAbortStatus: deps.sessionStatusOperations.shouldIgnorePendingAbortStatus,
+      hasPendingAbort: deps.sessionStatusOperations.hasPendingAbort,
+      clearPendingAbort: deps.sessionStatusOperations.clearPendingAbort,
+      setSessionStatusEntry: (sessionId, status) =>
+        setState('sessionStatus', (current) => ({
+          ...current,
+          [sessionId]: status,
+        })),
+      clearUsageLimitOnResumedProgress:
+        deps.sessionStatusOperations.clearUsageLimitOnResumedProgress,
+      updateUsageLimitState: deps.sessionStatusOperations.updateUsageLimitState,
+      syncSession: deps.sessionSyncOperations.syncSession,
+      shouldResyncSessionAfterIdle: (sessionId) => state.activeSessionId === sessionId,
+      syncSessionMessages: deps.sessionSyncOperations.syncSessionMessages,
+      applyUsageLimitNotice: deps.sessionStatusOperations.applyUsageLimitNotice,
+      syncTodosFromMessages: deps.todoSyncOperations.syncTodosFromMessages,
+      shouldAutoApprovePermissions: (sessionId) =>
+        getPermissionModeForSession(sessionId) === 'full',
+      respondPermission: deps.sessionApprovalOperations.respondPermission,
+      extractTodos: deps.extractTodos,
+      setDiffs: (diffs) => setState('diffs', diffs),
+    });
+  };
+
+  return { registerSessionEventHandlers: registerHandlers };
 }
 
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
@@ -134,8 +194,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
       if (sessionID === deps.getActiveSessionId()) {
         const statusType = (status as { type: string }).type;
-        if (statusType === 'busy' || statusType === 'retry') deps.startLoading();
-        else deps.stopLoading();
+        if (statusType === 'busy' || statusType === 'retry') startLoading();
+        else stopLoading();
       }
     })
   );
@@ -145,13 +205,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const sid = data.properties?.sessionID as string | undefined;
       const abortedRetry = deps.hasPendingAbort(sid);
       deps.clearPendingAbort(sid);
-      if (sid) deps.setSessionCompacting(sid, false);
+      if (sid) setSessionCompacting(sid, false);
       if (sid && !abortedRetry) {
         deps.updateUsageLimitState(sid, { type: 'idle' });
       }
-      if (!sid || sid === deps.getActiveSessionId()) deps.stopLoading();
+      if (!sid || sid === deps.getActiveSessionId()) stopLoading();
       if (sid && sid === deps.getActiveSessionId()) {
-        deps.markSessionSeen(sid);
+        markSessionSeen(sid);
         deps.syncSession(sid).catch(() => {});
         if (deps.shouldResyncSessionAfterIdle(sid)) {
           deps.syncSessionMessages(sid).catch(() => {});
@@ -166,20 +226,18 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const message = info as Message | undefined;
       if (!message?.sessionID) return;
       if (message.sessionID === deps.getActiveSessionId()) {
-        deps.markLoadingActivity();
-        deps.upsertMessageInfo(message);
+        markLoadingActivity();
+        upsertMessageInfo(message);
         if (isAssistantMessage(message) && (!!message.error || !!message.time.completed)) {
           deps.handoffTodosToMessages();
         }
       }
       if (isAssistantMessage(message)) {
-        deps.setSessionFailed(
+        setSessionFailed(
           message.sessionID,
           !!message.error && !isAbortedAssistantError(message.error)
         );
-        const notice = deps.parseUsageLimitNotice(
-          message.error?.data?.message || message.error?.name
-        );
+        const notice = parseUsageLimitNotice(message.error?.data?.message || message.error?.name);
         if (notice) {
           deps.applyUsageLimitNotice(message.sessionID, {
             ...notice,
@@ -189,7 +247,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             modelID: message.modelID,
           });
         } else if (message.error) {
-          deps.setSessionUsageLimit(message.sessionID, null);
+          setSessionUsageLimit(message.sessionID, null);
         } else {
           deps.clearUsageLimitOnResumedProgress(message.sessionID);
         }
@@ -201,11 +259,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.updated', (data) => {
       const part = data.properties?.part as { sessionID?: string } | undefined;
       if (part?.sessionID && (part as Part).type === 'compaction') {
-        deps.setSessionCompacting(part.sessionID, false);
+        setSessionCompacting(part.sessionID, false);
       }
       if (part?.sessionID === deps.getActiveSessionId()) {
-        deps.markLoadingActivity();
-        deps.upsertPart(part as Part);
+        markLoadingActivity();
+        upsertPart(part as Part);
         if ((part as Part).type === 'tool') {
           deps.syncTodosFromMessages();
         }
@@ -218,8 +276,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if (!p) return;
       if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        deps.markLoadingActivity();
-        deps.applyMessagePartDelta(
+        markLoadingActivity();
+        applyMessagePartDelta(
           p.messageID as string,
           p.partID as string,
           p.delta as string,
@@ -235,9 +293,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if (!p) return;
       if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        deps.markLoadingActivity();
+        markLoadingActivity();
       }
-      deps.removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
+      removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
       if ((p.sessionID as string) === deps.getActiveSessionId()) {
         deps.syncTodosFromMessages();
       }
@@ -249,12 +307,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if (!p) return;
       if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        deps.markLoadingActivity();
-        deps.clearStreamingState();
+        markLoadingActivity();
+        clearStreamingState();
         const nextMessages = deps
           .getMessages()
           .filter((m) => m.info.id !== (p.messageID as string));
-        deps.replaceMessages(nextMessages);
+        replaceMessages(nextMessages);
         deps.syncTodosFromMessages(nextMessages);
       }
     })
@@ -267,11 +325,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       void deps
         .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
         .catch(() => {
-          deps.addPermission(permission);
+          addPermission(permission);
         });
       return;
     }
-    deps.addPermission(permission);
+    addPermission(permission);
   }
 
   cleanups.push(
@@ -293,28 +351,28 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const props = data.properties;
       if (!props) return;
       const pid = getPermissionReplyId(props);
-      if (pid) deps.removePermission(pid);
+      if (pid) removePermission(pid);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.asked', (data) => {
       const props = data.properties;
-      if (props) deps.upsertQuestion(props as QuestionRequest);
+      if (props) upsertQuestion(props as QuestionRequest);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.replied', (data) => {
       const requestID = data.properties?.requestID as string | undefined;
-      if (requestID) deps.removeQuestion(requestID);
+      if (requestID) removeQuestion(requestID);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.rejected', (data) => {
       const requestID = data.properties?.requestID as string | undefined;
-      if (requestID) deps.removeQuestion(requestID);
+      if (requestID) removeQuestion(requestID);
     })
   );
 

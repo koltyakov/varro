@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Message } from '../types';
 import {
+  createSessionActionOperations,
   implementPlanWithDependencies,
   INIT_PROMPT,
   initSessionWithDependencies,
@@ -168,5 +169,50 @@ describe('session-actions helpers', () => {
 
     expect(result).toBe(false);
     expect(setError).toHaveBeenCalledWith('Unknown command: /missing');
+  });
+
+  it('creates bound action operations from shared dependencies', async () => {
+    const sendMessage = vi.fn(async () => {});
+    const openPlan = vi.fn(async () => {});
+    const runSessionCommand = vi.fn(async () => ({
+      info: userMessage('user-3'),
+      parts: [],
+    }));
+
+    const operations = createSessionActionOperations({
+      getActiveSessionId: () => 'session-1',
+      getBuildAgent: () => 'build',
+      setError: vi.fn(),
+      clearSkippedPlanSession: vi.fn(),
+      applySelectedAgent: vi.fn(),
+      sendMessage,
+      openPlan,
+      createSession: vi.fn(async () => 'session-2'),
+      getMessageCount: () => 0,
+      hasCommand: (name) => name === 'test',
+      startLoading: vi.fn(),
+      runSessionCommand,
+      shouldApplyToActiveSession: () => true,
+      upsertMessageInfo: vi.fn(),
+      upsertPart: vi.fn(),
+      syncTodosFromMessages: vi.fn(),
+      requestMessageListScrollToBottom: vi.fn(),
+      syncSession: vi.fn(async () => {}),
+      recheckSessionStatus: vi.fn(async () => {}),
+      stopLoading: vi.fn(),
+    });
+
+    await operations.implementPlan('Implement it', 'session-1');
+    await operations.openPlan('# Plan', 'session-1');
+    await operations.initSession();
+    await operations.runSlashCommandByName('test', '--watch');
+
+    expect(sendMessage).toHaveBeenCalledWith('Implement it');
+    expect(openPlan).toHaveBeenCalledWith('# Plan');
+    expect(sendMessage).toHaveBeenCalledWith(INIT_PROMPT);
+    expect(runSessionCommand).toHaveBeenCalledWith('session-1', {
+      command: 'test',
+      arguments: '--watch',
+    });
   });
 });

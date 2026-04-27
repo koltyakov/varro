@@ -1,8 +1,54 @@
+import { setState, state } from '../lib/state';
 import type { AssistantMessage, Message, Part, Todo } from '../types';
 
 const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
 
 export type TodoStateAuthority = 'messages' | 'event';
+
+export function createTodoSyncOperations(deps?: {
+  authority?: TodoStateAuthority;
+  getAuthority?(): TodoStateAuthority;
+  setAuthority?(authority: TodoStateAuthority): void;
+}) {
+  const getAuthority = () => deps?.getAuthority?.() ?? deps?.authority ?? 'messages';
+  const setAuthority = (authority: TodoStateAuthority) => {
+    deps?.setAuthority?.(authority);
+  };
+
+  const resetTodoSync = () => {
+    setAuthority('messages');
+  };
+
+  const syncTodosFromMessagesWithState = (
+    messages: Array<{ info: Message; parts: Part[] }> = state.messages
+  ) => {
+    syncTodosFromMessages(
+      { authority: getAuthority(), todos: state.todos },
+      (todos) => setState('todos', todos),
+      messages
+    );
+  };
+
+  const handoffTodosToMessagesWithState = (
+    messages: Array<{ info: Message; parts: Part[] }> = state.messages
+  ) => {
+    const handedOff = handoffTodosToMessages(
+      { authority: getAuthority(), todos: state.todos },
+      (todos) => setState('todos', todos),
+      messages
+    );
+    if (handedOff) {
+      setAuthority('messages');
+    }
+    return handedOff;
+  };
+
+  return {
+    resetTodoSync,
+    syncTodosFromMessages: syncTodosFromMessagesWithState,
+    handoffTodosToMessages: handoffTodosToMessagesWithState,
+  };
+}
 
 export function extractTodos(raw: unknown): Todo[] | null {
   if (Array.isArray(raw)) {
