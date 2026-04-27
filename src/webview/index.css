@@ -110,6 +110,16 @@
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
   --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 84%, transparent);
   --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 72%, transparent);
+  --color-code-comment: #6a9955;
+  --color-code-keyword: #c586c0;
+  --color-code-string: #ce9178;
+  --color-code-title: #dcdcaa;
+  --color-code-number: #b5cea8;
+  --color-code-literal: #569cd6;
+  --color-code-built_in: #4ec9b0;
+  --color-code-attr: #9cdcfe;
+  --color-code-variable: #9cdcfe;
+  --color-code-operator: #d4d4d4;
   --font-mono: var(
     --vscode-editor-font-family,
     'SF Mono',
@@ -259,6 +269,16 @@ body.vscode-high-contrast-light {
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 58%, transparent);
   --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 90%, transparent);
   --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 80%, transparent);
+  --color-code-comment: #008000;
+  --color-code-keyword: #af00db;
+  --color-code-string: #a31515;
+  --color-code-title: #795e26;
+  --color-code-number: #098658;
+  --color-code-literal: #0000ff;
+  --color-code-built_in: #267f99;
+  --color-code-attr: #001080;
+  --color-code-variable: #001080;
+  --color-code-operator: var(--color-vscode-fg);
 }
 
 body.vscode-light
@@ -1478,6 +1498,69 @@ body.vscode-light
   font-size: inherit;
   color: var(--color-vscode-fg);
   white-space: pre;
+}
+
+.interactive-result-code-block pre.code-block code .hljs-comment,
+.interactive-result-code-block pre.code-block code .hljs-quote {
+  color: var(--color-code-comment);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-keyword,
+.interactive-result-code-block pre.code-block code .hljs-selector-tag,
+.interactive-result-code-block pre.code-block code .hljs-subst {
+  color: var(--color-code-keyword);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-string,
+.interactive-result-code-block pre.code-block code .hljs-doctag,
+.interactive-result-code-block pre.code-block code .hljs-regexp,
+.interactive-result-code-block pre.code-block code .hljs-meta .hljs-string {
+  color: var(--color-code-string);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-title,
+.interactive-result-code-block pre.code-block code .hljs-title.class_,
+.interactive-result-code-block pre.code-block code .hljs-title.function_ {
+  color: var(--color-code-title);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-number,
+.interactive-result-code-block pre.code-block code .hljs-symbol,
+.interactive-result-code-block pre.code-block code .hljs-bullet {
+  color: var(--color-code-number);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-literal,
+.interactive-result-code-block pre.code-block code .hljs-type,
+.interactive-result-code-block pre.code-block code .hljs-meta,
+.interactive-result-code-block pre.code-block code .hljs-section {
+  color: var(--color-code-literal);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-built_in,
+.interactive-result-code-block pre.code-block code .hljs-code,
+.interactive-result-code-block pre.code-block code .hljs-addition {
+  color: var(--color-code-built_in);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-attr,
+.interactive-result-code-block pre.code-block code .hljs-attribute,
+.interactive-result-code-block pre.code-block code .hljs-property,
+.interactive-result-code-block pre.code-block code .hljs-template-variable {
+  color: var(--color-code-attr);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-variable,
+.interactive-result-code-block pre.code-block code .hljs-name,
+.interactive-result-code-block pre.code-block code .hljs-selector-id,
+.interactive-result-code-block pre.code-block code .hljs-selector-class {
+  color: var(--color-code-variable);
+}
+
+.interactive-result-code-block pre.code-block code .hljs-operator,
+.interactive-result-code-block pre.code-block code .hljs-punctuation,
+.interactive-result-code-block pre.code-block code .hljs-deletion {
+  color: var(--color-code-operator);
 }
 
 .interactive-session .chat-input-container {

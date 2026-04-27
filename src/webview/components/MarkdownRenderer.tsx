@@ -1,5 +1,6 @@
 import { createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import DOMPurify from 'dompurify';
+import hljs from 'highlight.js/lib/common';
 import { marked } from 'marked';
 import { postMessage } from '../lib/bridge';
 import { state } from '../lib/state';
@@ -85,6 +86,24 @@ const ALLOWED_HTML_ATTRIBUTES = [
 const CODE_BLOCK_CACHE_LIMIT = 100;
 const MAX_COPY_TEXT_LENGTH = 20_000;
 const codeBlockHtmlCache = new Map<string, string>();
+const highlightedCodeCache = new Map<string, string>();
+const CODE_LANGUAGE_ALIASES = new Map<string, string>([
+  ['console', 'bash'],
+  ['plain', 'plaintext'],
+  ['shell', 'bash'],
+  ['sh', 'bash'],
+  ['text', 'plaintext'],
+  ['txt', 'plaintext'],
+  ['zsh', 'bash'],
+]);
+
+interface CodeBlockHtmlParams {
+  text: string;
+  lang?: string;
+  className?: string;
+  copyText?: string;
+  showCopyButton?: boolean;
+}
 
 function escapeHtml(value: string) {
   return value
@@ -93,6 +112,79 @@ function escapeHtml(value: string) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function setCachedValue(cache: Map<string, string>, key: string, value: string) {
+  cache.set(key, value);
+  if (cache.size > CODE_BLOCK_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest) cache.delete(oldest);
+  }
+}
+
+function resolveCodeLanguage(lang?: string) {
+  const trimmed = lang?.trim();
+  if (!trimmed) return undefined;
+
+  const normalized = CODE_LANGUAGE_ALIASES.get(trimmed.toLowerCase()) ?? trimmed.toLowerCase();
+  return hljs.getLanguage(normalized) ? normalized : undefined;
+}
+
+export function renderHighlightedCodeHtml(text: string, lang?: string): string {
+  const cacheKey = `${lang || ''}\u0000${text}`;
+  const cached = highlightedCodeCache.get(cacheKey);
+  if (cached) {
+    highlightedCodeCache.delete(cacheKey);
+    highlightedCodeCache.set(cacheKey, cached);
+    return cached;
+  }
+
+  const resolvedLanguage = resolveCodeLanguage(lang);
+  const highlighted = (() => {
+    if (!resolvedLanguage) return escapeHtml(text);
+    try {
+      return hljs.highlight(text, { language: resolvedLanguage, ignoreIllegals: true }).value;
+    } catch {
+      return escapeHtml(text);
+    }
+  })();
+
+  setCachedValue(highlightedCodeCache, cacheKey, highlighted);
+  return highlighted;
+}
+
+export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
+  const lang = params.lang?.trim() || undefined;
+  const className = params.className?.trim();
+  const copyText = params.copyText ?? params.text;
+  const showCopyButton = params.showCopyButton !== false;
+  const cacheKey = [
+    className || '',
+    lang || '',
+    showCopyButton ? 'copy' : 'nocopy',
+    params.text,
+    copyText,
+  ].join('\u0000');
+  const cached = codeBlockHtmlCache.get(cacheKey);
+  if (cached) {
+    codeBlockHtmlCache.delete(cacheKey);
+    codeBlockHtmlCache.set(cacheKey, cached);
+    return cached;
+  }
+
+  const highlighted = renderHighlightedCodeHtml(params.text, lang);
+  const langLabel = lang ? `<span class="code-block-lang">${escapeHtml(lang)}</span>` : '';
+  const copyBtn = showCopyButton
+    ? `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${encodeCopyPayload(copyText)}" aria-label="Copy code" title="Copy code">${copySvg}</button>`
+    : '';
+  const header =
+    langLabel || copyBtn ? `<div class="code-block-header">${langLabel}${copyBtn}</div>` : '';
+  const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : '';
+  const classAttr = ['interactive-result-code-block', className].filter(Boolean).join(' ');
+  const html = `<div class="${classAttr}"${langAttr}>${header}<pre class="code-block"><code class="hljs">${highlighted}</code></pre></div>`;
+
+  setCachedValue(codeBlockHtmlCache, cacheKey, html);
+  return html;
 }
 
 function encodeCopyPayload(value: string) {
@@ -182,28 +274,11 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   const normalizedText = SHELL_LANGS.has((lang || '').toLowerCase())
     ? formatCommandDisplay(text, workspacePath || null)
     : text;
-  const cacheKey = `${workspacePath}\u0000${lang || ''}\u0000${normalizedText}`;
-  const cached = codeBlockHtmlCache.get(cacheKey);
-  if (cached) {
-    codeBlockHtmlCache.delete(cacheKey);
-    codeBlockHtmlCache.set(cacheKey, cached);
-    return cached;
-  }
-  const escaped = normalizedText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const copyPayload = encodeCopyPayload(normalizedText);
-  const langLabel = lang ? `<span class="code-block-lang">${lang}</span>` : '';
-  const copyBtn =
-    `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${copyPayload}" aria-label="Copy code" title="Copy code">` +
-    copySvg +
-    '</button>';
-  const langAttr = lang ? ` data-lang="${lang.replace(/"/g, '&quot;')}"` : '';
-  const html = `<div class="interactive-result-code-block"${langAttr}><div class="code-block-header">${langLabel}${copyBtn}</div><pre class="code-block"><code>${escaped}</code></pre></div>`;
-  codeBlockHtmlCache.set(cacheKey, html);
-  if (codeBlockHtmlCache.size > CODE_BLOCK_CACHE_LIMIT) {
-    const oldest = codeBlockHtmlCache.keys().next().value;
-    if (oldest) codeBlockHtmlCache.delete(oldest);
-  }
-  return html;
+  return renderCodeBlockHtml({
+    text: normalizedText,
+    lang,
+    copyText: normalizedText,
+  });
 };
 
 renderer.link = function ({

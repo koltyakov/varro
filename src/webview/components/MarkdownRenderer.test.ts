@@ -169,4 +169,30 @@ describe('MarkdownRenderer', () => {
     expect(copied).toHaveLength(20_000);
     expect(copied.includes('\u0000')).toBe(false);
   });
+
+  it('renders fenced code blocks with syntax highlight spans when the language is known', async () => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const code = container?.querySelector('.interactive-result-code-block code');
+    expect(code?.classList.contains('hljs')).toBe(true);
+    expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');
+    expect(code?.querySelector('.hljs-number')?.textContent).toBe('1');
+  });
+
+  it('falls back to escaped plain code when the language is unknown', async () => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: '```definitely-not-a-lang\nconst value = 1;\n```' }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const code = container?.querySelector('.interactive-result-code-block code');
+    expect(code?.classList.contains('hljs')).toBe(true);
+    expect(code?.querySelector('[class^="hljs-"]')).toBeNull();
+    expect(code?.textContent).toBe('const value = 1;');
+  });
 });

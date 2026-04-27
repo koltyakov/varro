@@ -327,6 +327,12 @@ describe('Message user prompt rendering', () => {
     expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
       'const value = 1;\nconst next = value + 1;\n'
     );
+    expect(container?.querySelector('.user-message-code-block code.hljs')).toBeInstanceOf(
+      HTMLElement
+    );
+    expect(container?.querySelector('.user-message-code-block .hljs-keyword')?.textContent).toBe(
+      'const'
+    );
   });
 
   it('does not render an attachments separator for attachment-only user prompts', () => {

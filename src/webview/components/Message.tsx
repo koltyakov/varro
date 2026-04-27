@@ -21,7 +21,7 @@ import type {
   ToolPart,
 } from '../types';
 import { DiffView } from './DiffView';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { MarkdownRenderer, renderCodeBlockHtml } from './MarkdownRenderer';
 import { MessagePart } from './MessagePart';
 import { isLoading, state } from '../lib/state';
 import {
@@ -505,18 +505,13 @@ function UserMessageTextContent(props: { text: string }) {
       {(segment) =>
         segment.type === 'code' ? (
           <div
-            class="interactive-result-code-block user-message-code-block"
-            data-lang={segment.language}
-          >
-            <Show when={segment.language}>
-              <div class="code-block-header">
-                <span class="code-block-lang">{segment.language}</span>
-              </div>
-            </Show>
-            <pre class="code-block">
-              <code>{segment.content}</code>
-            </pre>
-          </div>
+            innerHTML={renderCodeBlockHtml({
+              text: segment.content,
+              lang: segment.language,
+              className: 'user-message-code-block',
+              showCopyButton: false,
+            })}
+          />
         ) : (
           <Show when={segment.content.length > 0}>
             <p class="user-message-text">{segment.content}</p>

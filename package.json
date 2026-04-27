@@ -2,7 +2,7 @@
   "name": "varro",
   "displayName": "Varro",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
-  "version": "0.10.5",
+  "version": "0.10.6",
   "publisher": "koltyakov",
   "repository": "https://github.com/koltyakov/varro",
   "license": "MIT",
@@ -235,6 +235,7 @@
   "dependencies": {
     "@opencode-ai/sdk": "^1.14.25",
     "dompurify": "^3.4.1",
+    "highlight.js": "11.11.1",
     "marked": "18.0.2",
     "solid-js": "1.9.12"
   }
