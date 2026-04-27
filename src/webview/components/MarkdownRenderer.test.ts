@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import DOMPurify from 'dompurify';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { setState } from '../lib/state';
 
@@ -181,6 +182,49 @@ describe('MarkdownRenderer', () => {
     expect(code?.classList.contains('hljs')).toBe(true);
     expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');
     expect(code?.querySelector('.hljs-number')?.textContent).toBe('1');
+  });
+
+  it('reuses sanitized html for cached finalized content across remounts', async () => {
+    const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
+    const content = 'Finalized cache test `7mwnc`';
+
+    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(sanitizeSpy).toHaveBeenCalledTimes(1);
+
+    cleanup?.();
+    cleanup = undefined;
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+
+    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(sanitizeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does fresh sanitization when content caching is disabled', async () => {
+    const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
+    const content = 'Streaming cache bypass test `d9q2p`';
+
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const callsAfterFirstMount = sanitizeSpy.mock.calls.length;
+    expect(callsAfterFirstMount).toBeGreaterThan(0);
+
+    cleanup?.();
+    cleanup = undefined;
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(sanitizeSpy.mock.calls.length).toBeGreaterThan(callsAfterFirstMount);
   });
 
   it('falls back to escaped plain code when the language is unknown', async () => {

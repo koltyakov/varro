@@ -1015,7 +1015,10 @@ function AssistantMessageContent(props: {
           <div class="assistant-read-overlay-scroll">
             <div class="assistant-read-overlay-inner" onClick={(event) => event.stopPropagation()}>
               <div class="assistant-read-mode-content">
-                <MarkdownRenderer content={finalTextContent()} />
+                <MarkdownRenderer
+                  content={finalTextContent()}
+                  cacheByContent={!!props.info.time.completed}
+                />
               </div>
             </div>
           </div>

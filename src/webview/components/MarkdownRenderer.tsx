@@ -9,6 +9,7 @@ import { formatCommandDisplay } from '../lib/command-display';
 
 interface MarkdownProps {
   content: string;
+  cacheByContent?: boolean;
 }
 
 const copySvg =
@@ -84,9 +85,11 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'y2',
 ];
 const CODE_BLOCK_CACHE_LIMIT = 100;
+const RENDERED_MARKDOWN_CACHE_LIMIT = 100;
 const MAX_COPY_TEXT_LENGTH = 20_000;
 const codeBlockHtmlCache = new Map<string, string>();
 const highlightedCodeCache = new Map<string, string>();
+const renderedMarkdownCache = new Map<string, string>();
 const CODE_LANGUAGE_ALIASES = new Map<string, string>([
   ['console', 'bash'],
   ['plain', 'plaintext'],
@@ -120,6 +123,27 @@ function setCachedValue(cache: Map<string, string>, key: string, value: string) 
     const oldest = cache.keys().next().value;
     if (oldest) cache.delete(oldest);
   }
+}
+
+function setRenderedMarkdownCacheValue(key: string, value: string) {
+  renderedMarkdownCache.set(key, value);
+  if (renderedMarkdownCache.size > RENDERED_MARKDOWN_CACHE_LIMIT) {
+    const oldest = renderedMarkdownCache.keys().next().value;
+    if (oldest) renderedMarkdownCache.delete(oldest);
+  }
+}
+
+function hashContent(value: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${value.length}:${(hash >>> 0).toString(36)}`;
+}
+
+function getRenderedMarkdownCacheKey(content: string) {
+  return `${state.editorContext.workspacePath || ''}\u0000${hashContent(content)}`;
 }
 
 function resolveCodeLanguage(lang?: string) {
@@ -365,6 +389,31 @@ function sanitizeHtml(html: string): string {
   return template.innerHTML;
 }
 
+function renderMarkdownHtml(content: string): string {
+  try {
+    const parsed = marked.parse(content) as string;
+    return sanitizeHtml(linkifyPaths(parsed));
+  } catch {
+    return `<p>${escapeHtml(content)}</p>`;
+  }
+}
+
+function parseMarkdown(content: string, cacheByContent: boolean): string {
+  if (!cacheByContent) return renderMarkdownHtml(content);
+
+  const cacheKey = getRenderedMarkdownCacheKey(content);
+  const cached = renderedMarkdownCache.get(cacheKey);
+  if (cached) {
+    renderedMarkdownCache.delete(cacheKey);
+    renderedMarkdownCache.set(cacheKey, cached);
+    return cached;
+  }
+
+  const html = renderMarkdownHtml(content);
+  setRenderedMarkdownCacheValue(cacheKey, html);
+  return html;
+}
+
 function linkifyPaths(html: string): string {
   const preserved: string[] = [];
   let idx = 0;
@@ -460,23 +509,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let rafId: number | null = null;
   let lastAppliedHtml = '';
 
-  const [renderedHtml, setRenderedHtml] = createSignal(parseMarkdown(props.content || ''));
-
-  function parseMarkdown(content: string): string {
-    try {
-      const parsed = marked.parse(content) as string;
-      return sanitizeHtml(linkifyPaths(parsed));
-    } catch {
-      return `<p>${escapeHtml(content)}</p>`;
-    }
-  }
+  const [renderedHtml, setRenderedHtml] = createSignal(
+    parseMarkdown(props.content || '', !!props.cacheByContent)
+  );
 
   function flushPending() {
     rafId = null;
     if (pendingContent !== null) {
       const content = pendingContent;
       pendingContent = null;
-      const nextHtml = parseMarkdown(content);
+      const nextHtml = parseMarkdown(content, !!props.cacheByContent);
       if (nextHtml !== lastAppliedHtml) {
         lastAppliedHtml = nextHtml;
         setRenderedHtml(nextHtml);

@@ -22,7 +22,12 @@ export function MessagePart(props: {
     const part = p();
     switch (part.type) {
       case 'text':
-        return <MarkdownRenderer content={props.streamedText ?? (part as TextPart).text} />;
+        return (
+          <MarkdownRenderer
+            content={props.streamedText ?? (part as TextPart).text}
+            cacheByContent={!!props.messageInfo?.time.completed}
+          />
+        );
       case 'tool':
         return <ToolCall part={part} />;
       case 'reasoning':
