@@ -13,20 +13,23 @@ const clipboardState = vi.hoisted(() => ({
 const vscodeMock = vi.hoisted(() => ({
   window: {
     activeTerminal: { name: 'Terminal 1' },
-    activeTextEditor: undefined,
-    onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
-    onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: vi.fn() })),
+    activeTextEditor: undefined as unknown,
+    onDidChangeActiveTextEditor: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+    onDidChangeTextEditorSelection: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     showTextDocument: vi.fn(),
   },
   languages: {
-    onDidChangeDiagnostics: vi.fn(() => ({ dispose: vi.fn() })),
-    getDiagnostics: vi.fn(() => []),
+    onDidChangeDiagnostics: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+    getDiagnostics: vi.fn(
+      () => [] as Array<{ severity: number; message: string; range: { start: { line: number } } }>
+    ),
   },
   workspace: {
-    onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
-    onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+    asRelativePath: vi.fn(),
+    onDidChangeWorkspaceFolders: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+    onDidChangeConfiguration: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     getConfiguration: vi.fn(() => ({ get: vi.fn((_key: string, fallback: boolean) => fallback) })),
-    workspaceFolders: [],
+    workspaceFolders: [] as Array<{ name: string; uri: { fsPath: string } }>,
     getWorkspaceFolder: vi.fn(),
     fs: {
       stat: vi.fn(),
@@ -50,6 +53,10 @@ const vscodeMock = vi.hoisted(() => ({
   },
   FileType: {
     Directory: 2,
+  },
+  DiagnosticSeverity: {
+    Error: 0,
+    Warning: 1,
   },
   Position: vi.fn(function (line: number, character: number) {
     return { line, character };
@@ -76,11 +83,19 @@ describe('ContextProvider', () => {
     clipboardState.values = [];
     clipboardState.writes = [];
     vscodeMock.window.activeTerminal = { name: 'Terminal 1' };
+    vscodeMock.window.activeTextEditor = undefined;
     vscodeMock.workspace.getWorkspaceFolder.mockReset();
     vscodeMock.workspace.fs.stat.mockReset();
     vscodeMock.workspace.openTextDocument.mockReset();
+    vscodeMock.workspace.asRelativePath.mockReset();
     vscodeMock.window.showTextDocument.mockReset();
     vscodeMock.commands.executeCommand.mockResolvedValue(undefined);
+    vscodeMock.languages.getDiagnostics.mockReset();
+    vscodeMock.languages.getDiagnostics.mockReturnValue([]);
+    vscodeMock.workspace.workspaceFolders = [];
+    vscodeMock.workspace.getConfiguration.mockImplementation(() => ({
+      get: vi.fn((_key: string, fallback: boolean) => fallback),
+    }));
   });
 
   it('does not reuse stale clipboard text when terminal copy captures nothing', async () => {
@@ -161,6 +176,76 @@ describe('ContextProvider', () => {
 
       expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(uri);
       expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith(document, { preview: false });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('does not emit duplicate context updates for unchanged editor state', async () => {
+    const onChange = vi.fn();
+    const activeTextEditorListener = vi.fn();
+    vscodeMock.window.onDidChangeActiveTextEditor.mockImplementation((listener?: () => void) => {
+      if (listener) {
+        activeTextEditorListener.mockImplementation(listener);
+      }
+      return { dispose: vi.fn() };
+    });
+    const uri = {
+      fsPath: '/repo/src/app.ts',
+      scheme: 'file',
+      toString: () => 'file:///repo/src/app.ts',
+    };
+    const editor = {
+      document: { uri, isUntitled: false, languageId: 'typescript' },
+      selection: {
+        isEmpty: false,
+        start: { line: 2 },
+        end: { line: 4 },
+      },
+    };
+    vscodeMock.window.activeTextEditor = editor;
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(
+      vscodeMock.workspace.workspaceFolders[0]
+    );
+    vscodeMock.workspace.asRelativePath = vi.fn(() => 'src/app.ts');
+    vscodeMock.languages.getDiagnostics.mockReturnValue([
+      {
+        severity: 0,
+        message: 'bad',
+        range: { start: { line: 6 } },
+      },
+    ]);
+    vscodeMock.workspace.asRelativePath.mockImplementation(() => 'src/app.ts');
+
+    const provider = new ContextProvider(onChange);
+
+    try {
+      expect(onChange).toHaveBeenCalledTimes(2);
+
+      activeTextEditorListener();
+
+      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(onChange).toHaveBeenLastCalledWith({
+        workspacePath: '/repo',
+        activeFile: {
+          path: '/repo/src/app.ts',
+          relativePath: 'src/app.ts',
+          language: 'typescript',
+        },
+        selection: {
+          startLine: 3,
+          endLine: 5,
+        },
+        diagnostics: [
+          {
+            path: '/repo/src/app.ts',
+            severity: 'error',
+            message: 'bad',
+            line: 7,
+          },
+        ],
+      });
     } finally {
       provider.dispose();
     }

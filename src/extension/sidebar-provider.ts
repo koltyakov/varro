@@ -572,6 +572,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     path: string;
     body?: unknown;
   }) {
+    const requestGeneration = this.webviewLoadGeneration;
     try {
       const method = payload.method.toUpperCase();
       if (!isAllowedApiRequest(method, payload.path)) {
@@ -581,14 +582,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const recycleBinRequest = this.parseRecycleBinRequest(method, payload.path);
       if (recycleBinRequest) {
         const data = await this.handleRecycleBinRequest(recycleBinRequest);
-        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        this.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
 
       const planOpenRequest = this.parsePlanOpenRequest(method, payload.path, payload.body);
       if (planOpenRequest) {
         const data = await this.openPlanDocument(planOpenRequest.content);
-        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        this.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
 
@@ -602,7 +603,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           openCodeConfigRequest.kind === 'get'
             ? await this.readOpenCodeModelRouting()
             : await this.updateOpenCodeModelRouting(openCodeConfigRequest);
-        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        this.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
 
@@ -617,14 +618,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           providerLimitRequest.providerID,
           providerLimitRequest.modelID
         );
-        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        this.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
 
       if (this.simulateNoProviders && method === 'GET' && payload.path === '/config/providers') {
-        this.post({
-          type: 'api/response',
-          payload: { id: payload.id, data: { providers: [], default: {} } },
+        this.postApiResponse(requestGeneration, {
+          id: payload.id,
+          data: { providers: [], default: {} },
         });
         return;
       }
@@ -637,21 +638,29 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const softDeleteSessionID = this.parseSoftDeleteSessionRequest(method, payload.path);
       if (softDeleteSessionID) {
         const data = await this.moveSessionToRecycleBin(softDeleteSessionID);
-        this.post({ type: 'api/response', payload: { id: payload.id, data } });
+        this.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
 
       const data = await this.server.request(method, payload.path, payload.body);
-      this.post({
-        type: 'api/response',
-        payload: { id: payload.id, data: this.filterApiResponse(method, payload.path, data) },
+      this.postApiResponse(requestGeneration, {
+        id: payload.id,
+        data: this.filterApiResponse(method, payload.path, data),
       });
     } catch (err) {
-      this.post({
-        type: 'api/response',
-        payload: { id: payload.id, error: err instanceof Error ? err.message : String(err) },
+      this.postApiResponse(requestGeneration, {
+        id: payload.id,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  private postApiResponse(
+    requestGeneration: number,
+    payload: { id: number; data?: unknown; error?: string }
+  ) {
+    if (!this.view || requestGeneration !== this.webviewLoadGeneration) return;
+    this.post({ type: 'api/response', payload });
   }
 
   private parseRecycleBinRequest(method: string, path: string) {

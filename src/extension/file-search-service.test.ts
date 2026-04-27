@@ -8,6 +8,7 @@ const vscodeMock = vi.hoisted(() => ({
   workspaceFolder: { name: 'repo', uri: { fsPath: '/repo' } },
   workspace: {
     asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath.replace('/repo/', '')),
+    createFileSystemWatcher: vi.fn(),
     findFiles: vi.fn(),
     getWorkspaceFolder: vi.fn(),
     workspaceFolders: [] as Array<{ name: string; uri: { fsPath: string } }>,
@@ -49,6 +50,29 @@ describe('FileSearchService', () => {
     vi.resetModules();
     vi.clearAllMocks();
     const workspaceFolder = vscodeMock.workspaceFolder;
+    vscodeMock.workspace.createFileSystemWatcher.mockImplementation(() => {
+      let createListener: (() => void) | undefined;
+      let deleteListener: (() => void) | undefined;
+      let changeListener: (() => void) | undefined;
+      return {
+        onDidCreate: vi.fn((listener: () => void) => {
+          createListener = listener;
+          return { dispose: vi.fn() };
+        }),
+        onDidDelete: vi.fn((listener: () => void) => {
+          deleteListener = listener;
+          return { dispose: vi.fn() };
+        }),
+        onDidChange: vi.fn((listener: () => void) => {
+          changeListener = listener;
+          return { dispose: vi.fn() };
+        }),
+        dispose: vi.fn(),
+        fireCreate: () => createListener?.(),
+        fireDelete: () => deleteListener?.(),
+        fireChange: () => changeListener?.(),
+      };
+    });
     vscodeMock.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) =>
       uri.fsPath.replace('/repo/', '')
     );
@@ -138,6 +162,78 @@ describe('FileSearchService', () => {
 
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
     expect(thirdResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates the workspace cache when files change', async () => {
+    vscodeMock.workspace.findFiles
+      .mockResolvedValueOnce([{ fsPath: '/repo/src/first.ts' }])
+      .mockResolvedValueOnce([{ fsPath: '/repo/src/second.ts' }]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
+      fireCreate: () => void;
+    };
+    const firstResult = vi.fn();
+    const secondResult = vi.fn();
+
+    service.search(1, '', 10, firstResult);
+    await vi.waitFor(() => {
+      expect(firstResult).toHaveBeenCalledTimes(1);
+    });
+
+    watcher.fireCreate();
+
+    service.search(2, '', 10, secondResult);
+    await vi.waitFor(() => {
+      expect(secondResult).toHaveBeenCalledTimes(1);
+    });
+
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
+    expect(firstResult).toHaveBeenCalledWith({
+      requestId: 1,
+      query: '',
+      files: [{ path: '/repo/src/first.ts', relativePath: 'src/first.ts', type: 'file' }],
+    });
+    expect(secondResult).toHaveBeenCalledWith({
+      requestId: 2,
+      query: '',
+      files: [{ path: '/repo/src/second.ts', relativePath: 'src/second.ts', type: 'file' }],
+    });
+  });
+
+  it('resolves workspace folders without per-file getWorkspaceFolder lookups', async () => {
+    vscodeMock.workspace.workspaceFolders = [
+      { name: 'repo', uri: { fsPath: '/repo' } },
+      { name: 'docs', uri: { fsPath: '/docs' } },
+    ];
+    vscodeMock.workspace.findFiles.mockResolvedValue([
+      { fsPath: '/repo/src/app.ts' },
+      { fsPath: '/docs/guide.md' },
+    ]);
+    vscodeMock.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) => {
+      if (uri.fsPath.startsWith('/repo/')) return uri.fsPath.replace('/repo/', '');
+      if (uri.fsPath.startsWith('/docs/')) return uri.fsPath.replace('/docs/', '');
+      return uri.fsPath;
+    });
+
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+
+    service.search(1, '', 10, onResult);
+    await vi.waitFor(() => {
+      expect(onResult).toHaveBeenCalledTimes(1);
+    });
+
+    expect(vscodeMock.workspace.getWorkspaceFolder).not.toHaveBeenCalled();
+    expect(onResult).toHaveBeenCalledWith({
+      requestId: 1,
+      query: '',
+      files: [
+        { path: '/docs/guide.md', relativePath: 'docs/guide.md', type: 'file' },
+        { path: '/repo/src/app.ts', relativePath: 'repo/src/app.ts', type: 'file' },
+      ],
+    });
   });
 
   it('returns an empty result and logs a warning when discovery fails', async () => {

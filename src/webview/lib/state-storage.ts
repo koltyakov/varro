@@ -14,7 +14,6 @@ export const STORAGE_KEYS = {
   lastActiveSessionId: 'varro.lastActiveSessionId',
   showThinking: 'varro.showThinking',
   expandThinkingByDefault: 'varro.expandThinkingByDefault',
-  legacyexpandThinkingByDefault: 'varro.expandThinkingByDefault',
   showStickyUserPrompt: 'varro.showStickyUserPrompt',
 } as const;
 

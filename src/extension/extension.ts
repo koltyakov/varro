@@ -41,11 +41,11 @@ export async function activate(context: vscode.ExtensionContext) {
   registerCommands(context, sidebarProvider!, contextProvider!, server!);
 
   vscode.commands.executeCommand('setContext', 'varro:activated', true);
-  logger.info('Varro extension activated; server startup is deferred until first use');
+  logger.info('Varro extension activated; server startup is deferred until the chat view is used');
 }
 
 export async function deactivate() {
-  const disposeSafe = async (fn: () => Promise<void> | void, label: string) => {
+  const disposeSafe = async (fn: () => PromiseLike<void> | void, label: string) => {
     try {
       await fn();
     } catch (err) {
@@ -59,9 +59,10 @@ export async function deactivate() {
   server = null;
   contextProvider = null;
   sidebarProvider = null;
-  try {
-    vscode.commands.executeCommand('setContext', 'varro:activated', false);
-  } catch {}
+  await disposeSafe(
+    () => vscode.commands.executeCommand('setContext', 'varro:activated', false),
+    'setContext deactivate'
+  );
   logger.info('Varro extension deactivated');
   logger.dispose();
 }

@@ -24,8 +24,8 @@ export class ContextProvider implements vscode.Disposable {
     diagnostics: [],
   };
   private _terminalSelection: { text: string; terminalName: string } | null = null;
-  private _lastContextKey: string | null = null;
-  private _lastEmittedContextKey: string | null = null;
+  private _lastContextSnapshot: ContextSnapshot | null = null;
+  private _lastEmittedContextSnapshot: EditorContext | null = null;
   private _lastDiagnosticsSourceKey: string | null = null;
   private onChange: (ctx: EditorContext) => void;
 
@@ -160,9 +160,7 @@ export class ContextProvider implements vscode.Disposable {
         }
         this._context.activeFile = null;
         this._context.selection = null;
-        const nextKey = this.getContextKey();
-        if (nextKey === this._lastContextKey) return;
-        this._lastContextKey = nextKey;
+        if (!this.captureContextSnapshot()) return;
         this.refreshDiagnosticsIfNeeded();
       }, ContextProvider.ACTIVE_EDITOR_SETTLE_DELAY_MS);
       return;
@@ -172,9 +170,7 @@ export class ContextProvider implements vscode.Disposable {
     if (doc.isUntitled || doc.uri.scheme === 'untitled') {
       this._context.activeFile = null;
       this._context.selection = null;
-      const nextKey = this.getContextKey();
-      if (nextKey === this._lastContextKey) return;
-      this._lastContextKey = nextKey;
+      if (!this.captureContextSnapshot()) return;
       this.refreshDiagnosticsIfNeeded();
       return;
     }
@@ -200,9 +196,7 @@ export class ContextProvider implements vscode.Disposable {
       this._context.selection = null;
     }
 
-    const nextKey = this.getContextKey();
-    if (nextKey === this._lastContextKey) return;
-    this._lastContextKey = nextKey;
+    if (!this.captureContextSnapshot()) return;
 
     this.emitContextIfChanged();
     this.refreshDiagnosticsIfNeeded();
@@ -242,18 +236,19 @@ export class ContextProvider implements vscode.Disposable {
     this.emitContextIfChanged();
   }
 
-  private getContextKey() {
-    return JSON.stringify({
-      workspacePath: this._context.workspacePath,
-      activeFile: this._context.activeFile,
-      selection: this._context.selection,
-    });
+  private captureContextSnapshot() {
+    const nextSnapshot = this.getContextSnapshot();
+    if (areContextSnapshotsEqual(nextSnapshot, this._lastContextSnapshot)) {
+      return false;
+    }
+
+    this._lastContextSnapshot = nextSnapshot;
+    return true;
   }
 
-  private getEmittedContextKey() {
+  private getContextSnapshot(): ContextSnapshot {
     const activeFile = this._context.activeFile;
-    const selection = this._context.selection;
-    return JSON.stringify({
+    return {
       workspacePath: this._context.workspacePath,
       activeFile: activeFile
         ? {
@@ -262,9 +257,13 @@ export class ContextProvider implements vscode.Disposable {
             language: activeFile.language,
           }
         : null,
-      selection,
-      diagnostics: this._context.diagnostics,
-    });
+      selection: this._context.selection
+        ? {
+            startLine: this._context.selection.startLine,
+            endLine: this._context.selection.endLine,
+          }
+        : null,
+    };
   }
 
   private getDiagnosticsSourceKey() {
@@ -272,9 +271,8 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   private emitContextIfChanged() {
-    const nextKey = this.getEmittedContextKey();
-    if (nextKey === this._lastEmittedContextKey) return;
-    this._lastEmittedContextKey = nextKey;
+    if (areEditorContextsEqual(this._context, this._lastEmittedContextSnapshot)) return;
+    this._lastEmittedContextSnapshot = cloneEditorContext(this._context);
     this.onChange(this._context);
   }
 
@@ -392,6 +390,64 @@ export class ContextProvider implements vscode.Disposable {
     const fallbackFolder = vscode.workspace.workspaceFolders?.[0];
     return fallbackFolder?.uri.fsPath || null;
   }
+}
+
+type ContextSnapshot = Pick<EditorContext, 'workspacePath' | 'activeFile' | 'selection'>;
+
+function areContextSnapshotsEqual(a: ContextSnapshot | null, b: ContextSnapshot | null) {
+  return (
+    a?.workspacePath === b?.workspacePath &&
+    areActiveFilesEqual(a?.activeFile ?? null, b?.activeFile ?? null) &&
+    areSelectionsEqual(a?.selection ?? null, b?.selection ?? null)
+  );
+}
+
+function areEditorContextsEqual(a: EditorContext, b: EditorContext | null) {
+  return (
+    a.workspacePath === b?.workspacePath &&
+    areActiveFilesEqual(a.activeFile, b?.activeFile ?? null) &&
+    areSelectionsEqual(a.selection, b?.selection ?? null) &&
+    areDiagnosticsEqual(a.diagnostics, b?.diagnostics ?? null)
+  );
+}
+
+function areActiveFilesEqual(a: EditorContext['activeFile'], b: EditorContext['activeFile']) {
+  return a?.path === b?.path && a?.relativePath === b?.relativePath && a?.language === b?.language;
+}
+
+function areSelectionsEqual(a: EditorContext['selection'], b: EditorContext['selection']) {
+  return a?.startLine === b?.startLine && a?.endLine === b?.endLine;
+}
+
+function areDiagnosticsEqual(
+  a: EditorContext['diagnostics'],
+  b: EditorContext['diagnostics'] | null
+) {
+  if (!b || a.length !== b.length) return false;
+
+  for (let index = 0; index < a.length; index += 1) {
+    const left = a[index];
+    const right = b[index];
+    if (
+      left?.path !== right?.path ||
+      left?.severity !== right?.severity ||
+      left?.message !== right?.message ||
+      left?.line !== right?.line
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function cloneEditorContext(context: EditorContext): EditorContext {
+  return {
+    workspacePath: context.workspacePath,
+    activeFile: context.activeFile ? { ...context.activeFile } : null,
+    selection: context.selection ? { ...context.selection } : null,
+    diagnostics: context.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+  };
 }
 
 function getContextConfig() {

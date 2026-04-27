@@ -147,4 +147,26 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
     expect(container?.querySelectorAll('code')).not.toHaveLength(0);
   });
+
+  it('sanitizes copied code payloads before writing to the clipboard', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    const oversized = 'A'.repeat(25_000);
+    cleanup = render(() => MarkdownRenderer({ content: '```txt\nplaceholder\n```' }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const button = container?.querySelector<HTMLButtonElement>('button[data-copy]');
+    button!.dataset.copyText = `line%201%0D%0Aline%202%00${encodeURIComponent(oversized)}`;
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = writeText.mock.calls[0]?.[0] as string;
+    expect(copied).toBe(`line 1\nline 2${'A'.repeat(19_987)}`);
+    expect(copied).toHaveLength(20_000);
+    expect(copied.includes('\u0000')).toBe(false);
+  });
 });

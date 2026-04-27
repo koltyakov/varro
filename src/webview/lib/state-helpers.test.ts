@@ -128,6 +128,11 @@ describe('state helpers', () => {
     stateModule.markSessionSeen('session-1', 1_500);
     expect(stateModule.state.lastSeenSessions['session-1']).toBe(1_500);
     expect(stateModule.isSessionUnread('session-1', 1_500)).toBe(false);
+    expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(
+      JSON.stringify({
+        '__varro.no-workspace__': { 'session-1': 1_500, 'session-2': 1_000 },
+      })
+    );
 
     stateModule.setSessionCompacting('session-4', true);
     expect(stateModule.state.compactingSessionIds).toEqual(['session-4']);
@@ -156,13 +161,116 @@ describe('state helpers', () => {
     expect(stateModule.isSkippedPlanSession('session-1', 200)).toBe(true);
     expect(stateModule.isSkippedPlanSession('session-1', 201)).toBe(false);
     expect(window.localStorage.getItem('varro.skippedPlanSessions')).toBe(
-      JSON.stringify({ 'session-1': 200 })
+      JSON.stringify({ '__varro.no-workspace__': { 'session-1': 200 } })
     );
 
     stateModule.clearSkippedPlanSession('session-1');
 
     expect(stateModule.state.skippedPlanSessions).toEqual({});
     expect(window.localStorage.getItem('varro.skippedPlanSessions')).toBe(JSON.stringify({}));
+
+    stateModule.setState('lastSeenSessions', { 'session-1': 100, 'session-2': 200 });
+    stateModule.clearSessionSeen('session-1');
+    expect(stateModule.state.lastSeenSessions).toEqual({ 'session-2': 200 });
+    expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(
+      JSON.stringify({ '__varro.no-workspace__': { 'session-2': 200 } })
+    );
+  });
+
+  it('prunes stale skipped session markers when sessions refresh', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setState('skippedPlanSessions', { stale: 3, 'session-1': 4 });
+
+    stateModule.setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'session-1',
+        version: '1',
+        time: { created: 100, updated: 200 },
+      },
+    ]);
+
+    expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-1': 4 });
+  });
+
+  it('keeps session markers scoped per workspace', async () => {
+    const stateModule = await loadState();
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+
+    stateModule.syncSessionMarkersForWorkspace('/repo-a');
+    stateModule.setSessions([
+      {
+        id: 'session-a',
+        projectID: 'project-a',
+        directory: '/repo-a',
+        title: 'session-a',
+        version: '1',
+        time: { created: 100, updated: 200 },
+      },
+    ]);
+    stateModule.markSessionSeen('session-a');
+    stateModule.skipPlanSession('session-a');
+
+    expect(stateModule.state.lastSeenSessions).toEqual({ 'session-a': 1_000 });
+    expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-a': 200 });
+
+    stateModule.syncSessionMarkersForWorkspace('/repo-b');
+    stateModule.setSessions([
+      {
+        id: 'session-b',
+        projectID: 'project-b',
+        directory: '/repo-b',
+        title: 'session-b',
+        version: '1',
+        time: { created: 300, updated: 400 },
+      },
+    ]);
+
+    expect(stateModule.state.lastSeenSessions).toEqual({});
+    expect(stateModule.state.skippedPlanSessions).toEqual({});
+
+    stateModule.markSessionSeen('session-b', 2_000);
+    stateModule.skipPlanSession('session-b');
+
+    expect(JSON.parse(window.localStorage.getItem('varro.lastSeenSessions') || '{}')).toEqual({
+      '/repo-a': { 'session-a': 1_000 },
+      '/repo-b': { 'session-b': 2_000 },
+    });
+    expect(JSON.parse(window.localStorage.getItem('varro.skippedPlanSessions') || '{}')).toEqual({
+      '/repo-a': { 'session-a': 200 },
+      '/repo-b': { 'session-b': 400 },
+    });
+
+    stateModule.syncSessionMarkersForWorkspace('/repo-a');
+    expect(stateModule.state.lastSeenSessions).toEqual({ 'session-a': 1_000 });
+    expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-a': 200 });
+  });
+
+  it('migrates legacy flat session marker storage into the current workspace scope', async () => {
+    window.localStorage.setItem('varro.lastSeenSessions', JSON.stringify({ legacy: 123 }));
+    window.localStorage.setItem('varro.skippedPlanSessions', JSON.stringify({ legacy: 456 }));
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.state.lastSeenSessions).toEqual({ legacy: 123 });
+    expect(stateModule.state.skippedPlanSessions).toEqual({ legacy: 456 });
+    expect(JSON.parse(window.localStorage.getItem('varro.lastSeenSessions') || '{}')).toEqual({
+      '/repo': { legacy: 123 },
+    });
+    expect(JSON.parse(window.localStorage.getItem('varro.skippedPlanSessions') || '{}')).toEqual({
+      '/repo': { legacy: 456 },
+    });
   });
 
   it('tracks draft and per-session permission modes by workspace', async () => {
@@ -576,6 +684,18 @@ describe('state helpers', () => {
     expect(stateModule.messageStructureVersion()).toBe(afterPartInsert);
     expect(stateModule.state.streamingPartId).toBeNull();
     expect(stateModule.state.streamingText).toBe('');
+
+    stateModule.updateMessagePart({
+      id: 'part-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'text',
+      text: 'Updated text',
+    });
+    expect(stateModule.getMessageById('message-1')?.parts[0]).toMatchObject({
+      id: 'part-1',
+      text: 'Updated text',
+    });
 
     stateModule.applyMessagePartDelta('message-1', 'part-2', 'Bye', 'session-1');
     await nextFrame();

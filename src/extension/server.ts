@@ -341,13 +341,9 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
-  private pollHealthResolve: ((url: string) => void) | null = null;
-  private pollHealthReject: ((err: Error) => void) | null = null;
   private pollHealthTimer: ReturnType<typeof setTimeout> | null = null;
 
   private cancelPollHealth() {
-    this.pollHealthResolve = null;
-    this.pollHealthReject = null;
     if (this.pollHealthTimer) {
       clearTimeout(this.pollHealthTimer);
       this.pollHealthTimer = null;
@@ -368,25 +364,12 @@ export class OpenCodeServer extends EventEmitter {
       return;
     }
 
-    this.pollHealthResolve = resolve;
-    this.pollHealthReject = reject;
-
     this.pollHealthTimer = setTimeout(async () => {
       this.pollHealthTimer = null;
-      if (
-        !this.pollHealthResolve ||
-        !this.pollHealthReject ||
-        startAttemptId !== this.startAttemptId ||
-        disposeGeneration !== this.disposeGeneration
-      )
+      if (startAttemptId !== this.startAttemptId || disposeGeneration !== this.disposeGeneration)
         return;
       const healthy = await this.checkHealth();
-      if (
-        !this.pollHealthResolve ||
-        !this.pollHealthReject ||
-        startAttemptId !== this.startAttemptId ||
-        disposeGeneration !== this.disposeGeneration
-      )
+      if (startAttemptId !== this.startAttemptId || disposeGeneration !== this.disposeGeneration)
         return;
       if (healthy) {
         this.cancelPollHealth();
@@ -395,15 +378,9 @@ export class OpenCodeServer extends EventEmitter {
         this.portFallbackAttempts = 0;
         this.portInUseDetected = false;
         this.startEventStream();
-        this.pollHealthResolve(this.url);
+        resolve(this.url);
       } else {
-        this.pollHealth(
-          startAttemptId,
-          disposeGeneration,
-          this.pollHealthResolve,
-          this.pollHealthReject,
-          attempt + 1
-        );
+        this.pollHealth(startAttemptId, disposeGeneration, resolve, reject, attempt + 1);
       }
     }, 200);
   }
@@ -551,7 +528,8 @@ export class OpenCodeServer extends EventEmitter {
       if (
         shouldReconnect &&
         this.isCurrentEventStream(controller, generation) &&
-        this._status.state === 'running'
+        this._status.state === 'running' &&
+        !this.isDisposing
       ) {
         this.updateEventStreamState('degraded');
         this.eventReconnectCount++;
@@ -562,7 +540,14 @@ export class OpenCodeServer extends EventEmitter {
         }
 
         const delay = this.getEventReconnectDelay();
-        this.eventReconnectTimer = setTimeout(() => this.startEventStream(), delay);
+        this.eventReconnectTimer = setTimeout(() => {
+          if (this.isDisposing || this._status.state !== 'running') {
+            this.eventReconnectTimer = null;
+            return;
+          }
+          this.eventReconnectTimer = null;
+          void this.startEventStream();
+        }, delay);
       }
     }
   }

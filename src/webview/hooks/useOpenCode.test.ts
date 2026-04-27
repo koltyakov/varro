@@ -1760,6 +1760,89 @@ describe('useOpenCode initialization', () => {
     }
   });
 
+  it('skips provider-limit refresh polling after an unsupported response', async () => {
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({
+      providers: [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ],
+      default: { openai: 'gpt-4o' },
+    });
+    clientMocks.providerLimit.mockResolvedValue({
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: 1,
+      note: 'Unsupported',
+    });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      stateModule.setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+      stateModule.setState('providers', [
+        provider('openai', {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true, vision: true },
+            cost: { input: 0, output: 0 },
+          },
+        }),
+      ]);
+      stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
+      stateModule.setState('providersLoaded', true);
+
+      await vi.waitFor(() => {
+        expect(clientMocks.providerLimit).toHaveBeenCalledTimes(1);
+      });
+
+      stateModule.setState('providerLimits', {
+        'openai:gpt-4o': {
+          providerID: 'openai',
+          modelID: 'gpt-4o',
+          status: 'unsupported',
+          source: 'provider',
+          checkedAt: 1,
+          note: 'Unsupported',
+        },
+      });
+
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+
+      expect(clientMocks.providerLimit).toHaveBeenCalledTimes(1);
+    } finally {
+      dispose();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: originalVisibility,
+      });
+    }
+  });
+
   it('syncs session-selected mcps when selecting a session', async () => {
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([session('session-1')]);

@@ -27,11 +27,20 @@ export class FileSearchService {
   private static readonly MAX_CANDIDATES = 4_000;
   private static readonly RESULT_LIMIT = 30;
 
+  private readonly workspaceWatcher: vscode.FileSystemWatcher;
   private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
   private workspaceFileCacheAt = 0;
   private hasWorkspaceFileCache = false;
   private workspaceFileCachePromise: Promise<WorkspaceFileSearchEntry[]> | null = null;
+  private workspaceFileCacheGeneration = 0;
   private fileSearchCts: vscode.CancellationTokenSource | null = null;
+
+  constructor() {
+    this.workspaceWatcher = vscode.workspace.createFileSystemWatcher('**/*');
+    this.workspaceWatcher.onDidCreate(() => this.clearWorkspaceFileCache());
+    this.workspaceWatcher.onDidDelete(() => this.clearWorkspaceFileCache());
+    this.workspaceWatcher.onDidChange(() => this.clearWorkspaceFileCache());
+  }
 
   /**
    * Launch a search for `query`. Results are delivered through `onResult`.
@@ -54,7 +63,14 @@ export class FileSearchService {
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = null;
+    this.workspaceWatcher.dispose();
+    this.clearWorkspaceFileCache();
+  }
+
+  private clearWorkspaceFileCache() {
+    this.workspaceFileCacheGeneration += 1;
     this.workspaceFileCache = [];
+    this.workspaceFileCacheAt = 0;
     this.hasWorkspaceFileCache = false;
     this.workspaceFileCachePromise = null;
   }
@@ -95,6 +111,7 @@ export class FileSearchService {
     }
     if (this.workspaceFileCachePromise) return this.workspaceFileCachePromise;
 
+    const cacheGeneration = this.workspaceFileCacheGeneration;
     const promise = Promise.resolve(
       vscode.workspace.findFiles(
         '**/*',
@@ -104,8 +121,12 @@ export class FileSearchService {
       )
     )
       .then((files) => {
+        const workspaceFolders = (vscode.workspace.workspaceFolders || []).map((folder) => ({
+          folder,
+          normalizedPath: normalizeWorkspacePath(folder.uri.fsPath),
+        }));
         const entries = files.map((uri) => {
-          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+          const workspaceFolder = findWorkspaceFolder(uri.fsPath, workspaceFolders);
           const relativePath = getRelativePath(uri, workspaceFolder);
           return {
             path: uri.fsPath,
@@ -115,9 +136,11 @@ export class FileSearchService {
             leafLower: basename(relativePath).toLowerCase(),
           };
         });
-        this.workspaceFileCache = entries;
-        this.hasWorkspaceFileCache = true;
-        this.workspaceFileCacheAt = Date.now();
+        if (cacheGeneration === this.workspaceFileCacheGeneration) {
+          this.workspaceFileCache = entries;
+          this.hasWorkspaceFileCache = true;
+          this.workspaceFileCacheAt = Date.now();
+        }
         return entries;
       })
       .finally(() => {
@@ -201,4 +224,32 @@ function getFileSearchScore(file: WorkspaceFileSearchEntry, query: string) {
     index = next + 1;
   }
   return score - haystack.length;
+}
+
+function normalizeWorkspacePath(path: string) {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function findWorkspaceFolder(
+  filePath: string,
+  folders: Array<{ folder: vscode.WorkspaceFolder; normalizedPath: string }>
+) {
+  const normalizedFilePath = normalizeWorkspacePath(filePath);
+  let bestMatch: vscode.WorkspaceFolder | undefined;
+
+  for (const { folder, normalizedPath } of folders) {
+    if (
+      normalizedFilePath === normalizedPath ||
+      normalizedFilePath.startsWith(`${normalizedPath}/`)
+    ) {
+      if (
+        !bestMatch ||
+        normalizedPath.length > normalizeWorkspacePath(bestMatch.uri.fsPath).length
+      ) {
+        bestMatch = folder;
+      }
+    }
+  }
+
+  return bestMatch;
 }

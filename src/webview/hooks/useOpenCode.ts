@@ -60,6 +60,7 @@ import {
   resetDraftPermissionMode,
   setPermissionModeForSession,
   syncDraftPermissionForWorkspace,
+  syncSessionMarkersForWorkspace,
   saveProjectPermissionMode,
   draftPermissionMode,
   setDraftPermissionMode,
@@ -76,6 +77,7 @@ import {
   setExpandThinkingByDefaultPreference,
   setShowStickyUserPromptPreference,
   getAvailableMcpNames,
+  getProviderLimit,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
@@ -669,6 +671,7 @@ export function useOpenCode() {
             );
             if (workspaceChanged) {
               syncDraftPermissionForWorkspace(nextWorkspacePath);
+              syncSessionMarkersForWorkspace(nextWorkspacePath);
             }
             if (workspaceChanged && initialized) {
               loadSessions().catch(() => {});
@@ -774,6 +777,8 @@ export function useOpenCode() {
 
     const active = getActiveProviderSelection();
     if (!active) return;
+    const existingLimit = getProviderLimit(active.providerID, active.modelID);
+    if (existingLimit?.status === 'unsupported') return;
 
     let cancelled = false;
     const refresh = async () => {
@@ -1380,7 +1385,12 @@ export async function deleteSessionPermanently(rootID: string) {
     const entry = state.recycleBinEntries.find((item) => item.rootID === rootID);
     await client.varro.recycleBin.delete(rootID);
     await loadRecycleBin();
-    for (const session of entry?.sessions || []) {
+    const deletedSessions = entry?.sessions?.length
+      ? entry.sessions
+      : entry?.root
+        ? [entry.root]
+        : [{ id: rootID } as Session];
+    for (const session of deletedSessions) {
       clearDeletedSessionState(session.id);
     }
   } catch (err) {

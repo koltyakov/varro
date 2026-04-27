@@ -222,6 +222,31 @@ describe('OpenCodeServer event stream', () => {
     await flushMicrotasks();
   });
 
+  it('does not reconnect an event stream after dispose starts', async () => {
+    const server = new OpenCodeServer(4096, false);
+    setRunning(server);
+
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (_input, init) => {
+      const signal = init?.signal as AbortSignal;
+      return createPendingEventResponse(signal);
+    });
+
+    const firstStream = startEventStream(server);
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(45_000);
+    await firstStream;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const disposePromise = server.dispose();
+    await vi.advanceTimersByTimeAsync(1_500);
+    await flushMicrotasks();
+    await disposePromise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('clears pending restart timers during dispose', async () => {
     const server = new OpenCodeServer(4096, false);
     const restart = vi.fn();
@@ -581,6 +606,43 @@ describe('OpenCodeServer maintenance', () => {
     });
     expect(terminal.show).toHaveBeenCalledWith(false);
     expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+  });
+});
+
+describe('OpenCodeServer startup health polling', () => {
+  it('keeps the original pollHealth callbacks across recursive retries', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const resolved = vi.fn();
+    const rejected = vi.fn();
+    const api = server as unknown as {
+      checkHealth: () => Promise<boolean>;
+      pollHealth: (
+        startAttemptId: number,
+        disposeGeneration: number,
+        resolve: (url: string) => void,
+        reject: (err: Error) => void,
+        attempt?: number
+      ) => void;
+      startAttemptId: number;
+      disposeGeneration: number;
+    };
+
+    api.checkHealth = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    api.startAttemptId = 1;
+    api.disposeGeneration = 0;
+
+    api.pollHealth(1, 0, resolved, rejected);
+    await vi.advanceTimersByTimeAsync(200);
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(200);
+    await flushMicrotasks();
+
+    expect(resolved).toHaveBeenCalledWith(server.url);
+    expect(resolved).toHaveBeenCalledTimes(1);
+    expect(rejected).not.toHaveBeenCalled();
   });
 });
 

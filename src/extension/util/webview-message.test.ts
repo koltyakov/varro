@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedApiRequest, parseWebviewMessage } from './webview-message';
+import { isAllowedApiRequest, isAllowedExternalUrl, parseWebviewMessage } from './webview-message';
 
 describe('webview message validation', () => {
   it('accepts known API routes used by the webview client', () => {
@@ -59,6 +59,18 @@ describe('webview message validation', () => {
         payload: { id: 1, method: 'GET', path: 'https://example.com/' },
       })
     ).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-external',
+        payload: { url: 'http://example.com' },
+      })
+    ).toBeNull();
+  });
+
+  it('allows only https external URLs', () => {
+    expect(isAllowedExternalUrl('https://example.com')).toBe(true);
+    expect(isAllowedExternalUrl('http://example.com')).toBe(false);
   });
 
   it('normalizes accepted API request methods to uppercase', () => {

@@ -13,6 +13,11 @@ import {
 } from './util/provider-limit';
 
 export class ProviderLimitService {
+  private static readonly PROVIDER_LIMIT_CACHE_TTL_MS = {
+    available: 5 * 60_000,
+    unsupported: 60_000,
+    error: 15_000,
+  } as const;
   private static readonly CACHE_TTL_MS = 60_000;
 
   private readonly providerLimitCache = new Map<
@@ -56,10 +61,22 @@ export class ProviderLimitService {
     });
 
     this.providerLimitCache.set(cacheKey, {
-      expiresAt: now + ProviderLimitService.CACHE_TTL_MS,
+      expiresAt: Number.POSITIVE_INFINITY,
       promise,
     });
+
+    void promise
+      .then((status) => {
+        const cachedEntry = this.providerLimitCache.get(cacheKey);
+        if (!cachedEntry || cachedEntry.promise !== promise) return;
+        cachedEntry.expiresAt = Date.now() + this.getProviderLimitCacheTtl(status);
+      })
+      .catch(() => {});
     return promise;
+  }
+
+  private getProviderLimitCacheTtl(status: ProviderLimitStatus) {
+    return ProviderLimitService.PROVIDER_LIMIT_CACHE_TTL_MS[status.status];
   }
 
   private pruneExpiredProviderLimitCache(now: number) {

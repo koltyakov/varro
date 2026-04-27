@@ -33,6 +33,12 @@ const { loggerMock, vscodeMock, spawnMock, mkdtempMock, openMock, readFileMock, 
         showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
       },
       workspace: {
+        createFileSystemWatcher: vi.fn(() => ({
+          onDidCreate: vi.fn(() => ({ dispose: vi.fn() })),
+          onDidDelete: vi.fn(() => ({ dispose: vi.fn() })),
+          onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
+          dispose: vi.fn(),
+        })),
         onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
         getConfiguration: vi.fn(() => ({
           get: vi.fn((_key: string, fallback?: unknown) => fallback),

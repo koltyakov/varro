@@ -83,6 +83,7 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'y2',
 ];
 const CODE_BLOCK_CACHE_LIMIT = 100;
+const MAX_COPY_TEXT_LENGTH = 20_000;
 const codeBlockHtmlCache = new Map<string, string>();
 
 function escapeHtml(value: string) {
@@ -104,6 +105,18 @@ function decodeCopyPayload(value: string) {
   } catch {
     return value;
   }
+}
+
+function sanitizeCopyText(value: string) {
+  return value
+    .replace(/\r\n?/g, '\n')
+    .split('')
+    .filter((char) => {
+      const code = char.charCodeAt(0);
+      return code === 0x09 || code === 0x0a || code >= 0x20;
+    })
+    .join('')
+    .slice(0, MAX_COPY_TEXT_LENGTH);
 }
 
 function trimTrailingSlashes(value: string) {
@@ -356,6 +369,11 @@ function applyCodeBlockCopyIcons(root: HTMLDivElement | undefined) {
   const buttons = root.querySelectorAll<HTMLButtonElement>('button[data-copy]');
   for (const button of buttons) {
     button.innerHTML = copySvg;
+    if (button.dataset.copyText) {
+      button.dataset.copyText = encodeCopyPayload(
+        sanitizeCopyText(decodeCopyPayload(button.dataset.copyText))
+      );
+    }
   }
 }
 
@@ -426,9 +444,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const block = btn.closest('.interactive-result-code-block');
       const code = block?.querySelector('code');
       if (!code) return;
-      const copyText = btn.dataset.copyText
-        ? decodeCopyPayload(btn.dataset.copyText)
-        : (code.textContent ?? '');
+      const copyText = sanitizeCopyText(
+        btn.dataset.copyText ? decodeCopyPayload(btn.dataset.copyText) : (code.textContent ?? '')
+      );
+      if (!copyText) return;
       navigator.clipboard.writeText(copyText).catch(() => {});
       btn.innerHTML = checkSvg;
       const tid = setTimeout(() => {

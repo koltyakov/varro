@@ -39,6 +39,8 @@ export type SelectedModel = { providerID: string; modelID: string; variant?: str
 export type SessionSelectedAgents = Record<string, string>;
 export type SessionSelectedModels = Record<string, SelectedModel>;
 export type SessionSelectedMcps = Record<string, string[]>;
+type SessionMarkerMap = Record<string, number>;
+type ScopedSessionMarkerStore = Record<string, SessionMarkerMap>;
 
 interface AppState {
   serverStatus: ServerStatus;
@@ -111,6 +113,12 @@ const defaultEditorContext: EditorContext = {
 };
 
 const initialWebviewState = readInitialWebviewState();
+const NO_WORKSPACE_STORAGE_SCOPE = '__varro.no-workspace__';
+let sessionMarkerWorkspaceScope = getSessionMarkerWorkspaceScope(
+  initialWebviewState.editorContext?.workspacePath
+);
+const initialLastSeenSessions = readInitialSessionMarkerScope(STORAGE_KEYS.lastSeenSessions);
+const initialSkippedPlanSessions = readInitialSessionMarkerScope(STORAGE_KEYS.skippedPlanSessions);
 
 export const [state, setState] = createStore<AppState>({
   serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
@@ -152,8 +160,8 @@ export const [state, setState] = createStore<AppState>({
   sessionSelectedMcps: readStored<SessionSelectedMcps>(STORAGE_KEYS.sessionSelectedMcps) || {},
   hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
   hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
-  lastSeenSessions: readStored<Record<string, number>>(STORAGE_KEYS.lastSeenSessions) || {},
-  skippedPlanSessions: readStored<Record<string, number>>(STORAGE_KEYS.skippedPlanSessions) || {},
+  lastSeenSessions: initialLastSeenSessions,
+  skippedPlanSessions: initialSkippedPlanSessions,
   compactingSessionIds: [],
   queuedMessages: [],
   failedSessionIds: [],
@@ -408,18 +416,18 @@ export function getPersistedActiveSessionId(): string | null {
 
 export function markSessionSeen(id: string, updatedAt?: number) {
   const seenAt = Math.max(state.lastSeenSessions[id] ?? 0, updatedAt ?? 0, Date.now());
-  const next = { ...state.lastSeenSessions, [id]: seenAt };
-  setState('lastSeenSessions', next);
-  writeStored(STORAGE_KEYS.lastSeenSessions, next);
+  if (state.lastSeenSessions[id] === seenAt) return;
+  const nextSessions = { ...state.lastSeenSessions, [id]: seenAt };
+  setState('lastSeenSessions', reconcile(nextSessions));
+  writeScopedSessionMarkerState(STORAGE_KEYS.lastSeenSessions, nextSessions);
 }
 
 export function clearSessionSeen(id: string) {
   if (!(id in state.lastSeenSessions)) return;
-  const next = Object.fromEntries(
-    Object.entries(state.lastSeenSessions).filter(([key]) => key !== id)
-  );
-  setState('lastSeenSessions', reconcile(next));
-  writeStored(STORAGE_KEYS.lastSeenSessions, next);
+  const nextSessions = { ...state.lastSeenSessions };
+  delete nextSessions[id];
+  setState('lastSeenSessions', reconcile(nextSessions));
+  writeScopedSessionMarkerState(STORAGE_KEYS.lastSeenSessions, nextSessions);
 }
 
 export function skipPlanSession(sessionId: string, updatedAt?: number) {
@@ -428,17 +436,16 @@ export function skipPlanSession(sessionId: string, updatedAt?: number) {
   if (typeof sessionUpdatedAt !== 'number') return;
 
   const next = { ...state.skippedPlanSessions, [sessionId]: sessionUpdatedAt };
-  setState('skippedPlanSessions', next);
-  writeStored(STORAGE_KEYS.skippedPlanSessions, next);
+  setState('skippedPlanSessions', reconcile(next));
+  writeScopedSessionMarkerState(STORAGE_KEYS.skippedPlanSessions, next);
 }
 
 export function clearSkippedPlanSession(sessionId: string) {
   if (!(sessionId in state.skippedPlanSessions)) return;
-  const next = Object.fromEntries(
-    Object.entries(state.skippedPlanSessions).filter(([id]) => id !== sessionId)
-  );
-  setState('skippedPlanSessions', reconcile(next));
-  writeStored(STORAGE_KEYS.skippedPlanSessions, next);
+  const nextSessions = { ...state.skippedPlanSessions };
+  delete nextSessions[sessionId];
+  setState('skippedPlanSessions', reconcile(nextSessions));
+  writeScopedSessionMarkerState(STORAGE_KEYS.skippedPlanSessions, nextSessions);
 }
 
 export function isSkippedPlanSession(sessionId: string, updatedAt: number) {
@@ -627,7 +634,6 @@ function readExpandThinkingByDefault(): boolean {
   return (
     initialWebviewState.expandThinkingByDefault ??
     readStored<boolean>(STORAGE_KEYS.expandThinkingByDefault) ??
-    readStored<boolean>(STORAGE_KEYS.legacyexpandThinkingByDefault) ??
     false
   );
 }
@@ -920,17 +926,20 @@ export function setCommands(commands: Command[]) {
 
 export function setSessions(nextSessions: Session[]) {
   setState('sessions', nextSessions);
-  const sessionIds = new Set(nextSessions.map((session) => session.id));
-  const nextSkippedPlanSessions = Object.fromEntries(
-    Object.entries(state.skippedPlanSessions).filter(([id]) => sessionIds.has(id))
-  );
-  if (
-    Object.keys(nextSkippedPlanSessions).length !== Object.keys(state.skippedPlanSessions).length
-  ) {
-    setState('skippedPlanSessions', reconcile(nextSkippedPlanSessions));
-    writeStored(STORAGE_KEYS.skippedPlanSessions, nextSkippedPlanSessions);
-  }
+  pruneScopedSkippedPlanSessions(new Set(nextSessions.map((session) => session.id)));
   sessionTreeIndex.invalidate();
+}
+
+export function syncSessionMarkersForWorkspace(workspacePath: string | null | undefined) {
+  sessionMarkerWorkspaceScope = getSessionMarkerWorkspaceScope(workspacePath);
+  setState(
+    'lastSeenSessions',
+    reconcile(readScopedSessionMarkerState(STORAGE_KEYS.lastSeenSessions))
+  );
+  setState(
+    'skippedPlanSessions',
+    reconcile(readScopedSessionMarkerState(STORAGE_KEYS.skippedPlanSessions))
+  );
 }
 
 export function setRecycleBinEntries(entries: RecycleBinEntry[]) {
@@ -1002,6 +1011,82 @@ function readInitialWebviewState(): Partial<InitialWebviewState> {
   const value = (window as unknown as { __initialWebviewState?: InitialWebviewState })
     .__initialWebviewState;
   return value && typeof value === 'object' ? value : {};
+}
+
+function normalizeWorkspacePath(path: string | null | undefined) {
+  if (!path) return null;
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalized || null;
+}
+
+function getSessionMarkerWorkspaceScope(workspacePath: string | null | undefined) {
+  return normalizeWorkspacePath(workspacePath) || NO_WORKSPACE_STORAGE_SCOPE;
+}
+
+function isSessionMarkerMap(value: unknown): value is SessionMarkerMap {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(
+    (item) => typeof item === 'number' && Number.isFinite(item)
+  );
+}
+
+function sanitizeSessionMarkerMap(value: unknown): SessionMarkerMap {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const sanitized: SessionMarkerMap = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item === 'number' && Number.isFinite(item)) {
+      sanitized[key] = item;
+    }
+  }
+  return sanitized;
+}
+
+function readScopedSessionMarkerStore(key: string): ScopedSessionMarkerStore {
+  const raw = readStored<unknown>(key);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || isSessionMarkerMap(raw)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).map(([workspaceScope, value]) => [
+      workspaceScope,
+      sanitizeSessionMarkerMap(value),
+    ])
+  );
+}
+
+function readInitialSessionMarkerScope(key: string): SessionMarkerMap {
+  const raw = readStored<unknown>(key);
+  if (isSessionMarkerMap(raw)) {
+    const markers = sanitizeSessionMarkerMap(raw);
+    writeStored(key, { [sessionMarkerWorkspaceScope]: markers });
+    return markers;
+  }
+
+  return readScopedSessionMarkerState(key);
+}
+
+function readScopedSessionMarkerState(key: string): SessionMarkerMap {
+  return readScopedSessionMarkerStore(key)[sessionMarkerWorkspaceScope] || {};
+}
+
+function writeScopedSessionMarkerState(key: string, markers: SessionMarkerMap) {
+  const nextStore = readScopedSessionMarkerStore(key);
+  if (Object.keys(markers).length === 0) {
+    delete nextStore[sessionMarkerWorkspaceScope];
+  } else {
+    nextStore[sessionMarkerWorkspaceScope] = markers;
+  }
+  writeStored(key, nextStore);
+}
+
+function pruneScopedSkippedPlanSessions(sessionIds: Set<string>) {
+  const nextMarkers = Object.fromEntries(
+    Object.entries(state.skippedPlanSessions).filter(([id]) => sessionIds.has(id))
+  );
+  if (Object.keys(nextMarkers).length === Object.keys(state.skippedPlanSessions).length) return;
+  setState('skippedPlanSessions', reconcile(nextMarkers));
+  writeScopedSessionMarkerState(STORAGE_KEYS.skippedPlanSessions, nextMarkers);
 }
 
 export function isModelVisible(providerID: string, modelID: string) {
@@ -1196,7 +1281,7 @@ export function upsertMessageInfo(info: Message) {
       if (idx !== -1) {
         if (msgs[idx].info === info) return;
         msgs[idx].info = info;
-        bumpMessageStructureVersion();
+        messageIndex.invalidate();
         return;
       } else {
         msgs.push({ info, parts: [] });
@@ -1243,6 +1328,7 @@ export function updateMessagePart(part: Part) {
       const msg = msgs[location.msgIdx];
       if (msg) {
         msg.parts[location.partIdx] = part;
+        messageIndex.invalidate();
       }
     })
   );
