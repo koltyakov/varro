@@ -21,6 +21,38 @@ test('responds to a pending permission request', async ({ page }) => {
     .toBe('always');
 });
 
+test('keeps a linked permission visible when its tool row is hidden in chat', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=hidden-linked-permission');
+
+  await expect(page.getByText('Permission Required')).toBeVisible();
+  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.tool-invocation-title')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Once' }).click();
+
+  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (window as Window & {
+          __varroE2E?: {
+            permissionResponses: Array<{
+              sessionId: string;
+              permissionId: string;
+              response: string;
+            }>;
+          };
+        }).__varroE2E;
+        return value?.permissionResponses[0] || null;
+      })
+    )
+    .toEqual({
+      sessionId: 'session-hidden-linked-permission',
+      permissionId: 'permission-hidden-linked-1',
+      response: 'once',
+    });
+});
+
 test('default permissions end up with a bash permission request for opencode version', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 

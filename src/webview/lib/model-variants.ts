@@ -23,7 +23,7 @@ function getVariantsForModel(
   const provider = providers.find((item) => item.id === providerID);
   const model = provider?.models[modelID];
   if (!model?.variants) return [];
-  return Object.keys(model.variants).filter((variant) => variant !== 'none');
+  return Object.keys(model.variants);
 }
 
 function isLowReasoningVariant(variantName: string) {
@@ -79,7 +79,9 @@ export function getPreferredVariant(
   modelID: string | null | undefined,
   providers: Provider[]
 ) {
-  const variants = getVariantsForModel(providerID, modelID, providers);
+  const variants = getVariantsForModel(providerID, modelID, providers).filter(
+    (variant) => variant !== 'none'
+  );
   if (variants.length === 0) return null;
 
   if (shouldPreferLowReasoningByDefault(modelID)) {

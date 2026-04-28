@@ -12,9 +12,38 @@ interface MarkdownProps {
   cacheByContent?: boolean;
 }
 
+type ParseMarkdownOptions = {
+  cacheByContent: boolean;
+  disablePathLinkify?: boolean;
+  disableCodeHighlighting?: boolean;
+};
+
 type StreamingMarkdownSegments = {
   stableContent: string;
   tailContent: string;
+};
+
+type MarkdownFenceState = {
+  char: string;
+  length: number;
+};
+
+type StreamingMarkdownScanState = {
+  content: string;
+  lastBoundary: number | null;
+  openFence: MarkdownFenceState | null;
+  resumeIndex: number;
+  resumeLastBoundary: number | null;
+  resumeOpenFence: MarkdownFenceState | null;
+};
+
+type MarkdownRenderSegments = StreamingMarkdownSegments & {
+  scanState: StreamingMarkdownScanState | null;
+  hasUnclosedFence: boolean;
+};
+
+type RenderMarkdownContext = {
+  disableCodeHighlighting: boolean;
 };
 
 const copySvg =
@@ -23,6 +52,7 @@ const checkSvg =
   '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
 
 const renderer = new marked.Renderer();
+let renderMarkdownContext: RenderMarkdownContext | null = null;
 const SHELL_LANGS = new Set(['', 'bash', 'console', 'shell', 'sh', 'zsh']);
 const COMPACT_FIRST_COLUMN_HEADERS = new Set(['#', 'no', 'no.', 'num', 'id']);
 const ALLOWED_HTML_TAGS = [
@@ -95,7 +125,6 @@ const MAX_COPY_TEXT_LENGTH = 20_000;
 const codeBlockHtmlCache = new Map<string, string>();
 const highlightedCodeCache = new Map<string, string>();
 const renderedMarkdownCache = new Map<string, string>();
-const renderedMarkdownCacheKeyCache = new Map<string, string>();
 const CODE_LANGUAGE_ALIASES = new Map<string, string>([
   ['console', 'bash'],
   ['plain', 'plaintext'],
@@ -112,6 +141,8 @@ interface CodeBlockHtmlParams {
   className?: string;
   copyText?: string;
   showCopyButton?: boolean;
+  disableHighlighting?: boolean;
+  disableCache?: boolean;
 }
 
 function escapeHtml(value: string) {
@@ -139,14 +170,6 @@ function setRenderedMarkdownCacheValue(key: string, value: string) {
   }
 }
 
-function setRenderedMarkdownCacheKeyValue(key: string, value: string) {
-  renderedMarkdownCacheKeyCache.set(key, value);
-  if (renderedMarkdownCacheKeyCache.size > RENDERED_MARKDOWN_CACHE_LIMIT) {
-    const oldest = renderedMarkdownCacheKeyCache.keys().next().value;
-    if (oldest) renderedMarkdownCacheKeyCache.delete(oldest);
-  }
-}
-
 function hashContent(value: string) {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++) {
@@ -157,18 +180,7 @@ function hashContent(value: string) {
 }
 
 function getRenderedMarkdownCacheKey(content: string) {
-  const workspacePath = state.editorContext.workspacePath || '';
-  const memoKey = `${workspacePath}\u0000${content}`;
-  const cached = renderedMarkdownCacheKeyCache.get(memoKey);
-  if (cached) {
-    renderedMarkdownCacheKeyCache.delete(memoKey);
-    renderedMarkdownCacheKeyCache.set(memoKey, cached);
-    return cached;
-  }
-
-  const cacheKey = `${workspacePath}\u0000${hashContent(content)}`;
-  setRenderedMarkdownCacheKeyValue(memoKey, cacheKey);
-  return cacheKey;
+  return `${hashContent(state.editorContext.workspacePath || '')}\u0000${hashContent(content)}`;
 }
 
 function resolveCodeLanguage(lang?: string) {
@@ -207,6 +219,8 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
   const className = params.className?.trim();
   const copyText = params.copyText ?? params.text;
   const showCopyButton = params.showCopyButton !== false;
+  const disableHighlighting = params.disableHighlighting === true;
+  const disableCache = params.disableCache === true;
   const cacheKey = [
     className || '',
     lang || '',
@@ -214,14 +228,18 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
     params.text,
     copyText,
   ].join('\u0000');
-  const cached = codeBlockHtmlCache.get(cacheKey);
-  if (cached) {
-    codeBlockHtmlCache.delete(cacheKey);
-    codeBlockHtmlCache.set(cacheKey, cached);
-    return cached;
+  if (!disableCache) {
+    const cached = codeBlockHtmlCache.get(cacheKey);
+    if (cached) {
+      codeBlockHtmlCache.delete(cacheKey);
+      codeBlockHtmlCache.set(cacheKey, cached);
+      return cached;
+    }
   }
 
-  const highlighted = renderHighlightedCodeHtml(params.text, lang);
+  const highlighted = disableHighlighting
+    ? escapeHtml(params.text)
+    : renderHighlightedCodeHtml(params.text, lang);
   const langLabel = lang ? `<span class="code-block-lang">${escapeHtml(lang)}</span>` : '';
   const copyBtn = showCopyButton
     ? `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${encodeCopyPayload(copyText)}" aria-label="Copy code" title="Copy code">${copySvg}</button>`
@@ -232,7 +250,9 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
   const classAttr = ['interactive-result-code-block', className].filter(Boolean).join(' ');
   const html = `<div class="${classAttr}"${langAttr}>${header}<pre class="code-block"><code class="hljs">${highlighted}</code></pre></div>`;
 
-  setCachedValue(codeBlockHtmlCache, cacheKey, html);
+  if (!disableCache) {
+    setCachedValue(codeBlockHtmlCache, cacheKey, html);
+  }
   return html;
 }
 
@@ -322,6 +342,8 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
     text: normalizedText,
     lang,
     copyText: normalizedText,
+    disableHighlighting: renderMarkdownContext?.disableCodeHighlighting,
+    disableCache: renderMarkdownContext?.disableCodeHighlighting,
   });
 };
 
@@ -414,21 +436,54 @@ function sanitizeHtml(html: string): string {
   return template.innerHTML;
 }
 
-function renderMarkdownHtml(content: string): string {
+function renderMarkdownHtml(
+  content: string,
+  options?: { disablePathLinkify?: boolean; disableCodeHighlighting?: boolean }
+): string {
+  const previousRenderMarkdownContext = renderMarkdownContext;
+  renderMarkdownContext = {
+    disableCodeHighlighting: options?.disableCodeHighlighting === true,
+  };
   try {
     const parsed = marked.parse(content) as string;
-    return sanitizeHtml(linkifyPaths(parsed));
+    return sanitizeHtml(options?.disablePathLinkify ? parsed : linkifyPaths(parsed));
   } catch {
     return `<p>${escapeHtml(content)}</p>`;
+  } finally {
+    renderMarkdownContext = previousRenderMarkdownContext;
   }
 }
 
-function findLastSafeMarkdownBoundary(content: string): number | null {
+function cloneFenceState(fence: MarkdownFenceState | null): MarkdownFenceState | null {
+  return fence ? { ...fence } : null;
+}
+
+function scanLastSafeMarkdownBoundary(
+  content: string,
+  previousState?: StreamingMarkdownScanState | null
+): StreamingMarkdownScanState {
+  if (previousState?.content === content) {
+    return previousState;
+  }
+
   let index = 0;
   let lastBoundary: number | null = null;
-  let openFence: { char: string; length: number } | null = null;
+  let openFence = null as MarkdownFenceState | null;
+  if (previousState && content.startsWith(previousState.content)) {
+    index = previousState.resumeIndex;
+    lastBoundary = previousState.resumeLastBoundary;
+    openFence = cloneFenceState(previousState.resumeOpenFence);
+  }
+
+  let resumeIndex = 0;
+  let resumeLastBoundary: number | null = null;
+  let resumeOpenFence = null as MarkdownFenceState | null;
 
   while (index < content.length) {
+    resumeIndex = index;
+    resumeLastBoundary = lastBoundary;
+    resumeOpenFence = cloneFenceState(openFence);
+
     const nextBreak = content.indexOf('\n', index);
     const lineEnd = nextBreak === -1 ? content.length : nextBreak;
     const rawLine = content.slice(index, lineEnd);
@@ -452,37 +507,79 @@ function findLastSafeMarkdownBoundary(content: string): number | null {
     index = nextIndex;
   }
 
-  return lastBoundary;
+  return {
+    content,
+    lastBoundary,
+    openFence: cloneFenceState(openFence),
+    resumeIndex,
+    resumeLastBoundary,
+    resumeOpenFence,
+  };
+}
+
+function getStreamingMarkdownSegments(
+  content: string,
+  previousState?: StreamingMarkdownScanState | null
+): MarkdownRenderSegments {
+  const scanState = scanLastSafeMarkdownBoundary(content, previousState);
+  const hasUnclosedFence = scanState.openFence !== null;
+  if (scanState.lastBoundary === null) {
+    return {
+      stableContent: '',
+      tailContent: content,
+      scanState,
+      hasUnclosedFence,
+    };
+  }
+
+  const stableContent = content.slice(0, scanState.lastBoundary).trimEnd();
+  const tailContent = content.slice(scanState.lastBoundary);
+  if (!stableContent || !tailContent.trim()) {
+    return {
+      stableContent: '',
+      tailContent: content,
+      scanState,
+      hasUnclosedFence,
+    };
+  }
+
+  return {
+    stableContent,
+    tailContent,
+    scanState,
+    hasUnclosedFence,
+  };
 }
 
 export function splitStreamingMarkdownContent(content: string): StreamingMarkdownSegments {
-  const boundary = findLastSafeMarkdownBoundary(content);
-  if (boundary === null) {
-    return { stableContent: '', tailContent: content };
-  }
-
-  const stableContent = content.slice(0, boundary).trimEnd();
-  const tailContent = content.slice(boundary);
-  if (!stableContent || !tailContent.trim()) {
-    return { stableContent: '', tailContent: content };
-  }
-
+  const { stableContent, tailContent } = getStreamingMarkdownSegments(content);
   return { stableContent, tailContent };
 }
 
 function getMarkdownRenderSegments(
   content: string,
-  cacheByContent: boolean
-): StreamingMarkdownSegments {
+  cacheByContent: boolean,
+  previousScanState?: StreamingMarkdownScanState | null
+): MarkdownRenderSegments {
   if (cacheByContent) {
-    return { stableContent: '', tailContent: content };
+    return {
+      stableContent: '',
+      tailContent: content,
+      scanState: null,
+      hasUnclosedFence: false,
+    };
   }
 
-  return splitStreamingMarkdownContent(content);
+  return getStreamingMarkdownSegments(content, previousScanState);
 }
 
-function parseMarkdown(content: string, cacheByContent: boolean): string {
-  if (!cacheByContent) return renderMarkdownHtml(content);
+function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
+  if (!options.cacheByContent) {
+    return renderMarkdownHtml(content, {
+      disablePathLinkify: options.disablePathLinkify,
+      disableCodeHighlighting: options.disableCodeHighlighting,
+    });
+  }
 
   const cacheKey = getRenderedMarkdownCacheKey(content);
   const cached = renderedMarkdownCache.get(cacheKey);
@@ -492,7 +589,10 @@ function parseMarkdown(content: string, cacheByContent: boolean): string {
     return cached;
   }
 
-  const html = renderMarkdownHtml(content);
+  const html = renderMarkdownHtml(content, {
+    disablePathLinkify: options.disablePathLinkify,
+    disableCodeHighlighting: options.disableCodeHighlighting,
+  });
   setRenderedMarkdownCacheValue(cacheKey, html);
   return html;
 }
@@ -602,13 +702,18 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let pendingContent: string | null = null;
   let rafId: number | null = null;
   const initialSegments = getMarkdownRenderSegments(props.content || '', !!props.cacheByContent);
+  let lastAppliedScanState = initialSegments.scanState;
+  let lastAppliedWorkspacePath = state.editorContext.workspacePath || '';
+  let lastAppliedStableContent = initialSegments.stableContent;
+  let lastAppliedTailContent = initialSegments.tailContent;
   let lastAppliedStableHtml = initialSegments.stableContent
-    ? parseMarkdown(initialSegments.stableContent, true)
+    ? parseMarkdown(initialSegments.stableContent, { cacheByContent: true })
     : '';
-  let lastAppliedTailHtml = parseMarkdown(
-    initialSegments.tailContent,
-    initialSegments.stableContent.length === 0 && !!props.cacheByContent
-  );
+  let lastAppliedTailHtml = parseMarkdown(initialSegments.tailContent, {
+    cacheByContent: initialSegments.stableContent.length === 0 && !!props.cacheByContent,
+    disablePathLinkify: !props.cacheByContent,
+    disableCodeHighlighting: initialSegments.hasUnclosedFence,
+  });
 
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
@@ -618,25 +723,50 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (pendingContent !== null) {
       const content = pendingContent;
       pendingContent = null;
-      const segments = getMarkdownRenderSegments(content, !!props.cacheByContent);
-      const nextStableHtml = segments.stableContent
-        ? parseMarkdown(segments.stableContent, true)
-        : '';
-      const nextTailHtml = parseMarkdown(
-        segments.tailContent,
-        segments.stableContent.length === 0 && !!props.cacheByContent
+      const segments = getMarkdownRenderSegments(
+        content,
+        !!props.cacheByContent,
+        lastAppliedScanState
       );
+      const workspacePath = state.editorContext.workspacePath || '';
+      const stableContentChanged =
+        workspacePath !== lastAppliedWorkspacePath ||
+        segments.stableContent !== lastAppliedStableContent;
+      const tailContentChanged =
+        workspacePath !== lastAppliedWorkspacePath ||
+        segments.tailContent !== lastAppliedTailContent;
+      const nextStableHtml =
+        segments.stableContent.length === 0
+          ? ''
+          : stableContentChanged
+            ? parseMarkdown(segments.stableContent, { cacheByContent: true })
+            : lastAppliedStableHtml;
+      const nextTailHtml = tailContentChanged
+        ? parseMarkdown(segments.tailContent, {
+            cacheByContent: segments.stableContent.length === 0 && !!props.cacheByContent,
+            disablePathLinkify: !props.cacheByContent,
+            disableCodeHighlighting: segments.hasUnclosedFence,
+          })
+        : lastAppliedTailHtml;
 
       const stableChanged = nextStableHtml !== lastAppliedStableHtml;
       const tailChanged = nextTailHtml !== lastAppliedTailHtml;
       if (stableChanged) {
+        lastAppliedStableContent = segments.stableContent;
         lastAppliedStableHtml = nextStableHtml;
         setStableHtml(nextStableHtml);
+      } else if (stableContentChanged) {
+        lastAppliedStableContent = segments.stableContent;
       }
       if (tailChanged) {
+        lastAppliedTailContent = segments.tailContent;
         lastAppliedTailHtml = nextTailHtml;
         setTailHtml(nextTailHtml);
+      } else if (tailContentChanged) {
+        lastAppliedTailContent = segments.tailContent;
       }
+      lastAppliedWorkspacePath = workspacePath;
+      lastAppliedScanState = segments.scanState;
 
       queueMicrotask(() => {
         if (stableChanged) {

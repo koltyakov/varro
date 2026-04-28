@@ -94,9 +94,63 @@ describe('getPreferredVariant', () => {
 
     expect(getPreferredVariant('provider', 'model', providers)).toBe('high');
   });
+
+  it('does not auto-select none when other variants are available', () => {
+    const providers = [
+      providerWithVariants({
+        none: {},
+        low: {},
+        medium: {},
+      }),
+    ];
+
+    expect(getPreferredVariant('provider', 'model', providers)).toBe('medium');
+  });
+
+  it('returns null when none is the only available variant', () => {
+    const providers = [
+      providerWithVariants({
+        none: {},
+      }),
+    ];
+
+    expect(getPreferredVariant('provider', 'model', providers)).toBeNull();
+  });
 });
 
 describe('getMatchingVariant', () => {
+  it('preserves none when the new model also exposes it', () => {
+    const providers = [
+      {
+        ...providerWithVariants({}),
+        models: {
+          source: {
+            id: 'source',
+            name: 'Source',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { none: {}, low: {}, high: {} },
+          },
+          target: {
+            id: 'target',
+            name: 'Target',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { none: {}, medium: {}, high: {} },
+          },
+        },
+      },
+    ];
+
+    expect(
+      getMatchingVariant(
+        { providerID: 'provider', modelID: 'source', variant: 'none' },
+        { providerID: 'provider', modelID: 'target' },
+        providers
+      )
+    ).toBe('none');
+  });
+
   it('preserves an exact variant name when the new model has it', () => {
     const providers = [
       {

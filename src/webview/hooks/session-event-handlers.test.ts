@@ -229,4 +229,121 @@ describe('registerSessionEventHandlers', () => {
     });
     expect(setState).toHaveBeenCalledWith('sessionStatus', expect.any(Function));
   });
+
+  it('ignores partial message.updated payloads for message state', () => {
+    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(
+        event as string,
+        handler as (data: { properties?: Record<string, unknown> }) => void
+      );
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    const handoffTodosToMessages = vi.fn().mockReturnValue(true);
+    const applyUsageLimitNotice = vi.fn();
+    const clearUsageLimitOnResumedProgress = vi.fn();
+    const updateUsageLimitState = vi.fn();
+
+    registerSessionEventHandlers({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [],
+      setTodoStateAuthority: vi.fn(),
+      handoffTodosToMessages,
+      setTodos: vi.fn(),
+      upsertSession: vi.fn(),
+      setSessionCompacting: vi.fn(),
+      removeDeletedSessionTree: vi.fn(),
+      shouldIgnorePendingAbortStatus: () => false,
+      hasPendingAbort: () => false,
+      clearPendingAbort: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      clearUsageLimitOnResumedProgress,
+      updateUsageLimitState,
+      syncSession: vi.fn().mockResolvedValue(undefined),
+      shouldResyncSessionAfterIdle: () => false,
+      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+      applyUsageLimitNotice,
+      syncTodosFromMessages: vi.fn(),
+      shouldAutoApprovePermissions: () => false,
+      respondPermission: vi.fn().mockResolvedValue(undefined),
+      extractTodos: () => null,
+      setDiffs: vi.fn(),
+    });
+
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          error: { name: 'rate_limit_exceeded', data: { message: '429 usage limit reached' } },
+        },
+      },
+    });
+
+    expect(handoffTodosToMessages).not.toHaveBeenCalled();
+    expect(applyUsageLimitNotice).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        source: 'message',
+        sessionID: 'session-1',
+        message: '429 usage limit reached',
+      })
+    );
+    expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
+  });
+
+  it('ignores partial message.part.updated payloads for message state', () => {
+    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(
+        event as string,
+        handler as (data: { properties?: Record<string, unknown> }) => void
+      );
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    const syncTodosFromMessages = vi.fn();
+
+    registerSessionEventHandlers({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [],
+      setTodoStateAuthority: vi.fn(),
+      handoffTodosToMessages: vi.fn().mockReturnValue(true),
+      setTodos: vi.fn(),
+      upsertSession: vi.fn(),
+      setSessionCompacting: vi.fn(),
+      removeDeletedSessionTree: vi.fn(),
+      shouldIgnorePendingAbortStatus: () => false,
+      hasPendingAbort: () => false,
+      clearPendingAbort: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      clearUsageLimitOnResumedProgress: vi.fn(),
+      updateUsageLimitState: vi.fn(),
+      syncSession: vi.fn().mockResolvedValue(undefined),
+      shouldResyncSessionAfterIdle: () => false,
+      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+      applyUsageLimitNotice: vi.fn(),
+      syncTodosFromMessages,
+      shouldAutoApprovePermissions: () => false,
+      respondPermission: vi.fn().mockResolvedValue(undefined),
+      extractTodos: () => null,
+      setDiffs: vi.fn(),
+    });
+
+    handlers.get('message.part.updated')?.({
+      properties: {
+        part: {
+          sessionID: 'session-1',
+          type: 'tool',
+        },
+      },
+    });
+
+    expect(syncTodosFromMessages).not.toHaveBeenCalled();
+  });
 });

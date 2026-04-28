@@ -26,6 +26,7 @@ import {
   upsertQuestion,
 } from '../lib/state';
 import type {
+  AssistantMessage,
   FileDiff,
   Message,
   Part,
@@ -34,6 +35,75 @@ import type {
   SessionStatus,
   Todo,
 } from '../types';
+
+function isCompleteMessageInfo(value: unknown): value is Message {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== 'string' ||
+    !record.id ||
+    typeof record.sessionID !== 'string' ||
+    !record.sessionID ||
+    typeof record.role !== 'string' ||
+    !record.time ||
+    typeof record.time !== 'object' ||
+    typeof (record.time as { created?: unknown }).created !== 'number'
+  ) {
+    return false;
+  }
+
+  if (record.role === 'user') {
+    return !!(
+      typeof record.agent === 'string' &&
+      record.model &&
+      typeof record.model === 'object' &&
+      typeof (record.model as { providerID?: unknown }).providerID === 'string' &&
+      typeof (record.model as { modelID?: unknown }).modelID === 'string'
+    );
+  }
+
+  if (record.role === 'assistant') {
+    return !!(
+      typeof record.parentID === 'string' &&
+      typeof record.modelID === 'string' &&
+      typeof record.providerID === 'string' &&
+      typeof record.mode === 'string' &&
+      record.path &&
+      typeof record.path === 'object' &&
+      typeof (record.path as { cwd?: unknown }).cwd === 'string' &&
+      typeof (record.path as { root?: unknown }).root === 'string' &&
+      typeof record.cost === 'number' &&
+      record.tokens &&
+      typeof record.tokens === 'object' &&
+      typeof (record.tokens as { input?: unknown }).input === 'number' &&
+      typeof (record.tokens as { output?: unknown }).output === 'number' &&
+      typeof (record.tokens as { reasoning?: unknown }).reasoning === 'number' &&
+      (record.tokens as { cache?: unknown }).cache &&
+      typeof (record.tokens as { cache?: unknown }).cache === 'object' &&
+      typeof ((record.tokens as { cache?: unknown }).cache as { read?: unknown }).read ===
+        'number' &&
+      typeof ((record.tokens as { cache?: unknown }).cache as { write?: unknown }).write ===
+        'number'
+    );
+  }
+
+  return false;
+}
+
+function isCompleteMessagePart(value: unknown): value is Part {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === 'string' &&
+    !!record.id &&
+    typeof record.sessionID === 'string' &&
+    !!record.sessionID &&
+    typeof record.messageID === 'string' &&
+    !!record.messageID &&
+    typeof record.type === 'string' &&
+    !!record.type
+  );
+}
 
 function getPermissionReplyId(props: Record<string, unknown>) {
   return (props.id || props.permissionID || props.requestID) as string | undefined;
@@ -222,34 +292,44 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('message.updated', (data) => {
-      const info = data.properties?.info as { sessionID?: string } | undefined;
-      const message = info as Message | undefined;
-      if (!message?.sessionID) return;
-      if (message.sessionID === deps.getActiveSessionId()) {
+      const info = data.properties?.info;
+      const partialMessage = info as
+        | { sessionID?: string; role?: string; error?: AssistantMessage['error'] }
+        | undefined;
+      const sessionID = partialMessage?.sessionID;
+      if (!sessionID) return;
+      const message = isCompleteMessageInfo(info) ? info : null;
+      const assistantMessage = message && isAssistantMessage(message) ? message : null;
+
+      if (sessionID === deps.getActiveSessionId()) {
         markLoadingActivity();
-        upsertMessageInfo(message);
-        if (isAssistantMessage(message) && (!!message.error || !!message.time.completed)) {
+        if (message) {
+          upsertMessageInfo(message);
+        }
+        if (assistantMessage && (!!assistantMessage.error || !!assistantMessage.time.completed)) {
           deps.handoffTodosToMessages();
         }
       }
-      if (isAssistantMessage(message)) {
+      if (partialMessage?.role === 'assistant') {
         setSessionFailed(
-          message.sessionID,
-          !!message.error && !isAbortedAssistantError(message.error)
+          sessionID,
+          !!partialMessage.error && !isAbortedAssistantError(partialMessage.error)
         );
-        const notice = parseUsageLimitNotice(message.error?.data?.message || message.error?.name);
+        const notice = parseUsageLimitNotice(
+          partialMessage.error?.data?.message || partialMessage.error?.name
+        );
         if (notice) {
-          deps.applyUsageLimitNotice(message.sessionID, {
+          deps.applyUsageLimitNotice(sessionID, {
             ...notice,
             source: 'message',
-            sessionID: message.sessionID,
-            providerID: message.providerID,
-            modelID: message.modelID,
+            sessionID,
+            providerID: assistantMessage?.providerID,
+            modelID: assistantMessage?.modelID,
           });
-        } else if (message.error) {
-          setSessionUsageLimit(message.sessionID, null);
+        } else if (partialMessage.error) {
+          setSessionUsageLimit(sessionID, null);
         } else {
-          deps.clearUsageLimitOnResumedProgress(message.sessionID);
+          deps.clearUsageLimitOnResumedProgress(sessionID);
         }
       }
     })
@@ -257,14 +337,16 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('message.part.updated', (data) => {
-      const part = data.properties?.part as { sessionID?: string } | undefined;
-      if (part?.sessionID && (part as Part).type === 'compaction') {
-        setSessionCompacting(part.sessionID, false);
+      const rawPart = data.properties?.part;
+      const partialPart = rawPart as { sessionID?: string; type?: string } | undefined;
+      if (partialPart?.sessionID && partialPart.type === 'compaction') {
+        setSessionCompacting(partialPart.sessionID, false);
       }
-      if (part?.sessionID === deps.getActiveSessionId()) {
+      if (partialPart?.sessionID === deps.getActiveSessionId()) {
         markLoadingActivity();
-        upsertPart(part as Part);
-        if ((part as Part).type === 'tool') {
+        if (!isCompleteMessagePart(rawPart)) return;
+        upsertPart(rawPart);
+        if (rawPart.type === 'tool') {
           deps.syncTodosFromMessages();
         }
       }
@@ -292,13 +374,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.removed', (data) => {
       const p = data.properties;
       if (!p) return;
-      if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        markLoadingActivity();
-      }
+      if ((p.sessionID as string) !== deps.getActiveSessionId()) return;
+      markLoadingActivity();
       removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
-      if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        deps.syncTodosFromMessages();
-      }
+      deps.syncTodosFromMessages();
     })
   );
 

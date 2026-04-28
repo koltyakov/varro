@@ -1451,27 +1451,48 @@ function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
   if (deltas.length === 0) return;
   const latest = deltas[deltas.length - 1];
   let appendedPart = false;
+  let committedPreviousStreamingPart = false;
 
   batch(() => {
+    if (appState.state.streamingPartId && appState.state.streamingPartId !== latest.partId) {
+      const previousLocation = appState.messageIndex.findPartLocation(
+        appState.state.messages,
+        appState.state.streamingPartId
+      );
+      if (previousLocation) {
+        const previousPart =
+          appState.state.messages[previousLocation.msgIdx]?.parts[previousLocation.partIdx];
+        if (
+          previousPart &&
+          (previousPart.type === 'text' || previousPart.type === 'reasoning') &&
+          previousPart.text !== appState.state.streamingText
+        ) {
+          appState.setState(
+            'messages',
+            previousLocation.msgIdx,
+            'parts',
+            previousLocation.partIdx,
+            (currentPart) => {
+              if (currentPart.type !== 'text' && currentPart.type !== 'reasoning') {
+                return currentPart;
+              }
+              return {
+                ...currentPart,
+                text: appState.state.streamingText,
+              };
+            }
+          );
+          committedPreviousStreamingPart = true;
+        }
+      }
+    }
+
     appState.setState('streamingPartId', latest.partId);
     appState.setState('streamingText', latest.text);
 
     for (const item of deltas) {
       const location = appState.messageIndex.findPartLocation(appState.state.messages, item.partId);
       if (location) {
-        const part = appState.state.messages[location.msgIdx]?.parts[location.partIdx];
-        if (part.type === 'text' || part.type === 'reasoning') {
-          appState.setState(
-            'messages',
-            location.msgIdx,
-            'parts',
-            location.partIdx,
-            (currentPart) => ({
-              ...currentPart,
-              text: item.text,
-            })
-          );
-        }
         continue;
       }
 
@@ -1491,11 +1512,14 @@ function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
         },
       ]);
       appendedPart = true;
-      appState.messageIndex.invalidate();
+      appState.messageIndex.appendPart(appState.state.messages, item.partId, {
+        msgIdx,
+        partIdx: appState.state.messages[msgIdx].parts.length - 1,
+      });
     }
 
-    if (!appendedPart) {
-      // Keep the part index fresh after in-place streaming text updates.
+    if (!appendedPart && committedPreviousStreamingPart) {
+      // Keep the part index fresh after committing the previously active streaming part.
       appState.messageIndex.ensureIndex(appState.state.messages);
     }
   });
@@ -1554,7 +1578,10 @@ export function upsertPart(part: Part) {
       }
 
       msgs[idx].parts.push(part);
-      messageIndex.invalidate();
+      messageIndex.appendPart(msgs, part.id, {
+        msgIdx: idx,
+        partIdx: msgs[idx].parts.length - 1,
+      });
     })
   );
   if (state.streamingPartId === part.id) {
@@ -1602,6 +1629,9 @@ export function applyMessagePartDelta(
     streamingDeltaQueue.scheduleFlush();
     return;
   }
+  if (pending && pending.messageId !== messageId) {
+    flushPendingStreamingDeltas();
+  }
 
   messageIndex.ensureIndex(state.messages);
   const location = messageIndex.getIndexedPartLocation(partId);
@@ -1640,7 +1670,7 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
         const location = messageIndex.findPartLocation(msgs, partId);
         if (location && location.msgIdx === idx) {
           msgs[idx].parts.splice(location.partIdx, 1);
-          messageIndex.invalidate();
+          messageIndex.removePart(msgs, partId, location);
         }
       }
     })
@@ -1800,7 +1830,11 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
 
 export function replaceMessages(incoming: MessageEntry[]) {
   streamingDeltaQueue.reset();
-  setState('messages', incoming);
+  batch(() => {
+    setState('messages', incoming);
+    if (state.streamingPartId !== null) setState('streamingPartId', null);
+    if (state.streamingText !== '') setState('streamingText', '');
+  });
   messageIndex.invalidate();
 }
 

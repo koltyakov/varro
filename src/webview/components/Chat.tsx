@@ -76,6 +76,7 @@ const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
 const RECONNECT_BANNER_SHOW_DELAY_MS = 1500;
 const RECONNECT_BANNER_MIN_VISIBLE_MS = 4000;
+const CHAT_VIEW_ENTER_DURATION_MS = 180;
 
 export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
 
@@ -85,6 +86,8 @@ export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
+  const [isCreatingSessionFromPicker, setIsCreatingSessionFromPicker] = createSignal(false);
+  const [isEnteringChatView, setIsEnteringChatView] = createSignal(false);
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
   const isDesktopSessionPaneRight = () => desktopSessionPaneSide() === 'right';
   const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
@@ -99,6 +102,7 @@ export function Chat() {
   let reconnectBannerShowTimer: number | undefined;
   let reconnectBannerHideTimer: number | undefined;
   let reconnectBannerVisibleSince = 0;
+  let chatViewEnterTimer: number | undefined;
 
   const clearReconnectBannerShowTimer = () => {
     if (reconnectBannerShowTimer == null) return;
@@ -110,6 +114,12 @@ export function Chat() {
     if (reconnectBannerHideTimer == null) return;
     window.clearTimeout(reconnectBannerHideTimer);
     reconnectBannerHideTimer = undefined;
+  };
+
+  const clearChatViewEnterTimer = () => {
+    if (chatViewEnterTimer == null) return;
+    window.clearTimeout(chatViewEnterTimer);
+    chatViewEnterTimer = undefined;
   };
 
   onMount(() => {
@@ -162,6 +172,7 @@ export function Chat() {
   onCleanup(() => {
     clearReconnectBannerShowTimer();
     clearReconnectBannerHideTimer();
+    clearChatViewEnterTimer();
   });
 
   const shouldDiscardActiveBlankSession = () => {
@@ -240,6 +251,23 @@ export function Chat() {
   });
 
   createEffect(
+    on(showSessionPicker, (isOpen, wasOpen) => {
+      clearChatViewEnterTimer();
+
+      if (isOpen || !wasOpen) {
+        setIsEnteringChatView(false);
+        return;
+      }
+
+      setIsEnteringChatView(true);
+      chatViewEnterTimer = window.setTimeout(() => {
+        chatViewEnterTimer = undefined;
+        setIsEnteringChatView(false);
+      }, CHAT_VIEW_ENTER_DURATION_MS);
+    })
+  );
+
+  createEffect(
     on(
       openAttentionSessionsKey,
       () => {
@@ -313,6 +341,17 @@ export function Chat() {
   const clearSessionListView = () => {
     setSessionFilter(null);
     setSubagentParentId(null);
+  };
+  const createSessionFromPicker = async () => {
+    if (isCreatingSessionFromPicker()) return;
+
+    setIsCreatingSessionFromPicker(true);
+    try {
+      const createdId = await createSession();
+      if (createdId) setShowSessionPicker(false);
+    } finally {
+      setIsCreatingSessionFromPicker(false);
+    }
   };
   const activeSubagentParent = createMemo(() => {
     const parentId = subagentParentId();
@@ -402,10 +441,8 @@ export function Chat() {
         <Show when={showNewChatButton}>
           <button
             class="chat-header-btn"
-            onClick={() => {
-              createSession();
-              setShowSessionPicker(false);
-            }}
+            disabled={isCreatingSessionFromPicker()}
+            onClick={() => void createSessionFromPicker()}
             title="New chat"
           >
             <svg viewBox="0 0 16 16" fill="currentColor">
@@ -506,7 +543,7 @@ export function Chat() {
   );
 
   return (
-    <div class="interactive-session">
+    <div class={`interactive-session ${isEnteringChatView() ? 'chat-view-entering' : ''}`.trim()}>
       <div
         class={`chat-header ${shouldRenderWorkspace() ? 'chat-header-centered chat-header-chat-layout' : ''}`}
       >

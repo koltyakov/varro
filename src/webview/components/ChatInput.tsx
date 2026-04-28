@@ -1057,16 +1057,6 @@ export function ChatInput() {
     });
   });
 
-  const canSend = () =>
-    !hasActiveQuestion() &&
-    !hasActivePermission() &&
-    (getSendableInputText().trim().length > 0 ||
-      state.droppedFiles.length > 0 ||
-      hasSendableClipboardImages());
-  const showBusySendControls = createMemo(
-    () => isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()
-  );
-
   const assistantMessages = createMemo(() =>
     state.messages.map((entry) => entry.info).filter(isAssistantMessage)
   );
@@ -1164,6 +1154,16 @@ export function ChatInput() {
     );
   }
 
+  const canSend = () =>
+    !hasActiveQuestion() &&
+    !hasActivePermission() &&
+    (getSendableInputText().trim().length > 0 ||
+      state.droppedFiles.length > 0 ||
+      hasSendableClipboardImages());
+  const showBusySendControls = createMemo(
+    () => isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()
+  );
+
   const clipboardImagesDisabled = () =>
     clipboardImages().length > 0 && !currentModelSupportsVision();
 
@@ -1207,9 +1207,7 @@ export function ChatInput() {
 
   const availableVariants = createMemo(() => {
     const model = currentModel();
-    return getVariantsForModel(model.providerID, model.modelID, state.providers).filter(
-      (v) => v !== 'none'
-    );
+    return getVariantsForModel(model.providerID, model.modelID, state.providers);
   });
 
   const effectiveVariant = createMemo(() => {

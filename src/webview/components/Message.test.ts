@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
 import type { FilePart, Part, ToolPart } from '../types';
+import { setExpandThinkingByDefault } from '../lib/state';
 import {
   Message,
   calculateAssistantPartVirtualRange,
@@ -539,6 +540,24 @@ describe('Message streamed assistant text rendering', () => {
     );
     expect(container?.textContent).toContain('Before');
     expect(container?.textContent).toContain('After');
+  });
+
+  it('renders streamed reasoning updates without mutating the stored part text', () => {
+    setExpandThinkingByDefault(true);
+
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantMessage('message-stream-reasoning'), time: { created: 0 } },
+          parts: [reasoningPart('reason-1', 'Planning')],
+          streamingPartId: 'reason-1',
+          streamingText: '**Plan**\n\nInspect logs',
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.thinking-label-text')?.textContent).toContain('Plan');
+    expect(container?.querySelector('.thinking-text')?.textContent).toContain('Inspect logs');
   });
 
   it('does not mark streamed assistant text as a final answer before completion highlighting', () => {

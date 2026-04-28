@@ -82,9 +82,9 @@ export async function selectSessionWithDependencies(
     deps.setSelectedMcpsForSession(id, deps.getConnectedMcpNames());
   }
 
-  await deps.syncSessionMcps(id);
   deps.resetTodoSync();
   deps.clearMessages();
+  await deps.syncSessionMcps(id);
 
   try {
     const { session, messages } = await deps.loadSession(id);

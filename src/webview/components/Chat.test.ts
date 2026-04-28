@@ -865,6 +865,82 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
   });
 
+  it('keeps the session picker visible until a new session finishes creating', async () => {
+    let resolveCreateSession: ((value: string | null) => void) | undefined;
+    const createSessionSpy = vi.spyOn(openCodeModule, 'createSession').mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveCreateSession = resolve;
+        })
+    );
+
+    setState('sessions', [session('active', 500)]);
+    setState('activeSessionId', 'active');
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const newChatButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="New chat"]'
+    ) as HTMLButtonElement | null;
+    expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
+
+    newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(createSessionSpy).toHaveBeenCalledTimes(1);
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-main-shell')).toBeNull();
+
+    resolveCreateSession?.('new-session');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeNull();
+    expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('adds a brief chat view transition class after the new chat opens', async () => {
+    let resolveCreateSession: ((value: string | null) => void) | undefined;
+    vi.spyOn(openCodeModule, 'createSession').mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveCreateSession = resolve;
+        })
+    );
+
+    setState('sessions', [session('active', 500)]);
+    setState('activeSessionId', 'active');
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const newChatButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="New chat"]'
+    ) as HTMLButtonElement | null;
+    newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    resolveCreateSession?.('new-session');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.interactive-session')?.classList.contains('chat-view-entering')
+    ).toBe(true);
+
+    vi.advanceTimersByTime(180);
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.interactive-session')?.classList.contains('chat-view-entering')
+    ).toBe(false);
+  });
+
   it('filters completed sessions from the header badge', async () => {
     setState('sessions', [
       session('active', 500),

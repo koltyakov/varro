@@ -22,46 +22,55 @@ type PermissionResponse = {
   response: 'once' | 'always' | 'reject';
 };
 type RequestLog = { method: string; path: string; body?: unknown };
-type ScenarioName =
-  | 'blank'
-  | 'pending-permission'
-  | 'restored-session'
-  | 'maintenance-reconnect'
-  | 'dispose-during-start'
-  | 'startup-race'
-  | 'plan-ready'
-  | 'sticky-preview'
-  | 'todo-queue'
-  | 'status-filters'
-  | 'file-search'
-  | 'transport-degraded'
-  | 'usage-limit'
-  | 'mcp-pickers'
-  | 'slash-commands'
-  | 'command-events'
-  | 'no-providers'
-  | 'busy-stop-send'
-  | 'new-session-command'
-  | 'session-search'
-  | 'model-search'
-  | 'mcp-search'
-  | 'full-access'
-  | 'abort-command'
-  | 'server-error-missing-cli'
-  | 'server-error-generic'
-  | 'question-prompt'
-  | 'archive-overflow'
-  | 'context-compact'
-  | 'review-slash'
-  | 'undo-session'
-  | 'linked-tool-question'
-  | 'tool-cards'
-  | 'subagent-sessions'
-  | 'row-archive'
-  | 'tool-card-errors'
-  | 'grouped-permissions'
-  | 'tool-open-actions'
-  | 'todo-completion';
+const SCENARIO_NAMES = [
+  'blank',
+  'pending-permission',
+  'hidden-linked-permission',
+  'restored-session',
+  'maintenance-reconnect',
+  'dispose-during-start',
+  'startup-race',
+  'plan-ready',
+  'sticky-preview',
+  'todo-queue',
+  'status-filters',
+  'file-search',
+  'transport-degraded',
+  'usage-limit',
+  'mcp-pickers',
+  'slash-commands',
+  'command-events',
+  'no-providers',
+  'busy-stop-send',
+  'new-session-command',
+  'session-search',
+  'model-search',
+  'mcp-search',
+  'full-access',
+  'abort-command',
+  'server-error-missing-cli',
+  'server-error-generic',
+  'question-prompt',
+  'archive-overflow',
+  'context-compact',
+  'review-slash',
+  'undo-session',
+  'linked-tool-question',
+  'tool-cards',
+  'subagent-sessions',
+  'row-archive',
+  'tool-card-errors',
+  'grouped-permissions',
+  'tool-open-actions',
+  'todo-completion',
+  'message-rendering',
+] as const;
+type ScenarioName = (typeof SCENARIO_NAMES)[number];
+
+function isScenarioName(value: string | null): value is ScenarioName {
+  return SCENARIO_NAMES.some((name) => name === value);
+}
+
 type WorkspaceFile = {
   path: string;
   relativePath: string;
@@ -811,6 +820,69 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       },
     ];
     state.nextSequence = 20;
+    return state;
+  }
+
+  if (name === 'hidden-linked-permission') {
+    const session = makeSession(
+      'session-hidden-linked-permission',
+      'Hidden linked permission',
+      BASE_TIME - 1_000
+    );
+    const user = makeUserMessage(
+      session.id,
+      'message-hidden-permission-user',
+      ['Update the task plan, then ask before running npm test.'],
+      BASE_TIME - 6_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-hidden-permission-assistant',
+      user.info.id,
+      'I need approval before running the command.',
+      BASE_TIME - 5_000
+    );
+    assistant.parts = [
+      {
+        id: 'tool-hidden-permission-1',
+        sessionID: session.id,
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'hidden-permission-call-1',
+        tool: 'TodoWrite',
+        state: {
+          status: 'running',
+          input: {
+            todos: [
+              {
+                content: 'Inspect the permission flow',
+                status: 'in_progress',
+                priority: 'high',
+              },
+            ],
+          },
+          title: 'Updating plan',
+          metadata: {},
+          time: { start: BASE_TIME - 5_000 },
+        },
+      },
+    ];
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.pendingPermissions = [
+      {
+        id: 'permission-hidden-linked-1',
+        permission: 'bash',
+        sessionID: session.id,
+        title: 'Allow running npm test?',
+        metadata: { command: 'npm test' },
+        tool: { messageID: assistant.info.id, callID: 'hidden-permission-call-1' },
+        time: { created: BASE_TIME - 4_900 },
+      },
+    ];
+    state.nextSequence = 25;
     return state;
   }
 
@@ -1762,52 +1834,51 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     return state;
   }
 
+  if (name === 'message-rendering') {
+    const session = makeSession('session-message-rendering', 'Rendered message actions', BASE_TIME - 500);
+    const user = makeUserMessage(
+      session.id,
+      'message-rendering-user',
+      ['Show a longer answer with markdown actions.'],
+      BASE_TIME - 5_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-rendering-assistant',
+      user.info.id,
+      [
+        'This answer verifies rich assistant message controls across a realistic response.',
+        '',
+        'Use the [release notes](https://example.com/varro/releases) for the rollout checklist.',
+        '',
+        '```ts',
+        "export const useful = 'e2e coverage';",
+        '```',
+        '',
+        '1. Confirm the read mode action is available for long answers.',
+        '2. Confirm code blocks expose a copy button.',
+        '3. Confirm safe external links route through the extension bridge.',
+        '4. Confirm the read mode dialog renders the same markdown content.',
+        '5. Confirm closing read mode returns to the chat without losing content.',
+        '6. Confirm the composer remains available after interacting with rendered content.',
+      ].join('\n'),
+      BASE_TIME - 4_000
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 360;
+    return state;
+  }
+
   state.nextSequence = 30;
   return state;
 }
 
 function getScenarioName(): ScenarioName {
   const value = new URLSearchParams(window.location.search).get('scenario');
-  if (
-    value === 'maintenance-reconnect' ||
-    value === 'dispose-during-start' ||
-    value === 'startup-race' ||
-    value === 'restored-session' ||
-    value === 'pending-permission' ||
-    value === 'plan-ready' ||
-    value === 'sticky-preview' ||
-    value === 'todo-queue' ||
-    value === 'status-filters' ||
-    value === 'file-search' ||
-    value === 'transport-degraded' ||
-    value === 'usage-limit' ||
-    value === 'mcp-pickers' ||
-    value === 'slash-commands' ||
-    value === 'command-events' ||
-    value === 'no-providers' ||
-    value === 'busy-stop-send' ||
-    value === 'new-session-command' ||
-    value === 'session-search' ||
-    value === 'model-search' ||
-    value === 'mcp-search' ||
-    value === 'full-access' ||
-    value === 'abort-command' ||
-    value === 'server-error-missing-cli' ||
-    value === 'server-error-generic' ||
-    value === 'question-prompt' ||
-    value === 'archive-overflow' ||
-    value === 'context-compact' ||
-    value === 'review-slash' ||
-    value === 'undo-session' ||
-    value === 'linked-tool-question' ||
-    value === 'tool-cards' ||
-    value === 'subagent-sessions' ||
-    value === 'row-archive' ||
-    value === 'tool-card-errors' ||
-    value === 'grouped-permissions' ||
-    value === 'tool-open-actions' ||
-    value === 'todo-completion'
-  ) {
+  if (isScenarioName(value)) {
     return value;
   }
   return 'blank';
