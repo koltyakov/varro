@@ -20,6 +20,19 @@ test('opens read mode for long assistant answers and preserves rendered content'
   await expect(page.locator('textarea')).toBeVisible();
 });
 
+test('closes read mode with escape', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=message-rendering');
+
+  await page.getByRole('button', { name: 'Open read mode' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Read mode' });
+  await expect(dialog).toBeVisible();
+
+  await page.keyboard.press('Escape');
+
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('textarea')).toBeVisible();
+});
+
 test('routes safe external markdown links through the extension bridge', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
 

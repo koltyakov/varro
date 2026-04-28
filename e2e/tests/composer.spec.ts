@@ -50,6 +50,21 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   );
 });
 
+test('removes queued follow-up messages before sending them', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+
+  const composer = page.locator('textarea');
+  await composer.fill('Queue this and then remove it');
+  await page.getByTitle('Add to queue (Enter)').click();
+
+  const queueList = page.getByRole('list', { name: 'Queued messages' });
+  await expect(queueList.getByRole('listitem')).toContainText('Queue this and then remove it');
+
+  await page.getByRole('button', { name: 'Remove from queue' }).click();
+  await expect(queueList.getByRole('listitem')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Send as Steer' })).toHaveCount(0);
+});
+
 test('refreshes todos from the final assistant message after stale todo events', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-completion');
 

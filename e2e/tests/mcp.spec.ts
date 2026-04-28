@@ -17,3 +17,25 @@ test('opens the MCP picker from slash commands and updates connection state', as
 
   await expect.poll(() => page.evaluate(() => localStorage.getItem('varro.sessionSelectedMcps'))).toContain('github');
 });
+
+test('restores preselected MCPs after reload', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=mcp-pickers');
+
+  const composer = page.locator('textarea');
+  await composer.click();
+  await composer.fill('/mcps');
+  await page.keyboard.press('Enter');
+
+  await expect(page.getByRole('button', { name: /chrome connected/i })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await page.reload();
+  await composer.click();
+  await composer.fill('/mcps');
+  await page.keyboard.press('Enter');
+
+  await expect(page.getByRole('button', { name: /chrome connected/i })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('varro.sessionSelectedMcps'))).toContain(
+    'chrome'
+  );
+});

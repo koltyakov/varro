@@ -18,6 +18,26 @@ test('filters models in the model picker and shows a no-match state', async ({ p
   await expect(page.getByText('OpenAI', { exact: true })).toBeVisible();
 });
 
+test('supports keyboard navigation and escape in the model picker', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=model-search');
+
+  const pickerButton = page.getByTitle('GitHub Copilot / GPT-5 mini');
+  await pickerButton.click();
+
+  const search = page.getByLabel('Search models');
+  await expect(search).toBeVisible();
+  await search.fill('go');
+  await search.press('ArrowDown');
+  await search.press('Enter');
+
+  await expect(page.getByTitle('OpenCode Go / Go Fast')).toBeVisible();
+
+  await page.locator('.model-picker-btn').click();
+  await expect(search).toBeVisible();
+  await search.press('Escape');
+  await expect(search).toHaveCount(0);
+});
+
 test('filters MCPs in the MCP picker and shows a no-match state', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-search');
 
@@ -34,4 +54,31 @@ test('filters MCPs in the MCP picker and shows a no-match state', async ({ page 
 
   await search.fill('zzzz');
   await expect(page.getByText('No matching MCPs', { exact: true })).toBeVisible();
+});
+
+test('supports keyboard navigation and escape in the MCP picker', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=mcp-search');
+
+  const composer = page.locator('textarea');
+  await composer.click();
+  await composer.fill('/mcps');
+  await page.keyboard.press('Enter');
+
+  const search = page.getByLabel('Search MCPs');
+  await expect(search).toBeVisible();
+  await search.fill('sentry');
+  await search.press('ArrowDown');
+  await search.press('Enter');
+
+  const sentryRow = page
+    .locator('.dropdown-item.selected')
+    .filter({ has: page.getByText('sentry', { exact: true }) });
+  await expect(sentryRow).toBeVisible();
+
+  await composer.fill('/mcps');
+  await page.keyboard.press('Enter');
+  await expect(search).toBeVisible();
+  await expect(sentryRow).toBeVisible();
+  await search.press('Escape');
+  await expect(search).toHaveCount(0);
 });

@@ -51,4 +51,5 @@ test('filters sessions by running, failed, attention, plan ready, and completed 
   await expect(page.getByText('Completed', { exact: true })).toBeVisible();
   await expect(page.locator('.session-item')).toHaveCount(1);
   await expect(page.locator('.session-item-main')).toContainText('Failing provider sync');
+  await expect(page.locator('.chat-header-filter-chip-label')).toHaveText('Completed');
 });

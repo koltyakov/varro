@@ -38,7 +38,7 @@ test('planning mode ends up with a plan using realistic provider models', async 
     .toContain('# Migration Plan');
 });
 
-test('implementing a plan sends the build prompt and rejecting it hides the actions', async ({ page }) => {
+test('implementing a plan sends the build prompt', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
 
   await page.getByRole('button', { name: 'Implement the plan' }).click();
@@ -58,9 +58,24 @@ test('implementing a plan sends the build prompt and rejecting it hides the acti
   });
 
   expect(promptBody).toMatchObject({ agent: 'build' });
+});
 
+test('skipping a plan hides the plan actions', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
+
   await page.getByRole('button', { name: 'Skip for now' }).click();
+
+  await expect(page.getByRole('button', { name: 'Open plan' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Implement the plan' })).toHaveCount(0);
+});
+
+test('keeps skipped plan actions hidden after reload', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=plan-ready');
+
+  await page.getByRole('button', { name: 'Skip for now' }).click();
+  await expect(page.getByRole('button', { name: 'Open plan' })).toHaveCount(0);
+
+  await page.reload();
 
   await expect(page.getByRole('button', { name: 'Open plan' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Implement the plan' })).toHaveCount(0);

@@ -77,3 +77,21 @@ test('keeps the active session visible through a maintenance reconnect cycle', a
   ).toBeVisible();
   await expect(page.locator('textarea')).toBeEditable();
 });
+
+test('preserves composer input through a maintenance reconnect cycle', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=maintenance-reconnect');
+
+  const composer = page.locator('textarea');
+  await composer.fill('Keep this draft while transport reconnects');
+
+  const banner = page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' });
+  await expect(banner).toBeVisible();
+  await expect(composer).toHaveValue('Keep this draft while transport reconnects');
+
+  await expect
+    .poll(() => banner.count(), { timeout: 7_000 })
+    .toBe(0);
+
+  await expect(composer).toHaveValue('Keep this draft while transport reconnects');
+  await expect(composer).toBeEditable();
+});

@@ -22,3 +22,13 @@ test('full access mode sends a bash request without showing a permission prompt'
 
   expect(promptCount).toBe(1);
 });
+
+test('restores full access mode after reload', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=full-access');
+
+  await expect(page.getByRole('button', { name: 'Full access permissions' })).toBeVisible();
+  await page.reload();
+
+  await expect(page.getByRole('button', { name: 'Full access permissions' })).toBeVisible();
+  await expect(page.locator('textarea')).toBeVisible();
+});

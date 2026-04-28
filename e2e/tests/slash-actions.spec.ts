@@ -42,3 +42,34 @@ test('slash commands trigger provider setup, settings, and file picker actions',
     filePickCount: 1,
   });
 });
+
+test('supports keyboard navigation and tab completion for slash command suggestions', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+
+  const composer = page.locator('textarea');
+  await composer.click();
+  await composer.fill('/co');
+  await expect(page.getByText('Open provider login in the terminal')).toBeVisible();
+
+  await composer.press('ArrowDown');
+  await expect(page.locator('.composer-completion-item.selected')).toHaveCount(1);
+  const selectedTitle = page.locator('.composer-completion-item.selected .composer-completion-title');
+  const selectedText = await selectedTitle.textContent();
+  await composer.press('Tab');
+
+  await expect(composer).toHaveValue(selectedText?.trim() || '');
+});
+
+test('closes slash command suggestions with escape', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+
+  const composer = page.locator('textarea');
+  await composer.click();
+  await composer.fill('/co');
+  await expect(page.locator('.composer-completion-menu')).toBeVisible();
+
+  await composer.press('Escape');
+
+  await expect(page.locator('.composer-completion-menu')).toHaveCount(0);
+  await expect(composer).toHaveValue('');
+});

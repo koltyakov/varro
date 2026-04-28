@@ -21,6 +21,26 @@ test('responds to a pending permission request', async ({ page }) => {
     .toBe('always');
 });
 
+test('rejects a pending permission request', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=pending-permission');
+
+  await expect(page.getByText('Permission Required')).toBeVisible();
+  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await page.getByRole('button', { name: 'Reject' }).click();
+
+  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const value = (window as Window & {
+          __varroE2E?: { permissionResponses: Array<{ response: string }> };
+        }).__varroE2E;
+        return value?.permissionResponses[0]?.response || null;
+      })
+    )
+    .toBe('reject');
+});
+
 test('keeps a linked permission visible when its tool row is hidden in chat', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=hidden-linked-permission');
 
@@ -142,5 +162,32 @@ test('groups duplicate permission prompts into a single prompt with a count', as
     .toEqual([
       { permissionId: 'permission-group-1', response: 'once' },
       { permissionId: 'permission-group-2', response: 'once' },
+    ]);
+});
+
+test('keeps grouped permission prompts bundled when rejecting them', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=grouped-permissions');
+
+  await expect(page.locator('.permission-prompt-count')).toContainText('2');
+  await page.getByRole('button', { name: 'Reject' }).click();
+
+  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (window as Window & {
+          __varroE2E?: {
+            permissionResponses: Array<{ permissionId: string; response: string }>;
+          };
+        }).__varroE2E;
+        return (value?.permissionResponses || []).map(({ permissionId, response }) => ({
+          permissionId,
+          response,
+        }));
+      })
+    )
+    .toEqual([
+      { permissionId: 'permission-group-1', response: 'reject' },
+      { permissionId: 'permission-group-2', response: 'reject' },
     ]);
 });

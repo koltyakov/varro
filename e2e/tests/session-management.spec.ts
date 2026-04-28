@@ -39,3 +39,32 @@ test('filters sessions through the session search input', async ({ page }) => {
     'Gamma cleanup pass',
   ]);
 });
+
+test('opens a filtered session with keyboard navigation', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=session-search');
+
+  await page.getByTitle('Back to sessions').click();
+  const search = page.getByLabel('Search sessions');
+  await expect(search).toBeVisible();
+
+  await search.fill('gamma');
+  await expect(page.locator('.session-item')).toHaveCount(1);
+  await search.press('ArrowDown');
+  await search.press('Enter');
+
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Gamma cleanup pass');
+  await expect(page.locator('textarea')).toBeVisible();
+});
+
+test('wraps session keyboard focus from the end of the list', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=session-search');
+
+  await page.getByTitle('Back to sessions').click();
+  const search = page.getByLabel('Search sessions');
+  await expect(search).toBeVisible();
+
+  await search.press('ArrowUp');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Gamma cleanup pass');
+});
