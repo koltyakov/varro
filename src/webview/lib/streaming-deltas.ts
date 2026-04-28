@@ -50,8 +50,8 @@ export function createStreamingDeltaQueue(
       flushScheduled = true;
       const currentGeneration = generation;
       scheduleFrame(() => {
-        flushScheduled = false;
         if (currentGeneration !== generation) return;
+        flushScheduled = false;
         flush();
       });
     },

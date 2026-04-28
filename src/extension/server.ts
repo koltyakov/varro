@@ -475,7 +475,12 @@ export class OpenCodeServer extends EventEmitter {
       } catch {}
       if (!res.ok) {
         const msg =
-          typeof data === 'object' && data && 'message' in data ? data.message : res.statusText;
+          typeof data === 'object' &&
+          data &&
+          'message' in data &&
+          typeof (data as { message: unknown }).message === 'string'
+            ? (data as { message: string }).message
+            : res.statusText;
         throw new Error(`${res.status} ${msg}`);
       }
       return data;

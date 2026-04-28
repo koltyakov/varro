@@ -26,6 +26,7 @@ import {
   upsertQuestion,
 } from '../lib/state';
 import type {
+  AssistantMessage,
   FileDiff,
   Message,
   Part,
@@ -293,22 +294,19 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.updated', (data) => {
       const info = data.properties?.info;
       const partialMessage = info as
-        | { sessionID?: string; role?: string; error?: Message['error'] }
+        | { sessionID?: string; role?: string; error?: AssistantMessage['error'] }
         | undefined;
       const sessionID = partialMessage?.sessionID;
       if (!sessionID) return;
       const message = isCompleteMessageInfo(info) ? info : null;
+      const assistantMessage = message && isAssistantMessage(message) ? message : null;
 
       if (sessionID === deps.getActiveSessionId()) {
         markLoadingActivity();
         if (message) {
           upsertMessageInfo(message);
         }
-        if (
-          message &&
-          isAssistantMessage(message) &&
-          (!!message.error || !!message.time.completed)
-        ) {
+        if (assistantMessage && (!!assistantMessage.error || !!assistantMessage.time.completed)) {
           deps.handoffTodosToMessages();
         }
       }
@@ -325,8 +323,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             ...notice,
             source: 'message',
             sessionID,
-            providerID: message?.providerID,
-            modelID: message?.modelID,
+            providerID: assistantMessage?.providerID,
+            modelID: assistantMessage?.modelID,
           });
         } else if (partialMessage.error) {
           setSessionUsageLimit(sessionID, null);
@@ -376,13 +374,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.removed', (data) => {
       const p = data.properties;
       if (!p) return;
-      if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        markLoadingActivity();
-      }
+      if ((p.sessionID as string) !== deps.getActiveSessionId()) return;
+      markLoadingActivity();
       removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
-      if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        deps.syncTodosFromMessages();
-      }
+      deps.syncTodosFromMessages();
     })
   );
 

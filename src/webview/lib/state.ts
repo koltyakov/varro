@@ -1629,6 +1629,9 @@ export function applyMessagePartDelta(
     streamingDeltaQueue.scheduleFlush();
     return;
   }
+  if (pending && pending.messageId !== messageId) {
+    flushPendingStreamingDeltas();
+  }
 
   messageIndex.ensureIndex(state.messages);
   const location = messageIndex.getIndexedPartLocation(partId);
@@ -1827,7 +1830,11 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
 
 export function replaceMessages(incoming: MessageEntry[]) {
   streamingDeltaQueue.reset();
-  setState('messages', incoming);
+  batch(() => {
+    setState('messages', incoming);
+    if (state.streamingPartId !== null) setState('streamingPartId', null);
+    if (state.streamingText !== '') setState('streamingText', '');
+  });
   messageIndex.invalidate();
 }
 
