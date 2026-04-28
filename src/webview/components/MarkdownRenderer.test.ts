@@ -31,6 +31,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   delete window.__sendToExtension;
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -181,6 +182,31 @@ describe('MarkdownRenderer', () => {
     expect(copied).toBe(`line 1\nline 2${'A'.repeat(19_987)}`);
     expect(copied).toHaveLength(20_000);
     expect(copied.includes('\u0000')).toBe(false);
+  });
+
+  it('uses the same copy icon on initial render and after reset', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    cleanup = render(
+      () => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const button = container?.querySelector<HTMLButtonElement>('button[data-copy]');
+    expect(button).toBeTruthy();
+    const initialIcon = button!.innerHTML;
+
+    vi.useFakeTimers();
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(button!.innerHTML).not.toBe(initialIcon);
+
+    vi.advanceTimersByTime(1500);
+    expect(button!.innerHTML).toBe(initialIcon);
   });
 
   it('renders fenced code blocks with syntax highlight spans when the language is known', async () => {

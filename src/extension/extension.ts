@@ -5,6 +5,17 @@ import { ContextProvider } from './context-provider';
 import { registerCommands } from './commands';
 import { logger } from './logger';
 
+function readCompactionSettings(config: vscode.WorkspaceConfiguration) {
+  const rawReserved = config.get<number | null>('chat.autoCompactionReservedTokens', null);
+  return {
+    auto: config.get<boolean>('chat.autoCompact', true),
+    reserved:
+      typeof rawReserved === 'number' && Number.isInteger(rawReserved) && rawReserved >= 0
+        ? rawReserved
+        : null,
+  };
+}
+
 let server: OpenCodeServer | null = null;
 let contextProvider: ContextProvider | null = null;
 let sidebarProvider: SidebarProvider | null = null;
@@ -18,8 +29,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const command = config.get<string>('server.command', '');
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
   const simulateNoProviders = config.get<boolean>('debug.simulateNoProviders', false);
+  const compactionSettings = readCompactionSettings(config);
 
-  server = new OpenCodeServer(port, autoStart, command, simulateMissingCli);
+  server = new OpenCodeServer(port, autoStart, command, simulateMissingCli, compactionSettings);
   contextProvider = new ContextProvider((ctx) => {
     sidebarProvider?.post({ type: 'context/update', payload: ctx });
   });
@@ -35,6 +47,18 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebarProvider, {
       webviewOptions: { retainContextWhenHidden: true },
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        event.affectsConfiguration('varro.chat.autoCompact') ||
+        event.affectsConfiguration('varro.chat.autoCompactionReservedTokens')
+      ) {
+        const nextConfig = vscode.workspace.getConfiguration('varro');
+        void server?.updateCompactionSettings(readCompactionSettings(nextConfig));
+      }
     })
   );
 

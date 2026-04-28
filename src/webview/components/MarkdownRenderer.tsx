@@ -586,6 +586,11 @@ function applyCodeBlockCopyIcons(root: HTMLDivElement | undefined) {
   }
 }
 
+function hydrateRenderedMarkdown(root: HTMLDivElement | undefined) {
+  applyTableColumnClasses(root);
+  applyCodeBlockCopyIcons(root);
+}
+
 export function MarkdownRenderer(props: MarkdownProps) {
   // oxlint-disable-next-line no-unassigned-vars
   let ref: HTMLDivElement | undefined;
@@ -635,12 +640,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
       queueMicrotask(() => {
         if (stableChanged) {
-          applyTableColumnClasses(stableRef);
-          applyCodeBlockCopyIcons(stableRef);
+          hydrateRenderedMarkdown(stableRef);
         }
         if (tailChanged) {
-          applyTableColumnClasses(tailRef);
-          applyCodeBlockCopyIcons(tailRef);
+          hydrateRenderedMarkdown(tailRef);
         }
       });
     }
@@ -726,6 +729,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   onMount(() => {
     ref?.addEventListener('click', handleClick);
+    queueMicrotask(() => {
+      hydrateRenderedMarkdown(stableRef);
+      hydrateRenderedMarkdown(tailRef);
+    });
   });
   onCleanup(() => {
     ref?.removeEventListener('click', handleClick);

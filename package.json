@@ -171,6 +171,20 @@
           "default": "left",
           "markdownDescription": "Choose which side shows the sessions pane on large screens in the Varro chat view."
         },
+        "varro.chat.autoCompact": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic OpenCode session compaction when context is full. Project opencode.json overrides this setting."
+        },
+        "varro.chat.autoCompactionReservedTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "default": null,
+          "description": "Reserved token headroom before automatic OpenCode compaction triggers. Leave unset to use OpenCode defaults. Project opencode.json overrides this setting."
+        },
         "varro.context.autoAttachFile": {
           "type": "boolean",
           "default": true,

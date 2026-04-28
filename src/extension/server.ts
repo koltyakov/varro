@@ -2,6 +2,8 @@ import type { ChildProcess } from 'child_process';
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { existsSync } from 'fs';
+import { mkdir, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
 import * as vscode from 'vscode';
 import { logger } from './logger';
 import { EventEmitter } from 'events';
@@ -20,6 +22,30 @@ import {
 } from './server-utils';
 import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
+
+export interface OpenCodeCompactionSettings {
+  auto: boolean | null;
+  reserved: number | null;
+}
+
+function normalizeCompactionSettings(
+  value?: Partial<OpenCodeCompactionSettings>
+): OpenCodeCompactionSettings {
+  return {
+    auto: typeof value?.auto === 'boolean' ? value.auto : null,
+    reserved:
+      typeof value?.reserved === 'number' && Number.isInteger(value.reserved) && value.reserved >= 0
+        ? value.reserved
+        : null,
+  };
+}
+
+function areCompactionSettingsEqual(
+  left: OpenCodeCompactionSettings,
+  right: OpenCodeCompactionSettings
+): boolean {
+  return left.auto === right.auto && left.reserved === right.reserved;
+}
 
 export class OpenCodeServer extends EventEmitter {
   private static readonly MISSING_CLI_MESSAGE =
@@ -76,14 +102,24 @@ export class OpenCodeServer extends EventEmitter {
     | ((code: number | null, signal: NodeJS.Signals | null) => void)
     | null = null;
   private processErrorHandler: ((err: Error) => void) | null = null;
+  private compactionSettings: OpenCodeCompactionSettings;
+  private readonly injectedConfigPath: string;
 
-  constructor(port: number, autoStart: boolean, command?: string, simulateMissingCli = false) {
+  constructor(
+    port: number,
+    autoStart: boolean,
+    command?: string,
+    simulateMissingCli = false,
+    compactionSettings?: Partial<OpenCodeCompactionSettings>
+  ) {
     super();
     this.port = port;
     this.originalPort = port;
     this.autoStart = autoStart;
     this.command = command?.trim() || '';
     this.simulateMissingCli = simulateMissingCli;
+    this.compactionSettings = normalizeCompactionSettings(compactionSettings);
+    this.injectedConfigPath = join(tmpdir(), 'varro-opencode', `server-${port}.json`);
   }
 
   get status(): ServerStatus {
@@ -155,6 +191,8 @@ export class OpenCodeServer extends EventEmitter {
         throw new Error(OpenCodeServer.MISSING_CLI_MESSAGE);
       }
 
+      await this.syncInjectedConfigFile();
+
       const healthy = await this.checkHealth();
       this.throwIfStartCancelled(disposeGeneration);
       if (healthy) {
@@ -162,6 +200,11 @@ export class OpenCodeServer extends EventEmitter {
         this.managedProcess = false;
         this.portFallbackAttempts = 0;
         this.portInUseDetected = false;
+        if (this.hasInjectedCompactionOverride()) {
+          logger.warn(
+            'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
+          );
+        }
         this.setRunningStatus(this.url, 'healthy');
         this.startEventStream();
         this.requestMaintenanceCheck();
@@ -976,6 +1019,15 @@ export class OpenCodeServer extends EventEmitter {
     await this.disposeResources({ stopProcess: false });
   }
 
+  async updateCompactionSettings(value?: Partial<OpenCodeCompactionSettings>) {
+    const next = normalizeCompactionSettings(value);
+    const changed = !areCompactionSettingsEqual(this.compactionSettings, next);
+    this.compactionSettings = next;
+    await this.syncInjectedConfigFile();
+    if (!changed || this._status.state !== 'running') return;
+    await this.reapplyCompactionSettings();
+  }
+
   private async disposeResources(options: { stopProcess: boolean }) {
     this.lifecycle.beginDispose();
     this.clearRestartTimer();
@@ -1083,7 +1135,62 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private buildServerEnv(): NodeJS.ProcessEnv {
-    return buildServerEnv();
+    return {
+      ...buildServerEnv(),
+      OPENCODE_CONFIG: this.injectedConfigPath,
+    };
+  }
+
+  private async syncInjectedConfigFile() {
+    await mkdir(join(tmpdir(), 'varro-opencode'), { recursive: true });
+    await writeFile(this.injectedConfigPath, this.serializeInjectedConfig(), 'utf-8');
+  }
+
+  private serializeInjectedConfig() {
+    const compaction = {
+      ...(this.compactionSettings.auto !== null ? { auto: this.compactionSettings.auto } : {}),
+      ...(this.compactionSettings.reserved !== null
+        ? { reserved: this.compactionSettings.reserved }
+        : {}),
+    };
+    const config = {
+      $schema: 'https://opencode.ai/config.json',
+      ...(Object.keys(compaction).length > 0 ? { compaction } : {}),
+    };
+    return `${JSON.stringify(config, null, 2)}\n`;
+  }
+
+  private async reapplyCompactionSettings() {
+    if (!this.process || !this.managedProcess) {
+      logger.warn(
+        'Varro chat auto-compaction settings can only be reapplied automatically for a Varro-managed OpenCode server'
+      );
+      return;
+    }
+    try {
+      await this.request('POST', '/global/dispose');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `Failed to dispose OpenCode instances after compaction setting change: ${message}`
+      );
+      await this.restartManagedServerForCompactionSettings();
+    }
+  }
+
+  private async restartManagedServerForCompactionSettings() {
+    if (this.lifecycle.beginManagedRestart() === null) return;
+    try {
+      logger.info('Restarting managed OpenCode server to apply updated Varro compaction settings');
+      await this.stopManagedProcessForRestart();
+      await this.start();
+    } finally {
+      this.lifecycle.finishManagedRestart();
+    }
+  }
+
+  private hasInjectedCompactionOverride() {
+    return this.compactionSettings.auto !== null || this.compactionSettings.reserved !== null;
   }
 
   private serverPathEntries(): string[] {

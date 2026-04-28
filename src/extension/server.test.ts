@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as FsModule from 'fs';
+import type * as FsPromisesModule from 'fs/promises';
 import type { ServerStatus } from '../shared/protocol';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
 
-const { loggerMock, vscodeMock } = vi.hoisted(() => ({
+const { loggerMock, mkdirMock, spawnMock, vscodeMock, writeFileMock } = vi.hoisted(() => ({
   loggerMock: {
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
   },
+  mkdirMock: vi.fn(() => Promise.resolve(undefined)),
+  spawnMock: vi.fn(),
   vscodeMock: {
     window: {
       activeTextEditor: undefined,
@@ -24,15 +27,25 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
       workspaceFolders: undefined,
     },
   },
+  writeFileMock: vi.fn(() => Promise.resolve(undefined)),
 }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
+vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof FsModule>('fs');
   return {
     ...actual,
     existsSync: vi.fn(actual.existsSync),
+  };
+});
+vi.mock('fs/promises', async () => {
+  const actual = await vi.importActual<typeof FsPromisesModule>('fs/promises');
+  return {
+    ...actual,
+    mkdir: mkdirMock,
+    writeFile: writeFileMock,
   };
 });
 
@@ -151,6 +164,11 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   vi.stubGlobal('fetch', vi.fn());
+  spawnMock.mockReset();
+  mkdirMock.mockReset();
+  mkdirMock.mockResolvedValue(undefined);
+  writeFileMock.mockReset();
+  writeFileMock.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -453,6 +471,130 @@ describe('OpenCodeServer event stream', () => {
     expect(stderrOff).toHaveBeenCalledWith('data', stderrHandler);
     expect(procOff).toHaveBeenCalledWith('exit', exitHandler);
     expect(procOff).toHaveBeenCalledWith('error', errorHandler);
+  });
+});
+
+describe('OpenCodeServer compaction config injection', () => {
+  it('injects OPENCODE_CONFIG for managed server startup', async () => {
+    const server = new OpenCodeServer(4096, true, 'opencode', false, {
+      auto: false,
+      reserved: 1234,
+    });
+    const stdoutOn = vi.fn();
+    const stderrOn = vi.fn();
+    const processOn = vi.fn();
+    spawnMock.mockReturnValue({
+      stdout: { on: stdoutOn },
+      stderr: { on: stderrOn },
+      on: processOn,
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    } as never);
+
+    const api = server as unknown as {
+      checkHealth: ReturnType<typeof vi.fn>;
+      pollHealth: (
+        startAttemptId: number,
+        disposeGeneration: number,
+        resolve: (url: string) => void,
+        reject: (err: Error) => void,
+        attempt?: number
+      ) => void;
+    };
+    api.checkHealth = vi.fn().mockResolvedValue(false);
+    api.pollHealth = (_startAttemptId, _disposeGeneration, resolve) => {
+      resolve(server.url);
+    };
+
+    await server.start();
+
+    const configText = (
+      server as unknown as {
+        serializeInjectedConfig: () => string;
+      }
+    ).serializeInjectedConfig();
+    expect(String(configText)).toContain('"auto": false');
+    expect(String(configText)).toContain('"reserved": 1234');
+
+    const spawnCall = spawnMock.mock.calls[0];
+    expect(spawnCall).toBeTruthy();
+    const options = spawnCall?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+    expect(options?.env?.OPENCODE_CONFIG).toContain('varro-opencode');
+  });
+
+  it('reapplies changed settings by disposing OpenCode instances', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const request = vi.fn(async () => true);
+    const api = server as unknown as {
+      _status: ServerStatus;
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      request: typeof request;
+    };
+
+    api._status = { state: 'running', url: server.url };
+    api.process = {};
+    api.managedProcess = true;
+    api.request = request;
+
+    await server.updateCompactionSettings({ auto: false, reserved: 4321 });
+
+    expect(request).toHaveBeenCalledWith('POST', '/global/dispose');
+    const configText = (
+      server as unknown as {
+        serializeInjectedConfig: () => string;
+      }
+    ).serializeInjectedConfig();
+    expect(String(configText)).toContain('"auto": false');
+    expect(String(configText)).toContain('"reserved": 4321');
+  });
+
+  it('restarts the managed server when dispose fails during reapply', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const restart = vi.fn(async () => undefined);
+    const api = server as unknown as {
+      _status: ServerStatus;
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      request: (method: string, path: string, body?: unknown) => Promise<unknown>;
+      restartManagedServerForCompactionSettings: () => Promise<void>;
+    };
+
+    api._status = { state: 'running', url: server.url };
+    api.process = {};
+    api.managedProcess = true;
+    api.request = vi.fn(async () => {
+      throw new Error('dispose failed');
+    });
+    api.restartManagedServerForCompactionSettings = restart;
+
+    await server.updateCompactionSettings({ auto: false });
+
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns instead of reapplying when the running server is unmanaged', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const request = vi.fn(async () => true);
+    const api = server as unknown as {
+      _status: ServerStatus;
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      request: typeof request;
+    };
+
+    api._status = { state: 'running', url: server.url };
+    api.process = null;
+    api.managedProcess = false;
+    api.request = request;
+
+    await server.updateCompactionSettings({ auto: false });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Varro chat auto-compaction settings can only be reapplied automatically for a Varro-managed OpenCode server'
+    );
   });
 });
 
