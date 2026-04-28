@@ -867,6 +867,49 @@ describe('standalone action prompts', () => {
     ).toEqual([]);
   });
 
+  it('keeps linked permissions visible when their tool row is hidden in chat', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ];
+
+    expect(
+      getStandalonePermissionPrompts(
+        [
+          {
+            info: assistantMessage('message-1'),
+            parts: [
+              {
+                id: 'tool-1',
+                sessionID: 'session-1',
+                messageID: 'message-1',
+                type: 'tool',
+                callID: 'call-1',
+                tool: 'custom',
+                state: {
+                  status: 'running',
+                  title: 'Updating plan',
+                  input: {},
+                  time: { start: 1 },
+                },
+              },
+            ],
+          },
+        ],
+        permissions,
+        'session-1'
+      )
+    ).toEqual(permissions);
+  });
+
   it('keeps linked permissions visible when virtualization hides their tool row', () => {
     const messages = Array.from({ length: 60 }, (_, index) => {
       const messageId = `assistant-${index}`;
@@ -940,6 +983,44 @@ describe('standalone action prompts', () => {
         'session-1'
       )
     ).toEqual([]);
+  });
+
+  it('keeps linked questions visible when their tool row is hidden in chat', () => {
+    const questions: QuestionRequest[] = [
+      {
+        id: 'question-1',
+        sessionID: 'session-1',
+        questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+        tool: { messageID: 'message-1', callID: 'call-1' },
+      },
+    ];
+
+    expect(
+      getStandaloneQuestionPrompts(
+        [
+          {
+            info: assistantMessage('message-1'),
+            parts: [
+              {
+                id: 'tool-1',
+                sessionID: 'session-1',
+                messageID: 'message-1',
+                type: 'tool',
+                callID: 'call-1',
+                tool: 'TodoWrite',
+                state: {
+                  status: 'running',
+                  input: {},
+                  time: { start: 1 },
+                },
+              },
+            ],
+          },
+        ],
+        questions,
+        'session-1'
+      )
+    ).toEqual(questions);
   });
 
   it('keeps child-session permissions visible for the active root session', () => {

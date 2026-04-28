@@ -80,7 +80,13 @@ function getLinkedToolCallKeys(messages: Array<{ info: Message; parts: Part[] }>
     const messageId = entry.info.id;
     const sessionId = entry.info.sessionID;
     for (const part of entry.parts) {
-      if (part.type !== 'tool' || part.messageID !== messageId) continue;
+      if (
+        part.type !== 'tool' ||
+        part.messageID !== messageId ||
+        !shouldShowAssistantPartInline(part)
+      ) {
+        continue;
+      }
       const key = getLinkedToolCallKey(sessionId, messageId, part.callID);
       if (key) keys.add(key);
     }

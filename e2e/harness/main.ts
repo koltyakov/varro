@@ -814,6 +814,69 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     return state;
   }
 
+  if (name === 'hidden-linked-permission') {
+    const session = makeSession(
+      'session-hidden-linked-permission',
+      'Hidden linked permission',
+      BASE_TIME - 1_000
+    );
+    const user = makeUserMessage(
+      session.id,
+      'message-hidden-permission-user',
+      ['Update the task plan, then ask before running npm test.'],
+      BASE_TIME - 6_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-hidden-permission-assistant',
+      user.info.id,
+      'I need approval before running the command.',
+      BASE_TIME - 5_000
+    );
+    assistant.parts = [
+      {
+        id: 'tool-hidden-permission-1',
+        sessionID: session.id,
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'hidden-permission-call-1',
+        tool: 'TodoWrite',
+        state: {
+          status: 'running',
+          input: {
+            todos: [
+              {
+                content: 'Inspect the permission flow',
+                status: 'in_progress',
+                priority: 'high',
+              },
+            ],
+          },
+          title: 'Updating plan',
+          metadata: {},
+          time: { start: BASE_TIME - 5_000 },
+        },
+      },
+    ];
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.pendingPermissions = [
+      {
+        id: 'permission-hidden-linked-1',
+        permission: 'bash',
+        sessionID: session.id,
+        title: 'Allow running npm test?',
+        metadata: { command: 'npm test' },
+        tool: { messageID: assistant.info.id, callID: 'hidden-permission-call-1' },
+        time: { created: BASE_TIME - 4_900 },
+      },
+    ];
+    state.nextSequence = 25;
+    return state;
+  }
+
   if (name === 'plan-ready') {
     const session = makeSession('session-plan-ready', 'Plan migration rollout', BASE_TIME - 1_000);
     const user = makeUserMessage(
@@ -1774,6 +1837,7 @@ function getScenarioName(): ScenarioName {
     value === 'startup-race' ||
     value === 'restored-session' ||
     value === 'pending-permission' ||
+    value === 'hidden-linked-permission' ||
     value === 'plan-ready' ||
     value === 'sticky-preview' ||
     value === 'todo-queue' ||
