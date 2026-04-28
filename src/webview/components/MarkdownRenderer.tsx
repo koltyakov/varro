@@ -12,6 +12,11 @@ interface MarkdownProps {
   cacheByContent?: boolean;
 }
 
+type StreamingMarkdownSegments = {
+  stableContent: string;
+  tailContent: string;
+};
+
 const copySvg =
   '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4h1V2.5a.5.5 0 01.5-.5h8a.5.5 0 01.5.5v8a.5.5 0 01-.5.5H12v1h1.5a1.5 1.5 0 001.5-1.5v-8A1.5 1.5 0 0013.5 1h-8A1.5 1.5 0 004 2.5V4zm-2 1.5A1.5 1.5 0 013.5 4h8A1.5 1.5 0 0113 5.5v8a1.5 1.5 0 01-1.5 1.5h-8A1.5 1.5 0 012 13.5v-8zM3.5 5a.5.5 0 00-.5.5v8a.5.5 0 00.5.5h8a.5.5 0 00.5-.5v-8a.5.5 0 00-.5-.5h-8z"/></svg>';
 const checkSvg =
@@ -351,6 +356,7 @@ const FILE_PATH_RE =
   /(?:^|[\s(])(\.?\/?(?:[\w.-]+\/)*[\w.-]+\.[\w]+(?::\d+(?:-\d+)?)?)(?=[\s),.]|$)/g;
 const FILE_PATH_CANDIDATE_RE = /\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/;
 const PRESERVED_HTML_PLACEHOLDER_RE = /@@VARRO_PRESERVE_(\d+)@@/g;
+const MARKDOWN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 const ANCHOR_RE = /(<a[\s\S]*?<\/a>)/gi;
 const SVG_RE = /(<svg[\s\S]*?<\/svg>)/gi;
 const BUTTON_RE = /(<button[\s\S]*?<\/button>)/gi;
@@ -415,6 +421,64 @@ function renderMarkdownHtml(content: string): string {
   } catch {
     return `<p>${escapeHtml(content)}</p>`;
   }
+}
+
+function findLastSafeMarkdownBoundary(content: string): number | null {
+  let index = 0;
+  let lastBoundary: number | null = null;
+  let openFence: { char: string; length: number } | null = null;
+
+  while (index < content.length) {
+    const nextBreak = content.indexOf('\n', index);
+    const lineEnd = nextBreak === -1 ? content.length : nextBreak;
+    const rawLine = content.slice(index, lineEnd);
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    const fenceMatch = line.match(MARKDOWN_FENCE_RE);
+
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!openFence) {
+        openFence = { char: marker[0], length: marker.length };
+      } else if (marker[0] === openFence.char && marker.length >= openFence.length) {
+        openFence = null;
+      }
+    }
+
+    const nextIndex = nextBreak === -1 ? content.length : nextBreak + 1;
+    if (!openFence && line.trim().length === 0 && nextIndex < content.length) {
+      lastBoundary = nextIndex;
+    }
+
+    index = nextIndex;
+  }
+
+  return lastBoundary;
+}
+
+export function splitStreamingMarkdownContent(content: string): StreamingMarkdownSegments {
+  const boundary = findLastSafeMarkdownBoundary(content);
+  if (boundary === null) {
+    return { stableContent: '', tailContent: content };
+  }
+
+  const stableContent = content.slice(0, boundary).trimEnd();
+  const tailContent = content.slice(boundary);
+  if (!stableContent || !tailContent.trim()) {
+    return { stableContent: '', tailContent: content };
+  }
+
+  return { stableContent, tailContent };
+}
+
+function getMarkdownRenderSegments(
+  content: string,
+  cacheByContent: boolean
+): StreamingMarkdownSegments {
+  if (cacheByContent) {
+    return { stableContent: '', tailContent: content };
+  }
+
+  return splitStreamingMarkdownContent(content);
 }
 
 function parseMarkdown(content: string, cacheByContent: boolean): string {
@@ -525,33 +589,62 @@ function applyCodeBlockCopyIcons(root: HTMLDivElement | undefined) {
 export function MarkdownRenderer(props: MarkdownProps) {
   // oxlint-disable-next-line no-unassigned-vars
   let ref: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let stableRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let tailRef: HTMLDivElement | undefined;
 
   let pendingContent: string | null = null;
   let rafId: number | null = null;
-  let lastAppliedHtml = '';
-
-  const [renderedHtml, setRenderedHtml] = createSignal(
-    parseMarkdown(props.content || '', !!props.cacheByContent)
+  const initialSegments = getMarkdownRenderSegments(props.content || '', !!props.cacheByContent);
+  let lastAppliedStableHtml = initialSegments.stableContent
+    ? parseMarkdown(initialSegments.stableContent, true)
+    : '';
+  let lastAppliedTailHtml = parseMarkdown(
+    initialSegments.tailContent,
+    initialSegments.stableContent.length === 0 && !!props.cacheByContent
   );
+
+  const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
+  const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
 
   function flushPending() {
     rafId = null;
     if (pendingContent !== null) {
       const content = pendingContent;
       pendingContent = null;
-      const nextHtml = parseMarkdown(content, !!props.cacheByContent);
-      if (nextHtml !== lastAppliedHtml) {
-        lastAppliedHtml = nextHtml;
-        setRenderedHtml(nextHtml);
+      const segments = getMarkdownRenderSegments(content, !!props.cacheByContent);
+      const nextStableHtml = segments.stableContent
+        ? parseMarkdown(segments.stableContent, true)
+        : '';
+      const nextTailHtml = parseMarkdown(
+        segments.tailContent,
+        segments.stableContent.length === 0 && !!props.cacheByContent
+      );
+
+      const stableChanged = nextStableHtml !== lastAppliedStableHtml;
+      const tailChanged = nextTailHtml !== lastAppliedTailHtml;
+      if (stableChanged) {
+        lastAppliedStableHtml = nextStableHtml;
+        setStableHtml(nextStableHtml);
       }
+      if (tailChanged) {
+        lastAppliedTailHtml = nextTailHtml;
+        setTailHtml(nextTailHtml);
+      }
+
       queueMicrotask(() => {
-        applyTableColumnClasses(ref);
-        applyCodeBlockCopyIcons(ref);
+        if (stableChanged) {
+          applyTableColumnClasses(stableRef);
+          applyCodeBlockCopyIcons(stableRef);
+        }
+        if (tailChanged) {
+          applyTableColumnClasses(tailRef);
+          applyCodeBlockCopyIcons(tailRef);
+        }
       });
     }
   }
-
-  lastAppliedHtml = renderedHtml();
 
   createEffect(() => {
     const content = props.content || '';
@@ -638,5 +731,20 @@ export function MarkdownRenderer(props: MarkdownProps) {
     ref?.removeEventListener('click', handleClick);
   });
 
-  return <div ref={ref} class="rendered-markdown" innerHTML={renderedHtml()} />;
+  return (
+    <div ref={ref} class="rendered-markdown">
+      <div
+        ref={stableRef}
+        data-markdown-segment="stable"
+        style={{ display: stableHtml() ? 'contents' : 'none' }}
+        innerHTML={stableHtml()}
+      />
+      <div
+        ref={tailRef}
+        data-markdown-segment="tail"
+        style={{ display: tailHtml() ? 'contents' : 'none' }}
+        innerHTML={tailHtml()}
+      />
+    </div>
+  );
 }

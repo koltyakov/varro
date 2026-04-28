@@ -4,6 +4,7 @@ import {
   getCompletionSelection,
   getMentionCompletionItems,
   parseDroppedText,
+  shouldRequestMentionFileSearch,
   shouldPadInlineInsertion,
   isToolbarControlCompacted,
   isToolbarControlHidden,
@@ -182,6 +183,14 @@ describe('getMentionCompletionItems', () => {
         value: '@docs/',
       })
     );
+  });
+});
+
+describe('shouldRequestMentionFileSearch', () => {
+  it('skips duplicate mention file searches when the query text is unchanged', () => {
+    expect(shouldRequestMentionFileSearch('readme', 'readme')).toBe(false);
+    expect(shouldRequestMentionFileSearch('readme', 'read')).toBe(true);
+    expect(shouldRequestMentionFileSearch('', 'readme')).toBe(true);
   });
 });
 

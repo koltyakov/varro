@@ -266,11 +266,11 @@ export function ChatInput() {
   const [caretPosition, setCaretPosition] = createSignal(0);
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
-  const [fileSearchQuery, setFileSearchQuery] = createSignal('');
   const [showFileSearchHint, setShowFileSearchHint] = createSignal(false);
   const [suppressCompletion, setSuppressCompletion] = createSignal(false);
   const [toolbarCompactMode, setToolbarCompactMode] = createSignal<ToolbarCompactMode>('full');
   let latestFileSearchRequestId = 0;
+  let latestFileSearchQuery = '';
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let toolbarFitRaf = 0;
   let toolbarFitRequestId = 0;
@@ -341,8 +341,8 @@ export function ChatInput() {
         clearTimeout(fileSearchTimer);
         fileSearchTimer = null;
       }
+      latestFileSearchQuery = '';
       setFileSearchResults([]);
-      setFileSearchQuery('');
       setShowFileSearchHint(false);
       return;
     }
@@ -356,14 +356,16 @@ export function ChatInput() {
         clearTimeout(fileSearchTimer);
         fileSearchTimer = null;
       }
+      latestFileSearchQuery = '';
       setFileSearchResults([]);
-      setFileSearchQuery('');
       return;
     }
 
+    if (!shouldRequestMentionFileSearch(latestFileSearchQuery, rawQuery)) return;
+
     latestFileSearchRequestId += 1;
     const requestId = latestFileSearchRequestId;
-    setFileSearchQuery(rawQuery);
+    latestFileSearchQuery = rawQuery;
     if (fileSearchTimer) clearTimeout(fileSearchTimer);
     fileSearchTimer = setTimeout(() => {
       fileSearchTimer = null;
@@ -570,7 +572,7 @@ export function ChatInput() {
     setInputText(nextValue);
     setCompletionIndex(0);
     setFileSearchResults([]);
-    setFileSearchQuery('');
+    latestFileSearchQuery = '';
 
     queueMicrotask(() => {
       autoResize();
@@ -920,7 +922,7 @@ export function ChatInput() {
     const disposeBridge = onMessage((msg: ExtensionMessage) => {
       if (msg.type !== 'files/search-results') return;
       if (msg.payload.requestId !== latestFileSearchRequestId) return;
-      if (msg.payload.query !== fileSearchQuery()) return;
+      if (msg.payload.query !== latestFileSearchQuery) return;
       setFileSearchResults(msg.payload.files);
     });
 
@@ -1061,6 +1063,9 @@ export function ChatInput() {
     (getSendableInputText().trim().length > 0 ||
       state.droppedFiles.length > 0 ||
       hasSendableClipboardImages());
+  const showBusySendControls = createMemo(
+    () => isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()
+  );
 
   const assistantMessages = createMemo(() =>
     state.messages.map((entry) => entry.info).filter(isAssistantMessage)
@@ -1228,7 +1233,7 @@ export function ChatInput() {
     loading: isLoading(),
     hasQuestion: hasActiveQuestion(),
     hasPermission: hasActivePermission(),
-    canSend: canSend(),
+    showBusySendControls: showBusySendControls(),
     showAgentPicker: showAgentPicker(),
     showVariantPicker: showVariantPicker(),
     showModelPicker: showModelPicker(),
@@ -1937,7 +1942,7 @@ export function ChatInput() {
             <div style={{ position: 'relative' }}>
               <Show when={isToolbarControlVisible('send')}>
                 <Show
-                  when={isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()}
+                  when={showBusySendControls()}
                   fallback={
                     <button
                       class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
@@ -1989,14 +1994,7 @@ export function ChatInput() {
               </Show>
 
               <Show
-                when={
-                  isToolbarControlVisible('send') &&
-                  showBusyMenu() &&
-                  canSend() &&
-                  isLoading() &&
-                  !hasActiveQuestion() &&
-                  !hasActivePermission()
-                }
+                when={isToolbarControlVisible('send') && showBusyMenu() && showBusySendControls()}
               >
                 <div
                   ref={busyMenuRef!}
@@ -2737,6 +2735,10 @@ export function getMentionCompletionItems({
   }
 
   return [...fileItems, ...agentItems].slice(0, 10);
+}
+
+export function shouldRequestMentionFileSearch(previousQuery: string, nextQuery: string) {
+  return previousQuery !== nextQuery;
 }
 
 function normalizeMentionPath(value: string) {

@@ -4,6 +4,7 @@ import { createSignal } from 'solid-js';
 import type { FilePart, Part, ToolPart } from '../types';
 import {
   Message,
+  calculateAssistantPartVirtualRange,
   getAssistantContainerVariant,
   getUserMessagePreviewText,
   stripCompactionBoundaryMarkdown,
@@ -283,6 +284,50 @@ describe('stripCompactionBoundaryMarkdown', () => {
     expect(stripCompactionBoundaryMarkdown('Intro\n\n---\n\nDetails')).toBe(
       'Intro\n\n---\n\nDetails'
     );
+  });
+});
+
+describe('calculateAssistantPartVirtualRange', () => {
+  it('uses measured heights to compute padded visible ranges', () => {
+    expect(
+      calculateAssistantPartVirtualRange({
+        itemKeys: ['part-1', 'part-2', 'part-3', 'part-4', 'part-5'],
+        measuredHeights: new Map([
+          ['part-1', 100],
+          ['part-2', 250],
+          ['part-3', 100],
+          ['part-4', 100],
+          ['part-5', 100],
+        ]),
+        scrollTop: 260,
+        viewportHeight: 120,
+        defaultItemHeight: 100,
+        overscan: 1,
+      })
+    ).toEqual({
+      start: 1,
+      end: 4,
+      topPad: 100,
+      bottomPad: 100,
+    });
+  });
+
+  it('keeps at least one item rendered even with a collapsed viewport sample', () => {
+    expect(
+      calculateAssistantPartVirtualRange({
+        itemKeys: ['part-1', 'part-2', 'part-3'],
+        measuredHeights: new Map(),
+        scrollTop: 1000,
+        viewportHeight: 0,
+        defaultItemHeight: 100,
+        overscan: 0,
+      })
+    ).toEqual({
+      start: 2,
+      end: 3,
+      topPad: 200,
+      bottomPad: 0,
+    });
   });
 });
 

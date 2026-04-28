@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { MarkdownRenderer, splitStreamingMarkdownContent } from './MarkdownRenderer';
 import { setState } from '../lib/state';
 
 declare global {
@@ -35,6 +35,18 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer', () => {
+  it('splits streaming markdown at the last safe paragraph boundary', () => {
+    expect(splitStreamingMarkdownContent('First paragraph\n\nSecond paragraph')).toEqual({
+      stableContent: 'First paragraph',
+      tailContent: 'Second paragraph',
+    });
+
+    expect(splitStreamingMarkdownContent('```ts\nconst value = 1;\n\n')).toEqual({
+      stableContent: '',
+      tailContent: '```ts\nconst value = 1;\n\n',
+    });
+  });
+
   it('sanitizes unsafe html while keeping safe external links routable', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
@@ -225,6 +237,20 @@ describe('MarkdownRenderer', () => {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(sanitizeSpy.mock.calls.length).toBeGreaterThan(callsAfterFirstMount);
+  });
+
+  it('renders streaming content in stable and tail segments', async () => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: 'First paragraph\n\nSecond paragraph' }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const stableSegment = container?.querySelector('[data-markdown-segment="stable"]');
+    const tailSegment = container?.querySelector('[data-markdown-segment="tail"]');
+
+    expect(stableSegment?.innerHTML).toContain('<p>First paragraph</p>');
+    expect(tailSegment?.innerHTML).toContain('<p>Second paragraph</p>');
   });
 
   it('falls back to escaped plain code when the language is unknown', async () => {
