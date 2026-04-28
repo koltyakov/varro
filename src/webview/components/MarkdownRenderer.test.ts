@@ -322,6 +322,28 @@ describe('MarkdownRenderer', () => {
     expect(container?.textContent).toContain('./src/webview/App.tsx');
   });
 
+  it('defers syntax highlighting for an unclosed streaming fence until the fence closes', async () => {
+    let content = 'Before\n\n```ts\nconst value = 1;';
+
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    let code = container?.querySelector('.interactive-result-code-block code');
+    expect(code?.classList.contains('hljs')).toBe(true);
+    expect(code?.querySelector('[class^="hljs-"]')).toBeNull();
+    expect(code?.textContent).toBe('const value = 1;');
+
+    content = 'Before\n\n```ts\nconst value = 1;\n```';
+    cleanup?.();
+    container!.innerHTML = '';
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    code = container?.querySelector('.interactive-result-code-block code');
+    expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');
+    expect(code?.querySelector('.hljs-number')?.textContent).toBe('1');
+  });
+
   it('falls back to escaped plain code when the language is unknown', async () => {
     cleanup = render(
       () => MarkdownRenderer({ content: '```definitely-not-a-lang\nconst value = 1;\n```' }),
