@@ -1,6 +1,7 @@
 import {
   For,
   Show,
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -11,6 +12,7 @@ import {
 import {
   getSelectedAgentForSession,
   getPermissionGroupMembers,
+  isSessionAwaitingInput,
   state,
   isLoading,
   isSkippedPlanSession,
@@ -25,6 +27,7 @@ import {
   getActiveUsageLimitNotice,
   getSessionTreeRootId,
   getSessionTreeIds,
+  messageStructureVersion,
   showStickyUserPrompt,
   skipPlanSession,
 } from '../lib/state';
@@ -60,28 +63,49 @@ function isPlanningAssistantMessage(info: AssistantMessage): boolean {
   return info.agent === 'plan' || getSelectedAgentForSession(info.sessionID) === 'plan';
 }
 
-function hasLinkedToolCall(
-  messages: Array<{ info: Message; parts: Part[] }>,
+function getLinkedToolCallKey(
   sessionId: string,
   messageId: string | null | undefined,
   callId: string | null | undefined
 ) {
-  if (!messageId || !callId) return false;
+  if (!messageId || !callId) return null;
 
-  return messages.some(
-    (entry) =>
-      entry.info.sessionID === sessionId &&
-      entry.info.id === messageId &&
-      entry.parts.some(
-        (part) => part.type === 'tool' && part.messageID === messageId && part.callID === callId
-      )
-  );
+  return `${sessionId}\u0000${messageId}\u0000${callId}`;
+}
+
+function getLinkedToolCallKeys(messages: Array<{ info: Message; parts: Part[] }>) {
+  const keys = new Set<string>();
+
+  for (const entry of messages) {
+    const messageId = entry.info.id;
+    const sessionId = entry.info.sessionID;
+    for (const part of entry.parts) {
+      if (part.type !== 'tool' || part.messageID !== messageId) continue;
+      const key = getLinkedToolCallKey(sessionId, messageId, part.callID);
+      if (key) keys.add(key);
+    }
+  }
+
+  return keys;
+}
+
+function hasLinkedToolCall(
+  linkedToolCalls: ReadonlySet<string>,
+  sessionId: string,
+  messageId: string | null | undefined,
+  callId: string | null | undefined
+) {
+  const key = getLinkedToolCallKey(sessionId, messageId, callId);
+  if (!key) return false;
+
+  return linkedToolCalls.has(key);
 }
 
 export function getStandalonePermissionPrompts(
   messages: Array<{ info: Message; parts: Part[] }>,
   permissions: Permission[],
-  activeSessionId: string | null
+  activeSessionId: string | null,
+  linkedToolCalls = getLinkedToolCallKeys(messages)
 ) {
   if (!activeSessionId) return [];
 
@@ -92,7 +116,7 @@ export function getStandalonePermissionPrompts(
     (permission) =>
       sessionIds.has(permission.sessionID) &&
       !getPermissionGroupMembers(permission).some((member) =>
-        hasLinkedToolCall(messages, member.sessionID, member.messageID, member.callID)
+        hasLinkedToolCall(linkedToolCalls, member.sessionID, member.messageID, member.callID)
       )
   );
 }
@@ -100,7 +124,8 @@ export function getStandalonePermissionPrompts(
 export function getStandaloneQuestionPrompts(
   messages: Array<{ info: Message; parts: Part[] }>,
   questions: QuestionRequest[],
-  activeSessionId: string | null
+  activeSessionId: string | null,
+  linkedToolCalls = getLinkedToolCallKeys(messages)
 ) {
   if (!activeSessionId) return [];
 
@@ -111,7 +136,7 @@ export function getStandaloneQuestionPrompts(
     (question) =>
       sessionIds.has(question.sessionID) &&
       !hasLinkedToolCall(
-        messages,
+        linkedToolCalls,
         question.sessionID,
         question.tool?.messageID,
         question.tool?.callID
@@ -327,10 +352,13 @@ export function getStickyUserMessagePreview(
   firstVisibleMessageIndex: number | null
 ): StickyUserMessagePreview | null {
   if (firstVisibleMessageIndex === null || firstVisibleMessageIndex < 0) return null;
-  if (messages[firstVisibleMessageIndex]?.info.role === 'user') return null;
+  const firstVisibleEntry = messages[firstVisibleMessageIndex];
+  if (!firstVisibleEntry) return null;
+  if (firstVisibleEntry.info.role === 'user') return null;
 
   for (let i = firstVisibleMessageIndex; i >= 0; i--) {
     const entry = messages[i];
+    if (!entry) continue;
     if (entry.info.role !== 'user') continue;
     const text = getUserMessagePreviewText(entry.parts);
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
@@ -342,6 +370,27 @@ export function getStickyUserMessagePreview(
   }
 
   return null;
+}
+
+export function getNextVisibleUserMessageTopMap(
+  messages: Array<{ info: Message }>,
+  observedVisibleMessageBounds: ReadonlyMap<string, { top: number; bottom: number }>
+) {
+  const result = new Map<string, number | null>();
+  let nextVisibleUserMessageTop: number | null = null;
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const entry = messages[index];
+    result.set(entry.info.id, nextVisibleUserMessageTop);
+    if (entry.info.role !== 'user') continue;
+
+    const bounds = observedVisibleMessageBounds.get(entry.info.id);
+    if (bounds && bounds.bottom > 0) {
+      nextVisibleUserMessageTop = bounds.top;
+    }
+  }
+
+  return result;
 }
 
 export function shouldShowStickyUserMessagePreview(args: {
@@ -471,6 +520,15 @@ export function MessageList() {
   let measurementRafId = 0;
   let measurementScheduled = false;
   let pendingMeasurementAfterResize = false;
+  let viewportStateRafId = 0;
+  let viewportStateScheduled = false;
+  let pendingScrollTop = 0;
+  let pendingViewportHeight = 0;
+  let stickyPreviewRafId = 0;
+  let stickyPreviewViewportStateScheduled = false;
+  let pendingStickyPreviewScrollTop = 0;
+  let pendingStickyPreviewViewportHeight = 0;
+  let lastScrollbarInset = -1;
   const SCROLL_INTERVAL_MS = 700;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
   const INITIAL_SCROLL_STABLE_FRAMES = 3;
@@ -480,34 +538,95 @@ export function MessageList() {
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
+  const [observedVisibleMessageVersion, setObservedVisibleMessageVersion] = createSignal(0);
   const [observedFirstVisibleMessageId, setObservedFirstVisibleMessageId] = createSignal<
     string | null
   >(null);
   const [stickyUserMessagePreview, setStickyUserMessagePreview] =
     createSignal<StickyUserMessagePreview | null>(null);
+  const [stickyPreviewScrollTop, setStickyPreviewScrollTop] = createSignal(0);
+  const [stickyPreviewViewportHeight, setStickyPreviewViewportHeight] = createSignal(0);
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
+  const shouldShowStarterLogo = createMemo(() => {
+    if (state.messages.length > 0) return false;
+
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return true;
+
+    const session = state.sessions.find((candidate) => candidate.id === sessionId);
+    if (!session) return false;
+    if (state.queuedMessages.some((item) => item.sessionId === sessionId)) return false;
+    if (isSessionAwaitingInput(sessionId)) return false;
+
+    const statusType = state.sessionStatus[sessionId]?.type;
+    if (statusType === 'busy' || statusType === 'retry') return false;
+
+    return session.time.created === session.time.updated;
+  });
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
 
   const messages = createMemo(() => state.messages);
   const latestPlanImplementationMessageId = createMemo(() =>
     getLatestPlanImplementationMessageId(messages())
   );
+  const linkedToolCalls = createMemo(() => {
+    messageStructureVersion();
+    return untrack(() => getLinkedToolCallKeys(state.messages));
+  });
   const standalonePermissions = createMemo(() =>
-    getStandalonePermissionPrompts(messages(), state.permissions, state.activeSessionId)
+    getStandalonePermissionPrompts(
+      untrack(() => state.messages),
+      state.permissions,
+      state.activeSessionId,
+      linkedToolCalls()
+    )
   );
   const standaloneQuestions = createMemo(() =>
-    getStandaloneQuestionPrompts(messages(), state.questions, state.activeSessionId)
+    getStandaloneQuestionPrompts(
+      untrack(() => state.messages),
+      state.questions,
+      state.activeSessionId,
+      linkedToolCalls()
+    )
   );
   const visibleBlockingStreamingPart = createMemo(() =>
     hasVisibleBlockingStreamingPart(messages(), state.streamingPartId, state.streamingText)
   );
   const messageIndexById = createMemo(() => {
-    const result = new Map<string, number>();
-    for (const [index, entry] of messages().entries()) {
-      result.set(entry.info.id, index);
-    }
-    return result;
+    messageStructureVersion();
+    return untrack(() => {
+      const result = new Map<string, number>();
+      for (const [index, entry] of state.messages.entries()) {
+        result.set(entry.info.id, index);
+      }
+      return result;
+    });
   });
+
+  function flushViewportState() {
+    viewportStateScheduled = false;
+    viewportStateRafId = 0;
+    batch(() => {
+      setScrollTop(pendingScrollTop);
+      setViewportHeight(pendingViewportHeight);
+    });
+  }
+
+  function scheduleViewportState(nextScrollTop: number, nextViewportHeight: number) {
+    pendingScrollTop = nextScrollTop;
+    pendingViewportHeight = nextViewportHeight;
+    if (viewportStateScheduled) return;
+
+    viewportStateScheduled = true;
+    viewportStateRafId = requestAnimationFrame(flushViewportState);
+  }
+
+  function cancelScheduledViewportState() {
+    viewportStateScheduled = false;
+    if (!viewportStateRafId) return;
+    cancelAnimationFrame(viewportStateRafId);
+    viewportStateRafId = 0;
+  }
 
   function recomputeObservedFirstVisibleMessageId() {
     if (!containerRef || shouldVirtualize()) {
@@ -529,8 +648,44 @@ export function MessageList() {
   }
 
   function clearObservedVisibleMessages() {
+    if (observedVisibleMessageBounds.size > 0) {
+      setObservedVisibleMessageVersion((version) => version + 1);
+    }
     observedVisibleMessageBounds.clear();
     setObservedFirstVisibleMessageId(null);
+  }
+
+  const nextVisibleUserMessageTopByMessageId = createMemo(() => {
+    observedVisibleMessageVersion();
+    messageStructureVersion();
+    return untrack(() =>
+      getNextVisibleUserMessageTopMap(state.messages, observedVisibleMessageBounds)
+    );
+  });
+
+  function flushStickyPreviewViewportState() {
+    stickyPreviewViewportStateScheduled = false;
+    stickyPreviewRafId = 0;
+    batch(() => {
+      setStickyPreviewScrollTop(pendingStickyPreviewScrollTop);
+      setStickyPreviewViewportHeight(pendingStickyPreviewViewportHeight);
+    });
+  }
+
+  function scheduleStickyPreviewViewportState(nextScrollTop: number, nextViewportHeight: number) {
+    pendingStickyPreviewScrollTop = nextScrollTop;
+    pendingStickyPreviewViewportHeight = nextViewportHeight;
+    if (stickyPreviewViewportStateScheduled) return;
+
+    stickyPreviewViewportStateScheduled = true;
+    stickyPreviewRafId = requestAnimationFrame(flushStickyPreviewViewportState);
+  }
+
+  function cancelScheduledStickyPreviewViewportState() {
+    stickyPreviewViewportStateScheduled = false;
+    if (!stickyPreviewRafId) return;
+    cancelAnimationFrame(stickyPreviewRafId);
+    stickyPreviewRafId = 0;
   }
 
   function syncObservedVisibleMessages() {
@@ -543,57 +698,6 @@ export function MessageList() {
     }
   }
 
-  const stickyUserMessagePreviewCandidate = createMemo(() => {
-    scrollTop();
-    const currentViewportHeight = viewportHeight();
-    if (!containerRef || currentViewportHeight <= 0) return null;
-
-    const containerRect = containerRef.getBoundingClientRect();
-    let firstVisibleMessageIndex = shouldVirtualize()
-      ? getFirstVisibleMessageIndexFromVirtualMetrics({
-          metrics: virtualMetrics(),
-          scrollTop: scrollTop(),
-        })
-      : (messageIndexById().get(observedFirstVisibleMessageId() || '') ?? null);
-
-    if (firstVisibleMessageIndex === null) {
-      const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
-      for (const row of rows) {
-        const rowId = row.dataset.msgId;
-        if (!rowId) continue;
-        const rowRect = row.getBoundingClientRect();
-        const rowTop = rowRect.top - containerRect.top;
-        const rowBottom = rowRect.bottom - containerRect.top;
-        if (rowBottom <= 0 || rowTop >= currentViewportHeight) continue;
-        firstVisibleMessageIndex = messageIndexById().get(rowId) ?? null;
-        break;
-      }
-    }
-
-    const preview = getStickyUserMessagePreview(messages(), firstVisibleMessageIndex);
-    if (!preview) return null;
-
-    const previewElement = getStickyUserMessageSourceElement(preview.id);
-    const rowRect = previewElement?.getBoundingClientRect();
-    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(preview.index, containerRect);
-    const stickyPreviewBounds =
-      previousStickyPreviewId === preview.id
-        ? (getStickyUserMessagePreviewBounds(containerRect) ?? previousStickyPreviewBounds)
-        : null;
-    const shouldShow = shouldShowStickyUserMessagePreview({
-      preview,
-      shouldVirtualize: shouldVirtualize(),
-      visibleRange: visibleRange(),
-      rowTop: rowRect ? rowRect.top - containerRect.top : null,
-      rowBottom: rowRect ? rowRect.bottom - containerRect.top : null,
-      nextUserMessageTop,
-      viewportHeight: currentViewportHeight,
-      previousPreviewId: previousStickyPreviewId,
-      stickyPreviewTop: stickyPreviewBounds?.top ?? null,
-      stickyPreviewBottom: stickyPreviewBounds?.bottom ?? null,
-    });
-    return shouldShow ? preview : null;
-  });
   const shouldVirtualize = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
 
   const measuredHeights = new Map<string, number>();
@@ -626,6 +730,77 @@ export function MessageList() {
       scrollTop: scrollTop(),
       viewportHeight: viewportHeight(),
     });
+  });
+
+  const stickyUserMessagePreviewCandidate = createMemo(() => {
+    const throttledViewportHeight = stickyPreviewViewportHeight();
+    const currentViewportHeight =
+      throttledViewportHeight > 0 ? throttledViewportHeight : viewportHeight();
+    const currentScrollTop = throttledViewportHeight > 0 ? stickyPreviewScrollTop() : scrollTop();
+    if (!containerRef || currentViewportHeight <= 0) return null;
+
+    const virtualized = shouldVirtualize();
+    const currentVisibleRange = virtualized
+      ? calculateVirtualRangeFromMetrics({
+          metrics: virtualMetrics(),
+          scrollTop: currentScrollTop,
+          viewportHeight: currentViewportHeight,
+        })
+      : visibleRange();
+    const containerRect = containerRef.getBoundingClientRect();
+    let firstVisibleMessageIndex = virtualized
+      ? getFirstVisibleMessageIndexFromVirtualMetrics({
+          metrics: virtualMetrics(),
+          scrollTop: currentScrollTop,
+        })
+      : null;
+
+    if (firstVisibleMessageIndex === null) {
+      const firstVisibleMessageId = observedFirstVisibleMessageId();
+      if (firstVisibleMessageId) {
+        firstVisibleMessageIndex = messageIndexById().get(firstVisibleMessageId) ?? null;
+      } else {
+        const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
+        for (const row of rows) {
+          const rowId = row.dataset.msgId;
+          if (!rowId) continue;
+          const rowRect = row.getBoundingClientRect();
+          const rowTop = rowRect.top - containerRect.top;
+          const rowBottom = rowRect.bottom - containerRect.top;
+          if (rowBottom <= 0 || rowTop >= currentViewportHeight) continue;
+          firstVisibleMessageIndex = messageIndexById().get(rowId) ?? null;
+          break;
+        }
+      }
+    }
+
+    const preview = getStickyUserMessagePreview(messages(), firstVisibleMessageIndex);
+    if (!preview) return null;
+
+    const previewElement = getStickyUserMessageSourceElement(preview.id);
+    const rowRect = previewElement?.getBoundingClientRect();
+    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(
+      preview.id,
+      preview.index,
+      containerRect
+    );
+    const stickyPreviewBounds =
+      previousStickyPreviewId === preview.id
+        ? (getStickyUserMessagePreviewBounds(containerRect) ?? previousStickyPreviewBounds)
+        : null;
+    const shouldShow = shouldShowStickyUserMessagePreview({
+      preview,
+      shouldVirtualize: virtualized,
+      visibleRange: currentVisibleRange,
+      rowTop: rowRect ? rowRect.top - containerRect.top : null,
+      rowBottom: rowRect ? rowRect.bottom - containerRect.top : null,
+      nextUserMessageTop,
+      viewportHeight: currentViewportHeight,
+      previousPreviewId: previousStickyPreviewId,
+      stickyPreviewTop: stickyPreviewBounds?.top ?? null,
+      stickyPreviewBottom: stickyPreviewBounds?.bottom ?? null,
+    });
+    return shouldShow ? preview : null;
   });
 
   function measureVisibleItems() {
@@ -664,7 +839,6 @@ export function MessageList() {
       return;
     }
 
-    setMeasuredHeightFor(messageId, element.getBoundingClientRect().height);
     measuredRowObserver?.observe(element);
   }
 
@@ -717,7 +891,15 @@ export function MessageList() {
     return row?.querySelector<HTMLElement>('.user-message-card') ?? row;
   }
 
-  function getStickyUserMessageNextUserMessageTop(messageIndex: number, containerRect: DOMRect) {
+  function getStickyUserMessageNextUserMessageTop(
+    messageId: string,
+    messageIndex: number,
+    containerRect: DOMRect
+  ) {
+    if (firstVisibleMessageObserver) {
+      return nextVisibleUserMessageTopByMessageId().get(messageId) ?? null;
+    }
+
     if (!containerRef) return null;
     for (let index = messageIndex + 1; index < messages().length; index += 1) {
       const nextMessage = messages()[index];
@@ -740,6 +922,9 @@ export function MessageList() {
   function updateScrollbarInset() {
     if (!containerRef) return;
     const scrollbarInset = Math.max(0, containerRef.offsetWidth - containerRef.clientWidth);
+    if (scrollbarInset === lastScrollbarInset) return;
+
+    lastScrollbarInset = scrollbarInset;
     containerRef.parentElement?.style.setProperty(
       '--interactive-list-scrollbar-inset',
       `${scrollbarInset}px`
@@ -773,7 +958,11 @@ export function MessageList() {
     const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
     if (!stickyBounds) return false;
 
-    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(preview.index, containerRect);
+    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(
+      preview.id,
+      preview.index,
+      containerRect
+    );
     if (
       nextUserMessageTop !== null &&
       nextUserMessageTop !== undefined &&
@@ -843,7 +1032,7 @@ export function MessageList() {
       if (state.activeSessionId !== sessionId) return;
       if (!autoScroll()) return;
 
-      if (shouldVirtualize()) {
+      if (shouldVirtualize() && !measuredRowObserver) {
         measureVisibleItems();
       }
       performScroll();
@@ -884,8 +1073,9 @@ export function MessageList() {
   function onScroll() {
     if (!containerRef) return;
     const top = containerRef.scrollTop;
-    setScrollTop(top);
-    setViewportHeight(containerRef.clientHeight);
+    const currentViewportHeight = containerRef.clientHeight;
+    scheduleViewportState(top, currentViewportHeight);
+    scheduleStickyPreviewViewportState(top, currentViewportHeight);
     const near = distanceFromBottom() < AUTO_SCROLL_THRESHOLD_PX;
     const delta = top - lastObservedScrollTop;
     const now = performance.now();
@@ -945,6 +1135,8 @@ export function MessageList() {
     updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
     setScrollTop(containerRef.scrollTop);
+    setStickyPreviewViewportHeight(containerRef.clientHeight);
+    setStickyPreviewScrollTop(containerRef.scrollTop);
 
     if (typeof IntersectionObserver !== 'undefined') {
       firstVisibleMessageObserver = new IntersectionObserver(
@@ -965,6 +1157,7 @@ export function MessageList() {
               bottom: entry.boundingClientRect.bottom - rootBounds.top,
             });
           }
+          setObservedVisibleMessageVersion((version) => version + 1);
           recomputeObservedFirstVisibleMessageId();
         },
         {
@@ -984,7 +1177,7 @@ export function MessageList() {
           const element = entry.target as HTMLDivElement;
           const messageId = element.dataset.msgId;
           if (!messageId) continue;
-          setMeasuredHeightFor(messageId, element.getBoundingClientRect().height);
+          setMeasuredHeightFor(messageId, entry.contentRect.height);
         }
       });
     }
@@ -996,6 +1189,7 @@ export function MessageList() {
       if (!containerRef) return;
       updateScrollbarInset();
       setViewportHeight(containerRef.clientHeight);
+      scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
       scheduleVisibleMeasurement({ afterResize: true });
     });
     observer.observe(containerRef);
@@ -1012,6 +1206,8 @@ export function MessageList() {
       if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       cancelScheduledMeasurement();
+      cancelScheduledViewportState();
+      cancelScheduledStickyPreviewViewportState();
     });
   });
 
@@ -1158,104 +1354,117 @@ export function MessageList() {
   });
 
   const modelChangeMap = createMemo(() => {
-    const msgs = messages();
+    messageStructureVersion();
     const providerMap = new Map(state.providers.map((p) => [p.id, p]));
-    const result = new Map<string, string>();
-    let prevProvider: string | undefined;
-    let prevModel: string | undefined;
-    let prevVariant: string | undefined;
-    for (const msg of msgs) {
-      if (!isAssistantMessage(msg.info)) continue;
-      const cur = msg.info as AssistantMessage;
-      if (cur.mode === 'subagent') continue;
-      const modelChanged = cur.providerID !== prevProvider || cur.modelID !== prevModel;
-      const variantChanged = (cur.variant || '') !== (prevVariant || '');
-      if (prevProvider !== undefined && (modelChanged || variantChanged)) {
-        const provider = providerMap.get(cur.providerID);
-        const modelName = provider?.models[cur.modelID]?.name || cur.modelID;
-        const parts: string[] = [];
-        if (modelChanged) parts.push(modelName);
-        if (cur.variant) parts.push(formatVariantLabel(cur.variant));
-        else if (
-          variantChanged &&
-          !modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
-        )
-          parts.push('No thinking');
-        result.set(
-          msg.info.id,
-          formatLabelWithProvider(parts.join(' · '), provider?.name || cur.providerID)
-        );
+    return untrack(() => {
+      const result = new Map<string, string>();
+      let prevProvider: string | undefined;
+      let prevModel: string | undefined;
+      let prevVariant: string | undefined;
+      for (const msg of state.messages) {
+        if (!isAssistantMessage(msg.info)) continue;
+        const cur = msg.info as AssistantMessage;
+        if (cur.mode === 'subagent') continue;
+        const modelChanged = cur.providerID !== prevProvider || cur.modelID !== prevModel;
+        const variantChanged = (cur.variant || '') !== (prevVariant || '');
+        if (prevProvider !== undefined && (modelChanged || variantChanged)) {
+          const provider = providerMap.get(cur.providerID);
+          const modelName = provider?.models[cur.modelID]?.name || cur.modelID;
+          const parts: string[] = [];
+          if (modelChanged) parts.push(modelName);
+          if (cur.variant) parts.push(formatVariantLabel(cur.variant));
+          else if (
+            variantChanged &&
+            !modelSupportsReasoning(cur.providerID, cur.modelID, state.providers)
+          ) {
+            parts.push('No thinking');
+          }
+          result.set(
+            msg.info.id,
+            formatLabelWithProvider(parts.join(' · '), provider?.name || cur.providerID)
+          );
+        }
+        prevProvider = cur.providerID;
+        prevModel = cur.modelID;
+        prevVariant = cur.variant;
       }
-      prevProvider = cur.providerID;
-      prevModel = cur.modelID;
-      prevVariant = cur.variant;
-    }
-    return result;
+      return result;
+    });
   });
 
   const previousTrailingFileEventSignatureMap = createMemo(() => {
-    const result = new Map<string, string | null>();
-    let previousTrailingSignature: string | null = null;
+    messageStructureVersion();
+    return untrack(() => {
+      const result = new Map<string, string | null>();
+      let previousTrailingSignature: string | null = null;
 
-    for (const msg of messages()) {
-      result.set(msg.info.id, previousTrailingSignature);
+      for (const msg of state.messages) {
+        result.set(msg.info.id, previousTrailingSignature);
 
-      if (!isAssistantMessage(msg.info)) {
-        previousTrailingSignature = null;
-        continue;
+        if (!isAssistantMessage(msg.info)) {
+          previousTrailingSignature = null;
+          continue;
+        }
+
+        previousTrailingSignature = getTrailingFileEventSignature(msg.parts);
       }
 
-      previousTrailingSignature = getTrailingFileEventSignature(msg.parts);
-    }
-
-    return result;
+      return result;
+    });
   });
 
   const assistantStackGroupMap = createMemo(() => {
-    const result = new Map<string, AssistantFileEditStackGroup | null>();
-    const messageEntries = messages();
-    let index = 0;
+    const previousSignatures = previousTrailingFileEventSignatureMap();
+    messageStructureVersion();
+    return untrack(() => {
+      const result = new Map<string, AssistantFileEditStackGroup | null>();
+      const kindByMessageId = new Map<string, ReturnType<typeof getAssistantStackKind>>();
+      const messageEntries = state.messages;
+      let index = 0;
 
-    while (index < messageEntries.length) {
-      const current = messageEntries[index];
-      const currentKind = getAssistantStackKind(
-        current,
-        previousTrailingFileEventSignatureMap().get(current.info.id) ?? null
-      );
+      const getKind = (entry: { info: Message; parts: Part[] }) => {
+        const cached = kindByMessageId.get(entry.info.id);
+        if (cached !== undefined) return cached;
+        const kind = getAssistantStackKind(entry, previousSignatures.get(entry.info.id) ?? null);
+        kindByMessageId.set(entry.info.id, kind);
+        return kind;
+      };
 
-      if (!currentKind) {
-        index++;
-        continue;
-      }
+      while (index < messageEntries.length) {
+        const current = messageEntries[index];
+        const currentKind = getKind(current);
 
-      let end = index;
-      while (end + 1 < messageEntries.length) {
-        const next = messageEntries[end + 1];
-        if (
-          getAssistantStackKind(
-            next,
-            previousTrailingFileEventSignatureMap().get(next.info.id) ?? null
-          ) !== currentKind
+        if (!currentKind) {
+          index++;
+          continue;
+        }
+
+        let end = index;
+        while (
+          end + 1 < messageEntries.length &&
+          getKind(messageEntries[end + 1]) === currentKind
         ) {
-          break;
+          end++;
         }
-        end++;
+
+        if (end > index) {
+          for (let partIndex = index; partIndex <= end; partIndex++) {
+            const position = partIndex === index ? 'start' : partIndex === end ? 'end' : 'middle';
+            result.set(messageEntries[partIndex].info.id, position);
+          }
+        }
+
+        index = end + 1;
       }
 
-      if (end > index) {
-        for (let partIndex = index; partIndex <= end; partIndex++) {
-          const position = partIndex === index ? 'start' : partIndex === end ? 'end' : 'middle';
-          result.set(messageEntries[partIndex].info.id, position);
-        }
-      }
-
-      index = end + 1;
-    }
-
-    return result;
+      return result;
+    });
   });
 
-  const assistantDialogSummaryMap = createMemo(() => getAssistantDialogSummaryMap(messages()));
+  const assistantDialogSummaryMap = createMemo(() => {
+    messageStructureVersion();
+    return untrack(() => getAssistantDialogSummaryMap(state.messages));
+  });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
 
   return (
@@ -1274,15 +1483,17 @@ export function MessageList() {
         <Show
           when={state.messages.length > 0}
           fallback={
-            <div class="chat-empty-state">
-              <img
-                class="chat-empty-logo"
-                src={state.emptyStateLogoUri}
-                alt=""
-                aria-hidden="true"
-                draggable="false"
-              />
-            </div>
+            <Show when={shouldShowStarterLogo()}>
+              <div class="chat-empty-state">
+                <img
+                  class="chat-empty-logo"
+                  src={state.emptyStateLogoUri}
+                  alt=""
+                  aria-hidden="true"
+                  draggable="false"
+                />
+              </div>
+            </Show>
           }
         >
           <Show

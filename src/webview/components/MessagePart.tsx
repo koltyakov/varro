@@ -33,7 +33,11 @@ export function MessagePart(props: {
       case 'reasoning':
         return (
           <Show when={showThinking()}>
-            <ReasoningBlock part={part} messageInfo={props.messageInfo} />
+            <ReasoningBlock
+              part={part}
+              messageInfo={props.messageInfo}
+              streamedText={props.streamedText}
+            />
           </Show>
         );
       case 'agent':
@@ -92,9 +96,14 @@ function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {
   );
 }
 
-function ReasoningBlock(props: { part: ReasoningPart; messageInfo?: AssistantMessage }) {
+function ReasoningBlock(props: {
+  part: ReasoningPart;
+  messageInfo?: AssistantMessage;
+  streamedText?: string | null;
+}) {
   const [expanded, setExpanded] = createSignal(expandThinkingByDefault());
-  const parsedText = createMemo(() => splitReasoningText(props.part.text));
+  const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
+  const parsedText = createMemo(() => splitReasoningText(reasoningText()));
   const isStreaming = () => props.part.time.end === undefined;
   const hasBody = () => parsedText().body.trim().length > 0;
   const detailLabel = () => getReasoningDetailLabel(props.messageInfo);

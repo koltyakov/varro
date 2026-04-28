@@ -279,6 +279,49 @@ describe('MarkdownRenderer', () => {
     expect(tailSegment?.innerHTML).toContain('<p>Second paragraph</p>');
   });
 
+  it('does not reparse the stable streaming segment when only the tail grows', async () => {
+    let content = 'First paragraph\n\nSecond';
+    const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
+
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const stableSegment = container?.querySelector('[data-markdown-segment="stable"]');
+    const initialStableHtml = stableSegment?.innerHTML;
+    const initialSanitizeCalls = sanitizeSpy.mock.calls.length;
+
+    content = 'First paragraph\n\nSecond paragraph extended';
+    cleanup?.();
+    container!.innerHTML = '';
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('[data-markdown-segment="stable"]')?.innerHTML).toBe(
+      initialStableHtml
+    );
+    expect(sanitizeSpy.mock.calls.length).toBeGreaterThan(initialSanitizeCalls);
+    expect(sanitizeSpy.mock.calls.length - initialSanitizeCalls).toBe(1);
+  });
+
+  it('skips file-path linkification in the streaming tail', async () => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: 'Stable paragraph\n\n./src/webview/App.tsx' }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const stableLinks = container?.querySelectorAll(
+      '[data-markdown-segment="stable"] a.file-path-link'
+    );
+    const tailLinks = container?.querySelectorAll(
+      '[data-markdown-segment="tail"] a.file-path-link'
+    );
+
+    expect(stableLinks).toHaveLength(0);
+    expect(tailLinks).toHaveLength(0);
+    expect(container?.textContent).toContain('./src/webview/App.tsx');
+  });
+
   it('falls back to escaped plain code when the language is unknown', async () => {
     cleanup = render(
       () => MarkdownRenderer({ content: '```definitely-not-a-lang\nconst value = 1;\n```' }),

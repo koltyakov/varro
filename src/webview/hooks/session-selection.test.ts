@@ -31,6 +31,8 @@ describe('session-selection helpers', () => {
     const activeSession = { value: 'session-0' as string | null };
     const startLoading = vi.fn();
     const stopLoading = vi.fn();
+    const clearMessages = vi.fn();
+    const syncSessionMcps = vi.fn(async () => {});
 
     await selectSessionWithDependencies(
       {
@@ -50,9 +52,9 @@ describe('session-selection helpers', () => {
         getConnectedMcpNames: () => ['docs'],
         hasSelectedMcps: () => false,
         setSelectedMcpsForSession: vi.fn(),
-        syncSessionMcps: vi.fn(async () => {}),
+        syncSessionMcps,
         resetTodoSync: vi.fn(),
-        clearMessages: vi.fn(),
+        clearMessages,
         loadSession: vi.fn(async () => ({
           session: {
             id: 'session-1',
@@ -85,6 +87,9 @@ describe('session-selection helpers', () => {
     );
 
     expect(activeSession.value).toBe('session-1');
+    expect(clearMessages.mock.invocationCallOrder[0]).toBeLessThan(
+      syncSessionMcps.mock.invocationCallOrder[0]
+    );
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
   });

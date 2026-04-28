@@ -23,6 +23,7 @@ import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
   getFirstVisibleMessageIndexFromVirtualMetrics,
+  getNextVisibleUserMessageTopMap,
   getStickyUserMessagePreview,
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
@@ -39,6 +40,72 @@ let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | undefined;
 let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
+
+function installQueuedAnimationFrameMocks() {
+  const originalGlobalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalGlobalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  const originalWindowRequestAnimationFrame = window.requestAnimationFrame;
+  const originalWindowCancelAnimationFrame = window.cancelAnimationFrame;
+  const pendingAnimationFrameCallbacks: Array<FrameRequestCallback | null> = [];
+  const requestAnimationFrameMock = vi.fn().mockImplementation((cb: FrameRequestCallback) => {
+    pendingAnimationFrameCallbacks.push(cb);
+    return pendingAnimationFrameCallbacks.length;
+  });
+  const cancelAnimationFrameMock = vi.fn().mockImplementation((id: number) => {
+    if (id <= 0) return;
+    pendingAnimationFrameCallbacks[id - 1] = null;
+  });
+
+  Object.defineProperty(globalThis, 'requestAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: requestAnimationFrameMock,
+  });
+  Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: cancelAnimationFrameMock,
+  });
+  Object.defineProperty(window, 'requestAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: requestAnimationFrameMock,
+  });
+  Object.defineProperty(window, 'cancelAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: cancelAnimationFrameMock,
+  });
+
+  return {
+    flush(now = 0) {
+      const callbacks = pendingAnimationFrameCallbacks.splice(0);
+      for (const callback of callbacks) callback?.(now);
+    },
+    restore() {
+      Object.defineProperty(globalThis, 'requestAnimationFrame', {
+        configurable: true,
+        writable: true,
+        value: originalGlobalRequestAnimationFrame,
+      });
+      Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+        configurable: true,
+        writable: true,
+        value: originalGlobalCancelAnimationFrame,
+      });
+      Object.defineProperty(window, 'requestAnimationFrame', {
+        configurable: true,
+        writable: true,
+        value: originalWindowRequestAnimationFrame,
+      });
+      Object.defineProperty(window, 'cancelAnimationFrame', {
+        configurable: true,
+        writable: true,
+        value: originalWindowCancelAnimationFrame,
+      });
+    },
+  };
+}
 
 function textPart(
   id: string,
@@ -353,6 +420,44 @@ describe('getStickyUserMessagePreview', () => {
       )
     ).toBeNull();
   });
+
+  it('returns null when the first visible index is stale for the current message array', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [
+          { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+          { info: assistantMessage('assistant-1'), parts: [] },
+        ],
+        5
+      )
+    ).toBeNull();
+  });
+});
+
+describe('getNextVisibleUserMessageTopMap', () => {
+  it('reuses observed user row bounds to resolve the next visible user prompt', () => {
+    const messages = [
+      entry(userMessage('user-1')),
+      entry(assistantMessage('assistant-1')),
+      entry(userMessage('user-2')),
+      entry(assistantMessage('assistant-2')),
+      entry(userMessage('user-3')),
+      entry(assistantMessage('assistant-3')),
+    ];
+
+    const observedBounds = new Map<string, { top: number; bottom: number }>([
+      ['user-2', { top: -80, bottom: -20 }],
+      ['user-3', { top: 72, bottom: 124 }],
+    ]);
+
+    const nextTopByMessageId = getNextVisibleUserMessageTopMap(messages, observedBounds);
+    expect(nextTopByMessageId.get('assistant-3')).toBeNull();
+    expect(nextTopByMessageId.get('user-3')).toBeNull();
+    expect(nextTopByMessageId.get('assistant-2')).toBe(72);
+    expect(nextTopByMessageId.get('user-2')).toBe(72);
+    expect(nextTopByMessageId.get('assistant-1')).toBe(72);
+    expect(nextTopByMessageId.get('user-1')).toBe(72);
+  });
 });
 
 describe('shouldShowStickyUserMessagePreview', () => {
@@ -506,6 +611,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
   });
 
   it('does not attach a native title tooltip to the sticky preview text', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -539,6 +645,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     rectMap.set(assistant2Row!, new DOMRect(0, 40, 500, 320));
 
     list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
     await Promise.resolve();
 
     const stickyText = container?.querySelector(
@@ -547,6 +654,8 @@ describe('shouldShowStickyUserMessagePreview', () => {
     expect(stickyText).toBeInstanceOf(HTMLDivElement);
     expect(stickyText?.textContent).toContain('Prompt 2');
     expect(stickyText?.getAttribute('title')).toBeNull();
+
+    animationFrames.restore();
   });
 
   it('does not show a new sticky preview until the prompt is clearly above the viewport', () => {
@@ -592,6 +701,48 @@ describe('getLatestPlanImplementationMessageId', () => {
         entry(assistantMessage('assistant-2', { agent: 'build' })),
       ])
     ).toBeNull();
+  });
+});
+
+describe('MessageList empty state', () => {
+  it('shows the starter logo for a blank new chat', () => {
+    setState('emptyStateLogoUri', 'https://example.test/logo.svg');
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Blank session',
+        version: '1',
+        time: { created: 100, updated: 100 },
+      },
+    ]);
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => MessageList(), container!);
+
+    expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-empty-logo')).toBeInstanceOf(HTMLImageElement);
+  });
+
+  it('does not show the starter logo while switching to an existing chat with no loaded messages yet', () => {
+    setState('emptyStateLogoUri', 'https://example.test/logo.svg');
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Existing session',
+        version: '1',
+        time: { created: 100, updated: 200 },
+      },
+    ]);
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => MessageList(), container!);
+
+    expect(container?.querySelector('.chat-empty-state')).toBeNull();
+    expect(container?.querySelector('.chat-empty-logo')).toBeNull();
   });
 });
 
@@ -885,7 +1036,39 @@ describe('standalone action prompts', () => {
 });
 
 describe('MessageList sticky prompt preview', () => {
+  it('renders with virtualization enabled without hitting initialization order errors', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, `Response ${index}`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    expect(() => {
+      cleanup = render(() => MessageList(), container!);
+    }).not.toThrow();
+
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-list')).toBeInstanceOf(HTMLDivElement);
+
+    animationFrames.restore();
+  });
+
   it('shows the prompt that belongs to the response currently in view', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -930,6 +1113,7 @@ describe('MessageList sticky prompt preview', () => {
 
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
     list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
     await Promise.resolve();
 
     let sticky = container?.querySelector('.latest-user-message-sticky');
@@ -942,6 +1126,7 @@ describe('MessageList sticky prompt preview', () => {
 
     list!.scrollTop = 1400;
     list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
     await Promise.resolve();
 
     sticky = container?.querySelector('.latest-user-message-sticky');
@@ -951,9 +1136,67 @@ describe('MessageList sticky prompt preview', () => {
       sticky
     );
     expect(container?.querySelector('.latest-user-message-sticky [data-msg-id]')).toBeNull();
+
+    animationFrames.restore();
+  });
+
+  it('coalesces raw viewport scroll state updates until the next animation frame', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, `Response ${index}`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 240 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 10_000 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 0 });
+
+    const firstRenderedMessageIdBeforeScroll =
+      container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+    expect(firstRenderedMessageIdBeforeScroll).toBe('assistant-0');
+
+    list!.scrollTop = 3_600;
+    list?.dispatchEvent(new Event('scroll'));
+    list!.scrollTop = 4_800;
+    list?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    const firstRenderedMessageIdBeforeFrame =
+      container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+    expect(firstRenderedMessageIdBeforeFrame).toBe('assistant-0');
+
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const firstRenderedMessageIdAfterFrame =
+      container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+    expect(firstRenderedMessageIdAfterFrame).not.toBe('assistant-0');
+
+    animationFrames.restore();
   });
 
   it('hides the sticky preview as soon as any part of the prompt is visible outside it', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -992,6 +1235,7 @@ describe('MessageList sticky prompt preview', () => {
     rectMap.set(assistant2Row!, new DOMRect(0, 40, 500, 320));
 
     list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
     await Promise.resolve();
 
     let sticky = container?.querySelector('.latest-user-message-sticky');
@@ -1003,10 +1247,13 @@ describe('MessageList sticky prompt preview', () => {
     rectMap.set(user2Card!, new DOMRect(120, 30, 320, 40));
     list!.scrollTop = 1210;
     list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
     await Promise.resolve();
 
     sticky = container?.querySelector('.latest-user-message-sticky');
     expect(sticky).toBeNull();
+
+    animationFrames.restore();
   });
 });
 
@@ -1114,5 +1361,53 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     expect(scrollTopValue).toBe(1300);
+  });
+
+  it('updates the scrollbar inset css variable only when the inset changes', async () => {
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let clientWidthValue = 288;
+    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 300 });
+    Object.defineProperty(list!, 'clientWidth', {
+      configurable: true,
+      get: () => clientWidthValue,
+    });
+
+    const setPropertySpy = vi.spyOn(container!.style, 'setProperty');
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    expect(setPropertySpy).toHaveBeenCalledTimes(1);
+    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '12px');
+
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    expect(setPropertySpy).toHaveBeenCalledTimes(1);
+
+    clientWidthValue = 280;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    expect(setPropertySpy).toHaveBeenCalledTimes(2);
+    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '20px');
   });
 });

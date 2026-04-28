@@ -97,13 +97,62 @@ describe('state streaming deltas', () => {
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
       type: 'reasoning',
-      text: 'Planning more',
+      text: 'Planning',
     });
     expect(state.messages[0]?.parts[1]).toMatchObject({
       id: 'text-1',
       type: 'text',
-      text: 'Answer',
+      text: '',
     });
+    expect(state.streamingPartId).toBe('text-1');
+    expect(state.streamingText).toBe('Answer');
+  });
+
+  it('keeps existing streaming parts in live state until a finalized part update arrives', async () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [textPart('text-1', 'Existing answer')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', ' extended', 'session-1');
+    await nextFrame();
+
+    expect(state.streamingPartId).toBe('text-1');
+    expect(state.streamingText).toBe('Existing answer extended');
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      type: 'text',
+      text: 'Existing answer',
+    });
+  });
+
+  it('commits the previous streaming part text when another part becomes active later', async () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [reasoningPart('Thinking'), textPart('text-1', 'Done')],
+    });
+
+    applyMessagePartDelta('message-1', 'reason-1', ' carefully', 'session-1');
+    await nextFrame();
+
+    expect(state.streamingPartId).toBe('reason-1');
+    expect(state.streamingText).toBe('Thinking carefully');
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'reason-1',
+      type: 'reasoning',
+      text: 'Thinking',
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', ' already', 'session-1');
+    await nextFrame();
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'reason-1',
+      type: 'reasoning',
+      text: 'Thinking carefully',
+    });
+    expect(state.streamingPartId).toBe('text-1');
+    expect(state.streamingText).toBe('Done already');
   });
 
   it('resumes streaming from the part text after another part becomes active', async () => {
@@ -120,7 +169,7 @@ describe('state streaming deltas', () => {
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
       type: 'reasoning',
-      text: 'Thinking carefully now',
+      text: 'Thinking',
     });
     expect(state.streamingPartId).toBe('reason-1');
     expect(state.streamingText).toBe('Thinking carefully now');

@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { render } from 'solid-js/web';
 import {
+  ChatInput,
   getActiveCompletion,
   getCompletionSelection,
   getMentionCompletionItems,
@@ -10,6 +12,50 @@ import {
   isToolbarControlHidden,
   getSlashCommands,
 } from './ChatInput';
+import { setIsLoading, setState, setInputText } from '../lib/state';
+
+let container: HTMLDivElement | null = null;
+let cleanup: (() => void) | undefined;
+let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  originalResizeObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as typeof ResizeObserver;
+});
+
+afterEach(() => {
+  cleanup?.();
+  cleanup = undefined;
+  container?.remove();
+  container = null;
+  globalThis.ResizeObserver = originalResizeObserver;
+  setInputText('');
+  setIsLoading(false);
+  setState('activeSessionId', null);
+  setState('messages', []);
+  setState('providers', []);
+  setState('providerDefaults', {});
+  setState('selectedModel', null);
+  setState('clipboardImages', []);
+  setState('droppedFiles', []);
+});
+
+describe('ChatInput', () => {
+  it('renders while loading before the current model memo is initialized', () => {
+    setInputText('Ask the sub-agent');
+    setIsLoading(true);
+
+    expect(() => {
+      cleanup = render(() => ChatInput(), container!);
+    }).not.toThrow();
+  });
+});
 
 describe('isToolbarControlCompacted', () => {
   it('removes the stop label before compacting other toolbar controls', () => {

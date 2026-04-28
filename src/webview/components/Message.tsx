@@ -161,7 +161,7 @@ export function Message(props: {
     () => !!assistant()?.summary || normalizedParts().some((part) => part.type === 'compaction')
   );
   const getEffectivePartText = (part: Part) => {
-    if (part.type !== 'text') return null;
+    if (part.type !== 'text' && part.type !== 'reasoning') return null;
 
     const text = part.id === props.streamingPartId ? props.streamingText || part.text : part.text;
     return isCompactedSummaryMessage() ? stripCompactionBoundaryMarkdown(text) : text;

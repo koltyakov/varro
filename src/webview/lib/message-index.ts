@@ -8,6 +8,10 @@ export function createMessageIndex(onInvalidate?: () => void) {
   let messageById: Map<string, number> = new Map();
   let partById: Map<string, { msgIdx: number; partIdx: number }> = new Map();
 
+  function notifyStructureChange() {
+    onInvalidate?.();
+  }
+
   function ensureIndex(msgs: MessageEntry[]) {
     if (indexedVersion === messageIndexVersion) return;
     messageById = new Map();
@@ -24,10 +28,38 @@ export function createMessageIndex(onInvalidate?: () => void) {
   return {
     invalidate() {
       messageIndexVersion++;
-      onInvalidate?.();
+      notifyStructureChange();
     },
 
     ensureIndex,
+
+    appendPart(
+      msgs: MessageEntry[],
+      partId: string,
+      location: { msgIdx: number; partIdx: number }
+    ) {
+      ensureIndex(msgs);
+      partById.set(partId, location);
+      notifyStructureChange();
+    },
+
+    removePart(
+      msgs: MessageEntry[],
+      partId: string,
+      location: { msgIdx: number; partIdx: number }
+    ) {
+      ensureIndex(msgs);
+      partById.delete(partId);
+
+      const message = msgs[location.msgIdx];
+      if (message) {
+        for (let partIdx = location.partIdx; partIdx < message.parts.length; partIdx++) {
+          partById.set(message.parts[partIdx].id, { msgIdx: location.msgIdx, partIdx });
+        }
+      }
+
+      notifyStructureChange();
+    },
 
     findMessageIndex(msgs: MessageEntry[], id: string) {
       ensureIndex(msgs);

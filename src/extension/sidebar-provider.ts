@@ -713,6 +713,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     if (
       method === 'GET' &&
+      /^\/session\/[^/]+\/message$/.test(url.pathname) &&
+      Array.isArray(data)
+    ) {
+      return this.sanitizeSessionMessages(url.pathname, data);
+    }
+    if (
+      method === 'GET' &&
       url.pathname === '/session/status' &&
       data &&
       typeof data === 'object'
@@ -723,6 +730,65 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return this.sessionTrash.filterVisibleSessionRequests(data as Array<{ sessionID: string }>);
     }
     return data;
+  }
+
+  private sanitizeSessionMessages(pathname: string, data: unknown[]) {
+    let droppedEntries = 0;
+    let droppedParts = 0;
+    const normalized: Array<{ info: Record<string, unknown>; parts: Record<string, unknown>[] }> =
+      [];
+
+    for (const entry of data) {
+      const record = asRecord(entry);
+      const info = asRecord(record?.info);
+      const time = asRecord(info?.time);
+      if (
+        !info ||
+        typeof info.id !== 'string' ||
+        !info.id ||
+        typeof info.sessionID !== 'string' ||
+        !info.sessionID ||
+        (info.role !== 'user' && info.role !== 'assistant') ||
+        typeof time?.created !== 'number'
+      ) {
+        droppedEntries += 1;
+        continue;
+      }
+
+      const parts: Record<string, unknown>[] = [];
+      if (Array.isArray(record?.parts)) {
+        for (const part of record.parts) {
+          const partRecord = asRecord(part);
+          if (
+            !partRecord ||
+            typeof partRecord.id !== 'string' ||
+            !partRecord.id ||
+            typeof partRecord.messageID !== 'string' ||
+            !partRecord.messageID ||
+            typeof partRecord.sessionID !== 'string' ||
+            !partRecord.sessionID ||
+            typeof partRecord.type !== 'string' ||
+            !partRecord.type
+          ) {
+            droppedParts += 1;
+            continue;
+          }
+          parts.push(partRecord);
+        }
+      } else if (record?.parts !== undefined) {
+        droppedParts += 1;
+      }
+
+      normalized.push({ info, parts });
+    }
+
+    if (droppedEntries > 0 || droppedParts > 0) {
+      logger.warn(
+        `Filtered malformed session message payload for ${pathname} (${droppedEntries} entries, ${droppedParts} parts)`
+      );
+    }
+
+    return normalized;
   }
 
   private async handleRecycleBinRequest(

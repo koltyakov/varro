@@ -385,6 +385,20 @@ input:focus-visible {
   position: relative;
 }
 
+.interactive-session.chat-view-entering .chat-header-chat-layout,
+.interactive-session.chat-view-entering .chat-workspace,
+.interactive-session.chat-view-entering .chat-main-shell {
+  animation: fade-in 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .interactive-session.chat-view-entering .chat-header-chat-layout,
+  .interactive-session.chat-view-entering .chat-workspace,
+  .interactive-session.chat-view-entering .chat-main-shell {
+    animation: none;
+  }
+}
+
 body.vscode-light .interactive-session,
 body.vscode-high-contrast-light .interactive-session {
   --chat-input-top-gradient-bg: #fff;

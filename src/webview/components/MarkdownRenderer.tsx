@@ -12,6 +12,11 @@ interface MarkdownProps {
   cacheByContent?: boolean;
 }
 
+type ParseMarkdownOptions = {
+  cacheByContent: boolean;
+  disablePathLinkify?: boolean;
+};
+
 type StreamingMarkdownSegments = {
   stableContent: string;
   tailContent: string;
@@ -95,7 +100,6 @@ const MAX_COPY_TEXT_LENGTH = 20_000;
 const codeBlockHtmlCache = new Map<string, string>();
 const highlightedCodeCache = new Map<string, string>();
 const renderedMarkdownCache = new Map<string, string>();
-const renderedMarkdownCacheKeyCache = new Map<string, string>();
 const CODE_LANGUAGE_ALIASES = new Map<string, string>([
   ['console', 'bash'],
   ['plain', 'plaintext'],
@@ -139,14 +143,6 @@ function setRenderedMarkdownCacheValue(key: string, value: string) {
   }
 }
 
-function setRenderedMarkdownCacheKeyValue(key: string, value: string) {
-  renderedMarkdownCacheKeyCache.set(key, value);
-  if (renderedMarkdownCacheKeyCache.size > RENDERED_MARKDOWN_CACHE_LIMIT) {
-    const oldest = renderedMarkdownCacheKeyCache.keys().next().value;
-    if (oldest) renderedMarkdownCacheKeyCache.delete(oldest);
-  }
-}
-
 function hashContent(value: string) {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++) {
@@ -157,18 +153,7 @@ function hashContent(value: string) {
 }
 
 function getRenderedMarkdownCacheKey(content: string) {
-  const workspacePath = state.editorContext.workspacePath || '';
-  const memoKey = `${workspacePath}\u0000${content}`;
-  const cached = renderedMarkdownCacheKeyCache.get(memoKey);
-  if (cached) {
-    renderedMarkdownCacheKeyCache.delete(memoKey);
-    renderedMarkdownCacheKeyCache.set(memoKey, cached);
-    return cached;
-  }
-
-  const cacheKey = `${workspacePath}\u0000${hashContent(content)}`;
-  setRenderedMarkdownCacheKeyValue(memoKey, cacheKey);
-  return cacheKey;
+  return `${hashContent(state.editorContext.workspacePath || '')}\u0000${hashContent(content)}`;
 }
 
 function resolveCodeLanguage(lang?: string) {
@@ -414,10 +399,10 @@ function sanitizeHtml(html: string): string {
   return template.innerHTML;
 }
 
-function renderMarkdownHtml(content: string): string {
+function renderMarkdownHtml(content: string, options?: { disablePathLinkify?: boolean }): string {
   try {
     const parsed = marked.parse(content) as string;
-    return sanitizeHtml(linkifyPaths(parsed));
+    return sanitizeHtml(options?.disablePathLinkify ? parsed : linkifyPaths(parsed));
   } catch {
     return `<p>${escapeHtml(content)}</p>`;
   }
@@ -481,8 +466,10 @@ function getMarkdownRenderSegments(
   return splitStreamingMarkdownContent(content);
 }
 
-function parseMarkdown(content: string, cacheByContent: boolean): string {
-  if (!cacheByContent) return renderMarkdownHtml(content);
+function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
+  if (!options.cacheByContent) {
+    return renderMarkdownHtml(content, { disablePathLinkify: options.disablePathLinkify });
+  }
 
   const cacheKey = getRenderedMarkdownCacheKey(content);
   const cached = renderedMarkdownCache.get(cacheKey);
@@ -492,7 +479,7 @@ function parseMarkdown(content: string, cacheByContent: boolean): string {
     return cached;
   }
 
-  const html = renderMarkdownHtml(content);
+  const html = renderMarkdownHtml(content, { disablePathLinkify: options.disablePathLinkify });
   setRenderedMarkdownCacheValue(cacheKey, html);
   return html;
 }
@@ -602,13 +589,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let pendingContent: string | null = null;
   let rafId: number | null = null;
   const initialSegments = getMarkdownRenderSegments(props.content || '', !!props.cacheByContent);
+  let lastAppliedWorkspacePath = state.editorContext.workspacePath || '';
+  let lastAppliedStableContent = initialSegments.stableContent;
+  let lastAppliedTailContent = initialSegments.tailContent;
   let lastAppliedStableHtml = initialSegments.stableContent
-    ? parseMarkdown(initialSegments.stableContent, true)
+    ? parseMarkdown(initialSegments.stableContent, { cacheByContent: true })
     : '';
-  let lastAppliedTailHtml = parseMarkdown(
-    initialSegments.tailContent,
-    initialSegments.stableContent.length === 0 && !!props.cacheByContent
-  );
+  let lastAppliedTailHtml = parseMarkdown(initialSegments.tailContent, {
+    cacheByContent: initialSegments.stableContent.length === 0 && !!props.cacheByContent,
+    disablePathLinkify: !props.cacheByContent,
+  });
 
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
@@ -619,24 +609,43 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const content = pendingContent;
       pendingContent = null;
       const segments = getMarkdownRenderSegments(content, !!props.cacheByContent);
-      const nextStableHtml = segments.stableContent
-        ? parseMarkdown(segments.stableContent, true)
-        : '';
-      const nextTailHtml = parseMarkdown(
-        segments.tailContent,
-        segments.stableContent.length === 0 && !!props.cacheByContent
-      );
+      const workspacePath = state.editorContext.workspacePath || '';
+      const stableContentChanged =
+        workspacePath !== lastAppliedWorkspacePath ||
+        segments.stableContent !== lastAppliedStableContent;
+      const tailContentChanged =
+        workspacePath !== lastAppliedWorkspacePath ||
+        segments.tailContent !== lastAppliedTailContent;
+      const nextStableHtml =
+        segments.stableContent.length === 0
+          ? ''
+          : stableContentChanged
+            ? parseMarkdown(segments.stableContent, { cacheByContent: true })
+            : lastAppliedStableHtml;
+      const nextTailHtml = tailContentChanged
+        ? parseMarkdown(segments.tailContent, {
+            cacheByContent: segments.stableContent.length === 0 && !!props.cacheByContent,
+            disablePathLinkify: !props.cacheByContent,
+          })
+        : lastAppliedTailHtml;
 
       const stableChanged = nextStableHtml !== lastAppliedStableHtml;
       const tailChanged = nextTailHtml !== lastAppliedTailHtml;
       if (stableChanged) {
+        lastAppliedStableContent = segments.stableContent;
         lastAppliedStableHtml = nextStableHtml;
         setStableHtml(nextStableHtml);
+      } else if (stableContentChanged) {
+        lastAppliedStableContent = segments.stableContent;
       }
       if (tailChanged) {
+        lastAppliedTailContent = segments.tailContent;
         lastAppliedTailHtml = nextTailHtml;
         setTailHtml(nextTailHtml);
+      } else if (tailContentChanged) {
+        lastAppliedTailContent = segments.tailContent;
       }
+      lastAppliedWorkspacePath = workspacePath;
 
       queueMicrotask(() => {
         if (stableChanged) {
