@@ -867,6 +867,50 @@ describe('standalone action prompts', () => {
     ).toEqual([]);
   });
 
+  it('keeps linked permissions visible when virtualization hides their tool row', () => {
+    const messages = Array.from({ length: 60 }, (_, index) => {
+      const messageId = `assistant-${index}`;
+      return {
+        info: assistantMessage(messageId),
+        parts:
+          index === 0
+            ? [toolPart('tool-1', messageId, 'call-1')]
+            : [textPart(`text-${index}`, `Response ${index}`)],
+      };
+    });
+
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'assistant-0',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ];
+
+    const visibleRange = calculateVirtualRange({
+      itemIds: messages.map((message) => message.info.id),
+      measuredHeights: new Map(),
+      scrollTop: 7_000,
+      viewportHeight: 600,
+      defaultItemHeight: 120,
+      overscan: 0,
+    });
+
+    expect(visibleRange.start).toBeGreaterThan(0);
+    expect(
+      getStandalonePermissionPrompts(
+        messages.slice(visibleRange.start, visibleRange.end),
+        permissions,
+        'session-1'
+      )
+    ).toEqual(permissions);
+  });
+
   it('keeps unmatched questions visible as standalone prompts', () => {
     const questions: QuestionRequest[] = [
       {

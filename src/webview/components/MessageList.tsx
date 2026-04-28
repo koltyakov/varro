@@ -144,6 +144,14 @@ export function getStandaloneQuestionPrompts(
   );
 }
 
+function getRenderedMessages(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  range: { start: number; end: number },
+  shouldVirtualize: boolean
+) {
+  return shouldVirtualize ? messages.slice(range.start, range.end) : messages;
+}
+
 export function buildPlanImplementationPrompt(parts: Part[]) {
   void parts;
   return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
@@ -569,26 +577,6 @@ export function MessageList() {
   const latestPlanImplementationMessageId = createMemo(() =>
     getLatestPlanImplementationMessageId(messages())
   );
-  const linkedToolCalls = createMemo(() => {
-    messageStructureVersion();
-    return untrack(() => getLinkedToolCallKeys(state.messages));
-  });
-  const standalonePermissions = createMemo(() =>
-    getStandalonePermissionPrompts(
-      untrack(() => state.messages),
-      state.permissions,
-      state.activeSessionId,
-      linkedToolCalls()
-    )
-  );
-  const standaloneQuestions = createMemo(() =>
-    getStandaloneQuestionPrompts(
-      untrack(() => state.messages),
-      state.questions,
-      state.activeSessionId,
-      linkedToolCalls()
-    )
-  );
   const visibleBlockingStreamingPart = createMemo(() =>
     hasVisibleBlockingStreamingPart(messages(), state.streamingPartId, state.streamingText)
   );
@@ -731,6 +719,29 @@ export function MessageList() {
       viewportHeight: viewportHeight(),
     });
   });
+  const linkedToolCalls = createMemo(() => {
+    messageStructureVersion();
+    const allMessages = untrack(() => state.messages);
+    return getLinkedToolCallKeys(
+      getRenderedMessages(allMessages, visibleRange(), shouldVirtualize())
+    );
+  });
+  const standalonePermissions = createMemo(() =>
+    getStandalonePermissionPrompts(
+      untrack(() => state.messages),
+      state.permissions,
+      state.activeSessionId,
+      linkedToolCalls()
+    )
+  );
+  const standaloneQuestions = createMemo(() =>
+    getStandaloneQuestionPrompts(
+      untrack(() => state.messages),
+      state.questions,
+      state.activeSessionId,
+      linkedToolCalls()
+    )
+  );
 
   const stickyUserMessagePreviewCandidate = createMemo(() => {
     const throttledViewportHeight = stickyPreviewViewportHeight();
