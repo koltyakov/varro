@@ -176,7 +176,7 @@ Responsibilities:
 - subscribe to OpenCode events forwarded from the extension host
 - fetch initial data from OpenCode REST endpoints
 - send prompts, undo, abort, compact, plan handoff, and permission/question responses
-- rebuild todo state either from explicit `todo.updated` events or from tool parts in messages
+- derive todo state from message tool parts, with `todo.updated` acting only as a resync trigger
 - synchronize per-session MCP selections with OpenCode
 - recover interrupted sessions after reload when the previous run still looks incomplete
 

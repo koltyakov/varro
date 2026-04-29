@@ -1,5 +1,5 @@
 import type { Message, Part, Session, SessionStatus } from '../types';
-import type { SelectedModel } from '../lib/state';
+import type { SelectedModel } from '../lib/app-state-types';
 
 type SessionEntry = { info: Message; parts: Part[] };
 

@@ -1,3 +1,5 @@
+import type { ServerEventPropertiesByName } from './opencode-types';
+
 export interface EditorContext {
   workspacePath: string | null;
   activeFile: {
@@ -95,15 +97,7 @@ export type RecycleBinEntry = {
   sessions: RecycleBinSession[];
 };
 
-export type OpenCodeModelRoute = {
-  providerID: string;
-  modelID: string;
-};
-
-export type OpenCodeModelRouting = {
-  smallModel: OpenCodeModelRoute | null;
-  agentModels: Record<string, OpenCodeModelRoute>;
-};
+export type { OpenCodeModelRoute, OpenCodeModelRouting } from './opencode-types';
 
 export const SERVER_EVENT_NAMES = [
   'session.created',
@@ -135,7 +129,7 @@ export type ServerEventName = (typeof SERVER_EVENT_NAMES)[number];
 export type ServerEvent = {
   [Name in ServerEventName]: {
     type: Name;
-    properties?: Record<string, unknown>;
+    properties?: ServerEventPropertiesByName[Name];
   };
 }[ServerEventName];
 
@@ -148,7 +142,9 @@ export function parseServerEvent(value: unknown): ServerEvent | null {
   if (!record || !isServerEventName(record.type)) return null;
 
   const properties = asRecord(record.properties);
-  return properties ? { type: record.type, properties } : { type: record.type };
+  return properties
+    ? ({ type: record.type, properties } as ServerEvent)
+    : ({ type: record.type } as ServerEvent);
 }
 
 export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light';

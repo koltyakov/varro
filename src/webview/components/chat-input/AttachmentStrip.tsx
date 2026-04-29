@@ -1,5 +1,5 @@
 import { For, Show } from 'solid-js';
-import type { ClipboardImage } from '../../lib/state';
+import type { ClipboardImage } from '../../lib/app-state-types';
 import type { DroppedFile } from '../../../shared/protocol';
 import { formatContextLineRanges } from '../../../shared/context-files';
 import { getDroppedFileLabel } from '../../lib/path-display';

@@ -16,7 +16,9 @@ import type { SidebarProviderRuntime } from './sidebar-provider-runtime';
 import { setupSidebarProvider } from './sidebar-provider-setup';
 import type { SidebarProviderUiState } from './sidebar-provider-ui-state';
 import type { FileSearchService } from './file-search-service';
+import type { ContextProvider } from './context-provider';
 import type { MessageRouter } from './message-router';
+import type { OpenCodeServer } from './server';
 import type { RestProxy } from './rest-proxy';
 import type { SessionExportService } from './session-export-service';
 import type { SessionStateManager } from './session-state-manager';
@@ -68,8 +70,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     workspaceState: vscode.Memento,
-    contextProvider: import('./context-provider').ContextProvider,
-    server: import('./server').OpenCodeServer,
+    contextProvider: ContextProvider,
+    server: OpenCodeServer,
     private readonly simulateNoProviders = false
   ) {
     const setup = setupSidebarProvider({

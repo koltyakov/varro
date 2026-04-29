@@ -1,4 +1,4 @@
-import type { SelectedModel } from '../lib/state';
+import type { SelectedModel } from '../lib/app-state-types';
 import type { McpStatus, ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type { Agent, Command, Provider, QuestionRequest, Session, SessionStatus } from '../types';
 import { reconcileLoadedAgents, reconcileLoadedProviders } from './routing-state';

@@ -1,4 +1,4 @@
-import type { SelectedModel } from '../lib/state';
+import type { SelectedModel } from '../lib/app-state-types';
 import { resolveSelectedModel } from '../lib/state';
 import type { Message, Part, Session, SessionStatus } from '../types';
 import {

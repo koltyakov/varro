@@ -92,7 +92,7 @@ import { createSessionMcpOperations } from './session-mcp';
 import { createSessionSendOperations } from './session-send';
 import { createSessionStatusOperations } from './session-status';
 import { createSessionSyncOperations, resolveMessagesSelectedModel } from './session-sync';
-import { createTodoSyncOperations, extractTodos } from './todo-sync';
+import { createTodoSyncOperations, resetTodoSync } from './todo-sync';
 
 export interface OpenCodeRuntime {
   useOpenCode(): { client: typeof client };
@@ -150,7 +150,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let initializing = false;
   let eventHandlerCleanups: Array<() => void> = [];
   let currentWorkspacePath: string | null = null;
-  let todoStateAuthority: 'messages' | 'event' = 'messages';
   let connectionGeneration = 0;
   let sessionSelectionGeneration = 0;
   let sessionSyncGeneration = 0;
@@ -159,16 +158,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     document.visibilityState === 'visible'
   );
 
-  function resetTodoSync() {
-    todoStateAuthority = 'messages';
-  }
-
-  const todoSyncOperations = createTodoSyncOperations({
-    getAuthority: () => todoStateAuthority,
-    setAuthority: (authority) => {
-      todoStateAuthority = authority;
-    },
-  });
+  const todoSyncOperations = createTodoSyncOperations();
 
   const { syncTodosFromMessages, handoffTodosToMessages } = todoSyncOperations;
 
@@ -233,15 +223,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     if (eventHandlerCleanups.length > 0) return;
 
     const sessionEventHandlerOperations = createSessionEventHandlerOperations({
-      setTodoStateAuthority: (value) => {
-        todoStateAuthority = value;
-      },
       todoSyncOperations,
       sessionLifecycleOperations,
       sessionStatusOperations,
       sessionSyncOperations,
       sessionApprovalOperations,
-      extractTodos,
     });
 
     eventHandlerCleanups = sessionEventHandlerOperations.registerSessionEventHandlers();
@@ -308,7 +294,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         initialized = false;
         initializing = false;
         currentWorkspacePath = null;
-        todoStateAuthority = 'messages';
         connectionGeneration = 0;
         sessionSelectionGeneration = 0;
         sessionSyncGeneration = 0;

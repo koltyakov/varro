@@ -33,7 +33,6 @@ import type {
   QuestionRequest,
   Session,
   SessionStatus,
-  Todo,
 } from '../types';
 
 function isCompleteMessageInfo(value: unknown): value is Message {
@@ -112,9 +111,7 @@ function getPermissionReplyId(props: Record<string, unknown>) {
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
   getMessages(): Array<{ info: Message; parts: Part[] }>;
-  setTodoStateAuthority(value: 'messages' | 'event'): void;
   handoffTodosToMessages(messages?: Array<{ info: Message; parts: Part[] }>): boolean;
-  setTodos(todos: Todo[]): void;
   upsertSession(info: Session): void;
   setSessionCompacting(sessionId: string, compacting: boolean): void;
   removeDeletedSessionTree(sessionId: string): void;
@@ -140,12 +137,10 @@ type EventHandlerDependencies = {
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
   ): Promise<void>;
-  extractTodos(raw: unknown): Todo[] | null;
   setDiffs(diffs: FileDiff[]): void;
 };
 
 type EventHandlerOperationDependencies = {
-  setTodoStateAuthority(value: 'messages' | 'event'): void;
   todoSyncOperations: Pick<
     EventHandlerDependencies,
     'handoffTodosToMessages' | 'syncTodosFromMessages'
@@ -165,7 +160,6 @@ type EventHandlerOperationDependencies = {
   >;
   sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
   sessionApprovalOperations: Pick<EventHandlerDependencies, 'respondPermission'>;
-  extractTodos(raw: unknown): Todo[] | null;
 };
 
 function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
@@ -184,9 +178,7 @@ export function createSessionEventHandlerOperations(deps: EventHandlerOperationD
     return registerSessionEventHandlers({
       getActiveSessionId: () => state.activeSessionId,
       getMessages: () => state.messages,
-      setTodoStateAuthority: deps.setTodoStateAuthority,
       handoffTodosToMessages: deps.todoSyncOperations.handoffTodosToMessages,
-      setTodos: (todos) => setState('todos', todos),
       upsertSession: deps.sessionLifecycleOperations.upsertSession,
       setSessionCompacting,
       removeDeletedSessionTree: deps.sessionLifecycleOperations.removeDeletedSessionTree,
@@ -209,7 +201,6 @@ export function createSessionEventHandlerOperations(deps: EventHandlerOperationD
       shouldAutoApprovePermissions: (sessionId) =>
         getPermissionModeForSession(sessionId) === 'full',
       respondPermission: deps.sessionApprovalOperations.respondPermission,
-      extractTodos: deps.extractTodos,
       setDiffs: (diffs) => setState('diffs', diffs),
     });
   };
@@ -460,10 +451,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if ((p?.sessionID as string) === deps.getActiveSessionId()) {
         if (!hasActiveAssistantReply(deps.getMessages())) return;
-        const todos = deps.extractTodos(p?.todos);
-        if (!todos) return;
-        deps.setTodoStateAuthority('event');
-        deps.setTodos(todos);
+        deps.syncTodosFromMessages();
       }
     })
   );

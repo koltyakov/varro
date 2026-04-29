@@ -5,6 +5,12 @@ import type {
   WebviewThemeKind,
 } from '../shared/protocol';
 import type {
+  PermissionEventProperties,
+  PermissionReplyProperties,
+  QuestionReplyProperties,
+  QuestionRequest,
+} from '../shared/opencode-types';
+import type {
   BlockingRequestSnapshot,
   InterruptedSessionSnapshot,
   SessionStateManager,
@@ -55,30 +61,53 @@ export class SidebarProviderUiState {
     if (options?.clearResolvedEmbedded) {
       for (const item of this.blockingRequestsForWebview) {
         if (currentRequestIds.has(item.id)) continue;
+        if (item.kind === 'question') {
+          post({
+            type: 'server/event',
+            payload: {
+              type: 'question.replied',
+              properties: {
+                id: item.id,
+                requestID: item.id,
+                sessionID: item.sessionID,
+              } satisfies QuestionReplyProperties,
+            },
+          });
+          continue;
+        }
+
         post({
           type: 'server/event',
           payload: {
-            type: item.kind === 'question' ? 'question.replied' : 'permission.replied',
-            properties:
-              item.kind === 'question'
-                ? { id: item.id, requestID: item.id, sessionID: item.sessionID }
-                : {
-                    id: item.id,
-                    permissionID: item.id,
-                    requestID: item.id,
-                    sessionID: item.sessionID,
-                  },
+            type: 'permission.replied',
+            properties: {
+              id: item.id,
+              permissionID: item.id,
+              requestID: item.id,
+              sessionID: item.sessionID,
+            } satisfies PermissionReplyProperties,
           },
         });
       }
     }
 
     for (const item of currentRequests) {
+      if (item.kind === 'question') {
+        post({
+          type: 'server/event',
+          payload: {
+            type: 'question.asked',
+            properties: item.props as QuestionRequest,
+          },
+        });
+        continue;
+      }
+
       post({
         type: 'server/event',
         payload: {
-          type: item.kind === 'question' ? 'question.asked' : 'permission.asked',
-          properties: item.props,
+          type: 'permission.asked',
+          properties: item.props as PermissionEventProperties,
         },
       });
     }

@@ -18,6 +18,14 @@ import type {
   AssistantMessage,
 } from '../types';
 import type {
+  ClipboardImage,
+  QueuedMessage,
+  SelectedModel,
+  SessionSelectedAgents,
+  SessionSelectedMcps,
+  SessionSelectedModels,
+} from './app-state-types';
+import type {
   DesktopSessionPaneSide,
   EditorContext,
   DroppedFile,
@@ -53,11 +61,6 @@ import {
   type MessageEntry,
 } from './message-entry-sync';
 import { createStreamingDeltaQueue } from './streaming-deltas';
-
-export type SelectedModel = { providerID: string; modelID: string; variant?: string };
-export type SessionSelectedAgents = Record<string, string>;
-export type SessionSelectedModels = Record<string, SelectedModel>;
-export type SessionSelectedMcps = Record<string, string[]>;
 
 export interface AppState {
   serverStatus: ServerStatus;
@@ -103,20 +106,6 @@ export interface AppState {
   failedSessionIds: string[];
   sessionUsageLimits: Record<string, UsageLimitNotice | null>;
   interruptedSessionIds: string[];
-}
-
-export interface QueuedMessage {
-  id: string;
-  sessionId: string;
-  text: string;
-}
-
-export interface ClipboardImage {
-  id: string;
-  url: string;
-  mime: string;
-  filename: string;
-  size: number;
 }
 
 export const MAX_CLIPBOARD_IMAGES = 5;

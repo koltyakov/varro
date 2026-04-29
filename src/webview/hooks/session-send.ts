@@ -19,9 +19,8 @@ import {
   state,
   stopLoading,
   resolveSelectedModel,
-  type ClipboardImage,
-  type SelectedModel,
 } from '../lib/state';
+import type { ClipboardImage, SelectedModel } from '../lib/app-state-types';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { postMessage } from '../lib/bridge';
 import { modelSupportsVision } from '../lib/model-capabilities';

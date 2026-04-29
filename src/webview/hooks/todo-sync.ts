@@ -3,43 +3,25 @@ import type { AssistantMessage, Message, Part, Todo } from '../types';
 
 const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
 
-export type TodoStateAuthority = 'messages' | 'event';
+export function resetTodoSync() {
+  // Todos are always derived from message tool parts; resets only clear session state elsewhere.
+}
 
-export function createTodoSyncOperations(deps?: {
-  authority?: TodoStateAuthority;
-  getAuthority?(): TodoStateAuthority;
-  setAuthority?(authority: TodoStateAuthority): void;
-}) {
-  const getAuthority = () => deps?.getAuthority?.() ?? deps?.authority ?? 'messages';
-  const setAuthority = (authority: TodoStateAuthority) => {
-    deps?.setAuthority?.(authority);
-  };
-
-  const resetTodoSync = () => {
-    setAuthority('messages');
-  };
-
+export function createTodoSyncOperations() {
   const syncTodosFromMessagesWithState = (
     messages: Array<{ info: Message; parts: Part[] }> = state.messages
   ) => {
-    syncTodosFromMessages(
-      { authority: getAuthority(), todos: state.todos },
-      (todos) => setState('todos', todos),
-      messages
-    );
+    syncTodosFromMessages((todos) => setState('todos', todos), messages);
   };
 
   const handoffTodosToMessagesWithState = (
     messages: Array<{ info: Message; parts: Part[] }> = state.messages
   ) => {
     const handedOff = handoffTodosToMessages(
-      { authority: getAuthority(), todos: state.todos },
+      state.todos,
       (todos) => setState('todos', todos),
       messages
     );
-    if (handedOff) {
-      setAuthority('messages');
-    }
     return handedOff;
   };
 
@@ -93,16 +75,14 @@ export function deriveTodosFromMessages(messages: Array<{ info: Message; parts: 
 }
 
 export function syncTodosFromMessages(
-  syncState: { authority: TodoStateAuthority; todos: Todo[] },
   setTodos: (todos: Todo[]) => void,
   messages: Array<{ info: Message; parts: Part[] }>
 ) {
-  if (syncState.authority === 'event') return;
   setTodos(deriveTodosFromMessages(messages));
 }
 
 export function handoffTodosToMessages(
-  syncState: { authority: TodoStateAuthority; todos: Todo[] },
+  currentTodos: Todo[],
   setTodos: (todos: Todo[]) => void,
   messages: Array<{ info: Message; parts: Part[] }>
 ): boolean {
@@ -110,14 +90,9 @@ export function handoffTodosToMessages(
   const latestAssistant = getLatestAssistantMessageInTurn(messages);
   const currentTodoMessageId = getLatestTodoMessageId(messages);
 
-  // Keep the last event-driven todo snapshot visible until messages catch up.
-  if (syncState.authority === 'event' && syncState.todos.length > 0 && nextTodos.length === 0) {
-    return false;
-  }
-
   // Refreshed message snapshots can briefly lose todo-bearing parts for the same reply,
   // or introduce a newer unfinished assistant shell before its todo state arrives.
-  if (syncState.todos.length > 0 && nextTodos.length === 0) {
+  if (currentTodos.length > 0 && nextTodos.length === 0) {
     if (!latestAssistant) {
       return false;
     }

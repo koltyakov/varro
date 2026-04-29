@@ -64,9 +64,7 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers({
       getActiveSessionId: () => null,
       getMessages: () => [],
-      setTodoStateAuthority: vi.fn(),
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      setTodos: vi.fn(),
       upsertSession: vi.fn(),
       setSessionCompacting: vi.fn(),
       removeDeletedSessionTree: vi.fn(),
@@ -83,7 +81,6 @@ describe('registerSessionEventHandlers', () => {
       syncTodosFromMessages: vi.fn(),
       shouldAutoApprovePermissions: () => true,
       respondPermission,
-      extractTodos: () => null,
       setDiffs: vi.fn(),
     });
 
@@ -125,9 +122,7 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers({
       getActiveSessionId: () => null,
       getMessages: () => [],
-      setTodoStateAuthority: vi.fn(),
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      setTodos: vi.fn(),
       upsertSession: vi.fn(),
       setSessionCompacting: vi.fn(),
       removeDeletedSessionTree: vi.fn(),
@@ -144,7 +139,6 @@ describe('registerSessionEventHandlers', () => {
       syncTodosFromMessages: vi.fn(),
       shouldAutoApprovePermissions: () => false,
       respondPermission: vi.fn().mockResolvedValue(undefined),
-      extractTodos: () => null,
       setDiffs: vi.fn(),
     });
 
@@ -178,7 +172,6 @@ describe('registerSessionEventHandlers', () => {
     const syncTodosFromMessages = vi.fn();
 
     const operations = createSessionEventHandlerOperations({
-      setTodoStateAuthority: vi.fn(),
       todoSyncOperations: {
         handoffTodosToMessages,
         syncTodosFromMessages,
@@ -202,7 +195,6 @@ describe('registerSessionEventHandlers', () => {
       sessionApprovalOperations: {
         respondPermission,
       },
-      extractTodos: () => null,
     });
 
     operations.registerSessionEventHandlers();
@@ -250,9 +242,7 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers({
       getActiveSessionId: () => 'session-1',
       getMessages: () => [],
-      setTodoStateAuthority: vi.fn(),
       handoffTodosToMessages,
-      setTodos: vi.fn(),
       upsertSession: vi.fn(),
       setSessionCompacting: vi.fn(),
       removeDeletedSessionTree: vi.fn(),
@@ -269,7 +259,6 @@ describe('registerSessionEventHandlers', () => {
       syncTodosFromMessages: vi.fn(),
       shouldAutoApprovePermissions: () => false,
       respondPermission: vi.fn().mockResolvedValue(undefined),
-      extractTodos: () => null,
       setDiffs: vi.fn(),
     });
 
@@ -312,9 +301,7 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers({
       getActiveSessionId: () => 'session-1',
       getMessages: () => [],
-      setTodoStateAuthority: vi.fn(),
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      setTodos: vi.fn(),
       upsertSession: vi.fn(),
       setSessionCompacting: vi.fn(),
       removeDeletedSessionTree: vi.fn(),
@@ -331,7 +318,6 @@ describe('registerSessionEventHandlers', () => {
       syncTodosFromMessages,
       shouldAutoApprovePermissions: () => false,
       respondPermission: vi.fn().mockResolvedValue(undefined),
-      extractTodos: () => null,
       setDiffs: vi.fn(),
     });
 
@@ -345,5 +331,74 @@ describe('registerSessionEventHandlers', () => {
     });
 
     expect(syncTodosFromMessages).not.toHaveBeenCalled();
+  });
+
+  it('re-syncs todos from messages when todo.updated arrives for an active reply', () => {
+    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(
+        event as string,
+        handler as (data: { properties?: Record<string, unknown> }) => void
+      );
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    const syncTodosFromMessages = vi.fn();
+
+    registerSessionEventHandlers({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [
+        {
+          info: {
+            id: 'assistant-1',
+            sessionID: 'session-1',
+            role: 'assistant',
+            time: { created: 0 },
+            parentID: 'user-1',
+            modelID: 'model-1',
+            providerID: 'provider-1',
+            mode: 'default',
+            path: { cwd: '/', root: '/' },
+            cost: 0,
+            tokens: {
+              input: 0,
+              output: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          },
+          parts: [],
+        },
+      ],
+      handoffTodosToMessages: vi.fn().mockReturnValue(true),
+      upsertSession: vi.fn(),
+      setSessionCompacting: vi.fn(),
+      removeDeletedSessionTree: vi.fn(),
+      shouldIgnorePendingAbortStatus: () => false,
+      hasPendingAbort: () => false,
+      clearPendingAbort: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      clearUsageLimitOnResumedProgress: vi.fn(),
+      updateUsageLimitState: vi.fn(),
+      syncSession: vi.fn().mockResolvedValue(undefined),
+      shouldResyncSessionAfterIdle: () => false,
+      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+      applyUsageLimitNotice: vi.fn(),
+      syncTodosFromMessages,
+      shouldAutoApprovePermissions: () => false,
+      respondPermission: vi.fn().mockResolvedValue(undefined),
+      setDiffs: vi.fn(),
+    });
+
+    handlers.get('todo.updated')?.({
+      properties: {
+        sessionID: 'session-1',
+        todos: [{ id: 'todo-1', content: 'sync me', status: 'pending', priority: 'medium' }],
+      },
+    });
+
+    expect(syncTodosFromMessages).toHaveBeenCalledTimes(1);
   });
 });
