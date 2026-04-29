@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Message, Session } from '../types';
 import {
-  createSessionSyncOperations,
   resolveMessagesSelectedModel,
+  SessionSyncOperations,
   selectSessionWithStateDependencies,
   syncSessionMessagesWithStateDependencies,
   syncSessionWithStateDependencies,
-} from './session-sync';
+} from './session/session-sync';
 import { provider } from './useOpenCode.test-support';
 
 function assistantMessage(id: string): Message {
@@ -157,7 +157,7 @@ describe('session sync helpers', () => {
 
   it('creates bound session sync operations from one dependency bag', async () => {
     const activeSession = { value: 'session-0' as string | null };
-    const operations = createSessionSyncOperations(
+    const operations = new SessionSyncOperations(
       {
         getActiveSessionId: () => activeSession.value,
         setActiveSessionId: (id) => {

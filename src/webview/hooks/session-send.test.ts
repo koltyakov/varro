@@ -6,7 +6,7 @@ import {
   getAttachmentReference,
   retryMessageWithDependencies,
   sendMessageWithDependencies,
-} from './session-send';
+} from './session/session-send';
 
 function provider(id: string, models: Provider['models']): Provider {
   return {

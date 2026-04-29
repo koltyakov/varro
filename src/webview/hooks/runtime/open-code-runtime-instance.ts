@@ -1,71 +1,27 @@
 import { createSignal, onCleanup, onMount } from 'solid-js';
-import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
-import { onMessage, postMessage } from '../lib/bridge';
-import { client } from '../lib/client';
-import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
-import { applyWebviewTheme } from '../lib/theme';
-import {
-  clearDraftCurrentDocumentState,
-  clearMessages,
-  clearSkippedPlanSession,
-  consumeInterruptedSessionIds,
-  draftPermissionMode,
-  getAvailableMcpNames,
-  getPersistedActiveSessionId,
-  getPersistedSelectedAgent,
-  getPersistedSelectedModel,
-  getPermissionModeForSession,
-  getProviderLimit,
-  getSelectedAgentForSession,
-  getSelectedMcpsForSession,
-  getSelectedModelForSession,
-  markSessionSeen,
-  persistActiveSessionId,
-  requestMessageListScrollToBottom,
-  resetDraftPermissionMode,
-  resolveSelectedModel,
-  saveProjectPermissionMode,
-  setCommands,
-  setDraftPermissionMode,
-  setError,
-  setMcpStatus,
-  setPermissionModeForSession,
-  setProviderLimit,
-  setRecycleBinEntries,
-  setSelectedAgent,
-  setSelectedMcpsForSession,
-  setSelectedModel,
-  setSessionCompacting,
-  setSessionUsageLimit,
-  setState,
-  startLoading,
-  state,
-  stopLoading,
-  syncFailedSessionsFromMessages,
-  theme,
-  isLoading,
-  adoptDraftCurrentDocumentState,
-  upsertMessageInfo,
-  upsertPart,
-  removePermission,
-  setQuestions,
-  removeQuestion,
-  skipPlanSession,
-  getSessionTreeIds,
-  setMessagesIncremental,
-} from '../lib/state';
-import type { Message, Part, SessionStatus } from '../types';
+import type { ExtensionMessage, WebviewThemeKind } from '../../../shared/protocol';
+import { onMessage, postMessage } from '../../lib/bridge';
+import { client } from '../../lib/client';
+import { appStore } from '../../lib/stores/app-store';
+import { composerStore } from '../../lib/stores/composer-store';
+import { permissionsStore } from '../../lib/stores/permissions-store';
+import { routingStore } from '../../lib/stores/routing-store';
+import { sessionStore } from '../../lib/stores/session-store';
+import { uiStore } from '../../lib/stores/ui-store';
+import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
+import { applyWebviewTheme } from '../../lib/theme';
+import type { Message, Part } from '../../types';
 import {
   createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
-} from './connection-bootstrap';
-import { createDataLoaderOperations } from './data-loaders';
+} from '../connection-bootstrap';
+import { createStateBoundDataLoaderOperations } from '../data-loaders';
 import {
   createMountBridgeOperations,
   postFocusStateWithDependencies,
   registerFocusStateTracking,
-} from './mount-bridge';
-import { getSessionPermissionRulesForMode } from './permission-rules';
+} from '../mount-bridge';
+import { getSessionPermissionRulesForMode } from '../permission-rules';
 import {
   deriveSelectedAgentFromMessages,
   deriveSelectedModelFromMessages,
@@ -73,26 +29,26 @@ import {
   getBuildAgentName,
   getDefaultPrimaryAgentName,
   getUsageLimitNoticeContext as getUsageLimitNoticeContextForState,
-} from './routing-state';
-import { createSessionActionOperations } from './session-actions';
-import { createSessionApprovalOperations } from './session-approvals';
-import { createSessionControlOperations } from './session-controls';
+} from '../routing-state';
+import { SessionActionOperations } from '../session/session-actions';
+import { SessionApprovalOperations } from '../session/session-approvals';
+import { SessionControlOperations } from '../session/session-controls';
 import {
   registerLoadingStatusPollEffect,
   registerProviderLimitRefreshEffect,
-} from './session-effects';
-import { createSessionEventHandlerOperations } from './session-event-handlers';
+} from '../session/session-effects';
+import { SessionEventHandlerOperations } from '../session/session-event-handlers';
 import {
-  createSessionLifecycleOperations,
   getDeletedSessionTreeIds,
   getNextSessionIdAfterDeletion,
-} from './session-lifecycle';
-import { createSessionManagementOperations } from './session-management';
-import { createSessionMcpOperations } from './session-mcp';
-import { createSessionSendOperations } from './session-send';
-import { createSessionStatusOperations } from './session-status';
-import { createSessionSyncOperations, resolveMessagesSelectedModel } from './session-sync';
-import { createTodoSyncOperations, resetTodoSync } from './todo-sync';
+  SessionLifecycleOperations,
+} from '../session/session-lifecycle';
+import { SessionManagementOperations } from '../session/session-management';
+import { SessionMcpOperations } from '../session/session-mcp';
+import { SessionSendOperations } from '../session/session-send';
+import { SessionStatusOperations } from '../session/session-status';
+import { resolveMessagesSelectedModel, SessionSyncOperations } from '../session/session-sync';
+import { createTodoSyncOperations, resetTodoSync } from '../todo-sync';
 
 export interface OpenCodeRuntime {
   useOpenCode(): { client: typeof client };
@@ -162,12 +118,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const { syncTodosFromMessages, handoffTodosToMessages } = todoSyncOperations;
 
-  const sessionStatusOperations = createSessionStatusOperations({
+  const sessionStatusOperations = new SessionStatusOperations({
     pendingAbortRetryAttempts,
     deriveUsageLimitNoticeContext: getUsageLimitNoticeContext,
     refreshProviderLimit: (providerID, modelID) => refreshProviderLimit(providerID, modelID),
     isDocumentVisible: () => documentVisible(),
-    shouldResyncSessionAfterIdle: (sessionId) => state.activeSessionId === sessionId,
+    shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
     syncSessionMessages: (sessionId) => syncSessionMessages(sessionId),
     loadSessionStatuses: () => client.session.status(),
     logError,
@@ -182,7 +138,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     recheckSessionStatus: recheckSessionStatusWithState,
   } = sessionStatusOperations;
 
-  const sessionLifecycleOperations = createSessionLifecycleOperations({
+  const sessionLifecycleOperations = new SessionLifecycleOperations({
     getCurrentWorkspacePath: () => currentWorkspacePath,
     clearPendingAbort,
     clearPendingAbortTree,
@@ -199,30 +155,30 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   function getUsageLimitNoticeContext(
     sessionID: string,
-    messages: Array<{ info: Message; parts: Part[] }> = state.messages
+    messages: Array<{ info: Message; parts: Part[] }> = appStore.state.messages
   ) {
     return getUsageLimitNoticeContextForState({
       sessionId: sessionID,
       messages,
-      selectedModelForSession: getSelectedModelForSession(sessionID),
-      providers: state.providers,
-      providerDefaults: state.providerDefaults,
-      fallbackSelectedModel: state.selectedModel,
+      selectedModelForSession: routingStore.getSelectedModelForSession(sessionID),
+      providers: appStore.state.providers,
+      providerDefaults: appStore.state.providerDefaults,
+      fallbackSelectedModel: appStore.state.selectedModel,
     });
   }
 
   function getDefaultPrimaryAgentNameFromState() {
-    return getDefaultPrimaryAgentName(state.agents);
+    return getDefaultPrimaryAgentName(appStore.state.agents);
   }
 
   function getBuildAgentNameFromState() {
-    return getBuildAgentName(state.agents);
+    return getBuildAgentName(appStore.state.agents);
   }
 
   function ensureSessionEventHandlersRegistered() {
     if (eventHandlerCleanups.length > 0) return;
 
-    const sessionEventHandlerOperations = createSessionEventHandlerOperations({
+    const sessionEventHandlerOperations = new SessionEventHandlerOperations({
       todoSyncOperations,
       sessionLifecycleOperations,
       sessionStatusOperations,
@@ -235,7 +191,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   function useOpenCode() {
     onMount(() => {
-      applyTheme(theme());
+      applyTheme(uiStore.theme());
 
       const mountBridgeOperations = createMountBridgeOperations({
         ensureConnectionInitialized,
@@ -279,8 +235,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       const disposeFocusTracking = registerFocusStateTracking({
         setDocumentVisible,
         postFocusState,
-        isLoading,
-        getActiveSessionId: () => state.activeSessionId,
+        isLoading: uiStore.isLoading,
+        getActiveSessionId: () => appStore.state.activeSessionId,
         recheckSessionStatus: (sessionId) => {
           void recheckSessionStatus(sessionId);
         },
@@ -303,8 +259,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     });
 
     registerLoadingStatusPollEffect({
-      isLoading,
-      getActiveSessionId: () => state.activeSessionId,
+      isLoading: uiStore.isLoading,
+      getActiveSessionId: () => appStore.state.activeSessionId,
       isDocumentVisible: documentVisible,
       recheckSessionStatus: (sessionId) => {
         void recheckSessionStatus(sessionId);
@@ -312,13 +268,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     });
 
     registerProviderLimitRefreshEffect({
-      getServerState: () => state.serverStatus.state,
-      areProvidersLoaded: () => state.providersLoaded,
+      getServerState: () => appStore.state.serverStatus.state,
+      areProvidersLoaded: () => appStore.state.providersLoaded,
       isDocumentVisible: documentVisible,
       getActiveProviderSelection,
-      getProviderLimit,
+      getProviderLimit: routingStore.getProviderLimit,
       loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),
-      setProviderLimit,
+      setProviderLimit: routingStore.setProviderLimit,
       logError,
     });
 
@@ -327,9 +283,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   function getActiveProviderSelection() {
     return getActiveProviderSelectionForState({
-      selectedModel: state.selectedModel,
-      providers: state.providers,
-      providerDefaults: state.providerDefaults,
+      selectedModel: appStore.state.selectedModel,
+      providers: appStore.state.providers,
+      providerDefaults: appStore.state.providerDefaults,
     });
   }
 
@@ -341,38 +297,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     return connectionBootstrapOperations.initConnection();
   }
 
-  const dataLoaders = createDataLoaderOperations({
-    listMcpStatus: () => client.mcp.status(),
-    setMcpStatus,
-    getActiveSessionId: () => state.activeSessionId,
-    getSelectedMcpsForSession,
-    setSelectedMcpsForSession,
-    listQuestions: () => client.question.list(),
-    setQuestions,
-    listAgents: () => client.agent.list(),
-    getSelectedAgent: () => state.selectedAgent,
-    getSelectedAgentForSession: (sessionId) => getSelectedAgentForSession(sessionId),
-    getPersistedSelectedAgent,
-    setAllAgents: (agents) => setState('allAgents', agents),
-    setPrimaryAgents: (agents) => setState('agents', agents),
-    setSelectedAgent,
-    listCommands: () => client.command.list(),
-    setCommands,
-    listProviders: () => client.config.providers(),
-    setProvidersLoaded: (value) => setState('providersLoaded', value),
-    setProviders: (providers) => setState('providers', providers),
-    setProviderDefaults: (defaults) => setState('providerDefaults', defaults),
-    getSelectedModel: () => state.selectedModel,
-    setSelectedModel: (model) => setSelectedModel(model),
-    loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),
-    setProviderLimit,
-    listSessions: () => client.session.list(),
+  const dataLoaders = createStateBoundDataLoaderOperations({
     applySessions,
-    listRecycleBin: () => client.varro.recycleBin.list(),
-    setRecycleBinEntries,
-    loadSessionStatuses: () => client.session.status(),
-    setSessionStatuses: (statuses) => setState('sessionStatus', statuses),
-    getSessions: () => state.sessions,
     updateUsageLimitState,
     logError,
   });
@@ -393,20 +319,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await dataLoaders.refreshRoutingState();
   }
 
-  const sessionMcpOperations = createSessionMcpOperations({
-    getSelectedMcpsForSession,
-    getMcpStatus: () => state.mcpStatus,
+  const sessionMcpOperations = new SessionMcpOperations({
+    getSelectedMcpsForSession: routingStore.getSelectedMcpsForSession,
+    getMcpStatus: () => appStore.state.mcpStatus,
     loadMcps,
-    getAvailableMcpNames,
+    getAvailableMcpNames: routingStore.getAvailableMcpNames,
     connectMcp: (name) => client.mcp.connect(name),
     disconnectMcp: (name) => client.mcp.disconnect(name),
     logError,
-    setSelectedMcpsForSession,
+    setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
   });
 
   const { syncSessionMcps } = sessionMcpOperations;
 
-  async function applySessionMcps(names: string[], sessionId = state.activeSessionId) {
+  async function applySessionMcps(names: string[], sessionId = appStore.state.activeSessionId) {
     await sessionMcpOperations.applySessionMcps(names, sessionId);
   }
 
@@ -424,30 +350,36 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       ]);
     },
     hydrateSessionStatuses,
-    getActiveSessionId: () => state.activeSessionId,
-    getPersistedActiveSessionId,
-    hasSession: (sessionId) => state.sessions.some((session) => session.id === sessionId),
+    getActiveSessionId: () => appStore.state.activeSessionId,
+    getPersistedActiveSessionId: sessionStore.getPersistedActiveSessionId,
+    hasSession: (sessionId) => appStore.state.sessions.some((session) => session.id === sessionId),
     selectSession: async (sessionId) => {
       await selectSession(sessionId);
     },
     setInitialized: (value) => {
       initialized = value;
     },
-    setError,
+    setError: uiStore.setError,
     nextConnectionGeneration: () => ++connectionGeneration,
     isCurrentConnectionGeneration: (generation) =>
       isCurrentGeneration(generation, connectionGeneration),
-    consumeInterruptedSessionIds,
-    getSessionStatus: (sessionId) => state.sessionStatus[sessionId],
-    hasPendingQuestion: (sessionId) => state.questions.some((item) => item.sessionID === sessionId),
+    consumeInterruptedSessionIds: appStore.consumeInterruptedSessionIds,
+    getSessionStatus: (sessionId) => appStore.state.sessionStatus[sessionId],
+    hasPendingQuestion: (sessionId) =>
+      appStore.state.questions.some((item) => item.sessionID === sessionId),
     hasPendingPermission: (sessionId) =>
-      state.permissions.some((item) => item.sessionID === sessionId),
+      appStore.state.permissions.some((item) => item.sessionID === sessionId),
     loadSessionMessages: (sessionId) => client.session.messages(sessionId),
     logError,
     syncSessionMcps,
     resolveModel: (id) =>
-      resolveSelectedModel(getSelectedModelForSession(id), state.providers, state.providerDefaults),
-    resolveAgent: (id) => getSelectedAgentForSession(id) || getDefaultPrimaryAgentNameFromState(),
+      routingStore.resolveSelectedModel(
+        routingStore.getSelectedModelForSession(id),
+        appStore.state.providers,
+        appStore.state.providerDefaults
+      ),
+    resolveAgent: (id) =>
+      routingStore.getSelectedAgentForSession(id) || getDefaultPrimaryAgentNameFromState(),
     sendAsync: (id, body) => client.session.sendAsync(id, body),
     syncSession,
     recheckSessionStatus,
@@ -457,7 +389,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await connectionBootstrapOperations.continueInterruptedSession(sessionId);
   }
 
-  const sessionSendOperations = createSessionSendOperations({
+  const sessionSendOperations = new SessionSendOperations({
     createSession: (initialPermissionMode) => createSession(undefined, initialPermissionMode),
     clearPendingAbort,
     resetTodoSync,
@@ -480,39 +412,41 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     });
   }
 
-  const sessionSyncOperations = createSessionSyncOperations(
+  const sessionSyncOperations = new SessionSyncOperations(
     {
-      getActiveSessionId: () => state.activeSessionId,
-      setActiveSessionId: (activeSessionId) => setState('activeSessionId', activeSessionId),
-      persistActiveSessionId,
-      markSessionSeen,
-      clearDraftCurrentDocumentState,
+      getActiveSessionId: () => appStore.state.activeSessionId,
+      setActiveSessionId: sessionStore.setActiveSessionId,
+      persistActiveSessionId: sessionStore.persistActiveSessionId,
+      markSessionSeen: sessionStore.markSessionSeen,
+      clearDraftCurrentDocumentState: composerStore.clearDraftCurrentDocumentState,
       resetToolCallExpansionState,
       resolvePersistedAgent: (sessionId) => ({
-        persistedAgent: getSelectedAgentForSession(sessionId),
-        fallbackAgent: getPersistedSelectedAgent() || getDefaultPrimaryAgentNameFromState(),
+        persistedAgent: routingStore.getSelectedAgentForSession(sessionId),
+        fallbackAgent:
+          routingStore.getPersistedSelectedAgent() || getDefaultPrimaryAgentNameFromState(),
       }),
       applySelectedAgent: (agent, sessionId) =>
-        setSelectedAgent(agent, { sessionId, persistGlobal: false }),
+        routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
       resolvePersistedModel: (sessionId) =>
-        resolveSelectedModel(
-          getSelectedModelForSession(sessionId),
-          state.providers,
-          state.providerDefaults
+        routingStore.resolveSelectedModel(
+          routingStore.getSelectedModelForSession(sessionId),
+          appStore.state.providers,
+          appStore.state.providerDefaults
         ),
       resolveFallbackModel: () =>
-        resolveSelectedModel(getPersistedSelectedModel(), state.providers, state.providerDefaults),
+        routingStore.resolveSelectedModel(
+          routingStore.getPersistedSelectedModel(),
+          appStore.state.providers,
+          appStore.state.providerDefaults
+        ),
       applySelectedModel: (model, sessionId) =>
-        setSelectedModel(model, { sessionId, persistGlobal: false }),
-      getConnectedMcpNames: () =>
-        Object.entries(state.mcpStatus)
-          .filter(([, value]) => value?.status === 'connected')
-          .map(([name]) => name),
-      hasSelectedMcps: (sessionId) => !!getSelectedMcpsForSession(sessionId),
-      setSelectedMcpsForSession,
+        routingStore.setSelectedModel(model, { sessionId, persistGlobal: false }),
+      getConnectedMcpNames: routingStore.getConnectedMcpNames,
+      hasSelectedMcps: (sessionId) => !!routingStore.getSelectedMcpsForSession(sessionId),
+      setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
       syncSessionMcps,
       resetTodoSync,
-      clearMessages,
+      clearMessages: sessionStore.clearMessages,
       loadSession: async (sessionId) => {
         const [session, messages] = await Promise.all([
           client.session.get(sessionId),
@@ -523,33 +457,29 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       isCurrentSelectionGeneration: (generation) =>
         isCurrentGeneration(generation, sessionSelectionGeneration),
       upsertSession,
-      setMessagesIncremental,
-      syncFailedSessionsFromMessages,
-      requestMessageListScrollToBottom,
-      deriveSelectedAgentFromMessages: (messages) => deriveSelectedAgentFromMessages(messages),
+      setMessagesIncremental: sessionStore.setMessagesIncremental,
+      syncFailedSessionsFromMessages: sessionStore.syncFailedSessionsFromMessages,
+      requestMessageListScrollToBottom: uiStore.requestMessageListScrollToBottom,
+      deriveSelectedAgentFromMessages,
       deriveSelectedModelFromMessages: (messages) =>
         resolveMessagesSelectedModel(
           messages,
-          state.providers,
-          state.providerDefaults,
+          appStore.state.providers,
+          appStore.state.providerDefaults,
           deriveSelectedModelFromMessages
         ),
       syncTodosFromMessages,
       loadQuestions: async () => {
         await loadQuestions().catch((err) => logError('loadQuestions', err));
       },
-      loadSessionStatuses: async () =>
-        client.session.status().catch((err) => {
-          logError('session.status', err);
-          return {} as Record<string, SessionStatus>;
-        }),
+      loadSessionStatuses: async () => client.session.status(),
       mergeSessionStatuses: (statuses) =>
-        setState('sessionStatus', (current) => ({ ...current, ...statuses })),
+        appStore.setState('sessionStatus', (current) => ({ ...current, ...statuses })),
       updateUsageLimitState,
-      startLoading,
-      stopLoading,
-      setError,
-      getSessionStatus: (id) => state.sessionStatus[id],
+      startLoading: uiStore.startLoading,
+      stopLoading: uiStore.stopLoading,
+      setError: uiStore.setError,
+      getSessionStatus: (id) => appStore.state.sessionStatus[id],
       loadSessionMessages: (id) => client.session.messages(id),
       handoffTodosToMessages,
       loadSessionMetadata: (id) => client.session.get(id),
@@ -561,126 +491,126 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   );
 
-  const sessionControlOperations = createSessionControlOperations({
-    getActiveSessionId: () => state.activeSessionId,
+  const sessionControlOperations = new SessionControlOperations({
+    getActiveSessionId: () => appStore.state.activeSessionId,
     sendMessage,
-    getSessionTreeIds,
-    getSelectedAgentForSession,
-    skipPlanSession,
-    getSessionStatus: (sessionId) => state.sessionStatus[sessionId],
-    getSessionUsageLimit: (sessionId) => state.sessionUsageLimits[sessionId],
+    getSessionTreeIds: sessionStore.getSessionTreeIds,
+    getSelectedAgentForSession: routingStore.getSelectedAgentForSession,
+    skipPlanSession: sessionStore.skipPlanSession,
+    getSessionStatus: (sessionId) => appStore.state.sessionStatus[sessionId],
+    getSessionUsageLimit: (sessionId) => appStore.state.sessionUsageLimits[sessionId],
     markPendingAbortTree,
     setSessionStatusEntry,
-    stopLoading,
+    stopLoading: uiStore.stopLoading,
     abortRemoteSession: (sessionId) => client.session.abort(sessionId),
     clearPendingAbortTree,
-    setSessionUsageLimit,
+    setSessionUsageLimit: sessionStore.setSessionUsageLimit,
     logError,
-    getMessages: () => state.messages,
-    startLoading,
+    getMessages: () => appStore.state.messages,
+    startLoading: uiStore.startLoading,
     revertSession: (sessionId, messageId) => client.session.revert(sessionId, messageId),
     syncSession,
     syncSessionMessages,
-    setError,
+    setError: uiStore.setError,
     unrevertSession: (sessionId) => client.session.unrevert(sessionId),
     upsertSession,
     clearPendingAbort,
     resolveSelectedModel: () =>
-      resolveSelectedModel(state.selectedModel, state.providers, state.providerDefaults),
-    setSessionCompacting,
+      routingStore.resolveSelectedModel(
+        appStore.state.selectedModel,
+        appStore.state.providers,
+        appStore.state.providerDefaults
+      ),
+    setSessionCompacting: sessionStore.setSessionCompacting,
     compactRemoteSession: (sessionId, input) => client.session.compact(sessionId, input),
-    getSession: (sessionId) => state.sessions.find((session) => session.id === sessionId),
+    getSession: (sessionId) => appStore.state.sessions.find((session) => session.id === sessionId),
   });
 
-  const sessionActionOperations = createSessionActionOperations({
-    getActiveSessionId: () => state.activeSessionId,
+  const sessionActionOperations = new SessionActionOperations({
+    getActiveSessionId: () => appStore.state.activeSessionId,
     getBuildAgent: getBuildAgentNameFromState,
-    setError,
-    clearSkippedPlanSession,
+    setError: uiStore.setError,
+    clearSkippedPlanSession: sessionStore.clearSkippedPlanSession,
     applySelectedAgent: (agent, sessionId) =>
-      setSelectedAgent(agent, { sessionId, persistGlobal: false }),
+      routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
     sendMessage,
     openPlan: (content) => client.varro.openPlan(content),
-    createSession: () => createSession(undefined, getPermissionModeForSession(null)),
-    getMessageCount: () => state.messages.length,
-    hasCommand: (commandName) => state.commands.some((item) => item.name === commandName),
-    startLoading,
+    createSession: () =>
+      createSession(undefined, permissionsStore.getPermissionModeForSession(null)),
+    getMessageCount: () => appStore.state.messages.length,
+    hasCommand: routingStore.hasCommand,
+    startLoading: uiStore.startLoading,
     runSessionCommand: (sessionId, input) => client.session.command(sessionId, input),
-    shouldApplyToActiveSession: (sessionId) => state.activeSessionId === sessionId,
-    upsertMessageInfo,
-    upsertPart,
+    shouldApplyToActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
+    upsertMessageInfo: sessionStore.upsertMessageInfo,
+    upsertPart: sessionStore.upsertPart,
     syncTodosFromMessages,
-    requestMessageListScrollToBottom,
+    requestMessageListScrollToBottom: uiStore.requestMessageListScrollToBottom,
     syncSession,
     recheckSessionStatus,
-    stopLoading,
+    stopLoading: uiStore.stopLoading,
   });
 
-  const sessionApprovalOperations = createSessionApprovalOperations({
-    getPermissions: () => state.permissions,
+  const sessionApprovalOperations = new SessionApprovalOperations({
+    getPermissions: () => appStore.state.permissions,
     respondRemotePermission: (sessionId, permissionId, response) =>
       client.session.respondPermission(sessionId, permissionId, response),
-    removePermission,
-    setError,
+    removePermission: permissionsStore.removePermission,
+    setError: uiStore.setError,
     replyQuestion: (requestId, answers) => client.question.reply(requestId, answers),
-    removeQuestion,
+    removeQuestion: permissionsStore.removeQuestion,
     rejectRemoteQuestion: (requestId) => client.question.reject(requestId),
-    getPermissionModeForSession,
-    getDraftPermissionMode: draftPermissionMode,
-    setPermissionModeForSession,
-    setDraftPermissionMode,
-    saveProjectPermissionMode,
+    getPermissionModeForSession: permissionsStore.getPermissionModeForSession,
+    getDraftPermissionMode: permissionsStore.draftPermissionMode,
+    setPermissionModeForSession: permissionsStore.setPermissionModeForSession,
+    setDraftPermissionMode: permissionsStore.setDraftPermissionMode,
+    saveProjectPermissionMode: permissionsStore.saveProjectPermissionMode,
     updateSessionPermission: (sessionId, input) => client.session.update(sessionId, input),
     upsertSession,
     getPermissionsForSession: (sessionId) =>
-      state.permissions.filter((permission) => permission.sessionID === sessionId),
+      appStore.state.permissions.filter((permission) => permission.sessionID === sessionId),
   });
 
-  const sessionManagementOperations = createSessionManagementOperations({
-    getActiveSessionId: () => state.activeSessionId,
+  const sessionManagementOperations = new SessionManagementOperations({
+    getActiveSessionId: () => appStore.state.activeSessionId,
     createRemoteSession: (body) => client.session.create(body),
     buildCreatePermission: (mode) => getSessionPermissionRulesForMode(mode, 'create'),
     upsertSession,
     resetToolCallExpansionState,
-    setActiveSessionId: (sessionId) => setState('activeSessionId', sessionId),
-    clearDraftCurrentDocumentState,
-    adoptDraftCurrentDocumentState,
+    setActiveSessionId: sessionStore.setActiveSessionId,
+    clearDraftCurrentDocumentState: composerStore.clearDraftCurrentDocumentState,
+    adoptDraftCurrentDocumentState: composerStore.adoptDraftCurrentDocumentState,
     setSessionStatusEntry,
-    setSessionUsageLimit,
-    persistActiveSessionId,
-    markSessionSeen,
-    getPersistedSelectedModel,
-    setSelectedModel,
+    setSessionUsageLimit: sessionStore.setSessionUsageLimit,
+    persistActiveSessionId: sessionStore.persistActiveSessionId,
+    markSessionSeen: sessionStore.markSessionSeen,
+    getPersistedSelectedModel: routingStore.getPersistedSelectedModel,
+    setSelectedModel: routingStore.setSelectedModel,
     resolveDefaultAgent: () =>
       getBuildAgentNameFromState() ||
-      getPersistedSelectedAgent() ||
+      routingStore.getPersistedSelectedAgent() ||
       getDefaultPrimaryAgentNameFromState(),
-    setSelectedAgent,
-    getConnectedMcpNames: () =>
-      Object.entries(state.mcpStatus)
-        .filter(([, value]) => value?.status === 'connected')
-        .map(([name]) => name),
-    setSelectedMcpsForSession,
-    setPermissionModeForSession,
-    resetDraftPermissionMode,
+    setSelectedAgent: routingStore.setSelectedAgent,
+    getConnectedMcpNames: routingStore.getConnectedMcpNames,
+    setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
+    setPermissionModeForSession: permissionsStore.setPermissionModeForSession,
+    resetDraftPermissionMode: permissionsStore.resetDraftPermissionMode,
     resetTodoSync,
-    clearMessages,
-    stopLoading,
-    setError,
-    getSessions: () => state.sessions,
+    clearMessages: sessionStore.clearMessages,
+    stopLoading: uiStore.stopLoading,
+    setError: uiStore.setError,
+    getSessions: () => appStore.state.sessions,
     getDeletedSessionTreeIds,
     getNextSessionIdAfterDeletion,
     deleteRemoteSession: (sessionId) => client.session.delete(sessionId),
-    hideDeletedSessionTree: (sessionId) => {
-      hideDeletedSessionTree(sessionId);
-    },
+    hideDeletedSessionTree,
     loadRecycleBin,
     selectSession,
     logError,
     restoreRecycleBinEntry: (rootID) => client.varro.recycleBin.restore(rootID),
     loadSessions,
     hydrateSessionStatuses,
-    getRecycleBinEntries: () => state.recycleBinEntries,
+    getRecycleBinEntries: () => appStore.state.recycleBinEntries,
     deleteRecycleBinEntry: (rootID) => client.varro.recycleBin.delete(rootID),
     clearDeletedSessionState,
     emptyRecycleBin: () => client.varro.recycleBin.empty(),
@@ -700,7 +630,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function createSession(
     title?: string,
-    initialPermissionMode = getPermissionModeForSession(null)
+    initialPermissionMode = permissionsStore.getPermissionModeForSession(null)
   ): Promise<string | null> {
     return sessionManagementOperations.createSession(title, initialPermissionMode);
   }
@@ -725,15 +655,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await sessionSendOperations.sendMessage(text, options);
   }
 
-  async function retryMessage(messageId: string, sessionId = state.activeSessionId) {
+  async function retryMessage(messageId: string, sessionId = appStore.state.activeSessionId) {
     await sessionSendOperations.retryMessage(messageId, sessionId);
   }
 
-  async function implementPlan(prompt: string, sessionId = state.activeSessionId) {
+  async function implementPlan(prompt: string, sessionId = appStore.state.activeSessionId) {
     await sessionActionOperations.implementPlan(prompt, sessionId);
   }
 
-  async function openPlan(markdown: string, sessionId = state.activeSessionId) {
+  async function openPlan(markdown: string, sessionId = appStore.state.activeSessionId) {
     await sessionActionOperations.openPlan(markdown, sessionId);
   }
 
@@ -780,7 +710,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function updatePermissionModeForSession(
     mode: 'default' | 'full',
-    sessionId = state.activeSessionId
+    sessionId = appStore.state.activeSessionId
   ) {
     await sessionApprovalOperations.updatePermissionModeForSession(
       mode,

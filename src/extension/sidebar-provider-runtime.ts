@@ -1,4 +1,3 @@
-import type * as vscode from 'vscode';
 import type { ServerEvent, ServerStatus } from '../shared/protocol';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
@@ -53,7 +52,7 @@ export class SidebarProviderRuntime {
     }
   }
 
-  async cleanupExpiredRecycleBin(status: ServerStatus, onUpdate: () => void) {
+  async cleanupExpiredRecycleBin(status: ServerStatus) {
     if (this.recycleBinMaintenanceInFlight || status.state !== 'running') return;
     const now = Date.now();
     if (now - this.lastRecycleBinCleanupAt < this.recycleBinCleanupIntervalMs) return;
@@ -67,7 +66,6 @@ export class SidebarProviderRuntime {
         this.sessionState.removeSessions(
           removed.flatMap((entry) => entry.sessions.map((session) => session.id))
         );
-        onUpdate();
       }
     } finally {
       this.recycleBinMaintenanceInFlight = false;
@@ -76,23 +74,5 @@ export class SidebarProviderRuntime {
 
   shouldSuppressServerEvent(event: ServerEvent) {
     return getSessionIdsForEvent(event).some((sessionID) => this.sessionTrash.isHidden(sessionID));
-  }
-
-  recycleBinEntries() {
-    return this.sessionTrash.list();
-  }
-
-  postApiResponse(
-    view: vscode.WebviewView | undefined,
-    requestGeneration: number,
-    webviewLoadGeneration: number,
-    post: (msg: {
-      type: 'api/response';
-      payload: { id: number; data?: unknown; error?: string };
-    }) => void,
-    payload: { id: number; data?: unknown; error?: string }
-  ) {
-    if (!view || requestGeneration !== webviewLoadGeneration) return;
-    post({ type: 'api/response', payload });
   }
 }

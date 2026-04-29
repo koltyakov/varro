@@ -107,7 +107,6 @@ afterEach(() => {
   setState('activeSessionId', null);
   setState('messages', []);
   setState('queuedMessages', []);
-  setState('pendingAttentionSessionIds', []);
   setState('streamingPartId', null);
   setState('streamingText', '');
   setState('compactingSessionIds', []);

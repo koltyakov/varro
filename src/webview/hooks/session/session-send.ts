@@ -1,32 +1,23 @@
-import type { DroppedFile, EditorContext } from '../../shared/protocol';
+import type { DroppedFile, EditorContext } from '../../../shared/protocol';
 import {
   formatSelectionReference,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
   subtractContextLineRanges,
-} from '../../shared/context-files';
-import {
-  clearClipboardImages,
-  getCurrentDocumentEnabled,
-  getPermissionModeForSession,
-  requestMessageListScrollToBottom,
-  setError,
-  setSelectedModel,
-  setSessionFailed,
-  setSessionUsageLimit,
-  setState,
-  startLoading,
-  state,
-  stopLoading,
-  resolveSelectedModel,
-} from '../lib/state';
-import type { ClipboardImage, SelectedModel } from '../lib/app-state-types';
-import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
-import { postMessage } from '../lib/bridge';
-import { modelSupportsVision } from '../lib/model-capabilities';
-import { getPreferredVariant } from '../lib/model-variants';
-import { getWorkspaceRelativePath, isSamePath } from '../lib/path-display';
-import type { Provider } from '../types';
+} from '../../../shared/context-files';
+import { appStore } from '../../lib/stores/app-store';
+import { composerStore } from '../../lib/stores/composer-store';
+import { permissionsStore } from '../../lib/stores/permissions-store';
+import { routingStore } from '../../lib/stores/routing-store';
+import { sessionStore } from '../../lib/stores/session-store';
+import { uiStore } from '../../lib/stores/ui-store';
+import type { ClipboardImage, SelectedModel } from '../../lib/app-state-types';
+import { postMessage } from '../../lib/bridge';
+import { getPromptTextForClipboardImages } from '../../lib/clipboard-images';
+import { modelSupportsVision } from '../../lib/model-capabilities';
+import { getPreferredVariant } from '../../lib/model-variants';
+import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
+import type { Provider } from '../../types';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -86,7 +77,7 @@ export function buildSessionSendBody(
   isCurrentDocumentEnabled: (sessionId: string) => boolean,
   options?: SendFlowOptions
 ): { body: SessionSendBody; effectiveModel: SelectedModel | null } | null {
-  const effectiveModel = resolveSelectedModel(
+  const effectiveModel = routingStore.resolveSelectedModel(
     composerState.selectedModel,
     composerState.providers,
     composerState.providerDefaults
@@ -206,79 +197,78 @@ export function buildSessionSendBody(
   return { body, effectiveModel };
 }
 
-export function createSessionSendOperations(deps: StateBoundSendDependencies) {
-  const sendMessage = async (text: string, options?: SendFlowOptions) => {
+export class SessionSendOperations {
+  constructor(private readonly deps: StateBoundSendDependencies) {}
+
+  readonly sendMessage = async (text: string, options?: SendFlowOptions) => {
     await sendMessageWithDependencies(
       {
-        getActiveSessionId: () => state.activeSessionId,
-        getDefaultPermissionMode: () => getPermissionModeForSession(null),
-        createSession: deps.createSession,
-        clearPendingAbort: deps.clearPendingAbort,
-        syncSessionMcps: deps.syncSessionMcps,
+        getActiveSessionId: () => appStore.state.activeSessionId,
+        getDefaultPermissionMode: () => permissionsStore.getPermissionModeForSession(null),
+        createSession: this.deps.createSession,
+        clearPendingAbort: this.deps.clearPendingAbort,
+        syncSessionMcps: this.deps.syncSessionMcps,
         buildSendPayload: (sessionId, nextText, nextOptions) =>
           buildSessionSendBody(
             {
-              selectedAgent: state.selectedAgent,
-              selectedModel: state.selectedModel,
-              providers: state.providers,
-              providerDefaults: state.providerDefaults,
-              editorContext: state.editorContext,
-              terminalSelection: state.terminalSelection,
-              droppedFiles: state.droppedFiles,
-              clipboardImages: state.clipboardImages,
+              selectedAgent: appStore.state.selectedAgent,
+              selectedModel: appStore.state.selectedModel,
+              providers: appStore.state.providers,
+              providerDefaults: appStore.state.providerDefaults,
+              editorContext: appStore.state.editorContext,
+              terminalSelection: appStore.state.terminalSelection,
+              droppedFiles: appStore.state.droppedFiles,
+              clipboardImages: appStore.state.clipboardImages,
             },
             sessionId,
             nextText,
-            getCurrentDocumentEnabled,
+            composerStore.getCurrentDocumentEnabled,
             nextOptions
           ),
-        requestMessageListScrollToBottom,
-        startLoading,
-        setError,
-        applyEffectiveModel: (model, sessionId) => setSelectedModel(model, { sessionId }),
-        resetTodoSync: deps.resetTodoSync,
-        clearTodos: () => setState('todos', []),
-        clearSessionUsageLimit: (sessionId) => setSessionUsageLimit(sessionId, null),
-        sendAsync: deps.sendAsync,
-        clearDroppedFiles: () => setState('droppedFiles', []),
-        clearTerminalSelection: () => setState('terminalSelection', null),
-        clearClipboardImages,
+        requestMessageListScrollToBottom: uiStore.requestMessageListScrollToBottom,
+        startLoading: uiStore.startLoading,
+        setError: uiStore.setError,
+        applyEffectiveModel: (model, sessionId) =>
+          routingStore.setSelectedModel(model, { sessionId }),
+        resetTodoSync: this.deps.resetTodoSync,
+        clearTodos: composerStore.clearTodos,
+        clearSessionUsageLimit: (sessionId) => sessionStore.setSessionUsageLimit(sessionId, null),
+        sendAsync: this.deps.sendAsync,
+        clearDroppedFiles: composerStore.clearDroppedFiles,
+        clearTerminalSelection: composerStore.clearTerminalSelection,
+        clearClipboardImages: composerStore.clearClipboardImages,
         postFilesClear: () => postMessage({ type: 'files/clear' }),
         postTerminalSelectionClear: () => postMessage({ type: 'terminal-selection/clear' }),
-        syncSession: deps.syncSession,
-        syncSessionMessages: deps.syncSessionMessages,
-        recheckSessionStatus: deps.recheckSessionStatus,
-        stopLoading,
+        syncSession: this.deps.syncSession,
+        syncSessionMessages: this.deps.syncSessionMessages,
+        recheckSessionStatus: this.deps.recheckSessionStatus,
+        stopLoading: uiStore.stopLoading,
       },
       text,
       options
     );
   };
 
-  const retryMessage = async (messageId: string, sessionId = state.activeSessionId) => {
+  readonly retryMessage = async (messageId: string, sessionId = appStore.state.activeSessionId) => {
     await retryMessageWithDependencies(
       {
-        getActiveSessionId: () => state.activeSessionId,
+        getActiveSessionId: () => appStore.state.activeSessionId,
         hasAssistantMessage: (targetMessageId) =>
-          state.messages.some(
+          appStore.state.messages.some(
             (entry) => entry.info.role === 'assistant' && entry.info.id === targetMessageId
           ),
-        startLoading,
-        setError,
-        clearPendingAbort: deps.clearPendingAbort,
-        clearSessionUsageLimit: (targetSessionId) => setSessionUsageLimit(targetSessionId, null),
-        setSessionFailed,
-        continueInterruptedSession: deps.continueInterruptedSession,
-        stopLoading,
+        startLoading: uiStore.startLoading,
+        setError: uiStore.setError,
+        clearPendingAbort: this.deps.clearPendingAbort,
+        clearSessionUsageLimit: (targetSessionId) =>
+          sessionStore.setSessionUsageLimit(targetSessionId, null),
+        setSessionFailed: sessionStore.setSessionFailed,
+        continueInterruptedSession: this.deps.continueInterruptedSession,
+        stopLoading: uiStore.stopLoading,
       },
       messageId,
       sessionId
     );
-  };
-
-  return {
-    sendMessage,
-    retryMessage,
   };
 }
 

@@ -27,16 +27,17 @@ import { SessionStateManager } from './session-state-manager';
 
 type WorkspaceStateMock = {
   get: ReturnType<typeof vi.fn>;
-  update: ReturnType<typeof vi.fn>;
+  set: ReturnType<typeof vi.fn>;
+  remove: ReturnType<typeof vi.fn>;
 };
 
 function createManager(shouldShow: () => boolean = () => true) {
   const workspaceState = {
-    get: vi.fn((_key: string, fallback?: unknown) => fallback),
-    update: vi.fn(() => Promise.resolve()),
+    get: vi.fn(() => undefined),
+    set: vi.fn(() => Promise.resolve()),
+    remove: vi.fn(() => Promise.resolve()),
   };
   const listener = {
-    onPendingAttentionChange: vi.fn(),
     onStatusChange: vi.fn(),
   };
   return new SessionStateManager(workspaceState as never, listener, { shouldShow });
@@ -164,13 +165,13 @@ describe('SessionStateManager notifications', () => {
 
   it('persists trimmed interrupted sessions and blocking requests', async () => {
     const workspaceState: WorkspaceStateMock = {
-      get: vi.fn((_key: string, fallback?: unknown) => fallback),
-      update: vi.fn(() => Promise.resolve()),
+      get: vi.fn(() => undefined),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
     };
     const manager = new SessionStateManager(
       workspaceState as never,
       {
-        onPendingAttentionChange: vi.fn(),
         onStatusChange: vi.fn(),
       },
       { shouldShow: () => false }
@@ -210,10 +211,10 @@ describe('SessionStateManager notifications', () => {
 
     await manager.persist();
 
-    const interruptedUpdate = [...workspaceState.update.mock.calls]
+    const interruptedUpdate = [...workspaceState.set.mock.calls]
       .toReversed()
       .find((call) => call[0] === 'varro.interruptedSessions') as [string, unknown] | undefined;
-    const blockingUpdate = [...workspaceState.update.mock.calls]
+    const blockingUpdate = [...workspaceState.set.mock.calls]
       .toReversed()
       .find((call) => call[0] === 'varro.blockingRequests') as [string, unknown] | undefined;
 

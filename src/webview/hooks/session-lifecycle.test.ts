@@ -68,12 +68,12 @@ vi.mock('../lib/state', async () => {
 import {
   applySessions,
   clearDeletedSessionState,
-  createSessionLifecycleOperations,
   getDeletedSessionTreeIds,
   getNextSessionIdAfterDeletion,
   normalizeProjectPath,
+  SessionLifecycleOperations,
   upsertSession,
-} from './session-lifecycle';
+} from './session/session-lifecycle';
 
 function session(id: string, directory = '/repo', updated = 0, parentID?: string): Session {
   return {
@@ -213,7 +213,7 @@ describe('session-lifecycle helpers', () => {
     state.activeSessionId = 'session-2';
     state.sessions = [session('session-1', '/repo-a', 1), session('session-2', '/repo-b', 2)];
 
-    const operations = createSessionLifecycleOperations({
+    const operations = new SessionLifecycleOperations({
       getCurrentWorkspacePath: () => '/repo-a',
       clearPendingAbort,
       clearPendingAbortTree: vi.fn(),

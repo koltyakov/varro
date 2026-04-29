@@ -241,7 +241,6 @@ afterEach(() => {
   setState('agents', []);
   setState('allAgents', []);
   setState('queuedMessages', []);
-  setState('pendingAttentionSessionIds', []);
   setState('streamingPartId', null);
   setState('streamingText', '');
   setState('sessionStatus', reconcile({}));

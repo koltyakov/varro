@@ -30,7 +30,6 @@ vi.mock('../lib/state', async () => {
 });
 
 import {
-  createSessionStatusOperations,
   applyUsageLimitNoticeWithDependencies,
   clearPendingAbortTreeWithDependencies,
   clearPendingAbortWithDependencies,
@@ -39,9 +38,10 @@ import {
   markPendingAbortTreeWithDependencies,
   markPendingAbortWithDependencies,
   recheckSessionStatusWithDependencies,
+  SessionStatusOperations,
   shouldIgnorePendingAbortStatusWithDependencies,
   updateUsageLimitStateWithDependencies,
-} from './session-status';
+} from './session/session-status';
 
 describe('session status helpers', () => {
   it('tracks pending abort retries and clears them', () => {
@@ -336,7 +336,7 @@ describe('session status helpers', () => {
     };
     state.messages = [];
 
-    const operations = createSessionStatusOperations({
+    const operations = new SessionStatusOperations({
       pendingAbortRetryAttempts,
       deriveUsageLimitNoticeContext: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
       refreshProviderLimit,

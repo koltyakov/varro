@@ -5,7 +5,6 @@ import type { MessageRouterCallbacks } from './message-router';
 import type { RestProxy } from './rest-proxy';
 import type { SessionExportService } from './session-export-service';
 import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
-import type { SidebarProviderUiState } from './sidebar-provider-ui-state';
 
 type ConfigPayload = Extract<
   Parameters<MessageRouterCallbacks['updateConfig']>[0],
@@ -16,7 +15,9 @@ type OpenPathPayload = Parameters<MessageRouterCallbacks['openPath']>[0];
 
 export interface SidebarProviderActionDeps {
   contextProvider: ContextProvider;
-  uiState: SidebarProviderUiState;
+  webviewSession: {
+    setFocus(focused: boolean): void;
+  };
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
   restProxy: RestProxy;
@@ -41,7 +42,7 @@ export function createSidebarProviderActions(
   return {
     ready: () => deps.handleReadyMessage(),
     setWebviewFocus: (focused) => {
-      deps.uiState.webviewHasFocus = focused;
+      deps.webviewSession.setFocus(focused);
     },
     requestContext: () => {
       deps.postContext();

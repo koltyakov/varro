@@ -1,4 +1,4 @@
-import type { Message, Part } from '../types';
+import type { Message, Part } from '../../types';
 
 type SessionEntry = { info: Message; parts: Part[] };
 
@@ -145,7 +145,7 @@ export async function runSlashCommandWithDependencies(
   }
 }
 
-export function createSessionActionOperations(deps: {
+type SessionActionDependencies = {
   getActiveSessionId(): string | null;
   getBuildAgent(): string | null;
   setError(message: string | null): void;
@@ -169,63 +169,68 @@ export function createSessionActionOperations(deps: {
   syncSession(sessionId: string): Promise<void>;
   recheckSessionStatus(sessionId: string): Promise<void>;
   stopLoading(): void;
-}) {
-  return {
-    implementPlan: async (prompt: string, sessionId: string | null) => {
-      await implementPlanWithDependencies(
-        {
-          getActiveSessionId: deps.getActiveSessionId,
-          getBuildAgent: deps.getBuildAgent,
-          setError: deps.setError,
-          clearSkippedPlanSession: deps.clearSkippedPlanSession,
-          applySelectedAgent: deps.applySelectedAgent,
-          sendMessage: deps.sendMessage,
-        },
-        prompt,
-        sessionId
-      );
-    },
-    openPlan: async (markdown: string, sessionId: string | null) => {
-      await openPlanWithDependencies(
-        {
-          getActiveSessionId: deps.getActiveSessionId,
-          setError: deps.setError,
-          openPlan: deps.openPlan,
-        },
-        markdown,
-        sessionId
-      );
-    },
-    initSession: async () => {
-      await initSessionWithDependencies({
-        getActiveSessionId: deps.getActiveSessionId,
-        createSession: deps.createSession,
-        getMessageCount: deps.getMessageCount,
-        setError: deps.setError,
-        sendMessage: deps.sendMessage,
-      });
-    },
-    runSlashCommandByName: async (name: string, args: string) => {
-      return runSlashCommandWithDependencies(
-        {
-          hasCommand: deps.hasCommand,
-          getActiveSessionId: deps.getActiveSessionId,
-          createSession: deps.createSession,
-          startLoading: deps.startLoading,
-          runSessionCommand: deps.runSessionCommand,
-          shouldApplyToActiveSession: deps.shouldApplyToActiveSession,
-          upsertMessageInfo: deps.upsertMessageInfo,
-          upsertPart: deps.upsertPart,
-          syncTodosFromMessages: deps.syncTodosFromMessages,
-          requestMessageListScrollToBottom: deps.requestMessageListScrollToBottom,
-          syncSession: deps.syncSession,
-          recheckSessionStatus: deps.recheckSessionStatus,
-          stopLoading: deps.stopLoading,
-          setError: deps.setError,
-        },
-        name,
-        args
-      );
-    },
+};
+
+export class SessionActionOperations {
+  constructor(private readonly deps: SessionActionDependencies) {}
+
+  readonly implementPlan = async (prompt: string, sessionId: string | null) => {
+    await implementPlanWithDependencies(
+      {
+        getActiveSessionId: this.deps.getActiveSessionId,
+        getBuildAgent: this.deps.getBuildAgent,
+        setError: this.deps.setError,
+        clearSkippedPlanSession: this.deps.clearSkippedPlanSession,
+        applySelectedAgent: this.deps.applySelectedAgent,
+        sendMessage: this.deps.sendMessage,
+      },
+      prompt,
+      sessionId
+    );
+  };
+
+  readonly openPlan = async (markdown: string, sessionId: string | null) => {
+    await openPlanWithDependencies(
+      {
+        getActiveSessionId: this.deps.getActiveSessionId,
+        setError: this.deps.setError,
+        openPlan: this.deps.openPlan,
+      },
+      markdown,
+      sessionId
+    );
+  };
+
+  readonly initSession = async () => {
+    await initSessionWithDependencies({
+      getActiveSessionId: this.deps.getActiveSessionId,
+      createSession: this.deps.createSession,
+      getMessageCount: this.deps.getMessageCount,
+      setError: this.deps.setError,
+      sendMessage: this.deps.sendMessage,
+    });
+  };
+
+  readonly runSlashCommandByName = async (name: string, args: string) => {
+    return runSlashCommandWithDependencies(
+      {
+        hasCommand: this.deps.hasCommand,
+        getActiveSessionId: this.deps.getActiveSessionId,
+        createSession: this.deps.createSession,
+        startLoading: this.deps.startLoading,
+        runSessionCommand: this.deps.runSessionCommand,
+        shouldApplyToActiveSession: this.deps.shouldApplyToActiveSession,
+        upsertMessageInfo: this.deps.upsertMessageInfo,
+        upsertPart: this.deps.upsertPart,
+        syncTodosFromMessages: this.deps.syncTodosFromMessages,
+        requestMessageListScrollToBottom: this.deps.requestMessageListScrollToBottom,
+        syncSession: this.deps.syncSession,
+        recheckSessionStatus: this.deps.recheckSessionStatus,
+        stopLoading: this.deps.stopLoading,
+        setError: this.deps.setError,
+      },
+      name,
+      args
+    );
   };
 }

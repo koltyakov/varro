@@ -1,107 +1,162 @@
-import type * as vscode from 'vscode';
-import type {
-  DroppedFile,
-  ExtensionMessage,
-  ServerStatus,
-  WebviewMessage,
-} from '../shared/protocol';
-import type { SidebarProviderBridge } from './sidebar-provider-bridge';
-import type { SidebarProviderCommands } from './sidebar-provider-commands';
-import type { SidebarProviderCoordinator } from './sidebar-provider-coordinator';
-import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
-import type { SidebarProviderLifecycle } from './sidebar-provider-lifecycle';
-import type { SidebarProviderOrchestrator } from './sidebar-provider-orchestrator';
-import type { SidebarProviderPresenter } from './sidebar-provider-presenter';
-import type { SidebarProviderRuntime } from './sidebar-provider-runtime';
-import { setupSidebarProvider } from './sidebar-provider-setup';
-import type { SidebarProviderUiState } from './sidebar-provider-ui-state';
-import type { FileSearchService } from './file-search-service';
+import * as vscode from 'vscode';
+import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
-import type { MessageRouter } from './message-router';
+import { DroppedFilesService } from './dropped-files-service';
+import { FileSearchService } from './file-search-service';
+import { HostPersistence } from './host-persistence';
+import { MessageRouter } from './message-router';
+import { ProviderLimitService } from './provider-limit-service';
+import { RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
-import type { RestProxy } from './rest-proxy';
-import type { SessionExportService } from './session-export-service';
-import type { SessionStateManager } from './session-state-manager';
-import type { SessionTrashManager } from './session-trash-manager';
+import { ServerEventBridge } from './server-event-bridge';
+import { SessionExportService } from './session-export-service';
+import { SessionStateManager } from './session-state-manager';
+import { SessionTrashManager } from './session-trash-manager';
+import { createSidebarProviderActions } from './sidebar-provider-actions';
+import { SidebarProviderBridge } from './sidebar-provider-bridge';
+import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
+import { SidebarProviderRuntime } from './sidebar-provider-runtime';
+import { WebviewSession } from './webview-session';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
   private static readonly EXPORT_TIMEOUT_MS = 30_000;
   private static readonly RECYCLE_BIN_CLEANUP_INTERVAL_MS = 60_000;
-  private view?: vscode.WebviewView;
-  private _status: ServerStatus = { state: 'stopped' };
-  private themeDisposable?: vscode.Disposable;
-  private configDisposable?: vscode.Disposable;
+
+  private lastStatusBarStateKey = '';
   private readonly fileSearch: FileSearchService;
   private readonly sessionState: SessionStateManager;
   private readonly sessionTrash: SessionTrashManager;
-  private webviewDisposables: vscode.Disposable[] = [];
-  private windowStateDisposable?: vscode.Disposable;
-  private webviewLoadGeneration = 0;
   private readonly messageRouter: MessageRouter;
   private readonly restProxy: RestProxy;
-  private readonly sessionExportService: SessionExportService;
-  private readonly uiState: SidebarProviderUiState;
+  public readonly sessionExportService: SessionExportService;
   private readonly contextFilesState: SidebarProviderContextFiles;
   private readonly bridge: SidebarProviderBridge;
-  private readonly commands: SidebarProviderCommands;
-  private readonly lifecycle: SidebarProviderLifecycle;
-  private readonly orchestrator: SidebarProviderOrchestrator;
-  private readonly presenter: SidebarProviderPresenter;
   private readonly runtime: SidebarProviderRuntime;
-  private readonly coordinator: SidebarProviderCoordinator;
+  private readonly providerLimitService: ProviderLimitService;
+  private readonly webviewSession: WebviewSession;
+  private readonly serverEventBridge: ServerEventBridge;
+  private readonly droppedFilesService: DroppedFilesService;
+  private readonly configDisposable: vscode.Disposable;
+  private readonly windowStateDisposable: vscode.Disposable;
+  private readonly contextProvider: ContextProvider;
+
+  get view() {
+    return this.bridge.getView();
+  }
+
+  set view(value) {
+    this.bridge.setView(value);
+  }
 
   get blockingRequestsForWebview() {
-    return this.uiState.blockingRequestsForWebview;
+    return this.webviewSession.blockingRequestsForWebview;
   }
 
   set blockingRequestsForWebview(value) {
-    this.uiState.blockingRequestsForWebview = value;
+    this.webviewSession.blockingRequestsForWebview = value;
   }
 
   get interruptedSessionsForWebview() {
-    return this.uiState.interruptedSessionsForWebview;
+    return this.webviewSession.interruptedSessionsForWebview;
   }
 
   set interruptedSessionsForWebview(value) {
-    this.uiState.interruptedSessionsForWebview = value;
+    this.webviewSession.interruptedSessionsForWebview = value;
   }
 
   constructor(
-    private readonly extensionUri: vscode.Uri,
+    extensionUri: vscode.Uri,
     workspaceState: vscode.Memento,
     contextProvider: ContextProvider,
     server: OpenCodeServer,
     private readonly simulateNoProviders = false
   ) {
-    const setup = setupSidebarProvider({
-      extensionUri: this.extensionUri,
-      workspaceState,
-      contextProvider,
+    this.contextProvider = contextProvider;
+    const persistence = new HostPersistence(workspaceState);
+    this.droppedFilesService = new DroppedFilesService(contextProvider);
+    this.fileSearch = new FileSearchService();
+    this.providerLimitService = new ProviderLimitService(server);
+    this.bridge = new SidebarProviderBridge(extensionUri);
+    this.sessionTrash = new SessionTrashManager(persistence);
+    this.sessionState = new SessionStateManager(
+      persistence,
+      {
+        onStatusChange: () => this.updateStatusBarItem(),
+      },
+      {
+        shouldShow: () => !this.bridge.getView()?.visible,
+      }
+    );
+    this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
+    this.sessionExportService = new SessionExportService(server, SidebarProvider.EXPORT_TIMEOUT_MS);
+    this.runtime = new SidebarProviderRuntime(
       server,
-      simulateNoProviders: this.simulateNoProviders,
-      exportTimeoutMs: SidebarProvider.EXPORT_TIMEOUT_MS,
-      recycleBinCleanupIntervalMs: SidebarProvider.RECYCLE_BIN_CLEANUP_INTERVAL_MS,
-      callbacks: {
-        getView: () => this.view,
-        setView: (view) => {
-          this.view = view;
-        },
-        getStatus: () => this._status,
-        setStatus: (status) => {
-          this._status = status;
-        },
-        getWebviewLoadGeneration: () => this.webviewLoadGeneration,
-        incrementWebviewLoadGeneration: () => ++this.webviewLoadGeneration,
+      this.sessionState,
+      this.sessionTrash,
+      SidebarProvider.RECYCLE_BIN_CLEANUP_INTERVAL_MS
+    );
+
+    this.serverEventBridge = new ServerEventBridge(
+      server,
+      this.sessionState,
+      this.sessionTrash,
+      this.providerLimitService,
+      (message) => this.post(message),
+      () => this.updateStatusBarItem()
+    );
+
+    this.webviewSession = new WebviewSession(
+      this.bridge,
+      this.sessionState,
+      this.sessionTrash,
+      contextProvider,
+      this.contextFilesState,
+      {
         handleMessage: (message) => this.handleMessage(message),
-        renderHtml: () => this.getHtml(),
-        post: (message) => this.post(message),
+        ensureServerStarted: () => this.runtime.ensureServerStarted(),
+        readConfig: () => this.readConfig(),
+        currentTheme: () => this.currentTheme(),
+        renderStatus: () => this.serverEventBridge.getStatus(),
+        handleReadySideEffects: () => this.cleanupExpiredRecycleBin(),
+        handleVisibleSideEffects: () => this.cleanupExpiredRecycleBin(),
         updateStatusBarItem: () => this.updateStatusBarItem(),
-        cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
-        ensureServerStarted: () => this.ensureServerStarted(),
-        postApiResponse: (requestGeneration, payload) =>
-          this.postApiResponse(requestGeneration, payload),
-        postRecycleBinUpdate: () => this.postRecycleBinUpdate(),
+        postThemeUpdate: () =>
+          this.post({ type: 'theme/update', payload: { theme: this.currentTheme() } }),
+        onHidden: () => undefined,
+        resetStatusBarCache: () => {
+          this.lastStatusBarStateKey = '';
+        },
+      }
+    );
+
+    this.restProxy = new RestProxy({
+      server,
+      contextProvider,
+      providerLimitService: this.providerLimitService,
+      sessionState: this.sessionState,
+      sessionTrash: this.sessionTrash,
+      simulateNoProviders: this.simulateNoProviders,
+      getRequestGeneration: () => this.webviewSession.getRequestGeneration(),
+      getStatus: () => this.serverEventBridge.getStatus(),
+      ensureServerStarted: () => this.runtime.ensureServerStarted(),
+      cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
+      postApiResponse: (requestGeneration, payload) =>
+        this.webviewSession.postApiResponse(payload, requestGeneration),
+    });
+
+    this.messageRouter = new MessageRouter(
+      createSidebarProviderActions({
+        contextProvider,
+        webviewSession: {
+          setFocus: (focused) => this.webviewSession.setFocus(focused),
+        },
+        contextFilesState: this.contextFilesState,
+        sessionExportService: this.sessionExportService,
+        restProxy: this.restProxy,
+        postContext: () => this.postContext(),
+        postTerminalSelection: (selection) => this.postTerminalSelection(selection),
+        postConfigState: () => this.postConfigState(),
         handleReadyMessage: () => this.handleReadyMessage(),
         handleDroppedPaths: (paths) => this.handleDroppedPaths(paths),
         handleDroppedContent: (files) => this.handleDroppedContent(files),
@@ -110,45 +165,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         pickFiles: () => this.pickFiles(),
         searchFiles: (requestId, query, limit) => this.searchFiles(requestId, query, limit),
         runInTerminal: (command, title) => this.runInTerminal(command, title),
-        postContext: () => this.postContext(),
-        postTerminalSelection: (selection) => this.postTerminalSelection(selection),
-        postConfigState: () => this.postConfigState(),
-        getThemeDisposable: () => this.themeDisposable,
-        setThemeDisposable: (disposable) => {
-          this.themeDisposable = disposable;
-        },
-        getConfigDisposable: () => this.configDisposable,
-        getWindowStateDisposable: () => this.windowStateDisposable,
-        disposeWebviewDisposables: () => {
-          for (const disposable of this.webviewDisposables) disposable.dispose();
-          this.webviewDisposables = [];
-        },
-      },
+      })
+    );
+
+    this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
+      this.updateStatusBarItem();
+    });
+    this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
+        event.affectsConfiguration('varro.chat.showStickyUserPrompt') ||
+        event.affectsConfiguration('varro.chat.desktopSessionPaneSide')
+      ) {
+        this.postConfigState();
+      }
     });
 
-    this.fileSearch = setup.fileSearch;
-    this.sessionTrash = setup.sessionTrash;
-    this.sessionState = setup.sessionState;
-    this.uiState = setup.uiState;
-    this.commands = setup.commands;
-    this.contextFilesState = setup.contextFilesState;
-    this.bridge = setup.bridge;
-    this.sessionExportService = setup.sessionExportService;
-    this.runtime = setup.runtime;
-    this.presenter = setup.presenter;
-    this.orchestrator = setup.orchestrator;
-    this.coordinator = setup.coordinator;
-    this.lifecycle = setup.lifecycle;
-    this.restProxy = setup.restProxy;
-    this.messageRouter = setup.messageRouter;
-    this.configDisposable = setup.configDisposable;
-    this.windowStateDisposable = setup.windowStateDisposable;
-
-    this.coordinator.attachServerSubscriptions();
-  }
-
-  private updateStatusBarItem() {
-    this.uiState.updateStatusBarItem(this.coordinator.getStatusBarItem(), this.view);
+    this.serverEventBridge.attach();
   }
 
   resolveWebviewView(
@@ -156,107 +189,98 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
   ) {
-    this.lifecycle.resolveWebviewView(
-      webviewView,
-      () => {
-        for (const d of this.webviewDisposables) d.dispose();
-        this.webviewDisposables = [];
-      },
-      (disposable) => {
-        this.webviewDisposables.push(disposable);
-      },
-      this.bridge.webviewOptions()
-    );
-  }
-
-  private postConfigState() {
-    this.orchestrator.postConfigState((message) => this.post(message));
-  }
-
-  private async ensureServerStarted() {
-    return this.runtime.ensureServerStarted();
+    void this.webviewSession.resolve(webviewView);
   }
 
   async handleMessage(msg: WebviewMessage) {
     await this.messageRouter.handleMessage(msg);
   }
 
-  private async handleReadyMessage() {
-    this.orchestrator.handleReady((message) => this.post(message), this._status, {
-      flushPendingInputFocus: () => this.flushPendingInputFocus(),
-      flushPendingOpenAttentionSessions: () => this.flushPendingOpenAttentionSessions(),
-      cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
-      ensureServerStarted: () => this.ensureServerStarted(),
-    });
-  }
-
-  private postApiResponse(
-    requestGeneration: number,
-    payload: { id: number; data?: unknown; error?: string }
-  ) {
-    this.runtime.postApiResponse(
-      this.view,
-      requestGeneration,
-      this.webviewLoadGeneration,
-      (message) => this.post(message),
-      payload
-    );
-  }
-
-  private async cleanupExpiredRecycleBin() {
-    await this.runtime.cleanupExpiredRecycleBin(this._status, () => this.postRecycleBinUpdate());
-  }
-
-  private postRecycleBinUpdate() {
-    this.post(this.presenter.buildRecycleBinMessage());
-  }
-
   post(msg: ExtensionMessage) {
-    this.bridge.post(this.view, msg);
-  }
-
-  async handleDroppedContent(files: Array<{ name: string; content: string; size: number }>) {
-    await this.contextFilesState.handleDroppedContent(files, (message) => this.post(message));
-  }
-
-  async handleDroppedPaths(paths: string[]) {
-    await this.contextFilesState.handleDroppedPaths(paths, (message) => this.post(message));
+    this.bridge.post(msg);
   }
 
   setOnContextFilesChanged(fn: () => void) {
     this.contextFilesState.setOnContextFilesChanged(fn);
   }
 
-  removeContextFile(path: string) {
-    this.contextFilesState.removeContextFile(path, (message) => this.post(message));
-  }
-
   getContextFiles() {
     return this.contextFilesState.getContextFiles();
   }
 
-  clearContextFiles() {
+  postDroppedFiles(files: Array<Pick<DroppedFile, 'path' | 'relativePath' | 'type'>>) {
+    this.contextFilesState.postDroppedFiles(files, (message) => this.post(message));
+  }
+
+  postTerminalSelection(selection: { text: string; terminalName: string } | null) {
+    this.post({ type: 'terminal-selection/update', payload: selection });
+  }
+
+  postCommand(cmd: 'new-session' | 'abort') {
+    this.post({ type: `command/${cmd}` } as ExtensionMessage);
+  }
+
+  requestInputFocus() {
+    this.webviewSession.requestInputFocus();
+  }
+
+  hasPendingAttention() {
+    return this.sessionState.pending.size > 0;
+  }
+
+  openAttentionSessions() {
+    this.webviewSession.openAttentionSessions();
+  }
+
+  async dispose() {
+    await this.webviewSession.dispose();
+    await this.serverEventBridge.dispose();
+    this.configDisposable.dispose();
+    this.windowStateDisposable.dispose();
+    this.fileSearch.dispose();
+    await this.droppedFilesService.dispose();
+  }
+
+  private async handleReadyMessage() {
+    await this.webviewSession.handleReady();
+  }
+
+  private async cleanupExpiredRecycleBin() {
+    await this.runtime.cleanupExpiredRecycleBin(this.serverEventBridge.getStatus());
+  }
+
+  private postConfigState() {
+    this.post({ type: 'config/update', payload: this.readConfig() });
+  }
+
+  private postContext() {
+    this.post({ type: 'context/update', payload: this.getEditorContext() });
+  }
+
+  private getEditorContext() {
+    return this.contextProvider.context;
+  }
+
+  private async handleDroppedContent(
+    files: Array<{ name: string; content: string; size: number }>
+  ) {
+    await this.contextFilesState.handleDroppedContent(files, (message) => this.post(message));
+  }
+
+  private async handleDroppedPaths(paths: string[]) {
+    await this.contextFilesState.handleDroppedPaths(paths, (message) => this.post(message));
+  }
+
+  private removeContextFile(path: string) {
+    this.contextFilesState.removeContextFile(path, (message) => this.post(message));
+  }
+
+  private clearContextFiles() {
     this.contextFilesState.clearContextFiles();
   }
 
   private async pickFiles() {
     await this.contextFilesState.pickFiles((message) => this.post(message));
-  }
-
-  private postContext() {
-    this.orchestrator.postContext((message) => this.post(message));
-  }
-
-  postTerminalSelection(selection: { text: string; terminalName: string } | null) {
-    this.orchestrator.postTerminalSelection((message) => this.post(message), selection);
-  }
-
-  private runInTerminal(command: string, title = 'OpenCode') {
-    this.orchestrator.runInTerminal(command, title);
-  }
-
-  private postContextFiles() {
-    this.contextFilesState.postContextFiles((message) => this.post(message));
   }
 
   private searchFiles(requestId: number, query: string, limit = 12) {
@@ -265,49 +289,106 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  postDroppedFiles(files: Array<Pick<DroppedFile, 'path' | 'relativePath' | 'type'>>) {
-    this.contextFilesState.postDroppedFiles(files, (message) => this.post(message));
+  private runInTerminal(command: string, title = 'OpenCode') {
+    const text = command.trim();
+    if (!text) return;
+
+    const cwd = this.contextProvider.context.workspacePath || undefined;
+    const terminal = vscode.window.createTerminal({ name: title, cwd });
+    terminal.show(false);
+    terminal.sendText(text, true);
   }
 
-  postCommand(cmd: 'new-session' | 'abort') {
-    this.commands.postCommand((message) => this.post(message), cmd);
+  private currentTheme() {
+    const kind = vscode.window.activeColorTheme.kind;
+    switch (kind) {
+      case vscode.ColorThemeKind.Light:
+        return 'light' as const;
+      case vscode.ColorThemeKind.Dark:
+        return 'dark' as const;
+      case vscode.ColorThemeKind.HighContrast:
+        return 'high-contrast' as const;
+      case vscode.ColorThemeKind.HighContrastLight:
+        return 'high-contrast-light' as const;
+      default:
+        return 'dark' as const;
+    }
   }
 
-  requestInputFocus() {
-    this.commands.requestInputFocus(() => this.flushPendingInputFocus());
+  private readConfig() {
+    const config = vscode.workspace.getConfiguration('varro');
+    return {
+      expandThinkingByDefault: config.get<boolean>('chat.expandThinkingByDefault') ?? false,
+      showStickyUserPrompt: config.get<boolean>('chat.showStickyUserPrompt', true),
+      desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
+    };
   }
 
-  hasPendingAttention() {
-    return this.commands.hasPendingAttention();
+  private updateStatusBarItem() {
+    const next = this.getStatusBarState();
+    const nextKey = JSON.stringify(next);
+    if (nextKey === this.lastStatusBarStateKey) return;
+    this.lastStatusBarStateKey = nextKey;
+
+    const statusBarItem = this.serverEventBridge.getStatusBarItem();
+    if (!next.visible) {
+      statusBarItem.hide();
+      return;
+    }
+
+    statusBarItem.text = next.text;
+    statusBarItem.backgroundColor = next.backgroundColor;
+    statusBarItem.tooltip = next.tooltip;
+    statusBarItem.show();
   }
 
-  openAttentionSessions() {
-    this.commands.openAttentionSessions(() => this.flushPendingOpenAttentionSessions());
-  }
+  private getStatusBarState():
+    | { visible: false }
+    | { visible: true; text: string; tooltip: string; backgroundColor?: vscode.ThemeColor } {
+    if (this.bridge.getView()?.visible) {
+      return { visible: false };
+    }
 
-  private flushPendingInputFocus() {
-    this.commands.flushPendingInputFocus(this.view, (message) => this.post(message));
-  }
-
-  private flushPendingOpenAttentionSessions() {
-    this.commands.flushPendingOpenAttentionSessions(this.view, (message) => this.post(message));
-  }
-
-  private async getHtml(): Promise<string> {
-    const [interruptedSessions, blockingRequests] = await Promise.all([
-      this.sessionState.consumeInterruptedSessions(),
-      this.sessionState.consumeBlockingRequests(),
-    ]);
-    this.presenter.restoreBlockingState(interruptedSessions, blockingRequests);
-    this.updateStatusBarItem();
-    return this.bridge.renderHtml(
-      this.view,
-      this.presenter.buildInitialState(this._status, this.view)
+    const pendingRequests = [...this.sessionState.pending.values()].filter(
+      (request) => !this.sessionTrash.isHidden(request.sessionID)
     );
-  }
+    if (pendingRequests.length > 0) {
+      return {
+        visible: true,
+        text: `$(bell-dot) Varro: ${pendingRequests.length} waiting`,
+        backgroundColor: new vscode.ThemeColor('statusBarItem.warningBackground'),
+        tooltip: [
+          'Varro is waiting for your input.',
+          ...pendingRequests.slice(0, 3).map((request) => {
+            const title = this.sessionState.titleFor(request.sessionID);
+            return title ? `${title}: ${request.label}` : request.label;
+          }),
+          ...(pendingRequests.length > 3 ? [`+${pendingRequests.length - 3} more`] : []),
+          '',
+          'Click to open chat.',
+        ].join('\n'),
+      };
+    }
 
-  async dispose() {
-    this.uiState.webviewReady = false;
-    await this.coordinator.dispose();
+    const completedSessions = [...this.sessionState.completed].filter(
+      (sessionID) => !this.sessionTrash.isHidden(sessionID)
+    );
+    if (completedSessions.length > 0) {
+      return {
+        visible: true,
+        text: `$(check-all) Varro: ${completedSessions.length} completed`,
+        tooltip: [
+          'Varro finished background work.',
+          ...completedSessions
+            .slice(0, 3)
+            .map((sessionID) => this.sessionState.titleFor(sessionID) || sessionID),
+          ...(completedSessions.length > 3 ? [`+${completedSessions.length - 3} more`] : []),
+          '',
+          'Click to open chat.',
+        ].join('\n'),
+      };
+    }
+
+    return { visible: false };
   }
 }

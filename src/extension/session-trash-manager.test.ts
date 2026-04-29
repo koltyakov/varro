@@ -20,9 +20,12 @@ const mementoState = {
 };
 
 const workspaceState = {
-  get: vi.fn((_key: string, fallback: StoredEntry[]) => mementoState.stored ?? fallback),
-  update: vi.fn(async (_key: string, value: StoredEntry[]) => {
+  get: vi.fn(() => mementoState.stored),
+  set: vi.fn(async (_key: string, value: StoredEntry[]) => {
     mementoState.stored = value;
+  }),
+  remove: vi.fn(async () => {
+    mementoState.stored = [];
   }),
 };
 

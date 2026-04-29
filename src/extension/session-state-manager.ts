@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import type { Memento } from 'vscode';
-import type { ServerEvent } from '../shared/protocol';
+import type { Persistence } from '../shared/persistence';
+import type { ExtensionMessage, ServerEvent } from '../shared/protocol';
+import type { PermissionEventProperties, QuestionRequest } from '../shared/opencode-types';
 import { normalizeSessionTitle } from '../shared/session-title';
 import { logger } from './logger';
 import { isAbortedAssistantError } from '../webview/lib/aborted';
@@ -27,8 +28,6 @@ export type BlockingRequestSnapshot = {
 };
 
 export interface SessionStateListener {
-  /** Called when pending-attention composition changes. */
-  onPendingAttentionChange(sessionIds: string[]): void;
   /** Called whenever any state that the status bar renders has changed. */
   onStatusChange(): void;
 }
@@ -60,10 +59,9 @@ export class SessionStateManager {
   private readonly sessionAgents = new Map<string, string>();
   private readonly sessionTitles = new Map<string, string>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
-  private lastPendingAttentionKey = '';
 
   constructor(
-    private readonly workspaceState: Memento,
+    private readonly persistence: Persistence,
     private readonly listener: SessionStateListener,
     private readonly notificationGate: NotificationGate
   ) {}
@@ -95,7 +93,6 @@ export class SessionStateManager {
     }
     if (changed) {
       this.listener.onStatusChange();
-      this.publishPendingAttention();
       void this.persist();
     }
   }
@@ -216,23 +213,8 @@ export class SessionStateManager {
 
     if (changed) {
       this.listener.onStatusChange();
-      this.publishPendingAttention();
       void this.persist();
     }
-  }
-
-  publishPendingAttention(): void {
-    const sessionIds = [
-      ...new Set([...this.pendingAttention.values()].map((item) => item.sessionID)),
-    ];
-    const key = sessionIds.join('\n');
-    if (key === this.lastPendingAttentionKey) return;
-    this.lastPendingAttentionKey = key;
-    this.listener.onPendingAttentionChange(sessionIds);
-  }
-
-  resetPendingAttentionCache(): void {
-    this.lastPendingAttentionKey = '';
   }
 
   async persist(): Promise<void> {
@@ -251,15 +233,14 @@ export class SessionStateManager {
 
   async consumeInterruptedSessions(): Promise<InterruptedSessionSnapshot[]> {
     const snapshots =
-      this.workspaceState.get<InterruptedSessionSnapshot[]>(INTERRUPTED_SESSIONS_KEY, []) || [];
-    await this.workspaceState.update(INTERRUPTED_SESSIONS_KEY, []);
+      this.persistence.get<InterruptedSessionSnapshot[]>(INTERRUPTED_SESSIONS_KEY) || [];
+    await this.persistence.remove(INTERRUPTED_SESSIONS_KEY);
     return snapshots.filter((item) => typeof item?.id === 'string' && item.id.trim().length > 0);
   }
 
   async consumeBlockingRequests(): Promise<BlockingRequestSnapshot[]> {
-    const snapshots =
-      this.workspaceState.get<BlockingRequestSnapshot[]>(BLOCKING_REQUESTS_KEY, []) || [];
-    await this.workspaceState.update(BLOCKING_REQUESTS_KEY, []);
+    const snapshots = this.persistence.get<BlockingRequestSnapshot[]>(BLOCKING_REQUESTS_KEY) || [];
+    await this.persistence.remove(BLOCKING_REQUESTS_KEY);
     return snapshots.filter(
       (item) =>
         typeof item?.id === 'string' &&
@@ -290,7 +271,79 @@ export class SessionStateManager {
         props: item.props,
       });
     }
-    this.lastPendingAttentionKey = '';
+  }
+
+  replayBlockingRequests(
+    post: (message: ExtensionMessage) => void,
+    hiddenSessionIds: ReadonlySet<string>,
+    options?: {
+      previousRequests?: BlockingRequestSnapshot[];
+      clearResolvedEmbedded?: boolean;
+    }
+  ) {
+    const currentRequests = [...this.pendingAttention.entries()]
+      .map(([id, request]) => ({
+        id,
+        sessionID: request.sessionID,
+        kind: request.kind,
+        props: request.props,
+      }))
+      .filter((item) => !hiddenSessionIds.has(item.sessionID));
+    const currentRequestIds = new Set(currentRequests.map((item) => item.id));
+
+    if (options?.clearResolvedEmbedded) {
+      for (const item of options.previousRequests || []) {
+        if (hiddenSessionIds.has(item.sessionID) || currentRequestIds.has(item.id)) continue;
+        if (item.kind === 'question') {
+          post({
+            type: 'server/event',
+            payload: {
+              type: 'question.replied',
+              properties: {
+                id: item.id,
+                requestID: item.id,
+                sessionID: item.sessionID,
+              },
+            },
+          });
+          continue;
+        }
+
+        post({
+          type: 'server/event',
+          payload: {
+            type: 'permission.replied',
+            properties: {
+              id: item.id,
+              permissionID: item.id,
+              requestID: item.id,
+              sessionID: item.sessionID,
+            },
+          },
+        });
+      }
+    }
+
+    for (const item of currentRequests) {
+      if (item.kind === 'question') {
+        post({
+          type: 'server/event',
+          payload: {
+            type: 'question.asked',
+            properties: item.props as QuestionRequest,
+          },
+        });
+        continue;
+      }
+
+      post({
+        type: 'server/event',
+        payload: {
+          type: 'permission.asked',
+          properties: item.props as PermissionEventProperties,
+        },
+      });
+    }
   }
 
   describeSessionSuffix(sessionID: string): string {
@@ -306,7 +359,7 @@ export class SessionStateManager {
         id,
         title: trimOptionalString(this.sessionTitles.get(id)?.trim() || undefined),
       }));
-    await this.workspaceState.update(INTERRUPTED_SESSIONS_KEY, snapshots);
+    await this.persistence.set(INTERRUPTED_SESSIONS_KEY, snapshots);
   }
 
   private async persistBlockingRequests() {
@@ -319,7 +372,7 @@ export class SessionStateManager {
       }))
       .toSorted((a, b) => a.id.localeCompare(b.id))
       .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
-    await this.workspaceState.update(BLOCKING_REQUESTS_KEY, snapshots);
+    await this.persistence.set(BLOCKING_REQUESTS_KEY, snapshots);
   }
 
   private serializeBlockingRequestProps(

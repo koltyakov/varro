@@ -40,9 +40,9 @@ vi.mock('../lib/state', async () => {
 });
 
 import {
-  createSessionEventHandlerOperations,
   registerSessionEventHandlers,
-} from './session-event-handlers';
+  SessionEventHandlerOperations,
+} from './session/session-event-handlers';
 
 describe('registerSessionEventHandlers', () => {
   it('restores the permission prompt when auto-approval fails', async () => {
@@ -171,7 +171,7 @@ describe('registerSessionEventHandlers', () => {
     const handoffTodosToMessages = vi.fn().mockReturnValue(true);
     const syncTodosFromMessages = vi.fn();
 
-    const operations = createSessionEventHandlerOperations({
+    const operations = new SessionEventHandlerOperations({
       todoSyncOperations: {
         handoffTodosToMessages,
         syncTodosFromMessages,

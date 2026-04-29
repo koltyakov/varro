@@ -80,12 +80,18 @@ This is the main extension-side coordinator.
 
 It also restores pending permission or question prompts across reloads and serializes that state into the initial webview payload.
 
-It also exposes Varro-specific pseudo-endpoints:
+It also exposes the Varro extension-host API namespace, `/varro/*`.
 
 - `GET /varro/provider-limit`
 - `POST /varro/plan/open`
+- `GET /varro/opencode-config`
+- `POST /varro/opencode-config/model-routing`
+- `GET /varro/session-trash`
+- `POST /varro/session-trash/:rootID/restore`
+- `DELETE /varro/session-trash/:rootID/delete`
+- `DELETE /varro/session-trash`
 
-Those endpoints are resolved locally by the extension host rather than forwarded directly to OpenCode.
+Those paths share the same `api/request` bridge as OpenCode REST calls, but the extension host resolves them locally instead of forwarding them to OpenCode.
 
 Drag and drop has two paths here.
 
@@ -114,6 +120,8 @@ Defines:
 - webview-to-extension messages
 
 The protocol is intentionally small and transport-oriented. OpenCode domain types such as `Session`, `Message`, and `Part` live under `src/webview/types/` because they are consumed mainly by the UI.
+
+Next to the `/varro/*` namespace, the architectural choice is explicit: Varro treats the extension host as a transport boundary, not as a semantic event coordinator for webview state. The extension forwards raw `server/event` payloads and serves local `/varro/*` requests, while the webview derives UI facts like pending attention and recycle-bin views from those transport primitives plus targeted REST reloads.
 
 #### `src/shared/context-files.ts`
 
@@ -216,7 +224,6 @@ The extension sends:
 - `server/status`
 - `server/event`
 - `context/update`
-- `pending-attention/update`
 - `terminal-selection/update`
 - `files/dropped` and `files/removed`
 - `theme/update`
@@ -237,12 +244,14 @@ Typical part sequence:
 
 This is where Varro turns live VS Code context into OpenCode-compatible prompt parts.
 
-### Custom endpoints
+### Varro API namespace
 
-Two paths are resolved by the extension host instead of the OpenCode server.
+`/varro/*` is a documented extension-host namespace on top of the shared webview `api/request` transport.
 
 - `/varro/provider-limit` returns best-effort provider quota metadata for the current provider and model.
 - `/varro/plan/open` normalizes a plan response, saves it into the local OpenCode plans directory, and opens the file in VS Code.
+- `/varro/opencode-config` and `/varro/opencode-config/model-routing` read and update Varro-managed OpenCode model routing.
+- `/varro/session-trash` and its child paths expose the recycle-bin workflow managed by the extension host.
 
 ## Session And Attention Model
 
@@ -264,6 +273,11 @@ That information drives both:
 
 - sidebar notifications
 - the status bar item shown when the sidebar is hidden
+
+The webview independently derives its attention and recycle-bin UI from transport data.
+
+- `attention needed` is computed from raw `permission.*` and `question.*` events plus the initial pending snapshots embedded into the HTML payload.
+- recycle-bin state is loaded through `/varro/session-trash` instead of being mirrored through a second extension push channel.
 
 The webview adds more derived states on top of that data.
 

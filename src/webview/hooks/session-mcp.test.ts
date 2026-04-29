@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   applySessionMcpsWithDependencies,
-  createSessionMcpOperations,
+  SessionMcpOperations,
   syncSessionMcpsWithDependencies,
-} from './session-mcp';
+} from './session/session-mcp';
 
 describe('session MCP helpers', () => {
   it('connects and disconnects MCPs to match the session selection', async () => {
@@ -79,7 +79,7 @@ describe('session MCP helpers', () => {
     const disconnectMcp = vi.fn(async () => {});
     const setSelectedMcpsForSession = vi.fn();
 
-    const operations = createSessionMcpOperations({
+    const operations = new SessionMcpOperations({
       getSelectedMcpsForSession: () => ['beta'],
       getMcpStatus: () => ({
         alpha: { status: 'connected' },

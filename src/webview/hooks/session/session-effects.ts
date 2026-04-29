@@ -1,5 +1,5 @@
 import { createEffect, onCleanup } from 'solid-js';
-import type { ProviderLimitStatus } from '../../shared/protocol';
+import type { ProviderLimitStatus } from '../../../shared/protocol';
 
 type ProviderSelection = { providerID: string; modelID?: string | null };
 

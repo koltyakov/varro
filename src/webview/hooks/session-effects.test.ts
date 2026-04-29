@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   registerLoadingStatusPollEffect,
   registerProviderLimitRefreshEffect,
-} from './session-effects';
+} from './session/session-effects';
 
 describe('session effect helpers', () => {
   it('polls active session status while loading and visible', async () => {

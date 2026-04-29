@@ -1,6 +1,6 @@
-import type { McpStatus } from '../../shared/protocol';
+import type { McpStatus } from '../../../shared/protocol';
 
-export function createSessionMcpOperations(deps: {
+type SessionMcpDependencies = {
   getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
   getMcpStatus(): Record<string, McpStatus>;
   loadMcps(): Promise<void>;
@@ -9,36 +9,35 @@ export function createSessionMcpOperations(deps: {
   disconnectMcp(name: string): Promise<unknown>;
   logError(context: string, err: unknown): void;
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
-}) {
-  const syncSessionMcps = async (sessionId: string) => {
+};
+
+export class SessionMcpOperations {
+  constructor(private readonly deps: SessionMcpDependencies) {}
+
+  readonly syncSessionMcps = async (sessionId: string) => {
     await syncSessionMcpsWithDependencies(
       {
-        getSelectedMcpsForSession: deps.getSelectedMcpsForSession,
-        getMcpStatus: deps.getMcpStatus,
-        loadMcps: deps.loadMcps,
-        getAvailableMcpNames: deps.getAvailableMcpNames,
-        connectMcp: deps.connectMcp,
-        disconnectMcp: deps.disconnectMcp,
-        logError: deps.logError,
+        getSelectedMcpsForSession: this.deps.getSelectedMcpsForSession,
+        getMcpStatus: this.deps.getMcpStatus,
+        loadMcps: this.deps.loadMcps,
+        getAvailableMcpNames: this.deps.getAvailableMcpNames,
+        connectMcp: this.deps.connectMcp,
+        disconnectMcp: this.deps.disconnectMcp,
+        logError: this.deps.logError,
       },
       sessionId
     );
   };
 
-  const applySessionMcps = async (names: string[], sessionId: string | null | undefined) => {
+  readonly applySessionMcps = async (names: string[], sessionId: string | null | undefined) => {
     await applySessionMcpsWithDependencies(
       {
-        setSelectedMcpsForSession: deps.setSelectedMcpsForSession,
-        syncSessionMcps,
+        setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
+        syncSessionMcps: this.syncSessionMcps,
       },
       names,
       sessionId
     );
-  };
-
-  return {
-    syncSessionMcps,
-    applySessionMcps,
   };
 }
 

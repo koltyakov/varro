@@ -1,5 +1,5 @@
-import type { Permission, QuestionRequest, Session } from '../types';
-import type { PermissionMode } from '../../shared/protocol';
+import type { PermissionMode } from '../../../shared/protocol';
+import type { Permission, QuestionRequest, Session } from '../../types';
 
 type PermissionResponse = 'once' | 'always' | 'reject';
 
@@ -146,7 +146,7 @@ export function getQuestionById(questions: QuestionRequest[], requestId: string)
   return questions.find((question) => question.id === requestId) || null;
 }
 
-export function createSessionApprovalOperations(deps: {
+type SessionApprovalDependencies = {
   getPermissions(): Permission[];
   respondRemotePermission(
     sessionId: string,
@@ -169,80 +169,84 @@ export function createSessionApprovalOperations(deps: {
   ): Promise<Session>;
   upsertSession(session: Session): void;
   getPermissionsForSession(sessionId: string): Permission[];
-}) {
-  const operations = {
-    respondPermission: async (
-      sessionId: string,
-      permissionId: string,
-      response: PermissionResponse,
-      options?: { rethrow?: boolean }
-    ) => {
-      await respondPermissionWithDependencies(
-        {
-          getPermissions: deps.getPermissions,
-          respondPermission: deps.respondRemotePermission,
-          removePermission: deps.removePermission,
-          setError: deps.setError,
-        },
-        sessionId,
-        permissionId,
-        response,
-        options
-      );
-    },
-    respondQuestion: async (requestId: string, answers: Array<Array<string>>) => {
-      await respondQuestionWithDependencies(
-        {
-          replyQuestion: deps.replyQuestion,
-          removeQuestion: deps.removeQuestion,
-          setError: deps.setError,
-        },
-        requestId,
-        answers
-      );
-    },
-    rejectQuestion: async (requestId: string) => {
-      await rejectQuestionWithDependencies(
-        {
-          rejectQuestion: deps.rejectRemoteQuestion,
-          removeQuestion: deps.removeQuestion,
-          setError: deps.setError,
-        },
-        requestId
-      );
-    },
-    autoApprovePermissionsForSession: async (permissions: Permission[]) => {
-      await autoApprovePermissionsForSessionWithDependencies(
-        {
-          respondPermission: operations.respondPermission,
-        },
-        permissions
-      );
-    },
-    updatePermissionModeForSession: async (
-      mode: PermissionMode,
-      permissionRules: Session['permission'],
-      sessionId: string | null | undefined
-    ) => {
-      await updatePermissionModeForSessionWithDependencies(
-        {
-          getPermissionModeForSession: deps.getPermissionModeForSession,
-          getDraftPermissionMode: deps.getDraftPermissionMode,
-          setPermissionModeForSession: deps.setPermissionModeForSession,
-          setDraftPermissionMode: deps.setDraftPermissionMode,
-          saveProjectPermissionMode: deps.saveProjectPermissionMode,
-          updateSessionPermission: deps.updateSessionPermission,
-          upsertSession: deps.upsertSession,
-          setError: deps.setError,
-          getPermissionsForSession: deps.getPermissionsForSession,
-          autoApprovePermissionsForSession: operations.autoApprovePermissionsForSession,
-        },
-        mode,
-        permissionRules,
-        sessionId
-      );
-    },
+};
+
+export class SessionApprovalOperations {
+  constructor(private readonly deps: SessionApprovalDependencies) {}
+
+  readonly respondPermission = async (
+    sessionId: string,
+    permissionId: string,
+    response: PermissionResponse,
+    options?: { rethrow?: boolean }
+  ) => {
+    await respondPermissionWithDependencies(
+      {
+        getPermissions: this.deps.getPermissions,
+        respondPermission: this.deps.respondRemotePermission,
+        removePermission: this.deps.removePermission,
+        setError: this.deps.setError,
+      },
+      sessionId,
+      permissionId,
+      response,
+      options
+    );
   };
 
-  return operations;
+  readonly respondQuestion = async (requestId: string, answers: Array<Array<string>>) => {
+    await respondQuestionWithDependencies(
+      {
+        replyQuestion: this.deps.replyQuestion,
+        removeQuestion: this.deps.removeQuestion,
+        setError: this.deps.setError,
+      },
+      requestId,
+      answers
+    );
+  };
+
+  readonly rejectQuestion = async (requestId: string) => {
+    await rejectQuestionWithDependencies(
+      {
+        rejectQuestion: this.deps.rejectRemoteQuestion,
+        removeQuestion: this.deps.removeQuestion,
+        setError: this.deps.setError,
+      },
+      requestId
+    );
+  };
+
+  readonly autoApprovePermissionsForSession = async (permissions: Permission[]) => {
+    await autoApprovePermissionsForSessionWithDependencies(
+      {
+        respondPermission: this.respondPermission,
+      },
+      permissions
+    );
+  };
+
+  readonly updatePermissionModeForSession = async (
+    mode: PermissionMode,
+    permissionRules: Session['permission'],
+    sessionId: string | null | undefined
+  ) => {
+    await updatePermissionModeForSessionWithDependencies(
+      {
+        getPermissionModeForSession: this.deps.getPermissionModeForSession,
+        getDraftPermissionMode: this.deps.getDraftPermissionMode,
+        setPermissionModeForSession: this.deps.setPermissionModeForSession,
+        setDraftPermissionMode: this.deps.setDraftPermissionMode,
+        saveProjectPermissionMode: this.deps.saveProjectPermissionMode,
+        updateSessionPermission: this.deps.updateSessionPermission,
+        upsertSession: this.deps.upsertSession,
+        setError: this.deps.setError,
+        getPermissionsForSession: this.deps.getPermissionsForSession,
+        autoApprovePermissionsForSession: this.autoApprovePermissionsForSession,
+      },
+      mode,
+      permissionRules,
+      sessionId
+    );
+  };
 }

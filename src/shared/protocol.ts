@@ -97,6 +97,21 @@ export type RecycleBinEntry = {
   sessions: RecycleBinSession[];
 };
 
+/**
+ * `/varro/*` is Varro's extension-host API namespace on the shared `api/request`
+ * transport. These paths are resolved locally by the extension and are never
+ * forwarded to the OpenCode server.
+ */
+export const VARRO_API_NAMESPACE = '/varro' as const;
+
+export const VARRO_API_ENDPOINTS = {
+  providerLimit: '/varro/provider-limit',
+  planOpen: '/varro/plan/open',
+  openCodeConfig: '/varro/opencode-config',
+  openCodeConfigModelRouting: '/varro/opencode-config/model-routing',
+  sessionTrash: '/varro/session-trash',
+} as const;
+
 export type { OpenCodeModelRoute, OpenCodeModelRouting } from './opencode-types';
 
 export const SERVER_EVENT_NAMES = [
@@ -170,8 +185,6 @@ export type InitialWebviewState = {
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
   | { type: 'server/event'; payload: ServerEvent }
-  | { type: 'recycle-bin/update'; payload: { entries: RecycleBinEntry[] } }
-  | { type: 'pending-attention/update'; payload: { sessionIds: string[] } }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }

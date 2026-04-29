@@ -1,4 +1,4 @@
-import { setState, state } from '../lib/state';
+import { appStore } from '../lib/stores/app-store';
 import type { AssistantMessage, Message, Part, Todo } from '../types';
 
 const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
@@ -9,17 +9,17 @@ export function resetTodoSync() {
 
 export function createTodoSyncOperations() {
   const syncTodosFromMessagesWithState = (
-    messages: Array<{ info: Message; parts: Part[] }> = state.messages
+    messages: Array<{ info: Message; parts: Part[] }> = appStore.state.messages
   ) => {
-    syncTodosFromMessages((todos) => setState('todos', todos), messages);
+    syncTodosFromMessages((todos) => appStore.setState('todos', todos), messages);
   };
 
   const handoffTodosToMessagesWithState = (
-    messages: Array<{ info: Message; parts: Part[] }> = state.messages
+    messages: Array<{ info: Message; parts: Part[] }> = appStore.state.messages
   ) => {
     const handedOff = handoffTodosToMessages(
-      state.todos,
-      (todos) => setState('todos', todos),
+      appStore.state.todos,
+      (todos) => appStore.setState('todos', todos),
       messages
     );
     return handedOff;

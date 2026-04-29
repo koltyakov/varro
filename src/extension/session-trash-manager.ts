@@ -1,4 +1,4 @@
-import type { Memento } from 'vscode';
+import type { Persistence } from '../shared/persistence';
 import type { RecycleBinEntry, RecycleBinSession } from '../shared/protocol';
 
 const SESSION_TRASH_KEY = 'varro.sessionTrash';
@@ -7,8 +7,8 @@ export const SESSION_TRASH_RETENTION_MS = 24 * 60 * 60 * 1000;
 export class SessionTrashManager {
   private readonly entries = new Map<string, RecycleBinEntry>();
 
-  constructor(private readonly workspaceState: Memento) {
-    const stored = workspaceState.get<RecycleBinEntry[]>(SESSION_TRASH_KEY, []) || [];
+  constructor(private readonly persistence: Persistence) {
+    const stored = persistence.get<RecycleBinEntry[]>(SESSION_TRASH_KEY) || [];
     for (const entry of stored) {
       const normalized = normalizeEntry(entry);
       if (normalized) this.entries.set(normalized.rootID, normalized);
@@ -116,7 +116,7 @@ export class SessionTrashManager {
   }
 
   private async persist() {
-    await this.workspaceState.update(SESSION_TRASH_KEY, this.list());
+    await this.persistence.set(SESSION_TRASH_KEY, this.list());
   }
 }
 

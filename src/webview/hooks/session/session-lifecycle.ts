@@ -1,22 +1,10 @@
-import {
-  clearCurrentDocumentStateForSession,
-  clearMessages,
-  clearSelectedAgentForSession,
-  clearSelectedMcpsForSession,
-  clearSelectedModelForSession,
-  clearSessionSeen,
-  clearSkippedPlanSession,
-  markSessionSeen,
-  persistActiveSessionId,
-  removePermissionModeForSession,
-  setSessionFailed,
-  setSessions,
-  setSessionUsageLimit,
-  setState,
-  state,
-  stopLoading,
-} from '../lib/state';
-import type { Session } from '../types';
+import { appStore } from '../../lib/stores/app-store';
+import { composerStore } from '../../lib/stores/composer-store';
+import { permissionsStore } from '../../lib/stores/permissions-store';
+import { routingStore } from '../../lib/stores/routing-store';
+import { sessionStore } from '../../lib/stores/session-store';
+import { uiStore } from '../../lib/stores/ui-store';
+import type { Session } from '../../types';
 
 type LifecycleState = {
   activeSessionId: string | null;
@@ -41,71 +29,75 @@ type LifecycleDependencies = {
   setSessionFailed(sessionId: string, failed: boolean): void;
   filterQuestions(predicate: (sessionId: string) => boolean): void;
   filterPermissions(predicate: (sessionId: string) => boolean): void;
-  filterPendingAttentionSessionIds(predicate: (sessionId: string) => boolean): void;
   clearActiveSessionState(): void;
   markSessionSeen(sessionId: string, updatedAt?: number): void;
 };
 
-export function createSessionLifecycleOperations(deps: {
+type SessionLifecycleDependencies = {
   getCurrentWorkspacePath(): string | null;
   clearPendingAbort(sessionId: string | null | undefined): void;
   clearPendingAbortTree(sessionIds: string[]): void;
   resetTodoSync(): void;
   resetToolCallExpansionState(): void;
-}) {
-  const clearActiveSessionState = () => {
-    deps.resetTodoSync();
-    deps.resetToolCallExpansionState();
-    setState('activeSessionId', null);
-    persistActiveSessionId(null);
-    clearMessages();
-    stopLoading();
+};
+
+export class SessionLifecycleOperations {
+  private readonly lifecycleDeps: LifecycleDependencies;
+
+  constructor(private readonly deps: SessionLifecycleDependencies) {
+    this.lifecycleDeps = {
+      getState: () => ({
+        activeSessionId: appStore.state.activeSessionId,
+        sessions: appStore.state.sessions,
+      }),
+      getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
+      setSessions: sessionStore.setSessions,
+      clearSessionStatusEntry: sessionStore.clearSessionStatusEntry,
+      clearPendingAbort: deps.clearPendingAbort,
+      clearPendingAbortTree: deps.clearPendingAbortTree,
+      removePermissionModeForSession: permissionsStore.removePermissionModeForSession,
+      clearCurrentDocumentStateForSession: composerStore.clearCurrentDocumentStateForSession,
+      clearSelectedAgentForSession: routingStore.clearSelectedAgentForSession,
+      clearSelectedMcpsForSession: routingStore.clearSelectedMcpsForSession,
+      clearSkippedPlanSession: sessionStore.clearSkippedPlanSession,
+      clearSelectedModelForSession: routingStore.clearSelectedModelForSession,
+      clearSessionSeen: sessionStore.clearSessionSeen,
+      setSessionUsageLimit: sessionStore.setSessionUsageLimit,
+      setSessionFailed: sessionStore.setSessionFailed,
+      filterQuestions: (predicate: (sessionId: string) => boolean) =>
+        appStore.setState('questions', (items) =>
+          items.filter((item) => predicate(item.sessionID))
+        ),
+      filterPermissions: (predicate: (sessionId: string) => boolean) =>
+        appStore.setState('permissions', (items) =>
+          items.filter((item) => predicate(item.sessionID))
+        ),
+      clearActiveSessionState: this.clearActiveSessionState,
+      markSessionSeen: sessionStore.markSessionSeen,
+    };
+  }
+
+  readonly clearActiveSessionState = () => {
+    this.deps.resetTodoSync();
+    this.deps.resetToolCallExpansionState();
+    sessionStore.setActiveSessionId(null);
+    sessionStore.persistActiveSessionId(null);
+    sessionStore.clearMessages();
+    uiStore.stopLoading();
   };
 
-  const lifecycleDeps: LifecycleDependencies = {
-    getState: () => ({ activeSessionId: state.activeSessionId, sessions: state.sessions }),
-    getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
-    setSessions,
-    clearSessionStatusEntry: (sessionId: string) => {
-      setState('sessionStatus', (statuses) => {
-        const next = { ...statuses };
-        delete next[sessionId];
-        return next;
-      });
-    },
-    clearPendingAbort: deps.clearPendingAbort,
-    clearPendingAbortTree: deps.clearPendingAbortTree,
-    removePermissionModeForSession,
-    clearCurrentDocumentStateForSession,
-    clearSelectedAgentForSession,
-    clearSelectedMcpsForSession,
-    clearSkippedPlanSession,
-    clearSelectedModelForSession,
-    clearSessionSeen,
-    setSessionUsageLimit,
-    setSessionFailed,
-    filterQuestions: (predicate: (sessionId: string) => boolean) =>
-      setState('questions', (items) => items.filter((item) => predicate(item.sessionID))),
-    filterPermissions: (predicate: (sessionId: string) => boolean) =>
-      setState('permissions', (items) => items.filter((item) => predicate(item.sessionID))),
-    filterPendingAttentionSessionIds: (predicate: (sessionId: string) => boolean) =>
-      setState('pendingAttentionSessionIds', (items) =>
-        items.filter((sessionId) => predicate(sessionId))
-      ),
-    clearActiveSessionState,
-    markSessionSeen,
-  };
+  readonly applySessions = (sessions: Session[]) => applySessions(this.lifecycleDeps, sessions);
 
-  return {
-    clearActiveSessionState,
-    applySessions: (sessions: Session[]) => applySessions(lifecycleDeps, sessions),
-    clearDeletedSessionState: (id: string) => clearDeletedSessionState(lifecycleDeps, id),
-    hideDeletedSessionTree: (id: string, sessions = state.sessions) =>
-      hideDeletedSessionTree(lifecycleDeps, id, sessions),
-    removeDeletedSessionTree: (id: string, sessions = state.sessions) =>
-      removeDeletedSessionTree(lifecycleDeps, id, sessions),
-    upsertSession: (session: Session) => upsertSession(lifecycleDeps, session),
-  };
+  readonly clearDeletedSessionState = (id: string) =>
+    clearDeletedSessionState(this.lifecycleDeps, id);
+
+  readonly hideDeletedSessionTree = (id: string, sessions = appStore.state.sessions) =>
+    hideDeletedSessionTree(this.lifecycleDeps, id, sessions);
+
+  readonly removeDeletedSessionTree = (id: string, sessions = appStore.state.sessions) =>
+    removeDeletedSessionTree(this.lifecycleDeps, id, sessions);
+
+  readonly upsertSession = (session: Session) => upsertSession(this.lifecycleDeps, session);
 }
 
 export function normalizeProjectPath(path: string | null | undefined): string | null {
@@ -155,7 +147,6 @@ export function clearDeletedSessionState(deps: LifecycleDependencies, id: string
   deps.setSessionFailed(id, false);
   deps.filterQuestions((sessionId) => sessionId !== id);
   deps.filterPermissions((sessionId) => sessionId !== id);
-  deps.filterPendingAttentionSessionIds((sessionId) => sessionId !== id);
 
   if (deps.getState().activeSessionId === id) {
     deps.clearActiveSessionState();
@@ -173,7 +164,6 @@ export function hideDeletedSessionTree(
   deps.clearPendingAbortTree([...deletedIds]);
   deps.filterQuestions((sessionId) => !deletedIds.has(sessionId));
   deps.filterPermissions((sessionId) => !deletedIds.has(sessionId));
-  deps.filterPendingAttentionSessionIds((sessionId) => !deletedIds.has(sessionId));
 
   const activeSessionId = deps.getState().activeSessionId;
   if (activeSessionId && deletedIds.has(activeSessionId)) {

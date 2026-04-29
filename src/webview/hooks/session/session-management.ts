@@ -1,7 +1,7 @@
-import type { PermissionMode, RecycleBinEntry } from '../../shared/protocol';
-import type { PermissionRule, Session, SessionStatus } from '../types';
+import type { PermissionMode, RecycleBinEntry } from '../../../shared/protocol';
+import type { PermissionRule, Session, SessionStatus } from '../../types';
 
-export function createSessionManagementOperations(deps: {
+type SessionManagementDependencies = {
   getActiveSessionId(): string | null;
   createRemoteSession(body: { title?: string; permission?: PermissionRule[] }): Promise<Session>;
   buildCreatePermission(mode: PermissionMode): PermissionRule[];
@@ -47,89 +47,98 @@ export function createSessionManagementOperations(deps: {
   deleteRecycleBinEntry(rootID: string): Promise<unknown>;
   clearDeletedSessionState(sessionId: string): void;
   emptyRecycleBin(): Promise<unknown>;
-}) {
-  return {
-    createSession: async (title?: string, initialPermissionMode: PermissionMode = 'default') => {
-      return createSessionWithDependencies(
-        {
-          getActiveSessionId: deps.getActiveSessionId,
-          createRemoteSession: deps.createRemoteSession,
-          buildCreatePermission: deps.buildCreatePermission,
-          upsertSession: deps.upsertSession,
-          resetToolCallExpansionState: deps.resetToolCallExpansionState,
-          setActiveSessionId: deps.setActiveSessionId,
-          clearDraftCurrentDocumentState: deps.clearDraftCurrentDocumentState,
-          adoptDraftCurrentDocumentState: deps.adoptDraftCurrentDocumentState,
-          setSessionStatusEntry: deps.setSessionStatusEntry,
-          setSessionUsageLimit: deps.setSessionUsageLimit,
-          persistActiveSessionId: deps.persistActiveSessionId,
-          markSessionSeen: deps.markSessionSeen,
-          getPersistedSelectedModel: deps.getPersistedSelectedModel,
-          setSelectedModel: deps.setSelectedModel,
-          resolveDefaultAgent: deps.resolveDefaultAgent,
-          setSelectedAgent: deps.setSelectedAgent,
-          getConnectedMcpNames: deps.getConnectedMcpNames,
-          setSelectedMcpsForSession: deps.setSelectedMcpsForSession,
-          setPermissionModeForSession: deps.setPermissionModeForSession,
-          resetDraftPermissionMode: deps.resetDraftPermissionMode,
-          resetTodoSync: deps.resetTodoSync,
-          clearMessages: deps.clearMessages,
-          stopLoading: deps.stopLoading,
-          setError: deps.setError,
-        },
-        title,
-        initialPermissionMode
-      );
-    },
-    deleteSession: async (id: string) => {
-      await deleteSessionWithDependencies(
-        {
-          getSessions: deps.getSessions,
-          getActiveSessionId: deps.getActiveSessionId,
-          getDeletedSessionTreeIds: deps.getDeletedSessionTreeIds,
-          getNextSessionIdAfterDeletion: deps.getNextSessionIdAfterDeletion,
-          deleteRemoteSession: deps.deleteRemoteSession,
-          hideDeletedSessionTree: deps.hideDeletedSessionTree,
-          loadRecycleBin: deps.loadRecycleBin,
-          selectSession: deps.selectSession,
-          logError: deps.logError,
-        },
-        id
-      );
-    },
-    restoreSession: async (rootID: string) => {
-      await restoreSessionWithDependencies(
-        {
-          restoreRecycleBinEntry: deps.restoreRecycleBinEntry,
-          loadSessions: deps.loadSessions,
-          loadRecycleBin: deps.loadRecycleBin,
-          hydrateSessionStatuses: deps.hydrateSessionStatuses,
-          logError: deps.logError,
-        },
-        rootID
-      );
-    },
-    deleteSessionPermanently: async (rootID: string) => {
-      await deleteSessionPermanentlyWithDependencies(
-        {
-          getRecycleBinEntries: deps.getRecycleBinEntries,
-          deleteRecycleBinEntry: deps.deleteRecycleBinEntry,
-          loadRecycleBin: deps.loadRecycleBin,
-          clearDeletedSessionState: deps.clearDeletedSessionState,
-          logError: deps.logError,
-        },
-        rootID
-      );
-    },
-    emptyRecycleBin: async () => {
-      await emptyRecycleBinWithDependencies({
-        getRecycleBinEntries: deps.getRecycleBinEntries,
-        emptyRecycleBin: deps.emptyRecycleBin,
-        loadRecycleBin: deps.loadRecycleBin,
-        clearDeletedSessionState: deps.clearDeletedSessionState,
-        logError: deps.logError,
-      });
-    },
+};
+
+export class SessionManagementOperations {
+  constructor(private readonly deps: SessionManagementDependencies) {}
+
+  readonly createSession = async (
+    title?: string,
+    initialPermissionMode: PermissionMode = 'default'
+  ) => {
+    return createSessionWithDependencies(
+      {
+        getActiveSessionId: this.deps.getActiveSessionId,
+        createRemoteSession: this.deps.createRemoteSession,
+        buildCreatePermission: this.deps.buildCreatePermission,
+        upsertSession: this.deps.upsertSession,
+        resetToolCallExpansionState: this.deps.resetToolCallExpansionState,
+        setActiveSessionId: this.deps.setActiveSessionId,
+        clearDraftCurrentDocumentState: this.deps.clearDraftCurrentDocumentState,
+        adoptDraftCurrentDocumentState: this.deps.adoptDraftCurrentDocumentState,
+        setSessionStatusEntry: this.deps.setSessionStatusEntry,
+        setSessionUsageLimit: this.deps.setSessionUsageLimit,
+        persistActiveSessionId: this.deps.persistActiveSessionId,
+        markSessionSeen: this.deps.markSessionSeen,
+        getPersistedSelectedModel: this.deps.getPersistedSelectedModel,
+        setSelectedModel: this.deps.setSelectedModel,
+        resolveDefaultAgent: this.deps.resolveDefaultAgent,
+        setSelectedAgent: this.deps.setSelectedAgent,
+        getConnectedMcpNames: this.deps.getConnectedMcpNames,
+        setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
+        setPermissionModeForSession: this.deps.setPermissionModeForSession,
+        resetDraftPermissionMode: this.deps.resetDraftPermissionMode,
+        resetTodoSync: this.deps.resetTodoSync,
+        clearMessages: this.deps.clearMessages,
+        stopLoading: this.deps.stopLoading,
+        setError: this.deps.setError,
+      },
+      title,
+      initialPermissionMode
+    );
+  };
+
+  readonly deleteSession = async (id: string) => {
+    await deleteSessionWithDependencies(
+      {
+        getSessions: this.deps.getSessions,
+        getActiveSessionId: this.deps.getActiveSessionId,
+        getDeletedSessionTreeIds: this.deps.getDeletedSessionTreeIds,
+        getNextSessionIdAfterDeletion: this.deps.getNextSessionIdAfterDeletion,
+        deleteRemoteSession: this.deps.deleteRemoteSession,
+        hideDeletedSessionTree: this.deps.hideDeletedSessionTree,
+        loadRecycleBin: this.deps.loadRecycleBin,
+        selectSession: this.deps.selectSession,
+        logError: this.deps.logError,
+      },
+      id
+    );
+  };
+
+  readonly restoreSession = async (rootID: string) => {
+    await restoreSessionWithDependencies(
+      {
+        restoreRecycleBinEntry: this.deps.restoreRecycleBinEntry,
+        loadSessions: this.deps.loadSessions,
+        loadRecycleBin: this.deps.loadRecycleBin,
+        hydrateSessionStatuses: this.deps.hydrateSessionStatuses,
+        logError: this.deps.logError,
+      },
+      rootID
+    );
+  };
+
+  readonly deleteSessionPermanently = async (rootID: string) => {
+    await deleteSessionPermanentlyWithDependencies(
+      {
+        getRecycleBinEntries: this.deps.getRecycleBinEntries,
+        deleteRecycleBinEntry: this.deps.deleteRecycleBinEntry,
+        loadRecycleBin: this.deps.loadRecycleBin,
+        clearDeletedSessionState: this.deps.clearDeletedSessionState,
+        logError: this.deps.logError,
+      },
+      rootID
+    );
+  };
+
+  readonly emptyRecycleBin = async () => {
+    await emptyRecycleBinWithDependencies({
+      getRecycleBinEntries: this.deps.getRecycleBinEntries,
+      emptyRecycleBin: this.deps.emptyRecycleBin,
+      loadRecycleBin: this.deps.loadRecycleBin,
+      clearDeletedSessionState: this.deps.clearDeletedSessionState,
+      logError: this.deps.logError,
+    });
   };
 }
 

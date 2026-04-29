@@ -3,7 +3,7 @@ import type { Message, SessionStatus } from '../types';
 import {
   selectSessionWithDependencies,
   syncSessionMessagesWithDependencies,
-} from './session-selection';
+} from './session/session-selection';
 
 function assistantMessage(id: string): Message {
   return {

@@ -1,3 +1,5 @@
+import { BrowserPersistence } from './browser-persistence';
+
 export const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
   sessionSelectedAgents: 'varro.sessionSelectedAgents',
@@ -17,23 +19,16 @@ export const STORAGE_KEYS = {
   showStickyUserPrompt: 'varro.showStickyUserPrompt',
 } as const;
 
+const browserPersistence = new BrowserPersistence();
+
 export function readStored<T>(key: string): T | null {
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
+  return browserPersistence.get<T>(key) ?? null;
 }
 
 export function writeStored(key: string, value: unknown) {
-  try {
-    if (value === null || value === undefined) {
-      window.localStorage.removeItem(key);
-      return;
-    }
-    const serialized = JSON.stringify(value);
-    if (window.localStorage.getItem(key) === serialized) return;
-    window.localStorage.setItem(key, serialized);
-  } catch {}
+  if (value === null || value === undefined) {
+    browserPersistence.remove(key);
+    return;
+  }
+  browserPersistence.set(key, value);
 }

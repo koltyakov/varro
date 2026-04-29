@@ -1,6 +1,6 @@
 import { ErrorBoundary, Show, onCleanup } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
-import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/useOpenCode.runtime';
+import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
 import { AppStateProvider, useAppState } from './lib/app-state-context';
 import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';

@@ -3,11 +3,11 @@ import type { Message, Session } from '../types';
 import {
   abortSessionWithDependencies,
   compactSessionWithDependencies,
-  createSessionControlOperations,
   redoSessionWithDependencies,
   reviewSessionWithDependencies,
+  SessionControlOperations,
   undoSessionWithDependencies,
-} from './session-controls';
+} from './session/session-controls';
 
 function userMessage(id: string): Message {
   return {
@@ -197,7 +197,7 @@ describe('session-controls helpers', () => {
   });
 
   it('creates bound session-control operations from one dependency bag', async () => {
-    const operations = createSessionControlOperations({
+    const operations = new SessionControlOperations({
       getActiveSessionId: () => 'session-1',
       sendMessage: vi.fn(async () => {}),
       getSessionTreeIds: () => ['session-1'],

@@ -80,7 +80,6 @@ export interface AppState {
   todos: Todo[];
   permissions: Permission[];
   questions: QuestionRequest[];
-  pendingAttentionSessionIds: string[];
   diffs: FileDiff[];
   streamingPartId: string | null;
   streamingText: string;
@@ -205,7 +204,6 @@ export function createAppState(): AppStateInstance {
     todos: [],
     permissions: normalizeInitialPermissions(initialWebviewState.pendingPermissions),
     questions: normalizeInitialQuestions(initialWebviewState.pendingQuestions),
-    pendingAttentionSessionIds: collectInitialPendingAttentionSessionIds(initialWebviewState),
     diffs: [],
     streamingPartId: null,
     streamingText: '',
@@ -618,15 +616,6 @@ function normalizeInitialQuestions(values: unknown): QuestionRequest[] {
     .filter((item): item is QuestionRequest => item !== null);
 }
 
-function collectInitialPendingAttentionSessionIds(initialState: Partial<InitialWebviewState>) {
-  return [
-    ...new Set([
-      ...normalizeInitialPermissions(initialState.pendingPermissions).map((item) => item.sessionID),
-      ...normalizeInitialQuestions(initialState.pendingQuestions).map((item) => item.sessionID),
-    ]),
-  ];
-}
-
 export function enqueueMessage(message: QueuedMessage) {
   setState(
     'queuedMessages',
@@ -812,7 +801,6 @@ export function isSessionAwaitingInput(sessionId: string) {
   const rootId = getSessionTreeRootId(sessionId) || sessionId;
   const sessionIds = new Set(getSessionTreeIds(rootId));
   return [
-    ...state.pendingAttentionSessionIds,
     ...state.permissions.map((permission) => permission.sessionID),
     ...state.questions.map((question) => question.sessionID),
   ].some((candidateSessionId) => sessionIds.has(candidateSessionId));

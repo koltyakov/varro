@@ -1,4 +1,4 @@
-import type { Message, Session, SessionStatus } from '../types';
+import type { Message, Session, SessionStatus } from '../../types';
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 
@@ -164,7 +164,7 @@ export async function compactSessionWithDependencies(deps: {
   }
 }
 
-export function createSessionControlOperations(deps: {
+type SessionControlDependencies = {
   getActiveSessionId(): string | null;
   sendMessage(prompt: string): Promise<void>;
   getSessionTreeIds(sessionId: string): string[];
@@ -195,69 +195,75 @@ export function createSessionControlOperations(deps: {
     input: { providerID: string; modelID: string }
   ): Promise<unknown>;
   getSession(sessionId: string): Session | undefined;
-}) {
-  return {
-    reviewSession: async () => {
-      await reviewSessionWithDependencies({
-        getActiveSessionId: deps.getActiveSessionId,
-        sendMessage: deps.sendMessage,
-      });
-    },
-    abortSession: async () => {
-      await abortSessionWithDependencies({
-        getActiveSessionId: deps.getActiveSessionId,
-        getSessionTreeIds: deps.getSessionTreeIds,
-        getSelectedAgentForSession: deps.getSelectedAgentForSession,
-        skipPlanSession: deps.skipPlanSession,
-        getSessionStatus: deps.getSessionStatus,
-        getSessionUsageLimit: deps.getSessionUsageLimit,
-        markPendingAbortTree: deps.markPendingAbortTree,
-        setSessionStatusEntry: deps.setSessionStatusEntry,
-        stopLoading: deps.stopLoading,
-        abortRemoteSession: deps.abortRemoteSession,
-        clearPendingAbortTree: deps.clearPendingAbortTree,
-        setSessionUsageLimit: deps.setSessionUsageLimit,
-        logError: deps.logError,
-      });
-    },
-    undoSession: async () => {
-      await undoSessionWithDependencies({
-        getActiveSessionId: deps.getActiveSessionId,
-        getMessages: deps.getMessages,
-        startLoading: deps.startLoading,
-        revertSession: deps.revertSession,
-        syncSession: deps.syncSession,
-        syncSessionMessages: deps.syncSessionMessages,
-        stopLoading: deps.stopLoading,
-        setError: deps.setError,
-      });
-    },
-    redoSession: async () => {
-      await redoSessionWithDependencies({
-        getActiveSessionId: deps.getActiveSessionId,
-        startLoading: deps.startLoading,
-        unrevertSession: deps.unrevertSession,
-        upsertSession: deps.upsertSession,
-        syncSession: deps.syncSession,
-        syncSessionMessages: deps.syncSessionMessages,
-        stopLoading: deps.stopLoading,
-        setError: deps.setError,
-      });
-    },
-    compactSession: async () => {
-      await compactSessionWithDependencies({
-        getActiveSessionId: deps.getActiveSessionId,
-        clearPendingAbort: deps.clearPendingAbort,
-        resolveSelectedModel: deps.resolveSelectedModel,
-        setError: deps.setError,
-        setSessionCompacting: deps.setSessionCompacting,
-        startLoading: deps.startLoading,
-        compactRemoteSession: deps.compactRemoteSession,
-        syncSession: deps.syncSession,
-        syncSessionMessages: deps.syncSessionMessages,
-        getSession: deps.getSession,
-        stopLoading: deps.stopLoading,
-      });
-    },
+};
+
+export class SessionControlOperations {
+  constructor(private readonly deps: SessionControlDependencies) {}
+
+  readonly reviewSession = async () => {
+    await reviewSessionWithDependencies({
+      getActiveSessionId: this.deps.getActiveSessionId,
+      sendMessage: this.deps.sendMessage,
+    });
+  };
+
+  readonly abortSession = async () => {
+    await abortSessionWithDependencies({
+      getActiveSessionId: this.deps.getActiveSessionId,
+      getSessionTreeIds: this.deps.getSessionTreeIds,
+      getSelectedAgentForSession: this.deps.getSelectedAgentForSession,
+      skipPlanSession: this.deps.skipPlanSession,
+      getSessionStatus: this.deps.getSessionStatus,
+      getSessionUsageLimit: this.deps.getSessionUsageLimit,
+      markPendingAbortTree: this.deps.markPendingAbortTree,
+      setSessionStatusEntry: this.deps.setSessionStatusEntry,
+      stopLoading: this.deps.stopLoading,
+      abortRemoteSession: this.deps.abortRemoteSession,
+      clearPendingAbortTree: this.deps.clearPendingAbortTree,
+      setSessionUsageLimit: this.deps.setSessionUsageLimit,
+      logError: this.deps.logError,
+    });
+  };
+
+  readonly undoSession = async () => {
+    await undoSessionWithDependencies({
+      getActiveSessionId: this.deps.getActiveSessionId,
+      getMessages: this.deps.getMessages,
+      startLoading: this.deps.startLoading,
+      revertSession: this.deps.revertSession,
+      syncSession: this.deps.syncSession,
+      syncSessionMessages: this.deps.syncSessionMessages,
+      stopLoading: this.deps.stopLoading,
+      setError: this.deps.setError,
+    });
+  };
+
+  readonly redoSession = async () => {
+    await redoSessionWithDependencies({
+      getActiveSessionId: this.deps.getActiveSessionId,
+      startLoading: this.deps.startLoading,
+      unrevertSession: this.deps.unrevertSession,
+      upsertSession: this.deps.upsertSession,
+      syncSession: this.deps.syncSession,
+      syncSessionMessages: this.deps.syncSessionMessages,
+      stopLoading: this.deps.stopLoading,
+      setError: this.deps.setError,
+    });
+  };
+
+  readonly compactSession = async () => {
+    await compactSessionWithDependencies({
+      getActiveSessionId: this.deps.getActiveSessionId,
+      clearPendingAbort: this.deps.clearPendingAbort,
+      resolveSelectedModel: this.deps.resolveSelectedModel,
+      setError: this.deps.setError,
+      setSessionCompacting: this.deps.setSessionCompacting,
+      startLoading: this.deps.startLoading,
+      compactRemoteSession: this.deps.compactRemoteSession,
+      syncSession: this.deps.syncSession,
+      syncSessionMessages: this.deps.syncSessionMessages,
+      getSession: this.deps.getSession,
+      stopLoading: this.deps.stopLoading,
+    });
   };
 }

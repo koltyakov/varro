@@ -1,30 +1,12 @@
-import { serverEvents } from '../lib/client';
-import { normalizePermissionEvent } from '../lib/session-event-reducer';
-import { isAbortedAssistantError } from '../lib/aborted';
-import { isAssistantMessage } from '../lib/message-metrics';
-import { parseUsageLimitNotice, type UsageLimitNotice } from '../lib/usage-limit';
-import {
-  getPermissionModeForSession,
-  addPermission,
-  applyMessagePartDelta,
-  clearStreamingState,
-  markLoadingActivity,
-  markSessionSeen,
-  removeMessagePart,
-  removePermission,
-  removeQuestion,
-  replaceMessages,
-  setSessionCompacting,
-  setSessionFailed,
-  setSessionUsageLimit,
-  setState,
-  state,
-  startLoading,
-  stopLoading,
-  upsertMessageInfo,
-  upsertPart,
-  upsertQuestion,
-} from '../lib/state';
+import { isAbortedAssistantError } from '../../lib/aborted';
+import { serverEvents } from '../../lib/client';
+import { isAssistantMessage } from '../../lib/message-metrics';
+import { normalizePermissionEvent } from '../../lib/session-event-reducer';
+import { parseUsageLimitNotice, type UsageLimitNotice } from '../../lib/usage-limit';
+import { appStore } from '../../lib/stores/app-store';
+import { permissionsStore } from '../../lib/stores/permissions-store';
+import { sessionStore } from '../../lib/stores/session-store';
+import { uiStore } from '../../lib/stores/ui-store';
 import type {
   AssistantMessage,
   FileDiff,
@@ -33,7 +15,7 @@ import type {
   QuestionRequest,
   Session,
   SessionStatus,
-} from '../types';
+} from '../../types';
 
 function isCompleteMessageInfo(value: unknown): value is Message {
   if (!value || typeof value !== 'object') return false;
@@ -173,39 +155,36 @@ function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] 
   return false;
 }
 
-export function createSessionEventHandlerOperations(deps: EventHandlerOperationDependencies) {
-  const registerHandlers = () => {
+export class SessionEventHandlerOperations {
+  constructor(private readonly deps: EventHandlerOperationDependencies) {}
+
+  readonly registerSessionEventHandlers = () => {
     return registerSessionEventHandlers({
-      getActiveSessionId: () => state.activeSessionId,
-      getMessages: () => state.messages,
-      handoffTodosToMessages: deps.todoSyncOperations.handoffTodosToMessages,
-      upsertSession: deps.sessionLifecycleOperations.upsertSession,
-      setSessionCompacting,
-      removeDeletedSessionTree: deps.sessionLifecycleOperations.removeDeletedSessionTree,
-      shouldIgnorePendingAbortStatus: deps.sessionStatusOperations.shouldIgnorePendingAbortStatus,
-      hasPendingAbort: deps.sessionStatusOperations.hasPendingAbort,
-      clearPendingAbort: deps.sessionStatusOperations.clearPendingAbort,
-      setSessionStatusEntry: (sessionId, status) =>
-        setState('sessionStatus', (current) => ({
-          ...current,
-          [sessionId]: status,
-        })),
+      getActiveSessionId: () => appStore.state.activeSessionId,
+      getMessages: () => appStore.state.messages,
+      handoffTodosToMessages: this.deps.todoSyncOperations.handoffTodosToMessages,
+      upsertSession: this.deps.sessionLifecycleOperations.upsertSession,
+      setSessionCompacting: sessionStore.setSessionCompacting,
+      removeDeletedSessionTree: this.deps.sessionLifecycleOperations.removeDeletedSessionTree,
+      shouldIgnorePendingAbortStatus:
+        this.deps.sessionStatusOperations.shouldIgnorePendingAbortStatus,
+      hasPendingAbort: this.deps.sessionStatusOperations.hasPendingAbort,
+      clearPendingAbort: this.deps.sessionStatusOperations.clearPendingAbort,
+      setSessionStatusEntry: sessionStore.setSessionStatusEntry,
       clearUsageLimitOnResumedProgress:
-        deps.sessionStatusOperations.clearUsageLimitOnResumedProgress,
-      updateUsageLimitState: deps.sessionStatusOperations.updateUsageLimitState,
-      syncSession: deps.sessionSyncOperations.syncSession,
-      shouldResyncSessionAfterIdle: (sessionId) => state.activeSessionId === sessionId,
-      syncSessionMessages: deps.sessionSyncOperations.syncSessionMessages,
-      applyUsageLimitNotice: deps.sessionStatusOperations.applyUsageLimitNotice,
-      syncTodosFromMessages: deps.todoSyncOperations.syncTodosFromMessages,
+        this.deps.sessionStatusOperations.clearUsageLimitOnResumedProgress,
+      updateUsageLimitState: this.deps.sessionStatusOperations.updateUsageLimitState,
+      syncSession: this.deps.sessionSyncOperations.syncSession,
+      shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
+      syncSessionMessages: this.deps.sessionSyncOperations.syncSessionMessages,
+      applyUsageLimitNotice: this.deps.sessionStatusOperations.applyUsageLimitNotice,
+      syncTodosFromMessages: this.deps.todoSyncOperations.syncTodosFromMessages,
       shouldAutoApprovePermissions: (sessionId) =>
-        getPermissionModeForSession(sessionId) === 'full',
-      respondPermission: deps.sessionApprovalOperations.respondPermission,
-      setDiffs: (diffs) => setState('diffs', diffs),
+        permissionsStore.getPermissionModeForSession(sessionId) === 'full',
+      respondPermission: this.deps.sessionApprovalOperations.respondPermission,
+      setDiffs: sessionStore.setDiffs,
     });
   };
-
-  return { registerSessionEventHandlers: registerHandlers };
 }
 
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
@@ -255,8 +234,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
       if (sessionID === deps.getActiveSessionId()) {
         const statusType = (status as { type: string }).type;
-        if (statusType === 'busy' || statusType === 'retry') startLoading();
-        else stopLoading();
+        if (statusType === 'busy' || statusType === 'retry') uiStore.startLoading();
+        else uiStore.stopLoading();
       }
     })
   );
@@ -266,13 +245,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const sid = data.properties?.sessionID as string | undefined;
       const abortedRetry = deps.hasPendingAbort(sid);
       deps.clearPendingAbort(sid);
-      if (sid) setSessionCompacting(sid, false);
+      if (sid) sessionStore.setSessionCompacting(sid, false);
       if (sid && !abortedRetry) {
         deps.updateUsageLimitState(sid, { type: 'idle' });
       }
-      if (!sid || sid === deps.getActiveSessionId()) stopLoading();
+      if (!sid || sid === deps.getActiveSessionId()) uiStore.stopLoading();
       if (sid && sid === deps.getActiveSessionId()) {
-        markSessionSeen(sid);
+        sessionStore.markSessionSeen(sid);
         deps.syncSession(sid).catch(() => {});
         if (deps.shouldResyncSessionAfterIdle(sid)) {
           deps.syncSessionMessages(sid).catch(() => {});
@@ -293,16 +272,16 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const assistantMessage = message && isAssistantMessage(message) ? message : null;
 
       if (sessionID === deps.getActiveSessionId()) {
-        markLoadingActivity();
+        uiStore.markLoadingActivity();
         if (message) {
-          upsertMessageInfo(message);
+          sessionStore.upsertMessageInfo(message);
         }
         if (assistantMessage && (!!assistantMessage.error || !!assistantMessage.time.completed)) {
           deps.handoffTodosToMessages();
         }
       }
       if (partialMessage?.role === 'assistant') {
-        setSessionFailed(
+        sessionStore.setSessionFailed(
           sessionID,
           !!partialMessage.error && !isAbortedAssistantError(partialMessage.error)
         );
@@ -318,7 +297,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             modelID: assistantMessage?.modelID,
           });
         } else if (partialMessage.error) {
-          setSessionUsageLimit(sessionID, null);
+          sessionStore.setSessionUsageLimit(sessionID, null);
         } else {
           deps.clearUsageLimitOnResumedProgress(sessionID);
         }
@@ -331,12 +310,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const rawPart = data.properties?.part;
       const partialPart = rawPart as { sessionID?: string; type?: string } | undefined;
       if (partialPart?.sessionID && partialPart.type === 'compaction') {
-        setSessionCompacting(partialPart.sessionID, false);
+        sessionStore.setSessionCompacting(partialPart.sessionID, false);
       }
       if (partialPart?.sessionID === deps.getActiveSessionId()) {
-        markLoadingActivity();
+        uiStore.markLoadingActivity();
         if (!isCompleteMessagePart(rawPart)) return;
-        upsertPart(rawPart);
+        sessionStore.upsertPart(rawPart);
         if (rawPart.type === 'tool') {
           deps.syncTodosFromMessages();
         }
@@ -349,8 +328,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if (!p) return;
       if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        markLoadingActivity();
-        applyMessagePartDelta(
+        uiStore.markLoadingActivity();
+        sessionStore.applyMessagePartDelta(
           p.messageID as string,
           p.partID as string,
           p.delta as string,
@@ -366,8 +345,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if (!p) return;
       if ((p.sessionID as string) !== deps.getActiveSessionId()) return;
-      markLoadingActivity();
-      removeMessagePart(p.sessionID as string, p.messageID as string, p.partID as string);
+      uiStore.markLoadingActivity();
+      sessionStore.removeMessagePart(
+        p.sessionID as string,
+        p.messageID as string,
+        p.partID as string
+      );
       deps.syncTodosFromMessages();
     })
   );
@@ -377,12 +360,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if (!p) return;
       if ((p.sessionID as string) === deps.getActiveSessionId()) {
-        markLoadingActivity();
-        clearStreamingState();
+        uiStore.markLoadingActivity();
+        sessionStore.clearStreamingState();
         const nextMessages = deps
           .getMessages()
           .filter((m) => m.info.id !== (p.messageID as string));
-        replaceMessages(nextMessages);
+        sessionStore.replaceMessages(nextMessages);
         deps.syncTodosFromMessages(nextMessages);
       }
     })
@@ -395,11 +378,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       void deps
         .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
         .catch(() => {
-          addPermission(permission);
+          permissionsStore.addPermission(permission);
         });
       return;
     }
-    addPermission(permission);
+    permissionsStore.addPermission(permission);
   }
 
   cleanups.push(
@@ -421,28 +404,28 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const props = data.properties;
       if (!props) return;
       const pid = getPermissionReplyId(props);
-      if (pid) removePermission(pid);
+      if (pid) permissionsStore.removePermission(pid);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.asked', (data) => {
       const props = data.properties;
-      if (props) upsertQuestion(props as QuestionRequest);
+      if (props) permissionsStore.upsertQuestion(props as QuestionRequest);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.replied', (data) => {
       const requestID = data.properties?.requestID as string | undefined;
-      if (requestID) removeQuestion(requestID);
+      if (requestID) permissionsStore.removeQuestion(requestID);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.rejected', (data) => {
       const requestID = data.properties?.requestID as string | undefined;
-      if (requestID) removeQuestion(requestID);
+      if (requestID) permissionsStore.removeQuestion(requestID);
     })
   );
 

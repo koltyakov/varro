@@ -967,7 +967,6 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
   const rootSessionId = (sessionId: string) => getSessionTreeRootId(sessionId) || sessionId;
-  const pendingAttentionIds = new Set(state.pendingAttentionSessionIds.map(rootSessionId));
   const permissionIds = new Set(
     state.permissions.map((permission) => rootSessionId(permission.sessionID))
   );
@@ -979,9 +978,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const newlyCompletedIds = new Set<string>();
   const descendantSubagentCountByRoot = new Map<string, number>();
   const isAwaitingInput = (sessionId: string) =>
-    pendingAttentionIds.has(rootSessionId(sessionId)) ||
-    permissionIds.has(rootSessionId(sessionId)) ||
-    questionIds.has(rootSessionId(sessionId));
+    permissionIds.has(rootSessionId(sessionId)) || questionIds.has(rootSessionId(sessionId));
   const isFailed = (sessionId: string) =>
     failedSessionIds.has(sessionId) || hasActiveUsageLimit(sessionId);
   const isRunning = (sessionId: string) => {

@@ -1,9 +1,60 @@
 import type { SelectedModel } from '../lib/app-state-types';
+import { client } from '../lib/client';
+import { appStore } from '../lib/stores/app-store';
+import { permissionsStore } from '../lib/stores/permissions-store';
+import { routingStore } from '../lib/stores/routing-store';
+import { sessionStore } from '../lib/stores/session-store';
 import type { McpStatus, ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type { Agent, Command, Provider, QuestionRequest, Session, SessionStatus } from '../types';
 import { reconcileLoadedAgents, reconcileLoadedProviders } from './routing-state';
 
 type Logger = (context: string, err: unknown) => void;
+
+export function createStateBoundDataLoaderOperations(deps: {
+  applySessions(sessions: Session[]): void;
+  updateUsageLimitState(
+    sessionId: string,
+    status: SessionStatus | null | undefined,
+    messages?: Array<unknown>
+  ): void;
+  logError: Logger;
+}) {
+  return createDataLoaderOperations({
+    listMcpStatus: () => client.mcp.status(),
+    setMcpStatus: routingStore.setMcpStatus,
+    getActiveSessionId: () => appStore.state.activeSessionId,
+    getSelectedMcpsForSession: routingStore.getSelectedMcpsForSession,
+    setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
+    listQuestions: () => client.question.list(),
+    setQuestions: permissionsStore.setQuestions,
+    listAgents: () => client.agent.list(),
+    getSelectedAgent: () => appStore.state.selectedAgent,
+    getSelectedAgentForSession: routingStore.getSelectedAgentForSession,
+    getPersistedSelectedAgent: routingStore.getPersistedSelectedAgent,
+    setAllAgents: routingStore.setAllAgents,
+    setPrimaryAgents: routingStore.setPrimaryAgents,
+    setSelectedAgent: routingStore.setSelectedAgent,
+    listCommands: () => client.command.list(),
+    setCommands: routingStore.setCommands,
+    listProviders: () => client.config.providers(),
+    setProvidersLoaded: routingStore.setProvidersLoaded,
+    setProviders: routingStore.setProviders,
+    setProviderDefaults: routingStore.setProviderDefaults,
+    getSelectedModel: () => appStore.state.selectedModel,
+    setSelectedModel: routingStore.setSelectedModel,
+    loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),
+    setProviderLimit: routingStore.setProviderLimit,
+    listSessions: () => client.session.list(),
+    applySessions: deps.applySessions,
+    listRecycleBin: () => client.varro.recycleBin.list(),
+    setRecycleBinEntries: sessionStore.setRecycleBinEntries,
+    loadSessionStatuses: () => client.session.status(),
+    setSessionStatuses: sessionStore.setSessionStatuses,
+    getSessions: () => appStore.state.sessions,
+    updateUsageLimitState: deps.updateUsageLimitState,
+    logError: deps.logError,
+  });
+}
 
 export function createDataLoaderOperations(deps: {
   listMcpStatus(): Promise<Record<string, McpStatus> | null | undefined>;

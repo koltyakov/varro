@@ -75,7 +75,6 @@ export interface RestProxyCallbacks {
   ensureServerStarted(): Promise<string | undefined>;
   cleanupExpiredRecycleBin(): Promise<void>;
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
-  postRecycleBinUpdate(): void;
 }
 
 export class RestProxy {
@@ -300,7 +299,6 @@ export class RestProxy {
         return this.callbacks.sessionTrash.list();
       case 'restore': {
         const restored = await this.callbacks.sessionTrash.restore(request.rootID);
-        this.callbacks.postRecycleBinUpdate();
         return Boolean(restored);
       }
       case 'delete': {
@@ -311,7 +309,6 @@ export class RestProxy {
         );
         if (removed) {
           this.callbacks.sessionState.removeSessions(removed.sessions.map((session) => session.id));
-          this.callbacks.postRecycleBinUpdate();
         }
         return Boolean(removed);
       }
@@ -323,7 +320,6 @@ export class RestProxy {
           this.callbacks.sessionState.removeSessions(
             removed.flatMap((entry) => entry.sessions.map((session) => session.id))
           );
-          this.callbacks.postRecycleBinUpdate();
         }
         return true;
       }
@@ -339,7 +335,6 @@ export class RestProxy {
       throw new Error('404 Session not found');
     }
     this.callbacks.sessionState.removeSessions(entry.sessions.map((session) => session.id));
-    this.callbacks.postRecycleBinUpdate();
     return true;
   }
 

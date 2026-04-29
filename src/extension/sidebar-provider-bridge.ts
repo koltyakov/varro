@@ -7,17 +7,30 @@ import { renderWebviewHtml, type WebviewAssetContent } from './webview-html';
 
 export class SidebarProviderBridge {
   private webviewAssets: WebviewAssetContent | null = null;
+  private view?: vscode.WebviewView;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
-  post(view: vscode.WebviewView | undefined, msg: ExtensionMessage) {
-    // oxlint-disable-next-line require-post-message-target-origin
-    view?.webview.postMessage(msg);
+  setView(view: vscode.WebviewView | undefined) {
+    this.view = view;
   }
 
-  async renderHtml(view: vscode.WebviewView | undefined, initialState: InitialWebviewState) {
+  getView() {
+    return this.view;
+  }
+
+  isVisible() {
+    return Boolean(this.view?.visible);
+  }
+
+  post(msg: ExtensionMessage) {
+    // oxlint-disable-next-line require-post-message-target-origin
+    this.view?.webview.postMessage(msg);
+  }
+
+  async renderHtml(initialState: InitialWebviewState) {
     const assets = await this.loadWebviewAssets();
-    return renderWebviewHtml(view?.webview.cspSource || '', initialState, assets);
+    return renderWebviewHtml(this.view?.webview.cspSource || '', initialState, assets);
   }
 
   webviewOptions() {
@@ -27,8 +40,8 @@ export class SidebarProviderBridge {
     } satisfies vscode.WebviewOptions;
   }
 
-  emptyStateLogoUri(view: vscode.WebviewView | undefined) {
-    return view?.webview
+  emptyStateLogoUri() {
+    return this.view?.webview
       .asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'assets', 'icon.png'))
       ?.toString();
   }

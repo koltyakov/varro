@@ -1,11 +1,13 @@
-import { setSessionUsageLimit, setState, startLoading, state, stopLoading } from '../lib/state';
-import type { UsageLimitNotice } from '../lib/usage-limit';
-import { deriveUsageLimitNotice } from '../lib/usage-limit';
-import type { Message, Part, SessionStatus } from '../types';
+import { appStore } from '../../lib/stores/app-store';
+import { sessionStore } from '../../lib/stores/session-store';
+import { uiStore } from '../../lib/stores/ui-store';
+import { deriveUsageLimitNotice } from '../../lib/usage-limit';
+import type { UsageLimitNotice } from '../../lib/usage-limit';
+import type { Message, Part, SessionStatus } from '../../types';
 
 type SessionMessageEntry = { info: Message; parts: Part[] };
 
-export function createSessionStatusOperations(deps: {
+type SessionStatusDependencies = {
   pendingAbortRetryAttempts: Map<string, number | null>;
   deriveUsageLimitNoticeContext(
     sessionId: string,
@@ -17,79 +19,80 @@ export function createSessionStatusOperations(deps: {
   syncSessionMessages(sessionId: string): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   logError(context: string, err: unknown): void;
-}) {
-  const setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
-    setState('sessionStatus', (current) => ({
-      ...current,
-      [sessionId]: status,
-    }));
+};
+
+export class SessionStatusOperations {
+  constructor(private readonly deps: SessionStatusDependencies) {}
+
+  readonly setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
+    sessionStore.setSessionStatusEntry(sessionId, status);
   };
 
-  const clearPendingAbort = (sessionId: string | null | undefined) => {
+  readonly clearPendingAbort = (sessionId: string | null | undefined) => {
     clearPendingAbortWithDependencies(
-      { pendingAbortRetryAttempts: deps.pendingAbortRetryAttempts },
+      { pendingAbortRetryAttempts: this.deps.pendingAbortRetryAttempts },
       sessionId
     );
   };
 
-  const hasPendingAbort = (sessionId: string | null | undefined) => {
+  readonly hasPendingAbort = (sessionId: string | null | undefined) => {
     return hasPendingAbortWithDependencies(
-      { pendingAbortRetryAttempts: deps.pendingAbortRetryAttempts },
+      { pendingAbortRetryAttempts: this.deps.pendingAbortRetryAttempts },
       sessionId
     );
   };
 
-  const clearPendingAbortTree = (sessionIds: string[]) => {
+  readonly clearPendingAbortTree = (sessionIds: string[]) => {
     clearPendingAbortTreeWithDependencies(
-      { pendingAbortRetryAttempts: deps.pendingAbortRetryAttempts },
+      { pendingAbortRetryAttempts: this.deps.pendingAbortRetryAttempts },
       sessionIds
     );
   };
 
-  const markPendingAbortTree = (sessionIds: string[]) => {
+  readonly markPendingAbortTree = (sessionIds: string[]) => {
     markPendingAbortTreeWithDependencies(
       {
-        pendingAbortRetryAttempts: deps.pendingAbortRetryAttempts,
-        getSessionStatus: (sessionId) => state.sessionStatus[sessionId],
+        pendingAbortRetryAttempts: this.deps.pendingAbortRetryAttempts,
+        getSessionStatus: (sessionId) => appStore.state.sessionStatus[sessionId],
       },
       sessionIds
     );
   };
 
-  const shouldIgnorePendingAbortStatus = (
+  readonly shouldIgnorePendingAbortStatus = (
     sessionId: string,
     status: SessionStatus | null | undefined
   ) => {
     return shouldIgnorePendingAbortStatusWithDependencies(
-      { pendingAbortRetryAttempts: deps.pendingAbortRetryAttempts },
+      { pendingAbortRetryAttempts: this.deps.pendingAbortRetryAttempts },
       sessionId,
       status
     );
   };
 
-  const clearUsageLimitOnResumedProgress = (
+  readonly clearUsageLimitOnResumedProgress = (
     sessionID: string,
     nextStatus?: SessionStatus | null
   ) => {
     clearUsageLimitOnResumedProgressWithDependencies(
       {
-        getSessionUsageLimit: (sessionId) => state.sessionUsageLimits[sessionId],
-        setSessionUsageLimit,
+        getSessionUsageLimit: (sessionId) => appStore.state.sessionUsageLimits[sessionId],
+        setSessionUsageLimit: sessionStore.setSessionUsageLimit,
       },
       sessionID,
       nextStatus
     );
   };
 
-  const applyUsageLimitNotice = (
+  readonly applyUsageLimitNotice = (
     sessionID: string,
     notice: UsageLimitNotice | null,
     options?: { preserveExistingOnNull?: boolean }
   ) => {
     applyUsageLimitNoticeWithDependencies(
       {
-        setSessionUsageLimit,
-        refreshProviderLimit: deps.refreshProviderLimit,
+        setSessionUsageLimit: sessionStore.setSessionUsageLimit,
+        refreshProviderLimit: this.deps.refreshProviderLimit,
       },
       sessionID,
       notice,
@@ -97,15 +100,15 @@ export function createSessionStatusOperations(deps: {
     );
   };
 
-  const updateUsageLimitState = (
+  readonly updateUsageLimitState = (
     sessionID: string,
     status: SessionStatus | null | undefined,
-    messages = state.messages
+    messages = appStore.state.messages
   ) => {
     updateUsageLimitStateWithDependencies(
       {
-        deriveUsageLimitNoticeContext: deps.deriveUsageLimitNoticeContext,
-        applyUsageLimitNotice,
+        deriveUsageLimitNoticeContext: this.deps.deriveUsageLimitNoticeContext,
+        applyUsageLimitNotice: this.applyUsageLimitNotice,
       },
       sessionID,
       status,
@@ -113,36 +116,23 @@ export function createSessionStatusOperations(deps: {
     );
   };
 
-  const recheckSessionStatus = async (sessionId: string) => {
+  readonly recheckSessionStatus = async (sessionId: string) => {
     await recheckSessionStatusWithDependencies(
       {
-        isDocumentVisible: deps.isDocumentVisible,
-        loadSessionStatuses: deps.loadSessionStatuses,
-        shouldIgnorePendingAbortStatus,
-        hasPendingAbort,
-        updateUsageLimitState,
-        clearPendingAbort,
-        stopLoading,
-        shouldResyncSessionAfterIdle: deps.shouldResyncSessionAfterIdle,
-        syncSessionMessages: deps.syncSessionMessages,
-        startLoading,
-        logError: deps.logError,
+        isDocumentVisible: this.deps.isDocumentVisible,
+        loadSessionStatuses: this.deps.loadSessionStatuses,
+        shouldIgnorePendingAbortStatus: this.shouldIgnorePendingAbortStatus,
+        hasPendingAbort: this.hasPendingAbort,
+        updateUsageLimitState: this.updateUsageLimitState,
+        clearPendingAbort: this.clearPendingAbort,
+        stopLoading: uiStore.stopLoading,
+        shouldResyncSessionAfterIdle: this.deps.shouldResyncSessionAfterIdle,
+        syncSessionMessages: this.deps.syncSessionMessages,
+        startLoading: uiStore.startLoading,
+        logError: this.deps.logError,
       },
       sessionId
     );
-  };
-
-  return {
-    setSessionStatusEntry,
-    clearPendingAbort,
-    hasPendingAbort,
-    clearPendingAbortTree,
-    markPendingAbortTree,
-    shouldIgnorePendingAbortStatus,
-    clearUsageLimitOnResumedProgress,
-    applyUsageLimitNotice,
-    updateUsageLimitState,
-    recheckSessionStatus,
   };
 }
 

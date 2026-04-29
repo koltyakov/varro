@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Permission, Session } from '../types';
 import {
-  createSessionApprovalOperations,
   autoApprovePermissionsForSessionWithDependencies,
   rejectQuestionWithDependencies,
   respondPermissionWithDependencies,
   respondQuestionWithDependencies,
+  SessionApprovalOperations,
   updatePermissionModeForSessionWithDependencies,
-} from './session-approvals';
+} from './session/session-approvals';
 
 function permission(
   id: string,
@@ -179,7 +179,7 @@ describe('session-approvals helpers', () => {
     const rejectRemoteQuestion = vi.fn(async () => {});
     const updateSessionPermission = vi.fn(async () => session('session-1'));
 
-    const operations = createSessionApprovalOperations({
+    const operations = new SessionApprovalOperations({
       getPermissions: () => [permission('perm-1')],
       respondRemotePermission,
       removePermission: vi.fn(),
