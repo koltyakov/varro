@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { setExpandThinkingByDefaultPreference, setState } from '../lib/state';
 import type { Permission, QuestionRequest, ToolPart } from '../types';
@@ -11,6 +11,7 @@ import {
   shouldShowToolPreview,
 } from './ToolCall';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
+import { client } from '../lib/client';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -581,5 +582,90 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
+  });
+});
+
+describe('FileChangeCard', () => {
+  it('labels an edit tool as Edited based on the tool, not workspace git status', () => {
+    const fileStatusSpy = vi
+      .spyOn(client.file, 'status')
+      .mockResolvedValue([{ path: 'src/foo.ts', status: 'added', added: 1, removed: 0 }]);
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'edit',
+      state: completedState({ file_path: 'src/foo.ts' }, 'Edit src/foo.ts'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited');
+    expect(fileStatusSpy).not.toHaveBeenCalled();
+  });
+
+  it('labels a create tool as Added without consulting workspace git status', () => {
+    const fileStatusSpy = vi
+      .spyOn(client.file, 'status')
+      .mockResolvedValue([{ path: 'src/new.ts', status: 'modified', added: 1, removed: 0 }]);
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'create',
+      state: completedState({ file_path: 'src/new.ts' }, 'Create src/new.ts'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Added');
+    expect(fileStatusSpy).not.toHaveBeenCalled();
+  });
+
+  it('labels a delete tool as Removed without consulting workspace git status', () => {
+    const fileStatusSpy = vi.spyOn(client.file, 'status').mockResolvedValue([]);
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'delete',
+      state: completedState({ file_path: 'src/gone.ts' }, 'Delete src/gone.ts'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Removed');
+    expect(fileStatusSpy).not.toHaveBeenCalled();
+  });
+
+  it('labels a rename tool as Moved without consulting workspace git status', () => {
+    const fileStatusSpy = vi.spyOn(client.file, 'status').mockResolvedValue([]);
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'rename',
+      state: completedState(
+        { from_path: 'src/old.ts', to_path: 'src/new.ts' },
+        'Rename src/old.ts -> src/new.ts'
+      ),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Moved');
+    expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 });
