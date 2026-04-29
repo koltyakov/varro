@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import { logger } from './logger';
 import { EventEmitter } from 'events';
 import type { ServerStatus } from '../shared/protocol';
+import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './rest-proxy';
 import { ServerLifecycleStateMachine } from './server-lifecycle';
 import {
   anySignal,
@@ -452,14 +453,14 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async request(method: string, path: string, body?: unknown): Promise<unknown> {
-    const scoped = this.scopedUrl(path);
+    const scoped = scopeOpenCodeRequest(this.url, path, this.getWorkspaceCwd());
     const controller = new AbortController();
     this.requestControllers.add(controller);
     const init: RequestInit = {
       method,
       headers: {
         'Content-Type': 'application/json',
-        ...this.directoryHeaders(scoped.directory),
+        ...getOpenCodeDirectoryHeaders(scoped.directory),
       },
       signal: anySignal(controller.signal, AbortSignal.timeout(OpenCodeServer.REQUEST_TIMEOUT_MS)),
     };
@@ -495,7 +496,7 @@ export class OpenCodeServer extends EventEmitter {
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
-    const scoped = this.scopedUrl('/event');
+    const scoped = scopeOpenCodeRequest(this.url, '/event', this.getWorkspaceCwd());
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
     const isCurrentStream = () => this.isCurrentEventStream(controller, generation);
@@ -526,7 +527,7 @@ export class OpenCodeServer extends EventEmitter {
         signal: controller.signal,
         headers: {
           Accept: 'text/event-stream',
-          ...this.directoryHeaders(scoped.directory),
+          ...getOpenCodeDirectoryHeaders(scoped.directory),
         },
       });
       if (connectTimer) {
@@ -1090,25 +1091,6 @@ export class OpenCodeServer extends EventEmitter {
     });
     terminal.show(false);
     terminal.sendText(text, true);
-  }
-
-  private scopedUrl(path: string): { url: string; directory?: string } {
-    const url = new URL(path, this.url);
-    if (!path.startsWith('/') || path.startsWith('//') || url.origin !== this.url) {
-      throw new Error('Unsupported OpenCode API path');
-    }
-    const directory = this.getWorkspaceCwd();
-
-    if (directory && !url.pathname.startsWith('/global/') && !url.searchParams.has('directory')) {
-      url.searchParams.set('directory', directory);
-    }
-
-    return { url: url.toString(), directory };
-  }
-
-  private directoryHeaders(directory?: string): Record<string, string> {
-    if (!directory) return {};
-    return { 'x-opencode-directory': encodeURIComponent(directory) };
   }
 
   resolveCommand(): string {
