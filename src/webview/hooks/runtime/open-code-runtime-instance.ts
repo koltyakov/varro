@@ -126,6 +126,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
     syncSessionMessages: (sessionId) => syncSessionMessages(sessionId),
     loadSessionStatuses: () => client.session.status(),
+    isActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
     logError,
   });
 
@@ -416,6 +417,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     {
       getActiveSessionId: () => appStore.state.activeSessionId,
       setActiveSessionId: sessionStore.setActiveSessionId,
+      clearPendingAbort,
       persistActiveSessionId: sessionStore.persistActiveSessionId,
       markSessionSeen: sessionStore.markSessionSeen,
       clearDraftCurrentDocumentState: composerStore.clearDraftCurrentDocumentState,
@@ -442,7 +444,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       applySelectedModel: (model, sessionId) =>
         routingStore.setSelectedModel(model, { sessionId, persistGlobal: false }),
       getConnectedMcpNames: routingStore.getConnectedMcpNames,
-      hasSelectedMcps: (sessionId) => !!routingStore.getSelectedMcpsForSession(sessionId),
+      hasSelectedMcps: (sessionId) => routingStore.getSelectedMcpsForSession(sessionId) !== null,
       setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
       syncSessionMcps,
       resetTodoSync,

@@ -113,6 +113,12 @@ export class OpenCodeTransport {
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
     const isCurrentStream = () => this.isCurrentEventStream(controller, generation);
+    const clearConnectTimer = () => {
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
+      }
+    };
 
     const abortForReconnect = (message: string, reason: string) => {
       if (!isCurrentStream() || controller.signal.aborted) return;
@@ -143,10 +149,7 @@ export class OpenCodeTransport {
           ...getOpenCodeDirectoryHeaders(scoped.directory),
         },
       });
-      if (connectTimer) {
-        clearTimeout(connectTimer);
-        connectTimer = null;
-      }
+      clearConnectTimer();
       if (!isCurrentStream()) return;
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
       this.eventReconnectDelay = 1000;
@@ -197,10 +200,7 @@ export class OpenCodeTransport {
       }
       shouldReconnect = true;
     } finally {
-      if (connectTimer) {
-        clearTimeout(connectTimer);
-        connectTimer = null;
-      }
+      clearConnectTimer();
       if (idleTimer) {
         clearTimeout(idleTimer);
         idleTimer = null;
@@ -344,8 +344,12 @@ export class OpenCodeTransport {
   private getEventReconnectDelay() {
     const delay = this.eventReconnectDelay;
     this.eventReconnectDelay = Math.min(delay * 2, OpenCodeTransport.MAX_EVENT_RECONNECT_DELAY_MS);
-    const jitteredDelay = Math.round(delay * (0.8 + Math.random() * 0.4));
-    return Math.min(jitteredDelay, OpenCodeTransport.MAX_EVENT_RECONNECT_DELAY_MS);
+    const minDelay = Math.round(delay * 0.8);
+    const maxDelay = Math.round(
+      Math.min(delay * 1.2, OpenCodeTransport.MAX_EVENT_RECONNECT_DELAY_MS)
+    );
+    const jitterWindow = Math.max(maxDelay - minDelay, 0);
+    return minDelay + Math.round(Math.random() * jitterWindow);
   }
 
   private isCurrentEventStream(controller: AbortController, generation: number) {

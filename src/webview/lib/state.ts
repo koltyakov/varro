@@ -1773,19 +1773,23 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
 }
 
 export function replaceMessages(incoming: MessageEntry[]) {
+  const nextMessages = cloneMessageEntries(incoming);
   streamingDeltaQueue.reset();
   batch(() => {
-    setState('messages', incoming);
+    setState('messages', nextMessages);
     if (state.streamingPartId !== null) setState('streamingPartId', null);
     if (state.streamingText !== '') setState('streamingText', '');
   });
   messageIndex.invalidate();
 }
 
-export function setMessagesIncremental(incoming: MessageEntry[]) {
-  clearStreamingState();
+export function setMessagesIncremental(
+  incoming: MessageEntry[],
+  options?: { preserveExtraParts?: boolean }
+) {
   const current = state.messages;
   if (current === incoming) return;
+  clearStreamingState();
   if (current.length === 0 || incoming.length === 0) {
     replaceMessages(incoming);
     return;
@@ -1804,21 +1808,22 @@ export function setMessagesIncremental(incoming: MessageEntry[]) {
       let changed = false;
       for (let i = 0; i < incoming.length; i++) {
         const next = incoming[i];
+        const nextEntry = mergeMessageEntry(msgs[i], next, options);
         if (i < sharedPrefixLength) {
-          if (!areMessageEntriesEquivalent(msgs[i], next)) {
-            msgs[i] = next;
+          if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
+            msgs[i] = nextEntry;
             changed = true;
           }
           continue;
         }
 
         if (i < msgs.length) {
-          if (msgs[i] !== next) {
-            msgs[i] = next;
+          if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
+            msgs[i] = nextEntry;
             changed = true;
           }
         } else {
-          msgs.push(next);
+          msgs.push(nextEntry);
           changed = true;
         }
       }
@@ -1829,6 +1834,45 @@ export function setMessagesIncremental(incoming: MessageEntry[]) {
       if (changed) messageIndex.invalidate();
     })
   );
+}
+
+function mergeMessageEntry(
+  current: MessageEntry | undefined,
+  incoming: MessageEntry,
+  options?: { preserveExtraParts?: boolean }
+) {
+  const next = cloneValue(incoming);
+  if (!current || !options?.preserveExtraParts || current.parts.length === 0) {
+    return next;
+  }
+
+  const incomingPartIds = new Set(next.parts.map((part) => part.id));
+  for (const part of current.parts) {
+    if (!incomingPartIds.has(part.id)) {
+      next.parts.push(cloneValue(part));
+    }
+  }
+
+  return next;
+}
+
+function cloneMessageEntries(entries: MessageEntry[]) {
+  return entries.map((entry) => cloneValue(entry));
+}
+
+function cloneValue<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneValue(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        cloneValue(entry),
+      ])
+    ) as T;
+  }
+  return value;
 }
 
 export function getChildRunsByParentId(

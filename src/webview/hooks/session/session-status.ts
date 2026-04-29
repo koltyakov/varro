@@ -18,6 +18,7 @@ type SessionStatusDependencies = {
   shouldResyncSessionAfterIdle(sessionId: string): boolean;
   syncSessionMessages(sessionId: string): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
+  isActiveSession(sessionId: string): boolean;
   logError(context: string, err: unknown): void;
 };
 
@@ -129,6 +130,7 @@ export class SessionStatusOperations {
         shouldResyncSessionAfterIdle: this.deps.shouldResyncSessionAfterIdle,
         syncSessionMessages: this.deps.syncSessionMessages,
         startLoading: uiStore.startLoading,
+        isActiveSession: this.deps.isActiveSession,
         logError: this.deps.logError,
       },
       sessionId
@@ -283,6 +285,7 @@ export async function recheckSessionStatusWithDependencies(
     shouldResyncSessionAfterIdle(sessionId: string): boolean;
     syncSessionMessages(sessionId: string): Promise<void>;
     startLoading(): void;
+    isActiveSession(sessionId: string): boolean;
     logError(context: string, err: unknown): void;
   },
   sessionId: string
@@ -299,14 +302,16 @@ export async function recheckSessionStatusWithDependencies(
     }
     if (!status || status.type === 'idle') {
       deps.clearPendingAbort(sessionId);
-      deps.stopLoading();
+      if (deps.isActiveSession(sessionId)) {
+        deps.stopLoading();
+      }
       if (deps.shouldResyncSessionAfterIdle(sessionId)) {
         await deps.syncSessionMessages(sessionId).catch(() => {});
       }
       return;
     }
 
-    if (status.type === 'busy' || status.type === 'retry') {
+    if ((status.type === 'busy' || status.type === 'retry') && deps.isActiveSession(sessionId)) {
       deps.startLoading();
     }
   } catch (err) {

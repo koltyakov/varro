@@ -242,7 +242,7 @@ export async function loadMcpsWithDependencies(
     const nextStatus = status || {};
     deps.setMcpStatus(nextStatus);
     const activeSessionId = deps.getActiveSessionId();
-    if (activeSessionId && !deps.getSelectedMcpsForSession(activeSessionId)) {
+    if (activeSessionId && deps.getSelectedMcpsForSession(activeSessionId) === null) {
       deps.setSelectedMcpsForSession(
         activeSessionId,
         Object.entries(nextStatus)

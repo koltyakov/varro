@@ -1,6 +1,9 @@
 import type { Persistence } from '../../shared/persistence';
+import { postMessage } from './bridge';
 
 export class BrowserPersistence implements Persistence {
+  private warnedSetFailure = false;
+
   constructor(private readonly storage: Storage = window.localStorage) {}
 
   get<T>(key: string): T | undefined {
@@ -21,7 +24,19 @@ export class BrowserPersistence implements Persistence {
       }
       if (this.storage.getItem(key) === serialized) return;
       this.storage.setItem(key, serialized);
-    } catch {}
+    } catch (err) {
+      if (!this.warnedSetFailure) {
+        this.warnedSetFailure = true;
+        postMessage({
+          type: 'log',
+          payload: {
+            msg: `browser-persistence:set:${key}`,
+            error: err instanceof Error ? err.message : String(err),
+            level: 'warn',
+          },
+        });
+      }
+    }
   }
 
   remove(key: string) {

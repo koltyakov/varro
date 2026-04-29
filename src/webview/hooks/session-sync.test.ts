@@ -53,6 +53,7 @@ describe('session sync helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId: vi.fn(),
         markSessionSeen: vi.fn(),
         clearDraftCurrentDocumentState: vi.fn(),
@@ -118,7 +119,7 @@ describe('session sync helpers', () => {
       'session-1'
     );
 
-    expect(setMessagesIncremental).toHaveBeenCalledWith(messages);
+    expect(setMessagesIncremental).toHaveBeenCalledWith(messages, { preserveExtraParts: true });
   });
 
   it('syncs session metadata through the state dependency wrapper', async () => {
@@ -163,6 +164,7 @@ describe('session sync helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId: vi.fn(),
         markSessionSeen: vi.fn(),
         clearDraftCurrentDocumentState: vi.fn(),

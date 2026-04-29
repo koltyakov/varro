@@ -13,6 +13,7 @@ export async function selectSessionWithStateDependencies(
   deps: {
     getActiveSessionId(): string | null;
     setActiveSessionId(id: string): void;
+    clearPendingAbort(sessionId: string): void;
     persistActiveSessionId(id: string): void;
     markSessionSeen(id: string): void;
     clearDraftCurrentDocumentState(): void;
@@ -34,7 +35,10 @@ export async function selectSessionWithStateDependencies(
     loadSession(id: string): Promise<{ session: Session; messages: SessionEntry[] }>;
     isCurrentSelectionGeneration(generation: number): boolean;
     upsertSession(session: Session): void;
-    setMessagesIncremental(messages: SessionEntry[]): void;
+    setMessagesIncremental(
+      messages: SessionEntry[],
+      options?: { preserveExtraParts?: boolean }
+    ): void;
     syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
     requestMessageListScrollToBottom(): void;
     deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
@@ -69,7 +73,10 @@ export async function syncSessionMessagesWithStateDependencies(
       status: SessionStatus | null | undefined,
       messages: SessionEntry[]
     ): void;
-    setMessagesIncremental(messages: SessionEntry[]): void;
+    setMessagesIncremental(
+      messages: SessionEntry[],
+      options?: { preserveExtraParts?: boolean }
+    ): void;
     syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
     handoffTodosToMessages(messages: SessionEntry[]): void;
   },
@@ -92,6 +99,7 @@ export async function syncSessionWithStateDependencies(
 type SessionSyncDependencies = {
   getActiveSessionId(): string | null;
   setActiveSessionId(id: string): void;
+  clearPendingAbort(sessionId: string): void;
   persistActiveSessionId(id: string): void;
   markSessionSeen(id: string): void;
   clearDraftCurrentDocumentState(): void;
@@ -113,7 +121,10 @@ type SessionSyncDependencies = {
   loadSession(id: string): Promise<{ session: Session; messages: SessionEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
-  setMessagesIncremental(messages: SessionEntry[]): void;
+  setMessagesIncremental(
+    messages: SessionEntry[],
+    options?: { preserveExtraParts?: boolean }
+  ): void;
   syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
   requestMessageListScrollToBottom(): void;
   deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
@@ -153,6 +164,7 @@ export class SessionSyncOperations {
       {
         getActiveSessionId: this.deps.getActiveSessionId,
         setActiveSessionId: this.deps.setActiveSessionId,
+        clearPendingAbort: this.deps.clearPendingAbort,
         persistActiveSessionId: this.deps.persistActiveSessionId,
         markSessionSeen: this.deps.markSessionSeen,
         clearDraftCurrentDocumentState: this.deps.clearDraftCurrentDocumentState,

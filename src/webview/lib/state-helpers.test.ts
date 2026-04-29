@@ -840,6 +840,43 @@ describe('state helpers', () => {
     });
   });
 
+  it('preserves newer local parts during incremental snapshot refreshes', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setMessagesIncremental([
+      {
+        info: assistantMessage('message-1', 'session-1', 10),
+        parts: [],
+      },
+    ]);
+
+    stateModule.upsertPart({
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'todowrite',
+      state: {
+        status: 'running',
+        input: { todos: [{ content: 'Keep me', status: 'pending', priority: 'medium' }] },
+      },
+    });
+
+    stateModule.setMessagesIncremental(
+      [
+        {
+          info: assistantMessage('message-1', 'session-1', 10),
+          parts: [],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(stateModule.state.messages[0]?.parts).toHaveLength(1);
+    expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({ id: 'tool-1' });
+  });
+
   it('reads desktop session pane side from initial webview state', async () => {
     (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
       theme: 'dark',

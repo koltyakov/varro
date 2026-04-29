@@ -35,6 +35,7 @@ function isCompleteMessageInfo(value: unknown): value is Message {
 
   if (record.role === 'user') {
     return !!(
+      record.parentID === undefined &&
       typeof record.agent === 'string' &&
       record.model &&
       typeof record.model === 'object' &&
@@ -246,14 +247,20 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const abortedRetry = deps.hasPendingAbort(sid);
       deps.clearPendingAbort(sid);
       if (sid) sessionStore.setSessionCompacting(sid, false);
+      if (sid) deps.setSessionStatusEntry(sid, { type: 'idle' });
       if (sid && !abortedRetry) {
         deps.updateUsageLimitState(sid, { type: 'idle' });
       }
       if (!sid || sid === deps.getActiveSessionId()) uiStore.stopLoading();
       if (sid && sid === deps.getActiveSessionId()) {
+        const shouldResyncActiveMessages = hasActiveAssistantReply(deps.getMessages());
         sessionStore.markSessionSeen(sid);
         deps.syncSession(sid).catch(() => {});
-        if (deps.shouldResyncSessionAfterIdle(sid)) {
+        const handedOffTodos = deps.handoffTodosToMessages();
+        if (
+          (shouldResyncActiveMessages || !handedOffTodos) &&
+          deps.shouldResyncSessionAfterIdle(sid)
+        ) {
           deps.syncSessionMessages(sid).catch(() => {});
         }
       }

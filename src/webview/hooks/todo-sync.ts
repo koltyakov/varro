@@ -4,7 +4,7 @@ import type { AssistantMessage, Message, Part, Todo } from '../types';
 const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
 
 export function resetTodoSync() {
-  // Todos are always derived from message tool parts; resets only clear session state elsewhere.
+  appStore.setState('todos', []);
 }
 
 export function createTodoSyncOperations() {
@@ -89,6 +89,9 @@ export function handoffTodosToMessages(
   const nextTodos = deriveTodosFromMessages(messages);
   const latestAssistant = getLatestAssistantMessageInTurn(messages);
   const currentTodoMessageId = getLatestTodoMessageId(messages);
+  const latestAssistantIdle = latestAssistant
+    ? appStore.state.sessionStatus[latestAssistant.info.sessionID]?.type === 'idle'
+    : false;
 
   // Refreshed message snapshots can briefly lose todo-bearing parts for the same reply,
   // or introduce a newer unfinished assistant shell before its todo state arrives.
@@ -97,11 +100,19 @@ export function handoffTodosToMessages(
       return false;
     }
 
-    if (!latestAssistant.info.time.completed && !latestAssistant.info.error) {
+    if (
+      !latestAssistant.info.time.completed &&
+      !latestAssistant.info.error &&
+      !latestAssistantIdle
+    ) {
       return false;
     }
 
-    if (currentTodoMessageId && latestAssistant.info.id === currentTodoMessageId) {
+    if (
+      currentTodoMessageId &&
+      latestAssistant.info.id === currentTodoMessageId &&
+      !latestAssistantIdle
+    ) {
       return false;
     }
   }

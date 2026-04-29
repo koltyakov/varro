@@ -70,6 +70,7 @@ import {
   clearDeletedSessionState,
   getDeletedSessionTreeIds,
   getNextSessionIdAfterDeletion,
+  hideDeletedSessionTree,
   normalizeProjectPath,
   SessionLifecycleOperations,
   upsertSession,
@@ -191,6 +192,21 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearSelectedMcpsForSession).toHaveBeenCalledWith('session-1');
     expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('session-1');
     expect(setup.deps.clearActiveSessionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears per-session state when hiding a deleted session tree', () => {
+    const setup = createDeps({
+      activeSessionId: 'root',
+      sessions: [session('root'), session('child', '/repo', 1, 'root'), session('other')],
+    });
+
+    hideDeletedSessionTree(setup.deps, 'root', setup.current.sessions);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['other']);
+    expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('root');
+    expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('child');
+    expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('root');
+    expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('child');
   });
 
   it('upserts sessions inside the current workspace and marks the active one seen', () => {

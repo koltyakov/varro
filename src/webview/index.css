@@ -5742,6 +5742,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 @media (min-width: 1400px) {
+  .interactive-session {
+    --chat-sidebar-width: 420px;
+  }
+
   .chat-session-sidebar {
     display: flex;
   }

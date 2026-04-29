@@ -613,6 +613,9 @@ export class OpenCodeProcess {
       let stderr = '';
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
+      let proc: ChildProcess | null = null;
+      let handleStdout: ((data: Buffer) => void) | null = null;
+      let handleStderr: ((data: Buffer) => void) | null = null;
 
       const finish = (result: { output?: string; error?: Error }) => {
         if (settled) return;
@@ -620,6 +623,14 @@ export class OpenCodeProcess {
         if (timer) {
           clearTimeout(timer);
           timer = null;
+        }
+        if (proc) {
+          proc.removeAllListeners();
+          if (handleStdout) proc.stdout?.off('data', handleStdout);
+          if (handleStderr) proc.stderr?.off('data', handleStderr);
+          proc = null;
+          handleStdout = null;
+          handleStderr = null;
         }
         if (result.error) {
           reject(result.error);
@@ -631,7 +642,7 @@ export class OpenCodeProcess {
       try {
         const command = this.resolveCommand();
         const launch = resolveServerLaunch(command, args);
-        const proc = spawn(launch.command, launch.args, {
+        proc = spawn(launch.command, launch.args, {
           stdio: ['ignore', 'pipe', 'pipe'],
           cwd: this.getWorkspaceCwd(),
           env: this.buildServerEnv(),
@@ -639,15 +650,17 @@ export class OpenCodeProcess {
           ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         });
 
-        proc.stdout?.on('data', (data: Buffer) => {
+        handleStdout = (data: Buffer) => {
           stdout += data.toString();
-        });
-        proc.stderr?.on('data', (data: Buffer) => {
+        };
+        handleStderr = (data: Buffer) => {
           stderr += data.toString();
           if (isPortInUseMessage(data.toString())) {
             this.portInUseDetected = true;
           }
-        });
+        };
+        proc.stdout?.on('data', handleStdout);
+        proc.stderr?.on('data', handleStderr);
         proc.once('error', (err) => {
           finish({
             error: err.message.includes('ENOENT')
@@ -668,8 +681,9 @@ export class OpenCodeProcess {
         });
 
         timer = setTimeout(() => {
-          if (proc.exitCode === null && proc.signalCode === null) {
-            proc.kill('SIGKILL');
+          const runningProc = proc;
+          if (runningProc && runningProc.exitCode === null && runningProc.signalCode === null) {
+            runningProc.kill('SIGKILL');
           }
           finish({ error: new Error('OpenCode CLI command timed out') });
         }, OpenCodeProcess.CLI_COMMAND_TIMEOUT_MS);

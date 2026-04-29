@@ -1,11 +1,21 @@
 {
   "name": "varro",
   "displayName": "Varro",
+  "version": "0.11.2",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
-  "version": "0.11.1",
-  "publisher": "koltyakov",
-  "repository": "https://github.com/koltyakov/varro",
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "agent",
+    "ai",
+    "chat",
+    "opencode"
+  ],
   "license": "MIT",
+  "repository": "https://github.com/koltyakov/varro",
+  "publisher": "koltyakov",
   "files": [
     "dist/extension/extension.js",
     "dist/webview/webview.css",
@@ -14,26 +24,50 @@
     "README.md",
     "LICENSE"
   ],
-  "engines": {
-    "node": "^20.19.0 || ^22.12.0 || >=24.0.0",
-    "vscode": "^1.91.0"
-  },
-  "categories": [
-    "AI",
-    "Chat"
-  ],
-  "keywords": [
-    "ai",
-    "chat",
-    "opencode",
-    "agent"
-  ],
   "main": "./dist/extension/extension.js",
-  "icon": "assets/icon.png",
-  "activationEvents": [
-    "onCommand:varro.chat.focus",
-    "onCommand:varro.chat.statusBarClick"
-  ],
+  "scripts": {
+    "build:extension": "node esbuild.config.mjs",
+    "build:webview": "vite build",
+    "preview:webview": "vite --open /preview.html",
+    "build": "npm run build:extension && npm run build:webview",
+    "watch:extension": "node esbuild.config.mjs --watch",
+    "watch:webview": "vite build --watch",
+    "dev": "npx concurrently --kill-others-on-fail --names ext,web,preview \"npm run watch:extension\" \"npm run watch:webview\" \"npm run preview:webview\"",
+    "lint": "oxlint src/ --fix",
+    "lint:check": "oxlint src/",
+    "fmt": "oxfmt src/",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.webview.json && tsc --noEmit -p tsconfig.e2e.json",
+    "package": "npm run build && npx vsce package --no-dependencies",
+    "vscode:install": "rm -f varro-*.vsix && npm run package && code --install-extension varro-*.vsix"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.14.25",
+    "dompurify": "^3.4.1",
+    "highlight.js": "11.11.1",
+    "marked": "18.0.2",
+    "solid-js": "1.9.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@tailwindcss/vite": "4.2.4",
+    "@types/node": "25.6.0",
+    "@types/vscode": "1.91.0",
+    "@vitest/coverage-v8": "4.1.5",
+    "@vscode/vsce": "3.9.1",
+    "esbuild": "0.28.0",
+    "jsdom": "29.0.2",
+    "oxfmt": "0.46.0",
+    "oxlint": "1.61.0",
+    "postcss": "8.5.10",
+    "tailwindcss": "4.2.4",
+    "typescript": "6.0.3",
+    "vite": "7.3.2",
+    "vite-plugin-solid": "2.11.12",
+    "vitest": "4.1.5"
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -210,47 +244,13 @@
       }
     }
   },
-  "scripts": {
-    "build:extension": "node esbuild.config.mjs",
-    "build:webview": "vite build",
-    "preview:webview": "vite --open /preview.html",
-    "build": "npm run build:extension && npm run build:webview",
-    "watch:extension": "node esbuild.config.mjs --watch",
-    "watch:webview": "vite build --watch",
-    "dev": "npx concurrently --kill-others-on-fail --names ext,web,preview \"npm run watch:extension\" \"npm run watch:webview\" \"npm run preview:webview\"",
-    "lint": "oxlint src/ --fix",
-    "lint:check": "oxlint src/",
-    "fmt": "oxfmt src/",
-    "test": "vitest run",
-    "test:e2e": "playwright test",
-    "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.webview.json && tsc --noEmit -p tsconfig.e2e.json",
-    "package": "npm run build && npx vsce package --no-dependencies",
-    "vscode:install": "rm -f varro-*.vsix && npm run package && code --install-extension varro-*.vsix"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.59.1",
-    "@tailwindcss/vite": "4.2.4",
-    "@types/node": "25.6.0",
-    "@types/vscode": "1.91.0",
-    "@vitest/coverage-v8": "4.1.5",
-    "@vscode/vsce": "3.9.1",
-    "esbuild": "0.28.0",
-    "jsdom": "29.0.2",
-    "oxfmt": "0.46.0",
-    "oxlint": "1.61.0",
-    "postcss": "8.5.10",
-    "tailwindcss": "4.2.4",
-    "typescript": "6.0.3",
-    "vite": "7.3.2",
-    "vite-plugin-solid": "2.11.12",
-    "vitest": "4.1.5"
-  },
-  "dependencies": {
-    "@opencode-ai/sdk": "^1.14.25",
-    "dompurify": "^3.4.1",
-    "highlight.js": "11.11.1",
-    "marked": "18.0.2",
-    "solid-js": "1.9.12"
+  "activationEvents": [
+    "onCommand:varro.chat.focus",
+    "onCommand:varro.chat.statusBarClick"
+  ],
+  "icon": "assets/icon.png",
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0",
+    "vscode": "^1.91.0"
   }
 }

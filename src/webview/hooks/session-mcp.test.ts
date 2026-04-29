@@ -56,6 +56,32 @@ describe('session MCP helpers', () => {
     expect(loadMcps).toHaveBeenCalledTimes(1);
   });
 
+  it('hydrates an uninitialized session MCP selection before syncing', async () => {
+    const loadMcps = vi.fn(async () => {
+      selected = ['alpha'];
+    });
+    const connectMcp = vi.fn(async () => {});
+    const disconnectMcp = vi.fn(async () => {});
+    let selected: string[] | null = null;
+
+    await syncSessionMcpsWithDependencies(
+      {
+        getSelectedMcpsForSession: () => selected,
+        getMcpStatus: () => ({ alpha: { status: 'connected' } }),
+        loadMcps,
+        getAvailableMcpNames: () => ['alpha'],
+        connectMcp,
+        disconnectMcp,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(loadMcps).toHaveBeenCalledTimes(1);
+    expect(connectMcp).not.toHaveBeenCalled();
+    expect(disconnectMcp).not.toHaveBeenCalled();
+  });
+
   it('stores the selected MCPs before syncing them', async () => {
     const setSelectedMcpsForSession = vi.fn();
     const syncSessionMcps = vi.fn(async () => {});

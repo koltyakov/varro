@@ -161,13 +161,8 @@ export function hideDeletedSessionTree(
   const deletedIds = getDeletedSessionTreeIds(id, sessions);
 
   deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
-  deps.clearPendingAbortTree([...deletedIds]);
-  deps.filterQuestions((sessionId) => !deletedIds.has(sessionId));
-  deps.filterPermissions((sessionId) => !deletedIds.has(sessionId));
-
-  const activeSessionId = deps.getState().activeSessionId;
-  if (activeSessionId && deletedIds.has(activeSessionId)) {
-    deps.clearActiveSessionState();
+  for (const deletedId of deletedIds) {
+    clearDeletedSessionState(deps, deletedId);
   }
 
   return deletedIds;

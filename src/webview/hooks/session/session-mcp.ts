@@ -53,12 +53,12 @@ export async function syncSessionMcpsWithDependencies(
   },
   sessionId: string
 ) {
-  const desired = deps.getSelectedMcpsForSession(sessionId);
-  if (!desired) return;
-
-  if (Object.keys(deps.getMcpStatus()).length === 0) {
+  let desired = deps.getSelectedMcpsForSession(sessionId);
+  if (!desired || Object.keys(deps.getMcpStatus()).length === 0) {
     await deps.loadMcps();
+    desired = deps.getSelectedMcpsForSession(sessionId);
   }
+  if (!desired) return;
 
   const available = new Set(deps.getAvailableMcpNames());
   const desiredSet = new Set(desired.filter((name) => available.has(name)));

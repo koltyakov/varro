@@ -54,7 +54,7 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
-  it('resyncs active session messages on idle even when messages already exist', async () => {
+  it('does not resync active session messages on idle when local messages already look settled', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event as string, handler as (data: unknown) => void);
@@ -84,19 +84,24 @@ describe('useOpenCode session state flows', () => {
       await Promise.resolve();
 
       stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [{ info: userMessage('stale-user'), parts: [] }]);
+      stateModule.setState('messages', [
+        { info: userMessage('user-1'), parts: [] },
+        {
+          info: {
+            ...assistantMessage('assistant-1', 'user-1'),
+            time: { created: 0, completed: 1 },
+          },
+          parts: [],
+        },
+      ]);
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
 
       await vi.waitFor(() => {
         expect(clientMocks.sessionGet).toHaveBeenCalledWith('session-1');
-        expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1');
       });
 
-      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
-        'user-1',
-        'assistant-1',
-      ]);
+      expect(clientMocks.sessionMessages).not.toHaveBeenCalled();
     } finally {
       dispose();
     }

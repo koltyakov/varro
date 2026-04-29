@@ -6,6 +6,7 @@ type SessionEntry = { info: Message; parts: Part[] };
 type SessionSelectionDeps = {
   getActiveSessionId(): string | null;
   setActiveSessionId(id: string): void;
+  clearPendingAbort(sessionId: string): void;
   persistActiveSessionId(id: string): void;
   markSessionSeen(id: string): void;
   clearDraftCurrentDocumentState(): void;
@@ -27,7 +28,10 @@ type SessionSelectionDeps = {
   loadSession(id: string): Promise<{ session: Session; messages: SessionEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
-  setMessagesIncremental(messages: SessionEntry[]): void;
+  setMessagesIncremental(
+    messages: SessionEntry[],
+    options?: { preserveExtraParts?: boolean }
+  ): void;
   syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
   requestMessageListScrollToBottom(): void;
   deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
@@ -56,10 +60,7 @@ export async function selectSessionWithDependencies(
   deps.clearDraftCurrentDocumentState();
   deps.resetToolCallExpansionState();
   deps.setActiveSessionId(id);
-  deps.persistActiveSessionId(id);
-  if (options?.markSeen ?? true) {
-    deps.markSessionSeen(id);
-  }
+  deps.clearPendingAbort(id);
 
   const { persistedAgent, fallbackAgent } = deps.resolvePersistedAgent(id);
   if (persistedAgent) {
@@ -78,10 +79,6 @@ export async function selectSessionWithDependencies(
     }
   }
 
-  if (!deps.hasSelectedMcps(id)) {
-    deps.setSelectedMcpsForSession(id, deps.getConnectedMcpNames());
-  }
-
   deps.resetTodoSync();
   deps.clearMessages();
   await deps.syncSessionMcps(id);
@@ -91,6 +88,10 @@ export async function selectSessionWithDependencies(
     if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
 
     deps.upsertSession(session);
+    deps.persistActiveSessionId(id);
+    if (options?.markSeen ?? true) {
+      deps.markSessionSeen(id);
+    }
     deps.setMessagesIncremental(messages);
     deps.syncFailedSessionsFromMessages(messages);
     deps.requestMessageListScrollToBottom();
@@ -123,6 +124,7 @@ export async function selectSessionWithDependencies(
       deps.stopLoading();
     }
   } catch {
+    if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
     deps.setError('Failed to load messages');
   }
 }
@@ -137,7 +139,10 @@ export async function syncSessionMessagesWithDependencies(
       status: SessionStatus | null | undefined,
       messages: SessionEntry[]
     ): void;
-    setMessagesIncremental(messages: SessionEntry[]): void;
+    setMessagesIncremental(
+      messages: SessionEntry[],
+      options?: { preserveExtraParts?: boolean }
+    ): void;
     syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
     handoffTodosToMessages(messages: SessionEntry[]): void;
   },
@@ -150,7 +155,7 @@ export async function syncSessionMessagesWithDependencies(
 
   deps.updateUsageLimitState(sessionId, deps.getSessionStatus(sessionId), messages);
   if (sessionId === deps.getActiveSessionId()) {
-    deps.setMessagesIncremental(messages);
+    deps.setMessagesIncremental(messages, { preserveExtraParts: true });
     deps.syncFailedSessionsFromMessages(messages);
     deps.handoffTodosToMessages(messages);
   }
