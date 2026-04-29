@@ -69,7 +69,7 @@ function ErrorFallback(props: { err: Error }) {
         class="rounded bg-vscode-button-bg px-3 py-1 text-xs text-vscode-button-fg hover:bg-vscode-button-hover"
         onClick={() => window.location.reload()}
       >
-        Reload
+        Reload sidebar
       </button>
     </div>
   );

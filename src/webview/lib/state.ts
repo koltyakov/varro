@@ -340,129 +340,96 @@ export function createAppState(): AppStateInstance {
   return appState;
 }
 
-let currentAppState = createAppState();
+export const defaultAppState = createAppState();
 
-export let state: Store<AppState>;
-export let setState: SetStoreFunction<AppState>;
-export let showThinking: Accessor<boolean>;
-export let setShowThinking: Setter<boolean>;
-export let expandThinkingByDefault: Accessor<boolean>;
-export let setExpandThinkingByDefault: Setter<boolean>;
-export let showStickyUserPrompt: Accessor<boolean>;
-export let setShowStickyUserPrompt: Setter<boolean>;
-export let desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
-export let setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
-export let inputText: Accessor<string>;
-export let setInputText: Setter<string>;
-export let nextPastedImageIndex: Accessor<number>;
-export let setNextPastedImageIndex: Setter<number>;
-export let isLoading: Accessor<boolean>;
-export let setIsLoading: Setter<boolean>;
-export let loadingStartedAt: Accessor<number | null>;
-export let setLoadingStartedAt: Setter<number | null>;
-export let loadingLastActivityAt: Accessor<number | null>;
-export let setLoadingLastActivityAt: Setter<number | null>;
-export let error: Accessor<string | null>;
-export let setError: Setter<string | null>;
-export let showSessionPicker: Accessor<boolean>;
-export let setShowSessionPicker: Setter<boolean>;
-export let showModelPicker: Accessor<boolean>;
-export let setShowModelPicker: Setter<boolean>;
-export let showSettings: Accessor<boolean>;
-export let setShowSettings: Setter<boolean>;
-export let composerFocusKey: Accessor<number>;
-export let setComposerFocusKey: Setter<number>;
-export let openAttentionSessionsKey: Accessor<number>;
-export let setOpenAttentionSessionsKey: Setter<number>;
-export let messageListScrollRequestKey: Accessor<number>;
-export let setMessageListScrollRequestKey: Setter<number>;
-export let messageStructureVersion: Accessor<number>;
-export let setMessageStructureVersion: Setter<number>;
-export let draftPermissionMode: Accessor<PermissionMode>;
-export let setDraftPermissionMode: Setter<PermissionMode>;
-export let theme: Accessor<WebviewThemeKind>;
-export let setTheme: Setter<WebviewThemeKind>;
+export const state = defaultAppState.state;
+export const setState = defaultAppState.setState;
+export const showThinking = defaultAppState.showThinking;
+export const setShowThinking = defaultAppState.setShowThinking;
+export const expandThinkingByDefault = defaultAppState.expandThinkingByDefault;
+export const setExpandThinkingByDefault = defaultAppState.setExpandThinkingByDefault;
+export const showStickyUserPrompt = defaultAppState.showStickyUserPrompt;
+export const setShowStickyUserPrompt = defaultAppState.setShowStickyUserPrompt;
+export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
+export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
+export const inputText = defaultAppState.inputText;
+export const setInputText = defaultAppState.setInputText;
+export const nextPastedImageIndex = defaultAppState.nextPastedImageIndex;
+export const setNextPastedImageIndex = defaultAppState.setNextPastedImageIndex;
+export const isLoading = defaultAppState.isLoading;
+export const setIsLoading = defaultAppState.setIsLoading;
+export const loadingStartedAt = defaultAppState.loadingStartedAt;
+export const setLoadingStartedAt = defaultAppState.setLoadingStartedAt;
+export const loadingLastActivityAt = defaultAppState.loadingLastActivityAt;
+export const setLoadingLastActivityAt = defaultAppState.setLoadingLastActivityAt;
+export const error = defaultAppState.error;
+export const setError = defaultAppState.setError;
+export const showSessionPicker = defaultAppState.showSessionPicker;
+export const setShowSessionPicker = defaultAppState.setShowSessionPicker;
+export const showModelPicker = defaultAppState.showModelPicker;
+export const setShowModelPicker = defaultAppState.setShowModelPicker;
+export const showSettings = defaultAppState.showSettings;
+export const setShowSettings = defaultAppState.setShowSettings;
+export const composerFocusKey = defaultAppState.composerFocusKey;
+export const setComposerFocusKey = defaultAppState.setComposerFocusKey;
+export const openAttentionSessionsKey = defaultAppState.openAttentionSessionsKey;
+export const setOpenAttentionSessionsKey = defaultAppState.setOpenAttentionSessionsKey;
+export const messageListScrollRequestKey = defaultAppState.messageListScrollRequestKey;
+export const setMessageListScrollRequestKey = defaultAppState.setMessageListScrollRequestKey;
+export const messageStructureVersion = defaultAppState.messageStructureVersion;
+export const setMessageStructureVersion = defaultAppState.setMessageStructureVersion;
+export const draftPermissionMode = defaultAppState.draftPermissionMode;
+export const setDraftPermissionMode = defaultAppState.setDraftPermissionMode;
+export const theme = defaultAppState.theme;
+export const setTheme = defaultAppState.setTheme;
 
-let sessionTreeIndex: SessionTreeIndex;
-let messageIndex: MessageIndex;
-let streamingDeltaQueue: StreamingDeltaQueue;
+const sessionTreeIndex = defaultAppState.sessionTreeIndex;
+const messageIndex = defaultAppState.messageIndex;
+const streamingDeltaQueue = defaultAppState.streamingDeltaQueue;
 
-function syncAppStateBindings(appState: AppStateInstance) {
-  state = appState.state;
-  setState = appState.setState;
-  showThinking = appState.showThinking;
-  setShowThinking = appState.setShowThinking;
-  expandThinkingByDefault = appState.expandThinkingByDefault;
-  setExpandThinkingByDefault = appState.setExpandThinkingByDefault;
-  showStickyUserPrompt = appState.showStickyUserPrompt;
-  setShowStickyUserPrompt = appState.setShowStickyUserPrompt;
-  desktopSessionPaneSide = appState.desktopSessionPaneSide;
-  setDesktopSessionPaneSide = appState.setDesktopSessionPaneSide;
-  inputText = appState.inputText;
-  setInputText = appState.setInputText;
-  nextPastedImageIndex = appState.nextPastedImageIndex;
-  setNextPastedImageIndex = appState.setNextPastedImageIndex;
-  isLoading = appState.isLoading;
-  setIsLoading = appState.setIsLoading;
-  loadingStartedAt = appState.loadingStartedAt;
-  setLoadingStartedAt = appState.setLoadingStartedAt;
-  loadingLastActivityAt = appState.loadingLastActivityAt;
-  setLoadingLastActivityAt = appState.setLoadingLastActivityAt;
-  error = appState.error;
-  setError = appState.setError;
-  showSessionPicker = appState.showSessionPicker;
-  setShowSessionPicker = appState.setShowSessionPicker;
-  showModelPicker = appState.showModelPicker;
-  setShowModelPicker = appState.setShowModelPicker;
-  showSettings = appState.showSettings;
-  setShowSettings = appState.setShowSettings;
-  composerFocusKey = appState.composerFocusKey;
-  setComposerFocusKey = appState.setComposerFocusKey;
-  openAttentionSessionsKey = appState.openAttentionSessionsKey;
-  setOpenAttentionSessionsKey = appState.setOpenAttentionSessionsKey;
-  messageListScrollRequestKey = appState.messageListScrollRequestKey;
-  setMessageListScrollRequestKey = appState.setMessageListScrollRequestKey;
-  messageStructureVersion = appState.messageStructureVersion;
-  setMessageStructureVersion = appState.setMessageStructureVersion;
-  draftPermissionMode = appState.draftPermissionMode;
-  setDraftPermissionMode = appState.setDraftPermissionMode;
-  theme = appState.theme;
-  setTheme = appState.setTheme;
-  sessionTreeIndex = appState.sessionTreeIndex;
-  messageIndex = appState.messageIndex;
-  streamingDeltaQueue = appState.streamingDeltaQueue;
-}
-
-syncAppStateBindings(currentAppState);
-
-export function getCurrentAppState() {
-  return currentAppState;
-}
-
-export function installAppState(appState: AppStateInstance) {
-  const previous = currentAppState;
-  currentAppState = appState;
-  syncAppStateBindings(appState);
-  return () => {
-    currentAppState = previous;
-    syncAppStateBindings(previous);
-  };
+export function resetDefaultAppState() {
+  const next = createAppState();
+  setState(reconcile(next.state));
+  setShowThinking(next.showThinking());
+  setExpandThinkingByDefault(next.expandThinkingByDefault());
+  setShowStickyUserPrompt(next.showStickyUserPrompt());
+  setDesktopSessionPaneSide(next.desktopSessionPaneSide());
+  setInputText(next.inputText());
+  setNextPastedImageIndex(next.nextPastedImageIndex());
+  setIsLoading(next.isLoading());
+  setLoadingStartedAt(next.loadingStartedAt());
+  setLoadingLastActivityAt(next.loadingLastActivityAt());
+  setError(next.error());
+  setShowSessionPicker(next.showSessionPicker());
+  setShowModelPicker(next.showModelPicker());
+  setShowSettings(next.showSettings());
+  setComposerFocusKey(next.composerFocusKey());
+  setOpenAttentionSessionsKey(next.openAttentionSessionsKey());
+  setMessageListScrollRequestKey(next.messageListScrollRequestKey());
+  setMessageStructureVersion(next.messageStructureVersion());
+  setDraftPermissionMode(next.draftPermissionMode());
+  setTheme(next.theme());
+  defaultAppState.sessionMarkerWorkspaceScope = next.sessionMarkerWorkspaceScope;
+  defaultAppState.permissionWorkspace = next.permissionWorkspace;
+  sessionTreeIndex.invalidate();
+  messageIndex.invalidate();
+  streamingDeltaQueue.reset();
 }
 
 function getSessionMarkerWorkspaceScopeValue() {
-  return getCurrentAppState().sessionMarkerWorkspaceScope;
+  return defaultAppState.sessionMarkerWorkspaceScope;
 }
 
 function setSessionMarkerWorkspaceScopeValue(value: string) {
-  getCurrentAppState().sessionMarkerWorkspaceScope = value;
+  defaultAppState.sessionMarkerWorkspaceScope = value;
 }
 
 function getPermissionWorkspaceValue() {
-  return getCurrentAppState().permissionWorkspace;
+  return defaultAppState.permissionWorkspace;
 }
 
 function setPermissionWorkspaceValue(value: string | null) {
-  getCurrentAppState().permissionWorkspace = value;
+  defaultAppState.permissionWorkspace = value;
 }
 
 export function consumeInterruptedSessionIds() {
@@ -1526,7 +1493,7 @@ function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
 }
 
 function flushPendingStreamingDeltas() {
-  flushPendingStreamingDeltasFor(getCurrentAppState());
+  flushPendingStreamingDeltasFor(defaultAppState);
 }
 
 export function upsertMessage(msg: { info: Message; parts: Part[] }) {

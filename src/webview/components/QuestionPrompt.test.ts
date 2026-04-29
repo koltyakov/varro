@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render } from 'solid-js/web';
-import { setState } from '../lib/state';
+import { createComponent, render } from 'solid-js/web';
+import { AppStateProvider } from '../lib/app-state-context';
+import { defaultAppState, setState } from '../lib/state';
 import type { QuestionRequest } from '../types';
 import { QuestionPrompt } from './QuestionPrompt';
 
@@ -19,6 +20,19 @@ function request(id = 'question-1'): QuestionRequest {
       },
     ],
   };
+}
+
+function renderQuestionPrompt(activeRequest: QuestionRequest) {
+  cleanup = render(
+    () =>
+      createComponent(AppStateProvider, {
+        value: defaultAppState,
+        get children() {
+          return createComponent(QuestionPrompt, { request: activeRequest });
+        },
+      }),
+    container!
+  );
 }
 
 beforeEach(() => {
@@ -40,7 +54,7 @@ describe('QuestionPrompt draft retention', () => {
     const activeRequest = request();
     setState('questions', [activeRequest]);
 
-    cleanup = render(() => QuestionPrompt({ request: activeRequest }), container!);
+    renderQuestionPrompt(activeRequest);
 
     const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
     expect(input).not.toBeNull();
@@ -52,7 +66,7 @@ describe('QuestionPrompt draft retention', () => {
     cleanup = undefined;
     await Promise.resolve();
 
-    cleanup = render(() => QuestionPrompt({ request: activeRequest }), container!);
+    renderQuestionPrompt(activeRequest);
 
     expect(container?.querySelector<HTMLInputElement>('.question-custom-input')?.value).toBe(
       'Keep this draft'
@@ -63,7 +77,7 @@ describe('QuestionPrompt draft retention', () => {
     const activeRequest = request();
     setState('questions', [activeRequest]);
 
-    cleanup = render(() => QuestionPrompt({ request: activeRequest }), container!);
+    renderQuestionPrompt(activeRequest);
 
     const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
     expect(input).not.toBeNull();
@@ -76,7 +90,7 @@ describe('QuestionPrompt draft retention', () => {
     cleanup = undefined;
     await Promise.resolve();
 
-    cleanup = render(() => QuestionPrompt({ request: activeRequest }), container!);
+    renderQuestionPrompt(activeRequest);
 
     expect(container?.querySelector<HTMLInputElement>('.question-custom-input')?.value).toBe('');
   });

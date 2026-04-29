@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import type { QuestionRequest } from '../types';
 import { rejectQuestion, respondQuestion } from '../hooks/useOpenCode';
-import { state } from '../lib/state';
+import { useAppState } from '../lib/app-state-context';
 
 type QuestionDraft = {
   selected: Array<Array<string>>;
@@ -12,6 +12,7 @@ type QuestionDraft = {
 const questionDrafts = new Map<string, QuestionDraft>();
 
 export function QuestionPrompt(props: { request: QuestionRequest }) {
+  const appState = useAppState();
   const questions = () => props.request.questions || [];
   const isCustomEnabled = (questionIndex: number) => questions()[questionIndex]?.custom !== false;
   const ensureAnswerSlots = <T,>(values: T[], fallback: T) =>
@@ -44,7 +45,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
 
   onCleanup(() => {
     queueMicrotask(() => {
-      if (!state.questions.some((question) => question.id === props.request.id)) {
+      if (!appState.state.questions.some((question) => question.id === props.request.id)) {
         questionDrafts.delete(props.request.id);
       }
     });

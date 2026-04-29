@@ -1,9 +1,10 @@
 import { For, createEffect, createSignal } from 'solid-js';
-import { state } from '../lib/state';
+import { useAppState } from '../lib/app-state-context';
 import type { Todo } from '../types';
 
 export function TodoList() {
-  const todos = () => state.todos;
+  const appState = useAppState();
+  const todos = () => appState.state.todos;
   const completed = () => todos().filter((t) => t.status === 'completed').length;
   const total = () => todos().length;
   const progress = () => (total() > 0 ? (completed() / total()) * 100 : 0);

@@ -1,5 +1,4 @@
 import {
-  For,
   Show,
   batch,
   createEffect,
@@ -29,35 +28,57 @@ import {
   getSessionTreeIds,
   messageStructureVersion,
   showStickyUserPrompt,
-  skipPlanSession,
 } from '../lib/state';
-import {
-  formatDuration,
-  formatNumber,
-  isAssistantMessage,
-  sumAssistantTokens,
-} from '../lib/message-metrics';
+import { isAssistantMessage, sumAssistantTokens } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
-import {
-  Message as MessageComponent,
-  getUserMessagePreviewText,
-  type AssistantFileEditStackGroup,
-} from './Message';
-import { implementPlan, openPlan, recheckSessionStatus } from '../hooks/useOpenCode';
+import { type AssistantFileEditStackGroup } from './Message';
+import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import {
   collapseLeadingDuplicateFileEvents,
   getTrailingFileEventSignature,
 } from '../lib/message-event-collapse';
+import { isFileEditPart, isFileReadPart, shouldShowAssistantPartInline } from '../lib/part-utils';
+import { PendingActionRows, StickyUserMessagePreviewCard } from './message-list/MessageListChrome';
 import {
-  isFileEditPart,
-  isFileReadPart,
-  isWorkspaceDirectoryText,
-  shouldShowAssistantPartInline,
-} from '../lib/part-utils';
-import { PermissionPrompt } from './PermissionPrompt';
-import { QuestionPrompt } from './QuestionPrompt';
+  getNextVisibleUserMessageTopMap,
+  getStickyUserMessagePreview,
+  isMessageHiddenBehindStickyPreview,
+  shouldShowStickyUserMessagePreview,
+  type StickyUserMessagePreview,
+} from './message-list/sticky-preview';
+import { hasVisibleBlockingStreamingPart } from './message-list/streaming';
+import {
+  buildVirtualMetrics,
+  calculateVirtualRangeFromMetrics,
+  getFirstVisibleMessageIndexFromVirtualMetrics,
+  pruneMeasuredHeights,
+  type VirtualMetrics,
+} from './message-list/virtualization';
+import {
+  captureExpansionScrollAnchor,
+  getDistanceFromBottom,
+  performScrollToBottom,
+  resolveAutoScrollOnUserScroll,
+  restoreExpansionScrollAnchor as restoreExpansionScrollAnchorFromState,
+  type ExpansionScrollAnchor,
+} from './message-list/scrolling';
+import { MessageRows, type AssistantDialogSummaryInfo } from './message-list/MessageRows';
+import { VirtualizedContent } from './message-list/VirtualizedContent';
+
+export {
+  calculateVirtualRange,
+  calculateVirtualRangeFromMetrics,
+  getFirstVisibleMessageIndexFromVirtualMetrics,
+  pruneMeasuredHeights,
+} from './message-list/virtualization';
+
+export {
+  getNextVisibleUserMessageTopMap,
+  getStickyUserMessagePreview,
+  shouldShowStickyUserMessagePreview,
+} from './message-list/sticky-preview';
 
 function isPlanningAssistantMessage(info: AssistantMessage): boolean {
   return info.agent === 'plan' || getSelectedAgentForSession(info.sessionID) === 'plan';
@@ -211,299 +232,10 @@ export function shouldShowPlanImplementationAction(args: {
   return !session || !isSkippedPlanSession(args.info.sessionID, session.time.updated);
 }
 
-const DEFAULT_ITEM_HEIGHT = 120;
-const OVERSCAN = 5;
 const VIRTUALIZE_THRESHOLD = 50;
 
-type VirtualMetrics = {
-  prefix: number[];
-  totalHeight: number;
-  itemCount: number;
-};
-
-function buildVirtualMetrics(args: {
-  itemIds: string[];
-  measuredHeights: Map<string, number>;
-  defaultItemHeight?: number;
-}): VirtualMetrics {
-  const itemCount = args.itemIds.length;
-  const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
-  const prefix = Array.from<number>({ length: itemCount + 1 });
-  prefix[0] = 0;
-
-  for (let index = 0; index < itemCount; index += 1) {
-    prefix[index + 1] =
-      prefix[index] + (args.measuredHeights.get(args.itemIds[index]) ?? defaultItemHeight);
-  }
-
-  return {
-    prefix,
-    totalHeight: prefix[itemCount] || 0,
-    itemCount,
-  };
-}
-
-function calculateVirtualRangeFromMetrics(args: {
-  metrics: VirtualMetrics;
-  scrollTop: number;
-  viewportHeight: number;
-  defaultItemHeight?: number;
-  overscan?: number;
-}) {
-  const itemCount = args.metrics.itemCount;
-  const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
-  const overscan = args.overscan ?? OVERSCAN;
-  if (itemCount === 0) return { start: 0, end: 0, topPad: 0, bottomPad: 0 };
-
-  const overscanPx = overscan * defaultItemHeight;
-  const startOffset = Math.max(0, args.scrollTop - overscanPx);
-  const endOffset = Math.max(startOffset, args.scrollTop + args.viewportHeight + overscanPx);
-  const start = Math.max(
-    0,
-    Math.min(itemCount - 1, lowerBound(args.metrics.prefix, startOffset + 1) - 1)
-  );
-  const end = Math.min(
-    itemCount,
-    Math.max(start + 1, lowerBound(args.metrics.prefix, endOffset + 1))
-  );
-
-  return {
-    start,
-    end,
-    topPad: args.metrics.prefix[start] || 0,
-    bottomPad: args.metrics.totalHeight - (args.metrics.prefix[end] || 0),
-  };
-}
-
-export function calculateVirtualRange(args: {
-  itemIds: string[];
-  measuredHeights: Map<string, number>;
-  scrollTop: number;
-  viewportHeight: number;
-  defaultItemHeight?: number;
-  overscan?: number;
-}) {
-  return calculateVirtualRangeFromMetrics({
-    metrics: buildVirtualMetrics(args),
-    scrollTop: args.scrollTop,
-    viewportHeight: args.viewportHeight,
-    defaultItemHeight: args.defaultItemHeight,
-    overscan: args.overscan,
-  });
-}
-
-export function getFirstVisibleMessageIndexFromVirtualMetrics(args: {
-  metrics: VirtualMetrics;
-  scrollTop: number;
-}) {
-  if (args.metrics.itemCount === 0) return null;
-  const start = lowerBound(args.metrics.prefix, Math.max(0, args.scrollTop) + 1) - 1;
-  return Math.max(0, Math.min(args.metrics.itemCount - 1, start));
-}
-
-export function pruneMeasuredHeights(
-  measuredHeights: Map<string, number>,
-  itemIds: readonly string[]
-) {
-  const itemIdSet = new Set(itemIds);
-  let changed = false;
-  for (const id of measuredHeights.keys()) {
-    if (itemIdSet.has(id)) continue;
-    measuredHeights.delete(id);
-    changed = true;
-  }
-  return changed;
-}
-
-function lowerBound(values: number[], target: number) {
-  let low = 0;
-  let high = values.length - 1;
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    if (values[mid] < target) low = mid + 1;
-    else high = mid;
-  }
-  return low;
-}
-
-type MessageRowSharedProps = {
-  modelChangeMap: Map<string, string>;
-  lastAssistantID: string | null;
-  previousTrailingFileEventSignatureMap: Map<string, string | null>;
-  fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
-  assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
-  hasBuildAgent: boolean;
-  latestPlanImplementationMessageId: string | null;
-  observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
-};
-
-type VisibleRange = {
-  start: number;
-  end: number;
-  topPad: number;
-  bottomPad: number;
-};
-
-type StickyUserMessagePreview = {
-  id: string;
-  index: number;
-  text: string;
-};
-
-type ExpansionScrollAnchor = {
-  element: HTMLElement;
-  top: number;
-  expiresAt: number;
-};
-
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
-const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
-const EMPTY_USER_MESSAGE_PREVIEW = '(no content)';
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
-
-export function getStickyUserMessagePreview(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  firstVisibleMessageIndex: number | null
-): StickyUserMessagePreview | null {
-  if (firstVisibleMessageIndex === null || firstVisibleMessageIndex < 0) return null;
-  const firstVisibleEntry = messages[firstVisibleMessageIndex];
-  if (!firstVisibleEntry) return null;
-  if (firstVisibleEntry.info.role === 'user') return null;
-
-  for (let i = firstVisibleMessageIndex; i >= 0; i--) {
-    const entry = messages[i];
-    if (!entry) continue;
-    if (entry.info.role !== 'user') continue;
-    const text = getUserMessagePreviewText(entry.parts);
-    if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
-    return {
-      id: entry.info.id,
-      index: i,
-      text,
-    };
-  }
-
-  return null;
-}
-
-export function getNextVisibleUserMessageTopMap(
-  messages: Array<{ info: Message }>,
-  observedVisibleMessageBounds: ReadonlyMap<string, { top: number; bottom: number }>
-) {
-  const result = new Map<string, number | null>();
-  let nextVisibleUserMessageTop: number | null = null;
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const entry = messages[index];
-    result.set(entry.info.id, nextVisibleUserMessageTop);
-    if (entry.info.role !== 'user') continue;
-
-    const bounds = observedVisibleMessageBounds.get(entry.info.id);
-    if (bounds && bounds.bottom > 0) {
-      nextVisibleUserMessageTop = bounds.top;
-    }
-  }
-
-  return result;
-}
-
-export function shouldShowStickyUserMessagePreview(args: {
-  preview: StickyUserMessagePreview | null;
-  shouldVirtualize: boolean;
-  visibleRange: { start: number; end: number };
-  rowTop: number | null;
-  rowBottom: number | null;
-  nextUserMessageTop?: number | null;
-  viewportHeight: number;
-  previousPreviewId?: string | null;
-  stickyPreviewTop?: number | null;
-  stickyPreviewBottom?: number | null;
-}) {
-  const { preview } = args;
-  if (!preview) return false;
-  if (args.viewportHeight <= 0) return false;
-  if (args.viewportHeight < STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX) return false;
-
-  const isPreviousPreview = args.previousPreviewId === preview.id;
-
-  if (args.shouldVirtualize && preview.index < args.visibleRange.start) {
-    if (
-      isPreviousPreview &&
-      args.stickyPreviewBottom !== null &&
-      args.stickyPreviewBottom !== undefined &&
-      args.nextUserMessageTop !== null &&
-      args.nextUserMessageTop !== undefined &&
-      args.nextUserMessageTop <= args.stickyPreviewBottom
-    ) {
-      return false;
-    }
-
-    return true;
-  }
-
-  if (args.rowTop === null || args.rowBottom === null) return false;
-  if (
-    isPreviousPreview &&
-    args.stickyPreviewTop !== null &&
-    args.stickyPreviewTop !== undefined &&
-    args.stickyPreviewBottom !== null &&
-    args.stickyPreviewBottom !== undefined
-  ) {
-    if (args.rowBottom > 0) return false;
-    return (
-      args.nextUserMessageTop === null ||
-      args.nextUserMessageTop === undefined ||
-      args.nextUserMessageTop > args.stickyPreviewBottom
-    );
-  }
-
-  return args.rowBottom <= 0;
-}
-
-function isMessageHiddenBehindStickyPreview(args: {
-  rowBottom: number;
-  nextUserMessageTop?: number | null;
-  stickyPreviewBottom: number;
-}) {
-  if (args.rowBottom > 0) return false;
-
-  if (
-    args.nextUserMessageTop !== null &&
-    args.nextUserMessageTop !== undefined &&
-    args.nextUserMessageTop <= args.stickyPreviewBottom
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function hasVisibleBlockingStreamingPart(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  streamingPartId: string | null,
-  streamingText: string
-) {
-  if (!streamingPartId) return false;
-
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (part.id !== streamingPartId) continue;
-
-      if (part.type === 'text') {
-        const text = (streamingText || part.text).trim();
-        return text.length > 0 && !isWorkspaceDirectoryText(text);
-      }
-
-      if (part.type === 'reasoning') {
-        return false;
-      }
-
-      return shouldShowAssistantPartInline(part);
-    }
-  }
-
-  return false;
-}
 
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -951,18 +683,17 @@ export function MessageList() {
   function restoreExpansionScrollAnchor() {
     const anchor = pendingExpansionScrollAnchor;
     pendingExpansionScrollAnchor = null;
-    if (!anchor || !containerRef) return false;
-    if (performance.now() > anchor.expiresAt || !anchor.element.isConnected) return false;
+    const restored = restoreExpansionScrollAnchorFromState({
+      anchor,
+      container: containerRef,
+      now: performance.now(),
+      programmaticScrollWindowMs: PROGRAMMATIC_SCROLL_WINDOW_MS,
+    });
+    if (!restored) return false;
 
-    const containerRect = containerRef.getBoundingClientRect();
-    const nextTop = anchor.element.getBoundingClientRect().top - containerRect.top;
-    const delta = nextTop - anchor.top;
-    if (Math.abs(delta) < 1) return true;
-
-    const nextScrollTop = Math.max(0, containerRef.scrollTop + delta);
+    const nextScrollTop = restored.nextScrollTop;
     expectedScrollTop = nextScrollTop;
-    ignoreScrollUntil = performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS;
-    containerRef.scrollTop = nextScrollTop;
+    ignoreScrollUntil = restored.nextIgnoreScrollUntil;
     setScrollTop(nextScrollTop);
     lastObservedScrollTop = nextScrollTop;
     return true;
@@ -1003,22 +734,22 @@ export function MessageList() {
   }
 
   function distanceFromBottom() {
-    if (!containerRef) return Number.POSITIVE_INFINITY;
-    return Math.max(
-      0,
-      containerRef.scrollHeight - containerRef.scrollTop - containerRef.clientHeight
-    );
+    return getDistanceFromBottom(containerRef);
   }
 
   function performScroll() {
-    if (!containerRef) return;
     const now = performance.now();
-    const target = Math.max(0, containerRef.scrollHeight - containerRef.clientHeight);
-    expectedScrollTop = target;
-    ignoreScrollUntil = now + PROGRAMMATIC_SCROLL_WINDOW_MS;
-    containerRef.scrollTop = target;
-    lastObservedScrollTop = target;
-    lastScrollAt = now;
+    const result = performScrollToBottom({
+      container: containerRef,
+      now,
+      programmaticScrollWindowMs: PROGRAMMATIC_SCROLL_WINDOW_MS,
+    });
+    if (!result) return;
+
+    expectedScrollTop = result.nextScrollTop;
+    ignoreScrollUntil = result.nextIgnoreScrollUntil;
+    lastObservedScrollTop = result.nextScrollTop;
+    lastScrollAt = result.nextLastScrollAt;
   }
 
   function cancelPendingScroll() {
@@ -1093,42 +824,21 @@ export function MessageList() {
     const currentViewportHeight = containerRef.clientHeight;
     scheduleViewportState(top, currentViewportHeight);
     scheduleStickyPreviewViewportState(top, currentViewportHeight);
-    const near = distanceFromBottom() < AUTO_SCROLL_THRESHOLD_PX;
-    const delta = top - lastObservedScrollTop;
-    const now = performance.now();
-    lastObservedScrollTop = top;
-
-    const matchesExpected =
-      expectedScrollTop !== -1 &&
-      (Math.abs(top - expectedScrollTop) < 2 ||
-        (near && top >= expectedScrollTop - AUTO_SCROLL_THRESHOLD_PX));
-
-    if (matchesExpected) {
-      expectedScrollTop = -1;
-      return;
-    }
-
-    if (now <= ignoreScrollUntil) {
-      const userMovedAwayFromTarget =
-        expectedScrollTop !== -1 && top < expectedScrollTop - AUTO_SCROLL_THRESHOLD_PX;
-      if (!userMovedAwayFromTarget) return;
-      cancelPendingScroll();
-      expectedScrollTop = -1;
-      ignoreScrollUntil = 0;
-      setAutoScroll(false);
-      return;
-    }
-
-    expectedScrollTop = -1;
-    if (near) {
-      setAutoScroll(true);
-      return;
-    }
-
-    if (autoScroll() && delta >= 0) return;
-
-    cancelPendingScroll();
-    setAutoScroll(false);
+    const decision = resolveAutoScrollOnUserScroll({
+      top,
+      nearBottom: distanceFromBottom() < AUTO_SCROLL_THRESHOLD_PX,
+      autoScroll: autoScroll(),
+      expectedScrollTop,
+      lastObservedScrollTop,
+      ignoreScrollUntil,
+      now: performance.now(),
+      autoScrollThresholdPx: AUTO_SCROLL_THRESHOLD_PX,
+    });
+    lastObservedScrollTop = decision.nextLastObservedScrollTop;
+    expectedScrollTop = decision.nextExpectedScrollTop;
+    ignoreScrollUntil = decision.nextIgnoreScrollUntil;
+    if (decision.shouldCancelPendingScroll) cancelPendingScroll();
+    if (decision.nextAutoScroll !== null) setAutoScroll(decision.nextAutoScroll);
   }
 
   function handleClickCapture(event: MouseEvent) {
@@ -1138,12 +848,12 @@ export function MessageList() {
     const anchor = target.closest<HTMLElement>('[aria-expanded]');
     if (!anchor || !containerRef.contains(anchor)) return;
 
-    const containerRect = containerRef.getBoundingClientRect();
-    pendingExpansionScrollAnchor = {
-      element: anchor,
-      top: anchor.getBoundingClientRect().top - containerRect.top,
-      expiresAt: performance.now() + EXPANSION_SCROLL_ANCHOR_WINDOW_MS,
-    };
+    pendingExpansionScrollAnchor = captureExpansionScrollAnchor({
+      anchor,
+      container: containerRef,
+      now: performance.now(),
+      windowMs: EXPANSION_SCROLL_ANCHOR_WINDOW_MS,
+    });
   }
 
   onMount(() => {
@@ -1526,6 +1236,10 @@ export function MessageList() {
                 hasBuildAgent={hasBuildAgent()}
                 latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
                 observeMeasuredRow={observeMeasuredRow}
+                isPlanningAssistantMessage={isPlanningAssistantMessage}
+                shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
+                buildPlanImplementationPrompt={buildPlanImplementationPrompt}
+                buildPlanDocumentContent={buildPlanDocumentContent}
               />
             }
           >
@@ -1540,6 +1254,10 @@ export function MessageList() {
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}
               observeMeasuredRow={observeMeasuredRow}
+              isPlanningAssistantMessage={isPlanningAssistantMessage}
+              shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
+              buildPlanImplementationPrompt={buildPlanImplementationPrompt}
+              buildPlanDocumentContent={buildPlanDocumentContent}
             />
           </Show>
         </Show>
@@ -1562,175 +1280,6 @@ export function MessageList() {
     </div>
   );
 }
-
-function StickyUserMessagePreviewCard(props: { preview: StickyUserMessagePreview }) {
-  return (
-    <div class="latest-user-message-sticky-wrap" aria-hidden="true">
-      <div class="latest-user-message-sticky-overlay">
-        <div class="latest-user-message-sticky-top" />
-        <div class="latest-user-message-sticky-shell">
-          <div class="latest-user-message-sticky">
-            <div class="latest-user-message-sticky-text">{props.preview.text}</div>
-          </div>
-        </div>
-        <div class="latest-user-message-sticky-bottom-solid" />
-        <div class="latest-user-message-sticky-bottom-fade" />
-      </div>
-    </div>
-  );
-}
-
-function PendingActionRows(props: { questions: QuestionRequest[]; permissions: Permission[] }) {
-  return (
-    <>
-      <For each={props.questions}>
-        {(question) => (
-          <div class="interactive-item-container interactive-response">
-            <QuestionPrompt request={question} />
-          </div>
-        )}
-      </For>
-      <For each={props.permissions}>
-        {(permission) => (
-          <div class="interactive-item-container interactive-response">
-            <PermissionPrompt permission={permission} />
-          </div>
-        )}
-      </For>
-    </>
-  );
-}
-
-function VirtualizedContent(props: {
-  messages: Array<{ info: Message; parts: Part[] }>;
-  modelChangeMap: Map<string, string>;
-  lastAssistantID: string | null;
-  previousTrailingFileEventSignatureMap: Map<string, string | null>;
-  fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
-  assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
-  hasBuildAgent: boolean;
-  latestPlanImplementationMessageId: string | null;
-  visibleRange?: Partial<VisibleRange>;
-  observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
-}) {
-  const visibleRange = createMemo<VisibleRange>(() => ({
-    start: props.visibleRange?.start ?? 0,
-    end: props.visibleRange?.end ?? props.messages.length,
-    topPad: props.visibleRange?.topPad ?? 0,
-    bottomPad: props.visibleRange?.bottomPad ?? 0,
-  }));
-  const visible = createMemo(() => props.messages.slice(visibleRange().start, visibleRange().end));
-
-  return (
-    <>
-      <Show when={visibleRange().topPad > 0}>
-        <div style={{ height: `${visibleRange().topPad}px` }} />
-      </Show>
-      <MessageRows
-        messages={visible()}
-        modelChangeMap={props.modelChangeMap}
-        lastAssistantID={props.lastAssistantID}
-        previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
-        fileEditStackGroupMap={props.fileEditStackGroupMap}
-        assistantDialogSummaryMap={props.assistantDialogSummaryMap}
-        hasBuildAgent={props.hasBuildAgent}
-        latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
-        observeMeasuredRow={props.observeMeasuredRow}
-      />
-      <Show when={visibleRange().bottomPad > 0}>
-        <div style={{ height: `${visibleRange().bottomPad}px` }} />
-      </Show>
-    </>
-  );
-}
-
-function MessageRows(
-  props: { messages: Array<{ info: Message; parts: Part[] }> } & MessageRowSharedProps
-) {
-  return <For each={props.messages}>{(msg) => <MessageRow msg={msg} {...props} />}</For>;
-}
-
-function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps) {
-  let rowRef: HTMLDivElement | undefined;
-  const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
-  const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
-  const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
-  const highlightPlanningAnswer = () =>
-    props.assistantDialogSummaryMap.has(props.msg.info.id) &&
-    isAssistantMessage(props.msg.info) &&
-    isPlanningAssistantMessage(props.msg.info);
-
-  onMount(() => {
-    if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
-  });
-  onCleanup(() => {
-    if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, false);
-  });
-
-  return (
-    <div
-      ref={(el) => {
-        rowRef = el;
-      }}
-      data-msg-id={props.msg.info.id}
-      class={`interactive-item-container ${
-        props.msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
-      } ${
-        fileEditStackGroup()
-          ? `interactive-response-file-edit-group interactive-response-file-edit-group-${fileEditStackGroup()}`
-          : ''
-      }`}
-    >
-      <Show when={changeLabel()}>
-        <div class="model-change-indicator">
-          <span class="model-change-label">Switched to {changeLabel()}</span>
-        </div>
-      </Show>
-      <MessageComponent
-        info={props.msg.info}
-        parts={props.msg.parts}
-        isLastAssistant={props.msg.info.id === props.lastAssistantID}
-        highlightFinalAnswer={props.assistantDialogSummaryMap.has(props.msg.info.id)}
-        highlightPlanningAnswer={highlightPlanningAnswer()}
-        previousTrailingFileEventSignature={
-          props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
-        }
-        fileEditStackGroup={fileEditStackGroup()}
-        streamingPartId={state.streamingPartId}
-        streamingText={state.streamingText}
-      />
-      <Show when={summary()}>
-        {(assistantSummary) => (
-          <AssistantDialogSummary
-            summary={assistantSummary()}
-            showImplementPlanAction={shouldShowPlanImplementationAction({
-              hasBuildAgent: props.hasBuildAgent,
-              info: props.msg.info,
-              latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
-            })}
-            onImplementPlan={() =>
-              void implementPlan(
-                buildPlanImplementationPrompt(props.msg.parts),
-                props.msg.info.sessionID
-              )
-            }
-            onOpenPlan={() =>
-              void openPlan(buildPlanDocumentContent(props.msg.parts), props.msg.info.sessionID)
-            }
-            onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
-          />
-        )}
-      </Show>
-    </div>
-  );
-}
-
-type AssistantDialogSummaryInfo = {
-  durationMs: number;
-  inputTokens: number;
-  outputTokens: number;
-  agentCount: number;
-};
 
 function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Part[] }>) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
@@ -1800,54 +1349,6 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
 
   flush();
   return result;
-}
-
-function AssistantDialogSummary(props: {
-  summary: AssistantDialogSummaryInfo;
-  showImplementPlanAction?: boolean;
-  onOpenPlan?: () => void;
-  onImplementPlan?: () => void;
-  onSkipPlan?: () => void;
-}) {
-  const agentSuffix =
-    props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
-
-  return (
-    <div class="model-change-indicator assistant-dialog-summary">
-      <div class="assistant-dialog-summary-content">
-        <span class="model-change-label">
-          {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
-        </span>
-      </div>
-      <Show when={props.showImplementPlanAction}>
-        <div class="assistant-dialog-summary-actions">
-          <button
-            type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-neutral"
-            disabled={isLoading()}
-            onClick={() => props.onOpenPlan?.()}
-          >
-            Open plan
-          </button>
-          <button
-            type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-implement"
-            disabled={isLoading()}
-            onClick={() => props.onImplementPlan?.()}
-          >
-            Implement the plan
-          </button>
-          <button
-            type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-danger"
-            onClick={() => props.onSkipPlan?.()}
-          >
-            Skip for now
-          </button>
-        </div>
-      </Show>
-    </div>
-  );
 }
 
 function isFileEditOnlyAssistantMessage(
