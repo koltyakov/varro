@@ -17,6 +17,7 @@
 - Formatting follows existing `oxfmt`: 2-space indent, semicolons, single quotes, trailing commas in multiline literals.
 - Naming: `PascalCase` for components/classes/types, `camelCase` for functions/vars, `UPPER_SNAKE_CASE` or `static readonly` for constants.
 - Keep changes minimal and local; extract helpers only when reuse or readability clearly improves.
+- If an extraction has one consumer, treat it as a file split: keep it private or use a class/object directly instead of adding a public factory API.
 - Tests live beside source as `*.test.ts`; e2e specs live in `e2e/tests/*.spec.ts`.
 - Error handling: throw informative `Error`s, preserve actionable messages, and silently ignore only intentional best-effort cleanup/parsing fallbacks.
 - In Solid code, follow existing signal/memo/effect patterns and signal accessors like `value()`, not React-style state APIs.

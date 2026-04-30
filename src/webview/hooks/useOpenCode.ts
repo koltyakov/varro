@@ -24,4 +24,4 @@ export {
   undoSession,
   updatePermissionModeForSession,
   useOpenCode,
-} from './useOpenCode.runtime';
+} from './runtime/useOpenCode.runtime';

@@ -3,7 +3,7 @@ import type { Message, SessionStatus } from '../types';
 import {
   selectSessionWithDependencies,
   syncSessionMessagesWithDependencies,
-} from './session-selection';
+} from './session/session-selection';
 
 function assistantMessage(id: string): Message {
   return {
@@ -32,6 +32,8 @@ describe('session-selection helpers', () => {
     const startLoading = vi.fn();
     const stopLoading = vi.fn();
     const clearMessages = vi.fn();
+    const persistActiveSessionId = vi.fn();
+    const markSessionSeen = vi.fn();
     const syncSessionMcps = vi.fn(async () => {});
 
     await selectSessionWithDependencies(
@@ -40,8 +42,9 @@ describe('session-selection helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
-        persistActiveSessionId: vi.fn(),
-        markSessionSeen: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        persistActiveSessionId,
+        markSessionSeen,
         clearDraftCurrentDocumentState: vi.fn(),
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
@@ -90,8 +93,63 @@ describe('session-selection helpers', () => {
     expect(clearMessages.mock.invocationCallOrder[0]).toBeLessThan(
       syncSessionMcps.mock.invocationCallOrder[0]
     );
+    expect(persistActiveSessionId).toHaveBeenCalledWith('session-1');
+    expect(markSessionSeen).toHaveBeenCalledWith('session-1');
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('does not persist, mark seen, or surface an error for stale selection failures', async () => {
+    const persistActiveSessionId = vi.fn();
+    const markSessionSeen = vi.fn();
+    const setError = vi.fn();
+
+    await selectSessionWithDependencies(
+      {
+        getActiveSessionId: () => 'session-2',
+        setActiveSessionId: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        persistActiveSessionId,
+        markSessionSeen,
+        clearDraftCurrentDocumentState: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
+        applySelectedAgent: vi.fn(),
+        resolvePersistedModel: () => null,
+        resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+        applySelectedModel: vi.fn(),
+        getConnectedMcpNames: () => ['docs'],
+        hasSelectedMcps: () => false,
+        setSelectedMcpsForSession: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        loadSession: vi.fn(async () => {
+          throw new Error('offline');
+        }),
+        isCurrentSelectionGeneration: () => false,
+        upsertSession: vi.fn(),
+        setMessagesIncremental: vi.fn(),
+        syncFailedSessionsFromMessages: vi.fn(),
+        requestMessageListScrollToBottom: vi.fn(),
+        deriveSelectedAgentFromMessages: () => null,
+        deriveSelectedModelFromMessages: () => null,
+        syncTodosFromMessages: vi.fn(),
+        loadQuestions: vi.fn(async () => {}),
+        loadSessionStatuses: vi.fn(async () => ({})),
+        mergeSessionStatuses: vi.fn(),
+        updateUsageLimitState: vi.fn(),
+        startLoading: vi.fn(),
+        stopLoading: vi.fn(),
+        setError,
+      },
+      { next: () => 1 },
+      'session-1'
+    );
+
+    expect(persistActiveSessionId).not.toHaveBeenCalled();
+    expect(markSessionSeen).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
   });
 
   it('syncs active-session messages only for the latest generation', async () => {
@@ -116,6 +174,6 @@ describe('session-selection helpers', () => {
       'session-1'
     );
 
-    expect(setMessagesIncremental).toHaveBeenCalledWith(messages);
+    expect(setMessagesIncremental).toHaveBeenCalledWith(messages, { preserveExtraParts: true });
   });
 });

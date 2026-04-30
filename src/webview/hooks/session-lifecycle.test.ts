@@ -68,12 +68,13 @@ vi.mock('../lib/state', async () => {
 import {
   applySessions,
   clearDeletedSessionState,
-  createSessionLifecycleOperations,
   getDeletedSessionTreeIds,
   getNextSessionIdAfterDeletion,
+  hideDeletedSessionTree,
   normalizeProjectPath,
+  SessionLifecycleOperations,
   upsertSession,
-} from './session-lifecycle';
+} from './session/session-lifecycle';
 
 function session(id: string, directory = '/repo', updated = 0, parentID?: string): Session {
   return {
@@ -193,6 +194,21 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearActiveSessionState).toHaveBeenCalledTimes(1);
   });
 
+  it('clears per-session state when hiding a deleted session tree', () => {
+    const setup = createDeps({
+      activeSessionId: 'root',
+      sessions: [session('root'), session('child', '/repo', 1, 'root'), session('other')],
+    });
+
+    hideDeletedSessionTree(setup.deps, 'root', setup.current.sessions);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['other']);
+    expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('root');
+    expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('child');
+    expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('root');
+    expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('child');
+  });
+
   it('upserts sessions inside the current workspace and marks the active one seen', () => {
     const setup = createDeps({
       activeSessionId: 'session-1',
@@ -213,7 +229,7 @@ describe('session-lifecycle helpers', () => {
     state.activeSessionId = 'session-2';
     state.sessions = [session('session-1', '/repo-a', 1), session('session-2', '/repo-b', 2)];
 
-    const operations = createSessionLifecycleOperations({
+    const operations = new SessionLifecycleOperations({
       getCurrentWorkspacePath: () => '/repo-a',
       clearPendingAbort,
       clearPendingAbortTree: vi.fn(),

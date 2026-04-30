@@ -30,7 +30,6 @@ vi.mock('../lib/state', async () => {
 });
 
 import {
-  createSessionStatusOperations,
   applyUsageLimitNoticeWithDependencies,
   clearPendingAbortTreeWithDependencies,
   clearPendingAbortWithDependencies,
@@ -39,9 +38,10 @@ import {
   markPendingAbortTreeWithDependencies,
   markPendingAbortWithDependencies,
   recheckSessionStatusWithDependencies,
+  SessionStatusOperations,
   shouldIgnorePendingAbortStatusWithDependencies,
   updateUsageLimitStateWithDependencies,
-} from './session-status';
+} from './session/session-status';
 
 describe('session status helpers', () => {
   it('tracks pending abort retries and clears them', () => {
@@ -224,6 +224,7 @@ describe('session status helpers', () => {
         shouldResyncSessionAfterIdle: () => true,
         syncSessionMessages,
         startLoading: startLoadingSpy,
+        isActiveSession: () => true,
         logError,
       },
       'session-1'
@@ -256,6 +257,7 @@ describe('session status helpers', () => {
         shouldResyncSessionAfterIdle: () => true,
         syncSessionMessages,
         startLoading: startLoadingSpy,
+        isActiveSession: () => true,
         logError,
       },
       'session-1'
@@ -289,6 +291,7 @@ describe('session status helpers', () => {
         shouldResyncSessionAfterIdle: () => false,
         syncSessionMessages: vi.fn(async () => {}),
         startLoading: vi.fn(),
+        isActiveSession: () => true,
         logError,
       },
       'session-1'
@@ -308,6 +311,7 @@ describe('session status helpers', () => {
         shouldResyncSessionAfterIdle: () => false,
         syncSessionMessages: vi.fn(async () => {}),
         startLoading: vi.fn(),
+        isActiveSession: () => true,
         logError,
       },
       'session-1'
@@ -336,7 +340,7 @@ describe('session status helpers', () => {
     };
     state.messages = [];
 
-    const operations = createSessionStatusOperations({
+    const operations = new SessionStatusOperations({
       pendingAbortRetryAttempts,
       deriveUsageLimitNoticeContext: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
       refreshProviderLimit,
@@ -344,6 +348,7 @@ describe('session status helpers', () => {
       shouldResyncSessionAfterIdle: () => true,
       syncSessionMessages,
       loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
+      isActiveSession: () => true,
       logError: vi.fn(),
     });
 
@@ -363,5 +368,31 @@ describe('session status helpers', () => {
 
     expect(stopLoading).toHaveBeenCalledTimes(1);
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('does not toggle loading for stale inactive-session rechecks', async () => {
+    const stopLoadingSpy = vi.fn();
+    const startLoadingSpy = vi.fn();
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: stopLoadingSpy,
+        shouldResyncSessionAfterIdle: () => false,
+        syncSessionMessages: vi.fn(async () => {}),
+        startLoading: startLoadingSpy,
+        isActiveSession: () => false,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(stopLoadingSpy).not.toHaveBeenCalled();
+    expect(startLoadingSpy).not.toHaveBeenCalled();
   });
 });

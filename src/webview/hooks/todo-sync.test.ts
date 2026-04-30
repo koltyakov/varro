@@ -8,6 +8,7 @@ const { setState, state } = vi.hoisted(() => ({
   state: {
     todos: [] as Todo[],
     messages: [] as Array<{ info: UserMessage | AssistantMessage; parts: Part[] }>,
+    sessionStatus: {} as Record<string, { type: 'idle' | 'busy' | 'retry'; attempt?: number }>,
   },
 }));
 
@@ -103,11 +104,9 @@ describe('todo-sync', () => {
 
   it('keeps event-owned todos until messages fully catch up', () => {
     const setTodos = vi.fn();
+    state.sessionStatus = { 'session-1': { type: 'busy' } };
     const result = handoffTodosToMessages(
-      {
-        authority: 'event',
-        todos: [{ id: 'todo-1', content: 'pending', status: 'pending', priority: 'medium' }],
-      },
+      [{ id: 'todo-1', content: 'pending', status: 'pending', priority: 'medium' }],
       setTodos,
       [{ info: assistantMessage('assistant-1'), parts: [] }]
     );
@@ -116,7 +115,7 @@ describe('todo-sync', () => {
     expect(setTodos).not.toHaveBeenCalled();
   });
 
-  it('syncs todos from messages only when messages own the state', () => {
+  it('syncs todos from message tool parts', () => {
     const setTodos = vi.fn();
     const messages = [
       { info: userMessage('user-1'), parts: [] },
@@ -128,18 +127,13 @@ describe('todo-sync', () => {
       },
     ];
 
-    syncTodosFromMessages({ authority: 'messages', todos: [] }, setTodos, messages);
+    syncTodosFromMessages(setTodos, messages);
     expect(setTodos).toHaveBeenCalledWith([
       { id: 'todo-1', content: 'sync', status: 'pending', priority: 'medium' },
     ]);
-
-    setTodos.mockClear();
-    syncTodosFromMessages({ authority: 'event', todos: [] }, setTodos, messages);
-    expect(setTodos).not.toHaveBeenCalled();
   });
 
   it('creates bound todo-sync operations from shared state dependencies', () => {
-    let authority: 'messages' | 'event' = 'messages';
     const messages = [
       { info: userMessage('user-1'), parts: [] },
       {
@@ -153,12 +147,7 @@ describe('todo-sync', () => {
     state.todos = [];
     state.messages = messages;
 
-    const operations = createTodoSyncOperations({
-      getAuthority: () => authority,
-      setAuthority: (value) => {
-        authority = value;
-      },
-    });
+    const operations = createTodoSyncOperations();
 
     operations.syncTodosFromMessages();
     expect(setState).toHaveBeenCalledWith('todos', [
@@ -166,16 +155,29 @@ describe('todo-sync', () => {
     ]);
 
     setState.mockClear();
-    authority = 'event';
     state.todos = [{ id: 'todo-1', content: 'event', status: 'pending', priority: 'medium' }];
     state.messages = [{ info: assistantMessage('assistant-1'), parts: [] }];
+    state.sessionStatus = { 'session-1': { type: 'busy' } };
 
     const handedOff = operations.handoffTodosToMessages();
     expect(handedOff).toBe(false);
     expect(setState).not.toHaveBeenCalled();
 
-    authority = 'event';
     operations.resetTodoSync();
-    expect(authority).toBe('messages');
+    expect(setState).toHaveBeenCalledWith('todos', []);
+  });
+
+  it('hands off stale todos once the session is idle even without completion markers', () => {
+    const setTodos = vi.fn();
+    state.sessionStatus = { 'session-1': { type: 'idle' } };
+
+    const result = handoffTodosToMessages(
+      [{ id: 'todo-1', content: 'pending', status: 'pending', priority: 'medium' }],
+      setTodos,
+      [{ info: assistantMessage('assistant-1'), parts: [] }]
+    );
+
+    expect(result).toBe(true);
+    expect(setTodos).toHaveBeenCalledWith([]);
   });
 });

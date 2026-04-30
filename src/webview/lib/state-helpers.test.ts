@@ -587,7 +587,7 @@ describe('state helpers', () => {
     expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);
   });
 
-  it('treats synced pending-attention sessions as awaiting input', async () => {
+  it('treats permission and question state as awaiting input', async () => {
     const stateModule = await loadState();
 
     stateModule.setState('permissions', [
@@ -608,9 +608,7 @@ describe('state helpers', () => {
     expect(stateModule.isSessionAwaitingInput('session-2')).toBe(true);
 
     stateModule.setState('questions', []);
-    stateModule.setState('pendingAttentionSessionIds', ['session-3']);
-    expect(stateModule.isSessionAwaitingInput('session-3')).toBe(true);
-    expect(stateModule.isSessionAwaitingInput('session-4')).toBe(false);
+    expect(stateModule.isSessionAwaitingInput('session-3')).toBe(false);
   });
 
   it('treats root-session prompts as awaiting input on child sessions', async () => {
@@ -840,6 +838,43 @@ describe('state helpers', () => {
         metadata: { exitCode: 0 },
       }),
     });
+  });
+
+  it('preserves newer local parts during incremental snapshot refreshes', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setMessagesIncremental([
+      {
+        info: assistantMessage('message-1', 'session-1', 10),
+        parts: [],
+      },
+    ]);
+
+    stateModule.upsertPart({
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'todowrite',
+      state: {
+        status: 'running',
+        input: { todos: [{ content: 'Keep me', status: 'pending', priority: 'medium' }] },
+      },
+    });
+
+    stateModule.setMessagesIncremental(
+      [
+        {
+          info: assistantMessage('message-1', 'session-1', 10),
+          parts: [],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(stateModule.state.messages[0]?.parts).toHaveLength(1);
+    expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({ id: 'tool-1' });
   });
 
   it('reads desktop session pane side from initial webview state', async () => {

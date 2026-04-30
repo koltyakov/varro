@@ -144,7 +144,7 @@ describe('useOpenCode todo synchronization', () => {
         {
           id: 'todo-part-1-todo',
           content: 'Summarize findings',
-          status: 'in_progress',
+          status: 'completed',
           priority: 'medium',
         },
       ]);
@@ -171,7 +171,7 @@ describe('useOpenCode todo synchronization', () => {
     }
   });
 
-  it('keeps event-driven todos visible when completion arrives before message todos', async () => {
+  it('clears stale event todos when the refreshed messages still have no todo parts', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event as string, handler as (data: unknown) => void);
@@ -229,14 +229,7 @@ describe('useOpenCode todo synchronization', () => {
         },
       });
 
-      expect(stateModule.state.todos).toEqual([
-        {
-          id: 'todo-part-1-todo',
-          content: 'Summarize findings',
-          status: 'completed',
-          priority: 'medium',
-        },
-      ]);
+      expect(stateModule.state.todos).toEqual([]);
 
       handlers.get('message.updated')?.({
         properties: {
@@ -247,26 +240,12 @@ describe('useOpenCode todo synchronization', () => {
         },
       });
 
-      expect(stateModule.state.todos).toEqual([
-        {
-          id: 'todo-part-1-todo',
-          content: 'Summarize findings',
-          status: 'completed',
-          priority: 'medium',
-        },
-      ]);
+      expect(stateModule.state.todos).toEqual([]);
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
 
       await vi.waitFor(() => {
-        expect(stateModule.state.todos).toEqual([
-          {
-            id: 'todo-part-1-todo',
-            content: 'Summarize findings',
-            status: 'completed',
-            priority: 'medium',
-          },
-        ]);
+        expect(stateModule.state.todos).toEqual([]);
       });
     } finally {
       dispose();
@@ -338,7 +317,7 @@ describe('useOpenCode todo synchronization', () => {
     }
   });
 
-  it('ignores empty todo update payloads while the active assistant reply is still running', async () => {
+  it('ignores todo.updated payload contents while the active assistant reply is still running', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event as string, handler as (data: unknown) => void);
@@ -382,6 +361,14 @@ describe('useOpenCode todo synchronization', () => {
       handlers.get('todo.updated')?.({
         properties: {
           sessionID: 'session-1',
+          todos: [
+            {
+              id: 'todo-part-1-todo',
+              content: 'Stale event payload',
+              status: 'completed',
+              priority: 'medium',
+            },
+          ],
         },
       });
 

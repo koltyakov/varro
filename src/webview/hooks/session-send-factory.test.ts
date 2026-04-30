@@ -76,9 +76,9 @@ vi.mock('../lib/state', async () => {
   };
 });
 
-import { createSessionSendOperations } from './session-send';
+import { SessionSendOperations } from './session/session-send';
 
-describe('createSessionSendOperations', () => {
+describe('SessionSendOperations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.activeSessionId = 'session-1';
@@ -106,7 +106,7 @@ describe('createSessionSendOperations', () => {
   it('builds and sends payloads from shared state', async () => {
     const sendAsync = vi.fn(async () => {});
     const resetTodoSync = vi.fn();
-    const operations = createSessionSendOperations({
+    const operations = new SessionSendOperations({
       createSession: vi.fn(async () => 'session-2'),
       clearPendingAbort: vi.fn(),
       resetTodoSync,
@@ -142,7 +142,7 @@ describe('createSessionSendOperations', () => {
     ];
 
     const continueInterruptedSession = vi.fn(async () => {});
-    const operations = createSessionSendOperations({
+    const operations = new SessionSendOperations({
       createSession: vi.fn(async () => 'session-2'),
       clearPendingAbort: vi.fn(),
       resetTodoSync: vi.fn(),

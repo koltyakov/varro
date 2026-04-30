@@ -1,6 +1,6 @@
 import { ErrorBoundary, Show, onCleanup } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
-import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/useOpenCode.runtime';
+import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
 import { AppStateProvider, useAppState } from './lib/app-state-context';
 import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
@@ -69,7 +69,7 @@ function ErrorFallback(props: { err: Error }) {
         class="rounded bg-vscode-button-bg px-3 py-1 text-xs text-vscode-button-fg hover:bg-vscode-button-hover"
         onClick={() => window.location.reload()}
       >
-        Reload
+        Reload sidebar
       </button>
     </div>
   );

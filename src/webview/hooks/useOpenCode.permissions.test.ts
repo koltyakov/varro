@@ -122,7 +122,7 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ]);
       });
-      expect(stateModule.state.pendingAttentionSessionIds).toContain('session-1');
+      expect(stateModule.isSessionAwaitingInput('session-1')).toBe(true);
       expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
     } finally {
       dispose();
@@ -199,7 +199,7 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ]);
       });
-      expect(stateModule.state.pendingAttentionSessionIds).toContain('session-1');
+      expect(stateModule.isSessionAwaitingInput('session-1')).toBe(true);
       expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
     } finally {
       dispose();

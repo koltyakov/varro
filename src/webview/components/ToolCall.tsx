@@ -1,11 +1,10 @@
-import { Show, For, createEffect, createMemo, createSignal, createResource } from 'solid-js';
-import type { RepoFileStatus, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
+import { Show, For, createEffect, createSignal } from 'solid-js';
+import type { ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
-import { client } from '../lib/client';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
@@ -415,32 +414,7 @@ function FileChangeCard(props: {
   const isError = () => s().status === 'error';
   const isAborted = () => isAbortedToolError(s());
   const change = () => props.change!;
-  const changePath = createMemo(() => {
-    const c = change();
-    return c.kind === 'moved' ? null : c.path;
-  });
-  const [repoStatuses] = createResource(changePath, async () =>
-    client.file.status().catch(() => [] as RepoFileStatus[])
-  );
-
-  const repoStatus = () => {
-    const targetPath = normalizePath(change().path);
-    return repoStatuses()?.find((entry) => normalizePath(entry.path) === targetPath);
-  };
-
-  const effectiveKind = () => {
-    if (change().kind === 'moved') return 'moved' as const;
-    switch (repoStatus()?.status) {
-      case 'added':
-        return 'added' as const;
-      case 'deleted':
-        return 'removed' as const;
-      case 'modified':
-        return 'edited' as const;
-      default:
-        return change().kind;
-    }
-  };
+  const effectiveKind = () => change().kind;
 
   const action = () => {
     switch (effectiveKind()) {

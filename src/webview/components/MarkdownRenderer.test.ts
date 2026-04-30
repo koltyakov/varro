@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
-import { MarkdownRenderer, splitStreamingMarkdownContent } from './MarkdownRenderer';
+import {
+  MarkdownRenderer,
+  renderHighlightedCodeHtml,
+  splitStreamingMarkdownContent,
+} from './MarkdownRenderer';
 import { setState } from '../lib/state';
 
 declare global {
@@ -220,6 +224,30 @@ describe('MarkdownRenderer', () => {
     expect(code?.classList.contains('hljs')).toBe(true);
     expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');
     expect(code?.querySelector('.hljs-number')?.textContent).toBe('1');
+  });
+
+  it.each([
+    ['go', 'package main\nfunc main() {}'],
+    ['rust', 'fn main() { let value = 1; }'],
+    ['sql', 'select * from users;'],
+    ['java', 'class Main {}'],
+    ['cpp', '#include <iostream>\nint main() { return 0; }'],
+  ])('highlights common language %s', (lang, source) => {
+    expect(renderHighlightedCodeHtml(source, lang)).toContain('hljs-');
+  });
+
+  it.each([
+    ['js', 'const value = 1;', 'hljs-keyword'],
+    ['tsx', 'const node = <div />;', 'hljs-keyword'],
+    ['py', 'def greet():\n    pass', 'hljs-keyword'],
+    ['html', '<main>hello</main>', 'hljs-tag'],
+    ['yml', 'key: value', 'hljs-attr'],
+  ])('highlights language alias %s', (lang, source, expectedClass) => {
+    expect(renderHighlightedCodeHtml(source, lang)).toContain(expectedClass);
+  });
+
+  it('handles explicit plain text languages without highlighting', () => {
+    expect(renderHighlightedCodeHtml('plain <text>', 'txt')).toBe('plain &lt;text&gt;');
   });
 
   it('reuses sanitized html for cached finalized content across remounts', async () => {

@@ -1,4 +1,5 @@
-import { resolveSelectedModel, type SelectedModel } from '../lib/state';
+import type { SelectedModel } from '../lib/app-state-types';
+import { resolveSelectedModel } from '../lib/state';
 import type { Agent, Message, Part, Provider } from '../types';
 
 type SessionEntry = { info: Message; parts: Part[] };

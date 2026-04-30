@@ -18,6 +18,14 @@ import type {
   AssistantMessage,
 } from '../types';
 import type {
+  ClipboardImage,
+  QueuedMessage,
+  SelectedModel,
+  SessionSelectedAgents,
+  SessionSelectedMcps,
+  SessionSelectedModels,
+} from './app-state-types';
+import type {
   DesktopSessionPaneSide,
   EditorContext,
   DroppedFile,
@@ -54,11 +62,6 @@ import {
 } from './message-entry-sync';
 import { createStreamingDeltaQueue } from './streaming-deltas';
 
-export type SelectedModel = { providerID: string; modelID: string; variant?: string };
-export type SessionSelectedAgents = Record<string, string>;
-export type SessionSelectedModels = Record<string, SelectedModel>;
-export type SessionSelectedMcps = Record<string, string[]>;
-
 export interface AppState {
   serverStatus: ServerStatus;
   providersLoaded: boolean;
@@ -77,7 +80,6 @@ export interface AppState {
   todos: Todo[];
   permissions: Permission[];
   questions: QuestionRequest[];
-  pendingAttentionSessionIds: string[];
   diffs: FileDiff[];
   streamingPartId: string | null;
   streamingText: string;
@@ -103,20 +105,6 @@ export interface AppState {
   failedSessionIds: string[];
   sessionUsageLimits: Record<string, UsageLimitNotice | null>;
   interruptedSessionIds: string[];
-}
-
-export interface QueuedMessage {
-  id: string;
-  sessionId: string;
-  text: string;
-}
-
-export interface ClipboardImage {
-  id: string;
-  url: string;
-  mime: string;
-  filename: string;
-  size: number;
 }
 
 export const MAX_CLIPBOARD_IMAGES = 5;
@@ -216,7 +204,6 @@ export function createAppState(): AppStateInstance {
     todos: [],
     permissions: normalizeInitialPermissions(initialWebviewState.pendingPermissions),
     questions: normalizeInitialQuestions(initialWebviewState.pendingQuestions),
-    pendingAttentionSessionIds: collectInitialPendingAttentionSessionIds(initialWebviewState),
     diffs: [],
     streamingPartId: null,
     streamingText: '',
@@ -340,129 +327,96 @@ export function createAppState(): AppStateInstance {
   return appState;
 }
 
-let currentAppState = createAppState();
+export const defaultAppState = createAppState();
 
-export let state: Store<AppState>;
-export let setState: SetStoreFunction<AppState>;
-export let showThinking: Accessor<boolean>;
-export let setShowThinking: Setter<boolean>;
-export let expandThinkingByDefault: Accessor<boolean>;
-export let setExpandThinkingByDefault: Setter<boolean>;
-export let showStickyUserPrompt: Accessor<boolean>;
-export let setShowStickyUserPrompt: Setter<boolean>;
-export let desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
-export let setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
-export let inputText: Accessor<string>;
-export let setInputText: Setter<string>;
-export let nextPastedImageIndex: Accessor<number>;
-export let setNextPastedImageIndex: Setter<number>;
-export let isLoading: Accessor<boolean>;
-export let setIsLoading: Setter<boolean>;
-export let loadingStartedAt: Accessor<number | null>;
-export let setLoadingStartedAt: Setter<number | null>;
-export let loadingLastActivityAt: Accessor<number | null>;
-export let setLoadingLastActivityAt: Setter<number | null>;
-export let error: Accessor<string | null>;
-export let setError: Setter<string | null>;
-export let showSessionPicker: Accessor<boolean>;
-export let setShowSessionPicker: Setter<boolean>;
-export let showModelPicker: Accessor<boolean>;
-export let setShowModelPicker: Setter<boolean>;
-export let showSettings: Accessor<boolean>;
-export let setShowSettings: Setter<boolean>;
-export let composerFocusKey: Accessor<number>;
-export let setComposerFocusKey: Setter<number>;
-export let openAttentionSessionsKey: Accessor<number>;
-export let setOpenAttentionSessionsKey: Setter<number>;
-export let messageListScrollRequestKey: Accessor<number>;
-export let setMessageListScrollRequestKey: Setter<number>;
-export let messageStructureVersion: Accessor<number>;
-export let setMessageStructureVersion: Setter<number>;
-export let draftPermissionMode: Accessor<PermissionMode>;
-export let setDraftPermissionMode: Setter<PermissionMode>;
-export let theme: Accessor<WebviewThemeKind>;
-export let setTheme: Setter<WebviewThemeKind>;
+export const state = defaultAppState.state;
+export const setState = defaultAppState.setState;
+export const showThinking = defaultAppState.showThinking;
+export const setShowThinking = defaultAppState.setShowThinking;
+export const expandThinkingByDefault = defaultAppState.expandThinkingByDefault;
+export const setExpandThinkingByDefault = defaultAppState.setExpandThinkingByDefault;
+export const showStickyUserPrompt = defaultAppState.showStickyUserPrompt;
+export const setShowStickyUserPrompt = defaultAppState.setShowStickyUserPrompt;
+export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
+export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
+export const inputText = defaultAppState.inputText;
+export const setInputText = defaultAppState.setInputText;
+export const nextPastedImageIndex = defaultAppState.nextPastedImageIndex;
+export const setNextPastedImageIndex = defaultAppState.setNextPastedImageIndex;
+export const isLoading = defaultAppState.isLoading;
+export const setIsLoading = defaultAppState.setIsLoading;
+export const loadingStartedAt = defaultAppState.loadingStartedAt;
+export const setLoadingStartedAt = defaultAppState.setLoadingStartedAt;
+export const loadingLastActivityAt = defaultAppState.loadingLastActivityAt;
+export const setLoadingLastActivityAt = defaultAppState.setLoadingLastActivityAt;
+export const error = defaultAppState.error;
+export const setError = defaultAppState.setError;
+export const showSessionPicker = defaultAppState.showSessionPicker;
+export const setShowSessionPicker = defaultAppState.setShowSessionPicker;
+export const showModelPicker = defaultAppState.showModelPicker;
+export const setShowModelPicker = defaultAppState.setShowModelPicker;
+export const showSettings = defaultAppState.showSettings;
+export const setShowSettings = defaultAppState.setShowSettings;
+export const composerFocusKey = defaultAppState.composerFocusKey;
+export const setComposerFocusKey = defaultAppState.setComposerFocusKey;
+export const openAttentionSessionsKey = defaultAppState.openAttentionSessionsKey;
+export const setOpenAttentionSessionsKey = defaultAppState.setOpenAttentionSessionsKey;
+export const messageListScrollRequestKey = defaultAppState.messageListScrollRequestKey;
+export const setMessageListScrollRequestKey = defaultAppState.setMessageListScrollRequestKey;
+export const messageStructureVersion = defaultAppState.messageStructureVersion;
+export const setMessageStructureVersion = defaultAppState.setMessageStructureVersion;
+export const draftPermissionMode = defaultAppState.draftPermissionMode;
+export const setDraftPermissionMode = defaultAppState.setDraftPermissionMode;
+export const theme = defaultAppState.theme;
+export const setTheme = defaultAppState.setTheme;
 
-let sessionTreeIndex: SessionTreeIndex;
-let messageIndex: MessageIndex;
-let streamingDeltaQueue: StreamingDeltaQueue;
+const sessionTreeIndex = defaultAppState.sessionTreeIndex;
+const messageIndex = defaultAppState.messageIndex;
+const streamingDeltaQueue = defaultAppState.streamingDeltaQueue;
 
-function syncAppStateBindings(appState: AppStateInstance) {
-  state = appState.state;
-  setState = appState.setState;
-  showThinking = appState.showThinking;
-  setShowThinking = appState.setShowThinking;
-  expandThinkingByDefault = appState.expandThinkingByDefault;
-  setExpandThinkingByDefault = appState.setExpandThinkingByDefault;
-  showStickyUserPrompt = appState.showStickyUserPrompt;
-  setShowStickyUserPrompt = appState.setShowStickyUserPrompt;
-  desktopSessionPaneSide = appState.desktopSessionPaneSide;
-  setDesktopSessionPaneSide = appState.setDesktopSessionPaneSide;
-  inputText = appState.inputText;
-  setInputText = appState.setInputText;
-  nextPastedImageIndex = appState.nextPastedImageIndex;
-  setNextPastedImageIndex = appState.setNextPastedImageIndex;
-  isLoading = appState.isLoading;
-  setIsLoading = appState.setIsLoading;
-  loadingStartedAt = appState.loadingStartedAt;
-  setLoadingStartedAt = appState.setLoadingStartedAt;
-  loadingLastActivityAt = appState.loadingLastActivityAt;
-  setLoadingLastActivityAt = appState.setLoadingLastActivityAt;
-  error = appState.error;
-  setError = appState.setError;
-  showSessionPicker = appState.showSessionPicker;
-  setShowSessionPicker = appState.setShowSessionPicker;
-  showModelPicker = appState.showModelPicker;
-  setShowModelPicker = appState.setShowModelPicker;
-  showSettings = appState.showSettings;
-  setShowSettings = appState.setShowSettings;
-  composerFocusKey = appState.composerFocusKey;
-  setComposerFocusKey = appState.setComposerFocusKey;
-  openAttentionSessionsKey = appState.openAttentionSessionsKey;
-  setOpenAttentionSessionsKey = appState.setOpenAttentionSessionsKey;
-  messageListScrollRequestKey = appState.messageListScrollRequestKey;
-  setMessageListScrollRequestKey = appState.setMessageListScrollRequestKey;
-  messageStructureVersion = appState.messageStructureVersion;
-  setMessageStructureVersion = appState.setMessageStructureVersion;
-  draftPermissionMode = appState.draftPermissionMode;
-  setDraftPermissionMode = appState.setDraftPermissionMode;
-  theme = appState.theme;
-  setTheme = appState.setTheme;
-  sessionTreeIndex = appState.sessionTreeIndex;
-  messageIndex = appState.messageIndex;
-  streamingDeltaQueue = appState.streamingDeltaQueue;
-}
-
-syncAppStateBindings(currentAppState);
-
-export function getCurrentAppState() {
-  return currentAppState;
-}
-
-export function installAppState(appState: AppStateInstance) {
-  const previous = currentAppState;
-  currentAppState = appState;
-  syncAppStateBindings(appState);
-  return () => {
-    currentAppState = previous;
-    syncAppStateBindings(previous);
-  };
+export function resetDefaultAppState() {
+  const next = createAppState();
+  setState(reconcile(next.state));
+  setShowThinking(next.showThinking());
+  setExpandThinkingByDefault(next.expandThinkingByDefault());
+  setShowStickyUserPrompt(next.showStickyUserPrompt());
+  setDesktopSessionPaneSide(next.desktopSessionPaneSide());
+  setInputText(next.inputText());
+  setNextPastedImageIndex(next.nextPastedImageIndex());
+  setIsLoading(next.isLoading());
+  setLoadingStartedAt(next.loadingStartedAt());
+  setLoadingLastActivityAt(next.loadingLastActivityAt());
+  setError(next.error());
+  setShowSessionPicker(next.showSessionPicker());
+  setShowModelPicker(next.showModelPicker());
+  setShowSettings(next.showSettings());
+  setComposerFocusKey(next.composerFocusKey());
+  setOpenAttentionSessionsKey(next.openAttentionSessionsKey());
+  setMessageListScrollRequestKey(next.messageListScrollRequestKey());
+  setMessageStructureVersion(next.messageStructureVersion());
+  setDraftPermissionMode(next.draftPermissionMode());
+  setTheme(next.theme());
+  defaultAppState.sessionMarkerWorkspaceScope = next.sessionMarkerWorkspaceScope;
+  defaultAppState.permissionWorkspace = next.permissionWorkspace;
+  sessionTreeIndex.invalidate();
+  messageIndex.invalidate();
+  streamingDeltaQueue.reset();
 }
 
 function getSessionMarkerWorkspaceScopeValue() {
-  return getCurrentAppState().sessionMarkerWorkspaceScope;
+  return defaultAppState.sessionMarkerWorkspaceScope;
 }
 
 function setSessionMarkerWorkspaceScopeValue(value: string) {
-  getCurrentAppState().sessionMarkerWorkspaceScope = value;
+  defaultAppState.sessionMarkerWorkspaceScope = value;
 }
 
 function getPermissionWorkspaceValue() {
-  return getCurrentAppState().permissionWorkspace;
+  return defaultAppState.permissionWorkspace;
 }
 
 function setPermissionWorkspaceValue(value: string | null) {
-  getCurrentAppState().permissionWorkspace = value;
+  defaultAppState.permissionWorkspace = value;
 }
 
 export function consumeInterruptedSessionIds() {
@@ -662,15 +616,6 @@ function normalizeInitialQuestions(values: unknown): QuestionRequest[] {
     .filter((item): item is QuestionRequest => item !== null);
 }
 
-function collectInitialPendingAttentionSessionIds(initialState: Partial<InitialWebviewState>) {
-  return [
-    ...new Set([
-      ...normalizeInitialPermissions(initialState.pendingPermissions).map((item) => item.sessionID),
-      ...normalizeInitialQuestions(initialState.pendingQuestions).map((item) => item.sessionID),
-    ]),
-  ];
-}
-
 export function enqueueMessage(message: QueuedMessage) {
   setState(
     'queuedMessages',
@@ -856,7 +801,6 @@ export function isSessionAwaitingInput(sessionId: string) {
   const rootId = getSessionTreeRootId(sessionId) || sessionId;
   const sessionIds = new Set(getSessionTreeIds(rootId));
   return [
-    ...state.pendingAttentionSessionIds,
     ...state.permissions.map((permission) => permission.sessionID),
     ...state.questions.map((question) => question.sessionID),
   ].some((candidateSessionId) => sessionIds.has(candidateSessionId));
@@ -1526,7 +1470,7 @@ function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
 }
 
 function flushPendingStreamingDeltas() {
-  flushPendingStreamingDeltasFor(getCurrentAppState());
+  flushPendingStreamingDeltasFor(defaultAppState);
 }
 
 export function upsertMessage(msg: { info: Message; parts: Part[] }) {
@@ -1829,19 +1773,23 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
 }
 
 export function replaceMessages(incoming: MessageEntry[]) {
+  const nextMessages = cloneMessageEntries(incoming);
   streamingDeltaQueue.reset();
   batch(() => {
-    setState('messages', incoming);
+    setState('messages', nextMessages);
     if (state.streamingPartId !== null) setState('streamingPartId', null);
     if (state.streamingText !== '') setState('streamingText', '');
   });
   messageIndex.invalidate();
 }
 
-export function setMessagesIncremental(incoming: MessageEntry[]) {
-  clearStreamingState();
+export function setMessagesIncremental(
+  incoming: MessageEntry[],
+  options?: { preserveExtraParts?: boolean }
+) {
   const current = state.messages;
   if (current === incoming) return;
+  clearStreamingState();
   if (current.length === 0 || incoming.length === 0) {
     replaceMessages(incoming);
     return;
@@ -1860,21 +1808,22 @@ export function setMessagesIncremental(incoming: MessageEntry[]) {
       let changed = false;
       for (let i = 0; i < incoming.length; i++) {
         const next = incoming[i];
+        const nextEntry = mergeMessageEntry(msgs[i], next, options);
         if (i < sharedPrefixLength) {
-          if (!areMessageEntriesEquivalent(msgs[i], next)) {
-            msgs[i] = next;
+          if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
+            msgs[i] = nextEntry;
             changed = true;
           }
           continue;
         }
 
         if (i < msgs.length) {
-          if (msgs[i] !== next) {
-            msgs[i] = next;
+          if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
+            msgs[i] = nextEntry;
             changed = true;
           }
         } else {
-          msgs.push(next);
+          msgs.push(nextEntry);
           changed = true;
         }
       }
@@ -1885,6 +1834,45 @@ export function setMessagesIncremental(incoming: MessageEntry[]) {
       if (changed) messageIndex.invalidate();
     })
   );
+}
+
+function mergeMessageEntry(
+  current: MessageEntry | undefined,
+  incoming: MessageEntry,
+  options?: { preserveExtraParts?: boolean }
+) {
+  const next = cloneValue(incoming);
+  if (!current || !options?.preserveExtraParts || current.parts.length === 0) {
+    return next;
+  }
+
+  const incomingPartIds = new Set(next.parts.map((part) => part.id));
+  for (const part of current.parts) {
+    if (!incomingPartIds.has(part.id)) {
+      next.parts.push(cloneValue(part));
+    }
+  }
+
+  return next;
+}
+
+function cloneMessageEntries(entries: MessageEntry[]) {
+  return entries.map((entry) => cloneValue(entry));
+}
+
+function cloneValue<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneValue(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        cloneValue(entry),
+      ])
+    ) as T;
+  }
+  return value;
 }
 
 export function getChildRunsByParentId(

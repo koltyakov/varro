@@ -1,22 +1,10 @@
 import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
-import {
-  addContextFiles,
-  rememberCurrentDocumentNavigation,
-  removeContextFile,
-  requestComposerFocus,
-  requestOpenAttentionSessions,
-  setDesktopSessionPaneSide,
-  setError,
-  setExpandThinkingByDefaultPreference,
-  setRecycleBinEntries,
-  setShowStickyUserPromptPreference,
-  setState,
-  setTheme,
-  state,
-  syncDraftPermissionForWorkspace,
-  syncSessionMarkersForWorkspace,
-} from '../lib/state';
-import { normalizeProjectPath } from './session-lifecycle';
+import { appStore } from '../lib/stores/app-store';
+import { composerStore } from '../lib/stores/composer-store';
+import { sessionStore } from '../lib/stores/session-store';
+import { uiStore } from '../lib/stores/ui-store';
+import { syncSessionMarkersForWorkspace } from '../lib/state';
+import { normalizeProjectPath } from './session/session-lifecycle';
 
 export function createMountBridgeOperations(deps: {
   ensureConnectionInitialized(): void;
@@ -32,44 +20,41 @@ export function createMountBridgeOperations(deps: {
   const handleExtensionMessage = (msg: ExtensionMessage) => {
     handleExtensionMessageWithDependencies(
       {
-        setServerStatus: (payload) => setState('serverStatus', payload),
-        clearError: () => setError(null),
+        setServerStatus: (payload) => appStore.setState('serverStatus', payload),
+        clearError: () => uiStore.setError(null),
         ensureConnectionInitialized: deps.ensureConnectionInitialized,
         clearProvidersState: () => {
-          setState('providersLoaded', false);
-          setState('providerLimits', {});
+          appStore.setState('providersLoaded', false);
+          appStore.setState('providerLimits', {});
         },
         setTheme: (payload) => {
-          setTheme(payload.theme);
+          uiStore.setTheme(payload.theme);
           deps.applyTheme(payload.theme);
         },
         setConfig: (payload) => {
-          setExpandThinkingByDefaultPreference(payload.expandThinkingByDefault);
-          setShowStickyUserPromptPreference(payload.showStickyUserPrompt);
-          setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
+          uiStore.setExpandThinkingByDefaultPreference(payload.expandThinkingByDefault);
+          uiStore.setShowStickyUserPromptPreference(payload.showStickyUserPrompt);
+          uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
         },
-        setPendingAttentionSessionIds: (sessionIds) =>
-          setState('pendingAttentionSessionIds', sessionIds),
-        getPreviousActiveFilePath: () => state.editorContext.activeFile?.path ?? null,
+        getPreviousActiveFilePath: () => appStore.state.editorContext.activeFile?.path ?? null,
         getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
         setCurrentWorkspacePath: deps.setCurrentWorkspacePath,
-        setEditorContext: (payload) => setState('editorContext', payload),
-        rememberCurrentDocumentNavigation,
+        setEditorContext: composerStore.setEditorContext,
+        rememberCurrentDocumentNavigation: composerStore.rememberCurrentDocumentNavigation,
         syncWorkspaceState: (path) => {
-          syncDraftPermissionForWorkspace(path);
+          sessionStore.syncWorkspaceState(path);
           syncSessionMarkersForWorkspace(path);
         },
         reloadSessionsForWorkspaceChange: deps.reloadSessionsForWorkspaceChange,
         isInitialized: deps.isInitialized,
-        setTerminalSelection: (payload) => setState('terminalSelection', payload),
-        addContextFiles,
-        removeContextFile,
+        setTerminalSelection: composerStore.setTerminalSelection,
+        addContextFiles: composerStore.addContextFiles,
+        removeContextFile: composerStore.removeContextFile,
         createSession: deps.createSession,
-        requestComposerFocus,
-        requestOpenAttentionSessions,
+        requestComposerFocus: uiStore.requestComposerFocus,
+        requestOpenAttentionSessions: uiStore.requestOpenAttentionSessions,
         abortSession: deps.abortSession,
         refreshMcps: deps.refreshMcps,
-        setRecycleBinEntries,
       },
       msg
     );
@@ -86,7 +71,6 @@ export function handleExtensionMessageWithDependencies(
     clearProvidersState(): void;
     setTheme(payload: Extract<ExtensionMessage, { type: 'theme/update' }>['payload']): void;
     setConfig(payload: Extract<ExtensionMessage, { type: 'config/update' }>['payload']): void;
-    setPendingAttentionSessionIds(sessionIds: string[]): void;
     getPreviousActiveFilePath(): string | null;
     getCurrentWorkspacePath(): string | null;
     setCurrentWorkspacePath(path: string | null): void;
@@ -107,9 +91,6 @@ export function handleExtensionMessageWithDependencies(
     requestOpenAttentionSessions(): void;
     abortSession(): void;
     refreshMcps(): void;
-    setRecycleBinEntries(
-      entries: Extract<ExtensionMessage, { type: 'recycle-bin/update' }>['payload']['entries']
-    ): void;
   },
   msg: ExtensionMessage
 ) {
@@ -129,9 +110,6 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'config/update':
       deps.setConfig(msg.payload);
-      break;
-    case 'pending-attention/update':
-      deps.setPendingAttentionSessionIds(msg.payload.sessionIds);
       break;
     case 'context/update': {
       const previousActiveFilePath = deps.getPreviousActiveFilePath();
@@ -179,9 +157,6 @@ export function handleExtensionMessageWithDependencies(
       ) {
         deps.refreshMcps();
       }
-      break;
-    case 'recycle-bin/update':
-      deps.setRecycleBinEntries(msg.payload.entries);
       break;
   }
 }

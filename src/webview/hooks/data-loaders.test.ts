@@ -79,6 +79,25 @@ describe('data loaders', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it('does not overwrite an explicitly empty MCP selection during status hydration', async () => {
+    const setSelectedMcpsForSession = vi.fn();
+
+    await loadMcpsWithDependencies(
+      {
+        listMcpStatus: async () => ({
+          alpha: { status: 'connected' },
+        }),
+        setMcpStatus: vi.fn(),
+        getActiveSessionId: () => 'session-1',
+        getSelectedMcpsForSession: () => [],
+        setSelectedMcpsForSession,
+      },
+      vi.fn()
+    );
+
+    expect(setSelectedMcpsForSession).not.toHaveBeenCalled();
+  });
+
   it('reconciles invalid selected models when providers load', async () => {
     const setProvidersLoaded = vi.fn();
     const setProviders = vi.fn();

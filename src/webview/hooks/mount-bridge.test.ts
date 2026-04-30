@@ -81,7 +81,6 @@ describe('mount bridge helpers', () => {
         clearProvidersState: vi.fn(),
         setTheme: vi.fn(),
         setConfig: vi.fn(),
-        setPendingAttentionSessionIds: vi.fn(),
         getPreviousActiveFilePath: () => null,
         getCurrentWorkspacePath: () => null,
         setCurrentWorkspacePath: vi.fn(),
@@ -98,7 +97,6 @@ describe('mount bridge helpers', () => {
         requestOpenAttentionSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
-        setRecycleBinEntries: vi.fn(),
       },
       {
         type: 'server/status',
@@ -126,7 +124,6 @@ describe('mount bridge helpers', () => {
         clearProvidersState,
         setTheme: vi.fn(),
         setConfig: vi.fn(),
-        setPendingAttentionSessionIds: vi.fn(),
         getPreviousActiveFilePath: () => null,
         getCurrentWorkspacePath: () => null,
         setCurrentWorkspacePath: vi.fn(),
@@ -143,7 +140,6 @@ describe('mount bridge helpers', () => {
         requestOpenAttentionSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
-        setRecycleBinEntries: vi.fn(),
       },
       {
         type: 'server/status',
@@ -176,7 +172,6 @@ describe('mount bridge helpers', () => {
         clearProvidersState: vi.fn(),
         setTheme: vi.fn(),
         setConfig: vi.fn(),
-        setPendingAttentionSessionIds: vi.fn(),
         getPreviousActiveFilePath: () => '/repo/src/old.ts',
         getCurrentWorkspacePath: () => '/repo',
         setCurrentWorkspacePath,
@@ -193,7 +188,6 @@ describe('mount bridge helpers', () => {
         requestOpenAttentionSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
-        setRecycleBinEntries: vi.fn(),
       },
       {
         type: 'context/update',
@@ -216,8 +210,6 @@ describe('mount bridge helpers', () => {
     const refreshMcps = vi.fn();
     const addDroppedContextFiles = vi.fn();
     const removeDroppedContextFile = vi.fn();
-    const updateRecycleBinEntries = vi.fn();
-
     const deps = {
       setServerStatus: vi.fn(),
       clearError: vi.fn(),
@@ -225,7 +217,6 @@ describe('mount bridge helpers', () => {
       clearProvidersState: vi.fn(),
       setTheme: vi.fn(),
       setConfig: vi.fn(),
-      setPendingAttentionSessionIds: vi.fn(),
       getPreviousActiveFilePath: () => null,
       getCurrentWorkspacePath: () => null,
       setCurrentWorkspacePath: vi.fn(),
@@ -242,7 +233,6 @@ describe('mount bridge helpers', () => {
       requestOpenAttentionSessions: openAttentionSessions,
       abortSession,
       refreshMcps,
-      setRecycleBinEntries: updateRecycleBinEntries,
     };
 
     handleExtensionMessageWithDependencies(deps, { type: 'command/new-session' });
@@ -261,10 +251,6 @@ describe('mount bridge helpers', () => {
       type: 'server/event',
       payload: { type: 'mcp.tools.changed', properties: {} },
     });
-    handleExtensionMessageWithDependencies(deps, {
-      type: 'recycle-bin/update',
-      payload: { entries: [] },
-    });
 
     expect(createSession).toHaveBeenCalledTimes(1);
     expect(focusComposer).toHaveBeenCalledTimes(1);
@@ -273,7 +259,6 @@ describe('mount bridge helpers', () => {
     expect(addDroppedContextFiles).toHaveBeenCalledTimes(1);
     expect(removeDroppedContextFile).toHaveBeenCalledWith('/repo/file.ts');
     expect(refreshMcps).toHaveBeenCalledTimes(1);
-    expect(updateRecycleBinEntries).toHaveBeenCalledWith([]);
   });
 
   it('binds extension message handling to shared webview state', () => {

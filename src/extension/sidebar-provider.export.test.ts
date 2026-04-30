@@ -210,16 +210,18 @@ describe('SidebarProvider export flows', () => {
       signalCode: null,
     });
 
-    const { SidebarProvider, provider } = await createSidebarProviderInstance({
+    const { provider } = await createSidebarProviderInstance({
       server: createServer({
         resolveCommand: vi.fn(() => 'opencode'),
         getWorkspaceCwd: vi.fn(() => '/repo'),
       }),
     });
 
-    const providerClass = SidebarProvider as unknown as { EXPORT_TIMEOUT_MS: number };
-    const originalTimeout = providerClass.EXPORT_TIMEOUT_MS;
-    providerClass.EXPORT_TIMEOUT_MS = 10;
+    const exportService = provider as unknown as {
+      sessionExportService: { exportTimeoutMs: number };
+    };
+    const originalTimeout = exportService.sessionExportService.exportTimeoutMs;
+    exportService.sessionExportService.exportTimeoutMs = 10;
 
     try {
       await provider.handleMessage({
@@ -232,7 +234,7 @@ describe('SidebarProvider export flows', () => {
         'Failed to export session: OpenCode CLI export timed out'
       );
     } finally {
-      providerClass.EXPORT_TIMEOUT_MS = originalTimeout;
+      exportService.sessionExportService.exportTimeoutMs = originalTimeout;
     }
   });
 });

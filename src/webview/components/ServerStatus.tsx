@@ -1,12 +1,15 @@
 import { Show } from 'solid-js';
 import { postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
-import { state } from '../lib/state';
+import { useAppState } from '../lib/app-state-context';
 
 export function ServerStatus() {
-  const status = () => state.serverStatus;
+  const appState = useAppState();
+  const status = () => appState.state.serverStatus;
   const noProvidersConfigured = () =>
-    status().state === 'running' && state.providersLoaded && state.providers.length === 0;
+    status().state === 'running' &&
+    appState.state.providersLoaded &&
+    appState.state.providers.length === 0;
   const serverErrorMessage = () => {
     const currentStatus = status();
     return currentStatus.state === 'error' ? currentStatus.message.trim() : '';

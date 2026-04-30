@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Message } from '../types';
 import {
-  createSessionActionOperations,
   implementPlanWithDependencies,
   INIT_PROMPT,
   initSessionWithDependencies,
   openPlanWithDependencies,
   runSlashCommandWithDependencies,
-} from './session-actions';
+  SessionActionOperations,
+} from './session/session-actions';
 
 function userMessage(id: string): Message {
   return {
@@ -179,7 +179,7 @@ describe('session-actions helpers', () => {
       parts: [],
     }));
 
-    const operations = createSessionActionOperations({
+    const operations = new SessionActionOperations({
       getActiveSessionId: () => 'session-1',
       getBuildAgent: () => 'build',
       setError: vi.fn(),

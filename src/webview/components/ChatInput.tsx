@@ -1,5 +1,4 @@
-import { Show, For, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import {
   state,
   inputText,
@@ -63,29 +62,30 @@ import {
   getPrimaryProviderLimitWindow,
 } from '../lib/format';
 import { getMatchingVariant, getPreferredVariant } from '../lib/model-variants';
-import {
-  isAssistantMessage,
-  getContextWindow,
-  sumAssistantTokens,
-  formatNumber,
-} from '../lib/message-metrics';
+import { isAssistantMessage, getContextWindow, sumAssistantTokens } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
-import { getLeafPathName, getDroppedFileLabel } from '../lib/path-display';
+import { getLeafPathName } from '../lib/path-display';
 import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
 } from '../../shared/context-files';
 import { TodoList } from './TodoList';
-import { DocumentIcon } from './DocumentIcon';
+import { AttachmentStrip } from './chat-input/AttachmentStrip';
+import { ChatInputToolbar } from './chat-input/ChatInputToolbar';
+import { ComposerArea } from './chat-input/ComposerArea';
+import { DropOverlay } from './chat-input/DropOverlay';
+import { QueuedMessages } from './chat-input/QueuedMessages';
+import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
+import type {
+  CompletionItem,
+  MentionCompletionItem,
+  SlashCommand,
+} from './chat-input/CompletionMenu';
 import type { Agent, Command, Part, TextPart } from '../types';
-import type { DroppedFile, ExtensionMessage, PermissionMode } from '../../shared/protocol';
+import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
-import { getProviderIcon } from '../lib/provider-icons';
-
-const CONTEXT_USAGE_WARNING_PERCENT = 70;
-const CONTEXT_USAGE_ERROR_PERCENT = 90;
 
 type ToolbarControl =
   | 'permission'
@@ -109,23 +109,6 @@ type ToolbarCompactMode =
   | 'hide-stop'
   | 'hide-context'
   | 'tight';
-
-type MentionCompletionItem =
-  | {
-      key: string;
-      type: 'agent';
-      label: string;
-      detail: string;
-      value: string;
-    }
-  | {
-      key: string;
-      type: 'file';
-      label: string;
-      detail: string;
-      value: string;
-      file: DroppedFile;
-    };
 
 type MentionCompletionMeta = {
   showFileSearchHint: boolean;
@@ -206,39 +189,23 @@ export function isToolbarControlCompacted(
 }
 
 export function ChatInput() {
-  // oxlint-disable-next-line no-unassigned-vars
   let textareaRef: HTMLTextAreaElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let permissionPickerRef: HTMLButtonElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let permissionPopoverRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let agentPickerRef: HTMLButtonElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let agentPopoverRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let modelPickerRef: HTMLButtonElement | undefined;
   let modelPopoverRef: HTMLDivElement | undefined;
   let mcpPopoverRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let toolbarRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let toolbarLeftRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let toolbarRightRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let variantPickerRef: HTMLButtonElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let variantPopoverRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let contextButtonRef: HTMLButtonElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let contextPopupRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let busyMenuRef: HTMLDivElement | undefined;
-  // oxlint-disable-next-line no-unassigned-vars
   let busyToggleRef: HTMLButtonElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
@@ -1305,89 +1272,15 @@ export function ChatInput() {
   return (
     <div class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}`}>
       <Show when={isDraggingOver()}>
-        <Portal>
-          <div class="chat-drop-overlay" aria-hidden="true">
-            <div class="chat-drop-overlay-card">
-              <div class="chat-drop-overlay-icon">
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" y1="3" x2="12" y2="15" />
-                </svg>
-              </div>
-              <div class="chat-drop-overlay-title">Drop to add to context</div>
-            </div>
-          </div>
-        </Portal>
+        <DropOverlay />
       </Show>
 
       <Show when={queuedForSession().length > 0}>
-        <div class="chat-queue-container" role="list" aria-label="Queued messages">
-          <For each={queuedForSession()}>
-            {(item) => (
-              <div class="chat-queue-item" role="listitem" title={item.text}>
-                <div class="chat-queue-body">
-                  <span class="chat-queue-icon" aria-hidden="true">
-                    <svg
-                      width="11"
-                      height="11"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M3 4h10M3 8h10M3 12h6" />
-                    </svg>
-                  </span>
-                  <span class="chat-queue-label">{item.text}</span>
-                </div>
-                <div class="chat-queue-actions">
-                  <button
-                    class="chat-queue-action"
-                    onClick={() => sendQueuedAsSteer(item.id, item.text)}
-                    title="Send now as Steer"
-                    aria-label="Send as Steer"
-                  >
-                    <svg
-                      width="11"
-                      height="11"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.75"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M8 13V3M4 7l4-4 4 4" />
-                    </svg>
-                    <span class="chat-queue-action-label">Steer</span>
-                  </button>
-                  <button
-                    class="chat-queue-remove"
-                    onClick={() => removeQueuedMessage(item.id)}
-                    title="Remove from queue"
-                    aria-label="Remove from queue"
-                  >
-                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            )}
-          </For>
-        </div>
+        <QueuedMessages
+          items={queuedForSession()}
+          onSendAsSteer={sendQueuedAsSteer}
+          onRemove={removeQueuedMessage}
+        />
       </Show>
 
       <Show when={state.todos.length > 0 && !showModelPicker()}>
@@ -1395,35 +1288,22 @@ export function ChatInput() {
       </Show>
 
       <Show when={activeUsageLimit()}>
-        <div class="chat-usage-limit-banner" role="status" aria-live="polite">
-          <div class="chat-usage-limit-copy">
-            <span class="chat-usage-limit-title">Usage limit reached</span>
-            <span class="chat-usage-limit-meta">
-              {describeUsageLimit(activeUsageLimitWindow(), activeUsageLimit()?.attempt ?? null)}
-            </span>
-            <span class="chat-usage-limit-message">{activeUsageLimit()!.message}</span>
-          </div>
-          <div class="chat-usage-limit-actions">
-            <Show when={isLoading() && !hasActiveQuestion() && !hasActivePermission()}>
-              <button class="chat-usage-limit-action danger" onClick={() => abortSession()}>
-                Stop retrying
-              </button>
-            </Show>
-            <button
-              class="chat-usage-limit-action"
-              onClick={() => {
-                closePopups();
-                setShowModelPicker(true);
-              }}
-            >
-              Switch provider
-            </button>
-          </div>
-        </div>
+        <UsageLimitBanner
+          message={activeUsageLimit()!.message}
+          meta={describeUsageLimit(activeUsageLimitWindow(), activeUsageLimit()?.attempt ?? null)}
+          showStopRetrying={isLoading() && !hasActiveQuestion() && !hasActivePermission()}
+          onStopRetrying={() => abortSession()}
+          onSwitchProvider={() => {
+            closePopups();
+            setShowModelPicker(true);
+          }}
+        />
       </Show>
 
       <div
-        ref={containerRef}
+        ref={(el) => {
+          containerRef = el;
+        }}
         class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
@@ -1484,941 +1364,266 @@ export function ChatInput() {
         </Show>
 
         <Show when={hasContext() || hasMentions()}>
-          <div class="chat-attachments-container">
-            <Show when={activeContext()}>
-              <AttachmentChip
-                label={activeContext()!.filename}
-                detail={activeContext()!.lineRange}
-                disabled={!activeContextEnabled()}
-                title={`${
-                  activeContext()!.lineRange
-                    ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
-                    : activeContext()!.filename
-                }${activeContextEnabled() ? ' · Click to disable current document context' : ' · Current document context is disabled. Click to enable it again'}`}
-                onClick={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
-              />
-            </Show>
-            <Show when={terminalSelection()}>
-              <AttachmentChip
-                label={terminalSelection()!.terminalName}
-                detail="terminal"
-                icon="terminal"
-                title={`Terminal: ${terminalSelection()!.terminalName}`}
-                onRemove={() => postMessage({ type: 'terminal-selection/clear' })}
-              />
-            </Show>
-            <For each={visibleFiles()}>
-              {(file) => (
-                <AttachmentChip
-                  label={getDroppedFileLabel(file)}
-                  detail={formatContextLineRanges(file.lineRanges)}
-                  icon={file.type === 'directory' ? 'folder' : 'file'}
-                  title={
-                    formatContextLineRanges(file.lineRanges)
-                      ? `${file.relativePath || file.path} ${formatContextLineRanges(file.lineRanges)}`
-                      : file.relativePath || file.path
-                  }
-                  onRemove={() => {
-                    removeContextFile(file.path);
-                    postMessage({ type: 'files/remove', payload: { path: file.path } });
-                  }}
-                />
-              )}
-            </For>
-            <For each={clipboardImages()}>
-              {(image) => (
-                <AttachmentChip
-                  label={image.filename}
-                  disabled={clipboardImagesDisabled()}
-                  icon="image"
-                  title={
-                    clipboardImagesDisabled()
-                      ? `${image.filename} · Current model doesn't support vision, so this image will not be sent`
-                      : image.filename
-                  }
-                  onRemove={() => removeClipboardImage(image.id)}
-                />
-              )}
-            </For>
-          </div>
+          <AttachmentStrip
+            activeContext={activeContext()}
+            activeContextEnabled={activeContextEnabled()}
+            activeContextTitle={
+              activeContext()
+                ? `${
+                    activeContext()!.lineRange
+                      ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
+                      : activeContext()!.filename
+                  }${
+                    activeContextEnabled()
+                      ? ' · Click to disable current document context'
+                      : ' · Current document context is disabled. Click to enable it again'
+                  }`
+                : null
+            }
+            terminalSelection={terminalSelection()}
+            files={visibleFiles()}
+            clipboardImages={clipboardImages()}
+            clipboardImagesDisabled={clipboardImagesDisabled()}
+            onToggleActiveContext={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
+            onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
+            onRemoveFile={(path) => {
+              removeContextFile(path);
+              postMessage({ type: 'files/remove', payload: { path } });
+            }}
+            onRemoveClipboardImage={removeClipboardImage}
+          />
         </Show>
 
-        <div class="chat-editor-container">
-          <textarea
-            ref={textareaRef!}
-            style={{
-              'min-height': '36px',
-              width: '100%',
-              resize: 'none',
-              background: 'transparent',
-              padding: '0 0 0 6px',
-              'font-size': '13px',
-              'line-height': '1.45',
-              color: 'var(--color-vscode-input-fg)',
-              outline: 'none',
-              'font-family': 'inherit',
-              border: 'none',
-            }}
-            rows={1}
-            placeholder={
-              hasActiveQuestion() || hasActivePermission()
-                ? 'Respond to the prompt above to continue...'
-                : isLoading()
-                  ? 'Queue a follow-up or steer with \u2303Enter...'
-                  : 'Describe what to build'
+        <ComposerArea
+          textareaRef={(el) => {
+            textareaRef = el;
+          }}
+          placeholder={
+            hasActiveQuestion() || hasActivePermission()
+              ? 'Respond to the prompt above to continue...'
+              : isLoading()
+                ? 'Queue a follow-up or steer with \u2303Enter...'
+                : 'Describe what to build'
+          }
+          value={inputText()}
+          isFocused={isFocused()}
+          showCompletionMenu={showCompletionMenu()}
+          completionItems={composerCompletions()}
+          completionSelectedIndex={completionIndex()}
+          completionHeader={showFileSearchHint() ? 'Type to search workspace files' : undefined}
+          onInput={(e) => {
+            setHistoryIndex(null);
+            setHistoryDraft('');
+            setInputText(e.currentTarget.value);
+            setCaretPosition(e.currentTarget.selectionStart || 0);
+            setCompletionIndex(0);
+            setSuppressCompletion(false);
+            autoResize();
+          }}
+          onKeyDown={handleKeydown}
+          onPaste={handlePaste}
+          onFocus={(e) => {
+            setIsFocused(true);
+            setCaretPosition(e.currentTarget.selectionStart || 0);
+          }}
+          onBlur={() => setIsFocused(false)}
+          onClick={(e) => {
+            setCaretPosition(e.currentTarget.selectionStart || 0);
+            setShowAgentPicker(false);
+            setShowModelPicker(false);
+            setShowMcpPicker(false);
+            setShowVariantPicker(false);
+            setShowPermissionModePicker(false);
+            setShowBusyMenu(false);
+          }}
+          onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
+          onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
+          onSelectCompletion={(item) => {
+            const completion = activeCompletion();
+            const completionSelection = getCompletionSelection(completion, item, true);
+            if (!completionSelection) return;
+
+            if (completionSelection.type === 'run-slash') {
+              void runSlashCommand(completionSelection.value);
+              return;
             }
-            value={inputText()}
-            onInput={(e) => {
-              setHistoryIndex(null);
-              setHistoryDraft('');
-              setInputText(e.currentTarget.value);
-              setCaretPosition(e.currentTarget.selectionStart || 0);
-              setCompletionIndex(0);
-              setSuppressCompletion(false);
-              autoResize();
-            }}
-            onKeyDown={handleKeydown}
-            onPaste={handlePaste}
-            onFocus={(e) => {
-              setIsFocused(true);
-              setCaretPosition(e.currentTarget.selectionStart || 0);
-            }}
-            onBlur={() => setIsFocused(false)}
-            onClick={(e) => {
-              setCaretPosition(e.currentTarget.selectionStart || 0);
-              setShowAgentPicker(false);
-              setShowModelPicker(false);
-              setShowMcpPicker(false);
-              setShowVariantPicker(false);
-              setShowPermissionModePicker(false);
-              setShowBusyMenu(false);
-            }}
-            onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
-            onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
-          />
 
-          <Show when={isFocused() && showCompletionMenu()}>
-            <CompletionMenu
-              items={composerCompletions()}
-              selectedIndex={completionIndex()}
-              header={showFileSearchHint() ? 'Type to search workspace files' : undefined}
-              onSelect={(item) => {
-                const completion = activeCompletion();
-                const completionSelection = getCompletionSelection(completion, item, true);
-                if (!completionSelection) return;
+            if (completionSelection.type === 'set-slash') {
+              setComposerValue(completionSelection.value);
+              return;
+            }
 
-                if (completionSelection.type === 'run-slash') {
-                  void runSlashCommand(completionSelection.value);
-                  return;
-                }
+            if (completionSelection.file) addContextFile(completionSelection.file);
+            if (completion?.type !== 'mention') return;
+            applyMentionValue(completion, completionSelection.value);
+          }}
+        />
 
-                if (completionSelection.type === 'set-slash') {
-                  setComposerValue(completionSelection.value);
-                  return;
-                }
-
-                if (completionSelection.file) addContextFile(completionSelection.file);
-                if (completion?.type !== 'mention') return;
-                applyMentionValue(completion, completionSelection.value);
-              }}
-            />
-          </Show>
-        </div>
-
-        <div
-          ref={toolbarRef}
-          class={`chat-input-toolbars ${toolbarCompactMode() === 'tight' ? 'compact-tight' : ''}`}
-        >
-          <div
-            ref={toolbarLeftRef}
-            class={`toolbar-left${showContextPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() ? ' showing-context-popup' : ''}`}
-          >
-            <Show when={isToolbarControlVisible('permission')}>
-              <div style={{ position: 'relative' }}>
-                <button
-                  ref={permissionPickerRef!}
-                  class="toolbar-picker icon-only"
-                  onClick={() => {
-                    const next = !showPermissionModePicker();
-                    closePopups(next ? 'permission' : undefined);
-                    setShowPermissionModePicker(next);
-                  }}
-                  title={
-                    activePermissionMode() === 'full'
-                      ? 'Full access permissions'
-                      : 'Default permissions'
-                  }
-                  aria-label={
-                    activePermissionMode() === 'full'
-                      ? 'Full access permissions'
-                      : 'Default permissions'
-                  }
-                >
-                  <PermissionModeIcon mode={activePermissionMode()} />
-                </button>
-                <Show when={showPermissionModePicker()}>
-                  <div
-                    ref={permissionPopoverRef!}
-                    class="toolbar-popover"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div class="toolbar-popover-header">Permissions</div>
-                    <For each={PERMISSION_MODE_OPTIONS}>
-                      {(option) => (
-                        <button
-                          class={`toolbar-popover-item ${activePermissionMode() === option.mode ? 'selected' : ''}`}
-                          onClick={() => {
-                            void updatePermissionModeForSession(option.mode);
-                            setShowPermissionModePicker(false);
-                          }}
-                        >
-                          <PermissionModeIcon mode={option.mode} />
-                          <span class="min-w-0 flex-1">{option.label}</span>
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-              </div>
-            </Show>
-
-            <Show when={state.agents.length > 0 && isToolbarControlVisible('agent')}>
-              <div style={{ position: 'relative' }}>
-                <button
-                  ref={agentPickerRef!}
-                  class="toolbar-picker"
-                  onClick={() => {
-                    const next = !showAgentPicker();
-                    closePopups(next ? 'agent' : undefined);
-                    setShowAgentPicker(next);
-                    if (next) setAgentFocusIndex(0);
-                  }}
-                  title="Select agent"
-                >
-                  <span class="toolbar-picker-label">{selectedAgentLabel()}</span>
-                  <svg
-                    class="codicon-chevron"
-                    width="10"
-                    height="10"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  >
-                    <path d="M4 6l4 4 4-4" />
-                  </svg>
-                </button>
-                <Show when={showAgentPicker()}>
-                  <div
-                    ref={agentPopoverRef!}
-                    class="toolbar-popover agent-popover"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div class="toolbar-popover-header">Agent</div>
-                    <For each={state.agents}>
-                      {(agent, index) => (
-                        <button
-                          class={`toolbar-popover-item ${state.selectedAgent === agent.name ? 'selected' : ''} ${agentFocusIndex() === index() ? 'keyboard-focus' : ''}`}
-                          onClick={() => {
-                            setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
-                            setShowAgentPicker(false);
-                          }}
-                          onMouseEnter={() => setAgentFocusIndex(index())}
-                        >
-                          <span class="min-w-0 flex-1">
-                            <span class="block truncate">{formatAgentLabel(agent.name)}</span>
-                            <span class="block truncate text-[10px] text-vscode-muted/80">
-                              {agent.description || getAgentBadgeLine(agent)}
-                            </span>
-                          </span>
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-              </div>
-            </Show>
-
-            <button
-              ref={modelPickerRef!}
-              class={`toolbar-picker model-picker-btn ${modelCanEllipsize() ? 'model-ellipsis' : ''}`}
-              onClick={() => {
-                const next = !showModelPicker();
-                closePopups(next ? 'model' : undefined);
-                setShowModelPicker(next);
-              }}
-              title={
-                currentModel().modelName
-                  ? `${currentModel().providerName} / ${currentModel().modelName}`
-                  : 'Choose model'
-              }
-            >
-              <Show
-                when={currentModel().modelName}
-                fallback={<span class="toolbar-picker-label model-name">Model</span>}
-              >
-                <span class="toolbar-picker-label model-name">
-                  <Show when={getProviderIcon(currentModel().providerID)}>
-                    {(icon) => (
-                      <span
-                        class="provider-icon"
-                        style={{ '--provider-icon-mask': `url("${icon()}")` }}
-                        aria-hidden="true"
-                      />
-                    )}
-                  </Show>
-                  <span class="model-name-text">{currentModel().modelName}</span>
-                </span>
-              </Show>
-              <svg
-                class="codicon-chevron"
-                width="10"
-                height="10"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M4 6l4 4 4-4" />
-              </svg>
-            </button>
-
-            <Show when={currentProviderLimitCompact()}>
-              <span
-                class={`toolbar-limit-chip ${currentProviderLimitTone() !== 'default' ? currentProviderLimitTone() : ''}`}
-                title={currentProviderLimitTitle()}
-              >
-                {currentProviderLimitCompact()}
-              </span>
-            </Show>
-
-            <Show when={availableVariants().length > 0 && isToolbarControlVisible('reasoning')}>
-              <div style={{ position: 'relative' }}>
-                <button
-                  ref={variantPickerRef!}
-                  class="toolbar-picker"
-                  onClick={() => {
-                    const next = !showVariantPicker();
-                    closePopups(next ? 'variant' : undefined);
-                    setShowVariantPicker(next);
-                  }}
-                  title="Thinking level"
-                >
-                  <span class="toolbar-picker-label">{selectedVariantLabel()}</span>
-                  <svg
-                    class="codicon-chevron"
-                    width="10"
-                    height="10"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  >
-                    <path d="M4 6l4 4 4-4" />
-                  </svg>
-                </button>
-                <Show when={showVariantPicker()}>
-                  <div
-                    ref={variantPopoverRef!}
-                    class="toolbar-popover"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div class="toolbar-popover-header">Reasoning</div>
-                    <For each={availableVariants()}>
-                      {(v) => (
-                        <button
-                          class={`toolbar-popover-item ${effectiveVariant() === v ? 'selected' : ''}`}
-                          onClick={() => {
-                            const m = currentModel();
-                            setSelectedModel(
-                              {
-                                providerID: m.providerID!,
-                                modelID: m.modelID!,
-                                variant: v,
-                              },
-                              { sessionId: state.activeSessionId }
-                            );
-                            setShowVariantPicker(false);
-                          }}
-                        >
-                          {formatVariantLabel(v)}
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-              </div>
-            </Show>
-
-            <Show when={contextUsage() && isToolbarControlVisible('context')}>
-              <div style={{ position: 'relative' }}>
-                <button
-                  ref={contextButtonRef!}
-                  class={`chat-context-usage ${getContextUsageTone(contextUsage()!.percent)}`}
-                  onClick={() => {
-                    const next = !showContextPopup();
-                    closePopups(next ? 'context' : undefined);
-                    setShowContextPopup(next);
-                  }}
-                  title={formatContextUsageTitle(contextUsage()!.percent)}
-                  aria-label={formatContextUsageTitle(contextUsage()!.percent)}
-                >
-                  <svg class="circular-progress" viewBox="0 0 36 36">
-                    <circle class="progress-bg" cx="18" cy="18" r="14" />
-                    <circle
-                      class="progress-arc"
-                      cx="18"
-                      cy="18"
-                      r="14"
-                      stroke-dasharray="87.96"
-                      stroke-dashoffset={`${87.96 - (contextUsage()!.percent / 100) * 87.96}`}
-                    />
-                  </svg>
-                </button>
-                <Show when={showContextPopup()}>
-                  <ContextPopup
-                    ref={contextPopupRef!}
-                    usage={contextUsage()!}
-                    tokens={sessionTokens()}
-                    model={currentModel()}
-                    onClose={() => setShowContextPopup(false)}
-                  />
-                </Show>
-              </div>
-            </Show>
-          </div>
-
-          <div ref={toolbarRightRef} class="toolbar-right">
-            <Show when={isToolbarControlVisible('attachments')}>
-              <button
-                class="toolbar-attach-button"
-                onClick={() => postMessage({ type: 'files/pick' })}
-                title="Attach files"
-                aria-label="Attach files"
-              >
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 32 32"
-                  fill="currentColor"
-                  aria-hidden="true"
-                >
-                  <path d="M27.41 5.586c-1.021-1.021-2.363-1.532-3.705-1.532S21.021 4.564 20 5.586L8.153 17.431c-1.216 1.216-1.216 3.196.002 4.414 1.217 1.217 3.195 1.217 4.412 0l8.26-8.26-1.414-1.414-8.26 8.26c-.437.436-1.146.437-1.586-.002-.437-.437-.437-1.147 0-1.584L21.414 7C22.678 5.738 24.732 5.737 26 7.004c1.263 1.263 1.263 3.319 0 4.582L14.151 23.433c-2.091 2.089-5.491 2.089-7.586-.006-2.09-2.09-2.09-5.49 0-7.58L16.828 5.586l-1.414-1.414L5.151 14.433c-2.87 2.87-2.87 7.539.006 10.414 2.869 2.87 7.539 2.87 10.408 0L27.414 13C29.457 10.957 29.457 7.633 27.41 5.586z" />
-                </svg>
-              </button>
-            </Show>
-
-            <Show
-              when={
-                isLoading() &&
-                !hasActiveQuestion() &&
-                !hasActivePermission() &&
-                isToolbarControlVisible('stop')
-              }
-            >
-              <button
-                class={`toolbar-picker stop-button ${isToolbarControlCompacted(toolbarCompactMode(), 'stop') ? 'compact' : ''}`}
-                onClick={() => abortSession()}
-                title="Stop"
-                aria-label="Stop"
-              >
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                  <rect x="3" y="3" width="10" height="10" rx="1.5" />
-                </svg>
-                <Show when={!isToolbarControlCompacted(toolbarCompactMode(), 'stop')}>
-                  <span class="toolbar-picker-label">Stop</span>
-                </Show>
-              </button>
-            </Show>
-
-            <div style={{ position: 'relative' }}>
-              <Show when={isToolbarControlVisible('send')}>
-                <Show
-                  when={showBusySendControls()}
-                  fallback={
-                    <button
-                      class={`chat-send-button ${canSend() ? 'enabled' : 'disabled'}`}
-                      onClick={() => canSend() && handleSend()}
-                      disabled={!canSend()}
-                      title="Send (Enter)"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
-                      </svg>
-                    </button>
-                  }
-                >
-                  <div class="send-button-group">
-                    <button
-                      class="chat-send-button enabled send-main"
-                      onClick={() => handleSend()}
-                      title="Add to queue (Enter)"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
-                      </svg>
-                    </button>
-                    <button
-                      ref={busyToggleRef!}
-                      class="send-mode-chevron"
-                      onClick={() => {
-                        const next = !showBusyMenu();
-                        closePopups(next ? 'busy' : undefined);
-                        setShowBusyMenu(next);
-                      }}
-                      title="More send options"
-                    >
-                      <svg
-                        width="8"
-                        height="8"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <path d="M4 10l4-4 4 4" />
-                      </svg>
-                    </button>
-                  </div>
-                </Show>
-              </Show>
-
-              <Show
-                when={isToolbarControlVisible('send') && showBusyMenu() && showBusySendControls()}
-              >
-                <div
-                  ref={busyMenuRef!}
-                  class="toolbar-popover busy-menu"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    class="toolbar-popover-item"
-                    onClick={() => {
-                      handleSend();
-                      setShowBusyMenu(false);
-                    }}
-                  >
-                    <span class="busy-menu-icon">
-                      <svg
-                        width="11"
-                        height="11"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <path d="M8 3v10M3 8h10" />
-                      </svg>
-                    </span>
-                    <span class="busy-menu-label">Add to Queue</span>
-                    <span class="busy-menu-hint">Enter</span>
-                  </button>
-                  <button
-                    class="toolbar-popover-item"
-                    onClick={() => {
-                      handleSend('steer');
-                      setShowBusyMenu(false);
-                    }}
-                  >
-                    <span class="busy-menu-icon">
-                      <svg
-                        width="11"
-                        height="11"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <path d="M8 2l1.8 4.8H15l-4 3.4 1.6 5L8 12l-4.6 3.2 1.6-5-4-3.4h5.2z" />
-                      </svg>
-                    </span>
-                    <span class="busy-menu-label">Steer with Message</span>
-                    <span class="busy-menu-hint">{'\u2303'}Enter</span>
-                  </button>
-                  <button
-                    class="toolbar-popover-item"
-                    onClick={() => {
-                      abortSession();
-                      handleSend();
-                      setShowBusyMenu(false);
-                    }}
-                  >
-                    <span class="busy-menu-icon" style={{ color: 'var(--color-vscode-error)' }}>
-                      <svg
-                        width="11"
-                        height="11"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <path d="M2 3l12 10M14 3L2 13" />
-                      </svg>
-                    </span>
-                    <span class="busy-menu-label">Stop and Send</span>
-                  </button>
-                </div>
-              </Show>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ContextPopup(props: {
-  ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
-  usage: { used: number; limit: number; percent: number };
-  tokens: {
-    total: number;
-    input: number;
-    output: number;
-    reasoning: number;
-    cacheRead: number;
-    cacheWrite: number;
-  };
-  model: { providerName: string; modelName: string };
-  onClose: () => void;
-}) {
-  const rows = () => {
-    const t = props.tokens;
-    const items: Array<{ label: string; value: number; color?: string }> = [
-      { label: 'Input', value: t.input },
-      { label: 'Output', value: t.output },
-    ];
-    if (t.reasoning > 0) items.push({ label: 'Reasoning', value: t.reasoning });
-    if (t.cacheRead > 0) items.push({ label: 'Cache read', value: t.cacheRead });
-    if (t.cacheWrite > 0) items.push({ label: 'Cache write', value: t.cacheWrite });
-    return items;
-  };
-
-  return (
-    <div ref={props.ref} class="context-popup" onClick={(e) => e.stopPropagation()}>
-      <div class="context-popup-header">
-        <span class="context-popup-title">Context Window</span>
-        <span class="context-popup-pct">{Math.round(props.usage.percent)}%</span>
-      </div>
-
-      <div class="context-popup-bar">
-        <div
-          class={`context-popup-bar-fill ${getContextUsageTone(props.usage.percent)}`}
-          style={{ width: `${Math.min(props.usage.percent, 100)}%` }}
+        <ChatInputToolbar
+          toolbarRef={(el) => {
+            toolbarRef = el;
+          }}
+          toolbarLeftRef={(el) => {
+            toolbarLeftRef = el;
+          }}
+          toolbarRightRef={(el) => {
+            toolbarRightRef = el;
+          }}
+          compactTight={toolbarCompactMode() === 'tight'}
+          showLeftPopupState={
+            showContextPopup() ||
+            showAgentPicker() ||
+            showVariantPicker() ||
+            showMcpPicker() ||
+            showPermissionModePicker()
+          }
+          showPermissionControl={isToolbarControlVisible('permission')}
+          permissionButtonRef={(el) => {
+            permissionPickerRef = el;
+          }}
+          permissionPopoverRef={(el) => {
+            permissionPopoverRef = el;
+          }}
+          permissionMode={activePermissionMode()}
+          showPermissionPicker={showPermissionModePicker()}
+          onTogglePermissionPicker={() => {
+            const next = !showPermissionModePicker();
+            closePopups(next ? 'permission' : undefined);
+            setShowPermissionModePicker(next);
+          }}
+          onSelectPermissionMode={(mode) => {
+            void updatePermissionModeForSession(mode);
+            setShowPermissionModePicker(false);
+          }}
+          agents={state.agents}
+          selectedAgent={state.selectedAgent}
+          selectedAgentLabel={selectedAgentLabel()}
+          agentFocusIndex={agentFocusIndex()}
+          showAgentPicker={showAgentPicker()}
+          showAgentControl={isToolbarControlVisible('agent')}
+          agentButtonRef={(el) => {
+            agentPickerRef = el;
+          }}
+          agentPopoverRef={(el) => {
+            agentPopoverRef = el;
+          }}
+          getAgentLabel={(agent) => formatAgentLabel(agent.name)}
+          getAgentDetail={(agent) => agent.description || getAgentBadgeLine(agent)}
+          onToggleAgentPicker={() => {
+            const next = !showAgentPicker();
+            closePopups(next ? 'agent' : undefined);
+            setShowAgentPicker(next);
+            if (next) setAgentFocusIndex(0);
+          }}
+          onSelectAgent={(agent) => {
+            setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
+            setShowAgentPicker(false);
+          }}
+          onAgentFocusIndex={setAgentFocusIndex}
+          modelButtonRef={(el) => {
+            modelPickerRef = el;
+          }}
+          currentModel={currentModel()}
+          modelCanEllipsize={modelCanEllipsize()}
+          onToggleModelPicker={() => {
+            const next = !showModelPicker();
+            closePopups(next ? 'model' : undefined);
+            setShowModelPicker(next);
+          }}
+          providerLimitLabel={currentProviderLimitCompact()}
+          providerLimitTone={currentProviderLimitTone()}
+          providerLimitTitle={currentProviderLimitTitle()}
+          availableVariants={availableVariants()}
+          selectedVariant={effectiveVariant()}
+          selectedVariantLabel={selectedVariantLabel()}
+          showVariantPicker={showVariantPicker()}
+          showReasoningControl={isToolbarControlVisible('reasoning')}
+          variantButtonRef={(el) => {
+            variantPickerRef = el;
+          }}
+          variantPopoverRef={(el) => {
+            variantPopoverRef = el;
+          }}
+          getVariantLabel={formatVariantLabel}
+          onToggleVariantPicker={() => {
+            const next = !showVariantPicker();
+            closePopups(next ? 'variant' : undefined);
+            setShowVariantPicker(next);
+          }}
+          onSelectVariant={(variant) => {
+            const m = currentModel();
+            setSelectedModel(
+              {
+                providerID: m.providerID!,
+                modelID: m.modelID!,
+                variant,
+              },
+              { sessionId: state.activeSessionId }
+            );
+            setShowVariantPicker(false);
+          }}
+          contextUsage={contextUsage()}
+          showContextControl={isToolbarControlVisible('context')}
+          contextButtonRef={(el) => {
+            contextButtonRef = el;
+          }}
+          contextPopupRef={(el) => {
+            contextPopupRef = el;
+          }}
+          showContextPopup={showContextPopup()}
+          sessionTokens={sessionTokens()}
+          contextCompactDisabled={isLoading() || isSessionCompacting()}
+          onToggleContextPopup={() => {
+            const next = !showContextPopup();
+            closePopups(next ? 'context' : undefined);
+            setShowContextPopup(next);
+          }}
+          onCloseContextPopup={() => setShowContextPopup(false)}
+          onCompactSession={() => {
+            void compactSession();
+          }}
+          showAttachmentsControl={isToolbarControlVisible('attachments')}
+          onAttach={() => postMessage({ type: 'files/pick' })}
+          showStopButton={
+            isLoading() &&
+            !hasActiveQuestion() &&
+            !hasActivePermission() &&
+            isToolbarControlVisible('stop')
+          }
+          stopCompact={isToolbarControlCompacted(toolbarCompactMode(), 'stop')}
+          onStop={() => abortSession()}
+          showSendControl={isToolbarControlVisible('send')}
+          showBusySendControls={showBusySendControls()}
+          canSend={canSend()}
+          busyToggleRef={(el) => {
+            busyToggleRef = el;
+          }}
+          showBusyMenu={showBusyMenu()}
+          onSend={() => handleSend()}
+          onToggleBusyMenu={() => {
+            const next = !showBusyMenu();
+            closePopups(next ? 'busy' : undefined);
+            setShowBusyMenu(next);
+          }}
+          busyMenuRef={(el) => {
+            busyMenuRef = el;
+          }}
+          onQueue={() => {
+            handleSend();
+            setShowBusyMenu(false);
+          }}
+          onSteer={() => {
+            handleSend('steer');
+            setShowBusyMenu(false);
+          }}
+          onStopAndSend={() => {
+            abortSession();
+            handleSend();
+            setShowBusyMenu(false);
+          }}
         />
       </div>
-
-      <div class="context-popup-stat">
-        <span>{formatNumber(props.usage.used)}</span>
-        <span class="context-popup-sep">/</span>
-        <span>{formatNumber(props.usage.limit)}</span>
-        <span class="context-popup-unit">tokens</span>
-      </div>
-
-      <Show when={props.tokens.total > 0}>
-        <div class="context-popup-section">Session Tokens</div>
-        <div class="context-popup-rows">
-          <For each={rows()}>
-            {(row) => (
-              <div class="context-popup-row">
-                <span class="context-popup-row-label">{row.label}</span>
-                <span class="context-popup-row-value">{formatNumber(row.value)}</span>
-              </div>
-            )}
-          </For>
-          <div class="context-popup-row context-popup-row-total">
-            <span class="context-popup-row-label">Total</span>
-            <span class="context-popup-row-value">{formatNumber(props.tokens.total)}</span>
-          </div>
-        </div>
-      </Show>
-
-      <Show when={shouldShowContextCompact(props.usage.percent)}>
-        <div class="context-popup-actions">
-          <button
-            type="button"
-            class="context-popup-action"
-            disabled={isLoading() || isSessionCompacting()}
-            onClick={() => {
-              props.onClose();
-              void compactSession();
-            }}
-          >
-            Compact session
-          </button>
-        </div>
-      </Show>
-
-      <Show when={props.model.modelName}>
-        <div class="context-popup-model">
-          {props.model.providerName} / {props.model.modelName}
-        </div>
-      </Show>
     </div>
-  );
-}
-
-function getContextUsageTone(percent: number) {
-  if (percent >= CONTEXT_USAGE_ERROR_PERCENT) return 'error';
-  if (percent >= CONTEXT_USAGE_WARNING_PERCENT) return 'warning';
-  return '';
-}
-
-function formatContextUsageTitle(percent: number) {
-  return `Context usage (${Math.round(percent)}%)`;
-}
-
-function shouldShowContextCompact(percent: number) {
-  return percent >= CONTEXT_USAGE_WARNING_PERCENT;
-}
-
-type SlashCommand = {
-  name: string;
-  aliases: string[];
-  description: string;
-  action: (args: string) => void | Promise<void>;
-};
-
-type CompletionItem = (SlashCommand & { key: string; type: 'slash' }) | MentionCompletionItem;
-
-function CompletionMenu(props: {
-  items: CompletionItem[];
-  selectedIndex: number;
-  onSelect: (item: CompletionItem) => void;
-  header?: string;
-}) {
-  // oxlint-disable-next-line no-unassigned-vars
-  let menuRef: HTMLDivElement | undefined;
-  const itemRefs = new Map<number, HTMLButtonElement>();
-
-  createEffect(() => {
-    const items = props.items;
-    const activeIndices = new Set(items.map((_, i) => i));
-    for (const key of itemRefs.keys()) {
-      if (!activeIndices.has(key)) itemRefs.delete(key);
-    }
-  });
-
-  createEffect(() => {
-    const idx = props.selectedIndex;
-    const el = itemRefs.get(idx);
-    if (!el || !menuRef) return;
-    const elTop = el.offsetTop;
-    const elBottom = elTop + el.offsetHeight;
-    const viewTop = menuRef.scrollTop;
-    const viewBottom = viewTop + menuRef.clientHeight;
-    if (elTop < viewTop) {
-      menuRef.scrollTop = elTop;
-    } else if (elBottom > viewBottom) {
-      menuRef.scrollTop = elBottom - menuRef.clientHeight;
-    }
-  });
-
-  return (
-    <div class="composer-completion-menu" ref={menuRef}>
-      <Show when={props.header}>
-        <div class="composer-completion-header">{props.header}</div>
-      </Show>
-      <For each={props.items}>
-        {(item, index) => {
-          const isSlash = item.type === 'slash';
-          const title = 'name' in item ? `/${item.name}` : item.label;
-          const detail = 'description' in item ? item.description : item.detail;
-          const enableMarquee = item.type === 'file';
-          return (
-            <button
-              ref={(el) => itemRefs.set(index(), el)}
-              class={`composer-completion-item completion-${item.type} ${props.selectedIndex === index() ? 'selected' : ''}`}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => props.onSelect(item)}
-            >
-              <Show when={!isSlash}>
-                <span class="composer-completion-icon">
-                  <Show
-                    when={item.type === 'agent'}
-                    fallback={<DocumentIcon width={14} height={14} />}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 32 32" aria-hidden="true">
-                      <path
-                        fill="currentColor"
-                        d="M28 12V4h-8v3.546l-6 5.25V11H4v10h10v-1.796l6 5.25V28h8v-8h-8v1.796l-6-5.25v-1.092l6-5.25V12h8zM22 22h4v4h-4v-4zM12 19H6v-6h6v6zM22 6h4v4h-4V6z"
-                      />
-                    </svg>
-                  </Show>
-                </span>
-              </Show>
-              <CompletionTitle title={title} enableMarquee={enableMarquee} />
-              <span class="composer-completion-detail" title={detail}>
-                {detail}
-              </span>
-            </button>
-          );
-        }}
-      </For>
-    </div>
-  );
-}
-
-function CompletionTitle(props: { title: string; enableMarquee?: boolean }) {
-  let shellRef: HTMLSpanElement | undefined;
-  let textRef: HTMLSpanElement | undefined;
-  const [overflowDistance, setOverflowDistance] = createSignal(0);
-
-  const measure = () => {
-    if (!props.enableMarquee || !shellRef || !textRef) {
-      setOverflowDistance(0);
-      return;
-    }
-
-    const distance = Math.ceil(textRef.scrollWidth - shellRef.clientWidth);
-    setOverflowDistance(distance > 1 ? distance : 0);
-  };
-
-  onMount(() => {
-    queueMicrotask(measure);
-
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => measure());
-    if (shellRef) observer.observe(shellRef);
-    if (textRef) observer.observe(textRef);
-    onCleanup(() => observer.disconnect());
-  });
-
-  createEffect(() => {
-    void props.title;
-    void props.enableMarquee;
-    queueMicrotask(measure);
-  });
-
-  return (
-    <span class="composer-completion-title-shell" ref={(el) => (shellRef = el)}>
-      <span
-        ref={(el) => (textRef = el)}
-        class={`composer-completion-title ${overflowDistance() > 0 ? 'marquee' : ''}`}
-        title={props.title}
-        style={
-          overflowDistance() > 0
-            ? {
-                '--marquee-distance': `${overflowDistance()}px`,
-                '--marquee-duration': `${Math.max(2.2, 1.2 + overflowDistance() / 90)}s`,
-              }
-            : undefined
-        }
-      >
-        {props.title}
-      </span>
-    </span>
-  );
-}
-
-function AttachmentChip(props: {
-  label: string;
-  detail?: string | null;
-  disabled?: boolean;
-  icon?: 'file' | 'folder' | 'image' | 'terminal';
-  onClick?: () => void;
-  onRemove?: () => void;
-  title?: string;
-}) {
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (!props.onClick) return;
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    e.preventDefault();
-    props.onClick();
-  };
-
-  return (
-    <span
-      class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}${props.onClick ? ' clickable' : ''}`}
-      title={props.title}
-      aria-disabled={props.disabled ? 'true' : undefined}
-      aria-pressed={props.onClick ? (!props.disabled ? 'true' : 'false') : undefined}
-      role={props.onClick ? 'button' : undefined}
-      tabIndex={props.onClick ? 0 : undefined}
-      onClick={() => props.onClick?.()}
-      onKeyDown={handleKeyDown}
-    >
-      <Show when={props.onRemove}>
-        <button
-          class="chip-remove"
-          onClick={(e) => {
-            e.stopPropagation();
-            props.onRemove?.();
-          }}
-        >
-          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-          </svg>
-        </button>
-      </Show>
-      <Show when={props.icon === 'image'}>
-        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
-        </svg>
-      </Show>
-      <Show when={props.icon === 'folder'}>
-        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
-        </svg>
-      </Show>
-      <Show when={props.icon === 'terminal'}>
-        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M1.75 2h12.5c.97 0 1.75.78 1.75 1.75v8.5c0 .97-.78 1.75-1.75 1.75H1.75A1.75 1.75 0 010 12.25v-8.5C0 2.78.78 2 1.75 2zm0 1a.75.75 0 00-.75.75v8.5c0 .41.34.75.75.75h12.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75H1.75zm2.03 2.22a.75.75 0 011.06 0L6.56 6.94 4.84 8.66a.75.75 0 11-1.06-1.06L4.44 7 3.78 6.28a.75.75 0 010-1.06zM8 8.25h4a.75.75 0 010 1.5H8a.75.75 0 010-1.5z" />
-        </svg>
-      </Show>
-      <Show when={props.icon !== 'image' && props.icon !== 'folder' && props.icon !== 'terminal'}>
-        <DocumentIcon class="chip-icon" width="12" height="12" />
-      </Show>
-      <span class="chip-label">{props.label}</span>
-      <Show when={props.detail}>
-        <span class="chip-detail">{props.detail}</span>
-      </Show>
-    </span>
-  );
-}
-
-const PERMISSION_MODE_OPTIONS: Array<{ mode: PermissionMode; label: string }> = [
-  { mode: 'default', label: 'Default' },
-  { mode: 'full', label: 'Full access' },
-];
-
-function PermissionModeIcon(props: { mode: PermissionMode }) {
-  return (
-    <span class={`permission-mode-icon ${props.mode}`} aria-hidden="true">
-      <Show
-        when={props.mode === 'full'}
-        fallback={
-          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-            <path
-              fill-rule="evenodd"
-              clip-rule="evenodd"
-              d="M11.2071 3.6797C11.0909 3.85386 11 4.14834 11 4.5V6V11C11 11.5523 10.5523 12 10 12C9.44772 12 9 11.5523 9 11V6C9 5.64834 8.90906 5.35386 8.79295 5.1797C8.6966 5.03518 8.61209 5 8.5 5C8.38791 5 8.3034 5.03518 8.20705 5.1797C8.09094 5.35386 8 5.64834 8 6V12V15C8 15.5523 7.55228 16 7 16C6.44772 16 6 15.5523 6 15V12C6 11.6483 5.90906 11.3539 5.79295 11.1797C5.6966 11.0352 5.61209 11 5.5 11C5.38791 11 5.3034 11.0352 5.20705 11.1797C5.09094 11.3539 5 11.6483 5 12V16C5 17.033 5.70057 18.1402 7.0547 19.0429C8.3875 19.9315 10.1939 20.5 12 20.5C15.6675 20.5 18 18.251 18 16V9C18 8.64834 17.9091 8.35386 17.7929 8.1797C17.6966 8.03518 17.6121 8 17.5 8C17.3879 8 17.3034 8.03518 17.2071 8.1797C17.0909 8.35386 17 8.64834 17 9V12C17 12.5523 16.5523 13 16 13C15.4477 13 15 12.5523 15 12V9V6C15 5.64834 14.9091 5.35386 14.7929 5.1797C14.6966 5.03518 14.6121 5 14.5 5C14.3879 5 14.3034 5.03518 14.2071 5.1797C14.0909 5.35386 14 5.64834 14 6V11C14 11.5523 13.5523 12 13 12C12.4477 12 12 11.5523 12 11V6V4.5C12 4.14834 11.9091 3.85386 11.7929 3.6797C11.6966 3.53518 11.6121 3.5 11.5 3.5C11.3879 3.5 11.3034 3.53518 11.2071 3.6797ZM13.7452 3.12242C13.975 3.04395 14.227 3 14.5 3C15.3879 3 16.0534 3.46482 16.4571 4.0703C16.8409 4.64614 17 5.35166 17 6V6.05195C17.1578 6.01815 17.3245 6 17.5 6C18.3879 6 19.0534 6.46482 19.4571 7.0703C19.8409 7.64614 20 8.35166 20 9V16C20 19.749 16.3325 22.5 12 22.5C9.80613 22.5 7.6125 21.8185 5.9453 20.7071C4.29943 19.6098 3 17.967 3 16V12C3 11.3517 3.15906 10.6461 3.54295 10.0703C3.9466 9.46482 4.61209 9 5.5 9C5.67545 9 5.84222 9.01815 6 9.05195V6C6 5.35166 6.15906 4.64614 6.54295 4.0703C6.9466 3.46482 7.61209 3 8.5 3C8.77302 3 9.02501 3.04395 9.25482 3.12242C9.33156 2.92998 9.427 2.74423 9.54295 2.5703C9.9466 1.96482 10.6121 1.5 11.5 1.5C12.3879 1.5 13.0534 1.96482 13.4571 2.5703C13.573 2.74423 13.6684 2.92998 13.7452 3.12242Z"
-            />
-          </svg>
-        }
-      >
-        <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
-          <path
-            fill-rule="evenodd"
-            clip-rule="evenodd"
-            d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1zM7.2 3.7c0-.44.36-.8.8-.8s.8.36.8.8v4.05c0 .44-.36.8-.8.8s-.8-.36-.8-.8V3.7zM8 8.8a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"
-          />
-        </svg>
-      </Show>
-    </span>
   );
 }
 

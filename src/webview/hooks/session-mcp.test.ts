@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   applySessionMcpsWithDependencies,
-  createSessionMcpOperations,
+  SessionMcpOperations,
   syncSessionMcpsWithDependencies,
-} from './session-mcp';
+} from './session/session-mcp';
 
 describe('session MCP helpers', () => {
   it('connects and disconnects MCPs to match the session selection', async () => {
@@ -56,6 +56,32 @@ describe('session MCP helpers', () => {
     expect(loadMcps).toHaveBeenCalledTimes(1);
   });
 
+  it('hydrates an uninitialized session MCP selection before syncing', async () => {
+    const loadMcps = vi.fn(async () => {
+      selected = ['alpha'];
+    });
+    const connectMcp = vi.fn(async () => {});
+    const disconnectMcp = vi.fn(async () => {});
+    let selected: string[] | null = null;
+
+    await syncSessionMcpsWithDependencies(
+      {
+        getSelectedMcpsForSession: () => selected,
+        getMcpStatus: () => ({ alpha: { status: 'connected' } }),
+        loadMcps,
+        getAvailableMcpNames: () => ['alpha'],
+        connectMcp,
+        disconnectMcp,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(loadMcps).toHaveBeenCalledTimes(1);
+    expect(connectMcp).not.toHaveBeenCalled();
+    expect(disconnectMcp).not.toHaveBeenCalled();
+  });
+
   it('stores the selected MCPs before syncing them', async () => {
     const setSelectedMcpsForSession = vi.fn();
     const syncSessionMcps = vi.fn(async () => {});
@@ -79,7 +105,7 @@ describe('session MCP helpers', () => {
     const disconnectMcp = vi.fn(async () => {});
     const setSelectedMcpsForSession = vi.fn();
 
-    const operations = createSessionMcpOperations({
+    const operations = new SessionMcpOperations({
       getSelectedMcpsForSession: () => ['beta'],
       getMcpStatus: () => ({
         alpha: { status: 'connected' },

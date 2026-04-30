@@ -23,17 +23,19 @@ import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
   getFirstVisibleMessageIndexFromVirtualMetrics,
-  getNextVisibleUserMessageTopMap,
-  getStickyUserMessagePreview,
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
   getLatestPlanImplementationMessageId,
   pruneMeasuredHeights,
-  shouldShowStickyUserMessagePreview,
   MessageList,
   calculateVirtualRange,
   shouldShowPlanImplementationAction,
 } from './MessageList';
+import {
+  getNextVisibleUserMessageTopMap,
+  getStickyUserMessagePreview,
+  shouldShowStickyUserMessagePreview,
+} from './message-list/sticky-preview';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -239,7 +241,6 @@ afterEach(() => {
   setState('agents', []);
   setState('allAgents', []);
   setState('queuedMessages', []);
-  setState('pendingAttentionSessionIds', []);
   setState('streamingPartId', null);
   setState('streamingText', '');
   setState('sessionStatus', reconcile({}));

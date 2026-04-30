@@ -187,12 +187,20 @@ It debounces editor and diagnostics updates before posting them to the webview.
 - Tracks session attention state for notifications and a status bar item
 - Resolves provider limit metadata through OpenCode or supported provider APIs
 
-It also exposes two Varro-specific pseudo-endpoints:
+It also exposes the Varro extension-host API namespace, `/varro/*`:
 
 - `GET /varro/provider-limit`
 - `POST /varro/plan/open`
+- `GET /varro/opencode-config`
+- `POST /varro/opencode-config/model-routing`
+- `GET /varro/session-trash`
+- `POST /varro/session-trash/:rootID/restore`
+- `DELETE /varro/session-trash/:rootID/delete`
+- `DELETE /varro/session-trash`
 
-Those endpoints are resolved locally by the extension host instead of being forwarded directly to OpenCode.
+Those paths share the same `api/request` bridge as OpenCode REST calls, but the extension host resolves them locally instead of forwarding them to OpenCode.
+
+This is also the architecture boundary: the extension host acts as transport plus local `/varro/*` services, while the webview computes higher-level UI state from raw `server/event` traffic and follow-up `/varro/*` reads when needed.
 
 Drag and drop also has a fallback path for environments that do not expose local file paths. In that case, the webview sends file bytes and the extension writes them to a temporary `varro-drops` directory before attaching them as context.
 
@@ -269,7 +277,7 @@ The session UI also distinguishes running, attention-needed, failed, completed, 
 
 ## Provider Limits
 
-Varro exposes a custom API path, `/varro/provider-limit`, from the extension side.
+Varro exposes `/varro/provider-limit` under the `/varro/*` extension-host API namespace.
 
 The implementation in `src/extension/sidebar-provider.ts` and `src/extension/util/provider-limit.ts` tries these sources in order:
 

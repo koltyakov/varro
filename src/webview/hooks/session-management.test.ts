@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RecycleBinEntry } from '../../shared/protocol';
 import type { Session } from '../types';
 import {
-  createSessionManagementOperations,
+  SessionManagementOperations,
   createSessionWithDependencies,
   deleteSessionPermanentlyWithDependencies,
   deleteSessionWithDependencies,
   emptyRecycleBinWithDependencies,
   restoreSessionWithDependencies,
-} from './session-management';
+} from './session/session-management';
 
 function session(id = 'session-1', overrides?: Partial<Session>): Session {
   return {
@@ -246,7 +246,7 @@ describe('session management helpers', () => {
       emptyRecycleBin: vi.fn(async () => true),
     };
 
-    const operations = createSessionManagementOperations(deps);
+    const operations = new SessionManagementOperations(deps);
 
     await operations.createSession();
     await operations.deleteSession('session-1');
