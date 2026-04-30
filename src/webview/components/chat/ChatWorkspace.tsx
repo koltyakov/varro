@@ -5,6 +5,9 @@ import { SettingsPanel } from '../SettingsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionListFilter } from './SessionListView';
+import { RalphDashboard } from '../ralph/RalphDashboard';
+import { ralphStore } from '../../lib/stores/ralph-store';
+import { state } from '../../lib/state';
 
 export function ChatWorkspace(props: {
   isEnteringChatView: boolean;
@@ -125,14 +128,28 @@ export function ChatWorkspace(props: {
     </aside>
   );
 
+  const activeRalphSessionId = () => {
+    const id = state.activeSessionId;
+    return id && ralphStore.isRalphSession(id) ? id : null;
+  };
+
   const mainShell = () => (
     <div class="chat-main-shell">
       <div class="chat-header chat-header-chat-desktop">
         <div class="chat-header-inner">{activeChatHeader(false, false)}</div>
       </div>
       <div class="chat-main-column-shell">
-        <MessageList />
-        <ChatInput />
+        <Show
+          when={activeRalphSessionId()}
+          fallback={
+            <>
+              <MessageList />
+              <ChatInput />
+            </>
+          }
+        >
+          {(sessionId) => <RalphDashboard sessionId={sessionId()} />}
+        </Show>
       </div>
     </div>
   );

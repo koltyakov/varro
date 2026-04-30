@@ -28,6 +28,7 @@ import {
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry } from '../../../shared/protocol';
+import { ralphStore } from '../../lib/stores/ralph-store';
 
 type SessionGroups = {
   failed: (typeof state.sessions)[number][];
@@ -841,6 +842,15 @@ function SessionListItem(props: {
     (props.isRunning || props.needsAttention);
   const subagentLabel = () =>
     `Show ${props.subagentCount} sub-agent session${props.subagentCount === 1 ? '' : 's'}`;
+  const ralphSummary = () => {
+    const run = ralphStore.getRun(props.session.id);
+    if (!run) return null;
+    const unique = new Set<string>();
+    for (const it of run.iterations) {
+      for (const f of it.filesChanged) unique.add(f);
+    }
+    return { files: unique.size, iterations: run.iterations.length };
+  };
   const indicatorClass = () => {
     if (props.isFailed) return 'is-failed';
     if (props.isRunning) return 'is-running';
@@ -895,16 +905,35 @@ function SessionListItem(props: {
             {normalizeSessionTitle(props.session.title) || 'Untitled'}
           </span>
           <span class="session-item-meta">
-            <Show when={props.session.summary}>
-              {props.session.summary!.files} file{props.session.summary!.files !== 1 ? 's' : ''}
-              {' · '}
-              <span class="diff-lines-added">+{props.session.summary!.additions}</span>{' '}
-              <span class="diff-lines-removed">-{props.session.summary!.deletions}</span>
+            <Show
+              when={ralphSummary()}
+              fallback={
+                <Show when={props.session.summary}>
+                  {props.session.summary!.files} file
+                  {props.session.summary!.files !== 1 ? 's' : ''}
+                  {' · '}
+                  <span class="diff-lines-added">+{props.session.summary!.additions}</span>{' '}
+                  <span class="diff-lines-removed">-{props.session.summary!.deletions}</span>
+                </Show>
+              }
+            >
+              {(summary) => (
+                <>
+                  {summary().files} file{summary().files !== 1 ? 's' : ''} changed
+                  {' · '}
+                  {summary().iterations} iteration{summary().iterations !== 1 ? 's' : ''}
+                </>
+              )}
             </Show>
           </span>
         </div>
       </button>
       <div class="session-item-trailing">
+        <Show when={ralphStore.isRalphSession(props.session.id)}>
+          <span class="session-item-ralph-tag" title="Ralph loop" aria-label="Ralph loop">
+            Ralph
+          </span>
+        </Show>
         <Show when={showsPlanModeTag()}>
           <span class="session-item-plan-tag" title="Plan mode" aria-label="Plan mode">
             Plan
@@ -967,10 +996,16 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
   const rootSessionId = (sessionId: string) => getSessionTreeRootId(sessionId) || sessionId;
-  const permissionIds = new Set(
-    state.permissions.map((permission) => rootSessionId(permission.sessionID))
-  );
-  const questionIds = new Set(state.questions.map((question) => rootSessionId(question.sessionID)));
+  const permissionIds = new Set<string>();
+  for (const permission of state.permissions) {
+    permissionIds.add(permission.sessionID);
+    permissionIds.add(rootSessionId(permission.sessionID));
+  }
+  const questionIds = new Set<string>();
+  for (const question of state.questions) {
+    questionIds.add(question.sessionID);
+    questionIds.add(rootSessionId(question.sessionID));
+  }
   const runningIds = new Set<string>();
   const failedIds = new Set<string>();
   const attentionIds = new Set<string>();
@@ -1006,14 +1041,17 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
 
     if (failed) {
       failedIds.add(displaySessionId);
+      failedIds.add(sessionId);
       continue;
     }
     if (needsAttention) {
       attentionIds.add(displaySessionId);
+      attentionIds.add(sessionId);
       continue;
     }
     if (running) {
       runningIds.add(displaySessionId);
+      runningIds.add(sessionId);
       continue;
     }
     const selectedAgent = getSelectedAgentForSession(sessionId);

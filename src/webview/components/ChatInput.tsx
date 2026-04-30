@@ -51,6 +51,7 @@ import {
 } from '../hooks/useOpenCode';
 import { ModelPicker, getVariantsForModel } from './ModelPicker';
 import { McpPicker } from './McpPicker';
+import { ralphStore } from '../lib/stores/ralph-store';
 import {
   formatAgentInitial,
   formatAgentLabel,
@@ -1662,6 +1663,7 @@ export function getSlashCommands(props: {
     'review',
     'abort',
     'stop',
+    'ralph',
   ]);
 
   const commands: SlashCommand[] = [
@@ -1774,6 +1776,15 @@ export function getSlashCommands(props: {
     description: 'Review current code changes',
     action: () => {
       reviewSession();
+    },
+  });
+
+  commands.push({
+    name: 'ralph',
+    aliases: [],
+    description: 'Start a Ralph loop on a plan document',
+    action: () => {
+      ralphStore.setShowRalphForm(true);
     },
   });
 

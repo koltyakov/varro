@@ -90,6 +90,7 @@ describe('client', () => {
     await client.question.list();
     await client.question.reply('question-1', [['Yes'], ['No']]);
     await client.question.reject('question-1');
+    await client.varro.pickWorkspaceFile();
 
     expect(bridgeMocks.apiCall.mock.calls).toEqual([
       ['GET', '/global/health'],
@@ -140,6 +141,7 @@ describe('client', () => {
       ['GET', '/question'],
       ['POST', '/question/question-1/reply', { answers: [['Yes'], ['No']] }],
       ['POST', '/question/question-1/reject'],
+      ['GET', '/varro/workspace-file/pick'],
     ]);
   });
 

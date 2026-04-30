@@ -1287,12 +1287,14 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
+  let currentUserRequestCreated: number | null = null;
 
   const flush = () => {
     if (currentMessages.length === 0) {
       currentMessages = [];
       currentPrimaryMessageIds = [];
       currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
       return;
     }
 
@@ -1301,19 +1303,21 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
       currentMessages = [];
       currentPrimaryMessageIds = [];
       currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
       return;
     }
 
-    const completedMessages = currentMessages.filter((message) => !!message.time.completed);
+    const aggregateMessages = collectAssistantDialogMessages(currentMessages, childRunsByParentId);
+    const completedMessages = aggregateMessages.filter((message) => !!message.time.completed);
     const end = Math.max(...completedMessages.map((message) => message.time.completed || 0));
-    const tokens = sumAssistantTokens(currentMessages);
-    const childRunCount = currentPrimaryMessageIds.reduce(
-      (count, messageId) => count + (childRunsByParentId.get(messageId)?.length || 0),
-      0
+    const tokens = sumAssistantTokens(aggregateMessages);
+    const childRunCount = countAssistantDialogChildRuns(
+      currentPrimaryMessageIds,
+      childRunsByParentId
     );
     const agentCount = Math.max(childRunCount, currentSubagentHandoffCount);
     result.set(lastMessage.id, {
-      durationMs: Math.max(0, end - currentMessages[0].time.created),
+      durationMs: Math.max(0, end - (currentUserRequestCreated ?? currentMessages[0].time.created)),
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       agentCount,
@@ -1322,11 +1326,15 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
     currentMessages = [];
     currentPrimaryMessageIds = [];
     currentSubagentHandoffCount = 0;
+    currentUserRequestCreated = null;
   };
 
   for (const entry of messages) {
     if (!isAssistantMessage(entry.info)) {
       flush();
+      if (entry.info.role === 'user') {
+        currentUserRequestCreated = entry.info.time.created;
+      }
       continue;
     }
 
@@ -1349,6 +1357,51 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
 
   flush();
   return result;
+}
+
+function collectAssistantDialogMessages(
+  messages: AssistantMessage[],
+  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>
+) {
+  const result: AssistantMessage[] = [];
+  const visited = new Set<string>();
+  const pending = [...messages];
+
+  while (pending.length > 0) {
+    const message = pending.shift();
+    if (!message || visited.has(message.id)) continue;
+    visited.add(message.id);
+    result.push(message);
+
+    for (const child of childRunsByParentId.get(message.id) || []) {
+      pending.push(child.info);
+    }
+  }
+
+  return result;
+}
+
+function countAssistantDialogChildRuns(
+  rootMessageIds: string[],
+  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>
+) {
+  let count = 0;
+  const visited = new Set<string>();
+  const pending = [...rootMessageIds];
+
+  while (pending.length > 0) {
+    const messageId = pending.shift();
+    if (!messageId) continue;
+
+    for (const child of childRunsByParentId.get(messageId) || []) {
+      if (visited.has(child.info.id)) continue;
+      visited.add(child.info.id);
+      count++;
+      pending.push(child.info.id);
+    }
+  }
+
+  return count;
 }
 
 function isFileEditOnlyAssistantMessage(

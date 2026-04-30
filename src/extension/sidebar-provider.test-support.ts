@@ -27,10 +27,12 @@ const mocks = vi.hoisted(() => ({
       onDidChangeWindowState: vi.fn(() => ({ dispose: vi.fn() })),
       onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
       activeColorTheme: { kind: 2 },
+      showOpenDialog: vi.fn(() => Promise.resolve(undefined)),
       showTextDocument: vi.fn(() => Promise.resolve()),
       showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
     },
     workspace: {
+      asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
       createFileSystemWatcher: vi.fn(() => ({
         onDidCreate: vi.fn(() => ({ dispose: vi.fn() })),
         onDidDelete: vi.fn(() => ({ dispose: vi.fn() })),
@@ -38,6 +40,7 @@ const mocks = vi.hoisted(() => ({
         dispose: vi.fn(),
       })),
       onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+      getWorkspaceFolder: vi.fn(() => undefined),
       getConfiguration: vi.fn(() => ({
         get: vi.fn((_key: string, fallback?: unknown) => fallback),
         update: vi.fn(() => Promise.resolve()),
@@ -235,7 +238,13 @@ beforeEach(() => {
   mocks.vscode.window.showTextDocument.mockResolvedValue(undefined);
   mocks.vscode.window.showErrorMessage.mockReset();
   mocks.vscode.window.showErrorMessage.mockResolvedValue(undefined);
+  mocks.vscode.window.showOpenDialog.mockReset();
+  mocks.vscode.window.showOpenDialog.mockResolvedValue(undefined);
 
+  mocks.vscode.workspace.asRelativePath.mockReset();
+  mocks.vscode.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) => uri.fsPath);
+  mocks.vscode.workspace.getWorkspaceFolder.mockReset();
+  mocks.vscode.workspace.getWorkspaceFolder.mockReturnValue(undefined);
   mocks.vscode.workspace.fs.readFile.mockReset();
   mocks.vscode.workspace.fs.writeFile.mockReset();
   mocks.vscode.workspace.fs.writeFile.mockResolvedValue(undefined);

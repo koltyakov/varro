@@ -17,7 +17,10 @@ export function ModelPicker(props: {
   onSelect: (sel: ModelSelection) => void;
   onClose: () => void;
   popoverRef?: (el: HTMLDivElement) => void;
+  currentSelection?: { providerID?: string | null; modelID?: string | null } | null;
 }) {
+  const currentSelection = () =>
+    props.currentSelection !== undefined ? props.currentSelection : state.selectedModel;
   let menuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   const visibleProviders = createMemo(() => getVisibleProviders(state.providers));
@@ -74,7 +77,7 @@ export function ModelPicker(props: {
   });
 
   const initialIndex = () => {
-    const sel = state.selectedModel;
+    const sel = currentSelection();
     if (!sel) return 0;
     const idx = flatItems().findIndex(
       (i) => i.providerID === sel.providerID && i.modelID === sel.modelID
@@ -93,7 +96,7 @@ export function ModelPicker(props: {
   });
 
   const isSelected = (providerID: string, modelID: string) => {
-    const sel = state.selectedModel;
+    const sel = currentSelection();
     return sel?.providerID === providerID && sel?.modelID === modelID;
   };
 
@@ -156,6 +159,8 @@ export function ModelPicker(props: {
         onClick={(e) => e.stopPropagation()}
         style={{ outline: 'none' }}
       >
+        <div class="dropdown-header">Models</div>
+
         <Show when={showSearch()}>
           <div class="dropdown-search">
             <input

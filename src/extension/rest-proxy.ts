@@ -13,6 +13,7 @@ import {
   getPlanFileName,
   normalizePlanMarkdown,
 } from './util/plan-file';
+import { getRelativePath } from './util/path';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
 type ApiResponsePayload = { id: number; data?: unknown; error?: string };
@@ -53,7 +54,7 @@ export function getOpenCodeDirectoryHeaders(directory?: string): Record<string, 
 
 export interface RestProxyCallbacks {
   server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
-  contextProvider: Pick<ContextProvider, 'context'>;
+  contextProvider: Pick<ContextProvider, 'context' | 'readFile'>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
   sessionState: Pick<SessionStateManager, 'removeSessions'>;
   sessionTrash: Pick<
@@ -112,6 +113,19 @@ export class RestProxy {
           openCodeConfigRequest.kind === 'get'
             ? await this.readOpenCodeModelRouting()
             : await this.updateOpenCodeModelRouting(openCodeConfigRequest);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const workspaceFileRequest = this.parseWorkspaceFileRequest(method, payload.path);
+      if (workspaceFileRequest) {
+        const data = await this.callbacks.contextProvider.readFile(workspaceFileRequest.path);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      if (this.isWorkspaceFilePickRequest(method, payload.path)) {
+        const data = await this.pickWorkspaceFile();
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -351,6 +365,38 @@ export class RestProxy {
       providerID,
       modelID: url.searchParams.get('modelID')?.trim() || null,
     };
+  }
+
+  private parseWorkspaceFileRequest(method: string, path: string) {
+    if (method !== 'GET') return null;
+
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== '/varro/workspace-file') return null;
+
+    const filePath = url.searchParams.get('path')?.trim();
+    if (!filePath) {
+      throw new Error('Workspace file path is required');
+    }
+
+    return { path: filePath };
+  }
+
+  private isWorkspaceFilePickRequest(method: string, path: string) {
+    return method === 'GET' && path === '/varro/workspace-file/pick';
+  }
+
+  private async pickWorkspaceFile(): Promise<string | null> {
+    const result = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      canSelectFiles: true,
+      canSelectFolders: false,
+      title: 'Select Ralph plan document',
+    });
+    const selected = result?.[0];
+    if (!selected) return null;
+
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(selected);
+    return workspaceFolder ? getRelativePath(selected, workspaceFolder) : selected.fsPath;
   }
 
   private parsePlanOpenRequest(method: string, path: string, body: unknown) {

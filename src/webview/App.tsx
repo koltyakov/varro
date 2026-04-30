@@ -1,9 +1,11 @@
-import { ErrorBoundary, Show, onCleanup } from 'solid-js';
+import { ErrorBoundary, Show, onCleanup, onMount } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
 import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
 import { AppStateProvider, useAppState } from './lib/app-state-context';
 import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
+import { RalphForm } from './components/ralph/RalphForm';
+import { ralphRunner } from './components/ralph/ralph-runner';
 
 export function AppRoot() {
   const restoreOpenCodeRuntime = installOpenCodeRuntime(createOpenCodeRuntime());
@@ -27,6 +29,10 @@ export function App() {
     appState.state.serverStatus.state === 'running' &&
     !(appState.state.providersLoaded && appState.state.providers.length === 0);
 
+  onMount(() => {
+    ralphRunner.reattachAll();
+  });
+
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
       <ErrorBoundary fallback={(err) => <ErrorFallback err={err} />}>
@@ -34,6 +40,7 @@ export function App() {
           <Chat />
         </Show>
       </ErrorBoundary>
+      <RalphForm />
       <Show when={appState.error()}>
         <div class="flex items-start justify-between gap-2 border-t border-vscode-error/30 bg-vscode-error/6 px-4 py-2 text-[11px] text-vscode-error">
           <span class="break-words leading-relaxed">{appState.error()}</span>
