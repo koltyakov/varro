@@ -9,10 +9,13 @@ export function RalphDashboard(props: { sessionId: string }) {
   const run = () => ralphStore.getRun(props.sessionId);
 
   const isRunning = () => run()?.status === 'running';
-  const isPaused = () => run()?.status === 'paused';
+  const isResumable = () => {
+    const s = run()?.status;
+    return s === 'paused' || s === 'failed' || s === 'incomplete';
+  };
   const isTerminal = () => {
     const s = run()?.status;
-    return s === 'done' || s === 'stopped' || s === 'failed';
+    return s === 'done' || s === 'stopped' || s === 'failed' || s === 'incomplete';
   };
 
   return (
@@ -52,7 +55,7 @@ export function RalphDashboard(props: { sessionId: string }) {
                     </svg>
                   </button>
                 </Show>
-                <Show when={isPaused() || run()?.status === 'failed'}>
+                <Show when={isResumable()}>
                   <button
                     type="button"
                     class="ralph-dashboard-btn"

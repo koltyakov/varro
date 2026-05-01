@@ -6834,6 +6834,12 @@ body.vscode-high-contrast-light
   border-color: color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
 }
 
+.ralph-dashboard-status-incomplete {
+  color: var(--color-vscode-warning);
+  background: color-mix(in srgb, var(--color-vscode-warning) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 45%, transparent);
+}
+
 .ralph-dashboard-stop-reason {
   flex: 0 0 auto;
   font-size: 10px;

@@ -1138,7 +1138,7 @@ export function MessageList() {
   });
 
   const assistantStackGroupMap = createMemo(
-    () => new Map<string, AssistantFileEditStackGroup | null>(),
+    () => new Map<string, AssistantFileEditStackGroup | null>()
   );
 
   const assistantDialogSummaryMap = createMemo(() => {

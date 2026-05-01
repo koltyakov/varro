@@ -1,45 +1,472 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  attachTestView,
-  createServer,
-  createSidebarProviderInstance,
-  getVscodeMock,
-} from './sidebar-provider.test-support';
 
-const vscodeMock = getVscodeMock();
+const mocks = vi.hoisted(() => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  vscode: {
+    window: {
+      showOpenDialog: vi.fn(() => Promise.resolve(undefined)),
+      showTextDocument: vi.fn(() => Promise.resolve()),
+    },
+    workspace: {
+      getWorkspaceFolder: vi.fn(() => undefined),
+      asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
+      fs: {
+        readFile: vi.fn(),
+        writeFile: vi.fn(() => Promise.resolve()),
+        stat: vi.fn(),
+        createDirectory: vi.fn(() => Promise.resolve()),
+      },
+      openTextDocument: vi.fn(() => Promise.resolve({})),
+    },
+    Uri: {
+      file: vi.fn((fsPath: string) => ({ fsPath, toString: () => fsPath })),
+    },
+  },
+}));
 
-describe('RestProxy workspace file picker', () => {
-  it('returns the selected plan path without starting the server', async () => {
-    vscodeMock.window.showOpenDialog.mockResolvedValue([
-      { fsPath: '/repo/docs/RALPH.md' },
-    ] as never);
-    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ name: 'repo' } as never);
-    vscodeMock.workspace.asRelativePath.mockReturnValue('docs/RALPH.md');
+vi.mock('vscode', () => mocks.vscode);
+vi.mock('./logger', () => ({ logger: mocks.logger }));
 
-    const server = createServer({
-      status: { state: 'error', message: 'offline' },
-      start: vi.fn(() => Promise.reject(new Error('should not start'))),
-    });
-    const { provider } = await createSidebarProviderInstance({ server });
-    const { posted } = attachTestView(provider);
+import { RestProxy, getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './rest-proxy';
+import type { RestProxyCallbacks } from './rest-proxy';
 
-    await provider.handleMessage({
-      type: 'api/request',
-      payload: { id: 11, method: 'GET', path: '/varro/workspace-file/pick' },
-    });
+function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxyCallbacks {
+  return {
+    server: {
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+      request: vi.fn(() => Promise.resolve(undefined)),
+    },
+    contextProvider: {
+      context: { workspacePath: '/repo', activeFile: null, selection: null, diagnostics: [] },
+      readFile: vi.fn(() => Promise.resolve(null as string | null)),
+    },
+    providerLimitService: {
+      get: vi.fn(() =>
+        Promise.resolve({
+          providerID: 'test',
+          modelID: null,
+          status: 'unsupported' as const,
+          source: 'opencode' as const,
+          checkedAt: 0,
+          note: '',
+        })
+      ),
+    },
+    sessionState: { removeSessions: vi.fn() },
+    sessionTrash: {
+      cleanupExpired: vi.fn(() => Promise.resolve([] as never[])),
+      deletePermanently: vi.fn(() => Promise.resolve(null)),
+      empty: vi.fn(() => Promise.resolve([] as never[])),
+      filterVisibleSessionRequests: vi.fn(<T>(arr: T[]) => arr) as never,
+      filterVisibleSessions: vi.fn(<T>(arr: T[]) => arr) as never,
+      filterVisibleSessionStatuses: vi.fn(<T>(obj: Record<string, T>) => obj) as never,
+      isHidden: vi.fn(() => false),
+      list: vi.fn(() => []),
+      moveToTrash: vi.fn(() => Promise.resolve(null)),
+      restore: vi.fn(() => Promise.resolve(null)),
+    },
+    simulateNoProviders: false,
+    getRequestGeneration: vi.fn(() => 1),
+    getStatus: vi.fn(() => ({ state: 'running' as const, url: 'http://127.0.0.1:4096' })),
+    ensureServerStarted: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
+    cleanupExpiredRecycleBin: vi.fn(() => Promise.resolve()),
+    postApiResponse: vi.fn(),
+    ...overrides,
+  };
+}
 
-    expect(server.start).not.toHaveBeenCalled();
-    expect(vscodeMock.window.showOpenDialog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        canSelectMany: false,
-        canSelectFiles: true,
-        canSelectFolders: false,
-        title: 'Select Ralph plan document',
-      })
+function createProxy(overrides: Partial<RestProxyCallbacks> = {}) {
+  const callbacks = createCallbacks(overrides);
+  return { proxy: new RestProxy(callbacks), callbacks };
+}
+
+function makePayload(id: number, method: string, path: string, body?: unknown) {
+  return { id, method, path, body };
+}
+
+describe('scopeOpenCodeRequest', () => {
+  it('returns URL string when path is valid', () => {
+    const result = scopeOpenCodeRequest('http://127.0.0.1:4096', '/session');
+    expect(result.url).toBe('http://127.0.0.1:4096/session');
+  });
+
+  it('appends directory query param when directory is provided and not a global path', () => {
+    const result = scopeOpenCodeRequest('http://127.0.0.1:4096', '/session', '/workspace');
+    expect(result.url).toContain('directory=%2Fworkspace');
+    expect(result.directory).toBe('/workspace');
+  });
+
+  it('skips directory param for global paths', () => {
+    const result = scopeOpenCodeRequest('http://127.0.0.1:4096', '/global/health', '/workspace');
+    expect(result.url).toBe('http://127.0.0.1:4096/global/health');
+  });
+
+  it('throws for paths that do not start with /', () => {
+    expect(() => scopeOpenCodeRequest('http://127.0.0.1:4096', 'session')).toThrow(
+      'Unsupported OpenCode API path'
     );
-    expect(posted).toContainEqual({
-      type: 'api/response',
-      payload: { id: 11, data: 'docs/RALPH.md' },
+  });
+
+  it('throws for paths starting with //', () => {
+    expect(() => scopeOpenCodeRequest('http://127.0.0.1:4096', '//evil')).toThrow(
+      'Unsupported OpenCode API path'
+    );
+  });
+
+  it('throws when resulting origin does not match baseUrl', () => {
+    expect(() => scopeOpenCodeRequest('http://127.0.0.1:4096', 'http://evil.com/session')).toThrow(
+      'Unsupported OpenCode API path'
+    );
+  });
+});
+
+describe('getOpenCodeDirectoryHeaders', () => {
+  it('returns empty object when no directory provided', () => {
+    expect(getOpenCodeDirectoryHeaders()).toEqual({});
+    expect(getOpenCodeDirectoryHeaders(undefined)).toEqual({});
+  });
+
+  it('returns encoded directory header', () => {
+    expect(getOpenCodeDirectoryHeaders('/some/path')).toEqual({
+      'x-opencode-directory': encodeURIComponent('/some/path'),
+    });
+  });
+});
+
+describe('RestProxy handleRequest', () => {
+  it('returns error for disallowed API request', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(makePayload(1, 'DELETE', '/global/health'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      error: 'Unsupported API request',
+    });
+  });
+
+  it('routes recycle bin list request', async () => {
+    const trashList = [{ rootID: 'abc' }];
+    const { proxy, callbacks } = createProxy({
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        list: vi.fn(() => trashList),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(2, 'GET', '/varro/session-trash'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 2, data: trashList });
+  });
+
+  it('routes recycle bin empty request', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(makePayload(3, 'DELETE', '/varro/session-trash'));
+    expect(callbacks.sessionTrash.empty).toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 3, data: true });
+  });
+
+  it('routes recycle bin restore request', async () => {
+    const restored = { rootID: 'abc', sessions: [{ id: 's1' }] };
+    const { proxy, callbacks } = createProxy({
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        restore: vi.fn(() => Promise.resolve(restored)),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(4, 'POST', '/varro/session-trash/abc/restore'));
+    expect(callbacks.sessionTrash.restore).toHaveBeenCalledWith('abc');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 4, data: true });
+  });
+
+  it('routes recycle bin delete request and removes sessions', async () => {
+    const removed = { sessions: [{ id: 's1' }, { id: 's2' }] };
+    const { proxy, callbacks } = createProxy({
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        deletePermanently: vi.fn(() => Promise.resolve(removed)),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(5, 'DELETE', '/varro/session-trash/abc/delete'));
+    expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['s1', 's2']);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 5, data: true });
+  });
+
+  it('routes workspace file read request', async () => {
+    const fileContent = 'file content here';
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        readFile: vi.fn(() => Promise.resolve(fileContent)),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(6, 'GET', '/varro/workspace-file?path=src/foo.ts'));
+    expect(callbacks.contextProvider.readFile).toHaveBeenCalledWith('src/foo.ts');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 6, data: fileContent });
+  });
+
+  it('returns error for workspace file request without path', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(makePayload(7, 'GET', '/varro/workspace-file'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 7,
+      error: 'Unsupported API request',
+    });
+  });
+
+  it('routes provider limit request', async () => {
+    const limitStatus = { providerID: 'openai', modelID: 'gpt-4', status: 'available' };
+    const { proxy, callbacks } = createProxy({
+      providerLimitService: { get: vi.fn(() => Promise.resolve(limitStatus)) } as never,
+    });
+    await proxy.handleRequest(
+      makePayload(8, 'GET', '/varro/provider-limit?providerID=openai&modelID=gpt-4')
+    );
+    expect(callbacks.providerLimitService.get).toHaveBeenCalledWith('openai', 'gpt-4');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 8, data: limitStatus });
+  });
+
+  it('simulates no providers when flag is set', async () => {
+    const { proxy, callbacks } = createProxy({ simulateNoProviders: true });
+    await proxy.handleRequest(makePayload(9, 'GET', '/config/providers'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9,
+      data: { providers: [], default: {} },
+    });
+  });
+
+  it('returns 404 error for hidden session', async () => {
+    const { proxy, callbacks } = createProxy({
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        isHidden: vi.fn(() => true),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(10, 'GET', '/session/hidden-id'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 10,
+      error: '404 Session not found',
+    });
+  });
+
+  it('routes soft delete (DELETE /session/:id) to moveToTrash', async () => {
+    const entry = { sessions: [{ id: 's1' }] };
+    const serverRequest = vi.fn(() => Promise.resolve([]));
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        moveToTrash: vi.fn(() => Promise.resolve(entry)),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(11, 'DELETE', '/session/some-id'));
+    expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('some-id', []);
+    expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['s1']);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 11, data: true });
+  });
+
+  it('returns 404 error when moveToTrash returns null', async () => {
+    const serverRequest = vi.fn(() => Promise.resolve([]));
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        moveToTrash: vi.fn(() => Promise.resolve(null)),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(12, 'DELETE', '/session/nonexistent'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 12,
+      error: '404 Session not found',
+    });
+  });
+
+  it('ensures server is started when status is not running', async () => {
+    const { proxy, callbacks } = createProxy({
+      getStatus: vi.fn(() => ({ state: 'stopped' as const })),
+    });
+    await proxy.handleRequest(makePayload(13, 'GET', '/session'));
+    expect(callbacks.ensureServerStarted).toHaveBeenCalled();
+    expect(callbacks.cleanupExpiredRecycleBin).toHaveBeenCalled();
+  });
+
+  it('skips server start when already running', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(makePayload(14, 'GET', '/session'));
+    expect(callbacks.ensureServerStarted).not.toHaveBeenCalled();
+  });
+
+  it('forwards passthrough requests to server', async () => {
+    const serverData = [{ id: 's1' }];
+    const serverRequest = vi.fn(() => Promise.resolve(serverData));
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(15, 'GET', '/session'));
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session', undefined);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 15,
+      data: serverData,
+    });
+  });
+
+  it('filters session list through sessionTrash', async () => {
+    const sessions = [{ id: 'visible' }, { id: 'hidden' }];
+    const filtered = [{ id: 'visible' }];
+    const serverRequest = vi.fn(() => Promise.resolve(sessions));
+    const filterVisible = vi.fn(() => filtered);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        filterVisibleSessions: filterVisible,
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(16, 'GET', '/session'));
+    expect(filterVisible).toHaveBeenCalledWith(sessions);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 16, data: filtered });
+  });
+
+  it('sanitizes session messages', async () => {
+    const messages = [
+      {
+        info: {
+          id: 'm1',
+          sessionID: 's1',
+          role: 'user',
+          time: { created: 1234567890 },
+        },
+        parts: [{ id: 'p1', messageID: 'm1', sessionID: 's1', type: 'text', text: 'hello' }],
+      },
+      {
+        info: { id: '', sessionID: 's1', role: 'user', time: { created: 1 } },
+        parts: [],
+      },
+    ];
+    const serverRequest = vi.fn(() => Promise.resolve(messages));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    await proxy.handleRequest(makePayload(17, 'GET', '/session/s1/message'));
+    const response = (callbacks.postApiResponse as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(response.id).toBe(17);
+    expect(response.data).toHaveLength(1);
+    expect(response.data[0].info.id).toBe('m1');
+    expect(response.data[0].parts).toHaveLength(1);
+  });
+
+  it('filters malformed parts within valid entries', async () => {
+    const messages = [
+      {
+        info: {
+          id: 'm1',
+          sessionID: 's1',
+          role: 'assistant',
+          time: { created: 1234567890 },
+        },
+        parts: [
+          { id: 'p1', messageID: 'm1', sessionID: 's1', type: 'text', text: 'ok' },
+          { id: '', messageID: 'm1', sessionID: 's1', type: 'text' },
+          { bad: true },
+        ],
+      },
+    ];
+    const serverRequest = vi.fn(() => Promise.resolve(messages));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    await proxy.handleRequest(makePayload(18, 'GET', '/session/s1/message'));
+    const response = (callbacks.postApiResponse as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(response.data[0].parts).toHaveLength(1);
+    expect(response.data[0].parts[0].id).toBe('p1');
+    expect(mocks.logger.warn).toHaveBeenCalled();
+  });
+
+  it('catches thrown errors and posts error response', async () => {
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: vi.fn(() => Promise.reject(new Error('server down'))),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(19, 'GET', '/session'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 19,
+      error: 'server down',
+    });
+  });
+
+  it('catches non-Error throws and converts to string', async () => {
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: vi.fn(() => Promise.reject('string error')),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(20, 'GET', '/session'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 20,
+      error: 'string error',
+    });
+  });
+
+  it('uses current request generation in response', async () => {
+    const { proxy, callbacks } = createProxy({
+      getRequestGeneration: vi.fn(() => 42),
+    });
+    await proxy.handleRequest(makePayload(21, 'GET', '/varro/session-trash'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(42, expect.anything());
+  });
+
+  it('filters session status responses through sessionTrash', async () => {
+    const statuses = { s1: { state: 'active' }, s2: { state: 'idle' } };
+    const filtered = { s1: { state: 'active' } };
+    const serverRequest = vi.fn(() => Promise.resolve(statuses));
+    const filterStatuses = vi.fn(() => filtered);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        filterVisibleSessionStatuses: filterStatuses,
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(22, 'GET', '/session/status'));
+    expect(filterStatuses).toHaveBeenCalledWith(statuses);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 22, data: filtered });
+  });
+
+  it('filters question responses through sessionTrash', async () => {
+    const questions = [{ sessionID: 's1' }, { sessionID: 's2' }];
+    const filtered = [{ sessionID: 's1' }];
+    const serverRequest = vi.fn(() => Promise.resolve(questions));
+    const filterQuestions = vi.fn(() => filtered);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        filterVisibleSessionRequests: filterQuestions,
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(23, 'GET', '/question'));
+    expect(filterQuestions).toHaveBeenCalledWith(questions);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 23, data: filtered });
+  });
+
+  it('passes through non-session responses without filtering', async () => {
+    const configData = { providers: [{ id: 'openai' }] };
+    const serverRequest = vi.fn(() => Promise.resolve(configData));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    await proxy.handleRequest(makePayload(24, 'GET', '/config/providers'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 24,
+      data: configData,
     });
   });
 });

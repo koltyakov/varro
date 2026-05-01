@@ -1,0 +1,120 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { Permission, QuestionRequest } from '../../types';
+import { STORAGE_KEYS } from '../state-storage';
+import { draftPermissionMode, resetDefaultAppState, state } from '../state';
+import { permissionsStore } from './permissions-store';
+
+function createQuestion(id: string): QuestionRequest {
+  return {
+    id,
+    sessionID: 'session-1',
+    questions: [
+      {
+        question: 'Continue?',
+        header: 'Confirm',
+        options: [{ label: 'Yes', description: 'Continue execution' }],
+      },
+    ],
+  };
+}
+
+function createPermission(id: string, created: number): Permission {
+  return {
+    id,
+    type: 'edit',
+    pattern: 'src/index.ts',
+    sessionID: 'session-1',
+    messageID: `message-${id}`,
+    callID: `call-${id}`,
+    title: 'Edit src/index.ts',
+    metadata: { path: 'src/index.ts' },
+    time: { created },
+  };
+}
+
+describe('permissionsStore', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetDefaultAppState();
+  });
+
+  it('syncs draft and per-session permission modes', () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.projectPermissionModes,
+      JSON.stringify({ '/workspace': 'full' })
+    );
+
+    permissionsStore.syncDraftPermissionForWorkspace('/workspace///');
+
+    expect(draftPermissionMode()).toBe('full');
+
+    permissionsStore.setPermissionModeForSession(null, 'default');
+    expect(draftPermissionMode()).toBe('default');
+    expect(window.localStorage.getItem(STORAGE_KEYS.draftPermissionMode)).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.projectPermissionModes)).toBe('{}');
+
+    permissionsStore.setPermissionModeForSession('session-1', 'full');
+    expect(permissionsStore.getPermissionModeForSession('session-1')).toBe('full');
+
+    permissionsStore.removePermissionModeForSession('session-1');
+    expect(permissionsStore.getPermissionModeForSession('session-1')).toBe('default');
+
+    permissionsStore.resetDraftPermissionMode();
+    expect(draftPermissionMode()).toBe('default');
+  });
+
+  it('updates questions and groups duplicate permissions', () => {
+    const firstQuestion = createQuestion('question-1');
+    const secondQuestion = createQuestion('question-2');
+    const updatedFirstQuestion: QuestionRequest = {
+      ...firstQuestion,
+      questions: [
+        {
+          ...firstQuestion.questions[0],
+          question: 'Retry?',
+        },
+      ],
+    };
+
+    permissionsStore.setQuestions([firstQuestion]);
+    permissionsStore.upsertQuestion(updatedFirstQuestion);
+    permissionsStore.upsertQuestion(secondQuestion);
+    permissionsStore.removeQuestion('question-1');
+
+    expect(state.questions).toEqual([secondQuestion]);
+
+    const firstPermission = createPermission('permission-1', 1);
+    const secondPermission = createPermission('permission-2', 2);
+
+    permissionsStore.addPermission(firstPermission);
+    permissionsStore.addPermission(secondPermission);
+
+    expect(state.permissions).toHaveLength(1);
+    expect(permissionsStore.getPermissionGroupMembers(state.permissions[0])).toEqual([
+      {
+        id: 'permission-1',
+        sessionID: 'session-1',
+        messageID: 'message-permission-1',
+        callID: 'call-permission-1',
+      },
+      {
+        id: 'permission-2',
+        sessionID: 'session-1',
+        messageID: 'message-permission-2',
+        callID: 'call-permission-2',
+      },
+    ]);
+
+    permissionsStore.removePermission('permission-1');
+
+    expect(state.permissions).toHaveLength(1);
+    expect(state.permissions[0]).toMatchObject({
+      id: 'permission-2',
+      sessionID: 'session-1',
+      messageID: 'message-permission-2',
+      callID: 'call-permission-2',
+    });
+    expect(state.permissions[0]).not.toHaveProperty('duplicateIDs');
+    expect(state.permissions[0]).not.toHaveProperty('groupMembers');
+  });
+});

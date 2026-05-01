@@ -56,7 +56,7 @@ export const ralphRunner = {
   async resume(managerSessionId: string): Promise<void> {
     const run = ralphStore.getRun(managerSessionId);
     if (!run) return;
-    if (run.status !== 'paused' && run.status !== 'failed') return;
+    if (run.status !== 'paused' && run.status !== 'failed' && run.status !== 'incomplete') return;
     ralphStore.setStatus(managerSessionId, 'running');
     await runLoop(run.config);
   },
@@ -90,10 +90,11 @@ async function runLoop(config: RalphConfig): Promise<void> {
       const stopReason = await getStopReason(run);
       if (stopReason) {
         // If we ran out of iterations while there are still verification
-        // gaps or unchecked plan items, mark the run as `failed` (not `done`)
-        // so the UI surfaces that the work isn't fully complete.
-        const terminalStatus: 'done' | 'failed' =
-          stopReason === 'iteration_limit_with_gap' ? 'failed' : 'done';
+        // gaps or unchecked plan items, mark the run as `incomplete` (not
+        // `done` and not `failed`) so the UI can distinguish "ran out of
+        // budget before convergence" from a hard error or a clean finish.
+        const terminalStatus: 'done' | 'incomplete' =
+          stopReason === 'iteration_limit_with_gap' ? 'incomplete' : 'done';
         ralphStore.setStatus(config.managerSessionId, terminalStatus, stopReason);
         break;
       }

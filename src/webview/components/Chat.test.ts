@@ -1184,6 +1184,31 @@ describe('header status badges', () => {
     expect(titles).toEqual(['Gamma review']);
   });
 
+  it('resets keyboard-focused session when the search input regains focus', async () => {
+    setState('sessions', [
+      session('session-1', 500, { title: 'Alpha build' }),
+      session('session-2', 400, { title: 'Beta follow-up' }),
+      session('session-3', 300, { title: 'Gamma review' }),
+    ]);
+    setState('activeSessionId', 'session-1');
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const input = container?.querySelector('.session-list-search-input') as HTMLInputElement | null;
+    const items = Array.from(container?.querySelectorAll('.session-item') ?? []);
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(items).toHaveLength(3);
+
+    items[2]?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    expect(items[2]?.classList.contains('keyboard-focus')).toBe(true);
+
+    input!.dispatchEvent(new FocusEvent('focus'));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.session-item.keyboard-focus')).toBeNull();
+  });
+
   it('shows an empty state for a search with no matching sessions', async () => {
     setState('sessions', [session('session-1', 500, { title: 'Alpha build' })]);
     setShowSessionPicker(true);

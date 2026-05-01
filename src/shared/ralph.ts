@@ -1,11 +1,12 @@
 import type { PermissionMode } from './protocol';
 
-export type RalphStatus = 'running' | 'paused' | 'stopped' | 'done' | 'failed';
+export type RalphStatus = 'running' | 'paused' | 'stopped' | 'done' | 'incomplete' | 'failed';
 
 /**
  * Why a Ralph run stopped. Used to surface a clearer explanation in the UI
  * (e.g. distinguishing a clean completion from running out of iterations
- * with verification gaps still outstanding).
+ * with verification gaps still outstanding, which maps to the `incomplete`
+ * status rather than `done` or `failed`).
  */
 export type RalphStopReason =
   | 'iteration_limit'

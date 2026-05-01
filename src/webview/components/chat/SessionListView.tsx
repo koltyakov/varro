@@ -730,6 +730,7 @@ export function SessionListView(props: {
             class="session-list-search-input"
             value={searchQuery()}
             onInput={(e) => setSearchQuery(e.currentTarget.value)}
+            onFocus={() => setFocusedIndex(-1)}
             placeholder="Search sessions"
             aria-label="Search sessions"
             spellcheck={false}

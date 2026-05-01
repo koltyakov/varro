@@ -120,7 +120,7 @@ describe('ralph runner stop conditions', () => {
     expect(createSession).not.toHaveBeenCalled();
   });
 
-  it('marks the run failed when the iteration limit is reached with outstanding plan items', async () => {
+  it('marks the run incomplete when the iteration limit is reached with outstanding plan items', async () => {
     const { ralphRunner, ralphStore } = await loadRunnerModules();
     const config = createConfig({ iterations: 1 });
 
@@ -132,7 +132,7 @@ describe('ralph runner stop conditions', () => {
     await ralphRunner.resume(config.managerSessionId);
 
     const run = ralphStore.getRun(config.managerSessionId);
-    expect(run?.status).toBe('failed');
+    expect(run?.status).toBe('incomplete');
     expect(run?.stopReason).toBe('iteration_limit_with_gap');
     expect(createSession).not.toHaveBeenCalled();
   });
@@ -202,7 +202,7 @@ describe('ralph runner stop conditions', () => {
     expect(createSession).toHaveBeenCalledTimes(1);
   });
 
-  it('marks the run failed when the iteration limit is reached with plain list items left', async () => {
+  it('marks the run incomplete when the iteration limit is reached with plain list items left', async () => {
     const { ralphRunner, ralphStore } = await loadRunnerModules();
     const config = createConfig({ iterations: 1 });
 
@@ -214,7 +214,7 @@ describe('ralph runner stop conditions', () => {
     await ralphRunner.resume(config.managerSessionId);
 
     const run = ralphStore.getRun(config.managerSessionId);
-    expect(run?.status).toBe('failed');
+    expect(run?.status).toBe('incomplete');
     expect(run?.stopReason).toBe('iteration_limit_with_gap');
     expect(createSession).not.toHaveBeenCalled();
   });
@@ -448,7 +448,7 @@ describe('ralph runner iteration repair', () => {
     expect(sendAsync).toHaveBeenCalledTimes(6);
 
     const run = ralphStore.getRun(config.managerSessionId);
-    expect(run?.status).toBe('failed');
+    expect(run?.status).toBe('incomplete');
     expect(run?.stopReason).toBe('iteration_limit_with_gap');
     expect(run?.iterations).toHaveLength(1);
     expect(run?.iterations[0]).toEqual(

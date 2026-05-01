@@ -217,7 +217,7 @@ Ralph is a plan-driven orchestration layer that runs inside the webview.
 - `src/webview/components/ralph/ralph-runner.ts` creates one child session per iteration under the manager session, builds the iteration prompt from the plan document plus the previous iteration summary, and waits for the child to go idle.
 - Verification is intentionally split into a second turn. After the main work settles, the manager sends a dedicated verification prompt and parses `<name>: PASS|FAIL|SKIPPED` lines back out of the final assistant report.
 - If verification fails, the runner can spawn up to two repair child sessions for that iteration. Repair sessions stay under the same manager session so their history does not pollute the original iteration session.
-- Stop conditions come from both plan content and run history: `DONE` marker, consecutive passing iterations with a clean checklist, manual stop, iteration error, or iteration limit. Reaching the limit while the plan still has unchecked items or failed verification marks the run as `failed`, not `done`.
+- Stop conditions come from both plan content and run history: `DONE` marker, consecutive passing iterations with a clean checklist, manual stop, iteration error, or iteration limit. Reaching the limit while the plan still has unchecked items or failed verification marks the run as `incomplete` (not `done`, and not the harder `failed` reserved for true iteration errors).
 - `Chat.tsx` and `ChatWorkspace.tsx` treat Ralph manager sessions specially: manager sessions render the Ralph dashboard, Ralph roots are tagged in the session list, and navigating back from an iteration child session returns to the owning Ralph dashboard.
 
 ## Request And Event Flow
