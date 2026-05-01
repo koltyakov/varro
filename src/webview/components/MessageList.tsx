@@ -35,11 +35,8 @@ import { type AssistantFileEditStackGroup } from './Message';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
-import {
-  collapseLeadingDuplicateFileEvents,
-  getTrailingFileEventSignature,
-} from '../lib/message-event-collapse';
-import { isFileEditPart, isFileReadPart, shouldShowAssistantPartInline } from '../lib/part-utils';
+import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
+import { shouldShowAssistantPartInline } from '../lib/part-utils';
 import { PendingActionRows, StickyUserMessagePreviewCard } from './message-list/MessageListChrome';
 import {
   getNextVisibleUserMessageTopMap,
@@ -1140,53 +1137,9 @@ export function MessageList() {
     });
   });
 
-  const assistantStackGroupMap = createMemo(() => {
-    const previousSignatures = previousTrailingFileEventSignatureMap();
-    messageStructureVersion();
-    return untrack(() => {
-      const result = new Map<string, AssistantFileEditStackGroup | null>();
-      const kindByMessageId = new Map<string, ReturnType<typeof getAssistantStackKind>>();
-      const messageEntries = state.messages;
-      let index = 0;
-
-      const getKind = (entry: { info: Message; parts: Part[] }) => {
-        const cached = kindByMessageId.get(entry.info.id);
-        if (cached !== undefined) return cached;
-        const kind = getAssistantStackKind(entry, previousSignatures.get(entry.info.id) ?? null);
-        kindByMessageId.set(entry.info.id, kind);
-        return kind;
-      };
-
-      while (index < messageEntries.length) {
-        const current = messageEntries[index];
-        const currentKind = getKind(current);
-
-        if (!currentKind) {
-          index++;
-          continue;
-        }
-
-        let end = index;
-        while (
-          end + 1 < messageEntries.length &&
-          getKind(messageEntries[end + 1]) === currentKind
-        ) {
-          end++;
-        }
-
-        if (end > index) {
-          for (let partIndex = index; partIndex <= end; partIndex++) {
-            const position = partIndex === index ? 'start' : partIndex === end ? 'end' : 'middle';
-            result.set(messageEntries[partIndex].info.id, position);
-          }
-        }
-
-        index = end + 1;
-      }
-
-      return result;
-    });
-  });
+  const assistantStackGroupMap = createMemo(
+    () => new Map<string, AssistantFileEditStackGroup | null>(),
+  );
 
   const assistantDialogSummaryMap = createMemo(() => {
     messageStructureVersion();
@@ -1402,36 +1355,6 @@ function countAssistantDialogChildRuns(
   }
 
   return count;
-}
-
-function isFileEditOnlyAssistantMessage(
-  parts: Part[],
-  previousTrailingSignature: string | null
-): boolean {
-  const visibleParts = collapseLeadingDuplicateFileEvents(parts, previousTrailingSignature).filter(
-    (p) => shouldShowAssistantPartInline(p, false)
-  );
-  return visibleParts.length > 0 && visibleParts.every(isFileEditPart);
-}
-
-function isFileReadOnlyAssistantMessage(
-  parts: Part[],
-  previousTrailingSignature: string | null
-): boolean {
-  const visibleParts = collapseLeadingDuplicateFileEvents(parts, previousTrailingSignature).filter(
-    (p) => shouldShowAssistantPartInline(p, false)
-  );
-  return visibleParts.length > 0 && visibleParts.every(isFileReadPart);
-}
-
-function getAssistantStackKind(
-  msg: { info: Message; parts: Part[] },
-  previousTrailingSignature: string | null
-): 'file-edit' | 'file-read' | null {
-  if (!isAssistantMessage(msg.info)) return null;
-  if (isFileEditOnlyAssistantMessage(msg.parts, previousTrailingSignature)) return 'file-edit';
-  if (isFileReadOnlyAssistantMessage(msg.parts, previousTrailingSignature)) return 'file-read';
-  return null;
 }
 
 function LoadingRow(props: { compacting: boolean }) {

@@ -613,6 +613,10 @@ body.vscode-high-contrast-light .interactive-session {
 }
 
 .interactive-item-container {
+  /* Unified vertical rhythm: every row contributes 6px top + 6px bottom so
+     any two adjacent rows produce the same 12px gap as
+     `.assistant-turn-content-plain .assistant-message-flow { gap: 12px }`
+     used between parts inside a turn. */
   padding: 6px 0;
   display: flex;
   flex-direction: column;
@@ -622,22 +626,23 @@ body.vscode-high-contrast-light .interactive-session {
   -webkit-user-select: text;
 }
 
+/* An empty message row (no rendered content) must not contribute any
+   vertical space — otherwise it inflates the gap between two adjacent
+   non-empty rows from the canonical 12px to ~24px. */
+.interactive-item-container:empty {
+  padding: 0;
+}
+
 .interactive-item-container.interactive-request {
   align-items: flex-end;
-  padding: 10px 0 6px 0;
 }
 
 .interactive-item-container.interactive-response {
   align-items: stretch;
-  padding: 4px 0 12px 0;
 }
 
 .chat-turn {
   width: 100%;
-}
-
-.interactive-item-container.interactive-response:has(.chat-turn-assistant-plain) {
-  padding: 2px 0 6px 0;
 }
 
 .chat-turn-user {
@@ -706,7 +711,7 @@ body.vscode-high-contrast-light .interactive-session {
 }
 
 .assistant-turn-content.assistant-turn-content-plain {
-  padding: 2px 0;
+  padding: 0;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -987,7 +992,10 @@ body.vscode-light
   .assistant-message-flow-item
   > .rendered-markdown
   p {
-  margin-bottom: 10px;
+  /* Spacing between flow items is owned by `.assistant-message-flow { gap }`.
+     Flexbox gap does not collapse with child margins, so any margin here
+     would stack on top of the gap. Keep paragraphs flush. */
+  margin-bottom: 0;
 }
 
 .assistant-turn-content.assistant-turn-content-plain
