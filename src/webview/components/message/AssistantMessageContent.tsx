@@ -142,6 +142,10 @@ function pruneMeasuredAssistantPartHeights(
   return changed;
 }
 
+function samePartList(previous: readonly Part[], next: readonly Part[]) {
+  return previous.length === next.length && previous.every((part, index) => part === next[index]);
+}
+
 export function calculateAssistantPartVirtualRange(args: {
   itemKeys: string[];
   measuredHeights: Map<string, number>;
@@ -249,7 +253,8 @@ export function AssistantMessageContent(props: {
     setReadModeOpen(false);
   });
 
-  const renderItems = createMemo(() => {
+  const renderItems = createMemo<AssistantRenderItem[]>((previousItems) => {
+    const previousByKey = new Map((previousItems || []).map((item) => [item.key, item]));
     const items: AssistantRenderItem[] = [];
     const parts = displayParts();
 
@@ -261,19 +266,31 @@ export function AssistantMessageContent(props: {
         while (index + 1 < parts.length && isFileEditPart(parts[index + 1])) {
           fileEditParts.push(parts[++index] as ToolPart);
         }
-        items.push({
-          kind: 'file-edit-stack',
-          key: `file-edit-stack:${fileEditParts[0].id}:${fileEditParts[fileEditParts.length - 1].id}`,
-          parts: fileEditParts,
-        });
+        const key = `file-edit-stack:${fileEditParts[0].id}:${fileEditParts[fileEditParts.length - 1].id}`;
+        const previous = previousByKey.get(key);
+        if (previous?.kind === 'file-edit-stack' && samePartList(previous.parts, fileEditParts)) {
+          items.push(previous);
+        } else {
+          items.push({
+            kind: 'file-edit-stack',
+            key,
+            parts: fileEditParts,
+          });
+        }
         continue;
       }
 
-      items.push({ kind: 'part', key: `part:${part.id}`, part });
+      const key = `part:${part.id}`;
+      const previous = previousByKey.get(key);
+      if (previous?.kind === 'part' && previous.part === part) {
+        items.push(previous);
+      } else {
+        items.push({ kind: 'part', key, part });
+      }
     }
 
     return items;
-  });
+  }, []);
 
   const shouldVirtualizeParts = createMemo(
     () =>

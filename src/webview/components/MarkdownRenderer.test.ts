@@ -1,3 +1,4 @@
+import { createComponent, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
@@ -366,6 +367,36 @@ describe('MarkdownRenderer', () => {
     container!.innerHTML = '';
     cleanup = render(() => MarkdownRenderer({ content }), container!);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    code = container?.querySelector('.interactive-result-code-block code');
+    expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');
+    expect(code?.querySelector('.hljs-number')?.textContent).toBe('1');
+  });
+
+  it('defers first-pass highlighting for completed streaming tail fences until idle', async () => {
+    vi.useFakeTimers();
+    const [content, setContent] = createSignal('Stable paragraph\n\nTail');
+
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await vi.advanceTimersByTimeAsync(16);
+
+    setContent('Stable paragraph\n\n```ts\nconst value = 1;\n```');
+    await vi.advanceTimersByTimeAsync(16);
+
+    let code = container?.querySelector('.interactive-result-code-block code');
+    expect(code?.classList.contains('hljs')).toBe(true);
+    expect(code?.querySelector('[class^="hljs-"]')).toBeNull();
+    expect(code?.textContent).toBe('const value = 1;');
+
+    await vi.runOnlyPendingTimersAsync();
 
     code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');

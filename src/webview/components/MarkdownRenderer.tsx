@@ -82,6 +82,15 @@ type RenderMarkdownContext = {
   disableCodeHighlighting: boolean;
 };
 
+type IdleSchedulerGlobal = typeof globalThis & {
+  requestIdleCallback?: (callback: () => void) => number;
+  cancelIdleCallback?: (id: number) => void;
+};
+
+type IdleWorkHandle =
+  | { kind: 'idle'; id: number }
+  | { kind: 'timeout'; id: ReturnType<typeof setTimeout> };
+
 const copySvg =
   '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4h1V2.5a.5.5 0 01.5-.5h8a.5.5 0 01.5.5v8a.5.5 0 01-.5.5H12v1h1.5a1.5 1.5 0 001.5-1.5v-8A1.5 1.5 0 0013.5 1h-8A1.5 1.5 0 004 2.5V4zm-2 1.5A1.5 1.5 0 013.5 4h8A1.5 1.5 0 0113 5.5v8a1.5 1.5 0 01-1.5 1.5h-8A1.5 1.5 0 012 13.5v-8zM3.5 5a.5.5 0 00-.5.5v8a.5.5 0 00.5.5h8a.5.5 0 00.5-.5v-8a.5.5 0 00-.5-.5h-8z"/></svg>';
 const checkSvg =
@@ -462,11 +471,32 @@ const FILE_PATH_RE =
 const FILE_PATH_CANDIDATE_RE = /\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/;
 const PRESERVED_HTML_PLACEHOLDER_RE = /@@VARRO_PRESERVE_(\d+)@@/g;
 const MARKDOWN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+const MARKDOWN_FENCE_INFO_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const ANCHOR_RE = /(<a[\s\S]*?<\/a>)/gi;
 const SVG_RE = /(<svg[\s\S]*?<\/svg>)/gi;
 const BUTTON_RE = /(<button[\s\S]*?<\/button>)/gi;
 const INLINE_CODE_RE = /(<code[\s\S]*?<\/code>)/gi;
 const PRE_RE = /(<pre[\s\S]*?<\/pre>)/gi;
+
+function requestIdleWork(callback: () => void): IdleWorkHandle {
+  const idleScheduler = globalThis as IdleSchedulerGlobal;
+  if (idleScheduler.requestIdleCallback) {
+    return { kind: 'idle', id: idleScheduler.requestIdleCallback(callback) };
+  }
+  return { kind: 'timeout', id: setTimeout(callback, 0) };
+}
+
+function cancelIdleWork(handle: IdleWorkHandle | null) {
+  if (!handle) return;
+
+  if (handle.kind === 'idle') {
+    const idleScheduler = globalThis as IdleSchedulerGlobal;
+    idleScheduler.cancelIdleCallback?.(handle.id);
+    return;
+  }
+
+  clearTimeout(handle.id);
+}
 
 function isLocalFileHref(href: string | null): boolean {
   if (!href) return false;
@@ -572,6 +602,7 @@ function scanLastSafeMarkdownBoundary(
     const rawLine = content.slice(index, lineEnd);
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
     const fenceMatch = line.match(MARKDOWN_FENCE_RE);
+    const wasInsideFence = openFence !== null;
 
     if (fenceMatch) {
       const marker = fenceMatch[1];
@@ -583,6 +614,10 @@ function scanLastSafeMarkdownBoundary(
     }
 
     const nextIndex = nextBreak === -1 ? content.length : nextBreak + 1;
+    const closedFence = wasInsideFence && openFence === null;
+    if (closedFence && nextIndex < content.length) {
+      lastBoundary = nextIndex;
+    }
     if (!openFence && line.trim().length === 0 && nextIndex < content.length) {
       lastBoundary = nextIndex;
     }
@@ -639,6 +674,40 @@ export function splitStreamingMarkdownContent(content: string): StreamingMarkdow
   return { stableContent, tailContent };
 }
 
+function hasCompletedHighlightableFence(content: string) {
+  let index = 0;
+  let openFence = null as (MarkdownFenceState & { highlightable: boolean }) | null;
+
+  while (index < content.length) {
+    const nextBreak = content.indexOf('\n', index);
+    const lineEnd = nextBreak === -1 ? content.length : nextBreak;
+    const rawLine = content.slice(index, lineEnd);
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    const fenceMatch = line.match(MARKDOWN_FENCE_INFO_RE);
+
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!openFence) {
+        const lang = fenceMatch[2].trim().split(/\s+/, 1)[0];
+        openFence = {
+          char: marker[0],
+          length: marker.length,
+          highlightable: !!resolveCodeLanguage(lang),
+        };
+      } else if (marker[0] === openFence.char && marker.length >= openFence.length) {
+        if (openFence.highlightable) {
+          return true;
+        }
+        openFence = null;
+      }
+    }
+
+    index = nextBreak === -1 ? content.length : nextBreak + 1;
+  }
+
+  return false;
+}
+
 function getMarkdownRenderSegments(
   content: string,
   cacheByContent: boolean,
@@ -678,6 +747,23 @@ function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
   });
   setRenderedMarkdownCacheValue(cacheKey, html);
   return html;
+}
+
+export function __parseMarkdownForTests(
+  content: string,
+  options: {
+    cacheByContent: boolean;
+    disablePathLinkify?: boolean;
+    disableCodeHighlighting?: boolean;
+  }
+): string {
+  return parseMarkdown(content, options);
+}
+
+export function __resetMarkdownCachesForTests() {
+  codeBlockHtmlCache.clear();
+  highlightedCodeCache.clear();
+  renderedMarkdownCache.clear();
 }
 
 function linkifyPaths(html: string): string {
@@ -784,6 +870,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   let pendingContent: string | null = null;
   let rafId: number | null = null;
+  let idleHighlightId: IdleWorkHandle | null = null;
+  let hasProcessedStreamingUpdate = false;
   const initialSegments = getMarkdownRenderSegments(props.content || '', !!props.cacheByContent);
   let lastAppliedScanState = initialSegments.scanState;
   let lastAppliedWorkspacePath = state.editorContext.workspacePath || '';
@@ -801,11 +889,35 @@ export function MarkdownRenderer(props: MarkdownProps) {
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
 
+  function scheduleDeferredTailHighlight(content: string, workspacePath: string) {
+    cancelIdleWork(idleHighlightId);
+    idleHighlightId = requestIdleWork(() => {
+      idleHighlightId = null;
+      if (pendingContent !== null) return;
+      if (workspacePath !== lastAppliedWorkspacePath) return;
+      if (content !== lastAppliedTailContent) return;
+
+      const highlightedTailHtml = parseMarkdown(content, {
+        cacheByContent: false,
+        disablePathLinkify: !props.cacheByContent,
+      });
+      if (highlightedTailHtml === lastAppliedTailHtml) return;
+
+      lastAppliedTailHtml = highlightedTailHtml;
+      setTailHtml(highlightedTailHtml);
+      queueMicrotask(() => {
+        hydrateRenderedMarkdown(tailRef);
+      });
+    });
+  }
+
   function flushPending() {
     rafId = null;
     if (pendingContent !== null) {
       const content = pendingContent;
       pendingContent = null;
+      cancelIdleWork(idleHighlightId);
+      idleHighlightId = null;
       const segments = getMarkdownRenderSegments(
         content,
         !!props.cacheByContent,
@@ -824,11 +936,17 @@ export function MarkdownRenderer(props: MarkdownProps) {
           : stableContentChanged
             ? parseMarkdown(segments.stableContent, { cacheByContent: true })
             : lastAppliedStableHtml;
+      const shouldDeferTailHighlight =
+        hasProcessedStreamingUpdate &&
+        tailContentChanged &&
+        !props.cacheByContent &&
+        !segments.hasUnclosedFence &&
+        hasCompletedHighlightableFence(segments.tailContent);
       const nextTailHtml = tailContentChanged
         ? parseMarkdown(segments.tailContent, {
             cacheByContent: segments.stableContent.length === 0 && !!props.cacheByContent,
             disablePathLinkify: !props.cacheByContent,
-            disableCodeHighlighting: segments.hasUnclosedFence,
+            disableCodeHighlighting: segments.hasUnclosedFence || shouldDeferTailHighlight,
           })
         : lastAppliedTailHtml;
 
@@ -850,6 +968,11 @@ export function MarkdownRenderer(props: MarkdownProps) {
       }
       lastAppliedWorkspacePath = workspacePath;
       lastAppliedScanState = segments.scanState;
+      hasProcessedStreamingUpdate = true;
+
+      if (shouldDeferTailHighlight) {
+        scheduleDeferredTailHighlight(segments.tailContent, workspacePath);
+      }
 
       queueMicrotask(() => {
         if (stableChanged) {
@@ -881,6 +1004,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
       cancelAnimationFrame(rafId);
       rafId = null;
     }
+    cancelIdleWork(idleHighlightId);
+    idleHighlightId = null;
     for (const id of copyTimeouts) clearTimeout(id);
     copyTimeouts.clear();
   });

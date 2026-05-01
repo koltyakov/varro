@@ -24,53 +24,78 @@ export function ModelPicker(props: {
   let menuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   const visibleProviders = createMemo(() => getVisibleProviders(state.providers));
+  type VisibleProvider = ReturnType<typeof visibleProviders>[number];
+  type FlatItem = {
+    providerID: string;
+    modelID: string;
+    name: string;
+    contextLimit?: number;
+  };
+  type ModelEntry = {
+    item: FlatItem;
+    model: VisibleProvider['models'][string];
+    searchText: string;
+  };
+  type ProviderEntry = {
+    provider: VisibleProvider;
+    searchText: string;
+    models: ModelEntry[];
+  };
 
   const [query, setQuery] = createSignal('');
-  const normalizedQuery = () => query().trim().toLocaleLowerCase();
+  const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
+
+  const providerEntries = createMemo<ProviderEntry[]>(() =>
+    visibleProviders().map((provider) => ({
+      provider,
+      searchText: `${provider.name}\n${provider.id}`.toLocaleLowerCase(),
+      models: Object.values(provider.models)
+        .toSorted((a, b) => a.name.localeCompare(b.name))
+        .map((model) => ({
+          item: {
+            providerID: provider.id,
+            modelID: model.id,
+            name: model.name,
+            contextLimit: model.limit?.context,
+          },
+          model,
+          searchText: `${model.name}\n${model.id}`.toLocaleLowerCase(),
+        })),
+    }))
+  );
 
   const totalModelCount = createMemo(() =>
-    visibleProviders().reduce((acc, p) => acc + Object.keys(p.models).length, 0)
+    providerEntries().reduce((acc, provider) => acc + provider.models.length, 0)
   );
   const showSearch = createMemo(() => totalModelCount() > 10);
 
-  const filteredProviders = createMemo(() => {
+  const filteredProviders = createMemo<ProviderEntry[]>(() => {
     const search = normalizedQuery();
-    return visibleProviders()
-      .map((provider) => {
-        const models = Object.values(provider.models).toSorted((a, b) =>
-          a.name.localeCompare(b.name)
-        );
-        if (!search) return { provider, models };
-        const providerMatches = [provider.name, provider.id].some((v) =>
-          v.toLocaleLowerCase().includes(search)
-        );
-        return {
-          provider,
-          models: providerMatches
-            ? models
-            : models.filter((m) =>
-                [m.name, m.id].some((v) => v.toLocaleLowerCase().includes(search))
-              ),
-        };
-      })
-      .filter((entry) => entry.models.length > 0);
+    if (!search) return providerEntries();
+
+    const filtered: ProviderEntry[] = [];
+    for (const providerEntry of providerEntries()) {
+      if (providerEntry.searchText.includes(search)) {
+        filtered.push(providerEntry);
+        continue;
+      }
+      const models = providerEntry.models.filter((model) => model.searchText.includes(search));
+      if (models.length > 0) {
+        filtered.push({
+          provider: providerEntry.provider,
+          searchText: providerEntry.searchText,
+          models,
+        });
+      }
+    }
+    return filtered;
   });
 
-  const flatItems = createMemo(() => {
-    const items: Array<{
-      providerID: string;
-      modelID: string;
-      name: string;
-      contextLimit?: number;
-    }> = [];
-    for (const { provider, models } of filteredProviders()) {
+  const flatItems = createMemo<FlatItem[]>(() => {
+    const items: FlatItem[] = [];
+    for (const { models } of filteredProviders()) {
       for (const model of models) {
-        items.push({
-          providerID: provider.id,
-          modelID: model.id,
-          name: model.name,
-          contextLimit: model.limit?.context,
-        });
+        items.push(model.item);
       }
     }
     return items;
@@ -217,7 +242,8 @@ export function ModelPicker(props: {
                   <>
                     <div class="dropdown-group-header">{provider.name}</div>
                     <For each={models}>
-                      {(model) => {
+                      {(entry) => {
+                        const model = entry.model;
                         const myIndex = () => getItemIndex(provider.id, model.id);
                         const supportsTools = () =>
                           modelSupportsTools(provider.id, model.id, state.providers);

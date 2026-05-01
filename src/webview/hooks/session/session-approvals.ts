@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import type { PermissionMode } from '../../../shared/protocol';
 import type { Permission, QuestionRequest, Session } from '../../types';
 
@@ -40,7 +41,9 @@ export async function respondPermissionWithDependencies(
     await Promise.all(
       groupMembers.map((member) => deps.respondPermission(member.sessionID, member.id, response))
     );
-    groupMembers.forEach((member) => deps.removePermission(member.id));
+    batch(() => {
+      groupMembers.forEach((member) => deps.removePermission(member.id));
+    });
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to respond to permission');
     if (options?.rethrow) {
@@ -122,18 +125,22 @@ export async function updatePermissionModeForSessionWithDependencies(
 ) {
   const previousMode = deps.getPermissionModeForSession(sessionId);
   const previousDraft = deps.getDraftPermissionMode();
-  deps.setPermissionModeForSession(sessionId, mode);
-  deps.setDraftPermissionMode(mode);
-  deps.saveProjectPermissionMode(mode);
+  batch(() => {
+    deps.setPermissionModeForSession(sessionId, mode);
+    deps.setDraftPermissionMode(mode);
+    deps.saveProjectPermissionMode(mode);
+  });
   if (!sessionId) return;
 
   try {
     const session = await deps.updateSessionPermission(sessionId, { permission: permissionRules });
     deps.upsertSession(session);
   } catch (err) {
-    deps.setPermissionModeForSession(sessionId, previousMode);
-    deps.setDraftPermissionMode(previousDraft);
-    deps.saveProjectPermissionMode(previousDraft);
+    batch(() => {
+      deps.setPermissionModeForSession(sessionId, previousMode);
+      deps.setDraftPermissionMode(previousDraft);
+      deps.saveProjectPermissionMode(previousDraft);
+    });
     deps.setError(err instanceof Error ? err.message : 'Failed to update permissions');
     return;
   }

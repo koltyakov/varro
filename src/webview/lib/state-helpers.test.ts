@@ -731,6 +731,32 @@ describe('state helpers', () => {
     ]);
 
     expect(children.get('parent-1')?.map((entry) => entry.info.id)).toEqual(['child-1', 'child-2']);
+
+    stateModule.replaceMessages([
+      { info: assistantMessage('child-2', 'session-1', 20, 'subagent', 'parent-1'), parts: [] },
+      { info: assistantMessage('child-1', 'session-1', 10, 'subagent', 'parent-1'), parts: [] },
+    ]);
+
+    const cachedChildren = stateModule.getChildRunsByParentId(stateModule.state.messages);
+    expect(stateModule.getChildRunsByParentId(stateModule.state.messages)).toBe(cachedChildren);
+    expect(cachedChildren.get('parent-1')?.map((entry) => entry.info.id)).toEqual([
+      'child-1',
+      'child-2',
+    ]);
+
+    stateModule.setMessagesIncremental([
+      { info: assistantMessage('child-3', 'session-1', 5, 'subagent', 'parent-1'), parts: [] },
+      { info: assistantMessage('child-2', 'session-1', 20, 'subagent', 'parent-1'), parts: [] },
+      { info: assistantMessage('child-1', 'session-1', 10, 'subagent', 'parent-1'), parts: [] },
+    ]);
+
+    const updatedChildren = stateModule.getChildRunsByParentId(stateModule.state.messages);
+    expect(updatedChildren).not.toBe(cachedChildren);
+    expect(updatedChildren.get('parent-1')?.map((entry) => entry.info.id)).toEqual([
+      'child-3',
+      'child-1',
+      'child-2',
+    ]);
   });
 
   it('toggles local ui helpers and persists ui display preferences', async () => {

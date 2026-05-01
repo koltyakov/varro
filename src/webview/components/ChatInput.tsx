@@ -127,6 +127,27 @@ type MentionCompletionMeta = {
   showFileSearchHint: boolean;
 };
 
+type AgentMentionCompletionItem = Extract<MentionCompletionItem, { type: 'agent' }>;
+type FileMentionCompletionItem = Extract<MentionCompletionItem, { type: 'file' }>;
+
+type MentionAgentEntry = {
+  item: AgentMentionCompletionItem;
+  normalizedName: string;
+  normalizedDescription: string;
+};
+
+type MentionFileEntry = {
+  item: FileMentionCompletionItem;
+  normalizedPath: string;
+};
+
+type MentionCompletionSource = {
+  agentEntries: MentionAgentEntry[];
+  fileEntries: MentionFileEntry[];
+  exactAgentNames: ReadonlySet<string>;
+  exactFilePaths: ReadonlySet<string>;
+};
+
 type CompletionSelection =
   | { type: 'set-slash'; value: string }
   | { type: 'run-slash'; value: string }
@@ -298,6 +319,13 @@ export function ChatInput() {
       .sort((a, b) => a.name.localeCompare(b.name))
   );
 
+  const mentionCompletionSource = createMemo(() =>
+    createMentionCompletionSource({
+      agents: mentionAgents(),
+      files: fileSearchResults(),
+    })
+  );
+
   const slashCommands = createMemo(() =>
     getSlashCommands({
       isBusy: isLoading(),
@@ -374,8 +402,7 @@ export function ChatInput() {
 
     return getMentionCompletionItems({
       rawQuery: completion.query.trim(),
-      agents: mentionAgents(),
-      files: fileSearchResults(),
+      source: mentionCompletionSource(),
       meta: { showFileSearchHint: showFileSearchHint() },
     });
   });
@@ -1998,52 +2025,91 @@ export function getMentionCompletionItems({
   rawQuery,
   agents,
   files,
+  source,
   meta,
 }: {
   rawQuery: string;
-  agents: Agent[];
-  files: DroppedFile[];
+  agents?: Agent[];
+  files?: DroppedFile[];
+  source?: MentionCompletionSource;
   meta?: MentionCompletionMeta;
 }): MentionCompletionItem[] {
+  const mentionSource =
+    source ?? createMentionCompletionSource({ agents: agents ?? [], files: files ?? [] });
   const query = rawQuery.toLowerCase();
-  const exactAgentMatch = agents.some((agent) => agent.name.toLowerCase() === query);
-  const exactFileMatch = files.some(
-    (file) => normalizeMentionPath(file.relativePath) === normalizeMentionPath(rawQuery)
-  );
+  const exactAgentMatch = mentionSource.exactAgentNames.has(query);
+  const exactFileMatch = mentionSource.exactFilePaths.has(normalizeMentionPath(rawQuery));
   if (query && (exactAgentMatch || exactFileMatch)) return [];
 
-  const agentItems = agents
+  const agentItems = mentionSource.agentEntries
     .filter((agent) => {
       if (!query) return true;
-      return (
-        agent.name.toLowerCase().includes(query) || agent.description?.toLowerCase().includes(query)
-      );
+      return agent.normalizedName.includes(query) || agent.normalizedDescription.includes(query);
     })
-    .map((agent) => ({
-      key: `agent:${agent.name}`,
-      type: 'agent' as const,
-      label: `@${agent.name}`,
-      detail: agent.description || getAgentBadgeLine(agent),
-      value: `@${agent.name} `,
-    }));
+    .map((agent) => agent.item);
 
-  const fileItems = (rawQuery ? files : []).map((file) => ({
-    key: `file:${file.path}`,
-    type: 'file' as const,
-    label: `@${file.relativePath}`,
-    detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
-    value:
-      file.type === 'directory'
-        ? `@${formatMentionPath(file.relativePath)}/`
-        : `@${formatMentionPath(file.relativePath)} `,
-    file,
-  }));
+  const fileItems = (rawQuery ? mentionSource.fileEntries : []).map((file) => file.item);
 
   if (!rawQuery && !meta?.showFileSearchHint) {
     return agentItems.slice(0, 10);
   }
 
   return [...fileItems, ...agentItems].slice(0, 10);
+}
+
+function createMentionCompletionSource({
+  agents,
+  files,
+}: {
+  agents: Agent[];
+  files: DroppedFile[];
+}): MentionCompletionSource {
+  const exactAgentNames = new Set<string>();
+  const exactFilePaths = new Set<string>();
+
+  const agentEntries = agents.map((agent) => {
+    const normalizedName = agent.name.toLowerCase();
+    exactAgentNames.add(normalizedName);
+
+    return {
+      item: {
+        key: `agent:${agent.name}`,
+        type: 'agent',
+        label: `@${agent.name}`,
+        detail: agent.description || getAgentBadgeLine(agent),
+        value: `@${agent.name} `,
+      },
+      normalizedName,
+      normalizedDescription: agent.description?.toLowerCase() || '',
+    } satisfies MentionAgentEntry;
+  });
+
+  const fileEntries = files.map((file) => {
+    const normalizedPath = normalizeMentionPath(file.relativePath);
+    exactFilePaths.add(normalizedPath);
+
+    return {
+      item: {
+        key: `file:${file.path}`,
+        type: 'file',
+        label: `@${file.relativePath}`,
+        detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
+        value:
+          file.type === 'directory'
+            ? `@${formatMentionPath(file.relativePath)}/`
+            : `@${formatMentionPath(file.relativePath)} `,
+        file,
+      },
+      normalizedPath,
+    } satisfies MentionFileEntry;
+  });
+
+  return {
+    agentEntries,
+    fileEntries,
+    exactAgentNames,
+    exactFilePaths,
+  };
 }
 
 export function shouldRequestMentionFileSearch(previousQuery: string, nextQuery: string) {
