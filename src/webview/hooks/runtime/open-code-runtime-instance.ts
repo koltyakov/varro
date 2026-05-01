@@ -276,6 +276,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       getProviderLimit: routingStore.getProviderLimit,
       loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),
       setProviderLimit: routingStore.setProviderLimit,
+      getPollIntervalMs: () => uiStore.providerLimitPollIntervalSeconds() * 1000,
       logError,
     });
 

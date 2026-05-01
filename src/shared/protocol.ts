@@ -1,4 +1,5 @@
 import type { ServerEventPropertiesByName } from './opencode-types';
+import type { WebviewConfigUpdatePayload } from './provider-limit-config';
 
 export interface EditorContext {
   workspacePath: string | null;
@@ -33,7 +34,7 @@ export interface DroppedFile {
 
 export type PermissionMode = 'default' | 'full';
 
-export type ProviderLimitUnit = 'requests' | 'tokens' | 'messages' | 'credits' | 'unknown';
+export type ProviderLimitUnit = 'requests' | 'tokens' | 'messages' | 'credits' | 'usd' | 'unknown';
 
 export type ProviderLimitWindow = {
   id: string;
@@ -42,6 +43,7 @@ export type ProviderLimitWindow = {
   remaining: number;
   limit: number | null;
   resetAt: number | null;
+  percent?: number | null;
 };
 
 export type ProviderLimitStatus =
@@ -176,6 +178,9 @@ export type InitialWebviewState = {
   expandThinkingByDefault?: boolean;
   showStickyUserPrompt?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
+  providerLimitPollIntervalSeconds?: number;
+  providerLimitThresholdPercent?: number;
+  providerLimitsDisabled?: boolean;
   interruptedSessionIds?: string[];
   pendingPermissions?: Array<Record<string, unknown>>;
   pendingQuestions?: Array<Record<string, unknown>>;
@@ -195,10 +200,10 @@ export type ExtensionMessage =
     }
   | {
       type: 'config/update';
-      payload: {
-        expandThinkingByDefault: boolean;
-        showStickyUserPrompt: boolean;
-        desktopSessionPaneSide: DesktopSessionPaneSide;
+      payload: WebviewConfigUpdatePayload & {
+        providerLimitsDisabled?: boolean;
+        providerLimitPollIntervalSeconds?: number;
+        providerLimitThresholdPercent?: number;
       };
     }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
@@ -232,11 +237,7 @@ export type WebviewMessage =
   | { type: 'vscode/open-external'; payload: { url: string } }
   | {
       type: 'config/update';
-      payload: {
-        expandThinkingByDefault: boolean;
-        showStickyUserPrompt: boolean;
-        desktopSessionPaneSide: DesktopSessionPaneSide;
-      };
+      payload: WebviewConfigUpdatePayload;
     }
   | { type: 'ready' }
   | { type: 'api/request'; payload: { id: number; method: string; path: string; body?: unknown } }

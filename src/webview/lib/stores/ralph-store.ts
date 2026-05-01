@@ -88,6 +88,18 @@ export const ralphStore = {
     persist({ ...runs });
   },
 
+  addIterations(sessionId: string, count: number) {
+    if (!runs[sessionId] || !Number.isFinite(count) || count < 1) return;
+    setRuns(
+      sessionId,
+      produce((draft) => {
+        draft.config.iterations += Math.floor(count);
+        draft.updatedAt = Date.now();
+      })
+    );
+    persist({ ...runs });
+  },
+
   upsertIteration(sessionId: string, iteration: RalphIteration) {
     if (!runs[sessionId]) return;
     setRuns(

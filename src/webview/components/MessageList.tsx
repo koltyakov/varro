@@ -308,13 +308,22 @@ export function MessageList() {
   });
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
 
-  const messages = createMemo(() => state.messages);
-  const latestPlanImplementationMessageId = createMemo(() =>
-    getLatestPlanImplementationMessageId(messages())
-  );
-  const visibleBlockingStreamingPart = createMemo(() =>
-    hasVisibleBlockingStreamingPart(messages(), state.streamingPartId, state.streamingText)
-  );
+  const messages = createMemo(() => {
+    messageStructureVersion();
+    return untrack(() => state.messages);
+  });
+  const latestPlanImplementationMessageId = createMemo(() => {
+    messageStructureVersion();
+    return untrack(() => getLatestPlanImplementationMessageId(state.messages));
+  });
+  const visibleBlockingStreamingPart = createMemo(() => {
+    const streamingPartId = state.streamingPartId;
+    const streamingText = state.streamingText;
+    messageStructureVersion();
+    return untrack(() =>
+      hasVisibleBlockingStreamingPart(state.messages, streamingPartId, streamingText)
+    );
+  });
   const messageIndexById = createMemo(() => {
     messageStructureVersion();
     return untrack(() => {

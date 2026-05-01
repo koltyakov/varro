@@ -731,6 +731,32 @@ describe('state helpers', () => {
     ]);
 
     expect(children.get('parent-1')?.map((entry) => entry.info.id)).toEqual(['child-1', 'child-2']);
+
+    stateModule.replaceMessages([
+      { info: assistantMessage('child-2', 'session-1', 20, 'subagent', 'parent-1'), parts: [] },
+      { info: assistantMessage('child-1', 'session-1', 10, 'subagent', 'parent-1'), parts: [] },
+    ]);
+
+    const cachedChildren = stateModule.getChildRunsByParentId(stateModule.state.messages);
+    expect(stateModule.getChildRunsByParentId(stateModule.state.messages)).toBe(cachedChildren);
+    expect(cachedChildren.get('parent-1')?.map((entry) => entry.info.id)).toEqual([
+      'child-1',
+      'child-2',
+    ]);
+
+    stateModule.setMessagesIncremental([
+      { info: assistantMessage('child-3', 'session-1', 5, 'subagent', 'parent-1'), parts: [] },
+      { info: assistantMessage('child-2', 'session-1', 20, 'subagent', 'parent-1'), parts: [] },
+      { info: assistantMessage('child-1', 'session-1', 10, 'subagent', 'parent-1'), parts: [] },
+    ]);
+
+    const updatedChildren = stateModule.getChildRunsByParentId(stateModule.state.messages);
+    expect(updatedChildren).not.toBe(cachedChildren);
+    expect(updatedChildren.get('parent-1')?.map((entry) => entry.info.id)).toEqual([
+      'child-3',
+      'child-1',
+      'child-2',
+    ]);
   });
 
   it('toggles local ui helpers and persists ui display preferences', async () => {
@@ -896,5 +922,90 @@ describe('state helpers', () => {
     const stateModule = await loadState();
 
     expect(stateModule.desktopSessionPaneSide()).toBe('right');
+  });
+
+  it('uses the default provider-limit poll interval when polling is enabled', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      providerLimitsDisabled: false,
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(120);
+    expect(stateModule.providerLimitThresholdPercent()).toBe(40);
+  });
+
+  it('reads provider-limit threshold percent from initial webview state', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      providerLimitThresholdPercent: 25,
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.providerLimitThresholdPercent()).toBe(25);
+  });
+
+  it('reads disabled provider-limit polling from initial webview state', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      providerLimitsDisabled: true,
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
+  });
+
+  it('keeps legacy disabled provider-limit polling state working', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      providerLimitPollIntervalSeconds: -1,
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
   });
 });

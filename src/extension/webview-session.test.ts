@@ -99,6 +99,9 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
       expandThinkingByDefault: false,
       showStickyUserPrompt: true,
       desktopSessionPaneSide: 'left' as const,
+      providerLimitPollIntervalSeconds: 120,
+      providerLimitThresholdPercent: 40,
+      providerLimitsDisabled: false,
     })),
     currentTheme: vi.fn(() => 'dark' as const),
     renderStatus: vi.fn(() => RUNNING_STATUS),
@@ -181,5 +184,21 @@ describe('WebviewSession', () => {
     secondHtml.resolve('<html>fresh</html>');
     await flushMicrotasks();
     expect(view.webview.html).toBe('<html>fresh</html>');
+  });
+
+  it('includes provider-limit poll interval in the initial webview state', async () => {
+    const { session, bridge } = createSession();
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerLimitPollIntervalSeconds: 120,
+        providerLimitThresholdPercent: 40,
+        providerLimitsDisabled: false,
+      })
+    );
   });
 });

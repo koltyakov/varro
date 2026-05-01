@@ -1,4 +1,4 @@
-import { Show, For } from 'solid-js';
+import { Show, For, createMemo } from 'solid-js';
 import {
   state,
   removeClipboardImage,
@@ -29,7 +29,7 @@ export function ContextBar() {
     !!activeFile() ||
     !!selection() ||
     !!terminalSelection();
-  const activeContext = () => {
+  const activeContext = createMemo(() => {
     const file = activeFile();
     if (!file) return null;
 
@@ -43,7 +43,7 @@ export function ContextBar() {
     const lineRange = formatContextLineRanges(uniqueSelectedLines);
 
     return { filename: getLeafPathName(file.relativePath), lineRange };
-  };
+  });
   const visibleFiles = () => files();
 
   return (
@@ -51,15 +51,20 @@ export function ContextBar() {
       <div class="flex items-center gap-1.5 px-3 py-1.5">
         <div class="flex flex-1 flex-wrap gap-1 overflow-hidden">
           <Show when={activeContext()}>
-            <ContextChip
-              label={activeContext()!.filename}
-              detail={activeContext()!.lineRange}
-              title={
-                activeContext()!.lineRange
-                  ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
-                  : activeContext()!.filename
-              }
-            />
+            {(context) => {
+              const current = context();
+              return (
+                <ContextChip
+                  label={current.filename}
+                  detail={current.lineRange}
+                  title={
+                    current.lineRange
+                      ? `${current.filename} ${current.lineRange}`
+                      : current.filename
+                  }
+                />
+              );
+            }}
           </Show>
           <Show when={terminalSelection()}>
             <ContextChip

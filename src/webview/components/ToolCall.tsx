@@ -1,4 +1,4 @@
-import { Show, For, createEffect, createSignal } from 'solid-js';
+import { Show, For, createEffect, createMemo, createSignal } from 'solid-js';
 import type { ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
@@ -155,27 +155,34 @@ export function ToolCall(props: { part: ToolPart }) {
   const expansionKey = () => getToolCallExpansionKey(tool());
   const [expanded, setExpanded] = createSignal(getToolCallExpanded(expansionKey()));
   const state = () => tool().state;
-  const toolSessionRootId = () => getSessionTreeRootId(tool().sessionID) || tool().sessionID;
-  const questionRequest = () =>
-    appState.questions.find(
+  const toolSessionRootId = createMemo(
+    () => getSessionTreeRootId(tool().sessionID) || tool().sessionID
+  );
+  const questionRequest = createMemo(() => {
+    const currentTool = tool();
+    const sessionRootId = toolSessionRootId();
+    return appState.questions.find(
       (request) =>
-        (getSessionTreeRootId(request.sessionID) || request.sessionID) === toolSessionRootId() &&
-        request.tool?.messageID === tool().messageID &&
-        request.tool?.callID === tool().callID
+        (getSessionTreeRootId(request.sessionID) || request.sessionID) === sessionRootId &&
+        request.tool?.messageID === currentTool.messageID &&
+        request.tool?.callID === currentTool.callID
     );
+  });
 
-  const isPermissionMemberMatch = (perm: (typeof appState.permissions)[number]) =>
-    getPermissionGroupMembers(perm).some(
-      (member) =>
-        (getSessionTreeRootId(member.sessionID) || member.sessionID) === toolSessionRootId() &&
-        member.messageID === tool().messageID &&
-        member.callID === tool().callID
+  const permissionRequest = createMemo(() => {
+    const currentTool = tool();
+    const sessionRootId = toolSessionRootId();
+    return appState.permissions.find((permission) =>
+      getPermissionGroupMembers(permission).some(
+        (member) =>
+          (getSessionTreeRootId(member.sessionID) || member.sessionID) === sessionRootId &&
+          member.messageID === currentTool.messageID &&
+          member.callID === currentTool.callID
+      )
     );
+  });
 
-  const permissionRequest = () =>
-    appState.permissions.find((perm) => isPermissionMemberMatch(perm));
-
-  const isPrimaryPermissionOwner = () => {
+  const isPrimaryPermissionOwner = createMemo(() => {
     const permission = permissionRequest();
     if (!permission) return false;
     const [primaryMember] = getPermissionGroupMembers(permission);
@@ -185,7 +192,7 @@ export function ToolCall(props: { part: ToolPart }) {
       primaryMember.messageID === tool().messageID &&
       primaryMember.callID === tool().callID
     );
-  };
+  });
 
   const filePath = () => {
     return getToolReadPath(tool().tool, state());
@@ -211,7 +218,7 @@ export function ToolCall(props: { part: ToolPart }) {
     return formatToolTitle(tool().tool, state());
   };
 
-  const preview = (): ToolPreview | null => {
+  const preview = createMemo<ToolPreview | null>(() => {
     const s = state();
     const input: Record<string, unknown> = (s.input || {}) as Record<string, unknown>;
     const keys = ['file_path', 'pattern', 'query', 'command', 'path'];
@@ -219,18 +226,18 @@ export function ToolCall(props: { part: ToolPart }) {
       if (typeof input[k] === 'string') return { text: String(input[k]).slice(0, 100), key: k };
     }
     return null;
-  };
+  });
 
-  const inputEntries = () => {
+  const inputEntries = createMemo(() => {
     const input = (state().input || {}) as Record<string, unknown>;
     const normalizedTitle = normalizedComparableText(title());
     return getVisibleInputEntries(input).filter(([key, value]) => {
       if (key !== 'description') return true;
       return normalizedComparableText(value) !== normalizedTitle;
     });
-  };
+  });
 
-  const truncatedOutput = () => {
+  const truncatedOutput = createMemo(() => {
     if (state().status !== 'completed') return '';
     const output = (state() as ToolStateCompleted).output || '';
     if (output.length <= 2000) return output;
@@ -241,7 +248,7 @@ export function ToolCall(props: { part: ToolPart }) {
       'k chars truncated) …\n\n' +
       output.slice(-1000)
     );
-  };
+  });
 
   createEffect(() => {
     setExpanded(getToolCallExpanded(expansionKey()));

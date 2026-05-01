@@ -318,6 +318,9 @@ describe('parseExtensionMessage', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: false,
           desktopSessionPaneSide: 'left',
+          providerLimitPollIntervalSeconds: 120,
+          providerLimitsDisabled: false,
+          providerLimitThresholdPercent: 35,
         },
       })
     ).toEqual({
@@ -326,6 +329,9 @@ describe('parseExtensionMessage', () => {
         expandThinkingByDefault: true,
         showStickyUserPrompt: false,
         desktopSessionPaneSide: 'left',
+        providerLimitPollIntervalSeconds: 120,
+        providerLimitsDisabled: false,
+        providerLimitThresholdPercent: 35,
       },
     });
 
@@ -335,5 +341,50 @@ describe('parseExtensionMessage', () => {
         payload: { expandThinkingByDefault: true, showStickyUserPrompt: false },
       })
     ).toBeNull();
+  });
+
+  it('parses disabled provider-limit polling in config/update', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: false,
+          desktopSessionPaneSide: 'left',
+          providerLimitsDisabled: true,
+        },
+      })
+    ).toEqual({
+      type: 'config/update',
+      payload: {
+        expandThinkingByDefault: true,
+        showStickyUserPrompt: false,
+        desktopSessionPaneSide: 'left',
+        providerLimitsDisabled: true,
+      },
+    });
+  });
+
+  it('maps legacy disabled provider-limit polling payloads to the boolean flag', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: false,
+          desktopSessionPaneSide: 'left',
+          providerLimitPollIntervalSeconds: -1,
+        },
+      })
+    ).toEqual({
+      type: 'config/update',
+      payload: {
+        expandThinkingByDefault: true,
+        showStickyUserPrompt: false,
+        desktopSessionPaneSide: 'left',
+        providerLimitPollIntervalSeconds: -1,
+        providerLimitsDisabled: true,
+      },
+    });
   });
 });

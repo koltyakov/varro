@@ -1,13 +1,13 @@
-import { readFile } from 'fs/promises';
+import * as fs from 'fs/promises';
 import type { ProviderLimitStatus, ServerStatus } from '../shared/protocol';
+import { readProviderLimitConfig } from './provider-limit-config';
+import { fetchProviderLimitFromAdapter } from './provider-limits';
 import type { OpenCodeServer } from './server';
 import {
-  buildProviderLimitProbe,
   extractOpenCodeConsoleLimit,
   extractOpenCodeProviderLimit,
   getOpenCodeAuthFilePath,
   parseProviderAuthStore,
-  parseProviderLimitHeaders,
   type ProviderAuthRecord,
   type ProviderMetadata,
 } from './util/provider-limit';
@@ -18,12 +18,20 @@ export class ProviderLimitService {
     unsupported: 60_000,
     error: 15_000,
   } as const;
+  private static readonly RATE_LIMIT_ERROR_CACHE_TTL_MS = 60_000;
+  private static readonly MAX_RATE_LIMIT_ERROR_CACHE_TTL_MS = 60 * 60_000;
   private static readonly CACHE_TTL_MS = 60_000;
 
   private readonly providerLimitCache = new Map<
     string,
     { expiresAt: number; promise: Promise<ProviderLimitStatus> }
   >();
+  private readonly providerAuthFailureCache = new Map<
+    string,
+    { credentialFingerprint: string; note: string }
+  >();
+  private readonly providerLastKnownGoodCache = new Map<string, AvailableProviderLimitStatus>();
+  private readonly providerRateLimitBackoff = new Map<string, number>();
   private providerMetadataPromise: Promise<ProviderMetadata[]> | null = null;
   private providerMetadataFetchedAt = 0;
   private providerAuthStorePromise: Promise<Record<string, ProviderAuthRecord>> | null = null;
@@ -33,6 +41,8 @@ export class ProviderLimitService {
 
   clearCache() {
     this.providerLimitCache.clear();
+    this.providerLastKnownGoodCache.clear();
+    this.providerRateLimitBackoff.clear();
   }
 
   shouldClearCache(previous: ServerStatus, next: ServerStatus) {
@@ -53,30 +63,53 @@ export class ProviderLimitService {
     const cached = this.providerLimitCache.get(cacheKey);
     if (cached && cached.expiresAt > now) return cached.promise;
 
-    const promise = this.load(providerID, modelID).catch((err) => {
-      if (this.providerLimitCache.get(cacheKey)?.promise === promise) {
-        this.providerLimitCache.delete(cacheKey);
-      }
-      throw err;
-    });
+    const loadPromise = this.load(providerID, modelID);
+    const promise = loadPromise
+      .then((result) => result.status)
+      .catch((err) => {
+        if (this.providerLimitCache.get(cacheKey)?.promise === promise) {
+          this.providerLimitCache.delete(cacheKey);
+        }
+        throw err;
+      });
 
     this.providerLimitCache.set(cacheKey, {
       expiresAt: Number.POSITIVE_INFINITY,
       promise,
     });
 
-    void promise
-      .then((status) => {
+    void loadPromise
+      .then((result) => {
         const cachedEntry = this.providerLimitCache.get(cacheKey);
         if (!cachedEntry || cachedEntry.promise !== promise) return;
-        cachedEntry.expiresAt = Date.now() + this.getProviderLimitCacheTtl(status);
+        cachedEntry.expiresAt =
+          Date.now() + this.getProviderLimitCacheTtl(cacheKey, result.ttlStatus);
+        if (result.rememberLastKnownGood && result.status.status === 'available') {
+          this.providerLastKnownGoodCache.set(cacheKey, result.status);
+        }
       })
       .catch(() => {});
     return promise;
   }
 
-  private getProviderLimitCacheTtl(status: ProviderLimitStatus) {
-    return ProviderLimitService.PROVIDER_LIMIT_CACHE_TTL_MS[status.status];
+  private getProviderLimitCacheTtl(cacheKey: string, status: ProviderLimitStatus) {
+    if (status.status !== 'error') {
+      this.providerRateLimitBackoff.delete(cacheKey);
+      if (isAuthFailureProviderStatus(status)) return 0;
+      return ProviderLimitService.PROVIDER_LIMIT_CACHE_TTL_MS[status.status];
+    }
+
+    if (!isRateLimitedProviderError(status)) {
+      this.providerRateLimitBackoff.delete(cacheKey);
+      return ProviderLimitService.PROVIDER_LIMIT_CACHE_TTL_MS.error;
+    }
+
+    const previousBackoff = this.providerRateLimitBackoff.get(cacheKey);
+    const nextBackoff = previousBackoff
+      ? Math.min(previousBackoff * 2, ProviderLimitService.MAX_RATE_LIMIT_ERROR_CACHE_TTL_MS)
+      : ProviderLimitService.RATE_LIMIT_ERROR_CACHE_TTL_MS;
+    this.providerRateLimitBackoff.set(cacheKey, nextBackoff);
+    return nextBackoff;
   }
 
   private pruneExpiredProviderLimitCache(now: number) {
@@ -87,87 +120,103 @@ export class ProviderLimitService {
     }
   }
 
-  private async load(providerID: string, modelID: string | null): Promise<ProviderLimitStatus> {
+  private async load(providerID: string, modelID: string | null): Promise<ProviderLimitLoadResult> {
+    const cacheKey = `${providerID}:${modelID || ''}`;
     const checkedAt = Date.now();
     const providers = await this.getProviderMetadata();
     const provider = providers.find((item) => item.id === providerID);
 
     if (!provider) {
-      return {
+      this.providerRateLimitBackoff.delete(`${providerID}:${modelID || ''}`);
+      return createProviderLimitLoadResult({
         providerID,
         modelID,
         status: 'error',
         source: 'opencode',
         checkedAt,
         note: 'Provider not found in OpenCode config',
-      };
+      });
     }
 
     const direct = extractOpenCodeProviderLimit(provider, modelID, checkedAt);
-    if (direct) return direct;
+    if (direct) return createProviderLimitLoadResult(direct, true);
 
     try {
       const rawConsole = await this.server.request('GET', '/experimental/console');
       const consoleLimit = extractOpenCodeConsoleLimit(rawConsole, providerID, modelID, checkedAt);
-      if (consoleLimit) return consoleLimit;
+      if (consoleLimit) return createProviderLimitLoadResult(consoleLimit, true);
     } catch {}
 
-    const authStore = await this.readProviderAuthStore();
-    const probe = buildProviderLimitProbe(provider, authStore);
-    if (!probe) {
-      return {
+    const cachedAuthFailure = this.providerAuthFailureCache.get(provider.id);
+    const authStore = await this.readProviderAuthStore(Boolean(cachedAuthFailure));
+    const credentialFingerprint = getProviderCredentialFingerprint(provider, authStore);
+    if (cachedAuthFailure?.credentialFingerprint === credentialFingerprint) {
+      return createProviderLimitLoadResult(
+        unsupportedProviderStatus(provider.id, modelID, checkedAt, cachedAuthFailure.note)
+      );
+    }
+
+    const providerLimitConfig = readProviderLimitConfig();
+    const providerLimit = await fetchProviderLimitFromAdapter(
+      {
+        provider,
+        authStore,
+        modelID,
+        checkedAt,
+      },
+      { enabledAdapterIDs: providerLimitConfig.enabledAdapters }
+    );
+    if (providerLimit && isAuthFailureProviderStatus(providerLimit)) {
+      this.providerAuthFailureCache.set(provider.id, {
+        credentialFingerprint,
+        note: providerLimit.note,
+      });
+    }
+    if (!providerLimit) {
+      return createProviderLimitLoadResult({
         providerID,
         modelID,
         status: 'unsupported',
         source: 'provider',
         checkedAt,
         note: 'No zero-cost provider quota endpoint is known for this provider',
-      };
-    }
-
-    try {
-      const response = await fetch(probe.url, {
-        headers: probe.headers,
-        signal: AbortSignal.timeout(10_000),
       });
-      const windows = parseProviderLimitHeaders(response.headers, checkedAt);
-      if (windows.length > 0) {
-        return {
-          providerID,
-          modelID,
-          status: 'available',
-          source: 'provider',
-          checkedAt,
-          windows,
-          note: 'Polled provider metadata headers',
-        };
-      }
-
-      return {
-        providerID,
-        modelID,
-        status: 'unsupported',
-        source: 'provider',
-        checkedAt,
-        note: response.ok
-          ? 'Provider metadata endpoint did not expose remaining limits'
-          : `Provider metadata endpoint returned ${response.status}`,
-      };
-    } catch {
-      return {
-        providerID,
-        modelID,
-        status: 'error',
-        source: 'provider',
-        checkedAt,
-        note: 'Failed to poll the provider metadata endpoint',
-      };
     }
+
+    return this.withLastKnownGoodFallback(cacheKey, {
+      ...providerLimit,
+      checkedAt,
+    });
   }
 
-  private async readProviderAuthStore() {
+  private withLastKnownGoodFallback(
+    cacheKey: string,
+    status: ProviderLimitStatus
+  ): ProviderLimitLoadResult {
+    if (status.status === 'available') {
+      return createProviderLimitLoadResult(status, true);
+    }
+    if (status.status !== 'error' || status.source !== 'provider') {
+      return createProviderLimitLoadResult(status);
+    }
+
+    const lastKnownGood = this.providerLastKnownGoodCache.get(cacheKey);
+    if (!lastKnownGood) return createProviderLimitLoadResult(status);
+
+    return {
+      status: {
+        ...lastKnownGood,
+        checkedAt: status.checkedAt,
+        note: formatLastKnownGoodNote(lastKnownGood.note, status.note),
+      },
+      ttlStatus: status,
+    };
+  }
+
+  private async readProviderAuthStore(forceFresh = false) {
     const now = Date.now();
     if (
+      !forceFresh &&
       this.providerAuthStorePromise &&
       now - this.providerAuthStoreFetchedAt < ProviderLimitService.CACHE_TTL_MS
     ) {
@@ -177,7 +226,7 @@ export class ProviderLimitService {
     this.providerAuthStoreFetchedAt = now;
     this.providerAuthStorePromise = (async () => {
       try {
-        const raw = await readFile(getOpenCodeAuthFilePath(), 'utf-8');
+        const raw = await fs.readFile(getOpenCodeAuthFilePath(), 'utf-8');
         return parseProviderAuthStore(raw);
       } catch {
         return {};
@@ -215,6 +264,84 @@ export class ProviderLimitService {
   }
 }
 
+type AvailableProviderLimitStatus = Extract<ProviderLimitStatus, { status: 'available' }>;
+
+type ProviderLimitLoadResult = {
+  status: ProviderLimitStatus;
+  ttlStatus: ProviderLimitStatus;
+  rememberLastKnownGood?: boolean;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function createProviderLimitLoadResult(
+  status: ProviderLimitStatus,
+  rememberLastKnownGood = false
+): ProviderLimitLoadResult {
+  return {
+    status,
+    ttlStatus: status,
+    rememberLastKnownGood: rememberLastKnownGood && status.status === 'available',
+  };
+}
+
+function isRateLimitedProviderError(status: ProviderLimitStatus) {
+  return status.status === 'error' && /\b429\b/.test(status.note);
+}
+
+function isAuthFailureProviderStatus(
+  status: ProviderLimitStatus
+): status is ProviderLimitStatus & { status: 'unsupported'; note: string } {
+  return status.status === 'unsupported' && /rejected credentials/i.test(status.note);
+}
+
+function unsupportedProviderStatus(
+  providerID: string,
+  modelID: string | null,
+  checkedAt: number,
+  note: string
+): ProviderLimitStatus {
+  return {
+    providerID,
+    modelID,
+    status: 'unsupported',
+    source: 'provider',
+    checkedAt,
+    note,
+  };
+}
+
+function formatLastKnownGoodNote(previousNote: string | undefined, errorNote: string) {
+  const fallbackNote = `Showing the last successful quota snapshot because the latest provider poll failed: ${errorNote}`;
+  return previousNote ? `${previousNote}. ${fallbackNote}` : fallbackNote;
+}
+
+function serializeProviderAuthStore(authStore: Record<string, ProviderAuthRecord>) {
+  return JSON.stringify(
+    Object.entries(authStore)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([providerID, auth]) =>
+        auth.type === 'oauth'
+          ? [providerID, auth.type, auth.access]
+          : [providerID, auth.type, auth.key]
+      )
+  );
+}
+
+function getProviderCredentialFingerprint(
+  provider: ProviderMetadata,
+  authStore: Record<string, ProviderAuthRecord>
+) {
+  return JSON.stringify({
+    providerID: provider.id,
+    authStore: JSON.parse(serializeProviderAuthStore(authStore)) as unknown,
+    apiKey: getProviderApiKey(provider),
+  });
+}
+
+function getProviderApiKey(provider: ProviderMetadata) {
+  const apiKey = asRecord(provider.options)?.apiKey;
+  return typeof apiKey === 'string' ? apiKey.trim() : '';
 }

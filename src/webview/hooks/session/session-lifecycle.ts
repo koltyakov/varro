@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
@@ -78,12 +79,14 @@ export class SessionLifecycleOperations {
   }
 
   readonly clearActiveSessionState = () => {
-    this.deps.resetTodoSync();
-    this.deps.resetToolCallExpansionState();
-    sessionStore.setActiveSessionId(null);
-    sessionStore.persistActiveSessionId(null);
-    sessionStore.clearMessages();
-    uiStore.stopLoading();
+    batch(() => {
+      this.deps.resetTodoSync();
+      this.deps.resetToolCallExpansionState();
+      sessionStore.setActiveSessionId(null);
+      sessionStore.persistActiveSessionId(null);
+      sessionStore.clearMessages();
+      uiStore.stopLoading();
+    });
   };
 
   readonly applySessions = (sessions: Session[]) => applySessions(this.lifecycleDeps, sessions);
@@ -123,34 +126,36 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[]) 
   const nextSessions = sortSessions(
     sessions.filter((session) => isSessionInWorkspace(session, deps.getCurrentWorkspacePath()))
   );
-  deps.setSessions(nextSessions);
+  batch(() => {
+    deps.setSessions(nextSessions);
 
-  if (
-    deps.getState().activeSessionId &&
-    !nextSessions.some((session) => session.id === deps.getState().activeSessionId)
-  ) {
-    deps.clearActiveSessionState();
-  }
+    const { activeSessionId } = deps.getState();
+    if (activeSessionId && !nextSessions.some((session) => session.id === activeSessionId)) {
+      deps.clearActiveSessionState();
+    }
+  });
 }
 
 export function clearDeletedSessionState(deps: LifecycleDependencies, id: string) {
-  deps.clearPendingAbort(id);
-  deps.removePermissionModeForSession(id);
-  deps.clearCurrentDocumentStateForSession(id);
-  deps.clearSelectedAgentForSession(id);
-  deps.clearSelectedMcpsForSession(id);
-  deps.clearSkippedPlanSession(id);
-  deps.clearSelectedModelForSession(id);
-  deps.clearSessionSeen(id);
-  deps.clearSessionStatusEntry(id);
-  deps.setSessionUsageLimit(id, null);
-  deps.setSessionFailed(id, false);
-  deps.filterQuestions((sessionId) => sessionId !== id);
-  deps.filterPermissions((sessionId) => sessionId !== id);
+  batch(() => {
+    deps.clearPendingAbort(id);
+    deps.removePermissionModeForSession(id);
+    deps.clearCurrentDocumentStateForSession(id);
+    deps.clearSelectedAgentForSession(id);
+    deps.clearSelectedMcpsForSession(id);
+    deps.clearSkippedPlanSession(id);
+    deps.clearSelectedModelForSession(id);
+    deps.clearSessionSeen(id);
+    deps.clearSessionStatusEntry(id);
+    deps.setSessionUsageLimit(id, null);
+    deps.setSessionFailed(id, false);
+    deps.filterQuestions((sessionId) => sessionId !== id);
+    deps.filterPermissions((sessionId) => sessionId !== id);
 
-  if (deps.getState().activeSessionId === id) {
-    deps.clearActiveSessionState();
-  }
+    if (deps.getState().activeSessionId === id) {
+      deps.clearActiveSessionState();
+    }
+  });
 }
 
 export function hideDeletedSessionTree(
@@ -160,10 +165,12 @@ export function hideDeletedSessionTree(
 ) {
   const deletedIds = getDeletedSessionTreeIds(id, sessions);
 
-  deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
-  for (const deletedId of deletedIds) {
-    clearDeletedSessionState(deps, deletedId);
-  }
+  batch(() => {
+    deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
+    for (const deletedId of deletedIds) {
+      clearDeletedSessionState(deps, deletedId);
+    }
+  });
 
   return deletedIds;
 }
@@ -198,11 +205,13 @@ export function removeDeletedSessionTree(
 ) {
   const deletedIds = getDeletedSessionTreeIds(id, sessions);
 
-  deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
+  batch(() => {
+    deps.setSessions(sessions.filter((session) => !deletedIds.has(session.id)));
 
-  for (const deletedId of deletedIds) {
-    clearDeletedSessionState(deps, deletedId);
-  }
+    for (const deletedId of deletedIds) {
+      clearDeletedSessionState(deps, deletedId);
+    }
+  });
 
   return deletedIds;
 }

@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import {
   isModelVisible,
@@ -36,9 +36,9 @@ export function SettingsPanel() {
 
   const routableAgents = () => state.allAgents.filter((agent) => agent.mode === 'subagent');
 
-  const normalizedQuery = () => query().trim().toLocaleLowerCase();
+  const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
 
-  const filteredProviders = () => {
+  const filteredProviders = createMemo(() => {
     const search = normalizedQuery();
 
     return state.providers
@@ -63,7 +63,7 @@ export function SettingsPanel() {
         };
       })
       .filter((entry) => entry.models.length > 0);
-  };
+  });
 
   function updateScrollbarInset() {
     if (!bodyRef) return;

@@ -12,7 +12,13 @@ import {
   isToolbarControlHidden,
   getSlashCommands,
 } from './ChatInput';
-import { setIsLoading, setState, setInputText } from '../lib/state';
+import {
+  setIsLoading,
+  setProviderLimitPollIntervalSeconds,
+  setProviderLimitThresholdPercent,
+  setState,
+  setInputText,
+} from '../lib/state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -37,11 +43,14 @@ afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
   setInputText('');
   setIsLoading(false);
+  setProviderLimitPollIntervalSeconds(120);
+  setProviderLimitThresholdPercent(40);
   setState('activeSessionId', null);
   setState('messages', []);
   setState('providers', []);
   setState('providerDefaults', {});
   setState('selectedModel', null);
+  setState('providerLimits', {});
   setState('clipboardImages', []);
   setState('droppedFiles', []);
 });
@@ -54,6 +63,154 @@ describe('ChatInput', () => {
     expect(() => {
       cleanup = render(() => ChatInput(), container!);
     }).not.toThrow();
+  });
+
+  it('hides provider-limit UI when polling is disabled', () => {
+    setProviderLimitPollIntervalSeconds(-1);
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-4o' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setState('providerLimits', {
+      'openai:gpt-4o': {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'daily',
+            label: 'Daily',
+            unit: 'requests',
+            remaining: 12,
+            limit: 50,
+            resetAt: null,
+          },
+        ],
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
+  });
+
+  it('hides provider-limit UI when no window crosses the threshold', () => {
+    setProviderLimitThresholdPercent(40);
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-4o' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setState('providerLimits', {
+      'openai:gpt-4o': {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 41,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'month',
+            label: 'Monthly Limit',
+            unit: 'requests',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
+  });
+
+  it('shows provider-limit UI when any window crosses the threshold', () => {
+    setProviderLimitThresholdPercent(40);
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-4o' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setState('providerLimits', {
+      'openai:gpt-4o': {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 39,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'month',
+            label: 'Monthly Limit',
+            unit: 'requests',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
   });
 });
 

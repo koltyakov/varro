@@ -2185,31 +2185,176 @@ body.vscode-light
 .toolbar-limit-chip {
   display: inline-flex;
   align-items: center;
+  gap: 2px;
   height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--color-vscode-border-soft);
-  background: color-mix(in srgb, var(--color-vscode-fg) 4%, var(--color-vscode-widget-bg));
-  color: var(--color-vscode-fg-soft);
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-vscode-fg-soft) 65%, transparent);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
   flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: color 0.1s;
+}
+
+.toolbar-limit-chip:hover {
+  color: var(--color-vscode-fg-soft);
+  background: transparent;
+}
+
+.toolbar-limit-chip:focus-visible {
+  outline: none;
+}
+
+.toolbar-limit-chip-prefix {
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  font-weight: 400;
+}
+
+.toolbar-limit-chip-value {
+  color: currentColor;
+}
+
+.toolbar-limit-chip.warning {
+  color: color-mix(in srgb, var(--color-vscode-warning) 75%, transparent);
+}
+
+.toolbar-limit-chip.warning:hover {
+  color: var(--color-vscode-warning);
+}
+
+.toolbar-limit-chip.error {
+  color: color-mix(in srgb, var(--color-vscode-error) 80%, transparent);
+}
+
+.toolbar-limit-chip.error:hover {
+  color: var(--color-vscode-error);
+}
+
+/* Provider limit popup */
+.provider-limit-popup {
+  position: absolute;
+  bottom: 100%;
+  right: -4px;
+  z-index: 50;
+  margin-bottom: 6px;
+  width: 240px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 6px;
+  border: 1px solid var(--color-vscode-border);
+  background: var(--color-vscode-widget-bg);
+  box-shadow: 0 -2px 12px color-mix(in srgb, var(--color-vscode-widget-shadow) 85%, transparent);
+  padding: 10px;
+  animation: fade-in 0.1s ease-out;
+  font-size: 11px;
   user-select: none;
   -webkit-user-select: none;
 }
 
-.toolbar-limit-chip.warning {
-  color: var(--color-vscode-warning);
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 35%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-warning) 10%, var(--color-vscode-widget-bg));
+.provider-limit-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
-.toolbar-limit-chip.error {
-  color: var(--color-vscode-error);
-  border-color: color-mix(in srgb, var(--color-vscode-error) 35%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-error) 10%, var(--color-vscode-widget-bg));
+.provider-limit-popup-title {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--color-vscode-fg);
+}
+
+.provider-limit-popup-empty {
+  color: var(--color-vscode-fg-soft);
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+.provider-limit-popup-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.provider-limit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-limit-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.provider-limit-row-label {
+  font-weight: 600;
+  color: var(--color-vscode-fg);
+}
+
+.provider-limit-row-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-vscode-fg-soft);
+}
+
+.provider-limit-row-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-vscode-fg-soft) 18%, transparent);
+  overflow: hidden;
+}
+
+.provider-limit-row-bar-fill {
+  height: 100%;
+  background: var(--color-vscode-fg-soft);
+  transition: width 0.2s ease;
+}
+
+.provider-limit-row-bar-fill.warning {
+  background: var(--color-vscode-warning);
+}
+
+.provider-limit-row-bar-fill.error {
+  background: var(--color-vscode-error);
+}
+
+.provider-limit-row-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-vscode-fg-soft);
+  font-size: 10.5px;
+}
+
+.provider-limit-row-sep {
+  margin: 0 3px;
+  opacity: 0.6;
+}
+
+.provider-limit-row-unit {
+  margin-left: 3px;
+  opacity: 0.7;
+}
+
+.provider-limit-row-reset {
+  opacity: 0.85;
+}
+
+.provider-limit-popup-model {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-vscode-border-soft);
+  color: var(--color-vscode-fg-soft);
+  font-size: 10.5px;
 }
 
 .toolbar-picker:hover {
@@ -2365,7 +2510,7 @@ body.vscode-light
 
 .chat-input-toolbars.compact-tight .toolbar-limit-chip {
   height: 22px;
-  padding: 0 7px;
+  padding: 0 5px;
   font-size: 10px;
 }
 
@@ -6895,6 +7040,11 @@ body.vscode-high-contrast-light
 .ralph-dashboard-btn-danger {
   border-color: color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
   color: var(--color-vscode-error);
+}
+
+.ralph-dashboard-btn-continue {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 45%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-warning) 70%, var(--color-vscode-fg));
 }
 
 .ralph-dashboard-meta {

@@ -997,6 +997,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
   const rootSessionId = (sessionId: string) => getSessionTreeRootId(sessionId) || sessionId;
+  const childSessionIdsByParent = new Map<string, string[]>();
   const permissionIds = new Set<string>();
   for (const permission of state.permissions) {
     permissionIds.add(permission.sessionID);
@@ -1012,7 +1013,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const attentionIds = new Set<string>();
   const planReadyIds = new Set<string>();
   const newlyCompletedIds = new Set<string>();
-  const descendantSubagentCountByRoot = new Map<string, number>();
+  const descendantSubagentCountBySession = new Map<string, number>();
   const isAwaitingInput = (sessionId: string) =>
     permissionIds.has(rootSessionId(sessionId)) || questionIds.has(rootSessionId(sessionId));
   const isFailed = (sessionId: string) =>
@@ -1026,11 +1027,9 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
 
   for (const session of sessions) {
     if (session.parentID) {
-      const rootId = rootSessionId(session.id);
-      descendantSubagentCountByRoot.set(
-        rootId,
-        (descendantSubagentCountByRoot.get(rootId) || 0) + 1
-      );
+      const existingChildren = childSessionIdsByParent.get(session.parentID);
+      if (existingChildren) existingChildren.push(session.id);
+      else childSessionIdsByParent.set(session.parentID, [session.id]);
     }
 
     const sessionId = session.id;
@@ -1068,9 +1067,21 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     newlyCompletedIds.add(sessionId);
   }
 
+  const countDescendants = (sessionId: string): number => {
+    const cachedCount = descendantSubagentCountBySession.get(sessionId);
+    if (cachedCount !== undefined) return cachedCount;
+
+    let count = 0;
+    for (const childId of childSessionIdsByParent.get(sessionId) || []) {
+      count += 1 + countDescendants(childId);
+    }
+
+    descendantSubagentCountBySession.set(sessionId, count);
+    return count;
+  };
+
   for (const session of sessions) {
-    const rootId = rootSessionId(session.id);
-    const count = descendantSubagentCountByRoot.get(rootId) || 0;
+    const count = countDescendants(session.id);
     if (count > 0) {
       subagentCounts.set(session.id, count);
     }

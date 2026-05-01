@@ -1,5 +1,7 @@
 import type { PermissionMode } from './protocol';
 
+export const RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT = 5;
+
 export type RalphStatus = 'running' | 'paused' | 'stopped' | 'done' | 'incomplete' | 'failed';
 
 /**

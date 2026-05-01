@@ -6,6 +6,7 @@ import type {
   RalphStopReason,
   RalphVerificationVerdict,
 } from '../../../shared/ralph';
+import { RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT } from '../../../shared/ralph';
 import { client, serverEvents } from '../../lib/client';
 import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
 import { ralphStore } from '../../lib/stores/ralph-store';
@@ -57,8 +58,13 @@ export const ralphRunner = {
     const run = ralphStore.getRun(managerSessionId);
     if (!run) return;
     if (run.status !== 'paused' && run.status !== 'failed' && run.status !== 'incomplete') return;
+    if (run.status === 'incomplete') {
+      ralphStore.addIterations(managerSessionId, RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT);
+    }
+    const resumedRun = ralphStore.getRun(managerSessionId);
+    if (!resumedRun) return;
     ralphStore.setStatus(managerSessionId, 'running');
-    await runLoop(run.config);
+    await runLoop(resumedRun.config);
   },
 
   reattachAll(): void {
@@ -270,6 +276,19 @@ async function sendPrompt(childId: string, prompt: string, config: RalphConfig):
   await client.session.sendAsync(childId, body);
 }
 
+async function sendPromptAndWaitForIdle(
+  state: ActiveRunState,
+  childId: string,
+  prompt: string,
+  config: RalphConfig
+): Promise<void> {
+  // Arm idle listeners before sending so a fast child can't emit `idle`
+  // between `sendAsync()` resolving and the wait subscription being attached.
+  const idlePromise = waitForIdle(state, childId);
+  await sendPrompt(childId, prompt, config);
+  await idlePromise;
+}
+
 async function runIterationUntilSettled(args: {
   config: RalphConfig;
   state: ActiveRunState;
@@ -281,8 +300,7 @@ async function runIterationUntilSettled(args: {
   const { config, state, childId, iterationIndex, startedAt, initialPrompt } = args;
 
   // 1) Run the iteration's primary work in the iteration child session.
-  await sendPrompt(childId, initialPrompt, config);
-  await waitForIdle(state, childId);
+  await sendPromptAndWaitForIdle(state, childId, initialPrompt, config);
 
   // 2) Parent dynamically requires verification (item 38). The verification
   //    command set is NOT hardcoded in the child's initial prompt; the
@@ -347,8 +365,7 @@ async function runVerificationOnSession(
   sessionId: string
 ): Promise<void> {
   const verificationPrompt = buildVerificationPrompt(config);
-  await sendPrompt(sessionId, verificationPrompt, config);
-  await waitForIdle(state, sessionId);
+  await sendPromptAndWaitForIdle(state, sessionId, verificationPrompt, config);
 }
 
 async function createRepairChildSession(

@@ -37,6 +37,10 @@ import type {
   ServerStatus,
   WebviewThemeKind,
 } from '../../shared/protocol';
+import {
+  readProviderLimitPollIntervalSeconds,
+  readProviderLimitThresholdPercent,
+} from '../../shared/provider-limit-config';
 import { mergeContextFile } from '../../shared/context-files';
 import type { UsageLimitNotice } from './usage-limit';
 import { isAbortedAssistantError } from './aborted';
@@ -109,6 +113,16 @@ export interface AppState {
 
 export const MAX_CLIPBOARD_IMAGES = 5;
 const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
+const EMPTY_SESSION_TREE_IDS: string[] = [];
+const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<
+  string,
+  Array<{ info: AssistantMessage; parts: Part[] }>
+>();
+const permissionGroupMemberCache = new WeakMap<Permission, PermissionGroupMember[]>();
+
+let cachedChildRunsByParentIdMessages: Array<{ info: Message; parts: Part[] }> | null = null;
+let cachedChildRunsByParentIdVersion = -1;
+let cachedChildRunsByParentId = EMPTY_CHILD_RUNS_BY_PARENT_ID;
 
 const defaultEditorContext: EditorContext = {
   workspacePath: null,
@@ -132,6 +146,10 @@ export interface AppStateInstance {
   setShowStickyUserPrompt: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
+  providerLimitPollIntervalSeconds: Accessor<number>;
+  setProviderLimitPollIntervalSeconds: Setter<number>;
+  providerLimitThresholdPercent: Accessor<number>;
+  setProviderLimitThresholdPercent: Setter<number>;
   inputText: Accessor<string>;
   setInputText: Setter<string>;
   nextPastedImageIndex: Accessor<number>;
@@ -244,6 +262,12 @@ export function createAppState(): AppStateInstance {
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
   );
+  const [providerLimitPollIntervalSeconds, setProviderLimitPollIntervalSeconds] = createSignal(
+    readProviderLimitPollIntervalSeconds(initialWebviewState)
+  );
+  const [providerLimitThresholdPercent, setProviderLimitThresholdPercent] = createSignal(
+    readProviderLimitThresholdPercent(initialWebviewState)
+  );
   const [inputText, setInputText] = createSignal('');
   const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
   const [isLoading, setIsLoading] = createSignal(false);
@@ -283,6 +307,10 @@ export function createAppState(): AppStateInstance {
     setShowStickyUserPrompt,
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
+    providerLimitPollIntervalSeconds,
+    setProviderLimitPollIntervalSeconds,
+    providerLimitThresholdPercent,
+    setProviderLimitThresholdPercent,
     inputText,
     setInputText,
     nextPastedImageIndex,
@@ -339,6 +367,11 @@ export const showStickyUserPrompt = defaultAppState.showStickyUserPrompt;
 export const setShowStickyUserPrompt = defaultAppState.setShowStickyUserPrompt;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
+export const providerLimitPollIntervalSeconds = defaultAppState.providerLimitPollIntervalSeconds;
+export const setProviderLimitPollIntervalSeconds =
+  defaultAppState.setProviderLimitPollIntervalSeconds;
+export const providerLimitThresholdPercent = defaultAppState.providerLimitThresholdPercent;
+export const setProviderLimitThresholdPercent = defaultAppState.setProviderLimitThresholdPercent;
 export const inputText = defaultAppState.inputText;
 export const setInputText = defaultAppState.setInputText;
 export const nextPastedImageIndex = defaultAppState.nextPastedImageIndex;
@@ -381,6 +414,8 @@ export function resetDefaultAppState() {
   setExpandThinkingByDefault(next.expandThinkingByDefault());
   setShowStickyUserPrompt(next.showStickyUserPrompt());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
+  setProviderLimitPollIntervalSeconds(next.providerLimitPollIntervalSeconds());
+  setProviderLimitThresholdPercent(next.providerLimitThresholdPercent());
   setInputText(next.inputText());
   setNextPastedImageIndex(next.nextPastedImageIndex());
   setIsLoading(next.isLoading());
@@ -515,10 +550,22 @@ function stableSerializePermissionValue(value: unknown): string {
 
 export function getPermissionGroupMembers(permission: Permission): PermissionGroupMember[] {
   if (permission.groupMembers?.length) {
-    return permission.groupMembers.map((member) => ({ ...member }));
+    return permission.groupMembers;
   }
 
-  return [
+  const cachedMembers = permissionGroupMemberCache.get(permission);
+  const cachedMember = cachedMembers?.[0];
+  if (
+    cachedMember &&
+    cachedMember.id === permission.id &&
+    cachedMember.sessionID === permission.sessionID &&
+    cachedMember.messageID === permission.messageID &&
+    cachedMember.callID === permission.callID
+  ) {
+    return cachedMembers;
+  }
+
+  const members = [
     {
       id: permission.id,
       sessionID: permission.sessionID,
@@ -526,6 +573,8 @@ export function getPermissionGroupMembers(permission: Permission): PermissionGro
       callID: permission.callID,
     },
   ];
+  permissionGroupMemberCache.set(permission, members);
+  return members;
 }
 
 export function getPermissionSignature(permission: Permission): string {
@@ -1510,30 +1559,30 @@ export function upsertMessageInfo(info: Message) {
 export function upsertPart(part: Part) {
   flushPendingStreamingDeltas();
   const msgId = (part as { messageID: string }).messageID;
-  setState(
-    'messages',
-    produce((msgs) => {
-      const idx = messageIndex.findMessageIndex(msgs, msgId);
-      if (idx === -1) return;
-      const location = messageIndex.findPartLocation(msgs, part.id);
-      if (location && location.msgIdx === idx) {
-        msgs[idx].parts[location.partIdx] = part;
-        return;
-      }
+  batch(() => {
+    setState(
+      'messages',
+      produce((msgs) => {
+        const idx = messageIndex.findMessageIndex(msgs, msgId);
+        if (idx === -1) return;
+        const location = messageIndex.findPartLocation(msgs, part.id);
+        if (location && location.msgIdx === idx) {
+          msgs[idx].parts[location.partIdx] = part;
+          return;
+        }
 
-      msgs[idx].parts.push(part);
-      messageIndex.appendPart(msgs, part.id, {
-        msgIdx: idx,
-        partIdx: msgs[idx].parts.length - 1,
-      });
-    })
-  );
-  if (state.streamingPartId === part.id) {
-    batch(() => {
+        msgs[idx].parts.push(part);
+        messageIndex.appendPart(msgs, part.id, {
+          msgIdx: idx,
+          partIdx: msgs[idx].parts.length - 1,
+        });
+      })
+    );
+    if (state.streamingPartId === part.id) {
       setState('streamingPartId', null);
       setState('streamingText', '');
-    });
-  }
+    }
+  });
 }
 
 export function updateMessagePart(part: Part) {
@@ -1606,25 +1655,25 @@ export function applyMessagePartDelta(
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
   flushPendingStreamingDeltas();
-  setState(
-    'messages',
-    produce((msgs) => {
-      const idx = messageIndex.findMessageIndex(msgs, messageId);
-      if (idx !== -1 && msgs[idx].info.sessionID === sessionId) {
-        const location = messageIndex.findPartLocation(msgs, partId);
-        if (location && location.msgIdx === idx) {
-          msgs[idx].parts.splice(location.partIdx, 1);
-          messageIndex.removePart(msgs, partId, location);
+  batch(() => {
+    setState(
+      'messages',
+      produce((msgs) => {
+        const idx = messageIndex.findMessageIndex(msgs, messageId);
+        if (idx !== -1 && msgs[idx].info.sessionID === sessionId) {
+          const location = messageIndex.findPartLocation(msgs, partId);
+          if (location && location.msgIdx === idx) {
+            msgs[idx].parts.splice(location.partIdx, 1);
+            messageIndex.removePart(msgs, partId, location);
+          }
         }
-      }
-    })
-  );
-  if (state.streamingPartId === partId) {
-    batch(() => {
+      })
+    );
+    if (state.streamingPartId === partId) {
       setState('streamingPartId', null);
       setState('streamingText', '');
-    });
-  }
+    }
+  });
 }
 
 export function addPermission(permission: Permission) {
@@ -1687,10 +1736,15 @@ export function clearStreamingState() {
 }
 
 export function clearMessages() {
-  replaceMessages([]);
-  setState('todos', []);
-  setState('diffs', []);
-  clearStreamingState();
+  streamingDeltaQueue.reset();
+  batch(() => {
+    setState('messages', []);
+    setState('todos', []);
+    setState('diffs', []);
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+  });
+  messageIndex.invalidate();
 }
 
 export function setSessionFailed(sessionId: string, failed: boolean) {
@@ -1725,7 +1779,7 @@ export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice
 }
 
 export function getSessionTreeIds(rootId: string | null | undefined, sessions = state.sessions) {
-  if (!rootId) return [];
+  if (!rootId) return EMPTY_SESSION_TREE_IDS;
   if (sessions === state.sessions) {
     return sessionTreeIndex.getTreeIds(rootId, state.sessions, state.sessionUsageLimits);
   }
@@ -1789,7 +1843,6 @@ export function setMessagesIncremental(
 ) {
   const current = state.messages;
   if (current === incoming) return;
-  clearStreamingState();
   if (current.length === 0 || incoming.length === 0) {
     replaceMessages(incoming);
     return;
@@ -1802,38 +1855,44 @@ export function setMessagesIncremental(
     return;
   }
 
-  setState(
-    'messages',
-    produce((msgs) => {
-      let changed = false;
-      for (let i = 0; i < incoming.length; i++) {
-        const next = incoming[i];
-        const nextEntry = mergeMessageEntry(msgs[i], next, options);
-        if (i < sharedPrefixLength) {
-          if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
-            msgs[i] = nextEntry;
-            changed = true;
-          }
-          continue;
-        }
+  streamingDeltaQueue.reset();
+  batch(() => {
+    if (state.streamingPartId !== null) setState('streamingPartId', null);
+    if (state.streamingText !== '') setState('streamingText', '');
 
-        if (i < msgs.length) {
-          if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
-            msgs[i] = nextEntry;
+    setState(
+      'messages',
+      produce((msgs) => {
+        let changed = false;
+        for (let i = 0; i < incoming.length; i++) {
+          const next = incoming[i];
+          const nextEntry = mergeMessageEntry(msgs[i], next, options);
+          if (i < sharedPrefixLength) {
+            if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
+              msgs[i] = nextEntry;
+              changed = true;
+            }
+            continue;
+          }
+
+          if (i < msgs.length) {
+            if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
+              msgs[i] = nextEntry;
+              changed = true;
+            }
+          } else {
+            msgs.push(nextEntry);
             changed = true;
           }
-        } else {
-          msgs.push(nextEntry);
+        }
+        if (msgs.length !== incoming.length) {
+          msgs.length = incoming.length;
           changed = true;
         }
-      }
-      if (msgs.length !== incoming.length) {
-        msgs.length = incoming.length;
-        changed = true;
-      }
-      if (changed) messageIndex.invalidate();
-    })
-  );
+        if (changed) messageIndex.invalidate();
+      })
+    );
+  });
 }
 
 function mergeMessageEntry(
@@ -1878,6 +1937,14 @@ function cloneValue<T>(value: T): T {
 export function getChildRunsByParentId(
   messages: Array<{ info: Message; parts: Part[] }>
 ): Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> {
+  if (
+    messages === state.messages &&
+    cachedChildRunsByParentIdMessages === messages &&
+    cachedChildRunsByParentIdVersion === messageStructureVersion()
+  ) {
+    return cachedChildRunsByParentId;
+  }
+
   const map = new Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>();
   for (const entry of messages) {
     if (entry.info.role !== 'assistant') continue;
@@ -1890,6 +1957,13 @@ export function getChildRunsByParentId(
   for (const children of map.values()) {
     children.sort((a, b) => a.info.time.created - b.info.time.created);
   }
+
+  if (messages === state.messages) {
+    cachedChildRunsByParentIdMessages = messages;
+    cachedChildRunsByParentIdVersion = messageStructureVersion();
+    cachedChildRunsByParentId = map;
+  }
+
   return map;
 }
 
