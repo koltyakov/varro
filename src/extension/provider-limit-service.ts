@@ -84,7 +84,7 @@ export class ProviderLimitService {
         if (!cachedEntry || cachedEntry.promise !== promise) return;
         cachedEntry.expiresAt =
           Date.now() + this.getProviderLimitCacheTtl(cacheKey, result.ttlStatus);
-        if (result.rememberLastKnownGood) {
+        if (result.rememberLastKnownGood && result.status.status === 'available') {
           this.providerLastKnownGoodCache.set(cacheKey, result.status);
         }
       })

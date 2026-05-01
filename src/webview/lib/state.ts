@@ -113,7 +113,7 @@ export interface AppState {
 
 export const MAX_CLIPBOARD_IMAGES = 5;
 const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
-const EMPTY_SESSION_TREE_IDS = Object.freeze([]) as string[];
+const EMPTY_SESSION_TREE_IDS: string[] = [];
 const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<
   string,
   Array<{ info: AssistantMessage; parts: Part[] }>

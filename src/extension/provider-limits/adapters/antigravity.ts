@@ -191,7 +191,7 @@ function selectBestAntigravityProcess(output: string) {
   return candidates[0] ?? null;
 }
 
-function parseAntigravityProcessLine(line: string) {
+function parseAntigravityProcessLine(line: string): AntigravityProcessInfo | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
 
@@ -215,13 +215,15 @@ function parseAntigravityProcessLine(line: string) {
     normalized.includes('exa.language_server_pb');
   if (!hasServerSignal) return null;
 
+  const extensionServerPort = parsePortNumber(
+    extractCommandArgument(commandLine, '--extension_server_port')
+  );
+
   return {
     pid,
     commandLine,
     csrfToken: extractCommandArgument(commandLine, '--csrf_token'),
-    extensionServerPort: parsePortNumber(
-      extractCommandArgument(commandLine, '--extension_server_port')
-    ),
+    extensionServerPort: extensionServerPort || null,
   } satisfies AntigravityProcessInfo;
 }
 
@@ -388,7 +390,7 @@ function extractAntigravityWindows(
   };
 }
 
-function buildAntigravityWindow(entry: unknown, checkedAt: number) {
+function buildAntigravityWindow(entry: unknown, checkedAt: number): ProviderLimitWindow | null {
   const record = asRecord(entry);
   const quotaInfo = asRecord(record?.quotaInfo);
   const modelID = getString(asRecord(record?.modelOrAlias)?.model);
