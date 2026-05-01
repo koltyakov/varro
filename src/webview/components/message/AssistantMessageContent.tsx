@@ -190,7 +190,6 @@ export function AssistantMessageContent(props: {
   let scrollContainerRef: HTMLDivElement | null = null;
   let viewportRafId = 0;
   let measurementRafId = 0;
-  let viewportObserver: ResizeObserver | null = null;
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const measuredItemHeights = new Map<string, number>();
   const [hasScrollContainer, setHasScrollContainer] = createSignal(false);
@@ -338,23 +337,31 @@ export function AssistantMessageContent(props: {
   onMount(() => {
     scrollContainerRef = flowRef?.closest('.interactive-list') as HTMLDivElement | null;
     setHasScrollContainer(!!scrollContainerRef);
-    if (!scrollContainerRef) return;
+  });
+
+  createEffect(() => {
+    if (!shouldVirtualizeParts() || !scrollContainerRef) {
+      cancelScheduledMeasurements();
+      return;
+    }
 
     const handleScroll = () => {
       scheduleViewportSample();
     };
 
     scrollContainerRef.addEventListener('scroll', handleScroll);
-    if (typeof ResizeObserver !== 'undefined') {
-      viewportObserver = new ResizeObserver(() => {
-        scheduleViewportSample();
-        scheduleVisibleItemMeasurement();
-      });
-      viewportObserver.observe(scrollContainerRef);
-      if (flowRef) viewportObserver.observe(flowRef);
-    }
+    const viewportObserver =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => {
+            scheduleViewportSample();
+            scheduleVisibleItemMeasurement();
+          });
+    viewportObserver?.observe(scrollContainerRef);
+    if (flowRef) viewportObserver?.observe(flowRef);
 
     queueMicrotask(() => {
+      if (!shouldVirtualizeParts()) return;
       sampleViewport();
       scheduleVisibleItemMeasurement();
     });
@@ -362,7 +369,6 @@ export function AssistantMessageContent(props: {
     onCleanup(() => {
       scrollContainerRef?.removeEventListener('scroll', handleScroll);
       viewportObserver?.disconnect();
-      viewportObserver = null;
       cancelScheduledMeasurements();
     });
   });

@@ -1,4 +1,4 @@
-import { createEffect, onCleanup } from 'solid-js';
+import { createEffect, on, onCleanup, untrack } from 'solid-js';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 
 type ProviderSelection = { providerID: string; modelID?: string | null };
@@ -52,37 +52,50 @@ export function registerProviderLimitRefreshEffect(deps: {
   getPollIntervalMs(): number;
   logError(context: string, err: unknown): void;
 }) {
-  createEffect(() => {
-    const visible = deps.isDocumentVisible();
-    if (deps.getServerState() !== 'running' || !deps.areProvidersLoaded() || !visible) return;
-    if (deps.getPollIntervalMs() < 0) return;
+  createEffect(
+    on(
+      () => {
+        const visible = deps.isDocumentVisible();
+        if (deps.getServerState() !== 'running' || !deps.areProvidersLoaded() || !visible)
+          return '';
+        if (deps.getPollIntervalMs() < 0) return '';
+        const active = deps.getActiveProviderSelection();
+        if (!active) return '';
+        return `${active.providerID}\u0000${active.modelID ?? ''}`;
+      },
+      (key) => {
+        if (!key) return;
+        const active = untrack(() => deps.getActiveProviderSelection());
+        if (!active) return;
+        const existingLimit = untrack(() =>
+          deps.getProviderLimit(active.providerID, active.modelID)
+        );
+        if (existingLimit?.status === 'unsupported') return;
 
-    const active = deps.getActiveProviderSelection();
-    if (!active) return;
-    const existingLimit = deps.getProviderLimit(active.providerID, active.modelID);
-    if (existingLimit?.status === 'unsupported') return;
+        let cancelled = false;
+        const refresh = async () => {
+          if (document.visibilityState !== 'visible') return;
+          try {
+            const limit = await deps.loadProviderLimit(active.providerID, active.modelID);
+            if (!cancelled) {
+              deps.setProviderLimit(active.providerID, active.modelID, limit);
+            }
+          } catch (err) {
+            deps.logError('loadProviderLimit', err);
+          }
+        };
 
-    let cancelled = false;
-    const refresh = async () => {
-      if (document.visibilityState !== 'visible') return;
-      try {
-        const limit = await deps.loadProviderLimit(active.providerID, active.modelID);
-        if (!cancelled) {
-          deps.setProviderLimit(active.providerID, active.modelID, limit);
-        }
-      } catch (err) {
-        deps.logError('loadProviderLimit', err);
+        void refresh();
+        const pollIntervalMs = untrack(() => deps.getPollIntervalMs());
+        const timer = window.setInterval(() => {
+          void refresh();
+        }, pollIntervalMs);
+
+        onCleanup(() => {
+          cancelled = true;
+          window.clearInterval(timer);
+        });
       }
-    };
-
-    void refresh();
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, deps.getPollIntervalMs());
-
-    onCleanup(() => {
-      cancelled = true;
-      window.clearInterval(timer);
-    });
-  });
+    )
+  );
 }

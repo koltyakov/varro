@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -188,7 +188,7 @@
         },
         "varro.chat.expandThinkingByDefault": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Expand thinking blocks by default in the chat view."
         },
         "varro.chat.showStickyUserPrompt": {
@@ -202,7 +202,7 @@
             "left",
             "right"
           ],
-          "default": "left",
+          "default": "right",
           "markdownDescription": "Choose which side shows the sessions pane on large screens in the Varro chat view."
         },
         "varro.chat.autoCompact": {

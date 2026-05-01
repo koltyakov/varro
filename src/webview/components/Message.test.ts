@@ -20,10 +20,21 @@ vi.mock('../hooks/useOpenCode', () => ({
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+let resizeObserverObserveMock: ReturnType<typeof vi.fn>;
+let resizeObserverDisconnectMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
+  originalResizeObserver = globalThis.ResizeObserver;
+  resizeObserverObserveMock = vi.fn();
+  resizeObserverDisconnectMock = vi.fn();
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe = resizeObserverObserveMock;
+    unobserve() {}
+    disconnect = resizeObserverDisconnectMock;
+  } as typeof ResizeObserver;
 });
 
 afterEach(() => {
@@ -31,6 +42,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  globalThis.ResizeObserver = originalResizeObserver;
   document.body.classList.remove('chat-image-preview-open');
   retryMessageMock.mockReset();
   resetToolCallExpansionState();
@@ -608,6 +620,33 @@ describe('Message streamed assistant text rendering', () => {
 });
 
 describe('Message assistant final answer rendering', () => {
+  it('does not attach assistant part observers for normal-sized assistant turns', async () => {
+    const host = document.createElement('div');
+    host.className = 'interactive-list';
+    host.appendChild(container!);
+    document.body.appendChild(host);
+
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-normal-observers'),
+          parts: [
+            reasoningPart('reason-1', 'Inspecting'),
+            textPart('text-1', 'Status update.'),
+            textPart('text-2', 'Final answer.'),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    await Promise.resolve();
+
+    expect(resizeObserverObserveMock).not.toHaveBeenCalled();
+
+    host.remove();
+  });
+
   it('shows the read mode toggle for large final answers', () => {
     cleanup = render(
       () =>
