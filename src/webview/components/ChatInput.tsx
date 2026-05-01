@@ -779,7 +779,7 @@ export function ChatInput() {
     const dataTransfer = e.dataTransfer;
     if (!dataTransfer) return;
 
-    // Snapshot File objects now — DataTransfer is invalidated after the drop
+    // Snapshot File objects now - DataTransfer is invalidated after the drop
     // event returns, so FileReader fallback later wouldn't see them otherwise.
     const droppedFiles = Array.from(dataTransfer.files || []);
 

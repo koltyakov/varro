@@ -278,7 +278,7 @@ describe('ralph runner iteration repair', () => {
       .mockResolvedValueOnce({ id: 'child-1' })
       .mockResolvedValueOnce({ id: 'repair-1' });
 
-    // Messages snapshot per session — keyed by sessionId so the order of
+    // Messages snapshot per session - keyed by sessionId so the order of
     // calls (work / verify / repair / verify) doesn't matter.
     const messagesBySession: Record<string, unknown[]> = {
       'child-1': [

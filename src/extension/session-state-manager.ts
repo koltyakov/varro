@@ -255,7 +255,7 @@ export class SessionStateManager {
 
   /**
    * Reinstate pending-attention entries from a previous session (after
-   * webview reload). Does not emit notifications — those were already
+   * webview reload). Does not emit notifications - those were already
    * shown in the prior run.
    */
   restoreBlockingRequests(snapshots: BlockingRequestSnapshot[]): void {

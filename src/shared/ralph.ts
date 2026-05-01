@@ -54,7 +54,7 @@ export type RalphIteration = {
   filesChanged: string[];
   /**
    * Verification verdicts reported by the iteration. Names are project-driven
-   * (e.g. `lint`, `test`, `build`, `typecheck`, `fmt`, `clippy`, `vet`) — the
+   * (e.g. `lint`, `test`, `build`, `typecheck`, `fmt`, `clippy`, `vet`) - the
    * model decides which checks the workspace supports and reports each by
    * name. Order is preserved as encountered in the model's report.
    */

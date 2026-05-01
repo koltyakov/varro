@@ -58,7 +58,7 @@ export function MessagePart(props: {
       case 'compaction':
         return (
           <div class="chat-compaction-notice">
-            — context compacted ({part.auto ? 'auto' : 'manual'})
+            - context compacted ({part.auto ? 'auto' : 'manual'})
             <Show when={part.overflow}> after overflow</Show>
           </div>
         );
@@ -86,11 +86,11 @@ function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {
         when={usageLimit()}
         fallback={
           <Show when={props.part.error?.data?.message}>
-            <span class="chat-retry-error">— {props.part.error!.data.message}</span>
+            <span class="chat-retry-error">- {props.part.error!.data.message}</span>
           </Show>
         }
       >
-        <span class="chat-retry-error">— usage limit reached</span>
+        <span class="chat-retry-error">- usage limit reached</span>
       </Show>
     </div>
   );

@@ -187,7 +187,7 @@ async function getStopReason(run: RalphRun): Promise<RalphStopReasonInternal | n
   // Block "soft" stop reasons (DONE marker or consecutive passes) while the
   // most recent completed iteration still has outstanding verification
   // failures. Plan/spec-driven runs must not exit while there are known
-  // verification gaps — a follow-up iteration needs to repair them first.
+  // verification gaps - a follow-up iteration needs to repair them first.
   if (planContent && planHasDoneMarker(planContent)) {
     if (hasOutstandingVerificationFailure) return null;
     return 'done_marker';
@@ -306,7 +306,7 @@ async function runIterationUntilSettled(args: {
 
   if (iteration.status !== 'failed') return iteration;
 
-  // 3) Verification failed — spawn a separate repair sub-agent (item 37).
+  // 3) Verification failed - spawn a separate repair sub-agent (item 37).
   //    The repair child session is filed under the same manager so its
   //    history doesn't pollute the iteration session.
   const repairSessionIds: string[] = [];
@@ -477,7 +477,7 @@ async function summarizeIteration(args: {
   try {
     // Walk the iteration's session tree so tokens from any sub-agents
     // spawned by the Task tool (and their nested sub-sub-agents) are
-    // accumulated into the iteration's totals — matching how the chat
+    // accumulated into the iteration's totals - matching how the chat
     // popup shows in/out for a session, but rolled up across the entire
     // iteration's work.
     const sessionIds = await collectIterationSessionIds(childId);
@@ -542,12 +542,12 @@ async function summarizeIteration(args: {
 }
 
 /**
- * Extract verdict lines from the model's report. Names are project-driven —
+ * Extract verdict lines from the model's report. Names are project-driven -
  * we accept any short token followed by `: PASS|FAIL|SKIPPED` (with optional
  * dash separator). Example matches: `lint: PASS`, `cargo build - FAIL`,
  * `mypy: SKIPPED`, `tc:pass`. The first verdict per name wins so a model
  * that re-reports a check after fixing it still shows the latest line as
- * authoritative — we walk top-to-bottom and keep the LAST occurrence.
+ * authoritative - we walk top-to-bottom and keep the LAST occurrence.
  */
 function parseVerificationVerdicts(text: string): RalphIteration['verification'] {
   const verdicts: RalphIteration['verification'] = {};
@@ -556,7 +556,7 @@ function parseVerificationVerdicts(text: string): RalphIteration['verification']
   // get parsed as a verdict. Allow a leading list marker (`- `, `* `, `1.`)
   // and bold/code wrappers (`**lint**`, `` `lint` ``).
   const lineRegex =
-    /^[ \t]*(?:[-*+]\s+|\d+[.)]\s+)?[`*_]*([a-z][a-z0-9 _./+-]{0,30}?)[`*_]*\s*[:\-—]\s*(pass|fail|skipped)\b/gim;
+    /^[ \t]*(?:[-*+]\s+|\d+[.)]\s+)?[`*_]*([a-z][a-z0-9 _./+-]{0,30}?)[`*_]*\s*[:\--]\s*(pass|fail|skipped)\b/gim;
   for (const match of text.matchAll(lineRegex)) {
     const rawName = match[1];
     const verdict = match[2];

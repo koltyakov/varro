@@ -9,7 +9,7 @@ import type { RalphConfig, RalphIteration } from '../../../shared/ralph';
 const VERIFICATION_EXAMPLES = 'lint, test, build, typecheck, fmt';
 
 const GENERIC_VERIFICATION_INSTRUCTION =
-  'Inspect the workspace and run whatever verification commands the project supports — for example linting, tests, builds, typechecking, formatting, or language-specific checks (npm/pnpm scripts, cargo, pytest, go test/vet, mypy, etc.). Skip any verification the project does not configure. Do not invent checks the project does not support.';
+  'Inspect the workspace and run whatever verification commands the project supports - for example linting, tests, builds, typechecking, formatting, or language-specific checks (npm/pnpm scripts, cargo, pytest, go test/vet, mypy, etc.). Skip any verification the project does not configure. Do not invent checks the project does not support.';
 
 export const DEFAULT_RALPH_PROMPT_TEMPLATE = `You are iteration {{iteration}} of {{totalIterations}} in a Ralph loop driven from a plan document.
 
@@ -25,10 +25,10 @@ Your task this iteration:
 1. Read the plan document at {{planPath}}.
 2. Pick the smallest reasonable next chunk from it. Do not attempt the whole plan.
 3. Implement the chunk with concrete code edits.
-4. Update the plan document — mark the chunk as done (e.g., flip [ ] to [x]) and add a one-line note if useful.
+4. Update the plan document - mark the chunk as done (e.g., flip [ ] to [x]) and add a one-line note if useful.
 5. End with a short summary of what you changed.
 
-The Ralph manager will request verification commands separately after this turn — do not run verification yourself unless you need it to confirm the work is correct.
+The Ralph manager will request verification commands separately after this turn - do not run verification yourself unless you need it to confirm the work is correct.
 
 Constraints:
 - Do not exceed roughly 30 minutes of work.
@@ -110,9 +110,9 @@ export function buildVerificationPrompt(_config: RalphConfig): string {
   return [
     'The Ralph manager is requesting verification for the work you just completed.',
     GENERIC_VERIFICATION_INSTRUCTION,
-    'Report each verification on its own line in the form `<name>: PASS`, `<name>: FAIL — <one-line cause>`, or `<name>: SKIPPED — <reason>`.',
+    'Report each verification on its own line in the form `<name>: PASS`, `<name>: FAIL - <one-line cause>`, or `<name>: SKIPPED - <reason>`.',
     `Use short, lowercase names that describe the check (examples: ${VERIFICATION_EXAMPLES}).`,
-    'Do not start new plan work in this turn — only run verifications and report verdicts.',
+    'Do not start new plan work in this turn - only run verifications and report verdicts.',
   ].join('\n');
 }
 
@@ -145,7 +145,7 @@ export function buildRepairSubAgentPrompt(args: {
     'Your task:',
     '1. Diagnose the failing verification(s) using the workspace and the iteration summary above.',
     '2. Apply the minimal code edits required to fix them. Do not start a new plan chunk; only repair the iteration just completed.',
-    `3. Re-run verification. ${GENERIC_VERIFICATION_INSTRUCTION} Report each result on its own line in the form \`<name>: PASS\`, \`<name>: FAIL — <one-line cause>\`, or \`<name>: SKIPPED — <reason>\`. Use short, lowercase names (examples: ${VERIFICATION_EXAMPLES}).`,
+    `3. Re-run verification. ${GENERIC_VERIFICATION_INSTRUCTION} Report each result on its own line in the form \`<name>: PASS\`, \`<name>: FAIL - <one-line cause>\`, or \`<name>: SKIPPED - <reason>\`. Use short, lowercase names (examples: ${VERIFICATION_EXAMPLES}).`,
     '4. End with a short summary of the fix.',
     '',
     'Do not ask questions; you have full permission to read, edit, and run shell commands.',

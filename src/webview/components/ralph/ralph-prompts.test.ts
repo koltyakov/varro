@@ -129,7 +129,7 @@ describe('ralph prompt helpers', () => {
     expect(message).toContain('Permission mode: full');
     expect(message).toContain('Model: openai/gpt-5.4 (high)');
     expect(message).toMatch(/Verification: /);
-    // No hardcoded command list — the model is asked to detect what the
+    // No hardcoded command list - the model is asked to detect what the
     // project supports.
     expect(message).not.toContain('npm run');
   });
@@ -145,7 +145,7 @@ describe('parent-driven verification prompts', () => {
     expect(prompt).not.toContain('npm run test');
     expect(prompt).toMatch(/lint/i);
     expect(prompt).toMatch(/test/i);
-    // No fixed name list — the model picks short names that fit the project.
+    // No fixed name list - the model picks short names that fit the project.
     expect(prompt).not.toMatch(/Use the names:/);
     expect(prompt).toMatch(/short, lowercase names/i);
   });

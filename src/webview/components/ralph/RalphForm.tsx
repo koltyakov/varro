@@ -333,7 +333,7 @@ export function RalphForm() {
                 class="ralph-form-toggle"
                 onClick={() => setShowAdvanced(!showAdvanced())}
               >
-                {showAdvanced() ? '▾' : '▸'} Advanced — loop prompt template
+                {showAdvanced() ? '▾' : '▸'} Advanced - loop prompt template
               </button>
               <Show when={showAdvanced()}>
                 <Field label="Prompt template">

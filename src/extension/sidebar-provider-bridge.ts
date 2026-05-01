@@ -59,7 +59,7 @@ export class SidebarProviderBridge {
     const cssContent = cssResult.status === 'fulfilled' ? cssResult.value : '';
 
     if (scriptResult.status !== 'fulfilled') {
-      logger.warn('webview.js not found — run `npm run build:webview` first');
+      logger.warn('webview.js not found - run `npm run build:webview` first');
       return { scriptContent, cssContent };
     }
 

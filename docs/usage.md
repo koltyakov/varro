@@ -254,20 +254,20 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 
 Server:
 
-- `varro.server.autoStart` — auto-start `opencode serve` when Varro first needs it
-- `varro.server.port` — port used for the local OpenCode server (default `4096`)
-- `varro.server.command` — optional path to the OpenCode CLI executable
+- `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it
+- `varro.server.port` - port used for the local OpenCode server (default `4096`)
+- `varro.server.command` - optional path to the OpenCode CLI executable
 
 Context:
 
-- `varro.context.autoAttachFile` — include the active editor file in live context
-- `varro.context.autoAttachSelection` — include the current editor selection in live context
+- `varro.context.autoAttachFile` - include the active editor file in live context
+- `varro.context.autoAttachSelection` - include the current editor selection in live context
 
 Chat view:
 
-- `varro.chat.expandThinkingByDefault` — expand reasoning/thinking blocks by default
-- `varro.chat.showStickyUserPrompt` — show a sticky preview of the latest user prompt while scrolling long assistant responses
-- `varro.chat.desktopSessionPaneSide` — on large screens, show the sessions pane on the `left` or `right`
+- `varro.chat.expandThinkingByDefault` - expand reasoning/thinking blocks by default
+- `varro.chat.showStickyUserPrompt` - show a sticky preview of the latest user prompt while scrolling long assistant responses
+- `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`
 
 There are also hidden debug settings used in development builds:
 
