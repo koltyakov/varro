@@ -287,6 +287,65 @@ describe('ralph runner stop conditions', () => {
 });
 
 describe('ralph runner iteration repair', () => {
+  it('does not get stuck when the child session becomes idle before sendAsync resolves', async () => {
+    const { ralphRunner, ralphStore } = await loadRunnerModules();
+    const config = createConfig({ iterations: 1 });
+
+    readWorkspaceFile.mockResolvedValue('# Plan\n- [x] all done');
+    createSession.mockResolvedValueOnce({ id: 'child-1' });
+    sessionMessages.mockResolvedValue([
+      {
+        info: { role: 'assistant' },
+        parts: [
+          { type: 'text', text: 'Finished quickly.\nlint: PASS\ntypecheck: PASS\ntest: PASS' },
+        ],
+      },
+    ]);
+
+    const idleListeners: Array<(data: { properties?: { sessionID?: string } }) => void> = [];
+    const statusListeners: Array<
+      (data: { properties?: { sessionID?: string; status?: { type?: string } } }) => void
+    > = [];
+    serverEventsOn.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+      if (event === 'session.idle') {
+        idleListeners.push(handler as (data: { properties?: { sessionID?: string } }) => void);
+      }
+      if (event === 'session.status') {
+        statusListeners.push(
+          handler as (data: {
+            properties?: { sessionID?: string; status?: { type?: string } };
+          }) => void
+        );
+      }
+      return () => {};
+    });
+
+    sendAsync.mockImplementation(async (sid: string) => {
+      const idleEvent = { properties: { sessionID: sid } };
+      const statusEvent = { properties: { sessionID: sid, status: { type: 'idle' } } };
+      for (const listener of idleListeners) listener(idleEvent);
+      for (const listener of statusListeners) listener(statusEvent);
+    });
+
+    await ralphRunner.start(config);
+
+    const run = ralphStore.getRun(config.managerSessionId);
+    expect(run?.status).toBe('done');
+    expect(run?.stopReason).toBe('iteration_limit');
+    expect(run?.iterations).toHaveLength(1);
+    expect(run?.iterations[0]).toEqual(
+      expect.objectContaining({
+        status: 'passed',
+        childSessionId: 'child-1',
+        verification: {
+          lint: 'pass',
+          typecheck: 'pass',
+          test: 'pass',
+        },
+      })
+    );
+  });
+
   it('sends parent-driven verification follow-up and spawns a repair sub-agent on failure', async () => {
     const { ralphRunner, ralphStore } = await loadRunnerModules();
     const config = createConfig({ iterations: 1 });
