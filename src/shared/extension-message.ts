@@ -127,6 +127,12 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
           expandThinkingByDefault: payload.expandThinkingByDefault,
           showStickyUserPrompt: payload.showStickyUserPrompt,
           desktopSessionPaneSide: payload.desktopSessionPaneSide,
+          ...(typeof payload.providerLimitPollIntervalSeconds === 'number' &&
+          Number.isFinite(payload.providerLimitPollIntervalSeconds)
+            ? {
+                providerLimitPollIntervalSeconds: payload.providerLimitPollIntervalSeconds,
+              }
+            : {}),
           ...(payload.providerLimitsDisabled === undefined
             ? {}
             : {

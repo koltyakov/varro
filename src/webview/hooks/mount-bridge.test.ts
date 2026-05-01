@@ -18,6 +18,7 @@ const {
   setExpandThinkingByDefaultPreference,
   setShowStickyUserPromptPreference,
   setDesktopSessionPaneSide,
+  setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
 } = vi.hoisted(() => ({
   setState: vi.fn(),
@@ -34,6 +35,7 @@ const {
   setExpandThinkingByDefaultPreference: vi.fn(),
   setShowStickyUserPromptPreference: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
+  setProviderLimitPollIntervalSeconds: vi.fn(),
   setProviderLimitThresholdPercent: vi.fn(),
 }));
 
@@ -59,6 +61,7 @@ vi.mock('../lib/state', async () => {
     setExpandThinkingByDefaultPreference,
     setShowStickyUserPromptPreference,
     setDesktopSessionPaneSide,
+    setProviderLimitPollIntervalSeconds,
     setProviderLimitThresholdPercent,
   };
 });
@@ -293,6 +296,7 @@ describe('mount bridge helpers', () => {
         expandThinkingByDefault: true,
         showStickyUserPrompt: true,
         desktopSessionPaneSide: 'right',
+        providerLimitPollIntervalSeconds: 90,
         providerLimitsDisabled: false,
         providerLimitThresholdPercent: 25,
       },
@@ -306,6 +310,7 @@ describe('mount bridge helpers', () => {
     });
     expect(setError).toHaveBeenCalledWith(null);
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
+    expect(setProviderLimitPollIntervalSeconds).toHaveBeenCalledWith(90);
     expect(setProviderLimitThresholdPercent).toHaveBeenCalledWith(25);
   });
 

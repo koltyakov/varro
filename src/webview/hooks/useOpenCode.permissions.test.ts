@@ -43,13 +43,14 @@ describe('useOpenCode permission and config flows', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
+          providerLimitPollIntervalSeconds: 90,
           providerLimitsDisabled: false,
           providerLimitThresholdPercent: 25,
         },
       });
 
       expect(stateModule.desktopSessionPaneSide()).toBe('right');
-      expect(stateModule.providerLimitPollIntervalSeconds()).toBe(120);
+      expect(stateModule.providerLimitPollIntervalSeconds()).toBe(90);
       expect(stateModule.providerLimitThresholdPercent()).toBe(25);
     } finally {
       dispose();
@@ -133,6 +134,58 @@ describe('useOpenCode permission and config flows', () => {
       });
 
       expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('re-enables provider-limit polling from poll interval config updates', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: true,
+          desktopSessionPaneSide: 'right',
+          providerLimitPollIntervalSeconds: -1,
+        },
+      });
+      expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
+
+      bridgeHandler({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: true,
+          desktopSessionPaneSide: 'right',
+          providerLimitPollIntervalSeconds: 120,
+        },
+      });
+
+      expect(stateModule.providerLimitPollIntervalSeconds()).toBe(120);
     } finally {
       dispose();
     }

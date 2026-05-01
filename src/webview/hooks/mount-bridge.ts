@@ -40,13 +40,14 @@ export function createMountBridgeOperations(deps: {
           }
           if (
             payload.providerLimitsDisabled !== undefined ||
-            payload.providerLimitPollIntervalSeconds === -1
+            payload.providerLimitPollIntervalSeconds !== undefined
           ) {
             uiStore.setProviderLimitPollIntervalSeconds(
-              payload.providerLimitsDisabled === true ||
-                payload.providerLimitPollIntervalSeconds === -1
-                ? -1
-                : 120
+              payload.providerLimitPollIntervalSeconds !== undefined
+                ? payload.providerLimitPollIntervalSeconds
+                : payload.providerLimitsDisabled === true
+                  ? -1
+                  : 120
             );
           }
         },
