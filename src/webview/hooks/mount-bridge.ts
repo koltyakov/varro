@@ -35,6 +35,20 @@ export function createMountBridgeOperations(deps: {
           uiStore.setExpandThinkingByDefaultPreference(payload.expandThinkingByDefault);
           uiStore.setShowStickyUserPromptPreference(payload.showStickyUserPrompt);
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
+          if (payload.providerLimitThresholdPercent !== undefined) {
+            uiStore.setProviderLimitThresholdPercent(payload.providerLimitThresholdPercent);
+          }
+          if (
+            payload.providerLimitsDisabled !== undefined ||
+            payload.providerLimitPollIntervalSeconds === -1
+          ) {
+            uiStore.setProviderLimitPollIntervalSeconds(
+              payload.providerLimitsDisabled === true ||
+                payload.providerLimitPollIntervalSeconds === -1
+                ? -1
+                : 120
+            );
+          }
         },
         getPreviousActiveFilePath: () => appStore.state.editorContext.activeFile?.path ?? null,
         getCurrentWorkspacePath: deps.getCurrentWorkspacePath,

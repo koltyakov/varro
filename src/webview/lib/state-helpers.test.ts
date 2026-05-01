@@ -897,4 +897,89 @@ describe('state helpers', () => {
 
     expect(stateModule.desktopSessionPaneSide()).toBe('right');
   });
+
+  it('uses the default provider-limit poll interval when polling is enabled', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      providerLimitsDisabled: false,
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(120);
+    expect(stateModule.providerLimitThresholdPercent()).toBe(40);
+  });
+
+  it('reads provider-limit threshold percent from initial webview state', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      providerLimitThresholdPercent: 25,
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.providerLimitThresholdPercent()).toBe(25);
+  });
+
+  it('reads disabled provider-limit polling from initial webview state', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      providerLimitsDisabled: true,
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
+  });
+
+  it('keeps legacy disabled provider-limit polling state working', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      theme: 'dark',
+      serverStatus: { state: 'stopped' },
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      terminalSelection: null,
+      droppedFiles: [],
+      emptyStateLogoUri: '',
+      providerLimitPollIntervalSeconds: -1,
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
+  });
 });

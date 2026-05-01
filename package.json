@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.12.0",
+  "version": "0.14.0",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -228,6 +228,33 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically include the current selection in live editor context"
+        },
+        "varro.providerLimits.enabledAdapters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "anthropic",
+            "github-copilot",
+            "openrouter",
+            "zai",
+            "minimax",
+            "openai"
+          ],
+          "markdownDescription": "Allowlist of provider-limit adapters Varro may poll. Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity). Defaults to `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, and `openai`."
+        },
+        "varro.providerLimits.disabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Disable provider-limit polling and hide provider-limit UI."
+        },
+        "varro.providerLimits.thresholdPercent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 40,
+          "markdownDescription": "Show provider-limit UI only when at least one provider-limit window has this remaining percent or less."
         },
         "varro.debug.simulateMissingCli": {
           "hidden": true,

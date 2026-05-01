@@ -5,21 +5,26 @@ import {
   formatContextLimit,
   formatLabelWithProvider,
   formatProviderLimitCompact,
+  formatProviderLimitCompactPrefix,
   formatProviderLimitTitle,
   formatVariantInitial,
   formatVariantLabel,
+  hasProviderLimitWindowWithinThreshold,
   getProviderLimitTone,
+  getOrderedProviderLimitWindows,
   getPrimaryProviderLimitWindow,
+  resolveProviderLimitWindow,
 } from './format';
 
 function availableLimit(
   windows: Array<{
     id: string;
     label: string;
-    unit: 'requests' | 'tokens' | 'messages' | 'credits' | 'unknown';
+    unit: 'requests' | 'tokens' | 'messages' | 'credits' | 'usd' | 'unknown';
     remaining: number;
     limit: number | null;
     resetAt: number | null;
+    percent?: number | null;
   }>
 ) {
   return {
@@ -146,11 +151,140 @@ describe('format helpers', () => {
       },
     ]);
 
-    expect(formatProviderLimitCompact(limit)).toBe('12 req');
+    expect(formatProviderLimitCompactPrefix(limit)).toBe('D');
+    expect(formatProviderLimitCompact(limit)).toBe('24%');
     expect(formatProviderLimitTitle(limit, 60_000)).toBe('Requests: 12 / 50 left, resets in 1m');
   });
 
-  it('formats compact provider badges for each supported unit and fallback', () => {
+  it('derives period prefixes for weekly and monthly windows', () => {
+    expect(
+      formatProviderLimitCompactPrefix(
+        availableLimit([
+          {
+            id: 'seven_day',
+            label: 'Weekly All-Model',
+            unit: 'requests',
+            remaining: 68,
+            limit: 100,
+            resetAt: null,
+          },
+        ])
+      )
+    ).toBe('W');
+
+    expect(
+      formatProviderLimitCompactPrefix(
+        availableLimit([
+          {
+            id: 'monthly_limit',
+            label: 'Monthly Limit',
+            unit: 'credits',
+            remaining: 40,
+            limit: 100,
+            resetAt: null,
+          },
+        ])
+      )
+    ).toBe('M');
+
+    expect(
+      formatProviderLimitCompactPrefix(
+        availableLimit([
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 60,
+            limit: 100,
+            resetAt: null,
+          },
+        ])
+      )
+    ).toBe('5H');
+  });
+
+  it('resolves the selected window and overrides when another has lower remaining', () => {
+    const limit = availableLimit([
+      {
+        id: 'five_hour',
+        label: '5-Hour Limit',
+        unit: 'requests',
+        remaining: 80,
+        limit: 100,
+        resetAt: null,
+      },
+      {
+        id: 'seven_day',
+        label: 'Weekly All-Model',
+        unit: 'requests',
+        remaining: 60,
+        limit: 100,
+        resetAt: null,
+      },
+      {
+        id: 'monthly_limit',
+        label: 'Monthly Limit',
+        unit: 'requests',
+        remaining: 90,
+        limit: 100,
+        resetAt: null,
+      },
+    ]);
+
+    // Selection respected when no smaller-remaining window exists.
+    expect(resolveProviderLimitWindow(limit, 'seven_day')?.id).toBe('seven_day');
+
+    // Auto-override: monthly selected, but weekly has lower remaining percent.
+    expect(resolveProviderLimitWindow(limit, 'monthly_limit')?.id).toBe('seven_day');
+
+    // Explicit selection on current quota data is shown immediately; fresh data may override later.
+    expect(resolveProviderLimitWindow(limit, 'monthly_limit', limit.checkedAt)?.id).toBe(
+      'monthly_limit'
+    );
+
+    // No selection falls back to the narrowest period window.
+    expect(resolveProviderLimitWindow(limit, null)?.id).toBe('five_hour');
+
+    // Unknown selection falls back to the narrowest period window.
+    expect(resolveProviderLimitWindow(limit, 'does_not_exist')?.id).toBe('five_hour');
+  });
+
+  it('orders provider limit windows by narrowest period first', () => {
+    const limit = availableLimit([
+      {
+        id: 'monthly_limit',
+        label: 'Monthly Limit',
+        unit: 'requests',
+        remaining: 1,
+        limit: 100,
+        resetAt: null,
+      },
+      {
+        id: 'seven_day',
+        label: 'Weekly All-Model',
+        unit: 'requests',
+        remaining: 1,
+        limit: 100,
+        resetAt: null,
+      },
+      {
+        id: 'five_hour',
+        label: '5-Hour Limit',
+        unit: 'requests',
+        remaining: 80,
+        limit: 100,
+        resetAt: null,
+      },
+    ]);
+
+    expect(getOrderedProviderLimitWindows(limit).map((window) => window.id)).toEqual([
+      'five_hour',
+      'seven_day',
+      'monthly_limit',
+    ]);
+  });
+
+  it('formats compact provider badges as remaining percent across units', () => {
     expect(
       formatProviderLimitCompact(
         availableLimit([
@@ -164,7 +298,7 @@ describe('format helpers', () => {
           },
         ])
       )
-    ).toBe('1k tok');
+    ).toBe('60%');
 
     expect(
       formatProviderLimitCompact(
@@ -179,8 +313,25 @@ describe('format helpers', () => {
           },
         ])
       )
-    ).toBe('9.4 msg');
+    ).toBe('94%');
 
+    expect(
+      formatProviderLimitCompact(
+        availableLimit([
+          {
+            id: 'usd',
+            label: 'USD',
+            unit: 'usd',
+            remaining: 12.5,
+            limit: 40,
+            resetAt: null,
+          },
+        ])
+      )
+    ).toBe('31%');
+  });
+
+  it('falls back to remaining count when no ratio is computable', () => {
     expect(
       formatProviderLimitCompact(
         availableLimit([
@@ -267,6 +418,26 @@ describe('format helpers', () => {
             remaining: 0,
             limit: null,
             resetAt: null,
+          },
+        ],
+      })
+    ).toBe('error');
+
+    expect(
+      getProviderLimitTone({
+        providerID: 'openrouter',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 0,
+        windows: [
+          {
+            id: 'monthly-spend',
+            label: 'Monthly Spend',
+            unit: 'usd',
+            remaining: 8,
+            limit: null,
+            resetAt: null,
+            percent: 92,
           },
         ],
       })
@@ -362,5 +533,58 @@ describe('format helpers', () => {
     expect(formatProviderLimitTitle(limit, 0)).toBe(
       'Subsec: 1 / 10 left, resets in <1s | Seconds: 2 left, resets in 20s | Hours: 3 / 3k left, resets in 1h | Days: 4 / 40 left, resets in 3d'
     );
+  });
+
+  it('uses explicit percent metadata when ranking and formatting provider limits', () => {
+    const limit = availableLimit([
+      {
+        id: 'requests',
+        label: 'Requests',
+        unit: 'requests',
+        remaining: 80,
+        limit: null,
+        resetAt: null,
+        percent: 20,
+      },
+      {
+        id: 'monthly-spend',
+        label: 'Monthly Spend',
+        unit: 'usd',
+        remaining: 12.5,
+        limit: 40,
+        resetAt: 60_000,
+        percent: 68.75,
+      },
+    ]);
+
+    expect(getPrimaryProviderLimitWindow(limit)).toEqual(limit.windows[1]);
+    expect(formatProviderLimitTitle(limit, 0)).toBe(
+      'Requests: 80 left (20% used) | Monthly Spend: $12.5 / $40 left (68.8% used), resets in 1m'
+    );
+  });
+
+  it('detects when any provider-limit window crosses the remaining threshold', () => {
+    const limit = availableLimit([
+      {
+        id: 'five_hour',
+        label: '5-Hour Limit',
+        unit: 'requests',
+        remaining: 45,
+        limit: 100,
+        resetAt: null,
+      },
+      {
+        id: 'month',
+        label: 'Monthly Limit',
+        unit: 'requests',
+        remaining: 20,
+        limit: 100,
+        resetAt: null,
+      },
+    ]);
+
+    expect(hasProviderLimitWindowWithinThreshold(limit, 40)).toBe(true);
+    expect(hasProviderLimitWindowWithinThreshold(limit, 10)).toBe(false);
+    expect(hasProviderLimitWindowWithinThreshold(null, 40)).toBe(false);
   });
 });

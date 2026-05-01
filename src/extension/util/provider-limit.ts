@@ -35,6 +35,7 @@ const DIRECT_WINDOW_DEFS: Array<{ key: string; label: string; unit: ProviderLimi
   { key: 'tokens', label: 'Tokens', unit: 'tokens' },
   { key: 'messages', label: 'Messages', unit: 'messages' },
   { key: 'credits', label: 'Credits', unit: 'credits' },
+  { key: 'usd', label: 'USD', unit: 'usd' },
 ];
 
 const DIRECT_CONTAINER_KEYS = ['quota', 'usage', 'rateLimit', 'rateLimits', 'limits', 'billing'];
@@ -313,6 +314,8 @@ function buildHeaderWindow(
   const remaining = parseFiniteNumber(headers.get(remainingHeader));
   if (remaining == null) return null;
 
+  const percent = null;
+
   return {
     id,
     label,
@@ -320,6 +323,7 @@ function buildHeaderWindow(
     remaining,
     limit: parseFiniteNumber(headers.get(limitHeader)),
     resetAt: parseRateLimitResetAt(headers.get(resetHeader), checkedAt),
+    ...(percent == null ? {} : { percent }),
   } satisfies ProviderLimitWindow;
 }
 
@@ -339,6 +343,8 @@ function buildDirectWindow(
     parseFiniteNumber(record.remainingCount);
   if (remaining == null) return null;
 
+  const percent = parseWindowPercent(record);
+
   return {
     id,
     label,
@@ -354,6 +360,7 @@ function buildDirectWindow(
       record.resetAt ?? record.reset ?? record.resetsAt ?? record.reset_after,
       checkedAt
     ),
+    ...(percent == null ? {} : { percent }),
   } satisfies ProviderLimitWindow;
 }
 
@@ -416,8 +423,25 @@ function inferLimitUnit(value: string | null | undefined): ProviderLimitUnit {
   if (normalized.includes('request')) return 'requests';
   if (normalized.includes('token')) return 'tokens';
   if (normalized.includes('message')) return 'messages';
+  if (
+    normalized.includes('usd') ||
+    normalized.includes('dollar') ||
+    normalized.includes('cost') ||
+    normalized.includes('spend')
+  ) {
+    return 'usd';
+  }
   if (normalized.includes('credit') || normalized.includes('balance')) return 'credits';
   return 'unknown';
+}
+
+function parseWindowPercent(record: Record<string, unknown>) {
+  return (
+    parseFiniteNumber(record.percent) ??
+    parseFiniteNumber(record.usagePercent) ??
+    parseFiniteNumber(record.utilizationPercent) ??
+    parseFiniteNumber(record.usedPercent)
+  );
 }
 
 function toLabel(value: string) {

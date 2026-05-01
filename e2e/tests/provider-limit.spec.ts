@@ -6,7 +6,7 @@ test('exhausted provider limit shows error chip in toolbar', async ({ page }) =>
   const chip = page.locator('.toolbar-limit-chip');
   await expect(chip).toBeVisible();
   await expect(chip).toHaveClass(/\berror\b/);
-  await expect(chip).toContainText('0 msg');
+  await expect(chip).toContainText('0%');
 });
 
 test('exhausted provider limit chip has descriptive title', async ({ page }) => {

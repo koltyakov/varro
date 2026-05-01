@@ -6,7 +6,7 @@ test('shows usage-limit retry state and lets the user switch providers', async (
   await expect(page.getByText('Usage limit reached', { exact: true })).toBeVisible();
   await expect(page.locator('.chat-usage-limit-meta')).toContainText('messages exhausted');
   await expect(page.locator('.chat-usage-limit-message')).toContainText('429 usage limit reached');
-  await expect(page.locator('.toolbar-limit-chip')).toContainText('0 msg');
+  await expect(page.locator('.toolbar-limit-chip')).toContainText('0%');
 
   await page.getByRole('button', { name: 'Switch provider' }).click();
   await expect(page.getByText('OpenAI', { exact: true })).toBeVisible();

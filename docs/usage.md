@@ -270,6 +270,14 @@ Context:
 - `varro.context.autoAttachFile` - include the active editor file in live context
 - `varro.context.autoAttachSelection` - include the current editor selection in live context
 
+Provider limits:
+
+- `varro.providerLimits.enabledAdapters` - allowlist of provider-limit adapters Varro may poll
+- Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity)
+- Default enabled IDs: `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, `openai`
+- `varro.providerLimits.disabled` - disable provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval
+- `varro.providerLimits.thresholdPercent` - show provider-limit UI only when any provider-limit window has this remaining percentage or less; defaults to `40`
+
 Chat view:
 
 - `varro.chat.expandThinkingByDefault` - expand reasoning/thinking blocks by default

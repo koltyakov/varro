@@ -45,36 +45,148 @@ export function getPrimaryProviderLimitWindow(limit: ProviderLimitStatus | null 
   return [...limit.windows].toSorted((a, b) => compareProviderLimitWindows(a, b))[0] ?? null;
 }
 
-export function getProviderLimitTone(limit: ProviderLimitStatus | null | undefined) {
-  const window = getPrimaryProviderLimitWindow(limit);
-  if (!window) return 'default';
-  if (window.remaining <= 0) return 'error';
-  if (window.limit == null || window.limit <= 0) return 'default';
+/**
+ * Resolve which window the toolbar chip should show.
+ *
+ * - If `selectedId` matches an available window, prefer it.
+ * - Otherwise fall back to the narrowest period window (5H, D, W, M).
+ * - Auto-override: if any other window has a strictly smaller remaining percent
+ *   than the selected one, surface that smaller window instead so the user is
+ *   warned about the more urgent quota.
+ */
+export function resolveProviderLimitWindow(
+  limit: ProviderLimitStatus | null | undefined,
+  selectedId?: string | null,
+  selectedCheckedAt?: number | null
+): ProviderLimitWindow | null {
+  if (!limit || limit.status !== 'available' || limit.windows.length === 0) return null;
 
-  const ratio = window.remaining / window.limit;
-  if (ratio <= 0.1) return 'error';
-  if (ratio <= 0.25) return 'warning';
+  const selected = selectedId ? limit.windows.find((w) => w.id === selectedId) : null;
+  if (!selected) return getDefaultProviderLimitWindow(limit);
+
+  if (selectedId && selectedCheckedAt != null && selectedCheckedAt >= limit.checkedAt) {
+    return selected;
+  }
+
+  const selectedRemaining = getProviderLimitWindowRemainingPercent(selected);
+  if (selectedRemaining == null) return selected;
+
+  let best = selected;
+  let bestRemaining = selectedRemaining;
+  for (const w of limit.windows) {
+    if (w.id === selected.id) continue;
+    const remaining = getProviderLimitWindowRemainingPercent(w);
+    if (remaining == null) continue;
+    if (remaining < bestRemaining) {
+      best = w;
+      bestRemaining = remaining;
+    }
+  }
+  return best;
+}
+
+export function getProviderLimitTone(
+  limit: ProviderLimitStatus | null | undefined,
+  window?: ProviderLimitWindow | null
+) {
+  const target = window ?? getPrimaryProviderLimitWindow(limit);
+  if (!target) return 'default';
+  if (target.remaining <= 0) return 'error';
+  const percent = getWindowPercent(target);
+  if (percent == null) return 'default';
+
+  if (percent >= 90) return 'error';
+  if (percent >= 75) return 'warning';
   return 'default';
 }
 
-export function formatProviderLimitCompact(limit: ProviderLimitStatus | null | undefined) {
-  const window = getPrimaryProviderLimitWindow(limit);
-  if (!window) return '';
+export function getProviderLimitWindowUsedPercent(
+  window: ProviderLimitWindow | null | undefined
+): number | null {
+  if (!window) return null;
+  return getWindowPercent(window);
+}
+
+export function getProviderLimitWindowRemainingPercent(
+  window: ProviderLimitWindow | null | undefined
+): number | null {
+  const used = getProviderLimitWindowUsedPercent(window);
+  if (used == null) return null;
+  return Math.max(0, Math.min(100, 100 - used));
+}
+
+export function getOrderedProviderLimitWindows(
+  limit: ProviderLimitStatus | null | undefined
+): ProviderLimitWindow[] {
+  if (!limit || limit.status !== 'available') return [];
+  return [...limit.windows].toSorted((a, b) => compareProviderLimitDisplayWindows(a, b));
+}
+
+export function hasProviderLimitWindowWithinThreshold(
+  limit: ProviderLimitStatus | null | undefined,
+  thresholdPercent: number
+) {
+  if (!limit || limit.status !== 'available') return false;
+
+  for (const window of limit.windows) {
+    const remaining = getProviderLimitWindowRemainingPercent(window);
+    if (remaining != null && remaining <= thresholdPercent) return true;
+  }
+
+  return false;
+}
+
+export function formatProviderLimitWindowValue(window: ProviderLimitWindow, value: number) {
+  return formatWindowValue(window, value);
+}
+
+export function formatProviderLimitWindowReset(resetAt: number, now = Date.now()) {
+  return formatRelativeReset(resetAt, now);
+}
+
+export function formatProviderLimitCompact(
+  limit: ProviderLimitStatus | null | undefined,
+  window?: ProviderLimitWindow | null
+) {
+  const target = window ?? getPrimaryProviderLimitWindow(limit);
+  if (!target) return '';
+
+  const remainingPercent = getProviderLimitWindowRemainingPercent(target);
+  if (remainingPercent != null) return `${formatRemainingPercent(remainingPercent)}%`;
 
   const suffix =
-    window.unit === 'requests'
+    target.unit === 'requests'
       ? 'req'
-      : window.unit === 'tokens'
+      : target.unit === 'tokens'
         ? 'tok'
-        : window.unit === 'messages'
+        : target.unit === 'messages'
           ? 'msg'
-          : window.unit === 'credits'
+          : target.unit === 'credits'
             ? 'cr'
-            : 'left';
+            : target.unit === 'usd'
+              ? '$'
+              : 'left';
+
+  if (suffix === '$') return `$${formatCompactValue(target.remaining, 'usd')}`;
 
   return suffix === 'left'
-    ? `${formatCompactValue(window.remaining)} left`
-    : `${formatCompactValue(window.remaining)} ${suffix}`;
+    ? `${formatCompactValue(target.remaining)} left`
+    : `${formatCompactValue(target.remaining)} ${suffix}`;
+}
+
+export function formatProviderLimitCompactPrefix(
+  limit: ProviderLimitStatus | null | undefined,
+  window?: ProviderLimitWindow | null
+) {
+  const target = window ?? getPrimaryProviderLimitWindow(limit);
+  if (!target) return '';
+  return getProviderLimitWindowPeriodLabel(target);
+}
+
+function formatRemainingPercent(value: number) {
+  if (value >= 10) return `${Math.round(value)}`;
+  if (value <= 0) return '0';
+  return value.toFixed(1).replace(/\.0$/, '');
 }
 
 export function formatProviderLimitTitle(
@@ -86,9 +198,13 @@ export function formatProviderLimitTitle(
 
   return limit.windows
     .map((window) => {
-      const total = window.limit != null ? ` / ${formatCompactValue(window.limit)}` : '';
+      const total = window.limit != null ? ` / ${formatWindowValue(window, window.limit)}` : '';
+      const percent =
+        window.percent != null && Number.isFinite(window.percent)
+          ? ` (${formatPercent(window.percent)}% used)`
+          : '';
       const reset = window.resetAt ? `, resets in ${formatRelativeReset(window.resetAt, now)}` : '';
-      return `${window.label}: ${formatCompactValue(window.remaining)}${total} left${reset}`;
+      return `${window.label}: ${formatWindowValue(window, window.remaining)}${total} left${percent}${reset}`;
     })
     .join(' | ');
 }
@@ -100,7 +216,30 @@ function compareProviderLimitWindows(a: ProviderLimitWindow, b: ProviderLimitWin
   return getWindowPriority(a) - getWindowPriority(b);
 }
 
+function getDefaultProviderLimitWindow(limit: ProviderLimitStatus) {
+  return getOrderedProviderLimitWindows(limit)[0] ?? null;
+}
+
+function compareProviderLimitDisplayWindows(a: ProviderLimitWindow, b: ProviderLimitWindow) {
+  const aPeriod = getWindowPeriodPriority(a);
+  const bPeriod = getWindowPeriodPriority(b);
+  if (aPeriod !== bPeriod) return aPeriod - bPeriod;
+  return compareProviderLimitWindows(a, b);
+}
+
+function getWindowPeriodPriority(window: ProviderLimitWindow) {
+  const period = getProviderLimitWindowPeriodLabel(window);
+  if (period === '5H') return 0;
+  if (period === 'D') return 1;
+  if (period === 'W') return 2;
+  if (period === 'M') return 3;
+  return 100;
+}
+
 function getWindowRatio(window: ProviderLimitWindow) {
+  if (window.percent != null && Number.isFinite(window.percent)) {
+    return 1 - window.percent / 100;
+  }
   if (window.limit == null || window.limit <= 0) return Number.POSITIVE_INFINITY;
   return window.remaining / window.limit;
 }
@@ -109,13 +248,53 @@ function getWindowPriority(window: ProviderLimitWindow) {
   if (window.unit === 'messages') return 0;
   if (window.unit === 'requests') return 1;
   if (window.unit === 'credits') return 2;
-  if (window.unit === 'tokens') return 3;
-  return 4;
+  if (window.unit === 'usd') return 3;
+  if (window.unit === 'tokens') return 4;
+  return 5;
 }
 
-function formatCompactValue(value: number) {
+function getWindowPercent(window: ProviderLimitWindow) {
+  if (window.percent != null && Number.isFinite(window.percent)) return window.percent;
+  if (window.limit == null || window.limit <= 0) return null;
+  return (1 - window.remaining / window.limit) * 100;
+}
+
+function getProviderLimitWindowPeriodLabel(window: ProviderLimitWindow) {
+  const id = window.id.toLowerCase();
+  const label = window.label.toLowerCase();
+
+  if (id.includes('month') || label.includes('month')) return 'M';
+  if (id.includes('week') || id.includes('seven_day') || label.includes('week')) return 'W';
+  if (id.includes('five_hour') || label.includes('5-hour') || label.includes('5 hour')) {
+    return '5H';
+  }
+  if (
+    id.includes('day') ||
+    id.includes('daily') ||
+    label.includes('day') ||
+    label.includes('daily') ||
+    id === 'requests'
+  ) {
+    return 'D';
+  }
+
+  return '';
+}
+
+function formatWindowValue(window: ProviderLimitWindow, value: number) {
+  return window.unit === 'usd' ? `$${formatCompactValue(value, 'usd')}` : formatCompactValue(value);
+}
+
+function formatPercent(value: number) {
+  if (Number.isInteger(value)) return `${value}`;
+  if (Math.abs(value) >= 10) return value.toFixed(1).replace(/\.0$/, '');
+  return value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function formatCompactValue(value: number, unit?: ProviderLimitWindow['unit']) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
   if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
+  if (unit === 'usd') return value.toFixed(1).replace(/\.0$/, '');
   if (Number.isInteger(value) || value >= 10) return `${Math.round(value)}`;
   return value.toFixed(1).replace(/\.0$/, '');
 }

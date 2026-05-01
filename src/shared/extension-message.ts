@@ -7,6 +7,10 @@ import {
   type ServerStatus,
   type WebviewThemeKind,
 } from './protocol';
+import {
+  DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS,
+  normalizeProviderLimitThresholdPercent,
+} from './provider-limit-config';
 
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'server/status',
@@ -123,6 +127,22 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
           expandThinkingByDefault: payload.expandThinkingByDefault,
           showStickyUserPrompt: payload.showStickyUserPrompt,
           desktopSessionPaneSide: payload.desktopSessionPaneSide,
+          ...(payload.providerLimitsDisabled === undefined
+            ? {}
+            : {
+                providerLimitsDisabled: payload.providerLimitsDisabled === true,
+              }),
+          ...(payload.providerLimitPollIntervalSeconds ===
+          DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS
+            ? { providerLimitsDisabled: true }
+            : {}),
+          ...(payload.providerLimitThresholdPercent === undefined
+            ? {}
+            : {
+                providerLimitThresholdPercent: normalizeProviderLimitThresholdPercent(
+                  payload.providerLimitThresholdPercent
+                ),
+              }),
         },
       };
     }

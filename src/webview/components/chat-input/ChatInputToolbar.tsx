@@ -1,9 +1,10 @@
 import { Show } from 'solid-js';
 import type { Agent } from '../../types';
-import type { PermissionMode } from '../../../shared/protocol';
+import type { PermissionMode, ProviderLimitStatus } from '../../../shared/protocol';
 import { AttachButton } from './AttachButton';
 import { BusySendMenu } from './BusySendMenu';
 import { ContextPopup, ContextUsageButton } from './ContextPopup';
+import { ProviderLimitPopup } from './ProviderLimitPopup';
 import { SendControls } from './SendControls';
 import { StopButton } from './StopButton';
 import {
@@ -68,9 +69,17 @@ export function ChatInputToolbar(props: {
   currentModel: CurrentModelInfo;
   modelCanEllipsize: boolean;
   onToggleModelPicker: () => void;
+  providerLimitPrefix: string | null;
   providerLimitLabel: string | null;
   providerLimitTone: string;
   providerLimitTitle: string | null;
+  providerLimit: ProviderLimitStatus | null;
+  showProviderLimitPopup: boolean;
+  providerLimitButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
+  providerLimitPopupRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  onToggleProviderLimitPopup: () => void;
+  onCycleProviderLimitWindow: () => void;
+  onCloseProviderLimitPopup: () => void;
   availableVariants: string[];
   selectedVariant: string | null;
   selectedVariantLabel: string;
@@ -154,12 +163,6 @@ export function ChatInputToolbar(props: {
           onToggle={props.onToggleModelPicker}
         />
 
-        <ProviderLimitChip
-          label={props.providerLimitLabel}
-          tone={props.providerLimitTone}
-          title={props.providerLimitTitle}
-        />
-
         <Show when={props.availableVariants.length > 0 && props.showReasoningControl}>
           <VariantPicker
             buttonRef={props.variantButtonRef}
@@ -195,6 +198,31 @@ export function ChatInputToolbar(props: {
               </Show>
             </div>
           )}
+        </Show>
+
+        <Show when={props.providerLimitLabel}>
+          <div style={{ position: 'relative' }}>
+            <ProviderLimitChip
+              buttonRef={props.providerLimitButtonRef}
+              prefix={props.providerLimitPrefix}
+              label={props.providerLimitLabel}
+              tone={props.providerLimitTone}
+              title={props.providerLimitTitle}
+              onClick={props.onToggleProviderLimitPopup}
+              onCycle={props.onCycleProviderLimitWindow}
+            />
+            <Show when={props.showProviderLimitPopup}>
+              <ProviderLimitPopup
+                ref={props.providerLimitPopupRef}
+                limit={props.providerLimit}
+                model={{
+                  providerName: props.currentModel.providerName,
+                  modelName: props.currentModel.modelName,
+                }}
+                onClose={props.onCloseProviderLimitPopup}
+              />
+            </Show>
+          </div>
         </Show>
       </div>
 

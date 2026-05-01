@@ -30,9 +30,11 @@ import {
   requestMessageListScrollToBottom,
   getCurrentDocumentEnabled,
   getProviderLimit,
+  providerLimitThresholdPercent,
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
   isSessionCompacting,
+  providerLimitPollIntervalSeconds,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
@@ -56,11 +58,15 @@ import {
   formatAgentInitial,
   formatAgentLabel,
   formatProviderLimitCompact,
+  formatProviderLimitCompactPrefix,
   formatProviderLimitTitle,
   formatVariantInitial,
   formatVariantLabel,
   getProviderLimitTone,
+  hasProviderLimitWindowWithinThreshold,
+  getOrderedProviderLimitWindows,
   getPrimaryProviderLimitWindow,
+  resolveProviderLimitWindow,
 } from '../lib/format';
 import { getMatchingVariant, getPreferredVariant } from '../lib/model-variants';
 import { isAssistantMessage, getContextWindow, sumAssistantTokens } from '../lib/message-metrics';
@@ -86,7 +92,13 @@ import type {
 } from './chat-input/CompletionMenu';
 import type { Agent, Command, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
+import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
+import {
+  getSelectedProviderLimitWindowCheckedAt,
+  getSelectedProviderLimitWindowId,
+  setSelectedProviderLimitWindowId,
+} from '../lib/provider-limit-selection';
 
 type ToolbarControl =
   | 'permission'
@@ -206,6 +218,8 @@ export function ChatInput() {
   let variantPopoverRef: HTMLDivElement | undefined;
   let contextButtonRef: HTMLButtonElement | undefined;
   let contextPopupRef: HTMLDivElement | undefined;
+  let providerLimitButtonRef: HTMLButtonElement | undefined;
+  let providerLimitPopupRef: HTMLDivElement | undefined;
   let busyMenuRef: HTMLDivElement | undefined;
   let busyToggleRef: HTMLButtonElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
@@ -215,9 +229,18 @@ export function ChatInput() {
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [showPermissionModePicker, setShowPermissionModePicker] = createSignal(false);
   const [showContextPopup, setShowContextPopup] = createSignal(false);
+  const [showProviderLimitPopup, setShowProviderLimitPopup] = createSignal(false);
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
 
-  type PopupKind = 'agent' | 'variant' | 'model' | 'permission' | 'context' | 'busy' | 'mcp';
+  type PopupKind =
+    | 'agent'
+    | 'variant'
+    | 'model'
+    | 'permission'
+    | 'context'
+    | 'providerLimit'
+    | 'busy'
+    | 'mcp';
   const closePopups = (except?: PopupKind) => {
     if (except !== 'agent') setShowAgentPicker(false);
     if (except !== 'variant') setShowVariantPicker(false);
@@ -225,6 +248,7 @@ export function ChatInput() {
     if (except !== 'mcp') setShowMcpPicker(false);
     if (except !== 'permission') setShowPermissionModePicker(false);
     if (except !== 'context') setShowContextPopup(false);
+    if (except !== 'providerLimit') setShowProviderLimitPopup(false);
     if (except !== 'busy') setShowBusyMenu(false);
   };
 
@@ -906,6 +930,7 @@ export function ChatInput() {
         setShowPermissionModePicker(false);
         setShowBusyMenu(false);
         setShowContextPopup(false);
+        setShowProviderLimitPopup(false);
         setCompletionIndex(0);
         return;
       }
@@ -933,6 +958,12 @@ export function ChatInput() {
       }
       if (showContextPopup() && clickedOutside(target, contextButtonRef, contextPopupRef)) {
         setShowContextPopup(false);
+      }
+      if (
+        showProviderLimitPopup() &&
+        clickedOutside(target, providerLimitButtonRef, providerLimitPopupRef)
+      ) {
+        setShowProviderLimitPopup(false);
       }
     };
 
@@ -986,7 +1017,7 @@ export function ChatInput() {
         showPermissionModePicker()
       )
         return;
-      if (showBusyMenu() || showContextPopup()) return;
+      if (showBusyMenu() || showContextPopup() || showProviderLimitPopup()) return;
       scheduleToolbarFit();
     });
     observer.observe(toolbarRef);
@@ -1156,19 +1187,53 @@ export function ChatInput() {
   const sessionTokens = createMemo(() => sumAssistantTokens(assistantMessages()));
 
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
+  const showProviderLimits = createMemo(
+    () => providerLimitPollIntervalSeconds() !== DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS
+  );
   const currentProviderLimit = createMemo(() => {
     const current = currentModel();
     if (!current.providerID) return null;
     return getProviderLimit(current.providerID, current.modelID);
   });
+  const showCurrentProviderLimit = createMemo(
+    () =>
+      showProviderLimits() &&
+      hasProviderLimitWindowWithinThreshold(currentProviderLimit(), providerLimitThresholdPercent())
+  );
+
+  const currentProviderLimitWindow = createMemo(() => {
+    if (!showCurrentProviderLimit()) return null;
+    const providerID = currentModel().providerID;
+    const selectedId = providerID ? getSelectedProviderLimitWindowId(providerID) : null;
+    const selectedCheckedAt = providerID
+      ? getSelectedProviderLimitWindowCheckedAt(providerID)
+      : null;
+    return resolveProviderLimitWindow(currentProviderLimit(), selectedId, selectedCheckedAt);
+  });
 
   const currentProviderLimitCompact = createMemo(() =>
-    formatProviderLimitCompact(currentProviderLimit())
+    showCurrentProviderLimit()
+      ? formatProviderLimitCompact(currentProviderLimit(), currentProviderLimitWindow())
+      : null
+  );
+  const currentProviderLimitCompactPrefix = createMemo(() =>
+    showCurrentProviderLimit()
+      ? formatProviderLimitCompactPrefix(currentProviderLimit(), currentProviderLimitWindow())
+      : null
   );
   const currentProviderLimitTitle = createMemo(() =>
-    formatProviderLimitTitle(currentProviderLimit())
+    showCurrentProviderLimit() ? formatProviderLimitTitle(currentProviderLimit()) : null
   );
-  const currentProviderLimitTone = createMemo(() => getProviderLimitTone(currentProviderLimit()));
+  const currentProviderLimitTone = createMemo(() =>
+    showCurrentProviderLimit()
+      ? getProviderLimitTone(currentProviderLimit(), currentProviderLimitWindow())
+      : 'default'
+  );
+  createEffect(() => {
+    if (!showCurrentProviderLimit() && showProviderLimitPopup()) {
+      setShowProviderLimitPopup(false);
+    }
+  });
   const activeUsageLimitWindow = createMemo(() =>
     getPrimaryProviderLimitWindow(createUsageLimitProviderLimit(activeUsageLimit()))
   );
@@ -1207,6 +1272,7 @@ export function ChatInput() {
     showPermissionModePicker: showPermissionModePicker(),
     showBusyMenu: showBusyMenu(),
     showContextPopup: showContextPopup(),
+    showProviderLimitPopup: showProviderLimitPopup(),
   }));
 
   const activePermissionMode = createMemo(() => getPermissionModeForSession(state.activeSessionId));
@@ -1265,7 +1331,7 @@ export function ChatInput() {
       deps.showPermissionModePicker
     )
       return;
-    if (deps.showBusyMenu || deps.showContextPopup) return;
+    if (deps.showBusyMenu || deps.showContextPopup || deps.showProviderLimitPopup) return;
 
     scheduleToolbarFit();
   });
@@ -1305,7 +1371,7 @@ export function ChatInput() {
         ref={(el) => {
           containerRef = el;
         }}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
+        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showProviderLimitPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1476,7 +1542,8 @@ export function ChatInput() {
             showAgentPicker() ||
             showVariantPicker() ||
             showMcpPicker() ||
-            showPermissionModePicker()
+            showPermissionModePicker() ||
+            showProviderLimitPopup()
           }
           showPermissionControl={isToolbarControlVisible('permission')}
           permissionButtonRef={(el) => {
@@ -1531,9 +1598,37 @@ export function ChatInput() {
             closePopups(next ? 'model' : undefined);
             setShowModelPicker(next);
           }}
+          providerLimitPrefix={currentProviderLimitCompactPrefix()}
           providerLimitLabel={currentProviderLimitCompact()}
           providerLimitTone={currentProviderLimitTone()}
           providerLimitTitle={currentProviderLimitTitle()}
+          providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
+          showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
+          providerLimitButtonRef={(el) => {
+            providerLimitButtonRef = el;
+          }}
+          providerLimitPopupRef={(el) => {
+            providerLimitPopupRef = el;
+          }}
+          onToggleProviderLimitPopup={() => {
+            if (!showCurrentProviderLimit()) return;
+            const next = !showProviderLimitPopup();
+            closePopups(next ? 'providerLimit' : undefined);
+            setShowProviderLimitPopup(next);
+          }}
+          onCycleProviderLimitWindow={() => {
+            const limit = currentProviderLimit();
+            const providerID = currentModel().providerID;
+            if (!limit || !providerID) return;
+            const windows = getOrderedProviderLimitWindows(limit);
+            if (windows.length <= 1) return;
+            const current = currentProviderLimitWindow();
+            const currentIndex = current ? windows.findIndex((w) => w.id === current.id) : -1;
+            const nextWindow = windows[(currentIndex + 1) % windows.length];
+            if (nextWindow)
+              setSelectedProviderLimitWindowId(providerID, nextWindow.id, limit.checkedAt);
+          }}
+          onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
           availableVariants={availableVariants()}
           selectedVariant={effectiveVariant()}
           selectedVariantLabel={selectedVariantLabel()}

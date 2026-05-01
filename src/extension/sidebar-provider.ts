@@ -5,6 +5,7 @@ import { DroppedFilesService } from './dropped-files-service';
 import { FileSearchService } from './file-search-service';
 import { HostPersistence } from './host-persistence';
 import { MessageRouter } from './message-router';
+import { readExtensionConfigState } from './provider-limit-config';
 import { ProviderLimitService } from './provider-limit-service';
 import { RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
@@ -172,10 +173,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.updateStatusBarItem();
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('varro.providerLimits.enabledAdapters')) {
+        this.providerLimitService.clearCache();
+      }
       if (
         event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
         event.affectsConfiguration('varro.chat.showStickyUserPrompt') ||
-        event.affectsConfiguration('varro.chat.desktopSessionPaneSide')
+        event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
+        event.affectsConfiguration('varro.providerLimits.disabled') ||
+        event.affectsConfiguration('varro.providerLimits.thresholdPercent') ||
+        event.affectsConfiguration('varro.providerLimits.pollIntervalSeconds')
       ) {
         this.postConfigState();
       }
@@ -316,12 +323,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private readConfig() {
-    const config = vscode.workspace.getConfiguration('varro');
-    return {
-      expandThinkingByDefault: config.get<boolean>('chat.expandThinkingByDefault') ?? false,
-      showStickyUserPrompt: config.get<boolean>('chat.showStickyUserPrompt', true),
-      desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
-    };
+    return readExtensionConfigState();
   }
 
   private updateStatusBarItem() {

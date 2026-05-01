@@ -43,10 +43,96 @@ describe('useOpenCode permission and config flows', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
+          providerLimitsDisabled: false,
+          providerLimitThresholdPercent: 25,
         },
       });
 
       expect(stateModule.desktopSessionPaneSide()).toBe('right');
+      expect(stateModule.providerLimitPollIntervalSeconds()).toBe(120);
+      expect(stateModule.providerLimitThresholdPercent()).toBe(25);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('applies disabled provider-limit polling from config updates', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: true,
+          desktopSessionPaneSide: 'right',
+          providerLimitsDisabled: true,
+        },
+      });
+
+      expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('still accepts legacy disabled provider-limit polling config updates', async () => {
+    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: true,
+          desktopSessionPaneSide: 'right',
+          providerLimitPollIntervalSeconds: -1,
+        },
+      });
+
+      expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
     } finally {
       dispose();
     }

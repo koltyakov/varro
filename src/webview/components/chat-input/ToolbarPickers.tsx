@@ -200,18 +200,34 @@ export function ModelPickerButton(props: {
 }
 
 export function ProviderLimitChip(props: {
+  buttonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
+  prefix: string | null;
   label: string | null;
   tone: string;
   title: string | null;
+  onClick: () => void;
+  onCycle?: () => void;
 }) {
   return (
     <Show when={props.label}>
-      <span
+      <button
+        ref={props.buttonRef}
+        type="button"
         class={`toolbar-limit-chip ${props.tone !== 'default' ? props.tone : ''}`}
         title={props.title ?? undefined}
+        aria-label={props.title ?? 'Provider limits'}
+        onClick={props.onClick}
+        onContextMenu={(event) => {
+          if (!props.onCycle) return;
+          event.preventDefault();
+          props.onCycle();
+        }}
       >
-        {props.label}
-      </span>
+        <Show when={props.prefix}>
+          <span class="toolbar-limit-chip-prefix">{props.prefix}</span>
+        </Show>
+        <span class="toolbar-limit-chip-value">{props.label}</span>
+      </button>
     </Show>
   );
 }

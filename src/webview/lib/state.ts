@@ -37,6 +37,10 @@ import type {
   ServerStatus,
   WebviewThemeKind,
 } from '../../shared/protocol';
+import {
+  readProviderLimitPollIntervalSeconds,
+  readProviderLimitThresholdPercent,
+} from '../../shared/provider-limit-config';
 import { mergeContextFile } from '../../shared/context-files';
 import type { UsageLimitNotice } from './usage-limit';
 import { isAbortedAssistantError } from './aborted';
@@ -132,6 +136,10 @@ export interface AppStateInstance {
   setShowStickyUserPrompt: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
+  providerLimitPollIntervalSeconds: Accessor<number>;
+  setProviderLimitPollIntervalSeconds: Setter<number>;
+  providerLimitThresholdPercent: Accessor<number>;
+  setProviderLimitThresholdPercent: Setter<number>;
   inputText: Accessor<string>;
   setInputText: Setter<string>;
   nextPastedImageIndex: Accessor<number>;
@@ -244,6 +252,12 @@ export function createAppState(): AppStateInstance {
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
   );
+  const [providerLimitPollIntervalSeconds, setProviderLimitPollIntervalSeconds] = createSignal(
+    readProviderLimitPollIntervalSeconds(initialWebviewState)
+  );
+  const [providerLimitThresholdPercent, setProviderLimitThresholdPercent] = createSignal(
+    readProviderLimitThresholdPercent(initialWebviewState)
+  );
   const [inputText, setInputText] = createSignal('');
   const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
   const [isLoading, setIsLoading] = createSignal(false);
@@ -283,6 +297,10 @@ export function createAppState(): AppStateInstance {
     setShowStickyUserPrompt,
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
+    providerLimitPollIntervalSeconds,
+    setProviderLimitPollIntervalSeconds,
+    providerLimitThresholdPercent,
+    setProviderLimitThresholdPercent,
     inputText,
     setInputText,
     nextPastedImageIndex,
@@ -339,6 +357,11 @@ export const showStickyUserPrompt = defaultAppState.showStickyUserPrompt;
 export const setShowStickyUserPrompt = defaultAppState.setShowStickyUserPrompt;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
+export const providerLimitPollIntervalSeconds = defaultAppState.providerLimitPollIntervalSeconds;
+export const setProviderLimitPollIntervalSeconds =
+  defaultAppState.setProviderLimitPollIntervalSeconds;
+export const providerLimitThresholdPercent = defaultAppState.providerLimitThresholdPercent;
+export const setProviderLimitThresholdPercent = defaultAppState.setProviderLimitThresholdPercent;
 export const inputText = defaultAppState.inputText;
 export const setInputText = defaultAppState.setInputText;
 export const nextPastedImageIndex = defaultAppState.nextPastedImageIndex;
@@ -381,6 +404,8 @@ export function resetDefaultAppState() {
   setExpandThinkingByDefault(next.expandThinkingByDefault());
   setShowStickyUserPrompt(next.showStickyUserPrompt());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
+  setProviderLimitPollIntervalSeconds(next.providerLimitPollIntervalSeconds());
+  setProviderLimitThresholdPercent(next.providerLimitThresholdPercent());
   setInputText(next.inputText());
   setNextPastedImageIndex(next.nextPastedImageIndex());
   setIsLoading(next.isLoading());

@@ -95,6 +95,45 @@ describe('provider limit helpers', () => {
     });
   });
 
+  it('parses usd windows and native percent values from direct metadata', () => {
+    const result = extractOpenCodeProviderLimit(
+      {
+        id: 'openrouter',
+        models: {},
+        billing: {
+          spend: {
+            remaining: 12.5,
+            limit: 40,
+            percent: 68.75,
+            resetAt: '2026-05-01T12:00:00.000Z',
+          },
+        },
+      } as ProviderMetadata,
+      null,
+      0
+    );
+
+    expect(result).toEqual({
+      providerID: 'openrouter',
+      modelID: null,
+      status: 'available',
+      source: 'opencode',
+      checkedAt: 0,
+      note: 'Read from OpenCode metadata',
+      windows: [
+        {
+          id: 'spend',
+          label: 'Spend',
+          unit: 'usd',
+          remaining: 12.5,
+          limit: 40,
+          resetAt: Date.parse('2026-05-01T12:00:00.000Z'),
+          percent: 68.75,
+        },
+      ],
+    });
+  });
+
   it('builds provider probes from auth.json and known provider defaults', () => {
     const authStore = parseProviderAuthStore(
       JSON.stringify({

@@ -10,6 +10,7 @@ import type { SidebarProviderContextFiles } from './sidebar-provider-context-fil
 import type { SessionTrashManager } from './session-trash-manager';
 import { logger } from './logger';
 import { parseWebviewMessage } from './util/webview-message';
+import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../shared/provider-limit-config';
 import type { InitialWebviewState, ServerStatus, WebviewMessage } from '../shared/protocol';
 
 export class WebviewSession {
@@ -50,6 +51,9 @@ export class WebviewSession {
         expandThinkingByDefault: boolean;
         showStickyUserPrompt: boolean;
         desktopSessionPaneSide: 'left' | 'right';
+        providerLimitPollIntervalSeconds: number;
+        providerLimitThresholdPercent: number;
+        providerLimitsDisabled?: boolean;
       };
       currentTheme(): InitialWebviewState['theme'];
       renderStatus(): ServerStatus;
@@ -206,6 +210,10 @@ export class WebviewSession {
       expandThinkingByDefault: config.expandThinkingByDefault,
       showStickyUserPrompt: config.showStickyUserPrompt,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
+      providerLimitPollIntervalSeconds: config.providerLimitPollIntervalSeconds,
+      providerLimitThresholdPercent: config.providerLimitThresholdPercent,
+      providerLimitsDisabled:
+        config.providerLimitPollIntervalSeconds === DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS,
       interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')

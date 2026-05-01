@@ -49,11 +49,13 @@ export function registerProviderLimitRefreshEffect(deps: {
     modelID: string | null | undefined,
     limit: ProviderLimitStatus | null
   ): void;
+  getPollIntervalMs(): number;
   logError(context: string, err: unknown): void;
 }) {
   createEffect(() => {
     const visible = deps.isDocumentVisible();
     if (deps.getServerState() !== 'running' || !deps.areProvidersLoaded() || !visible) return;
+    if (deps.getPollIntervalMs() < 0) return;
 
     const active = deps.getActiveProviderSelection();
     if (!active) return;
@@ -76,7 +78,7 @@ export function registerProviderLimitRefreshEffect(deps: {
     void refresh();
     const timer = window.setInterval(() => {
       void refresh();
-    }, 120_000);
+    }, deps.getPollIntervalMs());
 
     onCleanup(() => {
       cancelled = true;

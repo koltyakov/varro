@@ -18,6 +18,7 @@ const {
   setExpandThinkingByDefaultPreference,
   setShowStickyUserPromptPreference,
   setDesktopSessionPaneSide,
+  setProviderLimitThresholdPercent,
 } = vi.hoisted(() => ({
   setState: vi.fn(),
   setError: vi.fn(),
@@ -33,6 +34,7 @@ const {
   setExpandThinkingByDefaultPreference: vi.fn(),
   setShowStickyUserPromptPreference: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
+  setProviderLimitThresholdPercent: vi.fn(),
 }));
 
 vi.mock('../lib/state', async () => {
@@ -57,6 +59,7 @@ vi.mock('../lib/state', async () => {
     setExpandThinkingByDefaultPreference,
     setShowStickyUserPromptPreference,
     setDesktopSessionPaneSide,
+    setProviderLimitThresholdPercent,
   };
 });
 
@@ -284,6 +287,16 @@ describe('mount bridge helpers', () => {
       type: 'server/status',
       payload: { state: 'running', url: 'http://127.0.0.1:4096' },
     });
+    operations.handleExtensionMessage({
+      type: 'config/update',
+      payload: {
+        expandThinkingByDefault: true,
+        showStickyUserPrompt: true,
+        desktopSessionPaneSide: 'right',
+        providerLimitsDisabled: false,
+        providerLimitThresholdPercent: 25,
+      },
+    });
 
     expect(setTheme).toHaveBeenCalledWith('light');
     expect(applyTheme).toHaveBeenCalledWith('light');
@@ -293,6 +306,7 @@ describe('mount bridge helpers', () => {
     });
     expect(setError).toHaveBeenCalledWith(null);
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
+    expect(setProviderLimitThresholdPercent).toHaveBeenCalledWith(25);
   });
 
   it('posts focus state based on visibility and document focus', () => {
