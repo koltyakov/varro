@@ -184,34 +184,18 @@ async function getStopReason(run: RalphRun): Promise<RalphStopReasonInternal | n
     }
     return 'iteration_limit';
   }
-  // Block "soft" stop reasons (DONE marker or consecutive passes) while the
-  // most recent completed iteration still has outstanding verification
-  // failures. Plan/spec-driven runs must not exit while there are known
-  // verification gaps - a follow-up iteration needs to repair them first.
+  // Block soft completion while the most recent completed iteration still has
+  // outstanding verification failures. Plan-driven runs should only finish
+  // early when the plan explicitly says it is complete.
   if (planContent && planHasDoneMarker(planContent)) {
     if (hasOutstandingVerificationFailure) return null;
     return 'done_marker';
-  }
-  if (shouldStopOnConsecutivePasses(run)) {
-    // Don't bail out on consecutive passes alone if the plan/spec still
-    // has outstanding `- [ ]` items. Plan-driven runs must verify completion
-    // against the checklist, not just recent verification verdicts.
-    if (planContent && planHasOutstandingTasks(planContent)) return null;
-    if (hasOutstandingVerificationFailure) return null;
-    return 'consecutive_passes';
   }
   return null;
 }
 
 function hasFailedVerdict(verification: RalphIteration['verification']): boolean {
   return Object.values(verification).some((v) => v === 'fail');
-}
-
-function shouldStopOnConsecutivePasses(run: RalphRun): boolean {
-  const recent = run.iterations
-    .filter((it) => it.status === 'passed' || it.status === 'failed')
-    .slice(-2);
-  return recent.length === 2 && recent.every((it) => it.status === 'passed');
 }
 
 async function readPlanContentSafe(planDocPath: string): Promise<string | null> {
@@ -230,7 +214,14 @@ function planHasDoneMarker(content: string): boolean {
 function planHasOutstandingTasks(content: string): boolean {
   // Match unchecked boxes in common plan formats: task-list bullets,
   // numbered items, and markdown table cells. Whitespace means "open".
-  return /(^\s*(?:[-*+]|\d+[.)])\s+\[\s\])|(^\s*\|[^\n]*\[\s\])/m.test(content);
+  if (/(^\s*(?:[-*+]|\d+[.)])\s+\[\s\])|(^\s*\|[^\n]*\[\s\])/m.test(content)) {
+    return true;
+  }
+
+  // Plans may use plain bullets/numbered lists for remaining work. Treat list
+  // items without an explicit checked box as outstanding so iteration-limit
+  // exits do not claim clean completion while visible tasks remain.
+  return /^\s*(?:[-*+]|\d+[.)])\s+(?!\[[xX]\])\S/m.test(content);
 }
 
 function lastCompletedIteration(run: RalphRun): RalphIteration | null {

@@ -183,7 +183,7 @@ describe('ralph runner stop conditions', () => {
     expect(createSession).toHaveBeenCalledTimes(1);
   });
 
-  it('stops after two consecutive passing iterations once the plan has no outstanding items', async () => {
+  it('continues after two consecutive passing iterations without a DONE marker', async () => {
     const { ralphRunner, ralphStore } = await loadRunnerModules();
     const config = createConfig();
 
@@ -193,9 +193,29 @@ describe('ralph runner stop conditions', () => {
     ralphStore.upsertIteration(config.managerSessionId, createIteration(2));
     ralphStore.setStatus(config.managerSessionId, 'paused');
 
+    createSession.mockRejectedValue(new Error('halt for assertion'));
+
     await ralphRunner.resume(config.managerSessionId);
 
-    expect(ralphStore.getRun(config.managerSessionId)?.status).toBe('done');
+    const run = ralphStore.getRun(config.managerSessionId);
+    expect(run?.status).toBe('failed');
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the run failed when the iteration limit is reached with plain list items left', async () => {
+    const { ralphRunner, ralphStore } = await loadRunnerModules();
+    const config = createConfig({ iterations: 1 });
+
+    readWorkspaceFile.mockResolvedValue('# Plan\n- `src/extension/session.ts` - add coverage');
+    ralphStore.startRun(config);
+    ralphStore.upsertIteration(config.managerSessionId, createIteration(1));
+    ralphStore.setStatus(config.managerSessionId, 'paused');
+
+    await ralphRunner.resume(config.managerSessionId);
+
+    const run = ralphStore.getRun(config.managerSessionId);
+    expect(run?.status).toBe('failed');
+    expect(run?.stopReason).toBe('iteration_limit_with_gap');
     expect(createSession).not.toHaveBeenCalled();
   });
 
