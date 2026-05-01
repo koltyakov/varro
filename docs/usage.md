@@ -90,6 +90,7 @@ Current built-in slash commands include:
 - `/undo` or `/revert` undoes the last assistant response
 - `/redo` replays the last undone response
 - `/review` asks the agent to review current workspace changes
+- `/ralph` starts a Ralph loop from a plan or spec document
 - `/abort` or `/stop` stops the current run
 
 Custom OpenCode commands loaded from your local config also appear in the same completion list.
@@ -106,6 +107,7 @@ Sessions are filtered to the current workspace directory, then sorted by most re
 - Filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions from the header badges.
 - Open sub-agent sessions from the parent session row when they exist.
 - Archive sessions from the session list.
+- Deleted session roots move into a recycle bin section where you can restore them or delete them permanently until they expire.
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.
 
@@ -115,9 +117,14 @@ If the sidebar is hidden, Varro can show VS Code notifications when a background
 
 If VS Code reloads while a session was running, Varro reconnects to those sessions and can continue interrupted work automatically when the session is still resumable.
 
-## Plans And Reviews
+## Plans, Reviews, And Ralph
 
 - `/review` sends a review prompt for the current workspace changes.
+- `/ralph` opens a form where you pick a plan or spec document, set an iteration cap, optionally choose a model and reasoning variant, and can override the loop prompt template.
+- A Ralph run creates a manager session with a dedicated dashboard plus one child session per iteration.
+- After each iteration settles, the Ralph manager sends a separate verification turn and expects lines like `<name>: PASS`, `<name>: FAIL - <cause>`, or `<name>: SKIPPED - <reason>`.
+- If verification fails, Ralph can spawn up to two repair sub-agents for that iteration before the loop moves on.
+- Ralph can pause, resume, or stop from the dashboard. It stops automatically when the plan starts with `DONE`, after consecutive passing iterations against a clean checklist, or when the iteration cap is reached. If the cap is reached with unchecked plan items or failed verification, the run stays marked as failed.
 - Sessions that finished with the `plan` agent surface as `Plan ready` in the session list.
 - The latest plan response can be opened as a saved markdown plan document.
 - The latest plan response can also be handed off to the build flow so Varro continues with implementation instead of revising the plan.

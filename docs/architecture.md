@@ -174,6 +174,8 @@ It stores:
 
 Several pieces are persisted in `localStorage`, including selected model, hidden models, permission mode preferences, and last active session ID.
 
+Ralph loop state is tracked separately in `src/webview/lib/stores/ralph-store.ts`, keyed by manager session ID and persisted in browser storage so manager dashboards and iteration history survive webview reloads.
+
 #### OpenCode integration
 
 `src/webview/hooks/useOpenCode.ts` is the most important webview file.
@@ -195,7 +197,7 @@ The hook also handles workspace filtering for sessions, stale loading recovery, 
 Key components:
 
 - `src/webview/components/Chat.tsx`: session header, session list, and top-level chat layout
-- `src/webview/components/ChatInput.tsx`: composer, slash commands, attachments, model/agent/MCP pickers, queueing, and send modes
+- `src/webview/components/ChatInput.tsx`: composer, slash commands, attachments, model/agent/MCP pickers, queueing, send modes, and the `/ralph` launcher
 - `src/webview/components/MessageList.tsx`: chat transcript and loading state
 - `src/webview/components/Message.tsx` and `MessagePart.tsx`: assistant/user message rendering
 - `src/webview/components/PermissionPrompt.tsx`: inline approval UI
@@ -203,6 +205,20 @@ Key components:
 - `src/webview/components/TodoList.tsx`: task progress surface
 - `src/webview/components/DiffView.tsx`: file change summaries
 - `src/webview/components/SettingsPanel.tsx`: model visibility settings
+- `src/webview/components/ralph/RalphForm.tsx`: Ralph loop setup form for plan path, iteration cap, model selection, and prompt-template overrides
+- `src/webview/components/ralph/RalphDashboard.tsx` and `RalphIterationCard.tsx`: manager-session dashboard, controls, stop reasons, and per-iteration summaries
+
+## Ralph Loop Flow
+
+Ralph is a plan-driven orchestration layer that runs inside the webview.
+
+- `src/shared/ralph.ts` defines Ralph run, iteration, model-selection, token-summary, and stop-reason types.
+- `/ralph` opens `RalphForm`, which creates a manager session, sends an anchor message with the loop config, and starts the runner.
+- `src/webview/components/ralph/ralph-runner.ts` creates one child session per iteration under the manager session, builds the iteration prompt from the plan document plus the previous iteration summary, and waits for the child to go idle.
+- Verification is intentionally split into a second turn. After the main work settles, the manager sends a dedicated verification prompt and parses `<name>: PASS|FAIL|SKIPPED` lines back out of the final assistant report.
+- If verification fails, the runner can spawn up to two repair child sessions for that iteration. Repair sessions stay under the same manager session so their history does not pollute the original iteration session.
+- Stop conditions come from both plan content and run history: `DONE` marker, consecutive passing iterations with a clean checklist, manual stop, iteration error, or iteration limit. Reaching the limit while the plan still has unchecked items or failed verification marks the run as `failed`, not `done`.
+- `Chat.tsx` and `ChatWorkspace.tsx` treat Ralph manager sessions specially: manager sessions render the Ralph dashboard, Ralph roots are tagged in the session list, and navigating back from an iteration child session returns to the owning Ralph dashboard.
 
 ## Request And Event Flow
 
@@ -295,4 +311,5 @@ The webview adds more derived states on top of that data.
 - Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.
 - The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.
 - Provider limits are best-effort metadata; they are not guaranteed for every provider or model.
+- Ralph runs persist separately from normal session state and can reattach to in-flight manager sessions after a reload.
 - Server startup is lazy and workspace-scoped, which keeps activation lightweight and helps multi-project use against a shared OpenCode instance.
