@@ -33,7 +33,11 @@ export const client = {
     async get(id: string): Promise<Session> {
       return apiCall('GET', `/session/${id}`);
     },
-    async create(body?: { title?: string; permission?: PermissionRule[] }): Promise<Session> {
+    async create(body?: {
+      title?: string;
+      permission?: PermissionRule[];
+      parentID?: string;
+    }): Promise<Session> {
       return apiCall('POST', '/session', body || {});
     },
     async update(
@@ -132,6 +136,13 @@ export const client = {
   varro: {
     async openPlan(content: string): Promise<{ path: string }> {
       return apiCall('POST', '/varro/plan/open', { content });
+    },
+    async pickWorkspaceFile(): Promise<string | null> {
+      return apiCall('GET', '/varro/workspace-file/pick');
+    },
+    async readWorkspaceFile(path: string): Promise<string | null> {
+      const params = new URLSearchParams({ path });
+      return apiCall('GET', `/varro/workspace-file?${params.toString()}`);
     },
     async openCodeConfig(): Promise<OpenCodeModelRouting> {
       return apiCall('GET', '/varro/opencode-config');

@@ -79,7 +79,8 @@ export const routingStore = {
   getConnectedMcpNames() {
     return Object.entries(state.mcpStatus)
       .filter(([, value]) => value?.status === 'connected')
-      .map(([name]) => name);
+      .map(([name]) => name)
+      .toSorted((a, b) => a.localeCompare(b));
   },
   hasCommand(name: string) {
     return state.commands.some((command: Command) => command.name === name);

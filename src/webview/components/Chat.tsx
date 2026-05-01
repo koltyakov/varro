@@ -12,6 +12,7 @@ import { createSignal, onMount, onCleanup, createEffect, createMemo, on } from '
 import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { ChatWorkspace } from './chat/ChatWorkspace';
+import { ralphStore } from '../lib/stores/ralph-store';
 import {
   deriveSessionIndicators,
   getPrimarySessionsForFilter,
@@ -238,6 +239,15 @@ export function Chat() {
     setSessionFilter(null);
     setSubagentParentId(null);
     const sessionId = state.activeSessionId;
+    // If the user is currently viewing a Ralph iteration child session, "back"
+    // should return to the owning Ralph dashboard instead of the global
+    // sessions list.
+    const ralphParentId = ralphStore.findManagerSessionIdForChild(sessionId);
+    if (ralphParentId && ralphParentId !== sessionId) {
+      setShowSessionPicker(false);
+      await selectSession(ralphParentId);
+      return;
+    }
     if (sessionId && shouldDiscardActiveBlankSession()) {
       setShowSessionPicker(true);
       await deleteSession(sessionId);

@@ -37,6 +37,7 @@ npm run test
 While iterating, run the narrowest relevant command for the area you changed. Useful targeted commands include:
 
 - `npm run test -- src/webview/components/ChatInput.test.ts`
+- `npm run test -- src/webview/components/ralph/ralph-runner.test.ts`
 - `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`
 - `npm run test:e2e -- e2e/tests/layout.spec.ts`
 

@@ -28,7 +28,7 @@ describe('protocol conformance', () => {
     };
 
     // If a new ExtensionMessage type is added, the Record literal above will
-    // fail to compile until this map is extended — forcing the validator to
+    // fail to compile until this map is extended - forcing the validator to
     // be updated in lockstep.
     const knownCount = Object.keys(covered).length;
     expect(knownCount).toBeGreaterThan(0);

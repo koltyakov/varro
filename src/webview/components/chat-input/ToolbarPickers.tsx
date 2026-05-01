@@ -57,7 +57,7 @@ export function PermissionModePicker(props: {
                 onClick={() => props.onSelect(option.mode)}
               >
                 <PermissionModeIcon mode={option.mode} />
-                <span class="min-w-0 flex-1">{option.label}</span>
+                <span class="min-w-0">{option.label}</span>
               </button>
             )}
           </For>
@@ -106,7 +106,7 @@ export function AgentPicker(props: {
                 onClick={() => props.onSelect(agent)}
                 onMouseEnter={() => props.onFocusIndex(index())}
               >
-                <span class="min-w-0 flex-1">
+                <span class="min-w-0">
                   <span class="block truncate">{props.getLabel(agent)}</span>
                   <span class="block truncate text-[10px] text-vscode-muted/80">
                     {props.getDetail(agent)}

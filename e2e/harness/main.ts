@@ -38,6 +38,7 @@ const SCENARIO_NAMES = [
   'transport-degraded',
   'usage-limit',
   'mcp-pickers',
+  'reload-persistence',
   'slash-commands',
   'command-events',
   'no-providers',
@@ -64,6 +65,8 @@ const SCENARIO_NAMES = [
   'tool-open-actions',
   'todo-completion',
   'message-rendering',
+  'ralph-dashboard',
+  'statusbar-focus',
 ] as const;
 type ScenarioName = (typeof SCENARIO_NAMES)[number];
 
@@ -99,6 +102,7 @@ type ScenarioState = {
     sessionSelectedMcps?: Record<string, string[]>;
     sessionPermissionModes?: Record<string, 'default' | 'full'>;
     lastSeenSessions?: Record<string, number>;
+    ralphRuns?: Record<string, unknown>;
   };
   postReadyMessages: unknown[];
   readyStatus?: ServerStatus;
@@ -120,6 +124,7 @@ type HarnessWindow = Window & {
     settingsQueries?: string[];
     filePickCount?: number;
     openTargets?: Array<{ path: string; line?: number; kind?: string }>;
+    exportSessionIds?: string[];
   };
 };
 
@@ -1188,6 +1193,27 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     return state;
   }
 
+  if (name === 'reload-persistence') {
+    const session = makeSessionWithPermission(
+      'session-reload-persistence',
+      'Reload persistence',
+      BASE_TIME - 500,
+      DEFAULT_PERMISSION_RULES as unknown as Session['permission']
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [];
+    state.persistedActiveSessionId = session.id;
+    state.mcpStatus = {
+      chrome: { status: 'connected' },
+      figma: { status: 'needs_auth', error: 'Login required' },
+      playwright: { status: 'disabled' },
+      github: { status: 'failed', error: 'CLI not authenticated' },
+    };
+    state.nextSequence = 115;
+    return state;
+  }
+
   if (name === 'slash-commands') {
     const session = makeSessionWithPermission(
       'session-slash',
@@ -1872,6 +1898,83 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     return state;
   }
 
+  if (name === 'ralph-dashboard') {
+    const session = makeSession('session-ralph-1', 'Ralph: PLAN.md', BASE_TIME - 2_000);
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [];
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 370;
+    state.storedState = {
+      ralphRuns: {
+        [session.id]: {
+          config: {
+            managerSessionId: session.id,
+            planDocPath: 'plan-abc123.md',
+            iterations: 5,
+            promptTemplate: 'You are iteration {{iteration}} of {{totalIterations}}.',
+            permissionMode: 'full',
+            model: null,
+            agent: null,
+            createdAt: BASE_TIME - 2_000,
+          },
+          status: 'running',
+          currentIteration: 2,
+          iterations: [
+            {
+              index: 1,
+              childSessionId: 'session-ralph-child-1',
+              status: 'passed',
+              startedAt: BASE_TIME - 1_800,
+              endedAt: BASE_TIME - 1_200,
+              filesChanged: ['src/a.ts'],
+              verification: { lint: 'pass', typecheck: 'pass', test: 'pass' },
+              tokens: { input: 1000, output: 500, reasoning: 200, cacheRead: 0, cacheWrite: 0, total: 1700 },
+            },
+            {
+              index: 2,
+              childSessionId: 'session-ralph-child-2',
+              status: 'running',
+              startedAt: BASE_TIME - 1_000,
+              endedAt: null,
+              filesChanged: [],
+              verification: {},
+            },
+            {
+              index: 3,
+              childSessionId: null,
+              status: 'pending',
+              startedAt: null,
+              endedAt: null,
+              filesChanged: [],
+              verification: {},
+            },
+          ],
+          updatedAt: BASE_TIME - 1_000,
+        },
+      },
+    };
+    return state;
+  }
+
+  if (name === 'statusbar-focus') {
+    const session = makeSession('session-statusbar-1', 'Status bar focus test', BASE_TIME - 500);
+    const secondSession = makeSession(
+      'session-statusbar-2',
+      'Second session no attention',
+      BASE_TIME - 700
+    );
+    state.sessions = [session, secondSession];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.sessionStatuses[secondSession.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [];
+    state.messagesBySessionId[secondSession.id] = [];
+    state.persistedActiveSessionId = session.id;
+    state.postReadyMessages.push({ type: 'command/focus-input' });
+    state.nextSequence = 380;
+    return state;
+  }
+
   state.nextSequence = 30;
   return state;
 }
@@ -2375,10 +2478,17 @@ async function handleApiRequest(
 
 function installBridge(state: ScenarioState) {
   const harnessWindow = window as HarnessWindow;
-  harnessWindow.__sendToExtension = async (message: WebviewMessage) => {
-    switch (message.type) {
+  harnessWindow.__sendToExtension = async (message: unknown) => {
+    const type = asRecord(message).type;
+    if (typeof type !== 'string') {
+      return;
+    }
+
+    const webviewMessage = message as WebviewMessage;
+
+    switch (webviewMessage.type) {
       case 'api/request': {
-        const { id, method, path, body } = message.payload;
+        const { id, method, path, body } = webviewMessage.payload;
         state.requests.push({ method, path, body });
         try {
           const data = await handleApiRequest(state, method, path, body);
@@ -2415,16 +2525,16 @@ function installBridge(state: ScenarioState) {
         });
         return;
       case 'vscode/open-external':
-        state.externalUrls.push(message.payload.url);
+        state.externalUrls.push(webviewMessage.payload.url);
         return;
       case 'terminal/run':
         harnessWindow.__varroE2E?.terminalCommands?.push({
-          command: message.payload.command,
-          ...(message.payload.title ? { title: message.payload.title } : {}),
+          command: webviewMessage.payload.command,
+          ...(webviewMessage.payload.title ? { title: webviewMessage.payload.title } : {}),
         });
         return;
       case 'vscode/open-settings':
-        harnessWindow.__varroE2E?.settingsQueries?.push(message.payload.query || '');
+        harnessWindow.__varroE2E?.settingsQueries?.push(webviewMessage.payload.query || '');
         return;
       case 'files/pick':
         if (harnessWindow.__varroE2E) {
@@ -2432,9 +2542,10 @@ function installBridge(state: ScenarioState) {
         }
         return;
       case 'files/search': {
-        const query = message.payload.query.trim().toLowerCase();
-        const requestId = message.payload.requestId;
-        const limit = typeof message.payload.limit === 'number' ? message.payload.limit : 12;
+        const query = webviewMessage.payload.query.trim().toLowerCase();
+        const requestId = webviewMessage.payload.requestId;
+        const limit =
+          typeof webviewMessage.payload.limit === 'number' ? webviewMessage.payload.limit : 12;
         const files = state.workspaceFiles
           .filter((file) => {
             if (!query) return true;
@@ -2447,7 +2558,7 @@ function installBridge(state: ScenarioState) {
           .map((file) => ({ ...file }));
         dispatchToWebview({
           type: 'files/search-results',
-          payload: { requestId, query: message.payload.query, files },
+          payload: { requestId, query: webviewMessage.payload.query, files },
         });
         return;
       }
@@ -2462,11 +2573,18 @@ function installBridge(state: ScenarioState) {
       case 'file/read':
       case 'config/update':
         return;
+      case 'session/export':
+        harnessWindow.__varroE2E?.exportSessionIds?.push(webviewMessage.payload.sessionId);
+        return;
       case 'vscode/open':
         harnessWindow.__varroE2E?.openTargets?.push({
-          path: message.payload.path,
-          ...(typeof message.payload.line === 'number' ? { line: message.payload.line } : {}),
-          ...(typeof message.payload.kind === 'string' ? { kind: message.payload.kind } : {}),
+          path: webviewMessage.payload.path,
+          ...(typeof webviewMessage.payload.line === 'number'
+            ? { line: webviewMessage.payload.line }
+            : {}),
+          ...(typeof webviewMessage.payload.kind === 'string'
+            ? { kind: webviewMessage.payload.kind }
+            : {}),
         });
         return;
       default:
@@ -2476,39 +2594,52 @@ function installBridge(state: ScenarioState) {
 }
 
 function setUpHarness() {
-  const scenarioState = createScenarioState(getScenarioName());
+  const scenarioName = getScenarioName();
+  const scenarioState = createScenarioState(scenarioName);
   const harnessWindow = window as HarnessWindow;
-  window.localStorage.clear();
-  if (scenarioState.persistedActiveSessionId) {
-    window.localStorage.setItem(
-      'varro.lastActiveSessionId',
-      JSON.stringify(scenarioState.persistedActiveSessionId)
-    );
+  const previousScenarioName = window.sessionStorage.getItem('varro.e2eScenario');
+  const shouldResetStorage = previousScenarioName !== scenarioName;
+
+  if (shouldResetStorage) {
+    window.localStorage.clear();
+    if (scenarioState.persistedActiveSessionId) {
+      window.localStorage.setItem(
+        'varro.lastActiveSessionId',
+        JSON.stringify(scenarioState.persistedActiveSessionId)
+      );
+    }
+    if (scenarioState.storedState.sessionSelectedAgents) {
+      window.localStorage.setItem(
+        'varro.sessionSelectedAgents',
+        JSON.stringify(scenarioState.storedState.sessionSelectedAgents)
+      );
+    }
+    if (scenarioState.storedState.sessionSelectedMcps) {
+      window.localStorage.setItem(
+        'varro.sessionSelectedMcps',
+        JSON.stringify(scenarioState.storedState.sessionSelectedMcps)
+      );
+    }
+    if (scenarioState.storedState.sessionPermissionModes) {
+      window.localStorage.setItem(
+        'varro.sessionPermissionModes',
+        JSON.stringify(scenarioState.storedState.sessionPermissionModes)
+      );
+    }
+    if (scenarioState.storedState.lastSeenSessions) {
+      window.localStorage.setItem(
+        'varro.lastSeenSessions',
+        JSON.stringify(scenarioState.storedState.lastSeenSessions)
+      );
+    }
+    if (scenarioState.storedState.ralphRuns) {
+      window.localStorage.setItem(
+        'varro.ralph.runs',
+        JSON.stringify(scenarioState.storedState.ralphRuns)
+      );
+    }
   }
-  if (scenarioState.storedState.sessionSelectedAgents) {
-    window.localStorage.setItem(
-      'varro.sessionSelectedAgents',
-      JSON.stringify(scenarioState.storedState.sessionSelectedAgents)
-    );
-  }
-  if (scenarioState.storedState.sessionSelectedMcps) {
-    window.localStorage.setItem(
-      'varro.sessionSelectedMcps',
-      JSON.stringify(scenarioState.storedState.sessionSelectedMcps)
-    );
-  }
-  if (scenarioState.storedState.sessionPermissionModes) {
-    window.localStorage.setItem(
-      'varro.sessionPermissionModes',
-      JSON.stringify(scenarioState.storedState.sessionPermissionModes)
-    );
-  }
-  if (scenarioState.storedState.lastSeenSessions) {
-    window.localStorage.setItem(
-      'varro.lastSeenSessions',
-      JSON.stringify(scenarioState.storedState.lastSeenSessions)
-    );
-  }
+  window.sessionStorage.setItem('varro.e2eScenario', scenarioName);
   harnessWindow.__initialTheme = THEME;
   harnessWindow.__initialWebviewState = buildInitialState(scenarioState);
   harnessWindow.__varroE2E = {
@@ -2521,6 +2652,7 @@ function setUpHarness() {
     settingsQueries: [],
     filePickCount: 0,
     openTargets: [],
+    exportSessionIds: [],
   };
   document.body.dataset.vscodeThemeKind = THEME;
   installBridge(scenarioState);

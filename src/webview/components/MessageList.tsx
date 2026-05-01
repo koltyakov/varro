@@ -35,11 +35,8 @@ import { type AssistantFileEditStackGroup } from './Message';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
-import {
-  collapseLeadingDuplicateFileEvents,
-  getTrailingFileEventSignature,
-} from '../lib/message-event-collapse';
-import { isFileEditPart, isFileReadPart, shouldShowAssistantPartInline } from '../lib/part-utils';
+import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
+import { shouldShowAssistantPartInline } from '../lib/part-utils';
 import { PendingActionRows, StickyUserMessagePreviewCard } from './message-list/MessageListChrome';
 import {
   getNextVisibleUserMessageTopMap,
@@ -1140,53 +1137,9 @@ export function MessageList() {
     });
   });
 
-  const assistantStackGroupMap = createMemo(() => {
-    const previousSignatures = previousTrailingFileEventSignatureMap();
-    messageStructureVersion();
-    return untrack(() => {
-      const result = new Map<string, AssistantFileEditStackGroup | null>();
-      const kindByMessageId = new Map<string, ReturnType<typeof getAssistantStackKind>>();
-      const messageEntries = state.messages;
-      let index = 0;
-
-      const getKind = (entry: { info: Message; parts: Part[] }) => {
-        const cached = kindByMessageId.get(entry.info.id);
-        if (cached !== undefined) return cached;
-        const kind = getAssistantStackKind(entry, previousSignatures.get(entry.info.id) ?? null);
-        kindByMessageId.set(entry.info.id, kind);
-        return kind;
-      };
-
-      while (index < messageEntries.length) {
-        const current = messageEntries[index];
-        const currentKind = getKind(current);
-
-        if (!currentKind) {
-          index++;
-          continue;
-        }
-
-        let end = index;
-        while (
-          end + 1 < messageEntries.length &&
-          getKind(messageEntries[end + 1]) === currentKind
-        ) {
-          end++;
-        }
-
-        if (end > index) {
-          for (let partIndex = index; partIndex <= end; partIndex++) {
-            const position = partIndex === index ? 'start' : partIndex === end ? 'end' : 'middle';
-            result.set(messageEntries[partIndex].info.id, position);
-          }
-        }
-
-        index = end + 1;
-      }
-
-      return result;
-    });
-  });
+  const assistantStackGroupMap = createMemo(
+    () => new Map<string, AssistantFileEditStackGroup | null>()
+  );
 
   const assistantDialogSummaryMap = createMemo(() => {
     messageStructureVersion();
@@ -1287,12 +1240,14 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
+  let currentUserRequestCreated: number | null = null;
 
   const flush = () => {
     if (currentMessages.length === 0) {
       currentMessages = [];
       currentPrimaryMessageIds = [];
       currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
       return;
     }
 
@@ -1301,19 +1256,21 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
       currentMessages = [];
       currentPrimaryMessageIds = [];
       currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
       return;
     }
 
-    const completedMessages = currentMessages.filter((message) => !!message.time.completed);
+    const aggregateMessages = collectAssistantDialogMessages(currentMessages, childRunsByParentId);
+    const completedMessages = aggregateMessages.filter((message) => !!message.time.completed);
     const end = Math.max(...completedMessages.map((message) => message.time.completed || 0));
-    const tokens = sumAssistantTokens(currentMessages);
-    const childRunCount = currentPrimaryMessageIds.reduce(
-      (count, messageId) => count + (childRunsByParentId.get(messageId)?.length || 0),
-      0
+    const tokens = sumAssistantTokens(aggregateMessages);
+    const childRunCount = countAssistantDialogChildRuns(
+      currentPrimaryMessageIds,
+      childRunsByParentId
     );
     const agentCount = Math.max(childRunCount, currentSubagentHandoffCount);
     result.set(lastMessage.id, {
-      durationMs: Math.max(0, end - currentMessages[0].time.created),
+      durationMs: Math.max(0, end - (currentUserRequestCreated ?? currentMessages[0].time.created)),
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       agentCount,
@@ -1322,11 +1279,15 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
     currentMessages = [];
     currentPrimaryMessageIds = [];
     currentSubagentHandoffCount = 0;
+    currentUserRequestCreated = null;
   };
 
   for (const entry of messages) {
     if (!isAssistantMessage(entry.info)) {
       flush();
+      if (entry.info.role === 'user') {
+        currentUserRequestCreated = entry.info.time.created;
+      }
       continue;
     }
 
@@ -1351,34 +1312,49 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
   return result;
 }
 
-function isFileEditOnlyAssistantMessage(
-  parts: Part[],
-  previousTrailingSignature: string | null
-): boolean {
-  const visibleParts = collapseLeadingDuplicateFileEvents(parts, previousTrailingSignature).filter(
-    (p) => shouldShowAssistantPartInline(p, false)
-  );
-  return visibleParts.length > 0 && visibleParts.every(isFileEditPart);
+function collectAssistantDialogMessages(
+  messages: AssistantMessage[],
+  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>
+) {
+  const result: AssistantMessage[] = [];
+  const visited = new Set<string>();
+  const pending = [...messages];
+
+  while (pending.length > 0) {
+    const message = pending.shift();
+    if (!message || visited.has(message.id)) continue;
+    visited.add(message.id);
+    result.push(message);
+
+    for (const child of childRunsByParentId.get(message.id) || []) {
+      pending.push(child.info);
+    }
+  }
+
+  return result;
 }
 
-function isFileReadOnlyAssistantMessage(
-  parts: Part[],
-  previousTrailingSignature: string | null
-): boolean {
-  const visibleParts = collapseLeadingDuplicateFileEvents(parts, previousTrailingSignature).filter(
-    (p) => shouldShowAssistantPartInline(p, false)
-  );
-  return visibleParts.length > 0 && visibleParts.every(isFileReadPart);
-}
+function countAssistantDialogChildRuns(
+  rootMessageIds: string[],
+  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>
+) {
+  let count = 0;
+  const visited = new Set<string>();
+  const pending = [...rootMessageIds];
 
-function getAssistantStackKind(
-  msg: { info: Message; parts: Part[] },
-  previousTrailingSignature: string | null
-): 'file-edit' | 'file-read' | null {
-  if (!isAssistantMessage(msg.info)) return null;
-  if (isFileEditOnlyAssistantMessage(msg.parts, previousTrailingSignature)) return 'file-edit';
-  if (isFileReadOnlyAssistantMessage(msg.parts, previousTrailingSignature)) return 'file-read';
-  return null;
+  while (pending.length > 0) {
+    const messageId = pending.shift();
+    if (!messageId) continue;
+
+    for (const child of childRunsByParentId.get(messageId) || []) {
+      if (visited.has(child.info.id)) continue;
+      visited.add(child.info.id);
+      count++;
+      pending.push(child.info.id);
+    }
+  }
+
+  return count;
 }
 
 function LoadingRow(props: { compacting: boolean }) {

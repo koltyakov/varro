@@ -1,4 +1,5 @@
 import type { FileDiff, SessionStatus } from '../../types';
+import { produce } from 'solid-js/store';
 import {
   applyMessagePartDelta,
   clearMessages,
@@ -86,11 +87,12 @@ export const sessionStore = {
     }));
   },
   clearSessionStatusEntry(sessionId: string) {
-    setState('sessionStatus', (statuses) => {
-      const next = { ...statuses };
-      delete next[sessionId];
-      return next;
-    });
+    setState(
+      'sessionStatus',
+      produce((statuses) => {
+        delete statuses[sessionId];
+      })
+    );
   },
 };
 

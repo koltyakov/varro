@@ -22,13 +22,10 @@ import type {
 import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
-  getFirstVisibleMessageIndexFromVirtualMetrics,
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
   getLatestPlanImplementationMessageId,
-  pruneMeasuredHeights,
   MessageList,
-  calculateVirtualRange,
   shouldShowPlanImplementationAction,
 } from './MessageList';
 import {
@@ -36,6 +33,7 @@ import {
   getStickyUserMessagePreview,
   shouldShowStickyUserMessagePreview,
 } from './message-list/sticky-preview';
+import { calculateVirtualRange } from './message-list/virtualization';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -152,22 +150,27 @@ function assistantMessage(
   options?: {
     agent?: string;
     error?: AssistantMessage['error'];
+    mode?: string;
+    parentID?: string;
+    sessionID?: string;
+    time?: AssistantMessage['time'];
+    tokens?: AssistantMessage['tokens'];
   }
 ): AssistantMessage {
   return {
     id,
-    sessionID: 'session-1',
+    sessionID: options?.sessionID ?? 'session-1',
     role: 'assistant',
-    time: { created: 1, completed: 2 },
-    parentID: 'parent-1',
+    time: options?.time ?? { created: 1, completed: 2 },
+    parentID: options?.parentID ?? 'parent-1',
     modelID: 'gpt-5.4',
     providerID: 'openai',
-    mode: 'default',
+    mode: options?.mode ?? 'default',
     agent: options?.agent,
     error: options?.error,
     path: { cwd: '/workspace', root: '/workspace' },
     cost: 0,
-    tokens: {
+    tokens: options?.tokens ?? {
       input: 0,
       output: 0,
       reasoning: 0,
@@ -290,76 +293,6 @@ describe('buildPlanDocumentContent', () => {
     expect(
       buildPlanDocumentContent([textPart('synthetic', 'placeholder', { synthetic: true })])
     ).toBe('');
-  });
-});
-
-describe('calculateVirtualRange', () => {
-  it('uses measured heights to calculate visible rows and padding', () => {
-    const measuredHeights = new Map([
-      ['a', 50],
-      ['b', 100],
-      ['c', 150],
-      ['d', 200],
-    ]);
-
-    expect(
-      calculateVirtualRange({
-        itemIds: ['a', 'b', 'c', 'd'],
-        measuredHeights,
-        scrollTop: 120,
-        viewportHeight: 120,
-        defaultItemHeight: 100,
-        overscan: 0,
-      })
-    ).toEqual({ start: 1, end: 3, topPad: 50, bottomPad: 200 });
-  });
-
-  it('falls back to default item heights for unmeasured rows', () => {
-    expect(
-      calculateVirtualRange({
-        itemIds: ['a', 'b', 'c'],
-        measuredHeights: new Map(),
-        scrollTop: 90,
-        viewportHeight: 40,
-        defaultItemHeight: 50,
-        overscan: 0,
-      })
-    ).toEqual({ start: 1, end: 3, topPad: 50, bottomPad: 0 });
-  });
-
-  it('prunes measured heights for removed messages', () => {
-    const measuredHeights = new Map([
-      ['a', 50],
-      ['stale', 90],
-    ]);
-
-    expect(pruneMeasuredHeights(measuredHeights, ['a', 'b'])).toBe(true);
-    expect(Array.from(measuredHeights.entries())).toEqual([['a', 50]]);
-    expect(pruneMeasuredHeights(measuredHeights, ['a'])).toBe(false);
-  });
-
-  it('derives the first visible message index from virtual metrics', () => {
-    expect(
-      getFirstVisibleMessageIndexFromVirtualMetrics({
-        metrics: {
-          prefix: [0, 50, 150, 300, 500],
-          totalHeight: 500,
-          itemCount: 4,
-        },
-        scrollTop: 151,
-      })
-    ).toBe(2);
-
-    expect(
-      getFirstVisibleMessageIndexFromVirtualMetrics({
-        metrics: {
-          prefix: [0],
-          totalHeight: 0,
-          itemCount: 0,
-        },
-        scrollTop: 10,
-      })
-    ).toBeNull();
   });
 });
 
@@ -1162,6 +1095,57 @@ describe('standalone action prompts', () => {
 });
 
 describe('MessageList sticky prompt preview', () => {
+  it('summarizes elapsed time and tokens across nested agent children', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 5_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          textPart('text-2', 'Response'),
+          {
+            id: 'agent-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'agent',
+            name: 'explore',
+          },
+        ],
+      },
+      {
+        info: assistantMessage('assistant-child-1', {
+          mode: 'subagent',
+          parentID: 'assistant-1',
+          sessionID: 'child-1',
+          time: { created: 2_500, completed: 8_000 },
+          tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+      {
+        info: assistantMessage('assistant-child-2', {
+          mode: 'subagent',
+          parentID: 'assistant-child-1',
+          sessionID: 'child-2',
+          time: { created: 3_000, completed: 11_000 },
+          tokens: { input: 2_000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 | ↓ 310 - Agents 2');
+  });
+
   it('renders with virtualization enabled without hitting initialization order errors', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');

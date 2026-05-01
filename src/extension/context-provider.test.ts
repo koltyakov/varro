@@ -250,4 +250,37 @@ describe('ContextProvider', () => {
       provider.dispose();
     }
   });
+
+  it('surfaces external active files using the absolute fsPath as relativePath', async () => {
+    const onChange = vi.fn();
+    const uri = {
+      fsPath: '/Users/andrew/.config/opencode/plans/plan-031f5812af04fbb6.md',
+      scheme: 'file',
+      toString: () => 'file:///Users/andrew/.config/opencode/plans/plan-031f5812af04fbb6.md',
+    };
+    const editor = {
+      document: { uri, isUntitled: false, languageId: 'markdown' },
+      selection: { isEmpty: true, start: { line: 0 }, end: { line: 0 } },
+    };
+    vscodeMock.window.activeTextEditor = editor;
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.languages.getDiagnostics.mockReturnValue([]);
+
+    const provider = new ContextProvider(onChange);
+
+    try {
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          activeFile: {
+            path: '/Users/andrew/.config/opencode/plans/plan-031f5812af04fbb6.md',
+            relativePath: '/Users/andrew/.config/opencode/plans/plan-031f5812af04fbb6.md',
+            language: 'markdown',
+          },
+        })
+      );
+    } finally {
+      provider.dispose();
+    }
+  });
 });

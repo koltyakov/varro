@@ -176,7 +176,13 @@ export class ContextProvider implements vscode.Disposable {
     }
 
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
-    const relativePath = getRelativePath(doc.uri, workspaceFolder);
+    // For files outside any workspace folder we surface the absolute fsPath
+    // as `relativePath` so that downstream consumers (e.g. Ralph plan input)
+    // receive a path that ContextProvider.readFile can resolve. Display sites
+    // already reduce this to a basename via getLeafPathName.
+    const relativePath = workspaceFolder
+      ? getRelativePath(doc.uri, workspaceFolder)
+      : doc.uri.fsPath;
 
     this._context.activeFile = config.autoAttachFile
       ? {
