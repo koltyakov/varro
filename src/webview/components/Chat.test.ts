@@ -1669,7 +1669,7 @@ describe('getHeaderFailedCount', () => {
     expect(indicators.attentionIds.has('session-1')).toBe(true);
   });
 
-  it('counts nested descendants in subagent counts for both root and active descendants', () => {
+  it('counts nested descendants per session subtree for subagent counts', () => {
     const sessions = [
       session('session-1', 500),
       session('child-1', 400, { parentID: 'session-1' }),
@@ -1681,8 +1681,8 @@ describe('getHeaderFailedCount', () => {
     const indicators = deriveSessionIndicators(state.sessions);
 
     expect(indicators.subagentCounts.get('session-1')).toBe(2);
-    expect(indicators.subagentCounts.get('child-1')).toBe(2);
-    expect(indicators.subagentCounts.get('grandchild-1')).toBe(2);
+    expect(indicators.subagentCounts.get('child-1')).toBe(1);
+    expect(indicators.subagentCounts.has('grandchild-1')).toBe(false);
   });
 });
 
