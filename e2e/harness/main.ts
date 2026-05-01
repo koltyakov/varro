@@ -65,6 +65,8 @@ const SCENARIO_NAMES = [
   'tool-open-actions',
   'todo-completion',
   'message-rendering',
+  'ralph-dashboard',
+  'statusbar-focus',
 ] as const;
 type ScenarioName = (typeof SCENARIO_NAMES)[number];
 
@@ -100,6 +102,7 @@ type ScenarioState = {
     sessionSelectedMcps?: Record<string, string[]>;
     sessionPermissionModes?: Record<string, 'default' | 'full'>;
     lastSeenSessions?: Record<string, number>;
+    ralphRuns?: Record<string, unknown>;
   };
   postReadyMessages: unknown[];
   readyStatus?: ServerStatus;
@@ -121,6 +124,7 @@ type HarnessWindow = Window & {
     settingsQueries?: string[];
     filePickCount?: number;
     openTargets?: Array<{ path: string; line?: number; kind?: string }>;
+    exportSessionIds?: string[];
   };
 };
 
@@ -1894,6 +1898,83 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     return state;
   }
 
+  if (name === 'ralph-dashboard') {
+    const session = makeSession('session-ralph-1', 'Ralph: PLAN.md', BASE_TIME - 2_000);
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [];
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 370;
+    state.storedState = {
+      ralphRuns: {
+        [session.id]: {
+          config: {
+            managerSessionId: session.id,
+            planDocPath: 'plan-abc123.md',
+            iterations: 5,
+            promptTemplate: 'You are iteration {{iteration}} of {{totalIterations}}.',
+            permissionMode: 'full',
+            model: null,
+            agent: null,
+            createdAt: BASE_TIME - 2_000,
+          },
+          status: 'running',
+          currentIteration: 2,
+          iterations: [
+            {
+              index: 1,
+              childSessionId: 'session-ralph-child-1',
+              status: 'passed',
+              startedAt: BASE_TIME - 1_800,
+              endedAt: BASE_TIME - 1_200,
+              filesChanged: ['src/a.ts'],
+              verification: { lint: 'pass', typecheck: 'pass', test: 'pass' },
+              tokens: { input: 1000, output: 500, reasoning: 200, cacheRead: 0, cacheWrite: 0, total: 1700 },
+            },
+            {
+              index: 2,
+              childSessionId: 'session-ralph-child-2',
+              status: 'running',
+              startedAt: BASE_TIME - 1_000,
+              endedAt: null,
+              filesChanged: [],
+              verification: {},
+            },
+            {
+              index: 3,
+              childSessionId: null,
+              status: 'pending',
+              startedAt: null,
+              endedAt: null,
+              filesChanged: [],
+              verification: {},
+            },
+          ],
+          updatedAt: BASE_TIME - 1_000,
+        },
+      },
+    };
+    return state;
+  }
+
+  if (name === 'statusbar-focus') {
+    const session = makeSession('session-statusbar-1', 'Status bar focus test', BASE_TIME - 500);
+    const secondSession = makeSession(
+      'session-statusbar-2',
+      'Second session no attention',
+      BASE_TIME - 700
+    );
+    state.sessions = [session, secondSession];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.sessionStatuses[secondSession.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [];
+    state.messagesBySessionId[secondSession.id] = [];
+    state.persistedActiveSessionId = session.id;
+    state.postReadyMessages.push({ type: 'command/focus-input' });
+    state.nextSequence = 380;
+    return state;
+  }
+
   state.nextSequence = 30;
   return state;
 }
@@ -2492,6 +2573,9 @@ function installBridge(state: ScenarioState) {
       case 'file/read':
       case 'config/update':
         return;
+      case 'session/export':
+        harnessWindow.__varroE2E?.exportSessionIds?.push(webviewMessage.payload.sessionId);
+        return;
       case 'vscode/open':
         harnessWindow.__varroE2E?.openTargets?.push({
           path: webviewMessage.payload.path,
@@ -2548,6 +2632,12 @@ function setUpHarness() {
         JSON.stringify(scenarioState.storedState.lastSeenSessions)
       );
     }
+    if (scenarioState.storedState.ralphRuns) {
+      window.localStorage.setItem(
+        'varro.ralph.runs',
+        JSON.stringify(scenarioState.storedState.ralphRuns)
+      );
+    }
   }
   window.sessionStorage.setItem('varro.e2eScenario', scenarioName);
   harnessWindow.__initialTheme = THEME;
@@ -2562,6 +2652,7 @@ function setUpHarness() {
     settingsQueries: [],
     filePickCount: 0,
     openTargets: [],
+    exportSessionIds: [],
   };
   document.body.dataset.vscodeThemeKind = THEME;
   installBridge(scenarioState);
