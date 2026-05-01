@@ -7042,6 +7042,11 @@ body.vscode-high-contrast-light
   color: var(--color-vscode-error);
 }
 
+.ralph-dashboard-btn-continue {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 45%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-warning) 70%, var(--color-vscode-fg));
+}
+
 .ralph-dashboard-meta {
   display: flex;
   gap: 14px;

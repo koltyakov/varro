@@ -1,5 +1,9 @@
 import { For, Show } from 'solid-js';
-import type { RalphStopReason } from '../../../shared/ralph';
+import {
+  RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT,
+  type RalphStatus,
+  type RalphStopReason,
+} from '../../../shared/ralph';
 import { formatVariantLabel } from '../../lib/format';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { ralphRunner } from './ralph-runner';
@@ -50,18 +54,27 @@ export function RalphDashboard(props: { sessionId: string }) {
                     onClick={() => ralphRunner.pause(props.sessionId)}
                   >
                     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                      <rect x="4" y="3" width="3" height="10" rx="0.75" />
-                      <rect x="9" y="3" width="3" height="10" rx="0.75" />
+                      <rect x="3.5" y="2.5" width="3" height="11" rx="1.25" />
+                      <rect x="9.5" y="2.5" width="3" height="11" rx="1.25" />
                     </svg>
                   </button>
                 </Show>
                 <Show when={isResumable()}>
                   <button
                     type="button"
-                    class="ralph-dashboard-btn"
+                    class={resumeButtonClass(activeRun().status)}
+                    title={resumeButtonTitle(activeRun().status)}
+                    aria-label={resumeButtonLabel(activeRun().status)}
                     onClick={() => void ralphRunner.resume(props.sessionId)}
                   >
-                    Resume
+                    <Show
+                      when={activeRun().status === 'incomplete'}
+                      fallback={resumeButtonLabel(activeRun().status)}
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M3.5 2.5l9 5.5-9 5.5z" />
+                      </svg>
+                    </Show>
                   </button>
                 </Show>
                 <Show when={!isTerminal()}>
@@ -73,7 +86,7 @@ export function RalphDashboard(props: { sessionId: string }) {
                     onClick={() => ralphRunner.stop(props.sessionId)}
                   >
                     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                      <rect x="3" y="3" width="10" height="10" rx="1.5" />
+                      <rect x="2.5" y="2.5" width="11" height="11" rx="2.25" />
                     </svg>
                   </button>
                 </Show>
@@ -120,6 +133,27 @@ function planLabel(path: string): string {
 
 function formatReasoningLevel(variant: string | undefined): string {
   return variant ? ` (${formatVariantLabel(variant)})` : '';
+}
+
+function resumeButtonLabel(status: RalphStatus): string {
+  if (status === 'incomplete') {
+    return `Add ${RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT} runs & continue`;
+  }
+  return 'Resume';
+}
+
+function resumeButtonTitle(status: RalphStatus): string {
+  if (status === 'incomplete') {
+    return `Increase the iteration limit by ${RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT} and continue the Ralph loop.`;
+  }
+  return 'Resume';
+}
+
+function resumeButtonClass(status: RalphStatus): string {
+  if (status === 'incomplete') {
+    return 'ralph-dashboard-btn ralph-dashboard-btn-icon ralph-dashboard-btn-continue';
+  }
+  return 'ralph-dashboard-btn';
 }
 
 export function stopReasonLabel(reason: RalphStopReason): string {

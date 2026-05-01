@@ -6,6 +6,7 @@ import type {
   RalphStopReason,
   RalphVerificationVerdict,
 } from '../../../shared/ralph';
+import { RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT } from '../../../shared/ralph';
 import { client, serverEvents } from '../../lib/client';
 import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
 import { ralphStore } from '../../lib/stores/ralph-store';
@@ -57,8 +58,13 @@ export const ralphRunner = {
     const run = ralphStore.getRun(managerSessionId);
     if (!run) return;
     if (run.status !== 'paused' && run.status !== 'failed' && run.status !== 'incomplete') return;
+    if (run.status === 'incomplete') {
+      ralphStore.addIterations(managerSessionId, RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT);
+    }
+    const resumedRun = ralphStore.getRun(managerSessionId);
+    if (!resumedRun) return;
     ralphStore.setStatus(managerSessionId, 'running');
-    await runLoop(run.config);
+    await runLoop(resumedRun.config);
   },
 
   reattachAll(): void {

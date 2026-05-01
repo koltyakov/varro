@@ -127,6 +127,37 @@ describe('ralph store persistence', () => {
     expect(afterRemovalStore.isRalphSession(config.managerSessionId)).toBe(false);
     expect(afterRemovalStore.getAllRuns()).toEqual([]);
   });
+
+  it('persists added iterations for an existing run', async () => {
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1_000);
+
+    const { ralphStore } = await loadRalphStore();
+    const config = createConfig({ managerSessionId: 'manager-3', iterations: 5 });
+
+    ralphStore.startRun(config);
+
+    now.mockReturnValue(2_000);
+    ralphStore.addIterations(config.managerSessionId, 5);
+
+    expect(ralphStore.getRun(config.managerSessionId)).toEqual({
+      config: { ...config, iterations: 10 },
+      status: 'running',
+      currentIteration: 0,
+      iterations: [],
+      updatedAt: 2_000,
+    });
+
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}')).toEqual({
+      [config.managerSessionId]: {
+        config: { ...config, iterations: 10 },
+        status: 'running',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: 2_000,
+      },
+    });
+  });
 });
 
 describe('ralph store findManagerSessionIdForChild', () => {

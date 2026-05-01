@@ -64,3 +64,35 @@ test('pause button transitions to paused and shows resume', async ({ page }) => 
   await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
 });
+
+test('incomplete runs show add-runs-and-continue action', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=ralph-dashboard');
+
+  await page.evaluate(() => {
+    const raw = window.localStorage.getItem('varro.ralph.runs');
+    const runs = raw ? JSON.parse(raw) : {};
+    const run = runs['session-ralph-1'];
+    runs['session-ralph-1'] = {
+      ...run,
+      status: 'incomplete',
+      stopReason: 'iteration_limit_with_gap',
+      currentIteration: 5,
+      iterations: Array.from({ length: 5 }, (_, index) => ({
+        index: index + 1,
+        childSessionId: `session-ralph-child-${index + 1}`,
+        status: 'passed',
+        startedAt: run.updatedAt - (5 - index) * 100,
+        endedAt: run.updatedAt - (5 - index) * 50,
+        filesChanged: [],
+        verification: { lint: 'pass', typecheck: 'pass', test: 'pass' },
+      })),
+    };
+    window.localStorage.setItem('varro.ralph.runs', JSON.stringify(runs));
+  });
+
+  await page.reload();
+
+  await expect(page.locator('.ralph-dashboard-status-incomplete')).toBeVisible();
+  await expect(page.locator('.ralph-dashboard-meta')).toContainText('Iterations: 5 / 5');
+  await expect(page.getByRole('button', { name: 'Add 5 runs & continue' })).toBeVisible();
+});

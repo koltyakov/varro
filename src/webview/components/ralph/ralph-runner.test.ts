@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RalphConfig, RalphIteration } from '../../../shared/ralph';
+import {
+  RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT,
+  type RalphConfig,
+  type RalphIteration,
+} from '../../../shared/ralph';
 
 const {
   createSession,
@@ -217,6 +221,25 @@ describe('ralph runner stop conditions', () => {
     expect(run?.status).toBe('incomplete');
     expect(run?.stopReason).toBe('iteration_limit_with_gap');
     expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it('adds more iterations before resuming an incomplete run', async () => {
+    const { ralphRunner, ralphStore } = await loadRunnerModules();
+    const config = createConfig({ iterations: 1 });
+
+    ralphStore.startRun(config);
+    ralphStore.upsertIteration(config.managerSessionId, createIteration(1));
+    ralphStore.setStatus(config.managerSessionId, 'incomplete', 'iteration_limit_with_gap');
+
+    createSession.mockRejectedValue(new Error('halt for assertion'));
+
+    await ralphRunner.resume(config.managerSessionId);
+
+    const run = ralphStore.getRun(config.managerSessionId);
+    expect(run?.config.iterations).toBe(1 + RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT);
+    expect(run?.status).toBe('failed');
+    expect(run?.stopReason).toBe('iteration_error');
+    expect(createSession).toHaveBeenCalledTimes(1);
   });
 
   it('stops when the plan document starts with the DONE marker', async () => {
