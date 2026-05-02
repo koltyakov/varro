@@ -50,7 +50,7 @@ export async function buildIterationPrompt(args: {
     ? formatPreviousSummary(previousIteration)
     : 'This is the first iteration.';
   const planContent = await readPlanDocument(config.planDocPath, readFile);
-  const planPathWarning = getPlanPathWarning(config.planDocPath);
+  const planPathWarning = getPlanPromptWarnings(config.planDocPath, planContent);
 
   return (
     config.promptTemplate
@@ -67,9 +67,19 @@ export async function buildIterationPrompt(args: {
   );
 }
 
-function getPlanPathWarning(path: string): string {
-  if (!isAbsolutePath(path)) return '';
-  return 'If the plan document path is absolute, it may be outside the current workspace. Read and update that exact path; do not create or update a same-named file inside the workspace.';
+function getPlanPromptWarnings(path: string, planContent: string): string {
+  const warnings: string[] = [];
+  if (isAbsolutePath(path)) {
+    warnings.push(
+      'If the plan document path is absolute, it may be outside the current workspace. Read and update that exact path; do not create or update a same-named file inside the workspace.'
+    );
+  }
+  if (isUnavailablePlanContent(planContent) || isEmptyPlanContent(planContent)) {
+    warnings.push(
+      'If the plan document content is unavailable or empty, do not invent plan work. Retry reading the exact path, and if it still cannot be read, report the blocker and stop without making code changes.'
+    );
+  }
+  return warnings.join('\n');
 }
 
 function isAbsolutePath(path: string): boolean {
@@ -89,6 +99,14 @@ export async function readPlanDocument(
   } catch {
     return '(Plan document content unavailable.)';
   }
+}
+
+function isUnavailablePlanContent(content: string): boolean {
+  return content === '(Plan document content unavailable.)';
+}
+
+function isEmptyPlanContent(content: string): boolean {
+  return content === '(Plan document is empty.)';
 }
 
 function formatPreviousSummary(previous: RalphIteration): string {

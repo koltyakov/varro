@@ -154,7 +154,7 @@ function extractTodosFromParallelTool(raw: unknown): Todo[] | null {
     const record = toolUse as Record<string, unknown>;
     const recipientName =
       typeof record.recipient_name === 'string' ? record.recipient_name.trim().toLowerCase() : '';
-    if (!recipientName.includes('todowrite')) continue;
+    if (!isTodoToolName(recipientName)) continue;
 
     const todos = extractTodos(record.parameters);
     if (todos) return todos;
@@ -198,6 +198,15 @@ function statusRank(status: string) {
   return 0;
 }
 
+function isTodoToolName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes('todo')) return true;
+
+  const bareName = normalized.split('.').at(-1) ?? normalized;
+  return TODO_TOOL_NAMES.has(normalized) || TODO_TOOL_NAMES.has(bareName);
+}
+
 function extractTodosFromPart(part: Part): Todo[] | null {
   if (part.type !== 'tool') return null;
 
@@ -211,7 +220,7 @@ function extractTodosFromPart(part: Part): Todo[] | null {
     );
   }
 
-  if (!toolName.includes('todo') && !TODO_TOOL_NAMES.has(toolName)) {
+  if (!isTodoToolName(toolName)) {
     return null;
   }
 

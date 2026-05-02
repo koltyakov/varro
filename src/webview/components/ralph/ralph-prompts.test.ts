@@ -111,6 +111,21 @@ describe('ralph prompt helpers', () => {
     expect(prompt).toContain('do not create or update a same-named file inside the workspace');
   });
 
+  it('tells Ralph to stop instead of guessing when the plan file is unreadable', async () => {
+    const prompt = await buildIterationPrompt({
+      config: createConfig({
+        promptTemplate: getDefaultPromptTemplate(),
+      }),
+      iterationIndex: 1,
+      previousIteration: null,
+      readFile: async () => null,
+    });
+
+    expect(prompt).toContain('(Plan document content unavailable.)');
+    expect(prompt).toContain('do not invent plan work');
+    expect(prompt).toContain('report the blocker and stop without making code changes');
+  });
+
   it('builds an anchor message that summarizes the configured run', () => {
     const message = buildAnchorMessage(
       createConfig({

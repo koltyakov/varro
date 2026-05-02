@@ -103,6 +103,41 @@ describe('todo-sync', () => {
     ).toEqual(todos);
   });
 
+  it('derives todos from update_plan entries inside parallel tool payloads', () => {
+    const todos = [{ id: 'todo-1', content: 'ship it', status: 'pending', priority: 'high' }];
+
+    expect(
+      deriveTodosFromMessages([
+        { info: userMessage('user-1'), parts: [] },
+        {
+          info: assistantMessage('assistant-1'),
+          parts: [
+            {
+              id: 'part-1',
+              sessionID: 'session-1',
+              messageID: 'assistant-1',
+              type: 'tool',
+              callID: 'call-1',
+              tool: 'multi_tool_use.parallel',
+              state: {
+                status: 'completed',
+                input: {
+                  tool_uses: [
+                    {
+                      recipient_name: 'functions.update_plan',
+                      parameters: { todos },
+                    },
+                  ],
+                },
+                time: { start: 0, end: 1 },
+              },
+            } as Part,
+          ],
+        },
+      ])
+    ).toEqual(todos);
+  });
+
   it('keeps event-owned todos until messages fully catch up', () => {
     const setTodos = vi.fn();
     state.sessionStatus = { 'session-1': { type: 'busy' } };
