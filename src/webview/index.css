@@ -2938,7 +2938,10 @@ body.vscode-light
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  width: min(100%, var(--chat-content-max-width));
+  width: max(
+    0px,
+    calc(min(100%, var(--chat-content-max-width)) - (var(--chat-horizontal-padding) * 2))
+  );
   margin: 8px auto 0;
   padding: 8px 10px;
   border-radius: 10px;
@@ -6028,7 +6031,13 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   }
 
   .chat-transport-banner.chat-main-column {
-    width: min(100%, calc(var(--chat-content-max-width) + var(--chat-sidebar-width)));
+    width: max(
+      0px,
+      calc(
+        min(100%, calc(var(--chat-content-max-width) + var(--chat-sidebar-width))) -
+          (var(--chat-horizontal-padding) * 2)
+      )
+    );
   }
 }
 
