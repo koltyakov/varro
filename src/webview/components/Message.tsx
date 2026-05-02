@@ -192,10 +192,10 @@ export function Message(props: {
                 textForPart={getEffectivePartText}
               />
             </Show>
-            <Show when={assistant() && visibleDiffs().length > 0}>
-              <DiffSummary diffs={visibleDiffs()} />
-            </Show>
           </div>
+          <Show when={assistant() && visibleDiffs().length > 0}>
+            <DiffSummary diffs={visibleDiffs()} />
+          </Show>
         </div>
       </Show>
     </Show>

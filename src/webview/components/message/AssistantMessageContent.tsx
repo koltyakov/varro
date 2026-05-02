@@ -547,6 +547,9 @@ function getAssistantFlowItemClass(
   highlightPlanningAnswer: boolean
 ) {
   const className = 'assistant-message-flow-item';
+  if (part.type === 'file' && part.mime.startsWith('image/')) {
+    return `${className} assistant-message-flow-item-image`;
+  }
   if (part.type !== 'text' || part.id !== finalTextPartId) return className;
 
   return `${className} assistant-message-flow-item-final assistant-message-flow-item-final-readable${highlightPlanningAnswer ? ' assistant-message-flow-item-final-planning' : ''}`;

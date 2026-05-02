@@ -191,7 +191,9 @@ export function UserMessageContent(props: { parts: Part[] }) {
     otherFileParts().length > 0 || parsed().messageTexts.length > 0 || imageParts().length > 0;
 
   return (
-    <div class="rendered-markdown">
+    <div
+      class={`rendered-markdown${imageParts().length > 0 ? ' user-message-content-has-image' : ''}`}
+    >
       <Show when={parsed().attachments.length > 0}>
         <div
           class={`message-attachments${hasTrailingAttachmentContent() ? ' message-attachments-leading' : ' message-attachments-standalone'}`}

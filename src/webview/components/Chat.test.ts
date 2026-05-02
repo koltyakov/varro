@@ -1866,6 +1866,46 @@ describe('usage-limit session status precedence', () => {
     expect(indicators.runningIds.has('session-1')).toBe(false);
     expect(indicators.runningIds.has('child-1')).toBe(false);
   });
+
+  it('does not render stale Ralph child running status in the sub-agent list', async () => {
+    setState('sessions', [
+      session('manager', 500),
+      session('child-1', 400, { parentID: 'manager' }),
+    ]);
+    setState('activeSessionId', 'manager');
+    setState('lastSeenSessions', { manager: 500, 'child-1': 400 });
+    setState('sessionStatus', {
+      'child-1': { type: 'busy' },
+    });
+    ralphStore.startRun({
+      managerSessionId: 'manager',
+      planDocPath: 'TESTS.md',
+      iterations: 15,
+      promptTemplate: 'Prompt',
+      permissionMode: 'full',
+      model: null,
+      agent: null,
+      createdAt: 1,
+    });
+    ralphStore.setStatus('manager', 'done', 'done_marker');
+
+    cleanup = render(() => Chat(), container!);
+
+    const subagentsButton = container?.querySelector(
+      '.chat-header-subagents'
+    ) as HTMLButtonElement | null;
+    expect(subagentsButton).toBeInstanceOf(HTMLButtonElement);
+
+    subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const childRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
+      (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'child-1'
+    );
+
+    expect(childRow).toBeInstanceOf(HTMLDivElement);
+    expect(childRow?.querySelector('.session-item-indicator')).toBeNull();
+  });
 });
 
 describe('getHeaderPlanReadyCount', () => {

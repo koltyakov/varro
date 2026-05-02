@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
 import type { FilePart, Part, ToolPart } from '../types';
+import { client } from '../lib/client';
 import { setExpandThinkingByDefault } from '../lib/state';
 import {
   Message,
@@ -764,6 +765,43 @@ describe('Message assistant final answer rendering', () => {
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);
     expect(finalItem).toBeInstanceOf(HTMLDivElement);
     expect(finalItem?.textContent).toContain('Final answer.');
+  });
+
+  it('renders changed files outside the assistant response block', async () => {
+    vi.spyOn(client.session, 'diff').mockResolvedValue([
+      {
+        file: 'src/webview/components/Chat.tsx',
+        before: '',
+        after: '',
+        additions: 71,
+        deletions: 80,
+      },
+    ]);
+
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-with-diff'),
+          parts: [textPart('text-1', 'Hello\nworld')],
+          isLastAssistant: true,
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.diff-summary')).toBeInstanceOf(HTMLDivElement);
+    });
+
+    const chatTurn = container?.querySelector('.chat-turn-assistant');
+    const responseBlock = container?.querySelector('.chat-turn-content');
+    const diffSummary = container?.querySelector('.diff-summary');
+
+    expect(chatTurn).toBeInstanceOf(HTMLDivElement);
+    expect(responseBlock).toBeInstanceOf(HTMLDivElement);
+    expect(diffSummary).toBeInstanceOf(HTMLDivElement);
+    expect(chatTurn?.lastElementChild).toBe(diffSummary);
+    expect(responseBlock?.contains(diffSummary!)).toBe(false);
   });
 
   it('renders thinking outside highlighted planning cards and hides workspace text', () => {
