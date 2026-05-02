@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import {
   ChatInput,
   getActiveCompletion,
@@ -26,8 +27,7 @@ const { sendMessageMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../hooks/useOpenCode', async () => {
-  const actual =
-    await vi.importActual<typeof import('../hooks/useOpenCode')>('../hooks/useOpenCode');
+  const actual = await vi.importActual<typeof UseOpenCodeModule>('../hooks/useOpenCode');
   return {
     ...actual,
     sendMessage: sendMessageMock,

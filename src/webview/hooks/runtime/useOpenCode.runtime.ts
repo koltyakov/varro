@@ -1,4 +1,5 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
+import type { QueuedMessage } from '../../lib/app-state-types';
 
 let currentOpenCodeRuntime = createOpenCodeRuntime();
 
@@ -61,9 +62,9 @@ export async function sendMessage(
   options?: {
     noReply?: boolean;
     queuedAttachments?: {
-      droppedFiles?: import('../../lib/app-state-types').QueuedMessage['droppedFiles'];
-      clipboardImages?: import('../../lib/app-state-types').QueuedMessage['clipboardImages'];
-      terminalSelection?: import('../../lib/app-state-types').QueuedMessage['terminalSelection'];
+      droppedFiles?: QueuedMessage['droppedFiles'];
+      clipboardImages?: QueuedMessage['clipboardImages'];
+      terminalSelection?: QueuedMessage['terminalSelection'];
     };
     preserveComposer?: boolean;
   }

@@ -5959,12 +5959,26 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
     margin: 0 auto var(--chat-horizontal-padding);
   }
 
-  .ralph-dashboard-header,
-  .ralph-dashboard-meta,
-  .ralph-dashboard-list {
+  .ralph-dashboard-list-scroll {
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .ralph-dashboard-fixed-track,
+  .ralph-dashboard-list-track {
     width: min(100%, var(--chat-content-max-width));
     margin-inline: auto;
+  }
+
+  .ralph-dashboard-fixed-track {
     padding-inline: var(--chat-horizontal-padding);
+  }
+
+  .ralph-dashboard-list-track {
+    padding-left: var(--chat-horizontal-padding);
+    padding-right: max(
+      0px,
+      calc(var(--chat-horizontal-padding) - var(--ralph-dashboard-scrollbar-inset))
+    );
   }
 }
 
@@ -6945,9 +6959,39 @@ body.vscode-high-contrast-light
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  padding: 14px;
+  min-width: 0;
+  --ralph-dashboard-scrollbar-inset: 0px;
+}
+
+.ralph-dashboard-fixed {
+  flex: 0 0 auto;
+  padding-top: 14px;
+  padding-bottom: 8px;
+}
+
+.ralph-dashboard-fixed-track {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  padding-inline: 14px;
+}
+
+.ralph-dashboard-list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+  padding: 0 0 14px;
+}
+
+.ralph-dashboard-list-track {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  padding: 0 max(0px, calc(14px - var(--ralph-dashboard-scrollbar-inset))) 0 14px;
 }
 
 .ralph-dashboard-empty {

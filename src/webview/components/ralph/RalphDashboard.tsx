@@ -1,4 +1,4 @@
-import { For, Show } from 'solid-js';
+import { For, Show, createEffect, onCleanup } from 'solid-js';
 import {
   RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT,
   type RalphStatus,
@@ -11,6 +11,16 @@ import { RalphIterationCard } from './RalphIterationCard';
 
 export function RalphDashboard(props: { sessionId: string }) {
   const run = () => ralphStore.getRun(props.sessionId);
+  let listScrollRef: HTMLDivElement | undefined;
+
+  function updateScrollbarInset() {
+    if (!listScrollRef) return;
+    const scrollbarInset = Math.max(0, listScrollRef.offsetWidth - listScrollRef.clientWidth);
+    listScrollRef.parentElement?.style.setProperty(
+      '--ralph-dashboard-scrollbar-inset',
+      `${scrollbarInset}px`
+    );
+  }
 
   const isRunning = () => run()?.status === 'running';
   const isResumable = () => {
@@ -22,104 +32,134 @@ export function RalphDashboard(props: { sessionId: string }) {
     return s === 'done' || s === 'stopped' || s === 'failed' || s === 'incomplete';
   };
 
+  createEffect(() => {
+    const listScroll = listScrollRef;
+    if (!listScroll) return;
+    updateScrollbarInset();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => updateScrollbarInset());
+    observer.observe(listScroll);
+    onCleanup(() => observer.disconnect());
+  });
+
   return (
     <div class="ralph-dashboard">
-      <Show when={run()} fallback={<div class="ralph-dashboard-empty">Ralph run not found.</div>}>
+      <Show
+        when={run()}
+        fallback={
+          <div class="ralph-dashboard-list-scroll" ref={(el) => (listScrollRef = el)}>
+            <div class="ralph-dashboard-list-track">
+              <div class="ralph-dashboard-empty">Ralph run not found.</div>
+            </div>
+          </div>
+        }
+      >
         {(activeRun) => (
           <>
-            <header class="ralph-dashboard-header">
-              <div class="ralph-dashboard-header-left">
-                <span class="ralph-dashboard-tag">Ralph</span>
-                <span class="ralph-dashboard-plan" title={activeRun().config.planDocPath}>
-                  {planLabel(activeRun().config.planDocPath)}
-                </span>
-                <span class={`ralph-dashboard-status ralph-dashboard-status-${activeRun().status}`}>
-                  {activeRun().status}
-                </span>
-                <Show when={activeRun().stopReason}>
-                  {(reason) => (
-                    <span class="ralph-dashboard-stop-reason" title={stopReasonTooltip(reason())}>
-                      {stopReasonLabel(reason())}
+            <div class="ralph-dashboard-fixed">
+              <div class="ralph-dashboard-fixed-track">
+                <header class="ralph-dashboard-header">
+                  <div class="ralph-dashboard-header-left">
+                    <span class="ralph-dashboard-tag">Ralph</span>
+                    <span class="ralph-dashboard-plan" title={activeRun().config.planDocPath}>
+                      {planLabel(activeRun().config.planDocPath)}
                     </span>
-                  )}
-                </Show>
-              </div>
-              <div class="ralph-dashboard-header-right">
-                <Show when={isRunning()}>
-                  <button
-                    type="button"
-                    class="ralph-dashboard-btn ralph-dashboard-btn-icon"
-                    title="Pause"
-                    aria-label="Pause"
-                    onClick={() => ralphRunner.pause(props.sessionId)}
-                  >
-                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                      <rect x="3.5" y="2.5" width="3" height="11" rx="1.25" />
-                      <rect x="9.5" y="2.5" width="3" height="11" rx="1.25" />
-                    </svg>
-                  </button>
-                </Show>
-                <Show when={isResumable()}>
-                  <button
-                    type="button"
-                    class={resumeButtonClass(activeRun().status)}
-                    title={resumeButtonTitle(activeRun().status)}
-                    aria-label={resumeButtonLabel(activeRun().status)}
-                    onClick={() => void ralphRunner.resume(props.sessionId)}
-                  >
-                    <Show
-                      when={activeRun().status === 'incomplete'}
-                      fallback={resumeButtonLabel(activeRun().status)}
+                    <span
+                      class={`ralph-dashboard-status ralph-dashboard-status-${activeRun().status}`}
                     >
-                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                        <path d="M3.5 2.5l9 5.5-9 5.5z" />
-                      </svg>
+                      {activeRun().status}
+                    </span>
+                    <Show when={activeRun().stopReason}>
+                      {(reason) => (
+                        <span
+                          class="ralph-dashboard-stop-reason"
+                          title={stopReasonTooltip(reason())}
+                        >
+                          {stopReasonLabel(reason())}
+                        </span>
+                      )}
                     </Show>
-                  </button>
-                </Show>
-                <Show when={!isTerminal()}>
-                  <button
-                    type="button"
-                    class="ralph-dashboard-btn ralph-dashboard-btn-icon ralph-dashboard-btn-danger"
-                    title="Stop"
-                    aria-label="Stop"
-                    onClick={() => ralphRunner.stop(props.sessionId)}
-                  >
-                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                      <rect x="2.5" y="2.5" width="11" height="11" rx="2.25" />
-                    </svg>
-                  </button>
-                </Show>
-              </div>
-            </header>
+                  </div>
+                  <div class="ralph-dashboard-header-right">
+                    <Show when={isRunning()}>
+                      <button
+                        type="button"
+                        class="ralph-dashboard-btn ralph-dashboard-btn-icon"
+                        title="Pause"
+                        aria-label="Pause"
+                        onClick={() => ralphRunner.pause(props.sessionId)}
+                      >
+                        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                          <rect x="3.5" y="2.5" width="3" height="11" rx="1.25" />
+                          <rect x="9.5" y="2.5" width="3" height="11" rx="1.25" />
+                        </svg>
+                      </button>
+                    </Show>
+                    <Show when={isResumable()}>
+                      <button
+                        type="button"
+                        class={resumeButtonClass(activeRun().status)}
+                        title={resumeButtonTitle(activeRun().status)}
+                        aria-label={resumeButtonLabel(activeRun().status)}
+                        onClick={() => void ralphRunner.resume(props.sessionId)}
+                      >
+                        <Show
+                          when={activeRun().status === 'incomplete'}
+                          fallback={resumeButtonLabel(activeRun().status)}
+                        >
+                          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                            <path d="M3.5 2.5l9 5.5-9 5.5z" />
+                          </svg>
+                        </Show>
+                      </button>
+                    </Show>
+                    <Show when={!isTerminal()}>
+                      <button
+                        type="button"
+                        class="ralph-dashboard-btn ralph-dashboard-btn-icon ralph-dashboard-btn-danger"
+                        title="Stop"
+                        aria-label="Stop"
+                        onClick={() => ralphRunner.stop(props.sessionId)}
+                      >
+                        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                          <rect x="2.5" y="2.5" width="11" height="11" rx="2.25" />
+                        </svg>
+                      </button>
+                    </Show>
+                  </div>
+                </header>
 
-            <section class="ralph-dashboard-meta">
-              <span>
-                Iterations: {activeRun().iterations.length} / {activeRun().config.iterations}
-              </span>
-              <Show when={activeRun().config.model}>
-                {(m) => (
+                <section class="ralph-dashboard-meta">
                   <span>
-                    Model: {m().providerID}/{m().modelID}
-                    {formatReasoningLevel(m().variant)}
+                    Iterations: {activeRun().iterations.length} / {activeRun().config.iterations}
                   </span>
-                )}
-              </Show>
-              <Show when={activeRun().config.agent}>
-                <span>Agent: {activeRun().config.agent}</span>
-              </Show>
-            </section>
+                  <Show when={activeRun().config.model}>
+                    {(m) => (
+                      <span>
+                        Model: {m().providerID}/{m().modelID}
+                        {formatReasoningLevel(m().variant)}
+                      </span>
+                    )}
+                  </Show>
+                  <Show when={activeRun().config.agent}>
+                    <span>Agent: {activeRun().config.agent}</span>
+                  </Show>
+                </section>
+              </div>
+            </div>
 
-            <section class="ralph-dashboard-list">
-              <Show
-                when={activeRun().iterations.length > 0}
-                fallback={<div class="ralph-dashboard-empty">No iterations yet.</div>}
-              >
-                <For each={activeRun().iterations}>
-                  {(iteration) => <RalphIterationCard iteration={iteration} />}
-                </For>
-              </Show>
-            </section>
+            <div class="ralph-dashboard-list-scroll" ref={(el) => (listScrollRef = el)}>
+              <section class="ralph-dashboard-list-track ralph-dashboard-list">
+                <Show
+                  when={activeRun().iterations.length > 0}
+                  fallback={<div class="ralph-dashboard-empty">No iterations yet.</div>}
+                >
+                  <For each={activeRun().iterations.toReversed()}>
+                    {(iteration) => <RalphIterationCard iteration={iteration} />}
+                  </For>
+                </Show>
+              </section>
+            </div>
           </>
         )}
       </Show>
