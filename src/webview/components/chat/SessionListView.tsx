@@ -1021,6 +1021,8 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const isRunning = (sessionId: string) => {
     if (hasActiveUsageLimit(sessionId)) return false;
     if (isAwaitingInput(sessionId)) return false;
+    const ralphRun = ralphStore.getRun(rootSessionId(sessionId));
+    if (ralphRun && ralphRun.status !== 'running') return false;
     const type = state.sessionStatus[sessionId]?.type;
     return type === 'busy' || type === 'retry';
   };
@@ -1106,6 +1108,8 @@ export function isFailedSession(sessionId: string) {
 export function isRunningSession(sessionId: string) {
   if (hasActiveUsageLimit(sessionId)) return false;
   if (isSessionAwaitingInput(sessionId)) return false;
+  const ralphRun = ralphStore.getRun(getSessionTreeRootId(sessionId) || sessionId);
+  if (ralphRun && ralphRun.status !== 'running') return false;
   const type = state.sessionStatus[sessionId]?.type;
   return type === 'busy' || type === 'retry';
 }

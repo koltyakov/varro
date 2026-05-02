@@ -37,6 +37,7 @@ import {
   setState,
   skipPlanSession,
 } from '../lib/state';
+import { ralphStore } from '../lib/stores/ralph-store';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -1814,6 +1815,56 @@ describe('usage-limit session status precedence', () => {
     expect(hasActiveUsageLimit('session-1')).toBe(false);
     expect(isFailedSession('session-1')).toBe(false);
     expect(isRunningSession('session-1')).toBe(true);
+  });
+
+  it('does not treat an incomplete Ralph manager session as running', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('sessionStatus', {
+      'session-1': { type: 'busy' },
+    });
+    ralphStore.startRun({
+      managerSessionId: 'session-1',
+      planDocPath: 'TESTS.md',
+      iterations: 15,
+      promptTemplate: 'Prompt',
+      permissionMode: 'full',
+      model: null,
+      agent: null,
+      createdAt: 1,
+    });
+    ralphStore.setStatus('session-1', 'incomplete', 'iteration_limit_with_gap');
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(isRunningSession('session-1')).toBe(false);
+    expect(indicators.runningIds.has('session-1')).toBe(false);
+  });
+
+  it('does not bubble stale child running status to a done Ralph manager session', () => {
+    setState('sessions', [
+      session('session-1', 500),
+      session('child-1', 400, { parentID: 'session-1' }),
+    ]);
+    setState('sessionStatus', {
+      'child-1': { type: 'busy' },
+    });
+    ralphStore.startRun({
+      managerSessionId: 'session-1',
+      planDocPath: 'PLAN.md',
+      iterations: 15,
+      promptTemplate: 'Prompt',
+      permissionMode: 'full',
+      model: null,
+      agent: null,
+      createdAt: 1,
+    });
+    ralphStore.setStatus('session-1', 'done', 'done_marker');
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(isRunningSession('child-1')).toBe(false);
+    expect(indicators.runningIds.has('session-1')).toBe(false);
+    expect(indicators.runningIds.has('child-1')).toBe(false);
   });
 });
 
