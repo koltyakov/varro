@@ -205,6 +205,7 @@ export function ProviderLimitChip(props: {
   label: string | null;
   tone: string;
   title: string | null;
+  ariaLabel?: string | null;
   onClick: () => void;
   onCycle?: () => void;
 }) {
@@ -215,7 +216,7 @@ export function ProviderLimitChip(props: {
         type="button"
         class={`toolbar-limit-chip ${props.tone !== 'default' ? props.tone : ''}`}
         title={props.title ?? undefined}
-        aria-label={props.title ?? 'Provider limits'}
+        aria-label={props.ariaLabel ?? props.title ?? 'Provider limits'}
         onClick={props.onClick}
         onContextMenu={(event) => {
           if (!props.onCycle) return;

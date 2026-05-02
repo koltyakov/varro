@@ -3,7 +3,7 @@ import type { Agent } from '../../types';
 import type { PermissionMode, ProviderLimitStatus } from '../../../shared/protocol';
 import { AttachButton } from './AttachButton';
 import { BusySendMenu } from './BusySendMenu';
-import { ContextPopup, ContextUsageButton } from './ContextPopup';
+import { ContextPopup, ContextUsageButton, formatContextUsageTitle } from './ContextPopup';
 import { ProviderLimitPopup } from './ProviderLimitPopup';
 import { SendControls } from './SendControls';
 import { StopButton } from './StopButton';
@@ -183,6 +183,11 @@ export function ChatInputToolbar(props: {
               <ContextUsageButton
                 ref={props.contextButtonRef}
                 percent={contextUsage().percent}
+                title={
+                  props.showContextPopup
+                    ? undefined
+                    : formatContextUsageTitle(contextUsage().percent)
+                }
                 onClick={props.onToggleContextPopup}
               />
               <Show when={props.showContextPopup}>
@@ -207,7 +212,8 @@ export function ChatInputToolbar(props: {
               prefix={props.providerLimitPrefix}
               label={props.providerLimitLabel}
               tone={props.providerLimitTone}
-              title={props.providerLimitTitle}
+              title={props.showProviderLimitPopup ? null : props.providerLimitTitle}
+              ariaLabel={props.providerLimitTitle}
               onClick={props.onToggleProviderLimitPopup}
               onCycle={props.onCycleProviderLimitWindow}
             />

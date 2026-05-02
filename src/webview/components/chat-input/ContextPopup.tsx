@@ -99,6 +99,7 @@ export function ContextPopup(props: {
 export function ContextUsageButton(props: {
   ref?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   percent: number;
+  title?: string;
   onClick: () => void;
 }) {
   return (
@@ -106,7 +107,7 @@ export function ContextUsageButton(props: {
       ref={props.ref}
       class={`chat-context-usage ${getContextUsageTone(props.percent)}`}
       onClick={props.onClick}
-      title={formatContextUsageTitle(props.percent)}
+      title={props.title}
       aria-label={formatContextUsageTitle(props.percent)}
     >
       <svg class="circular-progress" viewBox="0 0 36 36">

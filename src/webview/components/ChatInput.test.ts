@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
+import type { ProviderLimitStatus } from '../../shared/protocol';
 import {
   ChatInput,
   getActiveCompletion,
@@ -71,6 +72,74 @@ afterEach(() => {
   setState('queuedMessages', []);
   sendMessageMock.mockReset();
 });
+
+function setupModelState() {
+  setState('providers', [
+    {
+      id: 'openai',
+      name: 'OpenAI',
+      source: 'api',
+      models: {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+          limit: { context: 1000 },
+        },
+      },
+    },
+  ]);
+  setState('providerDefaults', { openai: 'gpt-4o' });
+  setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+}
+
+function assistantMessageEntry(tokens: { input: number; output: number }) {
+  return {
+    info: {
+      id: 'assistant-1',
+      sessionID: 'session-1',
+      role: 'assistant' as const,
+      time: { created: 0 },
+      parentID: 'user-1',
+      modelID: 'gpt-4o',
+      providerID: 'openai',
+      mode: 'default',
+      path: { cwd: '/repo', root: '/repo' },
+      cost: 0,
+      tokens: {
+        input: tokens.input,
+        output: tokens.output,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+    },
+    parts: [],
+  };
+}
+
+function availableProviderLimit(
+  overrides?: Partial<ProviderLimitStatus & { status: 'available' }>
+) {
+  return {
+    providerID: 'openai',
+    modelID: 'gpt-4o',
+    status: 'available' as const,
+    source: 'provider' as const,
+    checkedAt: 1,
+    windows: [
+      {
+        id: 'five_hour',
+        label: '5-Hour Limit',
+        unit: 'requests' as const,
+        remaining: 39,
+        limit: 100,
+        resetAt: null,
+      },
+    ],
+    ...overrides,
+  };
+}
 
 describe('ChatInput', () => {
   it('renders while loading before the current model memo is initialized', () => {
@@ -228,6 +297,43 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
+  });
+
+  it('removes the context button title while the popup is open', async () => {
+    setupModelState();
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const button = container?.querySelector<HTMLButtonElement>('.chat-context-usage');
+    expect(button?.getAttribute('title')).toBe('Context usage (50%)');
+
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.context-popup')).not.toBeNull();
+    expect(button?.hasAttribute('title')).toBe(false);
+    expect(button?.getAttribute('aria-label')).toBe('Context usage (50%)');
+  });
+
+  it('removes the provider limit title while the popup is open', async () => {
+    setProviderLimitThresholdPercent(40);
+    setupModelState();
+    setState('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit(),
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const button = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+    expect(button?.getAttribute('title')).toContain('5-Hour Limit: 39 / 100 left');
+
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.provider-limit-popup')).not.toBeNull();
+    expect(button?.hasAttribute('title')).toBe(false);
+    expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 39 / 100 left');
   });
 
   it('queues busy composer attachments and clears them from the input', () => {
