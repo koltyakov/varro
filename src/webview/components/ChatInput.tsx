@@ -2,6 +2,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from
 import {
   state,
   inputText,
+  setState,
   setInputText,
   nextPastedImageIndex,
   setNextPastedImageIndex,
@@ -13,6 +14,7 @@ import {
   setSelectedModel,
   resolveSelectedModel,
   addClipboardImage,
+  clearClipboardImages,
   MAX_CLIPBOARD_IMAGES,
   showModelPicker,
   setShowModelPicker,
@@ -20,6 +22,7 @@ import {
   composerFocusKey,
   removeClipboardImage,
   addContextFile,
+  clearContextFiles,
   removeContextFile,
   showThinking,
   toggleThinking,
@@ -78,6 +81,7 @@ import {
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
 } from '../../shared/context-files';
+import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
 import { TodoList } from './TodoList';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputToolbar } from './chat-input/ChatInputToolbar';
@@ -628,7 +632,24 @@ export function ChatInput() {
     const text = inputText();
     const sendableText = getSendableInputText(text);
     const hasSendableImages = hasSendableClipboardImages();
-    if (!sendableText.trim() && state.droppedFiles.length === 0 && !hasSendableImages) return;
+    if (
+      !sendableText.trim() &&
+      state.droppedFiles.length === 0 &&
+      !hasSendableImages &&
+      !state.terminalSelection
+    )
+      return;
+
+    const queuedAttachments = getQueuedAttachmentSnapshot({
+      droppedFiles: state.droppedFiles,
+      clipboardImages: state.clipboardImages,
+      terminalSelection: state.terminalSelection,
+    });
+
+    const hasQueuedAttachments =
+      queuedAttachments.droppedFiles?.length ||
+      queuedAttachments.clipboardImages?.length ||
+      queuedAttachments.terminalSelection;
 
     if (
       mode !== 'steer' &&
@@ -636,21 +657,27 @@ export function ChatInput() {
       !hasActiveQuestion() &&
       !hasActivePermission() &&
       state.activeSessionId &&
-      sendableText.trim() &&
-      state.droppedFiles.length === 0 &&
-      !hasSendableImages
+      (sendableText.trim() || hasQueuedAttachments)
     ) {
       requestMessageListScrollToBottom();
       enqueueMessage({
         id: createAttachmentID(),
         sessionId: state.activeSessionId,
         text: sendableText,
+        droppedFiles: queuedAttachments.droppedFiles,
+        clipboardImages: queuedAttachments.clipboardImages,
+        terminalSelection: queuedAttachments.terminalSelection,
       });
       setHistoryIndex(null);
       setHistoryDraft('');
       setCompletionIndex(0);
       setInputText('');
+      clearContextFiles();
+      setState('terminalSelection', null);
+      clearClipboardImages();
       resetPastedImageIndex();
+      postMessage({ type: 'files/clear' });
+      postMessage({ type: 'terminal-selection/clear' });
       if (textareaRef) textareaRef.style.height = 'auto';
       return;
     }
@@ -668,9 +695,17 @@ export function ChatInput() {
     }
   }
 
-  async function sendQueuedAsSteer(id: string, text: string) {
-    removeQueuedMessage(id);
-    await sendMessage(text, { noReply: true });
+  async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
+    removeQueuedMessage(item.id);
+    await sendMessage(item.text, {
+      noReply: true,
+      queuedAttachments: {
+        droppedFiles: item.droppedFiles,
+        clipboardImages: item.clipboardImages,
+        terminalSelection: item.terminalSelection,
+      },
+      preserveComposer: true,
+    });
   }
 
   let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
@@ -693,7 +728,14 @@ export function ChatInput() {
       const next = state.queuedMessages.find((item) => item.sessionId === sid);
       if (!next) return;
       removeQueuedMessage(next.id);
-      void sendMessage(next.text);
+      void sendMessage(next.text, {
+        queuedAttachments: {
+          droppedFiles: next.droppedFiles,
+          clipboardImages: next.clipboardImages,
+          terminalSelection: next.terminalSelection,
+        },
+        preserveComposer: true,
+      });
     }, 250);
   });
   onCleanup(() => {
@@ -1185,7 +1227,8 @@ export function ChatInput() {
     !hasActivePermission() &&
     (getSendableInputText().trim().length > 0 ||
       state.droppedFiles.length > 0 ||
-      hasSendableClipboardImages());
+      hasSendableClipboardImages() ||
+      !!state.terminalSelection);
   const showBusySendControls = createMemo(
     () => isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()
   );
@@ -1732,7 +1775,7 @@ export function ChatInput() {
             busyMenuRef = el;
           }}
           onQueue={() => {
-            handleSend();
+            handleSend('queue');
             setShowBusyMenu(false);
           }}
           onSteer={() => {

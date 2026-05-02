@@ -4,6 +4,7 @@ import type { Provider } from '../types';
 import {
   buildSessionSendBody,
   getAttachmentReference,
+  getQueuedAttachmentSnapshot,
   retryMessageWithDependencies,
   sendMessageWithDependencies,
 } from './session/session-send';
@@ -224,6 +225,59 @@ describe('session-send helpers', () => {
     expect(getAttachmentReference({ path: '/repo', type: 'directory' }, '/repo')).toBe('./');
   });
 
+  it('clones queued attachment snapshots so later composer edits do not mutate them', () => {
+    const droppedFiles: DroppedFile[] = [
+      {
+        path: '/repo/src/a.ts',
+        relativePath: 'src/a.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 1, endLine: 3 }],
+      },
+    ];
+    const clipboardImages = [
+      {
+        id: 'img-1',
+        url: 'blob:1',
+        mime: 'image/png',
+        filename: 'img-1.png',
+        size: 10,
+      },
+    ];
+    const terminalSelection = { text: 'npm test', terminalName: 'zsh' };
+
+    const snapshot = getQueuedAttachmentSnapshot({
+      droppedFiles,
+      clipboardImages,
+      terminalSelection,
+    });
+
+    droppedFiles[0].relativePath = 'src/changed.ts';
+    droppedFiles[0].lineRanges?.push({ startLine: 8, endLine: 9 });
+    clipboardImages[0].filename = 'changed.png';
+    terminalSelection.text = 'npm run build';
+
+    expect(snapshot).toEqual({
+      droppedFiles: [
+        {
+          path: '/repo/src/a.ts',
+          relativePath: 'src/a.ts',
+          type: 'file',
+          lineRanges: [{ startLine: 1, endLine: 3 }],
+        },
+      ],
+      clipboardImages: [
+        {
+          id: 'img-1',
+          url: 'blob:1',
+          mime: 'image/png',
+          filename: 'img-1.png',
+          size: 10,
+        },
+      ],
+      terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+    });
+  });
+
   it('creates a session when needed and sends the built payload', async () => {
     const sendAsync = vi.fn(async () => {});
     const applyEffectiveModel = vi.fn();
@@ -267,6 +321,59 @@ describe('session-send helpers', () => {
     expect(sendAsync).toHaveBeenCalledWith('session-2', {
       parts: [{ type: 'text', text: 'hello' }],
     });
+  });
+
+  it('preserves the live composer when replaying a queued attachment snapshot', async () => {
+    const clearDroppedFiles = vi.fn();
+    const clearTerminalSelection = vi.fn();
+    const clearClipboardImages = vi.fn();
+    const postFilesClear = vi.fn();
+    const postTerminalSelectionClear = vi.fn();
+
+    await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: { parts: [{ type: 'text', text: 'queued' }] },
+          effectiveModel: null,
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync: vi.fn(async () => {}),
+        clearDroppedFiles,
+        clearTerminalSelection,
+        clearClipboardImages,
+        postFilesClear,
+        postTerminalSelectionClear,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => false,
+      },
+      'queued',
+      {
+        preserveComposer: true,
+        queuedAttachments: {
+          droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        },
+      }
+    );
+
+    expect(clearDroppedFiles).not.toHaveBeenCalled();
+    expect(clearTerminalSelection).not.toHaveBeenCalled();
+    expect(clearClipboardImages).not.toHaveBeenCalled();
+    expect(postFilesClear).not.toHaveBeenCalled();
+    expect(postTerminalSelectionClear).not.toHaveBeenCalled();
   });
 
   it('retries only assistant messages in the active session', async () => {

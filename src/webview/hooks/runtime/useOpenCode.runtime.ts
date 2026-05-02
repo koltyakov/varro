@@ -56,7 +56,18 @@ export async function emptyRecycleBin() {
   await getCurrentOpenCodeRuntime().emptyRecycleBin();
 }
 
-export async function sendMessage(text: string, options?: { noReply?: boolean }) {
+export async function sendMessage(
+  text: string,
+  options?: {
+    noReply?: boolean;
+    queuedAttachments?: {
+      droppedFiles?: import('../../lib/app-state-types').QueuedMessage['droppedFiles'];
+      clipboardImages?: import('../../lib/app-state-types').QueuedMessage['clipboardImages'];
+      terminalSelection?: import('../../lib/app-state-types').QueuedMessage['terminalSelection'];
+    };
+    preserveComposer?: boolean;
+  }
+) {
   await getCurrentOpenCodeRuntime().sendMessage(text, options);
 }
 

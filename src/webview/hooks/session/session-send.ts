@@ -11,7 +11,7 @@ import { permissionsStore } from '../../lib/stores/permissions-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
-import type { ClipboardImage, SelectedModel } from '../../lib/app-state-types';
+import type { ClipboardImage, QueuedMessage, SelectedModel } from '../../lib/app-state-types';
 import { postMessage } from '../../lib/bridge';
 import { getPromptTextForClipboardImages } from '../../lib/clipboard-images';
 import { modelSupportsVision } from '../../lib/model-capabilities';
@@ -45,6 +45,11 @@ export type SessionSendBody = {
 };
 
 type SendFlowOptions = { noReply?: boolean };
+
+export type QueuedAttachmentSnapshot = Pick<
+  QueuedMessage,
+  'droppedFiles' | 'clipboardImages' | 'terminalSelection'
+>;
 
 type StateBoundSendDependencies = {
   createSession(initialPermissionMode: 'default' | 'full'): Promise<string | null>;
@@ -197,10 +202,47 @@ export function buildSessionSendBody(
   return { body, effectiveModel };
 }
 
+export function getQueuedAttachmentSnapshot(composerState: {
+  droppedFiles: DroppedFile[];
+  clipboardImages: ClipboardImage[];
+  terminalSelection: { text: string; terminalName: string } | null;
+}): QueuedAttachmentSnapshot {
+  return {
+    droppedFiles: composerState.droppedFiles.map((file) => ({
+      path: file.path,
+      relativePath: file.relativePath,
+      type: file.type,
+      lineRanges: file.lineRanges?.map((range) => ({
+        startLine: range.startLine,
+        endLine: range.endLine,
+      })),
+    })),
+    clipboardImages: composerState.clipboardImages.map((image) => ({
+      id: image.id,
+      url: image.url,
+      mime: image.mime,
+      filename: image.filename,
+      size: image.size,
+    })),
+    terminalSelection: composerState.terminalSelection
+      ? {
+          text: composerState.terminalSelection.text,
+          terminalName: composerState.terminalSelection.terminalName,
+        }
+      : null,
+  };
+}
+
 export class SessionSendOperations {
   constructor(private readonly deps: StateBoundSendDependencies) {}
 
-  readonly sendMessage = async (text: string, options?: SendFlowOptions) => {
+  readonly sendMessage = async (
+    text: string,
+    options?: SendFlowOptions & {
+      queuedAttachments?: QueuedAttachmentSnapshot;
+      preserveComposer?: boolean;
+    }
+  ) => {
     await sendMessageWithDependencies(
       {
         getActiveSessionId: () => appStore.state.activeSessionId,
@@ -216,9 +258,13 @@ export class SessionSendOperations {
               providers: appStore.state.providers,
               providerDefaults: appStore.state.providerDefaults,
               editorContext: appStore.state.editorContext,
-              terminalSelection: appStore.state.terminalSelection,
-              droppedFiles: appStore.state.droppedFiles,
-              clipboardImages: appStore.state.clipboardImages,
+              terminalSelection:
+                nextOptions?.queuedAttachments?.terminalSelection ??
+                appStore.state.terminalSelection,
+              droppedFiles:
+                nextOptions?.queuedAttachments?.droppedFiles ?? appStore.state.droppedFiles,
+              clipboardImages:
+                nextOptions?.queuedAttachments?.clipboardImages ?? appStore.state.clipboardImages,
             },
             sessionId,
             nextText,
@@ -243,6 +289,7 @@ export class SessionSendOperations {
         syncSessionMessages: this.deps.syncSessionMessages,
         recheckSessionStatus: this.deps.recheckSessionStatus,
         stopLoading: uiStore.stopLoading,
+        shouldClearComposerAfterSend: () => !options?.preserveComposer,
       },
       text,
       options
@@ -282,7 +329,10 @@ export async function sendMessageWithDependencies(
     buildSendPayload(
       sessionId: string,
       text: string,
-      options?: SendFlowOptions
+      options?: SendFlowOptions & {
+        queuedAttachments?: QueuedAttachmentSnapshot;
+        preserveComposer?: boolean;
+      }
     ): { body: SessionSendBody; effectiveModel: SelectedModel | null } | null;
     requestMessageListScrollToBottom(): void;
     startLoading(): void;
@@ -301,9 +351,13 @@ export async function sendMessageWithDependencies(
     syncSessionMessages(sessionId: string): Promise<void>;
     recheckSessionStatus(sessionId: string): Promise<void>;
     stopLoading(): void;
+    shouldClearComposerAfterSend(): boolean;
   },
   text: string,
-  options?: SendFlowOptions
+  options?: SendFlowOptions & {
+    queuedAttachments?: QueuedAttachmentSnapshot;
+    preserveComposer?: boolean;
+  }
 ) {
   let sessionId = deps.getActiveSessionId();
   if (!sessionId) {
@@ -337,11 +391,13 @@ export async function sendMessageWithDependencies(
 
   try {
     await deps.sendAsync(sessionId, body);
-    deps.clearDroppedFiles();
-    deps.clearTerminalSelection();
-    deps.clearClipboardImages();
-    deps.postFilesClear();
-    deps.postTerminalSelectionClear();
+    if (deps.shouldClearComposerAfterSend()) {
+      deps.clearDroppedFiles();
+      deps.clearTerminalSelection();
+      deps.clearClipboardImages();
+      deps.postFilesClear();
+      deps.postTerminalSelectionClear();
+    }
     await Promise.all([
       deps.syncSession(sessionId),
       deps.syncSessionMessages(sessionId),

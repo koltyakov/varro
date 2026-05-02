@@ -2,6 +2,7 @@ import { createSignal, onCleanup, onMount } from 'solid-js';
 import type { ExtensionMessage, WebviewThemeKind } from '../../../shared/protocol';
 import { onMessage, postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
+import type { QueuedMessage } from '../../lib/app-state-types';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
@@ -61,7 +62,18 @@ export interface OpenCodeRuntime {
   restoreSession(rootID: string): Promise<void>;
   deleteSessionPermanently(rootID: string): Promise<void>;
   emptyRecycleBin(): Promise<void>;
-  sendMessage(text: string, options?: { noReply?: boolean }): Promise<void>;
+  sendMessage(
+    text: string,
+    options?: {
+      noReply?: boolean;
+      queuedAttachments?: {
+        droppedFiles?: QueuedMessage['droppedFiles'];
+        clipboardImages?: QueuedMessage['clipboardImages'];
+        terminalSelection?: QueuedMessage['terminalSelection'];
+      };
+      preserveComposer?: boolean;
+    }
+  ): Promise<void>;
   retryMessage(messageId: string, sessionId?: string | null): Promise<void>;
   implementPlan(prompt: string, sessionId?: string | null): Promise<void>;
   openPlan(markdown: string, sessionId?: string | null): Promise<void>;
@@ -654,7 +666,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await sessionManagementOperations.emptyRecycleBin();
   }
 
-  async function sendMessage(text: string, options?: { noReply?: boolean }) {
+  async function sendMessage(
+    text: string,
+    options?: {
+      noReply?: boolean;
+      queuedAttachments?: {
+        droppedFiles?: QueuedMessage['droppedFiles'];
+        clipboardImages?: QueuedMessage['clipboardImages'];
+        terminalSelection?: QueuedMessage['terminalSelection'];
+      };
+      preserveComposer?: boolean;
+    }
+  ) {
     await sessionSendOperations.sendMessage(text, options);
   }
 

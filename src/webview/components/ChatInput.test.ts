@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import {
   ChatInput,
@@ -13,12 +13,26 @@ import {
   getSlashCommands,
 } from './ChatInput';
 import {
+  state,
   setIsLoading,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
   setState,
   setInputText,
 } from '../lib/state';
+
+const { sendMessageMock } = vi.hoisted(() => ({
+  sendMessageMock: vi.fn(async () => {}),
+}));
+
+vi.mock('../hooks/useOpenCode', async () => {
+  const actual =
+    await vi.importActual<typeof import('../hooks/useOpenCode')>('../hooks/useOpenCode');
+  return {
+    ...actual,
+    sendMessage: sendMessageMock,
+  };
+});
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -53,6 +67,9 @@ afterEach(() => {
   setState('providerLimits', {});
   setState('clipboardImages', []);
   setState('droppedFiles', []);
+  setState('terminalSelection', null);
+  setState('queuedMessages', []);
+  sendMessageMock.mockReset();
 });
 
 describe('ChatInput', () => {
@@ -211,6 +228,62 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
+  });
+
+  it('queues busy composer attachments and clears them from the input', () => {
+    setInputText('Follow up with context');
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('droppedFiles', [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }]);
+    setState('clipboardImages', [
+      { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+    ]);
+    setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const queueButton = container?.querySelector<HTMLButtonElement>(
+      '[title="Add to queue (Enter)"]'
+    );
+    queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(container?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(container?.querySelector('.chat-queue-item')).not.toBeNull();
+    expect(state.droppedFiles).toEqual([]);
+    expect(state.clipboardImages).toEqual([]);
+    expect(state.terminalSelection).toBeNull();
+    expect(state.queuedMessages).toHaveLength(1);
+    expect(state.queuedMessages[0]).toMatchObject({
+      text: 'Follow up with context',
+      droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+      clipboardImages: [
+        { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+      ],
+      terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+    });
+  });
+
+  it('shows an attachment badge in queued rows', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Queued follow-up',
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const meta = container?.querySelector('.chat-queue-meta');
+    expect(meta?.textContent).toContain('2');
+    expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
   });
 });
 
