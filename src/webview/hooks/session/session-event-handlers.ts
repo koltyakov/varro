@@ -112,7 +112,10 @@ type EventHandlerDependencies = {
     notice: UsageLimitNotice | null,
     options?: { preserveExistingOnNull?: boolean }
   ): void;
-  syncTodosFromMessages(messages?: Array<{ info: Message; parts: Part[] }>): void;
+  syncTodosFromMessages(
+    messages?: Array<{ info: Message; parts: Part[] }>,
+    latestEventPayload?: unknown
+  ): void;
   shouldAutoApprovePermissions(sessionId: string): boolean;
   respondPermission(
     sessionId: string,
@@ -441,7 +444,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if ((p?.sessionID as string) === deps.getActiveSessionId()) {
         if (!hasActiveAssistantReply(deps.getMessages())) return;
-        deps.syncTodosFromMessages();
+        deps.syncTodosFromMessages(undefined, p);
       }
     })
   );

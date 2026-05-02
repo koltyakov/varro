@@ -26,6 +26,7 @@ import {
   deriveTodosFromMessages,
   extractTodos,
   handoffTodosToMessages,
+  mergeTodoEventAdvance,
   syncTodosFromMessages,
 } from './todo-sync';
 
@@ -131,6 +132,36 @@ describe('todo-sync', () => {
     expect(setTodos).toHaveBeenCalledWith([
       { id: 'todo-1', content: 'sync', status: 'pending', priority: 'medium' },
     ]);
+  });
+
+  it('uses matching todo.updated payloads to advance stale message todo status', () => {
+    const messageTodos = [
+      { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
+    ];
+
+    expect(
+      mergeTodoEventAdvance(messageTodos, [
+        { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
+      ])
+    ).toEqual([{ id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' }]);
+  });
+
+  it('does not regress or replace todos from mismatched todo.updated payloads', () => {
+    const messageTodos = [
+      { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
+    ];
+
+    expect(
+      mergeTodoEventAdvance(messageTodos, [
+        { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
+      ])
+    ).toEqual(messageTodos);
+
+    expect(
+      mergeTodoEventAdvance(messageTodos, [
+        { id: 'todo-1', content: 'stale', status: 'completed', priority: 'medium' },
+      ])
+    ).toEqual(messageTodos);
   });
 
   it('creates bound todo-sync operations from shared state dependencies', () => {

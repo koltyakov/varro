@@ -9,9 +9,14 @@ export function resetTodoSync() {
 
 export function createTodoSyncOperations() {
   const syncTodosFromMessagesWithState = (
-    messages: Array<{ info: Message; parts: Part[] }> = appStore.state.messages
+    messages: Array<{ info: Message; parts: Part[] }> = appStore.state.messages,
+    latestEventPayload?: unknown
   ) => {
-    syncTodosFromMessages((todos) => appStore.setState('todos', todos), messages);
+    syncTodosFromMessages(
+      (todos) => appStore.setState('todos', todos),
+      messages,
+      latestEventPayload
+    );
   };
 
   const handoffTodosToMessagesWithState = (
@@ -76,9 +81,25 @@ export function deriveTodosFromMessages(messages: Array<{ info: Message; parts: 
 
 export function syncTodosFromMessages(
   setTodos: (todos: Todo[]) => void,
-  messages: Array<{ info: Message; parts: Part[] }>
+  messages: Array<{ info: Message; parts: Part[] }>,
+  latestEventPayload?: unknown
 ) {
-  setTodos(deriveTodosFromMessages(messages));
+  const messageTodos = deriveTodosFromMessages(messages);
+  const eventTodos = extractTodos(latestEventPayload);
+  setTodos(mergeTodoEventAdvance(messageTodos, eventTodos));
+}
+
+export function mergeTodoEventAdvance(messageTodos: Todo[], eventTodos: Todo[] | null): Todo[] {
+  if (!eventTodos || messageTodos.length === 0 || messageTodos.length !== eventTodos.length) {
+    return messageTodos;
+  }
+
+  return messageTodos.map((messageTodo, index) => {
+    const eventTodo = eventTodos[index];
+    if (!isSameTodo(messageTodo, eventTodo)) return messageTodo;
+    if (statusRank(eventTodo.status) <= statusRank(messageTodo.status)) return messageTodo;
+    return { ...messageTodo, status: eventTodo.status };
+  });
 }
 
 export function handoffTodosToMessages(
@@ -164,6 +185,17 @@ function normalizeTodo(raw: unknown): Todo | null {
     priority: typeof record.priority === 'string' ? record.priority : 'medium',
     id,
   };
+}
+
+function isSameTodo(left: Todo, right: Todo) {
+  return left.id === right.id && left.content === right.content;
+}
+
+function statusRank(status: string) {
+  if (status === 'completed') return 3;
+  if (status === 'in_progress') return 2;
+  if (status === 'pending') return 1;
+  return 0;
 }
 
 function extractTodosFromPart(part: Part): Todo[] | null {
