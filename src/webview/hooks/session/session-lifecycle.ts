@@ -1,6 +1,7 @@
 import { batch } from 'solid-js';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
+import { isSamePath } from '../../lib/path-display';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
@@ -115,7 +116,7 @@ export function isSessionInWorkspace(
 ): boolean {
   const normalizedWorkspace = normalizeProjectPath(workspacePath);
   if (!normalizedWorkspace) return true;
-  return normalizeProjectPath(session.directory) === normalizedWorkspace;
+  return isSamePath(session.directory, normalizedWorkspace);
 }
 
 export function sortSessions(sessions: Session[]) {

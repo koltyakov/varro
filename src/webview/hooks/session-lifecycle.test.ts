@@ -170,6 +170,21 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearActiveSessionState).toHaveBeenCalledTimes(1);
   });
 
+  it('treats Windows workspace paths as case-insensitive when filtering sessions', () => {
+    const setup = createDeps({
+      sessions: [
+        session('session-1', 'C:\\Users\\Andrew\\Projects\\Varro', 2),
+        session('session-2', 'D:\\Other', 1),
+      ],
+      workspace: 'c:/users/andrew/projects/varro',
+    });
+
+    applySessions(setup.deps, setup.current.sessions);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+    expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
+  });
+
   it('tracks deleted session trees and next selection candidates', () => {
     const sessions = [
       session('root', '/repo', 1),

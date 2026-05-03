@@ -41,7 +41,7 @@ export class OpenCodeTransport {
     const scoped = scopeOpenCodeRequest(
       this.options.getUrl(),
       path,
-      this.options.getWorkspaceCwd()
+      this.getWorkspaceDirectoryForRequest(method, path)
     );
     const controller = new AbortController();
     this.requestControllers.add(controller);
@@ -80,6 +80,20 @@ export class OpenCodeTransport {
     } finally {
       this.requestControllers.delete(controller);
     }
+  }
+
+  private getWorkspaceDirectoryForRequest(method: string, path: string) {
+    const pathname = new URL(path, 'http://localhost').pathname;
+    if (pathname === '/session' && method.toUpperCase() === 'POST') {
+      return this.options.getWorkspaceCwd();
+    }
+    if (pathname === '/session/status' || pathname.startsWith('/session/')) {
+      return undefined;
+    }
+    if (pathname === '/session') {
+      return undefined;
+    }
+    return this.options.getWorkspaceCwd();
   }
 
   async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {

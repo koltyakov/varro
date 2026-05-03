@@ -23,6 +23,7 @@ vi.mock('./rest-proxy', () => ({
 }));
 
 import { OpenCodeTransport } from './open-code-transport';
+import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './rest-proxy';
 
 function createTransport() {
   return new OpenCodeTransport({
@@ -85,5 +86,61 @@ describe('OpenCodeTransport reconnect delay', () => {
 
     expect(warnMock).toHaveBeenCalledTimes(1);
     expect(warnMock).toHaveBeenCalledWith('Event stream error: network failed');
+  });
+});
+
+describe('OpenCodeTransport request scoping', () => {
+  it('does not scope session list or session-id requests to a workspace directory', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.request('GET', '/session');
+    await transport.request('DELETE', '/session/session-1');
+
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:4096',
+      '/session',
+      undefined
+    );
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:4096',
+      '/session/session-1',
+      undefined
+    );
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(1, undefined);
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(2, undefined);
+  });
+
+  it('still scopes session creation to the current workspace directory', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.request('POST', '/session', {});
+
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session',
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
   });
 });

@@ -40,16 +40,34 @@ export function scopeOpenCodeRequest(baseUrl: string, path: string, directory?: 
     throw new Error('Unsupported OpenCode API path');
   }
 
-  if (directory && !url.pathname.startsWith('/global/') && !url.searchParams.has('directory')) {
-    url.searchParams.set('directory', directory);
+  const normalizedDirectory = normalizeOpenCodeDirectory(directory);
+
+  if (
+    normalizedDirectory &&
+    !url.pathname.startsWith('/global/') &&
+    !url.searchParams.has('directory')
+  ) {
+    url.searchParams.set('directory', normalizedDirectory);
   }
 
-  return { url: url.toString(), directory };
+  const scopedDirectory =
+    !url.pathname.startsWith('/global/') && url.searchParams.has('directory')
+      ? normalizeOpenCodeDirectory(url.searchParams.get('directory') || undefined)
+      : normalizedDirectory;
+
+  return { url: url.toString(), directory: scopedDirectory };
 }
 
 export function getOpenCodeDirectoryHeaders(directory?: string): Record<string, string> {
   if (!directory) return {};
   return { 'x-opencode-directory': encodeURIComponent(directory) };
+}
+
+function normalizeOpenCodeDirectory(directory: string | undefined) {
+  if (!directory) return undefined;
+  const normalized = directory.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) return undefined;
+  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
 }
 
 export interface RestProxyCallbacks {

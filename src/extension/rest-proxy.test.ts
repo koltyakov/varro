@@ -96,6 +96,32 @@ describe('scopeOpenCodeRequest', () => {
     expect(result.directory).toBe('/workspace');
   });
 
+  it('normalizes Windows directory scoping for session requests', () => {
+    const result = scopeOpenCodeRequest(
+      'http://127.0.0.1:4096',
+      '/session',
+      'C:\\Users\\Andrew\\Projects\\Varro\\'
+    );
+
+    expect(result.url).toBe(
+      'http://127.0.0.1:4096/session?directory=c%3A%2Fusers%2Fandrew%2Fprojects%2Fvarro'
+    );
+    expect(result.directory).toBe('c:/users/andrew/projects/varro');
+  });
+
+  it('prefers an explicit directory query over the fallback workspace directory', () => {
+    const result = scopeOpenCodeRequest(
+      'http://127.0.0.1:4096',
+      '/session?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro',
+      'D:\\Other'
+    );
+
+    expect(result.url).toBe(
+      'http://127.0.0.1:4096/session?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'
+    );
+    expect(result.directory).toBe('c:/users/andrew/projects/varro');
+  });
+
   it('skips directory param for global paths', () => {
     const result = scopeOpenCodeRequest('http://127.0.0.1:4096', '/global/health', '/workspace');
     expect(result.url).toBe('http://127.0.0.1:4096/global/health');
@@ -129,6 +155,12 @@ describe('getOpenCodeDirectoryHeaders', () => {
   it('returns encoded directory header', () => {
     expect(getOpenCodeDirectoryHeaders('/some/path')).toEqual({
       'x-opencode-directory': encodeURIComponent('/some/path'),
+    });
+  });
+
+  it('encodes normalized Windows directory headers', () => {
+    expect(getOpenCodeDirectoryHeaders('c:/users/andrew/projects/varro')).toEqual({
+      'x-opencode-directory': 'c%3A%2Fusers%2Fandrew%2Fprojects%2Fvarro',
     });
   });
 });
@@ -259,9 +291,39 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(11, 'DELETE', '/session/some-id'));
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session');
     expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('some-id', []);
     expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['s1']);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 11, data: true });
+  });
+
+  it('ignores workspace-specific directory scoping when looking up a session tree for soft delete', async () => {
+    const entry = { sessions: [{ id: 's1' }] };
+    const serverRequest = vi.fn(() => Promise.resolve([]));
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: 'C:\\Users\\Andrew\\Projects\\Varro',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      } as never,
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        moveToTrash: vi.fn(() => Promise.resolve(entry)),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(12, 'DELETE', '/session/some-id'));
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session');
+    expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('some-id', []);
   });
 
   it('returns 404 error when moveToTrash returns null', async () => {
@@ -276,9 +338,9 @@ describe('RestProxy handleRequest', () => {
         moveToTrash: vi.fn(() => Promise.resolve(null)),
       } as never,
     });
-    await proxy.handleRequest(makePayload(12, 'DELETE', '/session/nonexistent'));
+    await proxy.handleRequest(makePayload(13, 'DELETE', '/session/nonexistent'));
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
-      id: 12,
+      id: 13,
       error: '404 Session not found',
     });
   });
