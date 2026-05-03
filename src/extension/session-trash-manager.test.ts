@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SessionTrashManager } from './session-trash-manager';
+import { SESSION_TRASH_RETENTION_MS, SessionTrashManager } from './session-trash-manager';
 
 type StoredEntry = Awaited<ReturnType<SessionTrashManager['list']>>[number];
 
@@ -65,5 +65,95 @@ describe('SessionTrashManager', () => {
     expect(deleteSession.mock.calls.map(([id]) => id)).toEqual(['root', 'child']);
     expect(removed).toHaveLength(1);
     expect(manager.list()).toEqual([]);
+  });
+
+  it('restores trashed trees and unhides their sessions', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    const sessions = [
+      session('root', 3_000, { summary: { additions: 1, deletions: 2, files: 3 } }),
+      session('child', 2_000, { parentID: 'root' }),
+      session('visible', 1_000),
+    ];
+
+    const entry = await manager.moveToTrash('root', sessions as never[], 5_000);
+
+    expect(entry?.sessions.map(({ id }) => id)).toEqual(['root', 'child']);
+    expect([...manager.hiddenSessionIds()].toSorted()).toEqual(['child', 'root']);
+    expect(manager.filterVisibleSessions(sessions).map(({ id }) => id)).toEqual(['visible']);
+    expect(
+      Object.keys(
+        manager.filterVisibleSessionStatuses({
+          root: 'busy',
+          child: 'idle',
+          visible: 'idle',
+        })
+      )
+    ).toEqual(['visible']);
+    expect(
+      manager
+        .filterVisibleSessionRequests([
+          { id: 'request-1', sessionID: 'root' },
+          { id: 'request-2', sessionID: 'visible' },
+        ])
+        .map(({ id }) => id)
+    ).toEqual(['request-2']);
+
+    const restored = await manager.restore('root');
+
+    expect(restored).toEqual(entry);
+    expect(manager.isHidden('root')).toBe(false);
+    expect(manager.list()).toEqual([]);
+  });
+
+  it('cleans up only expired entries and retries failed evictions later', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    await manager.moveToTrash('expired', [session('expired', 1_000)] as never[], 10_000);
+    await manager.moveToTrash('fresh', [session('fresh', 2_000)] as never[], 50_000);
+
+    const deleteSession = vi
+      .fn(async (_sessionID: string) => undefined)
+      .mockRejectedValueOnce(new Error('temporary failure'));
+    const now = 10_000 + SESSION_TRASH_RETENTION_MS + 1;
+
+    await expect(manager.cleanupExpired(deleteSession, now)).resolves.toEqual([]);
+    expect(manager.list().map(({ rootID }) => rootID)).toEqual(['fresh', 'expired']);
+
+    await expect(manager.cleanupExpired(deleteSession, now)).resolves.toMatchObject([
+      { rootID: 'expired' },
+    ]);
+    expect(deleteSession.mock.calls.map(([id]) => id)).toEqual(['expired', 'expired']);
+    expect(manager.list().map(({ rootID }) => rootID)).toEqual(['fresh']);
+  });
+
+  it('drops corrupted persisted entries while loading valid recycle-bin state', () => {
+    mementoState.stored = [
+      {
+        rootID: 'broken-root',
+        deletedAt: 1,
+        expiresAt: 2,
+        root: null,
+        sessions: [],
+      } as never,
+      {
+        rootID: 'root',
+        deletedAt: 10,
+        expiresAt: 20,
+        root: session('root', 3_000),
+        sessions: [session('root', 3_000), { id: 'bad-session' }],
+      } as never,
+      {
+        rootID: 'missing-fields',
+        deletedAt: 'nope',
+      } as never,
+    ];
+
+    const manager = new SessionTrashManager(workspaceState as never);
+
+    expect(manager.list()).toMatchObject([
+      {
+        rootID: 'root',
+        sessions: [{ id: 'root' }],
+      },
+    ]);
   });
 });

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus } from '../../shared/protocol';
+import type { Session } from '../types';
 import {
   ChatInput,
   getActiveCompletion,
@@ -23,7 +24,9 @@ import {
   setInputText,
 } from '../lib/state';
 
-const { sendMessageMock } = vi.hoisted(() => ({
+const { abortSessionMock, continueInterruptedSessionMock, sendMessageMock } = vi.hoisted(() => ({
+  abortSessionMock: vi.fn(async () => {}),
+  continueInterruptedSessionMock: vi.fn(async () => {}),
   sendMessageMock: vi.fn(async () => {}),
 }));
 
@@ -31,6 +34,8 @@ vi.mock('../hooks/useOpenCode', async () => {
   const actual = await vi.importActual<typeof UseOpenCodeModule>('../hooks/useOpenCode');
   return {
     ...actual,
+    abortSession: abortSessionMock,
+    continueInterruptedSession: continueInterruptedSessionMock,
     sendMessage: sendMessageMock,
   };
 });
@@ -62,15 +67,22 @@ afterEach(() => {
   setProviderLimitThresholdPercent(40);
   setState('activeSessionId', null);
   setState('messages', []);
+  setState('sessions', []);
   setState('providers', []);
   setState('providerDefaults', {});
   setState('selectedModel', null);
   setState('providerLimits', {});
+  setState('sessionStatus', {});
+  setState('sessionUsageLimits', {});
   setState('clipboardImages', []);
   setState('droppedFiles', []);
   setState('terminalSelection', null);
   setState('queuedMessages', []);
+  setState('hiddenProviders', []);
+  setState('hiddenModels', []);
   sendMessageMock.mockReset();
+  abortSessionMock.mockReset();
+  continueInterruptedSessionMock.mockReset();
 });
 
 function setupModelState() {
@@ -116,6 +128,24 @@ function assistantMessageEntry(tokens: { input: number; output: number }) {
     },
     parts: [],
   };
+}
+
+function session(id: string, updated: number, overrides: Partial<Session> = {}): Session {
+  return {
+    id,
+    projectID: 'project-1',
+    directory: '/repo',
+    title: id,
+    version: '1',
+    time: { created: updated - 1_000, updated },
+    ...overrides,
+  };
+}
+
+async function flushAsyncWork(count = 4) {
+  for (let index = 0; index < count; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 function availableProviderLimit(
@@ -413,6 +443,276 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('[title="Stop"]')).toBeNull();
     expect(container?.querySelector('[title="Add to queue (Enter)"]')).not.toBeNull();
+  });
+
+  it('updates the active Ralph run model and interrupts a usage-limit retry when switching models', async () => {
+    const { ralphStore } = await import('../lib/stores/ralph-store');
+
+    setState('activeSessionId', 'child-1');
+    setState('sessions', [
+      session('manager-1', 2_000),
+      session('child-1', 2_100, { parentID: 'manager-1' }),
+    ]);
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+          },
+        },
+      },
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        source: 'api',
+        models: {
+          claude: {
+            id: 'claude',
+            name: 'Claude',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setState('sessionStatus', {
+      'child-1': { type: 'retry', attempt: 5, message: 'messages exhausted', next: 28 },
+    });
+    setState('sessionUsageLimits', {
+      'child-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'messages exhausted · retry in 28s · attempt #5',
+        unit: 'messages',
+        retryAt: 28_000,
+        attempt: 5,
+        sessionID: 'child-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
+    ralphStore.startRun({
+      managerSessionId: 'manager-1',
+      planDocPath: 'RALPH.md',
+      iterations: 5,
+      promptTemplate: 'Prompt',
+      permissionMode: 'full',
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+      agent: null,
+      createdAt: 1,
+    });
+    ralphStore.upsertIteration('manager-1', {
+      index: 1,
+      childSessionId: 'child-1',
+      status: 'running',
+      startedAt: 1,
+      endedAt: null,
+      filesChanged: [],
+      verification: {},
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const claudeOption = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
+    ).find((button) => button.textContent?.includes('Claude'));
+    claudeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.selectedModel).toEqual({
+      providerID: 'anthropic',
+      modelID: 'claude',
+      variant: undefined,
+    });
+    expect(ralphStore.getRun('manager-1')?.config.model).toEqual({
+      providerID: 'anthropic',
+      modelID: 'claude',
+      variant: undefined,
+    });
+    expect(ralphStore.getRun('manager-1')?.status).toBe('paused');
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(continueInterruptedSessionMock).toHaveBeenCalledWith('child-1');
+    expect(state.sessionStatus['child-1']).toEqual({ type: 'idle' });
+    expect(container?.textContent).not.toContain('Usage limit reached');
+  });
+
+  it('clears the active usage-limit banner when switching away from the limited provider', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_100, { parentID: 'session-1' }),
+    ]);
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+          },
+        },
+      },
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        source: 'api',
+        models: {
+          claude: {
+            id: 'claude',
+            name: 'Claude',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setState('sessionStatus', {
+      'child-1': { type: 'retry', attempt: 9, message: 'messages exhausted', next: 408 },
+    });
+    setState('sessionUsageLimits', {
+      'child-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'messages exhausted · retry in 408s · attempt #9',
+        unit: 'messages',
+        retryAt: 408_000,
+        attempt: 9,
+        sessionID: 'child-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.textContent).toContain('Usage limit reached');
+
+    const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const claudeOption = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
+    ).find((button) => button.textContent?.includes('Claude'));
+    claudeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.selectedModel).toEqual({
+      providerID: 'anthropic',
+      modelID: 'claude',
+      variant: undefined,
+    });
+    expect(container?.textContent).not.toContain('Usage limit reached');
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the usage-limit banner visible when a retry notice predates active-session model hydration', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('providers', [
+      {
+        id: 'copilot',
+        name: 'GitHub Copilot',
+        source: 'api',
+        models: {
+          'gpt-5-mini': {
+            id: 'gpt-5-mini',
+            name: 'GPT-5 mini',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+          },
+        },
+      },
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-4.1': {
+            id: 'gpt-4.1',
+            name: 'GPT-4.1',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { copilot: 'gpt-5-mini' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4.1' });
+    setState('sessionStatus', {
+      'session-1': {
+        type: 'retry',
+        attempt: 2,
+        message: '429 usage limit reached. retry in 45s attempt #2',
+        next: 45,
+      },
+    });
+    setState('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: '429 usage limit reached. retry in 45s attempt #2',
+        unit: 'messages',
+        retryAt: 45_000,
+        attempt: 2,
+        sessionID: 'session-1',
+        providerID: 'copilot',
+        modelID: 'gpt-5-mini',
+      },
+    });
+    setState('messages', [
+      {
+        info: {
+          id: 'assistant-usage-limit',
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 0, completed: 1 },
+          parentID: 'user-1',
+          modelID: 'gpt-4.1',
+          providerID: 'openai',
+          mode: 'default',
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          error: {
+            name: 'rate_limit_exceeded',
+            data: { message: '429 usage limit reached. retry in 45s attempt #2' },
+          },
+        },
+        parts: [],
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.textContent).toContain('Usage limit reached');
+    expect(container?.textContent).toContain('Stop retrying');
+    expect(container?.textContent).toContain('Switch provider');
   });
 });
 

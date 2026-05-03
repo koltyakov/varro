@@ -27,6 +27,28 @@ describe('createMiniMaxAdapter', () => {
     ).toBe(true);
   });
 
+  it('returns unsupported without usable MiniMax credentials', async () => {
+    const status = await adapter.fetch({
+      provider: {
+        ...provider,
+        options: { apiKey: 'opencode-oauth-dummy-key' },
+      },
+      authStore: {},
+      modelID: 'MiniMax-M2',
+      checkedAt: 1_000,
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(status).toEqual({
+      providerID: 'minimax',
+      modelID: 'MiniMax-M2',
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: 1_000,
+      note: 'No MiniMax credentials available',
+    });
+  });
+
   it('parses current and weekly request windows from the remains endpoint', async () => {
     vi.mocked(fetch).mockImplementation(async (_input, init) => {
       expect(init?.headers).toMatchObject({
@@ -185,6 +207,184 @@ describe('createMiniMaxAdapter', () => {
       source: 'provider',
       checkedAt: 1_000,
       note: 'MiniMax quota endpoint did not expose any bounded quotas',
+    });
+  });
+
+  it('normalizes camelCase payload fields and falls back to absolute reset times', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          baseResp: { statusCode: '0', statusMsg: 'success' },
+          modelRemains: [
+            {
+              currentIntervalUsageCount: null,
+              currentWeeklyTotalCount: '10',
+              currentWeeklyUsageCount: '-3',
+              weeklyEndTime: '2026-05-04T00:00:00.000Z',
+            },
+            {
+              currentIntervalTotalCount: '0',
+              currentIntervalUsageCount: '5',
+              endTime: '2026-05-03T00:00:00.000Z',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
+      modelID: 'MiniMax-M2.5',
+      checkedAt: 1_000,
+    });
+
+    expect(status).toEqual({
+      providerID: 'minimax',
+      modelID: 'MiniMax-M2.5',
+      status: 'available',
+      source: 'provider',
+      checkedAt: 1_000,
+      note: 'Polled MiniMax coding plan remains endpoint',
+      windows: [
+        {
+          id: 'requests',
+          label: 'Requests',
+          unit: 'requests',
+          remaining: 5,
+          limit: null,
+          resetAt: Date.parse('2026-05-03T00:00:00.000Z'),
+        },
+        {
+          id: 'requests-weekly',
+          label: 'Weekly requests',
+          unit: 'requests',
+          remaining: 0,
+          limit: 10,
+          resetAt: Date.parse('2026-05-04T00:00:00.000Z'),
+          percent: 100,
+        },
+      ],
+    });
+  });
+
+  it('treats HTTP auth failures as unsupported', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 401 }));
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
+      modelID: null,
+      checkedAt: 1_000,
+    });
+
+    expect(status).toEqual({
+      providerID: 'minimax',
+      modelID: null,
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: 1_000,
+      note: 'MiniMax quota endpoint rejected credentials (401)',
+    });
+  });
+
+  it('reports API failures, malformed payloads, and non-ok responses as errors', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            base_resp: {
+              status_code: 500,
+              status_msg: 'quota temporarily unavailable',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(new Response('{invalid-json', { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            base_resp: { status_code: 0, status_msg: 'success' },
+            model_remains: [
+              {
+                current_interval_total_count: 10,
+                current_interval_usage_count: 4,
+                remains_time: 1_000,
+              },
+            ],
+          }),
+          { status: 429, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+
+    await expect(
+      adapter.fetch({
+        provider,
+        authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
+        modelID: null,
+        checkedAt: 1_000,
+      })
+    ).resolves.toEqual({
+      providerID: 'minimax',
+      modelID: null,
+      status: 'error',
+      source: 'provider',
+      checkedAt: 1_000,
+      note: 'MiniMax quota endpoint returned an API error 500 (quota temporarily unavailable)',
+    });
+
+    await expect(
+      adapter.fetch({
+        provider,
+        authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
+        modelID: 'MiniMax-M2',
+        checkedAt: 2_000,
+      })
+    ).resolves.toEqual({
+      providerID: 'minimax',
+      modelID: 'MiniMax-M2',
+      status: 'error',
+      source: 'provider',
+      checkedAt: 2_000,
+      note: 'MiniMax quota endpoint returned an invalid response',
+    });
+
+    await expect(
+      adapter.fetch({
+        provider,
+        authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
+        modelID: null,
+        checkedAt: 3_000,
+      })
+    ).resolves.toEqual({
+      providerID: 'minimax',
+      modelID: null,
+      status: 'error',
+      source: 'provider',
+      checkedAt: 3_000,
+      note: 'MiniMax quota endpoint returned 429',
+    });
+  });
+
+  it('reports fetch failures as transient errors', async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error('network down'));
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
+      modelID: null,
+      checkedAt: 1_000,
+    });
+
+    expect(status).toEqual({
+      providerID: 'minimax',
+      modelID: null,
+      status: 'error',
+      source: 'provider',
+      checkedAt: 1_000,
+      note: 'Failed to poll the MiniMax quota endpoint',
     });
   });
 });

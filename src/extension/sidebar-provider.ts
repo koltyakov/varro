@@ -352,7 +352,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const pendingRequests = [...this.sessionState.pending.values()].filter(
-      (request) => !this.sessionTrash.isHidden(request.sessionID)
+      (request) =>
+        !this.sessionTrash.isHidden(request.sessionID) &&
+        this.sessionState.isSessionInWorkspace(
+          request.sessionID,
+          this.contextProvider.context.workspacePath
+        )
     );
     if (pendingRequests.length > 0) {
       return {
@@ -373,7 +378,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const completedSessions = [...this.sessionState.completed].filter(
-      (sessionID) => !this.sessionTrash.isHidden(sessionID)
+      (sessionID) =>
+        !this.sessionTrash.isHidden(sessionID) &&
+        this.sessionState.isSessionInWorkspace(
+          sessionID,
+          this.contextProvider.context.workspacePath
+        )
     );
     if (completedSessions.length > 0) {
       return {

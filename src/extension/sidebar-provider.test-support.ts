@@ -29,7 +29,11 @@ const mocks = vi.hoisted(() => ({
       activeColorTheme: { kind: 2 },
       showOpenDialog: vi.fn(() => Promise.resolve(undefined)),
       showTextDocument: vi.fn(() => Promise.resolve()),
+      showWarningMessage: vi.fn(() => Promise.resolve(undefined)),
       showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
+    },
+    commands: {
+      executeCommand: vi.fn(() => Promise.resolve(undefined)),
     },
     workspace: {
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
@@ -47,12 +51,15 @@ const mocks = vi.hoisted(() => ({
       })),
       fs: {
         readFile: vi.fn(),
+        stat: vi.fn(),
         writeFile: vi.fn(() => Promise.resolve()),
       },
       openTextDocument: vi.fn(() => Promise.resolve({})),
     },
     StatusBarAlignment: { Left: 1 },
-    ThemeColor: vi.fn((value: string) => ({ value })),
+    ThemeColor: class ThemeColor {
+      constructor(public readonly value: string) {}
+    },
     ColorThemeKind: {
       Light: 1,
       Dark: 2,
@@ -236,17 +243,23 @@ beforeEach(() => {
 
   mocks.vscode.window.showTextDocument.mockReset();
   mocks.vscode.window.showTextDocument.mockResolvedValue(undefined);
+  mocks.vscode.window.showWarningMessage.mockReset();
+  mocks.vscode.window.showWarningMessage.mockResolvedValue(undefined);
   mocks.vscode.window.showErrorMessage.mockReset();
   mocks.vscode.window.showErrorMessage.mockResolvedValue(undefined);
   mocks.vscode.window.showOpenDialog.mockReset();
   mocks.vscode.window.showOpenDialog.mockResolvedValue(undefined);
+  mocks.vscode.commands.executeCommand.mockReset();
+  mocks.vscode.commands.executeCommand.mockResolvedValue(undefined);
 
   mocks.vscode.workspace.asRelativePath.mockReset();
   mocks.vscode.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) => uri.fsPath);
   mocks.vscode.workspace.getWorkspaceFolder.mockReset();
   mocks.vscode.workspace.getWorkspaceFolder.mockReturnValue(undefined);
   mocks.vscode.workspace.fs.readFile.mockReset();
+  mocks.vscode.workspace.fs.stat.mockReset();
   mocks.vscode.workspace.fs.writeFile.mockReset();
+  mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: 1, type: 0, ctime: 0 });
   mocks.vscode.workspace.fs.writeFile.mockResolvedValue(undefined);
   mocks.vscode.workspace.openTextDocument.mockReset();
   mocks.vscode.workspace.openTextDocument.mockResolvedValue({});

@@ -1529,11 +1529,13 @@ export function upsertMessage(msg: { info: Message; parts: Part[] }) {
     produce((msgs) => {
       const idx = messageIndex.findMessageIndex(msgs, msg.info.id);
       if (idx !== -1) {
+        if (areMessageEntriesEquivalent(msgs[idx], msg)) return;
         msgs[idx] = msg;
+        messageIndex.invalidate();
       } else {
         msgs.push(msg);
+        messageIndex.invalidate();
       }
-      messageIndex.invalidate();
     })
   );
 }
@@ -1764,17 +1766,22 @@ export function setSessionFailed(sessionId: string, failed: boolean) {
 export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice | null) {
   if (!sessionId) return;
 
-  setState(
-    'sessionUsageLimits',
-    produce((current) => {
-      if (notice === null) {
-        delete current[sessionId];
-        return;
-      }
+  if (notice === null) {
+    if (state.sessionUsageLimits[sessionId] === undefined) return;
+    setState(
+      'sessionUsageLimits',
+      produce((limits) => {
+        delete limits[sessionId];
+      })
+    );
+    sessionTreeIndex.invalidate();
+    return;
+  }
 
-      current[sessionId] = notice;
-    })
-  );
+  setState('sessionUsageLimits', {
+    ...state.sessionUsageLimits,
+    [sessionId]: notice,
+  });
   sessionTreeIndex.invalidate();
 }
 

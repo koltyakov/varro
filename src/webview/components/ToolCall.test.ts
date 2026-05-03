@@ -16,10 +16,17 @@ import { client } from '../lib/client';
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
+function setExtensionSender() {
+  const sendSpy = vi.fn();
+  (window as unknown as Record<string, unknown>).__sendToExtension = sendSpy;
+  return sendSpy;
+}
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   setExpandThinkingByDefaultPreference(false);
+  delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
 
 afterEach(() => {
@@ -31,6 +38,7 @@ afterEach(() => {
   setState('permissions', []);
   setState('questions', []);
   resetToolCallExpansionState();
+  delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
 
 function completedState(
@@ -164,6 +172,39 @@ describe('ToolCall', () => {
     );
   });
 
+  it('renders a collapsed path preview as an open-file link', () => {
+    const sendSpy = setExtensionSender();
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'inspect',
+      state: completedState({ path: '/repo/docs/spec.md' }, 'Inspect file'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const previewLink = container?.querySelector<HTMLAnchorElement>('.tool-invocation-preview a');
+
+    expect(previewLink?.textContent).toBe('docs/spec.md');
+
+    previewLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: '/repo/docs/spec.md', kind: 'file' },
+    });
+  });
+
   it('hides a duplicated description from expanded task details', () => {
     const part: ToolPart = {
       id: 'tool-1',
@@ -254,6 +295,37 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
       'Running...'
     );
+  });
+
+  it('shows an explicit empty task result when the tagged payload has no content', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'completed',
+        input: {
+          subagent_type: 'explore',
+          prompt: 'Inspect the repository',
+        },
+        output: '<task_result>   </task_result>',
+        title: 'Inspect the repository',
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const resultRow = container?.querySelector('.structured-tool-row-result');
+
+    expect(resultRow?.textContent).toContain('task_result');
+    expect(resultRow?.textContent).toContain('(no output)');
   });
 
   it('renders aborted tool errors with neutral aborted styling', () => {
@@ -583,6 +655,105 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
   });
+
+  it('renders file reads with computed line ranges and file open links', () => {
+    const sendSpy = setExtensionSender();
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'read',
+      state: completedState(
+        { file_path: '/repo/src/main.ts', offset: 4, limit: 3 },
+        'Read main.ts'
+      ),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const target = container?.querySelector<HTMLAnchorElement>('.file-read-target');
+
+    expect(target?.textContent).toBe('main.ts');
+    expect(container?.querySelector('.file-read-range')?.textContent).toBe('(L5-7)');
+
+    target?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: '/repo/src/main.ts', kind: 'file' },
+    });
+  });
+
+  it('renders directory and current-directory read states distinctly', () => {
+    const sendSpy = setExtensionSender();
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    const directoryPart: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'read',
+      state: {
+        status: 'completed',
+        input: { file_path: '/repo/src' },
+        output: '<type>directory</type>',
+        title: 'Read src',
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part: directoryPart }), container!);
+
+    const directoryLink = container?.querySelector<HTMLAnchorElement>('.file-read-target');
+
+    expect(directoryLink?.textContent).toBe('src');
+    expect(container?.querySelector('.file-read-meta')?.textContent).toBe('directory');
+
+    directoryLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: '/repo/src', kind: 'directory' },
+    });
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.innerHTML = '';
+
+    const currentDirectoryPart: ToolPart = {
+      id: 'tool-2',
+      sessionID: 'session-1',
+      messageID: 'message-2',
+      type: 'tool',
+      callID: 'call-2',
+      tool: 'read',
+      state: completedState({ file_path: './' }, 'Read current directory'),
+    };
+
+    cleanup = render(() => ToolCall({ part: currentDirectoryPart }), container!);
+
+    expect(container?.querySelector('.file-read-target-text')?.textContent).toBe(
+      'current directory'
+    );
+    expect(container?.querySelector('.file-read-target[href]')).toBeNull();
+  });
 });
 
 describe('FileChangeCard', () => {
@@ -667,5 +838,55 @@ describe('FileChangeCard', () => {
 
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Moved');
     expect(fileStatusSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows move paths, diff stats, and open-path links for completed renames', () => {
+    const sendSpy = setExtensionSender();
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'rename',
+      state: {
+        status: 'completed',
+        input: { from_path: '/repo/src/old.ts', to_path: '/repo/src/new.ts' },
+        output: '',
+        title: 'Rename src/old.ts -> src/new.ts',
+        metadata: { additions: 2, deletions: 1 },
+        time: { start: 0, end: 1500 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const links = Array.from(
+      container?.querySelectorAll<HTMLAnchorElement>('.file-edit-path-link') || []
+    );
+
+    expect(links.map((link) => link.textContent)).toEqual(['src/old.ts', 'src/new.ts']);
+    expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+2');
+    expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-1');
+    expect(container?.querySelector('.file-edit-duration')?.textContent).toBe('1.5s');
+
+    links[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    links[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(sendSpy).toHaveBeenNthCalledWith(1, {
+      type: 'vscode/open',
+      payload: { path: '/repo/src/old.ts', kind: 'file' },
+    });
+    expect(sendSpy).toHaveBeenNthCalledWith(2, {
+      type: 'vscode/open',
+      payload: { path: '/repo/src/new.ts', kind: 'file' },
+    });
   });
 });

@@ -55,6 +55,7 @@ export interface OpenCodeRuntime {
   useOpenCode(): { client: typeof client };
   recheckSessionStatus(sessionId: string): Promise<void>;
   refreshRoutingState(): Promise<void>;
+  continueInterruptedSession(sessionId: string): Promise<void>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: { markSeen?: boolean }): Promise<void>;
   createSession(title?: string, initialPermissionMode?: 'default' | 'full'): Promise<string | null>;
@@ -417,6 +418,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSessionMessages,
     recheckSessionStatus,
     continueInterruptedSession,
+    logError,
   });
 
   function ensureConnectionInitialized() {
@@ -757,6 +759,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     useOpenCode,
     recheckSessionStatus,
     refreshRoutingState,
+    continueInterruptedSession,
     applySessionMcps,
     selectSession,
     createSession,

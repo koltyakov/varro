@@ -4,10 +4,19 @@ import {
   type RalphStatus,
   type RalphStopReason,
 } from '../../../shared/ralph';
-import { formatVariantLabel } from '../../lib/format';
+import {
+  formatProviderLimitCompact,
+  formatProviderLimitCompactPrefix,
+  formatProviderLimitTitle,
+  formatVariantLabel,
+  getOrderedProviderLimitWindows,
+  getProviderLimitTone,
+} from '../../lib/format';
+import { getProviderLimit } from '../../lib/state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { ralphRunner } from './ralph-runner';
 import { RalphIterationCard } from './RalphIterationCard';
+import { getRalphIterationLiveIssue } from './ralph-live-issue';
 
 export function RalphDashboard(props: { sessionId: string }) {
   const run = () => ralphStore.getRun(props.sessionId);
@@ -30,6 +39,60 @@ export function RalphDashboard(props: { sessionId: string }) {
   const isTerminal = () => {
     const s = run()?.status;
     return s === 'done' || s === 'stopped' || s === 'failed' || s === 'incomplete';
+  };
+  const providerLimit = () => {
+    const model = run()?.config.model;
+    if (!model) return null;
+    return getProviderLimit(model.providerID, model.modelID);
+  };
+  const providerLimitBadges = () => {
+    const limit = providerLimit();
+    if (!isRunning() || !limit || limit.status !== 'available') return [];
+
+    const windows = getOrderedProviderLimitWindows(limit);
+    const preferred = windows.filter((window) => {
+      const prefix = formatProviderLimitCompactPrefix(limit, window);
+      return prefix === '5H' || prefix === 'W' || prefix === 'M';
+    });
+    const visible =
+      preferred.length > 0
+        ? preferred
+        : windows.filter((window) => formatProviderLimitCompactPrefix(limit, window)).slice(0, 1);
+
+    return visible.flatMap((window) => {
+      const prefix = formatProviderLimitCompactPrefix(limit, window);
+      const value = formatProviderLimitCompact(limit, window);
+      if (!value) return [];
+      return [
+        {
+          label: prefix ? `${prefix} ${value}` : value,
+          tone: getProviderLimitTone(limit, window),
+        },
+      ];
+    });
+  };
+  const providerLimitTitle = () => {
+    const limit = providerLimit();
+    return limit ? formatProviderLimitTitle(limit) : '';
+  };
+  const latestIteration = () => {
+    const iterations = run()?.iterations;
+    return iterations && iterations.length > 0 ? iterations[iterations.length - 1] : null;
+  };
+  const activeIssue = () => getRalphIterationLiveIssue(latestIteration());
+  const latestIterationShowsOwnError = () => {
+    const iteration = latestIteration();
+    if (!iteration) return false;
+    return iteration.status === 'failed' || (iteration.status === 'running' && !!activeIssue());
+  };
+  const globalIssue = () => {
+    const issue = activeIssue();
+    return latestIterationShowsOwnError() ? null : issue;
+  };
+  const modelSummary = () => {
+    const model = run()?.config.model;
+    if (!model) return null;
+    return `${model.providerID}/${model.modelID}${formatReasoningLevel(model.variant)}`;
   };
 
   createEffect(() => {
@@ -73,7 +136,7 @@ export function RalphDashboard(props: { sessionId: string }) {
                       {(reason) => (
                         <span
                           class="ralph-dashboard-stop-reason"
-                          title={stopReasonTooltip(reason())}
+                          title={activeIssue() || stopReasonTooltip(reason())}
                         >
                           {stopReasonLabel(reason())}
                         </span>
@@ -130,19 +193,49 @@ export function RalphDashboard(props: { sessionId: string }) {
                 </header>
 
                 <section class="ralph-dashboard-meta">
-                  <span>
-                    Iterations: {activeRun().iterations.length} / {activeRun().config.iterations}
-                  </span>
-                  <Show when={activeRun().config.model}>
-                    {(m) => (
-                      <span>
-                        Model: {m().providerID}/{m().modelID}
-                        {formatReasoningLevel(m().variant)}
+                  <div class="ralph-dashboard-meta-main">
+                    <span class="ralph-dashboard-meta-item">
+                      Iterations: {activeRun().iterations.length} / {activeRun().config.iterations}
+                    </span>
+                    <Show when={modelSummary()}>
+                      {(summary) => (
+                        <span
+                          class="ralph-dashboard-meta-item ralph-dashboard-meta-item-model"
+                          title={summary()}
+                        >
+                          <span class="ralph-dashboard-meta-label">Model:</span>
+                          <span class="ralph-dashboard-meta-value">{summary()}</span>
+                        </span>
+                      )}
+                    </Show>
+                    <Show when={activeRun().config.agent}>
+                      <span class="ralph-dashboard-meta-item">
+                        Agent: {activeRun().config.agent}
                       </span>
-                    )}
+                    </Show>
+                  </div>
+                  <Show when={providerLimitBadges().length > 0}>
+                    <div
+                      class="ralph-dashboard-provider-limits"
+                      title={providerLimitTitle() || undefined}
+                    >
+                      <span class="ralph-dashboard-provider-limits-label">Limits:</span>
+                      <For each={providerLimitBadges()}>
+                        {(badge) => (
+                          <span class={`ralph-dashboard-provider-limit ${badge.tone}`}>
+                            {badge.label}
+                          </span>
+                        )}
+                      </For>
+                    </div>
                   </Show>
-                  <Show when={activeRun().config.agent}>
-                    <span>Agent: {activeRun().config.agent}</span>
+                  <Show when={globalIssue()}>
+                    {(issue) => (
+                      <div class="ralph-dashboard-error" title={issue()}>
+                        <span class="ralph-dashboard-error-label">Error</span>
+                        <span class="ralph-dashboard-error-message">{issue()}</span>
+                      </div>
+                    )}
                   </Show>
                 </section>
               </div>

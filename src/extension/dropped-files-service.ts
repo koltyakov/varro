@@ -2,7 +2,7 @@ import { writeFile, mkdtemp, mkdir, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { Buffer } from 'buffer';
 import { randomBytes } from 'crypto';
-import { join, isAbsolute } from 'path';
+import { join, isAbsolute, relative } from 'path';
 import * as vscode from 'vscode';
 import type { DroppedFile } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
@@ -127,6 +127,10 @@ export class DroppedFilesService {
 
     for (const folder of resolutionOrder) {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
+      const folderRelativePath = relative(folder.uri.fsPath, candidate.fsPath);
+      if (folderRelativePath.startsWith('..') || isAbsolute(folderRelativePath)) {
+        continue;
+      }
       try {
         await vscode.workspace.fs.stat(candidate);
         if (vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath === folder.uri.fsPath) {

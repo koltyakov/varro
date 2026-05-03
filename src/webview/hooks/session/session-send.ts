@@ -61,6 +61,7 @@ type StateBoundSendDependencies = {
   syncSessionMessages(sessionId: string): Promise<void>;
   recheckSessionStatus(sessionId: string): Promise<void>;
   continueInterruptedSession(sessionId: string): Promise<void>;
+  logError?(context: string, err: unknown): void;
 };
 
 export function getAttachmentReference(
@@ -352,6 +353,7 @@ export async function sendMessageWithDependencies(
     recheckSessionStatus(sessionId: string): Promise<void>;
     stopLoading(): void;
     shouldClearComposerAfterSend(): boolean;
+    logError?(context: string, err: unknown): void;
   },
   text: string,
   options?: SendFlowOptions & {
@@ -398,11 +400,22 @@ export async function sendMessageWithDependencies(
       deps.postFilesClear();
       deps.postTerminalSelectionClear();
     }
-    await Promise.all([
+    const syncResults = await Promise.allSettled([
       deps.syncSession(sessionId),
       deps.syncSessionMessages(sessionId),
       deps.recheckSessionStatus(sessionId),
-    ]).catch(() => {});
+    ]);
+    const failures = syncResults.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    );
+    if (failures.length > 0) {
+      for (const failure of failures) {
+        deps.logError?.('postSendSync', failure.reason);
+      }
+      if (failures.length === syncResults.length) {
+        deps.stopLoading();
+      }
+    }
   } catch (err) {
     deps.stopLoading();
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';

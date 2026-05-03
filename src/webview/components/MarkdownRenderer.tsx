@@ -501,7 +501,14 @@ function cancelIdleWork(handle: IdleWorkHandle | null) {
 function isLocalFileHref(href: string | null): boolean {
   if (!href) return false;
   if (href.startsWith('#')) return false;
-  return !/^[a-z][a-z0-9+.-]*:/i.test(href);
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return false;
+  if (href.startsWith('//')) return false;
+  return (
+    href.startsWith('/') ||
+    href.startsWith('./') ||
+    href.startsWith('../') ||
+    /^[A-Za-z]:[/\\]/.test(href)
+  );
 }
 
 function isSafeExternalHref(href: string | null): boolean {

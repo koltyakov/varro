@@ -107,6 +107,13 @@ function sendApiCall<T>(
     }, options.timeoutMs);
 
     let cleanupAbort: (() => void) | undefined;
+    pending.set(id, {
+      resolve: (value) => finish(() => resolve(value as T)),
+      reject: (error) => finish(() => reject(error)),
+      timer,
+      cleanupAbort,
+    });
+
     if (options.signal) {
       const abort = () => {
         finish(() => {
@@ -119,21 +126,14 @@ function sendApiCall<T>(
       };
 
       if (options.signal.aborted) {
-        clearTimeout(timer);
         abort();
         return;
       }
 
       options.signal.addEventListener('abort', abort, { once: true });
       cleanupAbort = () => options.signal?.removeEventListener('abort', abort);
+      pending.get(id)!.cleanupAbort = cleanupAbort;
     }
-
-    pending.set(id, {
-      resolve: (value) => finish(() => resolve(value as T)),
-      reject: (error) => finish(() => reject(error)),
-      timer,
-      cleanupAbort,
-    });
 
     const sent = postMessage({
       type: 'api/request',

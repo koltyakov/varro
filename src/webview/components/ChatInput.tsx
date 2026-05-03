@@ -36,6 +36,8 @@ import {
   providerLimitThresholdPercent,
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
+  getSessionTreeIds,
+  setSessionUsageLimit,
   isSessionCompacting,
   providerLimitPollIntervalSeconds,
 } from '../lib/state';
@@ -45,6 +47,7 @@ import {
   applySessionMcps,
   sendMessage,
   abortSession,
+  continueInterruptedSession,
   createSession,
   compactSession,
   initSession,
@@ -57,6 +60,7 @@ import {
 import { ModelPicker, getVariantsForModel } from './ModelPicker';
 import { McpPicker } from './McpPicker';
 import { ralphStore } from '../lib/stores/ralph-store';
+import type { RalphSelectedModel } from '../../shared/ralph';
 import {
   formatAgentInitial,
   formatAgentLabel,
@@ -1313,9 +1317,27 @@ export function ChatInput() {
       setShowProviderLimitPopup(false);
     }
   });
+  const visibleUsageLimit = createMemo(() => {
+    const notice = activeUsageLimit();
+    if (!notice) return null;
+
+    const current = currentModel();
+    const hasActiveAssistantContext = assistantMessages().length > 0;
+    if (!notice.providerID && !notice.modelID) return notice;
+    if (hasActiveAssistantContext && notice.source === 'status') return notice;
+    if (notice.providerID && notice.providerID !== current.providerID) return null;
+    if (notice.modelID && notice.modelID !== current.modelID) return null;
+    return notice;
+  });
   const activeUsageLimitWindow = createMemo(() =>
-    getPrimaryProviderLimitWindow(createUsageLimitProviderLimit(activeUsageLimit()))
+    getPrimaryProviderLimitWindow(createUsageLimitProviderLimit(visibleUsageLimit()))
   );
+  const activeRalphManagerSessionId = createMemo(() =>
+    ralphStore.isRalphSession(state.activeSessionId)
+      ? state.activeSessionId
+      : ralphStore.findManagerSessionIdForChild(state.activeSessionId)
+  );
+  const activeRalphRun = createMemo(() => ralphStore.getRun(activeRalphManagerSessionId()));
 
   const availableVariants = createMemo(() => {
     const model = currentModel();
@@ -1357,6 +1379,88 @@ export function ChatInput() {
 
   const activePermissionMode = createMemo(() => getPermissionModeForSession(state.activeSessionId));
 
+  function syncActiveRalphModel(nextModel: RalphSelectedModel) {
+    const managerSessionId = activeRalphManagerSessionId();
+    if (!managerSessionId) return;
+    ralphStore.updateRunModel(managerSessionId, nextModel);
+  }
+
+  async function handleSelectedModelChange(nextModel: RalphSelectedModel) {
+    const activeRun = activeRalphRun();
+    const activeRunWasRunning = activeRun?.status === 'running';
+    const previousRalphModel = activeRun?.config.model ?? null;
+    const currentSelection = {
+      providerID: state.selectedModel?.providerID,
+      modelID: state.selectedModel?.modelID,
+      variant: state.selectedModel?.variant,
+    };
+
+    setSelectedModel(nextModel, { sessionId: state.activeSessionId });
+    syncActiveRalphModel(nextModel);
+
+    const usageLimit = activeUsageLimit();
+    const visibleLimit = visibleUsageLimit();
+    const activeSessionId = state.activeSessionId;
+    const providerModelChanged =
+      currentSelection.providerID !== nextModel.providerID ||
+      currentSelection.modelID !== nextModel.modelID;
+    const ralphModelChanged =
+      previousRalphModel?.providerID !== nextModel.providerID ||
+      previousRalphModel?.modelID !== nextModel.modelID ||
+      previousRalphModel?.variant !== nextModel.variant;
+    const switchedAwayFromLimitedProvider =
+      !!usageLimit && !!usageLimit.providerID && usageLimit.providerID !== nextModel.providerID;
+    const switchedAwayFromLimitedModel =
+      !!usageLimit &&
+      !!usageLimit.modelID &&
+      usageLimit.providerID === nextModel.providerID &&
+      usageLimit.modelID !== nextModel.modelID;
+    const shouldClearUsageLimit =
+      !!usageLimit &&
+      (!!visibleLimit ||
+        switchedAwayFromLimitedProvider ||
+        switchedAwayFromLimitedModel ||
+        (!usageLimit.providerID && !usageLimit.modelID && providerModelChanged));
+
+    if (
+      (!providerModelChanged && !ralphModelChanged) ||
+      !activeSessionId ||
+      !shouldClearUsageLimit
+    ) {
+      return;
+    }
+
+    const treeSessionIds = getSessionTreeIds(activeSessionId);
+    const retryingSessionIds = treeSessionIds.filter(
+      (sessionId) => state.sessionStatus[sessionId]?.type === 'retry'
+    );
+
+    if (activeRunWasRunning && retryingSessionIds.includes(activeSessionId)) {
+      ralphStore.setStatus(activeRun.config.managerSessionId, 'paused');
+    }
+
+    if (retryingSessionIds.length > 0) {
+      setState('sessionStatus', (current) => ({
+        ...current,
+        ...Object.fromEntries(retryingSessionIds.map((sessionId) => [sessionId, { type: 'idle' }])),
+      }));
+    }
+
+    for (const sessionId of treeSessionIds) {
+      setSessionUsageLimit(sessionId, null);
+    }
+
+    if (retryingSessionIds.length > 0) {
+      abortSession()
+        .catch(() => {})
+        .finally(() => {
+          if (activeRunWasRunning && retryingSessionIds.includes(activeSessionId)) {
+            continueInterruptedSession(activeSessionId).catch(() => {});
+          }
+        });
+    }
+  }
+
   const queuedForSession = createMemo(() =>
     state.activeSessionId
       ? state.queuedMessages.filter((item) => item.sessionId === state.activeSessionId)
@@ -1367,7 +1471,7 @@ export function ChatInput() {
     () =>
       queuedForSession().length === 0 &&
       state.todos.length === 0 &&
-      !activeUsageLimit() &&
+      !visibleUsageLimit() &&
       !showModelPicker() &&
       !showContextPopup() &&
       !showAgentPicker() &&
@@ -1440,10 +1544,10 @@ export function ChatInput() {
         <TodoList />
       </Show>
 
-      <Show when={activeUsageLimit()}>
+      <Show when={visibleUsageLimit()}>
         <UsageLimitBanner
-          message={activeUsageLimit()!.message}
-          meta={describeUsageLimit(activeUsageLimitWindow(), activeUsageLimit()?.attempt ?? null)}
+          message={visibleUsageLimit()!.message}
+          meta={describeUsageLimit(activeUsageLimitWindow(), visibleUsageLimit()?.attempt ?? null)}
           showStopRetrying={isLoading() && !hasActiveQuestion() && !hasActivePermission()}
           onStopRetrying={() => abortSession()}
           onSwitchProvider={() => {
@@ -1492,14 +1596,11 @@ export function ChatInput() {
                     state.providers
                   ) ||
                   undefined;
-                setSelectedModel(
-                  {
-                    providerID: sel.providerID,
-                    modelID: sel.modelID,
-                    variant: matchedVariant,
-                  },
-                  { sessionId: state.activeSessionId }
-                );
+                void handleSelectedModelChange({
+                  providerID: sel.providerID,
+                  modelID: sel.modelID,
+                  variant: matchedVariant,
+                });
               }
             }}
             onClose={() => setShowModelPicker(false)}
@@ -1734,14 +1835,11 @@ export function ChatInput() {
           }}
           onSelectVariant={(variant) => {
             const m = currentModel();
-            setSelectedModel(
-              {
-                providerID: m.providerID!,
-                modelID: m.modelID!,
-                variant,
-              },
-              { sessionId: state.activeSessionId }
-            );
+            void handleSelectedModelChange({
+              providerID: m.providerID!,
+              modelID: m.modelID!,
+              variant,
+            });
             setShowVariantPicker(false);
           }}
           contextUsage={contextUsage()}

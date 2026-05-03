@@ -114,6 +114,9 @@ afterEach(() => {
   setDesktopSessionPaneSide('left');
   setShowSessionPicker(false);
   setShowSettings(false);
+  for (const run of ralphStore.getAllRuns()) {
+    ralphStore.removeRun(run.config.managerSessionId);
+  }
   globalThis.ResizeObserver = originalResizeObserver;
   globalThis.matchMedia = originalMatchMedia;
   HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -1905,6 +1908,88 @@ describe('usage-limit session status precedence', () => {
 
     expect(childRow).toBeInstanceOf(HTMLDivElement);
     expect(childRow?.querySelector('.session-item-indicator')).toBeNull();
+  });
+
+  it('bubbles Ralph child usage-limit failures to the manager session indicator', () => {
+    setState('sessions', [
+      session('manager', 500),
+      session('child-1', 400, { parentID: 'manager' }),
+    ]);
+    ralphStore.startRun({
+      managerSessionId: 'manager',
+      planDocPath: 'TESTS.md',
+      iterations: 15,
+      promptTemplate: 'Prompt',
+      permissionMode: 'full',
+      model: null,
+      agent: null,
+      createdAt: 1,
+    });
+    ralphStore.upsertIteration('manager', {
+      index: 1,
+      childSessionId: 'child-1',
+      status: 'running',
+      startedAt: 100,
+      endedAt: null,
+      filesChanged: [],
+      verification: {},
+    });
+    setSessionUsageLimit('child-1', {
+      source: 'status',
+      statusCode: 429,
+      message: '429 usage limit reached',
+      unit: 'messages',
+      retryAt: 8_000,
+      attempt: 2,
+      sessionID: 'child-1',
+    });
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(indicators.failedIds.has('manager')).toBe(true);
+    expect(indicators.runningIds.has('manager')).toBe(false);
+  });
+
+  it('does not bubble Ralph child failures to a manually stopped manager session', () => {
+    setState('sessions', [
+      session('manager', 500),
+      session('child-1', 400, { parentID: 'manager' }),
+    ]);
+    ralphStore.startRun({
+      managerSessionId: 'manager',
+      planDocPath: 'TESTS.md',
+      iterations: 15,
+      promptTemplate: 'Prompt',
+      permissionMode: 'full',
+      model: null,
+      agent: null,
+      createdAt: 1,
+    });
+    ralphStore.upsertIteration('manager', {
+      index: 1,
+      childSessionId: 'child-1',
+      status: 'failed',
+      startedAt: 100,
+      endedAt: 200,
+      filesChanged: [],
+      verification: {},
+    });
+    setSessionUsageLimit('child-1', {
+      source: 'status',
+      statusCode: 429,
+      message: '429 usage limit reached',
+      unit: 'messages',
+      retryAt: 8_000,
+      attempt: 2,
+      sessionID: 'child-1',
+    });
+    ralphStore.setStatus('manager', 'stopped', 'manual_stop');
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(indicators.failedIds.has('child-1')).toBe(true);
+    expect(indicators.failedIds.has('manager')).toBe(false);
+    expect(indicators.runningIds.has('manager')).toBe(false);
   });
 });
 

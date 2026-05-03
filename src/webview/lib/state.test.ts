@@ -9,6 +9,7 @@ import {
   addPermission,
   getActiveUsageLimitNotice,
   getMessageById,
+  getSessionTreeRootId,
   getSessionTreeIds,
   getPermissionSignature,
   groupPermissions,
@@ -20,6 +21,7 @@ import {
   removeClipboardImage,
   setSessionFailed,
   setInputText,
+  setSessionUsageLimit,
   setState,
   state,
   syncFailedSessionsFromMessages,
@@ -667,6 +669,48 @@ describe('getSessionTreeIds', () => {
     expect(getActiveUsageLimitNotice('child-1')).toMatchObject({ sessionID: 'child-1' });
     expect(hasActiveUsageLimit('session-1')).toBe(true);
     expect(hasActiveUsageLimit('child-1')).toBe(true);
+  });
+
+  it('clears an active usage-limit lookup after removing the notice', () => {
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Child 1',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 0, updated: 20 },
+      },
+    ]);
+    setSessionUsageLimit('child-1', {
+      source: 'status',
+      statusCode: 429,
+      message: '429 usage limit reached',
+      unit: 'messages',
+      retryAt: 4_000,
+      attempt: 2,
+      sessionID: 'child-1',
+    });
+
+    expect(getSessionTreeRootId('child-1')).toBe('session-1');
+    expect(hasActiveUsageLimit('session-1')).toBe(true);
+    expect(hasActiveUsageLimit('child-1')).toBe(true);
+
+    setSessionUsageLimit('child-1', null);
+
+    expect(getActiveUsageLimitNotice('session-1')).toBeNull();
+    expect(getActiveUsageLimitNotice('child-1')).toBeNull();
+    expect(hasActiveUsageLimit('session-1')).toBe(false);
+    expect(hasActiveUsageLimit('child-1')).toBe(false);
   });
 
   it('treats child-session prompts as active on the root session', () => {

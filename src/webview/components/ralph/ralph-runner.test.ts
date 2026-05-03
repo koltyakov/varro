@@ -369,6 +369,60 @@ describe('ralph runner iteration repair', () => {
     );
   });
 
+  it('marks an iteration failed when the final assistant text is a usage-limit interruption without verdicts', async () => {
+    const { ralphRunner, ralphStore } = await loadRunnerModules();
+    const config = createConfig({ iterations: 1 });
+
+    readWorkspaceFile.mockResolvedValue('# Plan\n- [ ] next chunk');
+    createSession.mockResolvedValueOnce({ id: 'child-1' });
+    sessionMessages.mockResolvedValue([
+      {
+        info: { role: 'assistant' },
+        parts: [{ type: 'text', text: 'The usage limit has been reached' }],
+      },
+    ]);
+
+    const idleListeners: Array<(data: { properties?: { sessionID?: string } }) => void> = [];
+    const statusListeners: Array<
+      (data: { properties?: { sessionID?: string; status?: { type?: string } } }) => void
+    > = [];
+    serverEventsOn.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+      if (event === 'session.idle') {
+        idleListeners.push(handler as (data: { properties?: { sessionID?: string } }) => void);
+      }
+      if (event === 'session.status') {
+        statusListeners.push(
+          handler as (data: {
+            properties?: { sessionID?: string; status?: { type?: string } };
+          }) => void
+        );
+      }
+      return () => {};
+    });
+
+    sendAsync.mockImplementation(async (sid: string) => {
+      setTimeout(() => {
+        const idleEvent = { properties: { sessionID: sid } };
+        const statusEvent = { properties: { sessionID: sid, status: { type: 'idle' } } };
+        for (const listener of idleListeners) listener(idleEvent);
+        for (const listener of statusListeners) listener(statusEvent);
+      }, 0);
+    });
+
+    await ralphRunner.start(config);
+
+    const run = ralphStore.getRun(config.managerSessionId);
+    expect(run?.status).toBe('incomplete');
+    expect(run?.stopReason).toBe('iteration_limit_with_gap');
+    expect(run?.iterations[0]).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        note: 'The usage limit has been reached',
+        verification: {},
+      })
+    );
+  });
+
   it('sends parent-driven verification follow-up and spawns a repair sub-agent on failure', async () => {
     const { ralphRunner, ralphStore } = await loadRunnerModules();
     const config = createConfig({ iterations: 1 });

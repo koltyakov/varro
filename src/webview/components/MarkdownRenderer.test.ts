@@ -130,6 +130,22 @@ describe('MarkdownRenderer', () => {
     });
   });
 
+  it('does not treat protocol-relative links as local files', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+
+    cleanup = render(
+      () => MarkdownRenderer({ content: '[External-ish](//example.test/path)' }),
+      container!
+    );
+
+    const link = container?.querySelector('a');
+    expect(link?.hasAttribute('href')).toBe(false);
+
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('re-renders workspace-relative links when the workspace changes', async () => {
     cleanup = render(
       () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),

@@ -29,6 +29,10 @@ export async function refreshRoutingState() {
   await getCurrentOpenCodeRuntime().refreshRoutingState();
 }
 
+export async function continueInterruptedSession(sessionId: string) {
+  await getCurrentOpenCodeRuntime().continueInterruptedSession(sessionId);
+}
+
 export async function applySessionMcps(names: string[], sessionId?: string | null) {
   await getCurrentOpenCodeRuntime().applySessionMcps(names, sessionId);
 }

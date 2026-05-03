@@ -534,7 +534,7 @@ async function summarizeIteration(args: {
   }
 
   const verification = parseVerificationVerdicts(lastAssistantText);
-  const status = inferIterationStatus(verification);
+  const status = inferIterationStatus(verification, lastAssistantText);
 
   return {
     index: iterationIndex,
@@ -586,11 +586,28 @@ function normalizeVerificationName(raw: string): string | null {
   return trimmed;
 }
 
-function inferIterationStatus(verdicts: RalphIteration['verification']): RalphIterationStatus {
+function inferIterationStatus(
+  verdicts: RalphIteration['verification'],
+  lastAssistantText: string
+): RalphIterationStatus {
   const reported = Object.values(verdicts);
-  if (reported.length === 0) return 'passed';
+  if (reported.length === 0) {
+    return isInterruptionLikeAssistantText(lastAssistantText) ? 'failed' : 'passed';
+  }
   if (reported.some((v) => v === 'fail')) return 'failed';
   return 'passed';
+}
+
+function isInterruptionLikeAssistantText(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized.includes('usage limit') ||
+    normalized.includes('messages exhausted') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('too many requests') ||
+    normalized.includes('the usage limit has been reached')
+  );
 }
 
 function buildPromptText(

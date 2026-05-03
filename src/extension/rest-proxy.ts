@@ -524,6 +524,7 @@ export class RestProxy {
     request: Extract<OpenCodeConfigRequest, { kind: 'update' }>
   ): Promise<OpenCodeModelRouting> {
     const { uri, config } = await this.readOpenCodeConfigObject();
+    const initialStat = await this.readConfigStat(uri);
     const next = { ...config };
     if (typeof next.$schema !== 'string' || !next.$schema.trim()) {
       next.$schema = 'https://opencode.ai/config.json';
@@ -549,8 +550,30 @@ export class RestProxy {
     }
 
     const encoded = new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`);
+    const latestStat = await this.readConfigStat(uri);
+    if (!this.areConfigStatsEqual(initialStat, latestStat)) {
+      throw new Error('Project opencode.json changed while updating model routing; please retry');
+    }
     await vscode.workspace.fs.writeFile(uri, encoded);
     return this.normalizeOpenCodeModelRouting(next);
+  }
+
+  private async readConfigStat(uri: vscode.Uri) {
+    try {
+      return await vscode.workspace.fs.stat(uri);
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'FileNotFound') {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  private areConfigStatsEqual(left: vscode.FileStat | null, right: vscode.FileStat | null) {
+    if (left === null || right === null) {
+      return left === right;
+    }
+    return left.mtime === right.mtime && left.size === right.size;
   }
 
   private async openPlanDocument(content: string) {

@@ -7154,8 +7154,92 @@ body.vscode-high-contrast-light
   display: flex;
   gap: 14px;
   flex-wrap: wrap;
+  align-items: flex-start;
   font-size: 11px;
   color: var(--color-vscode-muted);
+}
+
+.ralph-dashboard-meta-main {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.ralph-dashboard-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ralph-dashboard-meta-item-model {
+  flex: 1 1 240px;
+}
+
+.ralph-dashboard-meta-label {
+  flex: 0 0 auto;
+}
+
+.ralph-dashboard-meta-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ralph-dashboard-provider-limits {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.ralph-dashboard-provider-limits-label {
+  color: inherit;
+}
+
+.ralph-dashboard-provider-limit {
+  display: inline-flex;
+  align-items: center;
+  color: color-mix(in srgb, var(--color-vscode-fg-soft) 65%, transparent);
+}
+
+.ralph-dashboard-provider-limit.warning {
+  color: color-mix(in srgb, var(--color-vscode-warning) 75%, transparent);
+}
+
+.ralph-dashboard-provider-limit.error {
+  color: color-mix(in srgb, var(--color-vscode-error) 80%, transparent);
+}
+
+.ralph-dashboard-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-error) 38%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-error) 88%, var(--color-vscode-fg));
+}
+
+.ralph-dashboard-error-label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ralph-dashboard-error-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ralph-dashboard-list {
@@ -7183,6 +7267,19 @@ body.vscode-high-contrast-light
 
 .ralph-iter-card:hover {
   background: var(--color-vscode-toolbar-hover);
+}
+
+.ralph-iter-error {
+  border-color: color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-error) 8%,
+    var(--color-vscode-input-bg, var(--color-vscode-bg))
+  );
+}
+
+.ralph-iter-error:hover {
+  background: color-mix(in srgb, var(--color-vscode-error) 12%, var(--color-vscode-toolbar-hover));
 }
 
 .ralph-iter-card:disabled {
@@ -7228,6 +7325,12 @@ body.vscode-high-contrast-light
   border-color: color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
 }
 
+.ralph-iter-status-error {
+  color: var(--color-vscode-error);
+  background: color-mix(in srgb, var(--color-vscode-error) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
+}
+
 .ralph-iter-status-pending {
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
@@ -7241,6 +7344,7 @@ body.vscode-high-contrast-light
 }
 
 .ralph-iter-duration {
+  margin-left: auto;
   flex-shrink: 0;
   font-size: 11px;
   color: var(--color-vscode-muted);
@@ -7314,12 +7418,40 @@ body.vscode-high-contrast-light
 }
 
 .ralph-iter-note {
-  flex: 1 1 100%;
+  flex: 0 1 280px;
+  min-width: 0;
   font-size: 11px;
   color: var(--color-vscode-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ralph-iter-error .ralph-iter-note {
+  color: color-mix(in srgb, var(--color-vscode-error) 85%, var(--color-vscode-fg));
+}
+
+@media (max-width: 560px) {
+  .ralph-dashboard-meta {
+    gap: 10px;
+  }
+
+  .ralph-dashboard-meta-main {
+    gap: 8px;
+  }
+
+  .ralph-dashboard-meta-item-model {
+    flex-basis: 100%;
+  }
+
+  .ralph-dashboard-provider-limits {
+    margin-left: 0;
+    max-width: 100%;
+  }
+
+  .ralph-dashboard-error {
+    width: 100%;
+  }
 }
 
 .session-item-ralph-tag {

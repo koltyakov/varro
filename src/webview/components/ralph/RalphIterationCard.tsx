@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import type { RalphIteration, RalphVerificationVerdict } from '../../../shared/ralph';
 import { selectSession } from '../../hooks/useOpenCode';
+import { getRalphIterationLiveIssue } from './ralph-live-issue';
 
 // Shared ticker so any in-progress iteration card refreshes its displayed
 // duration roughly once per second without each card spawning its own timer.
@@ -52,22 +53,31 @@ export function RalphIterationCard(props: { iteration: RalphIteration }) {
     return tickNow() - startedAt;
   };
 
+  const liveIssue = () => getRalphIterationLiveIssue(props.iteration);
+  const hasLiveIssue = () => liveIssue() !== null;
+  const showExplicitErrorState = () => props.iteration.status === 'failed';
+  const showLiveRunningErrorState = () => props.iteration.status === 'running' && hasLiveIssue();
   const open = () => {
     const id = props.iteration.childSessionId;
     if (id) void selectSession(id);
   };
+  const note = () => liveIssue() || props.iteration.note;
+  const showNote = () => hasErrorState() || !!props.iteration.note;
+  const hasErrorState = () => showExplicitErrorState() || showLiveRunningErrorState();
+  const hidesDuration = () => hasErrorState();
+  const statusClass = () => (hasErrorState() ? 'error' : props.iteration.status);
+  const statusLabel = () => (hasErrorState() ? 'Error' : STATUS_LABELS[props.iteration.status]);
 
   return (
     <button
       type="button"
-      class={`ralph-iter-card ralph-iter-${props.iteration.status}`}
+      class={`ralph-iter-card ralph-iter-${props.iteration.status}${hasErrorState() ? ' ralph-iter-error' : ''}`}
       onClick={open}
       disabled={!props.iteration.childSessionId}
+      title={note() || undefined}
     >
       <span class="ralph-iter-index">#{props.iteration.index}</span>
-      <span class={`ralph-iter-status ralph-iter-status-${props.iteration.status}`}>
-        {STATUS_LABELS[props.iteration.status]}
-      </span>
+      <span class={`ralph-iter-status ralph-iter-status-${statusClass()}`}>{statusLabel()}</span>
       <Show when={props.iteration.tokens}>
         {(tokens) => (
           <span
@@ -87,8 +97,11 @@ export function RalphIterationCard(props: { iteration: RalphIteration }) {
           </For>
         </span>
       </span>
-      <Show when={durationMs() !== null}>
+      <Show when={!hidesDuration() && durationMs() !== null}>
         <span class="ralph-iter-duration">{formatDuration(durationMs()!)}</span>
+      </Show>
+      <Show when={showNote() && note()}>
+        {(value) => <span class="ralph-iter-note">{value()}</span>}
       </Show>
     </button>
   );

@@ -13,6 +13,7 @@ export type PendingAttentionEntry = {
   kind: PendingAttentionKind;
   label: string;
   props: Record<string, unknown>;
+  directory?: string;
 };
 
 export type InterruptedSessionSnapshot = {
@@ -25,6 +26,7 @@ export type BlockingRequestSnapshot = {
   sessionID: string;
   kind: PendingAttentionKind;
   props: Record<string, unknown>;
+  directory?: string;
 };
 
 export interface SessionStateListener {
@@ -58,6 +60,7 @@ export class SessionStateManager {
   private readonly failedSessions = new Set<string>();
   private readonly sessionAgents = new Map<string, string>();
   private readonly sessionTitles = new Map<string, string>();
+  private readonly sessionDirectories = new Map<string, string>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
 
   constructor(
@@ -86,6 +89,13 @@ export class SessionStateManager {
     return this.sessionAgents.get(sessionID) === 'plan';
   }
 
+  isSessionInWorkspace(sessionID: string, workspacePath: string | null | undefined): boolean {
+    const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
+    if (!normalizedWorkspace) return true;
+    const normalizedDirectory = normalizeWorkspacePath(this.sessionDirectories.get(sessionID));
+    return normalizedDirectory === normalizedWorkspace;
+  }
+
   removeSessions(sessionIDs: Iterable<string>): void {
     let changed = false;
     for (const sessionID of sessionIDs) {
@@ -110,7 +120,7 @@ export class SessionStateManager {
     switch (type) {
       case 'session.created':
       case 'session.updated': {
-        this.rememberSessionTitle(asRecord(props?.info));
+        this.rememberSessionMetadata(asRecord(props?.info));
         break;
       }
       case 'session.deleted': {
@@ -269,7 +279,13 @@ export class SessionStateManager {
             ? describeQuestionRequest(item.props)
             : describePermissionRequest(item.props),
         props: item.props,
+        directory: trimOptionalString(item.directory),
       });
+      const directory = trimOptionalString(item.directory);
+      if (directory) {
+        this.sessionDirectories.set(item.sessionID, directory);
+        this.evictOldestSessionMetadata(this.sessionDirectories);
+      }
     }
   }
 
@@ -369,6 +385,9 @@ export class SessionStateManager {
         sessionID: request.sessionID,
         kind: request.kind,
         props: this.serializeBlockingRequestProps(request.kind, request.props),
+        directory: trimOptionalString(
+          request.directory || this.sessionDirectories.get(request.sessionID)
+        ),
       }))
       .toSorted((a, b) => a.id.localeCompare(b.id))
       .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
@@ -384,12 +403,18 @@ export class SessionStateManager {
       : serializeQuestionRequestProps(props);
   }
 
-  private rememberSessionTitle(info: Record<string, unknown> | undefined) {
+  private rememberSessionMetadata(info: Record<string, unknown> | undefined) {
     const sessionID = getString(info?.id);
     const title = normalizeSessionTitle(getString(info?.title));
     if (sessionID && title) {
       this.sessionTitles.set(sessionID, title);
       this.evictOldestSessionMetadata(this.sessionTitles);
+    }
+
+    const directory = trimOptionalString(getString(info?.directory));
+    if (sessionID && directory) {
+      this.sessionDirectories.set(sessionID, directory);
+      this.evictOldestSessionMetadata(this.sessionDirectories);
     }
   }
 
@@ -413,7 +438,13 @@ export class SessionStateManager {
     const label =
       kind === 'question' ? describeQuestionRequest(props) : describePermissionRequest(props);
     this.busySessions.delete(sessionID);
-    this.pendingAttention.set(requestID, { sessionID, kind, label, props: { ...props } });
+    this.pendingAttention.set(requestID, {
+      sessionID,
+      kind,
+      label,
+      props: { ...props },
+      directory: this.sessionDirectories.get(sessionID),
+    });
     this.completedSessions.delete(sessionID);
     this.showBlockingNotification(kind, sessionID, label);
     return true;
@@ -426,6 +457,7 @@ export class SessionStateManager {
     changed = this.failedSessions.delete(sessionID) || changed;
     changed = this.sessionAgents.delete(sessionID) || changed;
     changed = this.sessionTitles.delete(sessionID) || changed;
+    changed = this.sessionDirectories.delete(sessionID) || changed;
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
       this.pendingAttention.delete(requestID);
@@ -656,4 +688,11 @@ function isPersistableMetadataValue(value: unknown): value is string | number | 
 
 function trimMetadataValue(value: string | number | boolean): string | number | boolean {
   return typeof value === 'string' ? trimRequiredString(value) : value;
+}
+
+function normalizeWorkspacePath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) return null;
+  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
 }

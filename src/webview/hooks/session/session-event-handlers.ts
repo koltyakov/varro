@@ -93,6 +93,7 @@ function getPermissionReplyId(props: Record<string, unknown>) {
 
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
+  isSessionInActiveTree?(sessionId: string): boolean;
   getMessages(): Array<{ info: Message; parts: Part[] }>;
   handoffTodosToMessages(messages?: Array<{ info: Message; parts: Part[] }>): boolean;
   upsertSession(info: Session): void;
@@ -165,6 +166,15 @@ export class SessionEventHandlerOperations {
   readonly registerSessionEventHandlers = () => {
     return registerSessionEventHandlers({
       getActiveSessionId: () => appStore.state.activeSessionId,
+      isSessionInActiveTree: (sessionId) => {
+        const activeSessionId = appStore.state.activeSessionId;
+        if (!activeSessionId) return false;
+
+        return (
+          (sessionStore.getSessionTreeRootId(sessionId) || sessionId) ===
+          (sessionStore.getSessionTreeRootId(activeSessionId) || activeSessionId)
+        );
+      },
       getMessages: () => appStore.state.messages,
       handoffTodosToMessages: this.deps.todoSyncOperations.handoffTodosToMessages,
       upsertSession: this.deps.sessionLifecycleOperations.upsertSession,
@@ -193,6 +203,11 @@ export class SessionEventHandlerOperations {
 
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
+  const isSessionInActiveTree = (sessionId: string | null | undefined) => {
+    if (!sessionId) return false;
+    if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
+    return sessionId === deps.getActiveSessionId();
+  };
 
   cleanups.push(
     serverEvents.on('session.created', (data) => {
@@ -281,7 +296,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const message = isCompleteMessageInfo(info) ? info : null;
       const assistantMessage = message && isAssistantMessage(message) ? message : null;
 
-      if (sessionID === deps.getActiveSessionId()) {
+      if (isSessionInActiveTree(sessionID)) {
         uiStore.markLoadingActivity();
         if (message) {
           sessionStore.upsertMessageInfo(message);
@@ -322,7 +337,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (partialPart?.sessionID && partialPart.type === 'compaction') {
         sessionStore.setSessionCompacting(partialPart.sessionID, false);
       }
-      if (partialPart?.sessionID === deps.getActiveSessionId()) {
+      if (isSessionInActiveTree(partialPart?.sessionID)) {
         uiStore.markLoadingActivity();
         if (!isCompleteMessagePart(rawPart)) return;
         sessionStore.upsertPart(rawPart);
@@ -337,7 +352,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.delta', (data) => {
       const p = data.properties;
       if (!p) return;
-      if ((p.sessionID as string) === deps.getActiveSessionId()) {
+      if (isSessionInActiveTree(p.sessionID as string | undefined)) {
         uiStore.markLoadingActivity();
         sessionStore.applyMessagePartDelta(
           p.messageID as string,
@@ -354,7 +369,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.removed', (data) => {
       const p = data.properties;
       if (!p) return;
-      if ((p.sessionID as string) !== deps.getActiveSessionId()) return;
+      if (!isSessionInActiveTree(p.sessionID as string | undefined)) return;
       uiStore.markLoadingActivity();
       sessionStore.removeMessagePart(
         p.sessionID as string,
@@ -369,7 +384,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.removed', (data) => {
       const p = data.properties;
       if (!p) return;
-      if ((p.sessionID as string) === deps.getActiveSessionId()) {
+      if (isSessionInActiveTree(p.sessionID as string | undefined)) {
         uiStore.markLoadingActivity();
         sessionStore.clearStreamingState();
         const nextMessages = deps
@@ -442,7 +457,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('todo.updated', (data) => {
       const p = data.properties;
-      if ((p?.sessionID as string) === deps.getActiveSessionId()) {
+      if (isSessionInActiveTree(p?.sessionID as string | undefined)) {
         if (!hasActiveAssistantReply(deps.getMessages())) return;
         deps.syncTodosFromMessages(undefined, p);
       }
@@ -452,7 +467,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('session.diff', (data) => {
       const p = data.properties;
-      if ((p?.sessionID as string) === deps.getActiveSessionId()) {
+      if (isSessionInActiveTree(p?.sessionID as string | undefined)) {
         deps.setDiffs((p?.diff as FileDiff[]) || []);
       }
     })

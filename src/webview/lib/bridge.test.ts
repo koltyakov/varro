@@ -184,4 +184,18 @@ describe('bridge', () => {
 
     await expect(request).rejects.toThrow('request cancelled');
   });
+
+  it('rejects immediately when the signal is already aborted', async () => {
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn();
+    const controller = new AbortController();
+    controller.abort(new Error('already cancelled'));
+
+    await expect(
+      bridge.apiCall('GET', '/session', undefined, { signal: controller.signal })
+    ).rejects.toThrow('already cancelled');
+
+    expect(window.__sendToExtension).not.toHaveBeenCalled();
+    bridge.cleanupBridge();
+  });
 });

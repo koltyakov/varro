@@ -376,6 +376,54 @@ describe('session-send helpers', () => {
     expect(postTerminalSelectionClear).not.toHaveBeenCalled();
   });
 
+  it('logs failed post-send syncs and stops loading when all syncs fail', async () => {
+    const stopLoading = vi.fn();
+    const logError = vi.fn();
+
+    await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: { parts: [{ type: 'text', text: 'queued' }] },
+          effectiveModel: null,
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync: vi.fn(async () => {}),
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {
+          throw new Error('syncSession failed');
+        }),
+        syncSessionMessages: vi.fn(async () => {
+          throw new Error('syncSessionMessages failed');
+        }),
+        recheckSessionStatus: vi.fn(async () => {
+          throw new Error('recheckSessionStatus failed');
+        }),
+        stopLoading,
+        shouldClearComposerAfterSend: () => true,
+        logError,
+      },
+      'queued'
+    );
+
+    expect(logError).toHaveBeenCalledTimes(3);
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
   it('retries only assistant messages in the active session', async () => {
     const continueInterruptedSession = vi.fn(async () => {});
 

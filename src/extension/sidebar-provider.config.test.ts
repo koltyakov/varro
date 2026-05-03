@@ -79,6 +79,8 @@ describe('SidebarProvider local config routing', () => {
 
   it('writes small_model routing to project opencode.json', async () => {
     vscodeMock.workspace.fs.readFile.mockRejectedValueOnce({ code: 'FileNotFound' });
+    vscodeMock.workspace.fs.stat.mockRejectedValueOnce({ code: 'FileNotFound' });
+    vscodeMock.workspace.fs.stat.mockRejectedValueOnce({ code: 'FileNotFound' });
 
     const { provider } = await createSidebarProviderInstance({
       server: createServer({ getWorkspaceCwd: vi.fn(() => '/repo') }),
@@ -130,6 +132,8 @@ describe('SidebarProvider local config routing', () => {
         })
       )
     );
+    vscodeMock.workspace.fs.stat.mockResolvedValueOnce({ mtime: 1, size: 10, type: 0, ctime: 0 });
+    vscodeMock.workspace.fs.stat.mockResolvedValueOnce({ mtime: 1, size: 10, type: 0, ctime: 0 });
 
     const { provider } = await createSidebarProviderInstance({
       server: createServer({ getWorkspaceCwd: vi.fn(() => '/repo') }),
@@ -162,6 +166,38 @@ describe('SidebarProvider local config routing', () => {
       agent: {
         build: { mode: 'primary', model: 'openai/gpt-5' },
         review: { model: 'anthropic/claude-sonnet-4' },
+      },
+    });
+  });
+
+  it('rejects config updates when opencode.json changes concurrently', async () => {
+    vscodeMock.workspace.fs.readFile.mockResolvedValueOnce(
+      new TextEncoder().encode(JSON.stringify({ small_model: 'openai/gpt-5-mini' }))
+    );
+    vscodeMock.workspace.fs.stat.mockResolvedValueOnce({ mtime: 1, size: 10, type: 0, ctime: 0 });
+    vscodeMock.workspace.fs.stat.mockResolvedValueOnce({ mtime: 2, size: 12, type: 0, ctime: 0 });
+
+    const { provider } = await createSidebarProviderInstance({
+      server: createServer({ getWorkspaceCwd: vi.fn(() => '/repo') }),
+    });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 4,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: { target: 'small_model', providerID: 'openai', modelID: 'gpt-5' },
+      },
+    });
+
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 4,
+        error: 'Project opencode.json changed while updating model routing; please retry',
       },
     });
   });

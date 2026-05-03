@@ -2,6 +2,7 @@ export {
   abortSession,
   applySessionMcps,
   compactSession,
+  continueInterruptedSession,
   createSession,
   deleteSession,
   deleteSessionPermanently,

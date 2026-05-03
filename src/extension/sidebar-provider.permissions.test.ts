@@ -3,6 +3,7 @@ import {
   attachTestView,
   createServer,
   createSidebarProviderInstance,
+  getVscodeMock,
 } from './sidebar-provider.test-support';
 
 describe('SidebarProvider permission replay', () => {
@@ -137,5 +138,53 @@ describe('SidebarProvider permission replay', () => {
         },
       },
     });
+  });
+
+  it('only shows waiting status for permission requests in the current workspace', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const statusBarItem = getVscodeMock().window.createStatusBarItem.mock.results.at(-1)?.value;
+    if (!statusBarItem) throw new Error('Expected status bar item to exist');
+
+    statusBarItem.show.mockClear();
+    statusBarItem.hide.mockClear();
+
+    const providerState = provider as unknown as {
+      sessionState: { handleServerEvent(event: unknown): void };
+    };
+
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-other', title: 'Other repo', directory: '/other' } },
+    });
+    providerState.sessionState.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'perm-other',
+        sessionID: 'session-other',
+        permission: 'bash',
+        title: 'Run Bash command',
+      },
+    });
+
+    expect(statusBarItem.show).not.toHaveBeenCalled();
+    expect(statusBarItem.text).toBe('');
+
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-local', title: 'Current repo', directory: '/repo' } },
+    });
+    providerState.sessionState.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'perm-local',
+        sessionID: 'session-local',
+        permission: 'bash',
+        title: 'Run Bash command',
+      },
+    });
+
+    expect(statusBarItem.show).toHaveBeenCalled();
+    expect(statusBarItem.text).toBe('$(bell-dot) Varro: 1 waiting');
+    expect(statusBarItem.tooltip).toContain('Current repo: Run Bash command');
   });
 });

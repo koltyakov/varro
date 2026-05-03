@@ -996,6 +996,8 @@ function formatDurationFromNow(timestamp: number, now: number): string {
 export function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
+  const ralphChildToManager = new Map<string, string>();
+  const ralphManagerManualStopIds = new Set<string>();
   const rootSessionId = (sessionId: string) => getSessionTreeRootId(sessionId) || sessionId;
   const childSessionIdsByParent = new Map<string, string[]>();
   const permissionIds = new Set<string>();
@@ -1014,10 +1016,14 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
   const planReadyIds = new Set<string>();
   const newlyCompletedIds = new Set<string>();
   const descendantSubagentCountBySession = new Map<string, number>();
+  const isManuallyStoppedRalphManager = (sessionId: string) =>
+    ralphManagerManualStopIds.has(sessionId);
   const isAwaitingInput = (sessionId: string) =>
     permissionIds.has(rootSessionId(sessionId)) || questionIds.has(rootSessionId(sessionId));
-  const isFailed = (sessionId: string) =>
-    failedSessionIds.has(sessionId) || hasActiveUsageLimit(sessionId);
+  const isFailed = (sessionId: string) => {
+    if (isManuallyStoppedRalphManager(sessionId)) return false;
+    return failedSessionIds.has(sessionId) || hasActiveUsageLimit(sessionId);
+  };
   const isRunning = (sessionId: string) => {
     if (hasActiveUsageLimit(sessionId)) return false;
     if (isAwaitingInput(sessionId)) return false;
@@ -1026,6 +1032,20 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     const type = state.sessionStatus[sessionId]?.type;
     return type === 'busy' || type === 'retry';
   };
+
+  for (const run of ralphStore.getAllRuns()) {
+    if (run.stopReason === 'manual_stop') {
+      ralphManagerManualStopIds.add(run.config.managerSessionId);
+    }
+    for (const iteration of run.iterations) {
+      if (iteration.childSessionId) {
+        ralphChildToManager.set(iteration.childSessionId, run.config.managerSessionId);
+      }
+      for (const repairSessionId of iteration.repairSessionIds || []) {
+        ralphChildToManager.set(repairSessionId, run.config.managerSessionId);
+      }
+    }
+  }
 
   for (const session of sessions) {
     if (session.parentID) {
@@ -1042,8 +1062,14 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     const running = !needsAttention && isRunning(sessionId);
 
     if (failed) {
-      failedIds.add(displaySessionId);
+      if (!isManuallyStoppedRalphManager(displaySessionId)) {
+        failedIds.add(displaySessionId);
+      }
       failedIds.add(sessionId);
+      const managerSessionId = ralphChildToManager.get(sessionId);
+      if (managerSessionId && !ralphManagerManualStopIds.has(managerSessionId)) {
+        failedIds.add(managerSessionId);
+      }
       continue;
     }
     if (needsAttention) {
@@ -1054,6 +1080,8 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     if (running) {
       runningIds.add(displaySessionId);
       runningIds.add(sessionId);
+      const managerSessionId = ralphChildToManager.get(sessionId);
+      if (managerSessionId && !failedIds.has(managerSessionId)) runningIds.add(managerSessionId);
       continue;
     }
     const selectedAgent = getSelectedAgentForSession(sessionId);
@@ -1102,6 +1130,8 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
 }
 
 export function isFailedSession(sessionId: string) {
+  const ralphRun = ralphStore.getRun(sessionId);
+  if (ralphRun?.stopReason === 'manual_stop') return false;
   return state.failedSessionIds.includes(sessionId) || hasActiveUsageLimit(sessionId);
 }
 

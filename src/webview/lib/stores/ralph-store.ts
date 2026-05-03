@@ -4,6 +4,7 @@ import type {
   RalphConfig,
   RalphIteration,
   RalphRun,
+  RalphSelectedModel,
   RalphStatus,
   RalphStopReason,
 } from '../../../shared/ralph';
@@ -94,6 +95,18 @@ export const ralphStore = {
       sessionId,
       produce((draft) => {
         draft.config.iterations += Math.floor(count);
+        draft.updatedAt = Date.now();
+      })
+    );
+    persist({ ...runs });
+  },
+
+  updateRunModel(sessionId: string, model: RalphSelectedModel | null) {
+    if (!runs[sessionId]) return;
+    setRuns(
+      sessionId,
+      produce((draft) => {
+        draft.config.model = model;
         draft.updatedAt = Date.now();
       })
     );

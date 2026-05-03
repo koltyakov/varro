@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Permission, Session } from '../types';
+import type { Permission, QuestionRequest, Session } from '../types';
 import {
   autoApprovePermissionsForSessionWithDependencies,
+  getQuestionById,
   rejectQuestionWithDependencies,
   respondPermissionWithDependencies,
   respondQuestionWithDependencies,
@@ -37,6 +38,20 @@ function session(id = 'session-1'): Session {
   };
 }
 
+function question(id: string): QuestionRequest {
+  return {
+    id,
+    sessionID: 'session-1',
+    questions: [
+      {
+        header: 'Question',
+        question: 'Continue?',
+        options: [{ label: 'Yes', description: 'Approve' }],
+      },
+    ],
+  };
+}
+
 describe('session-approvals helpers', () => {
   it('responds to grouped permissions and removes all members', async () => {
     const removePermission = vi.fn();
@@ -66,6 +81,49 @@ describe('session-approvals helpers', () => {
     expect(removePermission).toHaveBeenCalledWith('perm-2');
   });
 
+  it('falls back to the requested permission when only a duplicate id matches', async () => {
+    const removePermission = vi.fn();
+    const respondPermission = vi.fn(async () => {});
+
+    await respondPermissionWithDependencies(
+      {
+        getPermissions: () => [permission('perm-1', 'session-1', { duplicateIDs: ['perm-2'] })],
+        respondPermission,
+        removePermission,
+        setError: vi.fn(),
+      },
+      'session-2',
+      'perm-2',
+      'once'
+    );
+
+    expect(respondPermission).toHaveBeenCalledWith('session-2', 'perm-2', 'once');
+    expect(removePermission).toHaveBeenCalledWith('perm-2');
+  });
+
+  it('sets a fallback error and rethrows when permission responses fail', async () => {
+    const setError = vi.fn();
+
+    await expect(
+      respondPermissionWithDependencies(
+        {
+          getPermissions: () => [permission('perm-1')],
+          respondPermission: vi.fn(async () => {
+            throw 'permission failed';
+          }),
+          removePermission: vi.fn(),
+          setError,
+        },
+        'session-1',
+        'perm-1',
+        'reject',
+        { rethrow: true }
+      )
+    ).rejects.toBe('permission failed');
+
+    expect(setError).toHaveBeenCalledWith('Failed to respond to permission');
+  });
+
   it('answers and rejects questions through the question API', async () => {
     const removeQuestion = vi.fn();
 
@@ -90,6 +148,39 @@ describe('session-approvals helpers', () => {
 
     expect(removeQuestion).toHaveBeenCalledWith('question-1');
     expect(removeQuestion).toHaveBeenCalledWith('question-2');
+  });
+
+  it('surfaces question reply and rejection failures without removing the request', async () => {
+    const removeQuestion = vi.fn();
+    const setReplyError = vi.fn();
+    const setRejectError = vi.fn();
+
+    await respondQuestionWithDependencies(
+      {
+        replyQuestion: vi.fn(async () => {
+          throw 'reply failed';
+        }),
+        removeQuestion,
+        setError: setReplyError,
+      },
+      'question-1',
+      [['no']]
+    );
+
+    await rejectQuestionWithDependencies(
+      {
+        rejectQuestion: vi.fn(async () => {
+          throw new Error('reject failed');
+        }),
+        removeQuestion,
+        setError: setRejectError,
+      },
+      'question-2'
+    );
+
+    expect(removeQuestion).not.toHaveBeenCalled();
+    expect(setReplyError).toHaveBeenCalledWith('Failed to answer question');
+    expect(setRejectError).toHaveBeenCalledWith('reject failed');
   });
 
   it('auto-approves all pending permissions for a session', async () => {
@@ -171,6 +262,95 @@ describe('session-approvals helpers', () => {
     expect(saveProjectPermissionMode).toHaveBeenNthCalledWith(1, 'full');
     expect(saveProjectPermissionMode).toHaveBeenNthCalledWith(2, 'default');
     expect(setError).toHaveBeenCalledWith('permission update failed');
+  });
+
+  it('updates local permission state without a session id', async () => {
+    const setPermissionModeForSession = vi.fn();
+    const setDraftPermissionMode = vi.fn();
+    const saveProjectPermissionMode = vi.fn();
+    const updateSessionPermission = vi.fn();
+
+    await updatePermissionModeForSessionWithDependencies(
+      {
+        getPermissionModeForSession: () => 'default',
+        getDraftPermissionMode: () => 'default',
+        setPermissionModeForSession,
+        setDraftPermissionMode,
+        saveProjectPermissionMode,
+        updateSessionPermission,
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+        getPermissionsForSession: vi.fn(() => []),
+        autoApprovePermissionsForSession: vi.fn(async () => {}),
+      },
+      'default',
+      [{ permission: 'bash', pattern: '*', action: 'ask' }],
+      null
+    );
+
+    expect(setPermissionModeForSession).toHaveBeenCalledWith(null, 'default');
+    expect(setDraftPermissionMode).toHaveBeenCalledWith('default');
+    expect(saveProjectPermissionMode).toHaveBeenCalledWith('default');
+    expect(updateSessionPermission).not.toHaveBeenCalled();
+  });
+
+  it('skips auto-approval when the mode is not full', async () => {
+    const autoApprovePermissionsForSession = vi.fn(async () => {});
+    const getPermissionsForSession = vi.fn(() => [permission('perm-1')]);
+
+    await updatePermissionModeForSessionWithDependencies(
+      {
+        getPermissionModeForSession: () => 'full',
+        getDraftPermissionMode: () => 'full',
+        setPermissionModeForSession: vi.fn(),
+        setDraftPermissionMode: vi.fn(),
+        saveProjectPermissionMode: vi.fn(),
+        updateSessionPermission: vi.fn(async () => session('session-1')),
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+        getPermissionsForSession,
+        autoApprovePermissionsForSession,
+      },
+      'default',
+      [{ permission: 'bash', pattern: '*', action: 'ask' }],
+      'session-1'
+    );
+
+    expect(getPermissionsForSession).not.toHaveBeenCalled();
+    expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
+  });
+
+  it('uses the generic update error for non-Error failures', async () => {
+    const setError = vi.fn();
+
+    await updatePermissionModeForSessionWithDependencies(
+      {
+        getPermissionModeForSession: () => 'default',
+        getDraftPermissionMode: () => 'default',
+        setPermissionModeForSession: vi.fn(),
+        setDraftPermissionMode: vi.fn(),
+        saveProjectPermissionMode: vi.fn(),
+        updateSessionPermission: vi.fn(async () => {
+          throw 'update failed';
+        }),
+        upsertSession: vi.fn(),
+        setError,
+        getPermissionsForSession: () => [],
+        autoApprovePermissionsForSession: vi.fn(async () => {}),
+      },
+      'full',
+      [{ permission: 'bash', pattern: '*', action: 'allow' }],
+      'session-1'
+    );
+
+    expect(setError).toHaveBeenCalledWith('Failed to update permissions');
+  });
+
+  it('finds questions by id and returns null for missing requests', () => {
+    const questions = [question('question-1'), question('question-2')];
+
+    expect(getQuestionById(questions, 'question-2')).toEqual(question('question-2'));
+    expect(getQuestionById(questions, 'question-3')).toBeNull();
   });
 
   it('creates bound approval operations from shared dependencies', async () => {

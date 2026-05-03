@@ -109,4 +109,72 @@ describe('webview message validation', () => {
 
     expect(parseWebviewMessage({ type: 'session/export', payload: {} })).toBeNull();
   });
+
+  it('rejects malformed payloads for typed messages', () => {
+    expect(parseWebviewMessage({ type: 'webview/focus', payload: { focused: 'yes' } })).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'files/search',
+        payload: { requestId: 1.5, query: 'src', limit: -1 },
+      })
+    ).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'files/drop-content',
+        payload: {
+          files: [{ name: 'note.txt', content: 'Zm9v', size: 25 * 1024 * 1024 + 1 }],
+        },
+      })
+    ).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: true,
+          desktopSessionPaneSide: 'bottom',
+        },
+      })
+    ).toBeNull();
+
+    expect(
+      parseWebviewMessage({ type: 'log', payload: { msg: 'hello', level: 'debug' } })
+    ).toBeNull();
+  });
+
+  it('accepts known message shapes from newer webview versions by ignoring extra fields', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'ready',
+        version: '999',
+        payload: { unsupported: true },
+      })
+    ).toEqual({ type: 'ready' });
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open',
+        version: '2',
+        payload: {
+          path: '/repo/src/app.ts',
+          line: 12,
+          kind: 'file',
+          column: 7,
+          selection: { startLine: 12, endLine: 14 },
+        },
+      })
+    ).toEqual({
+      type: 'vscode/open',
+      payload: { path: '/repo/src/app.ts', line: 12, kind: 'file' },
+    });
+  });
+
+  it('rejects malformed URLs and unsafe path traversal in helper guards', () => {
+    expect(isAllowedExternalUrl('not a url')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session/../message')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/mcp/%2F/connect')).toBe(false);
+  });
 });

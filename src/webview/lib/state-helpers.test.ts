@@ -660,6 +660,13 @@ describe('state helpers', () => {
     stateModule.upsertMessageInfo(userMessage('message-1', 'session-1', 1));
     expect(stateModule.messageStructureVersion()).toBe(afterMessageInsert + 1);
 
+    const afterMessageInfoUpdate = stateModule.messageStructureVersion();
+    stateModule.upsertMessage({
+      info: userMessage('message-1', 'session-1', 1),
+      parts: [],
+    });
+    expect(stateModule.messageStructureVersion()).toBe(afterMessageInfoUpdate);
+
     stateModule.applyMessagePartDelta('message-1', 'part-1', 'Hello', 'session-1');
     await nextFrame();
 

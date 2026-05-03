@@ -1,17 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const vscodeMock = vi.hoisted(() => ({
-  window: {
-    onDidChangeActiveColorTheme: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
-    createOutputChannel: vi.fn(() => ({
-      appendLine: vi.fn(),
-      show: vi.fn(),
-      dispose: vi.fn(),
-    })),
+const { loggerMock, vscodeMock } = vi.hoisted(() => ({
+  loggerMock: {
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+  vscodeMock: {
+    window: {
+      onDidChangeActiveColorTheme: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+      createOutputChannel: vi.fn(() => ({
+        appendLine: vi.fn(),
+        show: vi.fn(),
+        dispose: vi.fn(),
+      })),
+    },
   },
 }));
 
 vi.mock('vscode', () => vscodeMock);
+vi.mock('./logger', () => ({ logger: loggerMock }));
 
 import type { InitialWebviewState, ServerStatus } from '../shared/protocol';
 import { WebviewSession } from './webview-session';
@@ -30,19 +37,41 @@ function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve());
 }
 
+type Listener<T> = ((value: T) => void) | undefined;
+
 function createWebviewView(visible: boolean) {
+  const listeners: {
+    message: Listener<unknown>;
+    dispose: Listener<void>;
+    visibility: Listener<void>;
+  } = {
+    message: undefined,
+    dispose: undefined,
+    visibility: undefined,
+  };
+
   return {
     visible,
+    listeners,
     webview: {
       options: undefined,
       html: '',
       cspSource: 'vscode-webview-resource:',
-      onDidReceiveMessage: vi.fn((_listener?: (value: unknown) => void) => ({ dispose: vi.fn() })),
+      onDidReceiveMessage: vi.fn((listener?: (value: unknown) => void) => {
+        listeners.message = listener;
+        return { dispose: vi.fn() };
+      }),
       postMessage: vi.fn(),
       asWebviewUri: vi.fn(() => ({ toString: () => 'vscode-resource://icon' })),
     },
-    onDidDispose: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
-    onDidChangeVisibility: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+    onDidDispose: vi.fn((listener?: () => void) => {
+      listeners.dispose = listener;
+      return { dispose: vi.fn() };
+    }),
+    onDidChangeVisibility: vi.fn((listener?: () => void) => {
+      listeners.visibility = listener;
+      return { dispose: vi.fn() };
+    }),
   };
 }
 
@@ -72,7 +101,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
   };
 
   const sessionTrash = {
-    hiddenSessionIds: vi.fn(() => []),
+    hiddenSessionIds: vi.fn(() => new Set<string>()),
     isHidden: vi.fn(() => false),
     list: vi.fn(),
   };
@@ -122,7 +151,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     deps
   );
 
-  return { session, bridge, sessionState, deps };
+  return { session, bridge, sessionState, sessionTrash, contextFilesState, deps };
 }
 
 describe('WebviewSession', () => {
@@ -200,5 +229,163 @@ describe('WebviewSession', () => {
         providerLimitsDisabled: false,
       })
     );
+  });
+
+  it('forwards valid webview messages and logs invalid ones', async () => {
+    const { session, deps } = createSession();
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+
+    view.listeners.message?.({ type: 'ready' });
+    view.listeners.message?.({ type: 'invalid/message' });
+
+    expect(deps.handleMessage).toHaveBeenCalledOnce();
+    expect(deps.handleMessage).toHaveBeenCalledWith({ type: 'ready' });
+    expect(loggerMock.warn).toHaveBeenCalledWith('Ignoring invalid webview message');
+  });
+
+  it('replays boot state and clears interrupted sessions when the webview becomes ready', async () => {
+    const { session, bridge, sessionState, sessionTrash, contextFilesState } = createSession();
+    const view = createWebviewView(true);
+    const hiddenSessionIds = new Set(['session-hidden']);
+
+    contextFilesState.postContextFiles.mockImplementation((post) => {
+      post({ type: 'files/update', payload: [] });
+    });
+    sessionTrash.hiddenSessionIds.mockReturnValue(hiddenSessionIds);
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    session.interruptedSessionsForWebview = [{ id: 'session-1', title: 'Needs attention' }];
+    session.blockingRequestsForWebview = [
+      {
+        id: 'perm-1',
+        sessionID: 'session-1',
+        kind: 'permission',
+        props: { id: 'perm-1', sessionID: 'session-1' },
+      },
+    ];
+
+    await session.handleReady();
+
+    expect(session.interruptedSessionsForWebview).toEqual([]);
+    expect(contextFilesState.postContextFiles).toHaveBeenCalledOnce();
+    expect(sessionState.replayBlockingRequests).toHaveBeenCalledWith(
+      expect.any(Function),
+      hiddenSessionIds,
+      {
+        previousRequests: session.blockingRequestsForWebview,
+        clearResolvedEmbedded: true,
+      }
+    );
+
+    const postedTypes = bridge.post.mock.calls.map(
+      ([message]) => (message as { type: string }).type
+    );
+    expect(postedTypes).toContain('context/update');
+    expect(postedTypes).toContain('terminal-selection/update');
+    expect(postedTypes).toContain('files/update');
+    expect(postedTypes).toContain('config/update');
+    expect(postedTypes).toContain('server/status');
+    expect(postedTypes).toContain('theme/update');
+  });
+
+  it('reacts to visibility and dispose events from the webview view', async () => {
+    const { session, bridge, sessionState, deps } = createSession();
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    bridge.post.mockClear();
+    sessionState.clearCompleted.mockClear();
+    deps.handleVisibleSideEffects.mockClear();
+    deps.ensureServerStarted.mockClear();
+    deps.onHidden.mockClear();
+    deps.updateStatusBarItem.mockClear();
+
+    view.visible = false;
+    view.listeners.visibility?.();
+
+    expect(deps.onHidden).toHaveBeenCalledOnce();
+    expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();
+
+    bridge.post.mockClear();
+    sessionState.clearCompleted.mockClear();
+    deps.handleVisibleSideEffects.mockClear();
+    deps.ensureServerStarted.mockClear();
+    deps.updateStatusBarItem.mockClear();
+
+    view.visible = true;
+    view.listeners.visibility?.();
+
+    expect(sessionState.clearCompleted).toHaveBeenCalledOnce();
+    expect(deps.handleVisibleSideEffects).toHaveBeenCalledOnce();
+    expect(deps.ensureServerStarted).toHaveBeenCalledOnce();
+    expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();
+    expect(bridge.post).toHaveBeenCalledWith({ type: 'server/status', payload: RUNNING_STATUS });
+
+    deps.updateStatusBarItem.mockClear();
+
+    view.listeners.dispose?.();
+
+    expect(bridge.getView()).toBeUndefined();
+    expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();
+  });
+
+  it('posts theme updates from VS Code theme changes', async () => {
+    const { session, deps } = createSession();
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+
+    const listener = vscodeMock.window.onDidChangeActiveColorTheme.mock.calls.at(-1)?.[0] as
+      | (() => void)
+      | undefined;
+
+    listener?.();
+
+    expect(deps.postThemeUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('renders a fallback page when html generation fails', async () => {
+    const { session } = createSession({
+      renderHtml: vi.fn(() => Promise.reject(new Error('boom'))),
+    });
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+    await vi.waitFor(() => {
+      expect(view.webview.html).toBe('<p>Failed to load Varro webview. Please reload.</p>');
+    });
+    expect(loggerMock.error).toHaveBeenCalledWith('getHtml failed: boom');
+  });
+
+  it('posts API responses only for the current active generation', async () => {
+    const { session, bridge } = createSession();
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+
+    const generation = session.getRequestGeneration();
+    bridge.post.mockClear();
+
+    session.postApiResponse({ id: 1, data: { ok: false } }, generation - 1);
+    session.postApiResponse({ id: 2, data: { ok: true } }, generation);
+
+    expect(bridge.post).toHaveBeenCalledOnce();
+    expect(bridge.post).toHaveBeenCalledWith({
+      type: 'api/response',
+      payload: { id: 2, data: { ok: true } },
+    });
+
+    await session.dispose();
+    bridge.post.mockClear();
+
+    session.postApiResponse({ id: 3 }, generation);
+
+    expect(bridge.post).not.toHaveBeenCalled();
   });
 });

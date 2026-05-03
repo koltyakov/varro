@@ -12,7 +12,7 @@ const clipboardState = vi.hoisted(() => ({
 
 const vscodeMock = vi.hoisted(() => ({
   window: {
-    activeTerminal: { name: 'Terminal 1' },
+    activeTerminal: { name: 'Terminal 1' } as { name: string } | undefined,
     activeTextEditor: undefined as unknown,
     onDidChangeActiveTextEditor: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     onDidChangeTextEditorSelection: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
@@ -157,6 +157,28 @@ describe('ContextProvider', () => {
     }
   });
 
+  it('returns no-terminal and clears prior terminal selection when no terminal is active', async () => {
+    clipboardState.values = ['existing clipboard', 'new terminal output'];
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await provider.captureTerminalSelection();
+      expect(provider.terminalSelection).toEqual({
+        text: 'new terminal output',
+        terminalName: 'Terminal 1',
+      });
+
+      vscodeMock.window.activeTerminal = undefined;
+
+      const result = await provider.captureTerminalSelection();
+
+      expect(result).toEqual({ ok: false, reason: 'no-terminal' });
+      expect(provider.terminalSelection).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('opens absolute paths outside the workspace', async () => {
     const provider = new ContextProvider(vi.fn());
     const uri = { fsPath: '/tmp/varro-drop.txt' };
@@ -178,6 +200,73 @@ describe('ContextProvider', () => {
       expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith(document, { preview: false });
     } finally {
       provider.dispose();
+    }
+  });
+
+  it('reveals directories instead of opening them as files', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const uri = { fsPath: '/tmp/varro-dir' };
+
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: vscodeMock.FileType.Directory });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+
+    try {
+      await provider.openPath('/tmp/varro-dir');
+
+      expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('revealInExplorer', uri);
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+      expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('captures editor context after the active editor settles back in', async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const uri = {
+      fsPath: '/repo/src/app.ts',
+      scheme: 'file',
+      toString: () => 'file:///repo/src/app.ts',
+    };
+    const editor = {
+      document: { uri, isUntitled: false, languageId: 'typescript' },
+      selection: {
+        isEmpty: false,
+        start: { line: 1 },
+        end: { line: 3 },
+      },
+    };
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(
+      vscodeMock.workspace.workspaceFolders[0]
+    );
+    vscodeMock.workspace.asRelativePath.mockReturnValue('src/app.ts');
+
+    const provider = new ContextProvider(onChange);
+
+    try {
+      vscodeMock.window.activeTextEditor = editor;
+
+      await vi.advanceTimersByTimeAsync(60);
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenLastCalledWith({
+        workspacePath: '/repo',
+        activeFile: {
+          path: '/repo/src/app.ts',
+          relativePath: 'src/app.ts',
+          language: 'typescript',
+        },
+        selection: {
+          startLine: 2,
+          endLine: 4,
+        },
+        diagnostics: [],
+      });
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
     }
   });
 
