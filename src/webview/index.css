@@ -4795,11 +4795,12 @@ kbd {
   width: 100%;
   height: 26px;
   padding: 4px 24px 4px 8px;
-  border: 1px solid color-mix(
-    in srgb,
-    var(--color-vscode-input-border, var(--color-vscode-border)) 75%,
-    var(--color-vscode-fg) 12%
-  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--color-vscode-input-border, var(--color-vscode-border)) 75%,
+      var(--color-vscode-fg) 12%
+    );
   border-radius: 5px;
   background: color-mix(
     in srgb,

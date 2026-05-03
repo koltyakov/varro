@@ -57,10 +57,7 @@ export function clampAnchoredPopupHeight(el: HTMLElement, margin = 8): void {
   }
 }
 
-export function observePopupViewport(
-  el: HTMLElement,
-  reposition: () => void
-): () => void {
+export function observePopupViewport(el: HTMLElement, reposition: () => void): () => void {
   const run = () => queueMicrotask(reposition);
 
   run();
