@@ -1,5 +1,6 @@
-import { createEffect, createMemo, createSignal, For, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { getSelectedMcpsForSession, state } from '../lib/state';
+import { clampAnchoredPopupHeight, observePopupViewport } from '../lib/popup-position';
 
 export function McpPicker(props: {
   sessionId: string | null;
@@ -79,8 +80,15 @@ export function McpPicker(props: {
   }
 
   onMount(() => {
+    const reposition = () => {
+      if (menuRef) clampAnchoredPopupHeight(menuRef);
+    };
+
     if (allItems().length > 8) searchInputRef?.focus();
     else menuRef?.focus();
+
+    if (!menuRef) return;
+    onCleanup(observePopupViewport(menuRef, reposition));
   });
 
   return (
@@ -117,7 +125,7 @@ export function McpPicker(props: {
           </div>
         </Show>
 
-        <div class="model-picker-list max-h-[280px] overflow-y-auto py-1">
+        <div class="model-picker-list overflow-y-auto py-1">
           <Show
             when={allItems().length > 0}
             fallback={

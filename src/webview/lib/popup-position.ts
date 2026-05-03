@@ -39,3 +39,42 @@ export function clampPopupToViewport(el: HTMLElement, margin = 8): void {
     el.style.maxHeight = `${maxHeight}px`;
   }
 }
+
+/**
+ * Cap an upward-opening popup to the space available above its anchored bottom edge.
+ *
+ * This preserves the popup's bottom alignment and only enables scrolling when the
+ * natural height would overflow past the top viewport margin.
+ */
+export function clampAnchoredPopupHeight(el: HTMLElement, margin = 8): void {
+  el.style.maxHeight = '';
+
+  const rect = el.getBoundingClientRect();
+  const maxHeight = Math.max(0, rect.bottom - margin);
+
+  if (rect.top < margin) {
+    el.style.maxHeight = `${maxHeight}px`;
+  }
+}
+
+export function observePopupViewport(
+  el: HTMLElement,
+  reposition: () => void
+): () => void {
+  const run = () => queueMicrotask(reposition);
+
+  run();
+  window.addEventListener('resize', run);
+
+  if (typeof ResizeObserver === 'undefined') {
+    return () => window.removeEventListener('resize', run);
+  }
+
+  const observer = new ResizeObserver(run);
+  observer.observe(el);
+
+  return () => {
+    window.removeEventListener('resize', run);
+    observer.disconnect();
+  };
+}

@@ -1,6 +1,7 @@
-import { createMemo, createSignal, For, onMount, Show, createEffect } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
 import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
+import { clampAnchoredPopupHeight, observePopupViewport } from '../lib/popup-position';
 import {
   modelSupportsTools,
   modelSupportsVariants,
@@ -156,11 +157,18 @@ export function ModelPicker(props: {
   }
 
   onMount(() => {
+    const reposition = () => {
+      if (menuRef) clampAnchoredPopupHeight(menuRef);
+    };
+
     if (showSearch()) {
       searchInputRef?.focus();
     } else {
       menuRef?.focus();
     }
+
+    if (!menuRef) return;
+    onCleanup(observePopupViewport(menuRef, reposition));
   });
 
   const getItemIndex = (providerID: string, modelID: string) => {
@@ -220,7 +228,7 @@ export function ModelPicker(props: {
           </div>
         </Show>
 
-        <div class="model-picker-list max-h-[280px] overflow-y-auto py-1">
+        <div class="model-picker-list overflow-y-auto py-1">
           <Show
             when={visibleProviders().length > 0}
             fallback={
