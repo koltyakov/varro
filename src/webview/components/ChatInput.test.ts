@@ -391,6 +391,29 @@ describe('ChatInput', () => {
     expect(meta?.textContent).toContain('2');
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
   });
+
+  it('shows only the stop button while loading with nothing sendable', () => {
+    setIsLoading(true);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('[title="Stop"]')).not.toBeNull();
+    expect(container?.querySelector('.stop-button .toolbar-picker-label')).toBeNull();
+    expect(container?.textContent).not.toContain('Stop');
+    expect(container?.querySelector('[title="Send (Enter)"]')).toBeNull();
+    expect(container?.querySelector('[title="Add to queue (Enter)"]')).toBeNull();
+  });
+
+  it('shows send controls instead of stop while loading with sendable content', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setInputText('Follow up');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('[title="Stop"]')).toBeNull();
+    expect(container?.querySelector('[title="Add to queue (Enter)"]')).not.toBeNull();
+  });
 });
 
 describe('isToolbarControlCompacted', () => {
@@ -398,6 +421,10 @@ describe('isToolbarControlCompacted', () => {
     expect(isToolbarControlCompacted('full', 'agent')).toBe(false);
     expect(isToolbarControlCompacted('full', 'reasoning')).toBe(false);
     expect(isToolbarControlCompacted('full', 'stop')).toBe(false);
+
+    expect(isToolbarControlCompacted('compact-provider-limit', 'agent')).toBe(false);
+    expect(isToolbarControlCompacted('compact-provider-limit', 'reasoning')).toBe(false);
+    expect(isToolbarControlCompacted('compact-provider-limit', 'stop')).toBe(true);
 
     expect(isToolbarControlCompacted('compact-stop', 'stop')).toBe(true);
     expect(isToolbarControlCompacted('compact-stop', 'agent')).toBe(false);
@@ -419,9 +446,11 @@ describe('isToolbarControlCompacted', () => {
 
 describe('isToolbarControlHidden', () => {
   it('does not hide controls during label compaction or model truncation', () => {
+    expect(isToolbarControlHidden('compact-provider-limit', 'permission')).toBe(false);
     expect(isToolbarControlHidden('compact-agent', 'permission')).toBe(false);
     expect(isToolbarControlHidden('compact-reasoning', 'permission')).toBe(false);
     expect(isToolbarControlHidden('truncate-model', 'permission')).toBe(false);
+    expect(isToolbarControlHidden('compact-provider-limit', 'send')).toBe(false);
     expect(isToolbarControlHidden('compact-stop', 'permission')).toBe(false);
     expect(isToolbarControlHidden('compact-stop', 'send')).toBe(false);
   });

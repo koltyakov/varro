@@ -25,11 +25,11 @@ export function ComposerArea(props: {
       <textarea
         ref={props.textareaRef}
         style={{
-          'min-height': '36px',
+          'min-height': '30px',
           width: '100%',
           resize: 'none',
           background: 'transparent',
-          padding: '0 0 0 6px',
+          padding: '4px 0 0 4px',
           'font-size': '13px',
           'line-height': '1.45',
           color: 'var(--color-vscode-input-fg)',

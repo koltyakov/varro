@@ -42,3 +42,11 @@ test('retry session status shows provider limit context alongside error', async 
   await expect(chip).toBeVisible();
   await expect(chip).toHaveClass(/\berror\b/);
 });
+
+test('narrow toolbar compacts provider limit before leaving controls overflowed', async ({ page }) => {
+  await page.setViewportSize({ width: 348, height: 260 });
+  await page.goto('/e2e/harness/index.html?scenario=usage-limit');
+
+  await expect(page.locator('.toolbar-limit-chip')).toHaveCount(0);
+  await expect(page.locator('.toolbar-picker.stop-button')).toBeVisible();
+});

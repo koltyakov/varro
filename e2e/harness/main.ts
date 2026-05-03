@@ -2186,6 +2186,7 @@ async function handleApiRequest(
       projectID: 'project-varro',
       directory: state.workspacePath,
       title,
+      parentID: typeof payload.parentID === 'string' ? payload.parentID : undefined,
       version: '1',
       time: {
         created: createdAt,

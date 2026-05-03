@@ -1,18 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
-test('confirms and cancels archive actions for overflow sessions', async ({ page }) => {
+test('archives an overflow completed session', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=archive-overflow');
-  await page.getByTitle('Back to sessions').click();
 
-  await page.getByLabel('Expand Archive').click();
-  await page.getByLabel('Archive sessions').click();
-  await expect(page.getByRole('button', { name: 'Confirm archive sessions' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel archive sessions' }).click();
-  await expect(page.getByRole('button', { name: 'Confirm archive sessions' })).toHaveCount(0);
-
-  await page.getByLabel('Archive sessions').click();
-  await page.getByRole('button', { name: 'Confirm archive sessions' }).click();
+  const firstRow = page.locator('.session-item').filter({ hasText: 'Archive candidate 1' });
+  await firstRow.hover();
+  await firstRow.getByTitle('Archive').click();
 
   const deleteCount = await getE2EState(page, () => {
     const value = (window as Window & {
@@ -22,7 +16,7 @@ test('confirms and cancels archive actions for overflow sessions', async ({ page
   });
 
   expect(deleteCount).toBeGreaterThan(0);
-  await expect(page.getByRole('button', { name: 'Confirm archive sessions' })).toHaveCount(0);
+  await expect(page.locator('.session-item-title')).not.toContainText(['Archive candidate 1']);
   await expect
     .poll(() => page.locator('.session-item').count())
     .toBeLessThan(6);
@@ -30,7 +24,6 @@ test('confirms and cancels archive actions for overflow sessions', async ({ page
 
 test('restores a recycle-bin session back into the list', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=row-archive');
-  await page.getByTitle('Back to sessions').click();
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
   await row.hover();
@@ -65,7 +58,6 @@ test('restores a recycle-bin session back into the list', async ({ page }) => {
 
 test('permanently deletes a recycle-bin session', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=row-archive');
-  await page.getByTitle('Back to sessions').click();
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
   await row.hover();
@@ -99,14 +91,13 @@ test('permanently deletes a recycle-bin session', async ({ page }) => {
 
 test('empties the recycle bin from the grouped sessions view', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=row-archive');
-  await page.getByTitle('Back to sessions').click();
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
   await row.hover();
   await row.getByTitle('Archive').click();
 
   await page.getByLabel('Expand Recycle Bin').click();
-  await expect(page.locator('.recycle-bin-item')).toHaveCount(2);
+  await expect(page.locator('.recycle-bin-item')).toHaveCount(1);
   await page.getByLabel('Empty Recycle Bin').click();
   await page.getByRole('button', { name: 'Confirm empty Recycle Bin' }).click();
 

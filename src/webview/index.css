@@ -2487,20 +2487,6 @@ body.vscode-light
   min-width: 28px;
 }
 
-.toolbar-picker.stop-button.compact {
-  width: 28px;
-  padding: 0;
-  justify-content: center;
-}
-
-.toolbar-picker.stop-button:not(.compact) {
-  padding-right: 8px;
-}
-
-.toolbar-picker.stop-button:not(.compact) .toolbar-picker-label {
-  margin-left: 1px;
-}
-
 .chat-input-toolbars.compact-tight {
   gap: 4px;
 }
@@ -2522,8 +2508,7 @@ body.vscode-light
   font-size: 10px;
 }
 
-.chat-input-toolbars.compact-tight .toolbar-picker.icon-only,
-.chat-input-toolbars.compact-tight .toolbar-picker.stop-button.compact {
+.chat-input-toolbars.compact-tight .toolbar-picker.icon-only {
   width: 26px;
   min-width: 26px;
 }

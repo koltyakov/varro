@@ -8,7 +8,6 @@ test('opens the subagent session list from a parent session', async ({ page }) =
 
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
 
-  await page.getByTitle('Back to sessions').click();
   await page.locator('.session-item').filter({ hasText: 'Parent orchestration' }).hover();
   await page.getByRole('button', { name: 'Show 2 sub-agent sessions' }).click();
   await expect(page.getByText('Viewing:', { exact: true })).toBeVisible();
@@ -27,7 +26,6 @@ test('does not throw while opening a subagent session from the filtered subagent
 
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
 
-  await page.getByTitle('Back to sessions').click();
   await page.locator('.session-item').filter({ hasText: 'Parent orchestration' }).hover();
   await page.getByRole('button', { name: 'Show 2 sub-agent sessions' }).click();
   await expect(page.getByText('Sub-agents', { exact: true })).toBeVisible();
@@ -46,7 +44,6 @@ test('opens a subagent session with keyboard navigation from the filtered subage
 }) => {
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
 
-  await page.getByTitle('Back to sessions').click();
   await page.locator('.session-item').filter({ hasText: 'Parent orchestration' }).hover();
   await page.getByRole('button', { name: 'Show 2 sub-agent sessions' }).click();
   await expect(page.getByText('Sub-agents', { exact: true })).toBeVisible();

@@ -3,7 +3,6 @@ import { getE2EState } from './helpers';
 
 test('archiving a parent session cascades delete to all child sessions', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
-  await page.getByTitle('Back to sessions').click();
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
   await parentRow.hover();
@@ -27,7 +26,6 @@ test('archiving a parent session cascades delete to all child sessions', async (
 
 test('recycle bin entry shows sub-agent count after archiving parent', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
-  await page.getByTitle('Back to sessions').click();
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
   await parentRow.hover();
@@ -41,7 +39,6 @@ test('recycle bin entry shows sub-agent count after archiving parent', async ({ 
 
 test('restoring a parent session from recycle bin also restores children', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
-  await page.getByTitle('Back to sessions').click();
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
   await parentRow.hover();
@@ -64,7 +61,6 @@ test('restoring a parent session from recycle bin also restores children', async
 
 test('permanently deleting a parent from recycle bin removes the entire tree', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
-  await page.getByTitle('Back to sessions').click();
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
   await parentRow.hover();

@@ -366,10 +366,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     hydrateSessionStatuses,
     getActiveSessionId: () => appStore.state.activeSessionId,
     getPersistedActiveSessionId: sessionStore.getPersistedActiveSessionId,
-    hasSession: (sessionId) => appStore.state.sessions.some((session) => session.id === sessionId),
-    selectSession: async (sessionId) => {
-      await selectSession(sessionId);
+    getSessionCount: () => appStore.state.sessions.length,
+    getOnlyPrimarySessionId: () => {
+      const primarySessions = appStore.state.sessions.filter((session) => !session.parentID);
+      return primarySessions.length === 1 ? primarySessions[0]?.id || null : null;
     },
+    hasSession: (sessionId) => appStore.state.sessions.some((session) => session.id === sessionId),
+    selectSession: (sessionId) => sessionSyncOperations.selectSession(sessionId),
+    setShowSessionPicker: uiStore.setShowSessionPicker,
     setInitialized: (value) => {
       initialized = value;
     },

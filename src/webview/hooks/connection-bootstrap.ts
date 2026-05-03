@@ -116,8 +116,10 @@ export async function initConnectionWithDependencies(
     hydrateSessionStatuses(): Promise<void>;
     getActiveSessionId(): string | null;
     getPersistedActiveSessionId(): string | null;
-    hasSession(sessionId: string): boolean;
+    getSessionCount(): number;
+    getOnlyPrimarySessionId(): string | null;
     selectSession(sessionId: string): Promise<void>;
+    setShowSessionPicker(value: boolean): void;
     recoverInterruptedSessions(generation: number): Promise<void>;
     setInitialized(value: boolean): void;
     setError(message: string | null): void;
@@ -136,10 +138,17 @@ export async function initConnectionWithDependencies(
     if (!generationRef.isCurrent(generation)) return;
 
     if (!deps.getActiveSessionId()) {
-      const lastId = deps.getPersistedActiveSessionId();
-      if (lastId && deps.hasSession(lastId)) {
-        await deps.selectSession(lastId);
+      const onlyPrimarySessionId = deps.getOnlyPrimarySessionId();
+      const shouldRestoreSingleActiveSession =
+        onlyPrimarySessionId !== null &&
+        deps.getPersistedActiveSessionId() === onlyPrimarySessionId;
+
+      if (shouldRestoreSingleActiveSession) {
+        deps.setShowSessionPicker(false);
+        await deps.selectSession(onlyPrimarySessionId);
         if (!generationRef.isCurrent(generation)) return;
+      } else {
+        deps.setShowSessionPicker(deps.getSessionCount() > 0);
       }
     }
 
@@ -172,8 +181,11 @@ export function createConnectionBootstrapOperations(deps: {
   hydrateSessionStatuses(): Promise<void>;
   getActiveSessionId(): string | null;
   getPersistedActiveSessionId(): string | null;
+  getSessionCount(): number;
+  getOnlyPrimarySessionId(): string | null;
   hasSession(sessionId: string): boolean;
   selectSession(sessionId: string): Promise<void>;
+  setShowSessionPicker(value: boolean): void;
   setInitialized(value: boolean): void;
   setError(message: string | null): void;
   nextConnectionGeneration(): number;
@@ -230,8 +242,10 @@ export function createConnectionBootstrapOperations(deps: {
         hydrateSessionStatuses: deps.hydrateSessionStatuses,
         getActiveSessionId: deps.getActiveSessionId,
         getPersistedActiveSessionId: deps.getPersistedActiveSessionId,
-        hasSession: deps.hasSession,
+        getSessionCount: deps.getSessionCount,
+        getOnlyPrimarySessionId: deps.getOnlyPrimarySessionId,
         selectSession: deps.selectSession,
+        setShowSessionPicker: deps.setShowSessionPicker,
         recoverInterruptedSessions,
         setInitialized: deps.setInitialized,
         setError: deps.setError,

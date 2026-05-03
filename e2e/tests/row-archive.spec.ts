@@ -3,7 +3,6 @@ import { getE2EState } from './helpers';
 
 test('archives an individual session row', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=row-archive');
-  await page.getByTitle('Back to sessions').click();
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
   await row.hover();

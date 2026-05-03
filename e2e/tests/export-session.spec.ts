@@ -44,6 +44,8 @@ test('/export does nothing when no session is active', async ({ page }) => {
 test('/export sends correct session after switching sessions', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=status-filters');
 
+  await page.locator('.session-item').filter({ hasText: 'Completed sticky cleanup' }).click();
+
   const composer = page.locator('textarea');
   await composer.click();
   await composer.fill('/export');

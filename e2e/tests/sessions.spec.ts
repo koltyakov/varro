@@ -15,7 +15,10 @@ test('restores a persisted active session', async ({ page }) => {
 test('filters sessions by running, failed, attention, plan ready, and completed status', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=status-filters');
 
-  await expect(page.getByTitle('Back to sessions').locator('..').getByText('Completed sticky cleanup')).toBeVisible();
+  await page.locator('.session-item').filter({ hasText: 'Completed sticky cleanup' }).click();
+  await expect(
+    page.getByTitle('Back to sessions').locator('..').getByText('Completed sticky cleanup')
+  ).toBeVisible();
   await page.getByTitle('Back to sessions').click();
   await expect(page.getByText('Sessions', { exact: false })).toBeVisible();
 

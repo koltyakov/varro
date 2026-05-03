@@ -23,7 +23,6 @@ test('host new-session command creates and focuses a fresh session', async ({ pa
 test('filters sessions through the session search input', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=session-search');
 
-  await page.getByTitle('Back to sessions').click();
   const search = page.getByLabel('Search sessions');
   await expect(search).toBeVisible();
 
@@ -43,7 +42,6 @@ test('filters sessions through the session search input', async ({ page }) => {
 test('opens a filtered session with keyboard navigation', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=session-search');
 
-  await page.getByTitle('Back to sessions').click();
   const search = page.getByLabel('Search sessions');
   await expect(search).toBeVisible();
 
@@ -59,7 +57,6 @@ test('opens a filtered session with keyboard navigation', async ({ page }) => {
 test('wraps session keyboard focus from the end of the list', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=session-search');
 
-  await page.getByTitle('Back to sessions').click();
   const search = page.getByLabel('Search sessions');
   await expect(search).toBeVisible();
 

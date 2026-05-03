@@ -1,9 +1,7 @@
-import { Show } from 'solid-js';
-
-export function StopButton(props: { compact: boolean; onStop: () => void }) {
+export function StopButton(props: { onStop: () => void }) {
   return (
     <button
-      class={`toolbar-picker stop-button ${props.compact ? 'compact' : ''}`}
+      class="toolbar-picker stop-button icon-only"
       onClick={props.onStop}
       title="Stop"
       aria-label="Stop"
@@ -11,9 +9,6 @@ export function StopButton(props: { compact: boolean; onStop: () => void }) {
       <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
         <rect x="3" y="3" width="10" height="10" rx="1.5" />
       </svg>
-      <Show when={!props.compact}>
-        <span class="toolbar-picker-label">Stop</span>
-      </Show>
     </button>
   );
 }

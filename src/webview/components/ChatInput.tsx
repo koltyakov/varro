@@ -114,6 +114,7 @@ type ToolbarControl =
   | 'context';
 type ToolbarCompactMode =
   | 'full'
+  | 'compact-provider-limit'
   | 'compact-stop'
   | 'compact-agent'
   | 'compact-reasoning'
@@ -169,6 +170,7 @@ const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
 
 const TOOLBAR_COMPACT_MODES: ToolbarCompactMode[] = [
   'full',
+  'compact-provider-limit',
   'compact-stop',
   'compact-agent',
   'compact-reasoning',
@@ -208,9 +210,12 @@ export function isToolbarControlCompacted(
   mode: ToolbarCompactMode,
   control: 'agent' | 'reasoning' | 'stop'
 ) {
-  if (control === 'agent') return !['full', 'compact-stop'].includes(mode);
-  if (control === 'reasoning') return !['full', 'compact-stop', 'compact-agent'].includes(mode);
+  if (control === 'agent')
+    return !['full', 'compact-provider-limit', 'compact-stop'].includes(mode);
+  if (control === 'reasoning')
+    return !['full', 'compact-provider-limit', 'compact-stop', 'compact-agent'].includes(mode);
   return [
+    'compact-provider-limit',
     'compact-stop',
     'compact-agent',
     'compact-reasoning',
@@ -1229,9 +1234,10 @@ export function ChatInput() {
       state.droppedFiles.length > 0 ||
       hasSendableClipboardImages() ||
       !!state.terminalSelection);
-  const showBusySendControls = createMemo(
-    () => isLoading() && !hasActiveQuestion() && !hasActivePermission() && canSend()
+  const isBusyWithoutInterruption = createMemo(
+    () => isLoading() && !hasActiveQuestion() && !hasActivePermission()
   );
+  const showBusySendControls = createMemo(() => isBusyWithoutInterruption() && canSend());
 
   const clipboardImagesDisabled = () =>
     clipboardImages().length > 0 && !currentModelSupportsVision();
@@ -1286,6 +1292,9 @@ export function ChatInput() {
       ? formatProviderLimitCompact(currentProviderLimit(), currentProviderLimitWindow())
       : null
   );
+  const currentProviderLimitCompactLabel = createMemo(() =>
+    toolbarCompactMode() === 'full' ? currentProviderLimitCompact() : null
+  );
   const currentProviderLimitCompactPrefix = createMemo(() =>
     showCurrentProviderLimit()
       ? formatProviderLimitCompactPrefix(currentProviderLimit(), currentProviderLimitWindow())
@@ -1328,6 +1337,7 @@ export function ChatInput() {
     modelProvider: currentModel().providerID,
     modelId: currentModel().modelID,
     modelName: currentModel().modelName,
+    providerLimitPrefix: currentProviderLimitCompactPrefix(),
     providerLimit: currentProviderLimitCompact(),
     variant: effectiveVariant(),
     hasContextUsage: !!contextUsage(),
@@ -1390,6 +1400,12 @@ export function ChatInput() {
     !['full', 'compact-stop', 'compact-agent', 'compact-reasoning'].includes(toolbarCompactMode());
   const isToolbarControlVisible = (control: ToolbarControl) =>
     !isToolbarControlHidden(toolbarCompactMode(), control);
+  const showStopButton = createMemo(
+    () => isBusyWithoutInterruption() && isToolbarControlVisible('stop') && !canSend()
+  );
+  const showSendControl = createMemo(
+    () => isToolbarControlVisible('send') && (!isBusyWithoutInterruption() || canSend())
+  );
 
   createEffect(() => {
     const deps = toolbarFitDependencies();
@@ -1539,7 +1555,7 @@ export function ChatInput() {
             hasActiveQuestion() || hasActivePermission()
               ? 'Respond to the prompt above to continue...'
               : isLoading()
-                ? 'Queue a follow-up or steer with \u2303Enter...'
+                ? 'Queue a follow-up or steer'
                 : 'Describe what to build'
           }
           value={inputText()}
@@ -1669,7 +1685,7 @@ export function ChatInput() {
             setShowModelPicker(next);
           }}
           providerLimitPrefix={currentProviderLimitCompactPrefix()}
-          providerLimitLabel={currentProviderLimitCompact()}
+          providerLimitLabel={currentProviderLimitCompactLabel()}
           providerLimitTone={currentProviderLimitTone()}
           providerLimitTitle={currentProviderLimitTitle()}
           providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
@@ -1750,15 +1766,9 @@ export function ChatInput() {
           }}
           showAttachmentsControl={isToolbarControlVisible('attachments')}
           onAttach={() => postMessage({ type: 'files/pick' })}
-          showStopButton={
-            isLoading() &&
-            !hasActiveQuestion() &&
-            !hasActivePermission() &&
-            isToolbarControlVisible('stop')
-          }
-          stopCompact={isToolbarControlCompacted(toolbarCompactMode(), 'stop')}
+          showStopButton={showStopButton()}
           onStop={() => abortSession()}
-          showSendControl={isToolbarControlVisible('send')}
+          showSendControl={showSendControl()}
           showBusySendControls={showBusySendControls()}
           canSend={canSend()}
           busyToggleRef={(el) => {

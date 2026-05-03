@@ -103,7 +103,6 @@ export function ChatInputToolbar(props: {
   showAttachmentsControl: boolean;
   onAttach: () => void;
   showStopButton: boolean;
-  stopCompact: boolean;
   onStop: () => void;
   showSendControl: boolean;
   showBusySendControls: boolean;
@@ -238,11 +237,11 @@ export function ChatInputToolbar(props: {
         </Show>
 
         <Show when={props.showStopButton}>
-          <StopButton compact={props.stopCompact} onStop={props.onStop} />
+          <StopButton onStop={props.onStop} />
         </Show>
 
-        <div style={{ position: 'relative' }}>
-          <Show when={props.showSendControl}>
+        <Show when={props.showSendControl}>
+          <div style={{ position: 'relative' }}>
             <SendControls
               showBusyControls={props.showBusySendControls}
               canSend={props.canSend}
@@ -250,17 +249,17 @@ export function ChatInputToolbar(props: {
               onSend={props.onSend}
               onToggleBusyMenu={props.onToggleBusyMenu}
             />
-          </Show>
 
-          <Show when={props.showSendControl && props.showBusyMenu && props.showBusySendControls}>
-            <BusySendMenu
-              ref={props.busyMenuRef}
-              onQueue={props.onQueue}
-              onSteer={props.onSteer}
-              onStopAndSend={props.onStopAndSend}
-            />
-          </Show>
-        </div>
+            <Show when={props.showBusyMenu && props.showBusySendControls}>
+              <BusySendMenu
+                ref={props.busyMenuRef}
+                onQueue={props.onQueue}
+                onSteer={props.onSteer}
+                onStopAndSend={props.onStopAndSend}
+              />
+            </Show>
+          </div>
+        </Show>
       </div>
     </div>
   );
