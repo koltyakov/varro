@@ -288,4 +288,48 @@ describe('state perf guards', () => {
       dispose();
     }
   });
+
+  it('preserves unchanged shared-prefix entries during large incremental appends', async () => {
+    const existingMessages = Array.from({ length: 1000 }, (_, index) => ({
+      info: createAssistantMessage(`message-${index}`),
+      parts: [createTextPart(`part-${index}`, `message-${index}`, `Response ${index}`)],
+    }));
+    setState('messages', existingMessages);
+
+    const firstEntry = state.messages[0];
+    const middleEntry = state.messages[500];
+    const lastExistingEntry = state.messages[999];
+
+    let flushCount = 0;
+    const dispose = createPerfRoot(() => {
+      createEffect(() => {
+        void state.messages.length;
+        void state.messages[1000]?.info.id;
+        flushCount += 1;
+      });
+    });
+
+    try {
+      await settlePerfEffects();
+      expect(flushCount).toBe(1);
+
+      setMessagesIncremental([
+        ...state.messages,
+        {
+          info: createAssistantMessage('message-1000'),
+          parts: [createTextPart('part-1000', 'message-1000', 'Appended response')],
+        },
+      ]);
+      await settlePerfEffects();
+
+      expect(flushCount).toBe(2);
+      expect(state.messages).toHaveLength(1001);
+      expect(state.messages[0]).toBe(firstEntry);
+      expect(state.messages[500]).toBe(middleEntry);
+      expect(state.messages[999]).toBe(lastExistingEntry);
+      expect(state.messages[1000]?.info.id).toBe('message-1000');
+    } finally {
+      dispose();
+    }
+  });
 });

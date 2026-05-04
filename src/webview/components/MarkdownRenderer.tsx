@@ -78,6 +78,11 @@ type MarkdownRenderSegments = StreamingMarkdownSegments & {
   hasUnclosedFence: boolean;
 };
 
+type MarkdownHydrationFlags = {
+  tables: boolean;
+  copyButtons: boolean;
+};
+
 type RenderMarkdownContext = {
   disableCodeHighlighting: boolean;
 };
@@ -853,7 +858,9 @@ function applyCodeBlockCopyIcons(root: HTMLDivElement | undefined) {
   if (!root) return;
   const buttons = root.querySelectorAll<HTMLButtonElement>('button[data-copy]');
   for (const button of buttons) {
-    button.innerHTML = copySvg;
+    if (!button.querySelector('svg')) {
+      button.innerHTML = copySvg;
+    }
     if (button.dataset.copyText) {
       button.dataset.copyText = encodeCopyPayload(
         sanitizeCopyText(decodeCopyPayload(button.dataset.copyText))
@@ -862,9 +869,16 @@ function applyCodeBlockCopyIcons(root: HTMLDivElement | undefined) {
   }
 }
 
-function hydrateRenderedMarkdown(root: HTMLDivElement | undefined) {
-  applyTableColumnClasses(root);
-  applyCodeBlockCopyIcons(root);
+function getMarkdownHydrationFlags(html: string): MarkdownHydrationFlags {
+  return {
+    tables: html.includes('<table'),
+    copyButtons: html.includes('data-copy'),
+  };
+}
+
+function hydrateRenderedMarkdown(root: HTMLDivElement | undefined, flags: MarkdownHydrationFlags) {
+  if (flags.tables) applyTableColumnClasses(root);
+  if (flags.copyButtons) applyCodeBlockCopyIcons(root);
 }
 
 export function MarkdownRenderer(props: MarkdownProps) {
@@ -892,6 +906,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
     disablePathLinkify: !props.cacheByContent,
     disableCodeHighlighting: initialSegments.hasUnclosedFence,
   });
+  let lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(lastAppliedStableHtml);
+  let lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(lastAppliedTailHtml);
 
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
@@ -911,9 +927,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (highlightedTailHtml === lastAppliedTailHtml) return;
 
       lastAppliedTailHtml = highlightedTailHtml;
+      lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(highlightedTailHtml);
       setTailHtml(highlightedTailHtml);
       queueMicrotask(() => {
-        hydrateRenderedMarkdown(tailRef);
+        hydrateRenderedMarkdown(tailRef, lastAppliedTailHydrationFlags);
       });
     });
   }
@@ -962,6 +979,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (stableChanged) {
         lastAppliedStableContent = segments.stableContent;
         lastAppliedStableHtml = nextStableHtml;
+        lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(nextStableHtml);
         setStableHtml(nextStableHtml);
       } else if (stableContentChanged) {
         lastAppliedStableContent = segments.stableContent;
@@ -969,6 +987,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (tailChanged) {
         lastAppliedTailContent = segments.tailContent;
         lastAppliedTailHtml = nextTailHtml;
+        lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(nextTailHtml);
         setTailHtml(nextTailHtml);
       } else if (tailContentChanged) {
         lastAppliedTailContent = segments.tailContent;
@@ -983,10 +1002,10 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
       queueMicrotask(() => {
         if (stableChanged) {
-          hydrateRenderedMarkdown(stableRef);
+          hydrateRenderedMarkdown(stableRef, lastAppliedStableHydrationFlags);
         }
         if (tailChanged) {
-          hydrateRenderedMarkdown(tailRef);
+          hydrateRenderedMarkdown(tailRef, lastAppliedTailHydrationFlags);
         }
       });
     }
@@ -1075,8 +1094,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
   onMount(() => {
     ref?.addEventListener('click', handleClick);
     queueMicrotask(() => {
-      hydrateRenderedMarkdown(stableRef);
-      hydrateRenderedMarkdown(tailRef);
+      hydrateRenderedMarkdown(stableRef, lastAppliedStableHydrationFlags);
+      hydrateRenderedMarkdown(tailRef, lastAppliedTailHydrationFlags);
     });
   });
   onCleanup(() => {

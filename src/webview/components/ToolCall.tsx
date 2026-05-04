@@ -1,4 +1,4 @@
-import { Show, For, createEffect, createMemo, createSignal } from 'solid-js';
+import { Show, For, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js';
 import type { QuestionRequest, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
@@ -581,9 +581,16 @@ function GenericToolCall(props: {
     return { label: 'result', value: props.truncatedOutput || '(no output)' };
   };
 
+  const bodyId = createUniqueId();
   return (
     <div class="chat-tool-invocation-part">
-      <button class="tool-invocation-header" onClick={props.toggleExpand}>
+      <button
+        type="button"
+        class="tool-invocation-header"
+        onClick={props.toggleExpand}
+        aria-expanded={props.expanded}
+        aria-controls={bodyId}
+      >
         <span class={`tool-status-dot ${props.statusClass}`} />
         <span class="tool-invocation-title">{props.title}</span>
         <Show when={props.state.status === 'completed'}>
@@ -634,7 +641,7 @@ function GenericToolCall(props: {
       </Show>
 
       <Show when={props.expanded}>
-        <div class="tool-invocation-detail animate-fade-in">
+        <div id={bodyId} class="tool-invocation-detail animate-fade-in">
           <Show
             when={isBash() && bashCommand()}
             fallback={

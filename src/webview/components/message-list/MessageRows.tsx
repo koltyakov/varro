@@ -1,4 +1,4 @@
-import { For, Show, onCleanup, onMount } from 'solid-js';
+import { For, Show, createMemo, onCleanup, onMount } from 'solid-js';
 import { implementPlan, openPlan } from '../../hooks/useOpenCode';
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { formatDuration, formatNumber, isAssistantMessage } from '../../lib/message-metrics';
@@ -46,6 +46,12 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
+  const streamingPartId = createMemo(() => {
+    const partId = state.streamingPartId;
+    if (!partId) return null;
+    return props.msg.parts.some((part) => part.id === partId) ? partId : null;
+  });
+  const streamingText = () => (streamingPartId() ? state.streamingText : '');
   const highlightPlanningAnswer = () =>
     props.assistantDialogSummaryMap.has(props.msg.info.id) &&
     isAssistantMessage(props.msg.info) &&
@@ -88,8 +94,8 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
           props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
         }
         fileEditStackGroup={fileEditStackGroup()}
-        streamingPartId={state.streamingPartId}
-        streamingText={state.streamingText}
+        streamingPartId={streamingPartId()}
+        streamingText={streamingText()}
         questionRequestForTool={props.questionRequestForTool}
         permissionMatchForTool={props.permissionMatchForTool}
       />

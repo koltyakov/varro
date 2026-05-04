@@ -81,6 +81,23 @@ describe('FileSearchService', () => {
     vscodeMock.workspace.workspaceFolders = [workspaceFolder];
   });
 
+  it('creates the workspace watcher lazily on first search', async () => {
+    vscodeMock.workspace.findFiles.mockResolvedValue([]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+
+    expect(vscodeMock.workspace.createFileSystemWatcher).not.toHaveBeenCalled();
+
+    const onResult = vi.fn();
+    service.search(1, '', 10, onResult);
+    await vi.waitFor(() => {
+      expect(onResult).toHaveBeenCalledTimes(1);
+    });
+
+    expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(1);
+    service.dispose();
+  });
+
   it('cancels stale searches and only reports the latest result', async () => {
     const pendingFiles = deferred<Array<{ fsPath: string }>>();
     vscodeMock.workspace.findFiles.mockReturnValue(pendingFiles.promise);
@@ -170,9 +187,6 @@ describe('FileSearchService', () => {
       .mockResolvedValueOnce([{ fsPath: '/repo/src/second.ts' }]);
     const { FileSearchService } = await loadModule();
     const service = new FileSearchService();
-    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
-      fireCreate: () => void;
-    };
     const firstResult = vi.fn();
     const secondResult = vi.fn();
 
@@ -180,6 +194,10 @@ describe('FileSearchService', () => {
     await vi.waitFor(() => {
       expect(firstResult).toHaveBeenCalledTimes(1);
     });
+
+    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
+      fireCreate: () => void;
+    };
 
     watcher.fireCreate();
 
@@ -199,6 +217,39 @@ describe('FileSearchService', () => {
       query: '',
       files: [{ path: '/repo/src/second.ts', relativePath: 'src/second.ts', type: 'file' }],
     });
+    service.dispose();
+  });
+
+  it('debounces repeated workspace cache invalidations', async () => {
+    vscodeMock.workspace.findFiles
+      .mockResolvedValueOnce([{ fsPath: '/repo/src/first.ts' }])
+      .mockResolvedValueOnce([{ fsPath: '/repo/src/second.ts' }]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const firstResult = vi.fn();
+    const secondResult = vi.fn();
+
+    service.search(1, '', 10, firstResult);
+    await vi.waitFor(() => {
+      expect(firstResult).toHaveBeenCalledTimes(1);
+    });
+
+    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
+      fireCreate: () => void;
+      fireDelete: () => void;
+      fireChange: () => void;
+    };
+    watcher.fireCreate();
+    watcher.fireDelete();
+    watcher.fireChange();
+
+    service.search(2, '', 10, secondResult);
+    await vi.waitFor(() => {
+      expect(secondResult).toHaveBeenCalledTimes(1);
+    });
+
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
+    service.dispose();
   });
 
   it('resolves workspace folders without per-file getWorkspaceFolder lookups', async () => {

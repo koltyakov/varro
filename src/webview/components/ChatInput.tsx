@@ -76,7 +76,12 @@ import {
   resolveProviderLimitWindow,
 } from '../lib/format';
 import { getMatchingVariant, getPreferredVariant } from '../lib/model-variants';
-import { isAssistantMessage, getContextWindow, sumAssistantTokens } from '../lib/message-metrics';
+import {
+  isAssistantMessage,
+  getContextWindow,
+  getAssistantTotalTokens,
+  type TokenUsage,
+} from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
 import { getLeafPathName } from '../lib/path-display';
@@ -98,7 +103,7 @@ import type {
   MentionCompletionItem,
   SlashCommand,
 } from './chat-input/CompletionMenu';
-import type { Agent, Command, Part, TextPart } from '../types';
+import type { Agent, AssistantMessage, Command, Message, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
@@ -155,6 +160,55 @@ type MentionCompletionSource = {
   exactAgentNames: ReadonlySet<string>;
   exactFilePaths: ReadonlySet<string>;
 };
+
+type MessageInfoEntry = { info: Message };
+
+export function getLatestAssistantMessageInfo(
+  messages: readonly MessageInfoEntry[]
+): AssistantMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const info = messages[index]?.info;
+    if (info && isAssistantMessage(info)) return info;
+  }
+  return null;
+}
+
+export function getLatestAssistantMessageInfoWithTokens(
+  messages: readonly MessageInfoEntry[]
+): AssistantMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const info = messages[index]?.info;
+    if (!info || !isAssistantMessage(info)) continue;
+    if ((info.tokens.input || 0) + (info.tokens.output || 0) > 0) return info;
+  }
+  return null;
+}
+
+export function sumAssistantTokensFromMessageEntries(
+  messages: readonly MessageInfoEntry[]
+): TokenUsage {
+  const result: TokenUsage = {
+    total: 0,
+    input: 0,
+    output: 0,
+    reasoning: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+  };
+
+  for (const entry of messages) {
+    const info = entry.info;
+    if (!isAssistantMessage(info)) continue;
+    result.total += getAssistantTotalTokens(info);
+    result.input += info.tokens.input || 0;
+    result.output += info.tokens.output || 0;
+    result.reasoning += info.tokens.reasoning || 0;
+    result.cacheRead += info.tokens.cache?.read || 0;
+    result.cacheWrite += info.tokens.cache?.write || 0;
+  }
+
+  return result;
+}
 
 type CompletionSelection =
   | { type: 'set-slash'; value: string }
@@ -312,7 +366,7 @@ export function ChatInput() {
   const visibleFiles = () => files();
   const activeContextEnabled = () => getCurrentDocumentEnabled(state.activeSessionId);
 
-  const activeContext = () => {
+  const activeContext = createMemo(() => {
     const file = activeFile();
     const selectedLines = getSelectionRangesFromEditorContext(selection());
     if (!file) return null;
@@ -323,7 +377,17 @@ export function ChatInput() {
       filename: displayPath,
       lineRange,
     };
-  };
+  });
+  const activeContextTitle = createMemo(() => {
+    const context = activeContext();
+    if (!context) return null;
+    const label = context.lineRange ? `${context.filename} ${context.lineRange}` : context.filename;
+    return `${label}${
+      activeContextEnabled()
+        ? ' · Click to disable current document context'
+        : ' · Current document context is disabled. Click to enable it again'
+    }`;
+  });
 
   const mentionAgents = createMemo(() =>
     state.allAgents
@@ -1133,10 +1197,6 @@ export function ChatInput() {
     });
   });
 
-  const assistantMessages = createMemo(() =>
-    state.messages.map((entry) => entry.info).filter(isAssistantMessage)
-  );
-
   const currentModel = createMemo(() => {
     const selected = resolveSelectedModel(
       state.selectedModel,
@@ -1156,7 +1216,7 @@ export function ChatInput() {
       };
     }
 
-    const latestAuto = [...assistantMessages()].toReversed()[0];
+    const latestAuto = getLatestAssistantMessageInfo(state.messages);
     if (latestAuto) {
       const provider = state.providers.find((item) => item.id === latestAuto.providerID);
       const model = provider?.models[latestAuto.modelID];
@@ -1246,24 +1306,14 @@ export function ChatInput() {
     clipboardImages().length > 0 && !currentModelSupportsVision();
 
   const contextUsage = createMemo(() => {
-    const assistants = assistantMessages();
-    if (assistants.length === 0) return null;
-    let best = null;
-    for (let i = assistants.length - 1; i >= 0; i--) {
-      const msg = assistants[i];
-      const hasTokens = (msg.tokens.input || 0) + (msg.tokens.output || 0) > 0;
-      if (hasTokens) {
-        best = msg;
-        break;
-      }
-    }
+    const best = getLatestAssistantMessageInfoWithTokens(state.messages);
     if (!best) return null;
     const ctx = getContextWindow(best, state.providers);
     if (!ctx) return null;
     return ctx;
   });
 
-  const sessionTokens = createMemo(() => sumAssistantTokens(assistantMessages()));
+  const sessionTokens = createMemo(() => sumAssistantTokensFromMessageEntries(state.messages));
 
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
   const showProviderLimits = createMemo(
@@ -1318,7 +1368,7 @@ export function ChatInput() {
     if (!notice) return null;
 
     const current = currentModel();
-    const hasActiveAssistantContext = assistantMessages().length > 0;
+    const hasActiveAssistantContext = getLatestAssistantMessageInfo(state.messages) !== null;
     if (!notice.providerID && !notice.modelID) return notice;
     if (hasActiveAssistantContext && notice.source === 'status') return notice;
     if (notice.providerID && notice.providerID !== current.providerID) return null;
@@ -1617,19 +1667,7 @@ export function ChatInput() {
           <AttachmentStrip
             activeContext={activeContext()}
             activeContextEnabled={activeContextEnabled()}
-            activeContextTitle={
-              activeContext()
-                ? `${
-                    activeContext()!.lineRange
-                      ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
-                      : activeContext()!.filename
-                  }${
-                    activeContextEnabled()
-                      ? ' · Click to disable current document context'
-                      : ' · Current document context is disabled. Click to enable it again'
-                  }`
-                : null
-            }
+            activeContextTitle={activeContextTitle()}
             terminalSelection={terminalSelection()}
             files={visibleFiles()}
             clipboardImages={clipboardImages()}

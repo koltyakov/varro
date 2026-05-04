@@ -84,12 +84,29 @@ export function getAssistantContainerVariant(params: {
   return part.type === 'tool' && !isFileEditPart(part) ? 'bare' : false;
 }
 
-function shouldShowReadModeToggle(text: string): boolean {
-  const normalized = text.replace(/\r\n?/g, '\n').trim();
-  if (normalized.length === 0) return false;
+export function shouldShowReadModeToggle(text: string): boolean {
+  let start = 0;
+  let end = text.length;
+  while (start < end && text[start].trim().length === 0) start += 1;
+  while (end > start && text[end - 1].trim().length === 0) end -= 1;
 
-  const lineCount = normalized.split('\n').length;
-  return normalized.length >= 420 || lineCount >= 8;
+  if (end <= start) return false;
+  if (end - start >= 420) return true;
+
+  let lineCount = 1;
+  for (let index = start; index < end; index += 1) {
+    const char = text[index];
+    if (char === '\r') {
+      lineCount += 1;
+      if (text[index + 1] === '\n') index += 1;
+    } else if (char === '\n') {
+      lineCount += 1;
+    }
+
+    if (lineCount >= 8) return true;
+  }
+
+  return false;
 }
 
 export function deduplicateFileEdits(parts: Part[]): Part[] {

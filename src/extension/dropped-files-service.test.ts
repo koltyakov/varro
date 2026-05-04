@@ -171,4 +171,52 @@ describe('DroppedFilesService', () => {
       'Ignoring dropped path ../secrets.txt: Path does not exist'
     );
   });
+
+  it('rejects oversized dropped content before decoding base64', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+    services.push(service);
+    const bufferFromSpy = vi.spyOn(Buffer, 'from');
+
+    try {
+      const files = await service.fromContent([
+        { name: 'huge.bin', content: 'AAAA', size: 11 * 1024 * 1024 },
+      ]);
+
+      expect(files).toEqual([]);
+      expect(bufferFromSpy).not.toHaveBeenCalled();
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        'Ignoring dropped file huge.bin: file is larger than 10485760 bytes'
+      );
+    } finally {
+      bufferFromSpy.mockRestore();
+    }
+  });
+
+  it('bounds concurrent path stat work for large drops', async () => {
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never);
+    services.push(service);
+    const folder = { name: 'repo', uri: { fsPath: '/repo' } };
+    let activeStats = 0;
+    let maxActiveStats = 0;
+
+    vscodeMock.workspace.workspaceFolders = [folder];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(folder);
+    vscodeMock.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath.replace('/repo/', '')
+    );
+    vscodeMock.workspace.fs.stat.mockImplementation(async () => {
+      activeStats += 1;
+      maxActiveStats = Math.max(maxActiveStats, activeStats);
+      await Promise.resolve();
+      activeStats -= 1;
+      return { type: 0 };
+    });
+
+    const files = await service.fromPaths(
+      Array.from({ length: 24 }, (_, index) => `/repo/file-${index}.txt`)
+    );
+
+    expect(files).toHaveLength(24);
+    expect(maxActiveStats).toBeLessThanOrEqual(8);
+  });
 });

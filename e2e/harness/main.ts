@@ -67,6 +67,7 @@ const SCENARIO_NAMES = [
   'message-rendering',
   'ralph-dashboard',
   'statusbar-focus',
+  'large-transcript',
 ] as const;
 type ScenarioName = (typeof SCENARIO_NAMES)[number];
 
@@ -1972,6 +1973,42 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.persistedActiveSessionId = session.id;
     state.postReadyMessages.push({ type: 'command/focus-input' });
     state.nextSequence = 380;
+    return state;
+  }
+
+  if (name === 'large-transcript') {
+    const session = makeSession('session-large-transcript', 'Large transcript', BASE_TIME - 500);
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 240; index += 1) {
+      const createdAt = BASE_TIME - (500 - index) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-large-user-${index}`,
+        [`Review large transcript section ${index} and keep the UI responsive.`],
+        createdAt
+      );
+      const assistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-large-assistant-${index}`,
+        user.info.id,
+        createdAt + 1,
+        [
+          `## Section ${index}`,
+          '',
+          `Large transcript response ${index} with enough markdown to exercise rendering, virtualization, and scroll anchoring.`,
+          '',
+          index % 12 === 0 ? '```ts\nexport const value = 1;\n```' : '- bounded row count',
+        ].join('\n')
+      );
+      messages.push(user, assistant);
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 390;
     return state;
   }
 

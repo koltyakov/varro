@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type { AssistantMessage, TextPart } from '../types';
-import { AssistantMessageContent } from '../components/message/AssistantMessageContent';
+import {
+  AssistantMessageContent,
+  shouldShowReadModeToggle,
+} from '../components/message/AssistantMessageContent';
 import { settlePerfEffects } from './harness';
 
 let container: HTMLDivElement | null = null;
@@ -107,5 +110,56 @@ describe('AssistantMessageContent perf guards', () => {
     await settlePerfEffects();
 
     expect(resizeObserverConstructCount).toBe(0);
+  });
+
+  it('renders only a bounded assistant-part window for long completed messages', async () => {
+    class ResizeObserverStub {
+      observe() {}
+
+      disconnect() {}
+    }
+
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: ResizeObserverStub,
+    });
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: ResizeObserverStub,
+    });
+
+    const parts = Array.from({ length: 100 }, (_, index) => ({
+      id: `part-${index}`,
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'text' as const,
+      text: `Assistant part ${index}`,
+    }));
+
+    cleanup = render(
+      () =>
+        AssistantMessageContent({
+          info: createAssistantMessage(),
+          parts,
+          textForPart: () => null,
+          isLastAssistant: false,
+          outerListVirtualized: false,
+        }),
+      container!
+    );
+
+    await settlePerfEffects();
+
+    expect(container?.querySelectorAll('[data-assistant-render-key]').length).toBeLessThan(30);
+  });
+
+  it('detects read-mode eligibility for large text without split allocation', () => {
+    const splitSpy = vi.spyOn(String.prototype, 'split');
+    const longText = `${'A'.repeat(50_000)}\nshort tail`;
+
+    expect(shouldShowReadModeToggle(longText)).toBe(true);
+    expect(splitSpy).not.toHaveBeenCalled();
   });
 });

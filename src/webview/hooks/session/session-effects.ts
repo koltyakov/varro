@@ -73,8 +73,10 @@ export function registerProviderLimitRefreshEffect(deps: {
         if (existingLimit?.status === 'unsupported') return;
 
         let cancelled = false;
+        let inFlight = false;
         const refresh = async () => {
-          if (document.visibilityState !== 'visible') return;
+          if (cancelled || inFlight || !deps.isDocumentVisible()) return;
+          inFlight = true;
           try {
             const limit = await deps.loadProviderLimit(active.providerID, active.modelID);
             if (!cancelled) {
@@ -82,6 +84,8 @@ export function registerProviderLimitRefreshEffect(deps: {
             }
           } catch (err) {
             deps.logError('loadProviderLimit', err);
+          } finally {
+            inFlight = false;
           }
         };
 
