@@ -352,15 +352,11 @@ export function SessionListView(props: {
   const [activeGroupedSection, setActiveGroupedSection] =
     createSignal<SessionListGroupedSection | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
-  const [hoveredSessionId, setHoveredSessionId] = createSignal<string | null>(null);
-  const [itemRefsVersion, setItemRefsVersion] = createSignal(0);
-  const [listScrollRef, setListScrollRef] = createSignal<HTMLDivElement | undefined>(undefined);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   let recentHeaderRef: HTMLDivElement | undefined;
   let archiveHeaderRef: HTMLDivElement | undefined;
   let recycleBinHeaderRef: HTMLDivElement | undefined;
-  const itemRefs = new Map<string, HTMLDivElement>();
 
   const normalizedSearchQuery = createMemo(() => searchQuery().trim().toLowerCase());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
@@ -539,53 +535,14 @@ export function SessionListView(props: {
     setActiveGroupedSection((current) => (current === section ? null : section));
   };
 
-  const setItemRef = (sessionId: string, el: HTMLDivElement | undefined) => {
-    if (el) itemRefs.set(sessionId, el);
-    else itemRefs.delete(sessionId);
-    setItemRefsVersion((version) => version + 1);
-  };
-
-  function updateScrollHighlights(listScroll = listScrollRef()) {
-    if (!listScroll) return;
-
-    itemRefsVersion();
-
-    const setHighlight = (
-      prefix: 'active' | 'hover',
-      sessionId: string | null,
-      background: string
-    ) => {
-      const el = sessionId ? itemRefs.get(sessionId) : undefined;
-      listScroll.style.setProperty(`--session-list-${prefix}-row-top`, el ? `${el.offsetTop}px` : '0px');
-      listScroll.style.setProperty(
-        `--session-list-${prefix}-row-height`,
-        el ? `${el.offsetHeight}px` : '0px'
-      );
-      listScroll.style.setProperty(`--session-list-${prefix}-row-bg`, el ? background : 'transparent');
-    };
-
-    setHighlight(
-      'active',
-      state.activeSessionId ?? null,
-      'color-mix(in srgb, var(--color-vscode-accent) 8%, transparent)'
-    );
-    setHighlight(
-      'hover',
-      hoveredSessionId() === state.activeSessionId ? null : hoveredSessionId(),
-      'var(--color-vscode-hover)'
-    );
-  }
-
   const renderSessionItems = (sessions: typeof state.sessions, indexOffset = 0) => (
     <For each={sessions}>
       {(session, index) => (
         <SessionListItem
-          ref={(el) => setItemRef(session.id, el)}
           session={session}
           itemIndex={() => indexOffset + index()}
           focusedIndex={focusedIndex}
           setFocusedIndex={setFocusedIndex}
-          setHoveredSessionId={setHoveredSessionId}
           now={now}
           subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
           hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
@@ -633,7 +590,7 @@ export function SessionListView(props: {
   );
 
   const renderScrollableContent = () => (
-    <div class="session-list-scroll" ref={setListScrollRef} onMouseLeave={() => setHoveredSessionId(null)}>
+    <div class="session-list-scroll">
       <Show when={props.subagentParentId || props.sessionFilter || normalizedSearchQuery()}>
         {renderSessionItems(visibleSessions())}
       </Show>
@@ -758,25 +715,6 @@ export function SessionListView(props: {
     });
   });
 
-  createEffect(() => {
-    const listScroll = listScrollRef();
-    if (!listScroll) return;
-
-    updateScrollHighlights(listScroll);
-    if (typeof ResizeObserver === 'undefined') return;
-
-    const observer = new ResizeObserver(() => updateScrollHighlights(listScroll));
-    observer.observe(listScroll);
-    onCleanup(() => observer.disconnect());
-  });
-
-  createEffect(() => {
-    hoveredSessionId();
-    state.activeSessionId;
-    itemRefsVersion();
-    updateScrollHighlights();
-  });
-
   const emptyMessage = () => {
     if (props.subagentParentId) return 'No sub-agent sessions';
     if (normalizedSearchQuery()) return 'No matching sessions';
@@ -835,7 +773,7 @@ export function SessionListView(props: {
       <Show when={hasVisibleContent()} fallback={<div class="session-empty">{emptyMessage()}</div>}>
         <Show when={showBottomGroups()} fallback={renderScrollableContent()}>
           <div class="session-list-layout">
-            <div class="session-list-scroll session-list-scroll-primary" ref={setListScrollRef}>
+            <div class="session-list-scroll session-list-scroll-primary">
               {renderSessionItems(surfacedSessions())}
             </div>
             {renderBottomGroups()}
@@ -896,12 +834,10 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
 }
 
 function SessionListItem(props: {
-  ref?: (el: HTMLDivElement | undefined) => void;
   session: (typeof state.sessions)[number];
   itemIndex: () => number;
   focusedIndex: () => number;
   setFocusedIndex: (index: number) => void;
-  setHoveredSessionId: (sessionId: string | null) => void;
   now: () => number;
   subagentCount: number;
   hasPermissionRequest: boolean;
@@ -957,11 +893,8 @@ function SessionListItem(props: {
 
   return (
     <div
-      ref={props.ref}
       class={`session-item ${isActive() ? 'active' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
       onMouseEnter={() => props.setFocusedIndex(props.itemIndex())}
-      onMouseOver={() => props.setHoveredSessionId(props.session.id)}
-      onMouseLeave={() => props.setHoveredSessionId(null)}
     >
       <button
         type="button"

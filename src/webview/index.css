@@ -1804,8 +1804,8 @@ body.vscode-light
 
 .interactive-session .chat-input-toolbar-divider {
   height: 1px;
-  margin: 8px -8px 0;
   background: var(--color-vscode-border-default);
+  margin: 0 -8px;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-main {
@@ -5523,36 +5523,9 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .session-list-scroll {
-  --session-list-active-row-top: 0px;
-  --session-list-active-row-height: 0px;
-  --session-list-active-row-bg: transparent;
-  --session-list-hover-row-top: 0px;
-  --session-list-hover-row-height: 0px;
-  --session-list-hover-row-bg: transparent;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-gutter: stable;
-  background-image:
-    linear-gradient(
-      to bottom,
-      transparent var(--session-list-active-row-top),
-      var(--session-list-active-row-bg) var(--session-list-active-row-top),
-      var(--session-list-active-row-bg)
-        calc(var(--session-list-active-row-top) + var(--session-list-active-row-height)),
-      transparent calc(var(--session-list-active-row-top) + var(--session-list-active-row-height))
-    ),
-    linear-gradient(
-      to bottom,
-      transparent var(--session-list-hover-row-top),
-      var(--session-list-hover-row-bg) var(--session-list-hover-row-top),
-      var(--session-list-hover-row-bg)
-        calc(var(--session-list-hover-row-top) + var(--session-list-hover-row-height)),
-      transparent calc(var(--session-list-hover-row-top) + var(--session-list-hover-row-height))
-    );
-  background-repeat: no-repeat;
-  background-position: right top, right top;
-  background-size: 12px 100%, 12px 100%;
 }
 
 .session-list-layout {
@@ -5732,12 +5705,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .session-item {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  margin-right: -12px;
-  padding: 8px 24px 8px 12px;
+  padding: 8px 12px;
   background: none;
   transition: background-color 0.08s;
 }
@@ -5769,7 +5742,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   background: var(--session-item-active-bg);
   border-left: 2px solid var(--color-vscode-accent);
   padding-left: 10px;
-  padding-right: 22px;
+  padding-right: 12px;
 }
 
 .session-item-content {
