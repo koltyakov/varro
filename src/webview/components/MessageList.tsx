@@ -28,6 +28,7 @@ import {
   getSessionTreeIds,
   messageStructureVersion,
   showStickyUserPrompt,
+  showModelPicker,
 } from '../lib/state';
 import { isAssistantMessage, sumAssistantTokens } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
@@ -42,7 +43,11 @@ import {
   buildQuestionRequestLookup,
   getToolCallLookupKey,
 } from '../lib/tool-call-matching';
-import { PendingActionRows, StickyUserMessagePreviewCard } from './message-list/MessageListChrome';
+import {
+  ChatContentBottomFade,
+  PendingActionRows,
+  StickyUserMessagePreviewCard,
+} from './message-list/MessageListChrome';
 import {
   getNextVisibleUserMessageTopMap,
   getStickyUserMessagePreview,
@@ -1200,47 +1205,69 @@ export function MessageList() {
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
 
   return (
-    <div
-      ref={containerRef}
-      class="interactive-list min-h-0 flex-1 overflow-y-auto"
-      role="log"
-      aria-live="polite"
-      aria-label="Chat messages"
-      onScroll={onScroll}
-    >
-      <div ref={trackRef} class="interactive-list-track">
-        <Show when={showStickyUserPrompt() && stickyUserMessagePreview()}>
-          {(preview) => <StickyUserMessagePreviewCard preview={preview()} />}
-        </Show>
-        <Show
-          when={state.messages.length > 0}
-          fallback={
-            <Show when={shouldShowStarterLogo()}>
-              <div class="chat-empty-state">
-                <img
-                  class="chat-empty-logo"
-                  src={state.emptyStateLogoUri}
-                  alt=""
-                  aria-hidden="true"
-                  draggable="false"
-                />
-              </div>
-            </Show>
-          }
-        >
+    <div class="interactive-list-shell min-h-0 flex-1">
+      <div
+        ref={containerRef}
+        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}`}
+        role="log"
+        aria-live="polite"
+        aria-label="Chat messages"
+        onScroll={onScroll}
+      >
+        <div ref={trackRef} class="interactive-list-track">
+          <Show when={showStickyUserPrompt() && stickyUserMessagePreview()}>
+            {(preview) => <StickyUserMessagePreviewCard preview={preview()} />}
+          </Show>
           <Show
-            when={shouldVirtualize()}
+            when={state.messages.length > 0}
             fallback={
-              <MessageRows
+              <Show when={shouldShowStarterLogo()}>
+                <div class="chat-empty-state">
+                  <img
+                    class="chat-empty-logo"
+                    src={state.emptyStateLogoUri}
+                    alt=""
+                    aria-hidden="true"
+                    draggable="false"
+                  />
+                </div>
+              </Show>
+            }
+          >
+            <Show
+              when={shouldVirtualize()}
+              fallback={
+                <MessageRows
+                  messages={messages()}
+                  modelChangeMap={modelChangeMap()}
+                  lastAssistantID={lastAssistantID()}
+                  outerListVirtualized={false}
+                  previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
+                  fileEditStackGroupMap={assistantStackGroupMap()}
+                  assistantDialogSummaryMap={assistantDialogSummaryMap()}
+                  hasBuildAgent={hasBuildAgent()}
+                  latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+                  observeMeasuredRow={observeMeasuredRow}
+                  isPlanningAssistantMessage={isPlanningAssistantMessage}
+                  questionRequestForTool={getQuestionRequestForTool}
+                  permissionMatchForTool={getPermissionMatchForTool}
+                  shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
+                  buildPlanImplementationPrompt={buildPlanImplementationPrompt}
+                  buildPlanDocumentContent={buildPlanDocumentContent}
+                />
+              }
+            >
+              <VirtualizedContent
                 messages={messages()}
                 modelChangeMap={modelChangeMap()}
                 lastAssistantID={lastAssistantID()}
-                outerListVirtualized={false}
+                outerListVirtualized
                 previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
                 fileEditStackGroupMap={assistantStackGroupMap()}
                 assistantDialogSummaryMap={assistantDialogSummaryMap()}
                 hasBuildAgent={hasBuildAgent()}
                 latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+                visibleRange={visibleRange()}
                 observeMeasuredRow={observeMeasuredRow}
                 isPlanningAssistantMessage={isPlanningAssistantMessage}
                 questionRequestForTool={getQuestionRequestForTool}
@@ -1249,45 +1276,26 @@ export function MessageList() {
                 buildPlanImplementationPrompt={buildPlanImplementationPrompt}
                 buildPlanDocumentContent={buildPlanDocumentContent}
               />
+            </Show>
+          </Show>
+          <PendingActionRows
+            questions={standaloneQuestions()}
+            permissions={standalonePermissions()}
+          />
+          <Show
+            when={
+              (isLoading() || isSessionCompacting()) &&
+              !hasActiveQuestion() &&
+              !hasActivePermission() &&
+              !visibleBlockingStreamingPart() &&
+              !activeUsageLimit()
             }
           >
-            <VirtualizedContent
-              messages={messages()}
-              modelChangeMap={modelChangeMap()}
-              lastAssistantID={lastAssistantID()}
-              outerListVirtualized
-              previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
-              fileEditStackGroupMap={assistantStackGroupMap()}
-              assistantDialogSummaryMap={assistantDialogSummaryMap()}
-              hasBuildAgent={hasBuildAgent()}
-              latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
-              visibleRange={visibleRange()}
-              observeMeasuredRow={observeMeasuredRow}
-              isPlanningAssistantMessage={isPlanningAssistantMessage}
-              questionRequestForTool={getQuestionRequestForTool}
-              permissionMatchForTool={getPermissionMatchForTool}
-              shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
-              buildPlanImplementationPrompt={buildPlanImplementationPrompt}
-              buildPlanDocumentContent={buildPlanDocumentContent}
-            />
+            <LoadingRow compacting={isSessionCompacting()} />
           </Show>
-        </Show>
-        <PendingActionRows
-          questions={standaloneQuestions()}
-          permissions={standalonePermissions()}
-        />
-        <Show
-          when={
-            (isLoading() || isSessionCompacting()) &&
-            !hasActiveQuestion() &&
-            !hasActivePermission() &&
-            !visibleBlockingStreamingPart() &&
-            !activeUsageLimit()
-          }
-        >
-          <LoadingRow compacting={isSessionCompacting()} />
-        </Show>
+        </div>
       </div>
+      <ChatContentBottomFade />
     </div>
   );
 }

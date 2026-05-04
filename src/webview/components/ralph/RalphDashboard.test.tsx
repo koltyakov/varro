@@ -274,7 +274,7 @@ describe('RalphDashboard', () => {
     expect(resumeMock).toHaveBeenCalledWith('manager-1');
   });
 
-  it('shows 5H, W, and M provider limits together when available', () => {
+  it('shows 5h, W, and M provider limits together when available', () => {
     currentRun = run({
       status: 'running',
       config: {
@@ -332,7 +332,8 @@ describe('RalphDashboard', () => {
     ).map((node) => node.textContent?.trim());
 
     expect(limits?.textContent).toContain('Limits:');
-    expect(badges).toEqual(['5H 0%', 'W 12%', 'M 40%']);
+    expect(badges).toEqual(['0%', '12%', '40%']);
+    expect(limits?.textContent).toContain('·');
     expect(limits?.getAttribute('title')).toContain('5-hour: 0 / 100 left');
     expect(limits?.getAttribute('title')).toContain('Weekly: 12 / 100 left');
     expect(limits?.getAttribute('title')).toContain('Monthly: 40 / 100 left');

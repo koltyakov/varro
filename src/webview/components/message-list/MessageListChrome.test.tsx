@@ -14,7 +14,11 @@ vi.mock('../PermissionPrompt', () => ({
   ),
 }));
 
-import { PendingActionRows, StickyUserMessagePreviewCard } from './MessageListChrome';
+import {
+  ChatContentBottomFade,
+  PendingActionRows,
+  StickyUserMessagePreviewCard,
+} from './MessageListChrome';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -49,6 +53,15 @@ describe('MessageListChrome', () => {
       'Summarize the latest failing test output.'
     );
     expect(container?.querySelector('.latest-user-message-sticky-bottom-fade')).not.toBeNull();
+  });
+
+  it('renders the chat content bottom fade shell with hidden semantics', () => {
+    cleanup = render(() => <ChatContentBottomFade />, container!);
+
+    const wrapper = container?.querySelector('.interactive-list-bottom-fade-wrap');
+
+    expect(wrapper?.getAttribute('aria-hidden')).toBe('true');
+    expect(container?.querySelector('.interactive-list-bottom-fade-gradient')).not.toBeNull();
   });
 
   it('renders pending question and permission rows in interactive containers', () => {

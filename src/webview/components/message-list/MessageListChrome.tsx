@@ -26,6 +26,16 @@ export function StickyUserMessagePreviewCard(props: { preview: StickyUserMessage
   );
 }
 
+export function ChatContentBottomFade() {
+  return (
+    <div class="interactive-list-bottom-fade-wrap" aria-hidden="true">
+      <div class="interactive-list-bottom-fade-overlay">
+        <div class="interactive-list-bottom-fade-gradient" />
+      </div>
+    </div>
+  );
+}
+
 export function PendingActionRows(props: {
   questions: QuestionRequest[];
   permissions: Permission[];

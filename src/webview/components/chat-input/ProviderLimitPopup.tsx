@@ -1,6 +1,10 @@
 import { For, onCleanup, onMount, Show } from 'solid-js';
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
-import { clampPopupToViewport } from '../../lib/popup-position';
+import {
+  alignPopupToBoundary,
+  clampPopupToViewport,
+  observePopupViewport,
+} from '../../lib/popup-position';
 import {
   formatProviderLimitWindowReset,
   formatProviderLimitWindowValue,
@@ -14,6 +18,8 @@ const PROVIDER_LIMIT_ERROR_PERCENT = 90;
 
 export function ProviderLimitPopup(props: {
   ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  boundaryRef?: HTMLElement;
+  alignTo?: 'left' | 'right';
   limit: ProviderLimitStatus | null;
   model: { providerName: string; modelName: string };
   onClose: () => void;
@@ -30,11 +36,12 @@ export function ProviderLimitPopup(props: {
   onMount(() => {
     if (!popupEl) return;
     const reposition = () => {
-      if (popupEl) clampPopupToViewport(popupEl);
+      if (!popupEl) return;
+      if (props.boundaryRef)
+        alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'right');
+      clampPopupToViewport(popupEl);
     };
-    reposition();
-    window.addEventListener('resize', reposition);
-    onCleanup(() => window.removeEventListener('resize', reposition));
+    onCleanup(observePopupViewport(popupEl, reposition));
   });
 
   return (

@@ -1,11 +1,18 @@
-import { For, Show } from 'solid-js';
+import { For, onCleanup, onMount, Show } from 'solid-js';
 import { formatNumber } from '../../lib/message-metrics';
+import {
+  alignPopupToBoundary,
+  clampPopupToViewport,
+  observePopupViewport,
+} from '../../lib/popup-position';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
 
 export function ContextPopup(props: {
   ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  boundaryRef?: HTMLElement;
+  alignTo?: 'left' | 'right';
   usage: { used: number; limit: number; percent: number };
   tokens: {
     total: number;
@@ -31,9 +38,28 @@ export function ContextPopup(props: {
     if (t.cacheWrite > 0) items.push({ label: 'Cache write', value: t.cacheWrite });
     return items;
   };
+  let popupEl: HTMLDivElement | undefined;
+
+  const setRef = (el: HTMLDivElement) => {
+    popupEl = el;
+    const forwarded = props.ref;
+    if (typeof forwarded === 'function') forwarded(el);
+  };
+
+  onMount(() => {
+    if (!popupEl || !props.boundaryRef) return;
+
+    const reposition = () => {
+      if (!popupEl || !props.boundaryRef) return;
+      alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'right');
+      clampPopupToViewport(popupEl);
+    };
+
+    onCleanup(observePopupViewport(popupEl, reposition));
+  });
 
   return (
-    <div ref={props.ref} class="context-popup" onClick={(e) => e.stopPropagation()}>
+    <div ref={setRef} class="context-popup" onClick={(e) => e.stopPropagation()}>
       <div class="context-popup-header">
         <span class="context-popup-title">Context Window</span>
         <span class="context-popup-pct">{Math.round(props.usage.percent)}%</span>

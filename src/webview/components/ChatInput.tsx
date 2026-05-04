@@ -64,16 +64,12 @@ import type { RalphSelectedModel } from '../../shared/ralph';
 import {
   formatAgentInitial,
   formatAgentLabel,
-  formatProviderLimitCompact,
-  formatProviderLimitCompactPrefix,
   formatProviderLimitTitle,
   formatVariantInitial,
   formatVariantLabel,
-  getProviderLimitTone,
+  getProviderLimitCompactBadges,
   hasProviderLimitWindowWithinThreshold,
-  getOrderedProviderLimitWindows,
   getPrimaryProviderLimitWindow,
-  resolveProviderLimitWindow,
 } from '../lib/format';
 import { getMatchingVariant, getPreferredVariant } from '../lib/model-variants';
 import {
@@ -93,7 +89,7 @@ import {
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
 import { TodoList } from './TodoList';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
-import { ChatInputToolbar } from './chat-input/ChatInputToolbar';
+import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import { ComposerArea } from './chat-input/ComposerArea';
 import { DropOverlay } from './chat-input/DropOverlay';
 import { QueuedMessages } from './chat-input/QueuedMessages';
@@ -107,10 +103,6 @@ import type { Agent, AssistantMessage, Command, Message, Part, TextPart } from '
 import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
-import {
-  getSelectedProviderLimitWindowId,
-  setSelectedProviderLimitWindowId,
-} from '../lib/provider-limit-selection';
 
 type ToolbarControl =
   | 'permission'
@@ -291,6 +283,7 @@ export function isToolbarControlCompacted(
 export function ChatInput() {
   let textareaRef: HTMLTextAreaElement | undefined;
   let containerRef: HTMLDivElement | undefined;
+  let inputFrameRef: HTMLDivElement | undefined;
   let permissionPickerRef: HTMLButtonElement | undefined;
   let permissionPopoverRef: HTMLDivElement | undefined;
   let agentPickerRef: HTMLButtonElement | undefined;
@@ -518,6 +511,19 @@ export function ChatInput() {
       composerCompletions().length > 0 || (completion.type === 'mention' && showFileSearchHint())
     );
   };
+
+  const showFloatingInputPopover = createMemo(
+    () =>
+      showModelPicker() ||
+      showMcpPicker() ||
+      showAgentPicker() ||
+      showVariantPicker() ||
+      showPermissionModePicker() ||
+      showBusyMenu() ||
+      showContextPopup() ||
+      showProviderLimitPopup() ||
+      (isFocused() && showCompletionMenu())
+  );
 
   createEffect(() => {
     const length = composerCompletions().length;
@@ -1330,33 +1336,11 @@ export function ChatInput() {
       hasProviderLimitWindowWithinThreshold(currentProviderLimit(), providerLimitThresholdPercent())
   );
 
-  const currentProviderLimitWindow = createMemo(() => {
-    if (!showCurrentProviderLimit()) return null;
-    const providerID = currentModel().providerID;
-    const selectedId = providerID ? getSelectedProviderLimitWindowId(providerID) : null;
-    return resolveProviderLimitWindow(currentProviderLimit(), selectedId);
-  });
-
-  const currentProviderLimitCompact = createMemo(() =>
-    showCurrentProviderLimit()
-      ? formatProviderLimitCompact(currentProviderLimit(), currentProviderLimitWindow())
-      : null
-  );
-  const currentProviderLimitCompactLabel = createMemo(() =>
-    toolbarCompactMode() === 'full' ? currentProviderLimitCompact() : null
-  );
-  const currentProviderLimitCompactPrefix = createMemo(() =>
-    showCurrentProviderLimit()
-      ? formatProviderLimitCompactPrefix(currentProviderLimit(), currentProviderLimitWindow())
-      : null
-  );
   const currentProviderLimitTitle = createMemo(() =>
     showCurrentProviderLimit() ? formatProviderLimitTitle(currentProviderLimit()) : null
   );
-  const currentProviderLimitTone = createMemo(() =>
-    showCurrentProviderLimit()
-      ? getProviderLimitTone(currentProviderLimit(), currentProviderLimitWindow())
-      : 'default'
+  const currentProviderLimitBadges = createMemo(() =>
+    showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentProviderLimit()) : []
   );
   createEffect(() => {
     if (!showCurrentProviderLimit() && showProviderLimitPopup()) {
@@ -1405,8 +1389,9 @@ export function ChatInput() {
     modelProvider: currentModel().providerID,
     modelId: currentModel().modelID,
     modelName: currentModel().modelName,
-    providerLimitPrefix: currentProviderLimitCompactPrefix(),
-    providerLimit: currentProviderLimitCompact(),
+    providerLimit: currentProviderLimitBadges()
+      .map((badge) => badge.label)
+      .join('|'),
     variant: effectiveVariant(),
     hasContextUsage: !!contextUsage(),
     loading: isLoading(),
@@ -1607,24 +1592,7 @@ export function ChatInput() {
         ref={(el) => {
           containerRef = el;
         }}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showProviderLimitPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
-        onDragEnter={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-          setIsDraggingOver(true);
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-          setIsDraggingOver(true);
-        }}
-        onDragLeave={(e) => {
-          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-          setIsDraggingOver(false);
-        }}
-        onDrop={handleDrop}
+        class={`chat-input-shell ${showFloatingInputPopover() ? 'showing-floating-popover' : ''}`}
       >
         <Show when={showModelPicker()}>
           <ModelPicker
@@ -1663,110 +1631,283 @@ export function ChatInput() {
           />
         </Show>
 
-        <Show when={hasContext() || hasMentions()}>
-          <AttachmentStrip
-            activeContext={activeContext()}
-            activeContextEnabled={activeContextEnabled()}
-            activeContextTitle={activeContextTitle()}
-            terminalSelection={terminalSelection()}
-            files={visibleFiles()}
-            clipboardImages={clipboardImages()}
-            clipboardImagesDisabled={clipboardImagesDisabled()}
-            onToggleActiveContext={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
-            onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
-            onRemoveFile={(path) => {
-              removeContextFile(path);
-              postMessage({ type: 'files/remove', payload: { path } });
+        <div
+          ref={(el) => {
+            inputFrameRef = el;
+          }}
+          class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showAgentPicker() || showVariantPicker() || showMcpPicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            setIsDraggingOver(true);
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            setIsDraggingOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setIsDraggingOver(false);
+          }}
+          onDrop={handleDrop}
+        >
+          <Show when={hasContext() || hasMentions()}>
+            <AttachmentStrip
+              activeContext={activeContext()}
+              activeContextEnabled={activeContextEnabled()}
+              activeContextTitle={activeContextTitle()}
+              terminalSelection={terminalSelection()}
+              files={visibleFiles()}
+              clipboardImages={clipboardImages()}
+              clipboardImagesDisabled={clipboardImagesDisabled()}
+              onToggleActiveContext={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
+              onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
+              onRemoveFile={(path) => {
+                removeContextFile(path);
+                postMessage({ type: 'files/remove', payload: { path } });
+              }}
+              onRemoveClipboardImage={removeClipboardImage}
+            />
+          </Show>
+
+          <ComposerArea
+            textareaRef={(el) => {
+              textareaRef = el;
             }}
-            onRemoveClipboardImage={removeClipboardImage}
+            placeholder={
+              hasActiveQuestion() || hasActivePermission()
+                ? 'Respond to the prompt above to continue...'
+                : isLoading()
+                  ? 'Queue a follow-up or steer'
+                  : 'Describe what to build'
+            }
+            value={inputText()}
+            isFocused={isFocused()}
+            showCompletionMenu={showCompletionMenu()}
+            completionItems={composerCompletions()}
+            completionSelectedIndex={completionIndex()}
+            completionHeader={showFileSearchHint() ? 'Type to search workspace files' : undefined}
+            onInput={(e) => {
+              setHistoryIndex(null);
+              setHistoryDraft('');
+              setInputText(e.currentTarget.value);
+              setCaretPosition(e.currentTarget.selectionStart || 0);
+              setCompletionIndex(0);
+              setSuppressCompletion(false);
+              autoResize();
+            }}
+            onKeyDown={handleKeydown}
+            onPaste={handlePaste}
+            onFocus={(e) => {
+              setIsFocused(true);
+              setCaretPosition(e.currentTarget.selectionStart || 0);
+            }}
+            onBlur={() => setIsFocused(false)}
+            onClick={(e) => {
+              setCaretPosition(e.currentTarget.selectionStart || 0);
+              setShowAgentPicker(false);
+              setShowModelPicker(false);
+              setShowMcpPicker(false);
+              setShowVariantPicker(false);
+              setShowPermissionModePicker(false);
+              setShowBusyMenu(false);
+            }}
+            onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
+            onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
+            onSelectCompletion={(item) => {
+              const completion = activeCompletion();
+              const completionSelection = getCompletionSelection(completion, item, true);
+              if (!completionSelection) return;
+
+              if (completionSelection.type === 'run-slash') {
+                void runSlashCommand(completionSelection.value);
+                return;
+              }
+
+              if (completionSelection.type === 'set-slash') {
+                setComposerValue(completionSelection.value);
+                return;
+              }
+
+              if (completionSelection.file) addContextFile(completionSelection.file);
+              if (completion?.type !== 'mention') return;
+              applyMentionValue(completion, completionSelection.value);
+            }}
           />
-        </Show>
 
-        <ComposerArea
-          textareaRef={(el) => {
-            textareaRef = el;
-          }}
-          placeholder={
-            hasActiveQuestion() || hasActivePermission()
-              ? 'Respond to the prompt above to continue...'
-              : isLoading()
-                ? 'Queue a follow-up or steer'
-                : 'Describe what to build'
-          }
-          value={inputText()}
-          isFocused={isFocused()}
-          showCompletionMenu={showCompletionMenu()}
-          completionItems={composerCompletions()}
-          completionSelectedIndex={completionIndex()}
-          completionHeader={showFileSearchHint() ? 'Type to search workspace files' : undefined}
-          onInput={(e) => {
-            setHistoryIndex(null);
-            setHistoryDraft('');
-            setInputText(e.currentTarget.value);
-            setCaretPosition(e.currentTarget.selectionStart || 0);
-            setCompletionIndex(0);
-            setSuppressCompletion(false);
-            autoResize();
-          }}
-          onKeyDown={handleKeydown}
-          onPaste={handlePaste}
-          onFocus={(e) => {
-            setIsFocused(true);
-            setCaretPosition(e.currentTarget.selectionStart || 0);
-          }}
-          onBlur={() => setIsFocused(false)}
-          onClick={(e) => {
-            setCaretPosition(e.currentTarget.selectionStart || 0);
-            setShowAgentPicker(false);
-            setShowModelPicker(false);
-            setShowMcpPicker(false);
-            setShowVariantPicker(false);
-            setShowPermissionModePicker(false);
-            setShowBusyMenu(false);
-          }}
-          onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
-          onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
-          onSelectCompletion={(item) => {
-            const completion = activeCompletion();
-            const completionSelection = getCompletionSelection(completion, item, true);
-            if (!completionSelection) return;
+          <div class="chat-input-toolbar-divider" aria-hidden="true" />
 
-            if (completionSelection.type === 'run-slash') {
-              void runSlashCommand(completionSelection.value);
-              return;
-            }
+          <ChatInputMainToolbar
+            toolbarRef={(el) => {
+              toolbarRef = el;
+            }}
+            toolbarLeftRef={(el) => {
+              toolbarLeftRef = el;
+            }}
+            toolbarRightRef={(el) => {
+              toolbarRightRef = el;
+            }}
+            compactTight={toolbarCompactMode() === 'tight'}
+            showLeftPopupState={showAgentPicker() || showVariantPicker()}
+            showPermissionControl={true}
+            permissionButtonRef={(el) => {
+              permissionPickerRef = el;
+            }}
+            permissionPopoverRef={(el) => {
+              permissionPopoverRef = el;
+            }}
+            permissionMode={activePermissionMode()}
+            showPermissionPicker={showPermissionModePicker()}
+            onTogglePermissionPicker={() => {
+              const next = !showPermissionModePicker();
+              closePopups(next ? 'permission' : undefined);
+              setShowPermissionModePicker(next);
+            }}
+            onSelectPermissionMode={(mode) => {
+              void updatePermissionModeForSession(mode);
+              setShowPermissionModePicker(false);
+            }}
+            agents={state.agents}
+            selectedAgent={state.selectedAgent}
+            selectedAgentLabel={selectedAgentLabel()}
+            agentFocusIndex={agentFocusIndex()}
+            showAgentPicker={showAgentPicker()}
+            showAgentControl={isToolbarControlVisible('agent')}
+            agentButtonRef={(el) => {
+              agentPickerRef = el;
+            }}
+            agentPopoverRef={(el) => {
+              agentPopoverRef = el;
+            }}
+            getAgentLabel={(agent) => formatAgentLabel(agent.name)}
+            getAgentDetail={(agent) => agent.description || getAgentBadgeLine(agent)}
+            onToggleAgentPicker={() => {
+              const next = !showAgentPicker();
+              closePopups(next ? 'agent' : undefined);
+              setShowAgentPicker(next);
+              if (next) setAgentFocusIndex(0);
+            }}
+            onSelectAgent={(agent) => {
+              setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
+              setShowAgentPicker(false);
+            }}
+            onAgentFocusIndex={setAgentFocusIndex}
+            modelButtonRef={(el) => {
+              modelPickerRef = el;
+            }}
+            currentModel={currentModel()}
+            modelCanEllipsize={modelCanEllipsize()}
+            onToggleModelPicker={() => {
+              const next = !showModelPicker();
+              closePopups(next ? 'model' : undefined);
+              setShowModelPicker(next);
+            }}
+            providerLimitBadges={currentProviderLimitBadges()}
+            providerLimitTitle={currentProviderLimitTitle()}
+            providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
+            showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
+            providerLimitButtonRef={(el) => {
+              providerLimitButtonRef = el;
+            }}
+            providerLimitPopupRef={(el) => {
+              providerLimitPopupRef = el;
+            }}
+            onToggleProviderLimitPopup={() => {
+              if (!showCurrentProviderLimit()) return;
+              const next = !showProviderLimitPopup();
+              closePopups(next ? 'providerLimit' : undefined);
+              setShowProviderLimitPopup(next);
+            }}
+            onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
+            availableVariants={availableVariants()}
+            selectedVariant={effectiveVariant()}
+            selectedVariantLabel={selectedVariantLabel()}
+            showVariantPicker={showVariantPicker()}
+            showReasoningControl={isToolbarControlVisible('reasoning')}
+            variantButtonRef={(el) => {
+              variantPickerRef = el;
+            }}
+            variantPopoverRef={(el) => {
+              variantPopoverRef = el;
+            }}
+            getVariantLabel={formatVariantLabel}
+            onToggleVariantPicker={() => {
+              const next = !showVariantPicker();
+              closePopups(next ? 'variant' : undefined);
+              setShowVariantPicker(next);
+            }}
+            onSelectVariant={(variant) => {
+              const m = currentModel();
+              void handleSelectedModelChange({
+                providerID: m.providerID!,
+                modelID: m.modelID!,
+                variant,
+              });
+              setShowVariantPicker(false);
+            }}
+            contextUsage={contextUsage()}
+            showContextControl={!!contextUsage()}
+            contextButtonRef={(el) => {
+              contextButtonRef = el;
+            }}
+            contextPopupRef={(el) => {
+              contextPopupRef = el;
+            }}
+            showContextPopup={showContextPopup()}
+            sessionTokens={sessionTokens()}
+            contextCompactDisabled={isLoading() || isSessionCompacting()}
+            onToggleContextPopup={() => {
+              const next = !showContextPopup();
+              closePopups(next ? 'context' : undefined);
+              setShowContextPopup(next);
+            }}
+            onCloseContextPopup={() => setShowContextPopup(false)}
+            onCompactSession={() => {
+              void compactSession();
+            }}
+            showAttachmentsControl={isToolbarControlVisible('attachments')}
+            onAttach={() => postMessage({ type: 'files/pick' })}
+            showStopButton={showStopButton()}
+            onStop={() => abortSession()}
+            showSendControl={showSendControl()}
+            showBusySendControls={showBusySendControls()}
+            canSend={canSend()}
+            busyToggleRef={(el) => {
+              busyToggleRef = el;
+            }}
+            showBusyMenu={showBusyMenu()}
+            onSend={() => handleSend()}
+            onToggleBusyMenu={() => {
+              const next = !showBusyMenu();
+              closePopups(next ? 'busy' : undefined);
+              setShowBusyMenu(next);
+            }}
+            busyMenuRef={(el) => {
+              busyMenuRef = el;
+            }}
+            onQueue={() => {
+              handleSend('queue');
+              setShowBusyMenu(false);
+            }}
+            onSteer={() => {
+              handleSend('steer');
+              setShowBusyMenu(false);
+            }}
+            onStopAndSend={() => {
+              abortSession();
+              handleSend();
+              setShowBusyMenu(false);
+            }}
+          />
+        </div>
 
-            if (completionSelection.type === 'set-slash') {
-              setComposerValue(completionSelection.value);
-              return;
-            }
-
-            if (completionSelection.file) addContextFile(completionSelection.file);
-            if (completion?.type !== 'mention') return;
-            applyMentionValue(completion, completionSelection.value);
-          }}
-        />
-
-        <ChatInputToolbar
-          toolbarRef={(el) => {
-            toolbarRef = el;
-          }}
-          toolbarLeftRef={(el) => {
-            toolbarLeftRef = el;
-          }}
-          toolbarRightRef={(el) => {
-            toolbarRightRef = el;
-          }}
+        <ChatInputMetaToolbar
           compactTight={toolbarCompactMode() === 'tight'}
-          showLeftPopupState={
-            showContextPopup() ||
-            showAgentPicker() ||
-            showVariantPicker() ||
-            showMcpPicker() ||
-            showPermissionModePicker() ||
-            showProviderLimitPopup()
-          }
-          showPermissionControl={isToolbarControlVisible('permission')}
+          inputFrameRef={inputFrameRef}
+          showPermissionControl={true}
           permissionButtonRef={(el) => {
             permissionPickerRef = el;
           }}
@@ -1819,9 +1960,7 @@ export function ChatInput() {
             closePopups(next ? 'model' : undefined);
             setShowModelPicker(next);
           }}
-          providerLimitPrefix={currentProviderLimitCompactPrefix()}
-          providerLimitLabel={currentProviderLimitCompactLabel()}
-          providerLimitTone={currentProviderLimitTone()}
+          providerLimitBadges={currentProviderLimitBadges()}
           providerLimitTitle={currentProviderLimitTitle()}
           providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
           showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
@@ -1836,18 +1975,6 @@ export function ChatInput() {
             const next = !showProviderLimitPopup();
             closePopups(next ? 'providerLimit' : undefined);
             setShowProviderLimitPopup(next);
-          }}
-          onCycleProviderLimitWindow={() => {
-            const limit = currentProviderLimit();
-            const providerID = currentModel().providerID;
-            if (!limit || !providerID) return;
-            const windows = getOrderedProviderLimitWindows(limit);
-            if (windows.length <= 1) return;
-            const current = currentProviderLimitWindow();
-            const currentIndex = current ? windows.findIndex((w) => w.id === current.id) : -1;
-            const nextWindow = windows[(currentIndex + 1) % windows.length];
-            if (nextWindow)
-              setSelectedProviderLimitWindowId(providerID, nextWindow.id, limit.checkedAt);
           }}
           onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
           availableVariants={availableVariants()}
@@ -1877,7 +2004,7 @@ export function ChatInput() {
             setShowVariantPicker(false);
           }}
           contextUsage={contextUsage()}
-          showContextControl={isToolbarControlVisible('context')}
+          showContextControl={!!contextUsage()}
           contextButtonRef={(el) => {
             contextButtonRef = el;
           }}

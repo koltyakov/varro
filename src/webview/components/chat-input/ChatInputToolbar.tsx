@@ -39,12 +39,9 @@ type SessionTokensInfo = {
   cacheWrite: number;
 };
 
-export function ChatInputToolbar(props: {
-  toolbarRef: (el: HTMLDivElement) => void;
-  toolbarLeftRef: (el: HTMLDivElement) => void;
-  toolbarRightRef: (el: HTMLDivElement) => void;
+type ToolbarSharedProps = {
   compactTight: boolean;
-  showLeftPopupState: boolean;
+  inputFrameRef?: HTMLElement;
   showPermissionControl: boolean;
   permissionButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   permissionPopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
@@ -69,16 +66,13 @@ export function ChatInputToolbar(props: {
   currentModel: CurrentModelInfo;
   modelCanEllipsize: boolean;
   onToggleModelPicker: () => void;
-  providerLimitPrefix: string | null;
-  providerLimitLabel: string | null;
-  providerLimitTone: string;
+  providerLimitBadges: Array<{ label: string; tone: string }>;
   providerLimitTitle: string | null;
   providerLimit: ProviderLimitStatus | null;
   showProviderLimitPopup: boolean;
   providerLimitButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   providerLimitPopupRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   onToggleProviderLimitPopup: () => void;
-  onCycleProviderLimitWindow: () => void;
   onCloseProviderLimitPopup: () => void;
   availableVariants: string[];
   selectedVariant: string | null;
@@ -115,27 +109,25 @@ export function ChatInputToolbar(props: {
   onQueue: () => void;
   onSteer: () => void;
   onStopAndSend: () => void;
-}) {
+};
+
+type ChatInputMainToolbarProps = ToolbarSharedProps & {
+  toolbarRef: (el: HTMLDivElement) => void;
+  toolbarLeftRef: (el: HTMLDivElement) => void;
+  toolbarRightRef: (el: HTMLDivElement) => void;
+  showLeftPopupState: boolean;
+};
+
+export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
   return (
     <div
       ref={props.toolbarRef}
-      class={`chat-input-toolbars ${props.compactTight ? 'compact-tight' : ''}`}
+      class={`chat-input-toolbars toolbar-main ${props.compactTight ? 'compact-tight' : ''}`}
     >
       <div
         ref={props.toolbarLeftRef}
         class={`toolbar-left${props.showLeftPopupState ? ' showing-context-popup' : ''}`}
       >
-        <Show when={props.showPermissionControl}>
-          <PermissionModePicker
-            buttonRef={props.permissionButtonRef}
-            popoverRef={props.permissionPopoverRef}
-            mode={props.permissionMode}
-            showPicker={props.showPermissionPicker}
-            onToggle={props.onTogglePermissionPicker}
-            onSelect={props.onSelectPermissionMode}
-          />
-        </Show>
-
         <Show when={props.agents.length > 0 && props.showAgentControl}>
           <AgentPicker
             buttonRef={props.agentButtonRef}
@@ -175,60 +167,6 @@ export function ChatInputToolbar(props: {
             onSelect={props.onSelectVariant}
           />
         </Show>
-
-        <Show when={props.showContextControl && props.contextUsage}>
-          {(contextUsage) => (
-            <div style={{ position: 'relative' }}>
-              <ContextUsageButton
-                ref={props.contextButtonRef}
-                percent={contextUsage().percent}
-                title={
-                  props.showContextPopup
-                    ? undefined
-                    : formatContextUsageTitle(contextUsage().percent)
-                }
-                onClick={props.onToggleContextPopup}
-              />
-              <Show when={props.showContextPopup}>
-                <ContextPopup
-                  ref={props.contextPopupRef}
-                  usage={contextUsage()}
-                  tokens={props.sessionTokens}
-                  model={props.currentModel}
-                  compactDisabled={props.contextCompactDisabled}
-                  onClose={props.onCloseContextPopup}
-                  onCompact={props.onCompactSession}
-                />
-              </Show>
-            </div>
-          )}
-        </Show>
-
-        <Show when={props.providerLimitLabel}>
-          <div style={{ position: 'relative' }}>
-            <ProviderLimitChip
-              buttonRef={props.providerLimitButtonRef}
-              prefix={props.providerLimitPrefix}
-              label={props.providerLimitLabel}
-              tone={props.providerLimitTone}
-              title={props.showProviderLimitPopup ? null : props.providerLimitTitle}
-              ariaLabel={props.providerLimitTitle}
-              onClick={props.onToggleProviderLimitPopup}
-              onCycle={props.onCycleProviderLimitWindow}
-            />
-            <Show when={props.showProviderLimitPopup}>
-              <ProviderLimitPopup
-                ref={props.providerLimitPopupRef}
-                limit={props.providerLimit}
-                model={{
-                  providerName: props.currentModel.providerName,
-                  modelName: props.currentModel.modelName,
-                }}
-                onClose={props.onCloseProviderLimitPopup}
-              />
-            </Show>
-          </div>
-        </Show>
       </div>
 
       <div ref={props.toolbarRightRef} class="toolbar-right">
@@ -262,5 +200,90 @@ export function ChatInputToolbar(props: {
         </Show>
       </div>
     </div>
+  );
+}
+
+export function ChatInputMetaToolbar(props: ToolbarSharedProps) {
+  const hasContextControl = () => props.showContextControl && !!props.contextUsage;
+  const showMetaRow = () =>
+    props.showPermissionControl || hasContextControl() || props.providerLimitBadges.length > 0;
+
+  return (
+    <Show when={showMetaRow()}>
+      <div class={`chat-input-toolbars toolbar-meta ${props.compactTight ? 'compact-tight' : ''}`}>
+        <div class="toolbar-meta-left">
+          <Show when={props.showPermissionControl}>
+            <PermissionModePicker
+              buttonRef={props.permissionButtonRef}
+              popoverRef={props.permissionPopoverRef}
+              boundaryRef={props.inputFrameRef}
+              alignTo="left"
+              mode={props.permissionMode}
+              showPicker={props.showPermissionPicker}
+              showLabel={true}
+              onToggle={props.onTogglePermissionPicker}
+              onSelect={props.onSelectPermissionMode}
+            />
+          </Show>
+        </div>
+
+        <div class="toolbar-meta-right">
+          <Show when={props.providerLimitBadges.length > 0}>
+            <div class="provider-limit-anchor" style={{ position: 'relative' }}>
+              <ProviderLimitChip
+                buttonRef={props.providerLimitButtonRef}
+                badges={props.providerLimitBadges}
+                title={props.showProviderLimitPopup ? null : props.providerLimitTitle}
+                ariaLabel={props.providerLimitTitle}
+                onClick={props.onToggleProviderLimitPopup}
+              />
+              <Show when={props.showProviderLimitPopup}>
+                <ProviderLimitPopup
+                  ref={props.providerLimitPopupRef}
+                  boundaryRef={props.inputFrameRef}
+                  alignTo="right"
+                  limit={props.providerLimit}
+                  model={{
+                    providerName: props.currentModel.providerName,
+                    modelName: props.currentModel.modelName,
+                  }}
+                  onClose={props.onCloseProviderLimitPopup}
+                />
+              </Show>
+            </div>
+          </Show>
+
+          <Show when={props.showContextControl && props.contextUsage}>
+            {(contextUsage) => (
+              <div class="context-anchor" style={{ position: 'relative' }}>
+                <ContextUsageButton
+                  ref={props.contextButtonRef}
+                  percent={contextUsage().percent}
+                  title={
+                    props.showContextPopup
+                      ? undefined
+                      : formatContextUsageTitle(contextUsage().percent)
+                  }
+                  onClick={props.onToggleContextPopup}
+                />
+                <Show when={props.showContextPopup}>
+                  <ContextPopup
+                    ref={props.contextPopupRef}
+                    boundaryRef={props.inputFrameRef}
+                    alignTo="right"
+                    usage={contextUsage()}
+                    tokens={props.sessionTokens}
+                    model={props.currentModel}
+                    compactDisabled={props.contextCompactDisabled}
+                    onClose={props.onCloseContextPopup}
+                    onCompact={props.onCompactSession}
+                  />
+                </Show>
+              </div>
+            )}
+          </Show>
+        </div>
+      </div>
+    </Show>
   );
 }

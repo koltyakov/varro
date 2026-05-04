@@ -142,7 +142,7 @@ function AssistantDialogSummary(props: {
     <div class="model-change-indicator assistant-dialog-summary">
       <div class="assistant-dialog-summary-content">
         <span class="model-change-label">
-          {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
+          {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} · ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
         </span>
       </div>
       <Show when={props.showImplementPlanAction}>

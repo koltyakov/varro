@@ -4,6 +4,7 @@ import { reconcile } from 'solid-js/store';
 import {
   replaceMessages,
   setSessions,
+  setShowModelPicker,
   setShowThinkingPreference,
   setState,
   skipPlanSession,
@@ -1255,7 +1256,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 | ↓ 310 - Agents 2');
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 · ↓ 310 - Agents 2');
   });
 
   it('renders with virtualization enabled without hitting initialization order errors', async () => {
@@ -1287,6 +1288,17 @@ describe('MessageList sticky prompt preview', () => {
     expect(container?.querySelector('.interactive-list')).toBeInstanceOf(HTMLDivElement);
 
     animationFrames.restore();
+  });
+
+  it('adds the model-picker modifier class while the model selector is open', async () => {
+    setShowModelPicker(true);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-list')?.className).toContain(
+      'showing-model-picker'
+    );
   });
 
   it('shows the prompt that belongs to the response currently in view', async () => {
@@ -1922,7 +1934,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    const shell = container?.querySelector('.interactive-list-shell') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
+    expect(shell).toBeInstanceOf(HTMLDivElement);
 
     let clientWidthValue = 288;
     Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 300 });
@@ -1931,7 +1945,7 @@ describe('MessageList auto-scroll', () => {
       get: () => clientWidthValue,
     });
 
-    const setPropertySpy = vi.spyOn(container!.style, 'setProperty');
+    const setPropertySpy = vi.spyOn(shell!.style, 'setProperty');
     for (const callback of resizeCallbacks) {
       callback([], {} as ResizeObserver);
     }
@@ -1984,7 +1998,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    const shell = container?.querySelector('.interactive-list-shell') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
+    expect(shell).toBeInstanceOf(HTMLDivElement);
 
     let clientWidthValue = 288;
     Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 300 });
@@ -1993,7 +2009,7 @@ describe('MessageList auto-scroll', () => {
       get: () => clientWidthValue,
     });
 
-    const setPropertySpy = vi.spyOn(container!.style, 'setProperty');
+    const setPropertySpy = vi.spyOn(shell!.style, 'setProperty');
 
     for (const callback of resizeCallbacks) {
       callback([], {} as ResizeObserver);

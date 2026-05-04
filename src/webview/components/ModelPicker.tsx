@@ -177,9 +177,9 @@ export function ModelPicker(props: {
 
   return (
     <div
-      class="absolute inset-x-0 z-50"
+      class="dropdown-anchor absolute inset-x-0 z-50"
       onClick={props.onClose}
-      style={{ bottom: 'calc(100% + 10px)' }}
+      style={{ bottom: '100%', 'padding-bottom': '10px' }}
     >
       <div
         ref={(el) => {

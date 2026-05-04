@@ -1,7 +1,12 @@
-import { For, Show } from 'solid-js';
+import { createEffect, For, onCleanup, Show } from 'solid-js';
 import type { Agent } from '../../types';
 import type { PermissionMode } from '../../../shared/protocol';
 import { getProviderIcon } from '../../lib/provider-icons';
+import {
+  alignPopupToBoundary,
+  clampPopupToViewport,
+  observePopupViewport,
+} from '../../lib/popup-position';
 import { PermissionModeIcon } from './PermissionModeIcon';
 
 function PickerChevron() {
@@ -25,8 +30,11 @@ function PickerChevron() {
 export function PermissionModePicker(props: {
   buttonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   popoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  boundaryRef?: HTMLElement;
+  alignTo?: 'left' | 'right';
   mode: PermissionMode;
   showPicker: boolean;
+  showLabel?: boolean;
   onToggle: () => void;
   onSelect: (mode: PermissionMode) => void;
 }) {
@@ -35,20 +43,44 @@ export function PermissionModePicker(props: {
     { mode: 'full', label: 'Full access' },
   ];
   const title = () => (props.mode === 'full' ? 'Full access permissions' : 'Default permissions');
+  const buttonLabel = () => (props.mode === 'full' ? 'Full access' : 'Default');
+  let popupEl: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!props.showPicker || !popupEl || !props.boundaryRef) return;
+
+    const reposition = () => {
+      if (!popupEl || !props.boundaryRef) return;
+      alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+      clampPopupToViewport(popupEl);
+    };
+
+    onCleanup(observePopupViewport(popupEl, reposition));
+  });
+
+  const setPopoverRef = (el: HTMLDivElement) => {
+    popupEl = el;
+    const forwarded = props.popoverRef;
+    if (typeof forwarded === 'function') forwarded(el);
+  };
 
   return (
     <div style={{ position: 'relative' }}>
       <button
         ref={props.buttonRef}
-        class="toolbar-picker icon-only"
+        class={`toolbar-picker permission-mode-button ${props.showLabel ? '' : 'icon-only'}`}
         onClick={props.onToggle}
         title={title()}
         aria-label={title()}
       >
         <PermissionModeIcon mode={props.mode} />
+        <Show when={props.showLabel}>
+          <span class="toolbar-picker-label">{buttonLabel()}</span>
+          <PickerChevron />
+        </Show>
       </button>
       <Show when={props.showPicker}>
-        <div ref={props.popoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+        <div ref={setPopoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
           <div class="toolbar-popover-header">Permissions</div>
           <For each={options}>
             {(option) => (
@@ -201,33 +233,36 @@ export function ModelPickerButton(props: {
 
 export function ProviderLimitChip(props: {
   buttonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
-  prefix: string | null;
-  label: string | null;
-  tone: string;
+  badges: Array<{ label: string; tone: string }>;
   title: string | null;
   ariaLabel?: string | null;
   onClick: () => void;
-  onCycle?: () => void;
 }) {
   return (
-    <Show when={props.label}>
+    <Show when={props.badges.length > 0}>
       <button
         ref={props.buttonRef}
         type="button"
-        class={`toolbar-limit-chip ${props.tone !== 'default' ? props.tone : ''}`}
+        class="toolbar-limit-chip"
         title={props.title ?? undefined}
         aria-label={props.ariaLabel ?? props.title ?? 'Provider limits'}
         onClick={props.onClick}
-        onContextMenu={(event) => {
-          if (!props.onCycle) return;
-          event.preventDefault();
-          props.onCycle();
-        }}
       >
-        <Show when={props.prefix}>
-          <span class="toolbar-limit-chip-prefix">{props.prefix}</span>
-        </Show>
-        <span class="toolbar-limit-chip-value">{props.label}</span>
+        <span class="toolbar-limit-chip-label">Limits:</span>
+        <For each={props.badges}>
+          {(badge, index) => (
+            <>
+              <Show when={index() > 0}>
+                <span class="toolbar-limit-chip-separator">&middot;</span>
+              </Show>
+              <span
+                class={`toolbar-limit-chip-badge ${badge.tone !== 'default' ? badge.tone : ''}`}
+              >
+                <span class="toolbar-limit-chip-badge-value">{badge.label}</span>
+              </span>
+            </>
+          )}
+        </For>
       </button>
     </Show>
   );

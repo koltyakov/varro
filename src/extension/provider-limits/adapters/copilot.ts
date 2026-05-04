@@ -19,6 +19,12 @@ const COPILOT_QUOTA_LABELS: Record<string, string> = {
   completions: 'Completions',
 };
 
+const COPILOT_MONTHLY_QUOTA_LABELS: Record<string, string> = {
+  premium_interactions: 'Monthly Premium Requests',
+  chat: 'Monthly Chat',
+  completions: 'Monthly Completions',
+};
+
 export function createCopilotAdapter(): ProviderLimitAdapter {
   return {
     id: 'github-copilot',
@@ -143,7 +149,7 @@ function buildCopilotWindow(
 
   return {
     id,
-    label: COPILOT_QUOTA_LABELS[id] ?? toLabel(id),
+    label: COPILOT_MONTHLY_QUOTA_LABELS[id] ?? COPILOT_QUOTA_LABELS[id] ?? `Monthly ${toLabel(id)}`,
     unit: id === 'chat' ? 'messages' : 'requests',
     remaining,
     limit: limit != null && limit > 0 ? limit : null,
