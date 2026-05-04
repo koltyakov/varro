@@ -1108,15 +1108,36 @@ describe('MessageList sticky prompt preview', () => {
         parts: [
           {
             ...toolPart('tool-1', 'assistant-1', 'call-1'),
-            state: { status: 'completed', input: { command: 'pwd' }, output: '', title: 'pwd', metadata: {}, time: { start: 0, end: 1 } },
+            state: {
+              status: 'completed',
+              input: { command: 'pwd' },
+              output: '',
+              title: 'pwd',
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
           },
           {
             ...toolPart('tool-2', 'assistant-1', 'call-2'),
-            state: { status: 'completed', input: { command: 'ls' }, output: '', title: 'ls', metadata: {}, time: { start: 0, end: 1 } },
+            state: {
+              status: 'completed',
+              input: { command: 'ls' },
+              output: '',
+              title: 'ls',
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
           },
           {
             ...toolPart('tool-3', 'assistant-1', 'call-3'),
-            state: { status: 'completed', input: { command: 'git status' }, output: '', title: 'git status', metadata: {}, time: { start: 0, end: 1 } },
+            state: {
+              status: 'completed',
+              input: { command: 'git status' },
+              output: '',
+              title: 'git status',
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
           },
         ],
       },
@@ -1525,6 +1546,103 @@ describe('MessageList loading row', () => {
 });
 
 describe('MessageList auto-scroll', () => {
+  it('updates the virtualized range when initial bottom scroll is programmatic', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, `Response ${index}`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 7200 });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(6800);
+    const firstRenderedMessageId =
+      container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+    expect(firstRenderedMessageId).not.toBe('assistant-0');
+
+    animationFrames.restore();
+  });
+
+  it('keeps correcting initial bottom scroll when scrollHeight shifts without track growth', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let trackHeight = 1200;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(800);
+
+    scrollHeightValue = 1700;
+    trackHeight = 1200;
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(1300);
+    animationFrames.restore();
+  });
+
   it('keeps the latest message fully visible when the last response grows', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -1711,6 +1829,76 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterGrowth);
+    expect(scrollTopValue).toBe(1300);
+    animationFrames.restore();
+  });
+
+  it('does not rewrite scrollTop when resize leaves the list already at bottom', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    expect(resizeCallbacks).toHaveLength(2);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    const assignmentCountAfterInitialScroll = assignedScrollTops.length;
+    trackHeight = 1700;
+    scrollHeightValue = 1700;
+    scrollTopValue = 1300;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterInitialScroll);
     expect(scrollTopValue).toBe(1300);
     animationFrames.restore();
   });

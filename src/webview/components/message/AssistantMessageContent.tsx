@@ -443,10 +443,14 @@ export function AssistantMessageContent(props: {
                 messageInfo={props.info}
                 streamedText={props.textForPart(part)}
                 questionRequest={
-                  part.type === 'tool' ? props.questionRequestForTool?.(part as ToolPart) : undefined
+                  part.type === 'tool'
+                    ? props.questionRequestForTool?.(part as ToolPart)
+                    : undefined
                 }
                 permissionMatch={
-                  part.type === 'tool' ? props.permissionMatchForTool?.(part as ToolPart) : undefined
+                  part.type === 'tool'
+                    ? props.permissionMatchForTool?.(part as ToolPart)
+                    : undefined
                 }
               />
             )}

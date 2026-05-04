@@ -26,7 +26,11 @@ export function buildQuestionRequestLookup(
     const questionRootId = getSessionTreeRootId(question.sessionID) || question.sessionID;
     if (questionRootId !== sessionRootId) continue;
 
-    const key = getToolCallLookupKey(sessionRootId, question.tool?.messageID, question.tool?.callID);
+    const key = getToolCallLookupKey(
+      sessionRootId,
+      question.tool?.messageID,
+      question.tool?.callID
+    );
     if (key && !result.has(key)) {
       result.set(key, question);
     }

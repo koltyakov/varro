@@ -160,7 +160,9 @@ export function ToolCall(props: {
   const expansionKey = () => getToolCallExpansionKey(tool());
   const [expanded, setExpanded] = createSignal(getToolCallExpanded(expansionKey()));
   const state = () => tool().state;
-  const toolSessionRootId = createMemo(() => getSessionTreeRootId(tool().sessionID) || tool().sessionID);
+  const toolSessionRootId = createMemo(
+    () => getSessionTreeRootId(tool().sessionID) || tool().sessionID
+  );
   const fallbackQuestionRequest = createMemo(() => {
     const currentTool = tool();
     const sessionRootId = toolSessionRootId();
@@ -178,7 +180,8 @@ export function ToolCall(props: {
     for (const permission of appState.permissions) {
       const members = getPermissionGroupMembers(permission);
       for (const [index, member] of members.entries()) {
-        if ((getSessionTreeRootId(member.sessionID) || member.sessionID) !== sessionRootId) continue;
+        if ((getSessionTreeRootId(member.sessionID) || member.sessionID) !== sessionRootId)
+          continue;
         if (member.messageID !== currentTool.messageID || member.callID !== currentTool.callID) {
           continue;
         }
@@ -192,7 +195,9 @@ export function ToolCall(props: {
     return null;
   });
   const questionRequest = createMemo(() =>
-    props.questionRequest !== undefined ? props.questionRequest : (fallbackQuestionRequest() ?? null)
+    props.questionRequest !== undefined
+      ? props.questionRequest
+      : (fallbackQuestionRequest() ?? null)
   );
   const permissionMatch = createMemo(() =>
     props.permissionMatch !== undefined ? props.permissionMatch : fallbackPermissionMatch()

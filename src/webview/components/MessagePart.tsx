@@ -16,7 +16,7 @@ export function MessagePart(props: {
   part: Part;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
-  questionRequest?: typeof state.questions[number] | null;
+  questionRequest?: (typeof state.questions)[number] | null;
   permissionMatch?: ToolCallPermissionMatch | null;
 }) {
   const p = () => props.part;
@@ -112,11 +112,11 @@ function ReasoningBlock(props: {
 }) {
   const [expanded, setExpanded] = createSignal(expandThinkingByDefault());
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
-  const parsedText = createMemo(() => splitReasoningText(reasoningText()));
+  const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
+  const bodyText = createMemo(() => (expanded() ? splitReasoningText(reasoningText()).body : ''));
   const isStreaming = () => props.part.time.end === undefined;
-  const hasBody = () => parsedText().body.trim().length > 0;
+  const hasBody = () => bodyText().trim().length > 0;
   const detailLabel = () => getReasoningDetailLabel(props.messageInfo);
-  const subjectLabel = () => parsedText().subject;
   const headerLabel = () => formatReasoningHeader(subjectLabel(), detailLabel());
   const durationLabel = () => formatReasoningDuration(props.part.time);
 
@@ -149,12 +149,32 @@ function ReasoningBlock(props: {
       <Show when={expanded() && hasBody()}>
         <div class="thinking-content">
           <div class="thinking-item">
-            <div class="thinking-text">{parsedText().body}</div>
+            <div class="thinking-text">{bodyText()}</div>
           </div>
         </div>
       </Show>
     </div>
   );
+}
+
+function getReasoningSubject(text: string) {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  let index = 0;
+
+  while (index < normalized.length) {
+    const nextBreak = normalized.indexOf('\n', index);
+    const lineEnd = nextBreak === -1 ? normalized.length : nextBreak;
+    const line = normalized.slice(index, lineEnd).trim();
+    if (line.length > 0) {
+      const subjectMatch = line.match(/^\*\*(.+?)\*\*$/);
+      const subject = subjectMatch?.[1].trim();
+      return subject || null;
+    }
+    if (nextBreak === -1) break;
+    index = nextBreak + 1;
+  }
+
+  return null;
 }
 
 export function splitReasoningText(text: string) {

@@ -50,7 +50,7 @@ import {
   shouldShowStickyUserMessagePreview,
   type StickyUserMessagePreview,
 } from './message-list/sticky-preview';
-import { hasVisibleBlockingStreamingPart } from './message-list/streaming';
+import { findStreamingPart, hasVisibleBlockingStreamingPart } from './message-list/streaming';
 import {
   buildVirtualMetrics,
   calculateVirtualRangeFromMetrics,
@@ -325,13 +325,14 @@ export function MessageList() {
     messageStructureVersion();
     return untrack(() => getLatestPlanImplementationMessageId(state.messages));
   });
-  const visibleBlockingStreamingPart = createMemo(() => {
+  const streamingPart = createMemo(() => {
     const streamingPartId = state.streamingPartId;
-    const streamingText = state.streamingText;
     messageStructureVersion();
-    return untrack(() =>
-      hasVisibleBlockingStreamingPart(state.messages, streamingPartId, streamingText)
-    );
+    return untrack(() => findStreamingPart(state.messages, streamingPartId));
+  });
+  const visibleBlockingStreamingPart = createMemo(() => {
+    const streamingText = state.streamingText;
+    return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
   const messageIndexById = createMemo(() => {
     messageStructureVersion();
@@ -615,12 +616,24 @@ export function MessageList() {
     return changed;
   }
 
-  function setMeasuredHeightFor(id: string, height: number) {
-    if (height <= 0) return false;
-    if ((measuredHeights.get(id) ?? 0) === height) return false;
-    measuredHeights.set(id, height);
+  function setMeasuredHeightsFor(entries: ResizeObserverEntry[]) {
+    let changed = false;
+    for (const entry of entries) {
+      const element = entry.target as HTMLDivElement;
+      const messageId = element.dataset.msgId;
+      const height = entry.contentRect.height;
+      if (!messageId || height <= 0 || (measuredHeights.get(messageId) ?? 0) === height) {
+        continue;
+      }
+
+      measuredHeights.set(messageId, height);
+      changed = true;
+    }
+
+    if (!changed) return;
+
     setMeasurementVersion((version) => version + 1);
-    return true;
+    scheduleVisibleMeasurement({ afterResize: true });
   }
 
   function observeMeasuredRow(element: HTMLDivElement, messageId: string, active: boolean) {
@@ -793,6 +806,10 @@ export function MessageList() {
     ignoreScrollUntil = result.nextIgnoreScrollUntil;
     lastObservedScrollTop = result.nextScrollTop;
     lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
+    batch(() => {
+      setScrollTop(result.nextScrollTop);
+      if (containerRef) setViewportHeight(containerRef.clientHeight);
+    });
   }
 
   function cancelPendingScroll() {
@@ -812,6 +829,7 @@ export function MessageList() {
     let attempts = 0;
     let stableFrames = 0;
     let lastHeight = -1;
+    let lastBottomScrollTop = -1;
 
     const tick = () => {
       initialScrollRafId = 0;
@@ -824,16 +842,26 @@ export function MessageList() {
       }
 
       const currentHeight = trackRef.getBoundingClientRect().height;
-      if (currentHeight > lastAutoScrolledTrackHeight + 1) {
+      const currentBottomScrollTop = Math.max(
+        0,
+        containerRef.scrollHeight - containerRef.clientHeight
+      );
+      const belowBottomTarget = containerRef.scrollTop < currentBottomScrollTop - 1;
+      if (belowBottomTarget || currentHeight > lastAutoScrolledTrackHeight + 1) {
         performScroll();
       }
 
-      if (Math.abs(currentHeight - lastHeight) <= 1) {
+      if (
+        Math.abs(currentHeight - lastHeight) <= 1 &&
+        Math.abs(currentBottomScrollTop - lastBottomScrollTop) <= 1 &&
+        distanceFromBottom() <= 1
+      ) {
         stableFrames++;
         if (stableFrames >= INITIAL_SCROLL_STABLE_FRAMES) return;
       } else {
         stableFrames = 0;
         lastHeight = currentHeight;
+        lastBottomScrollTop = currentBottomScrollTop;
       }
 
       if (++attempts < INITIAL_SCROLL_MAX_FRAMES) {
@@ -926,12 +954,7 @@ export function MessageList() {
 
     if (typeof ResizeObserver !== 'undefined') {
       measuredRowObserver = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          const element = entry.target as HTMLDivElement;
-          const messageId = element.dataset.msgId;
-          if (!messageId) continue;
-          setMeasuredHeightFor(messageId, entry.contentRect.height);
-        }
+        setMeasuredHeightsFor(entries);
       });
     }
 
@@ -1274,7 +1297,8 @@ export function getAssistantDialogSummaryMap(
   targetMessageIds?: ReadonlySet<string>
 ) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
-  let childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> | null = null;
+  let childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> | null =
+    null;
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
