@@ -768,16 +768,18 @@ export function SessionListView(props: {
 }
 
 function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }) {
-  const childCount = () => Math.max(0, props.entry.sessions.length - 1);
+  const title = () => normalizeSessionTitle(props.entry.root?.title || props.entry.rootID);
+  const childCount = () => {
+    const sessions = Array.isArray(props.entry.sessions) ? props.entry.sessions : [];
+    return Math.max(0, sessions.length - 1);
+  };
 
   return (
     <div class="session-item recycle-bin-item">
       <div class="session-item-main recycle-bin-item-main">
         <span class="session-item-indicator-spacer" />
         <div class="session-item-content">
-          <span class="session-item-title">
-            {normalizeSessionTitle(props.entry.root.title) || 'Untitled'}
-          </span>
+          <span class="session-item-title">{title() || 'Untitled'}</span>
           <span class="session-item-meta">
             Deleted {formatSessionAge(props.entry.deletedAt, props.now())} ago
             <Show when={childCount() > 0}>

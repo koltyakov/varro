@@ -234,13 +234,8 @@ describe('format helpers', () => {
     // Selection respected when no smaller-remaining window exists.
     expect(resolveProviderLimitWindow(limit, 'seven_day')?.id).toBe('seven_day');
 
-    // Auto-override: monthly selected, but weekly has lower remaining percent.
-    expect(resolveProviderLimitWindow(limit, 'monthly_limit')?.id).toBe('seven_day');
-
-    // Explicit selection on current quota data is shown immediately; fresh data may override later.
-    expect(resolveProviderLimitWindow(limit, 'monthly_limit', limit.checkedAt)?.id).toBe(
-      'monthly_limit'
-    );
+    // Manual selection is remembered even when another window is more constrained.
+    expect(resolveProviderLimitWindow(limit, 'monthly_limit')?.id).toBe('monthly_limit');
 
     // No selection falls back to the narrowest period window.
     expect(resolveProviderLimitWindow(limit, null)?.id).toBe('five_hour');

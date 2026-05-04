@@ -37,7 +37,6 @@ describe('performScrollToBottom', () => {
       {
         nextScrollTop: 300,
         nextIgnoreScrollUntil: 450,
-        nextLastScrollAt: 250,
       }
     );
     expect(container.scrollTop).toBe(300);

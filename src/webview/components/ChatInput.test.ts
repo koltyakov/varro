@@ -23,6 +23,7 @@ import {
   setState,
   setInputText,
 } from '../lib/state';
+import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-limit-selection';
 
 const { abortSessionMock, continueInterruptedSessionMock, sendMessageMock } = vi.hoisted(() => ({
   abortSessionMock: vi.fn(async () => {}),
@@ -45,6 +46,7 @@ let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 
 beforeEach(() => {
+  __resetProviderLimitWindowSelectionsForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
@@ -80,6 +82,7 @@ afterEach(() => {
   setState('queuedMessages', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  __resetProviderLimitWindowSelectionsForTests();
   sendMessageMock.mockReset();
   abortSessionMock.mockReset();
   continueInterruptedSessionMock.mockReset();
@@ -327,6 +330,87 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
+  });
+
+  it('keeps the selected provider-limit window after limit refreshes', async () => {
+    setProviderLimitThresholdPercent(40);
+    setupModelState();
+    setState('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 39,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'seven_day',
+            label: 'Weekly All-Model',
+            unit: 'requests',
+            remaining: 30,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'monthly_limit',
+            label: 'Monthly Limit',
+            unit: 'requests',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      }),
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const chip = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+    expect(container?.querySelector('.toolbar-limit-chip-prefix')?.textContent).toBe('5H');
+
+    chip?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.toolbar-limit-chip-prefix')?.textContent).toBe('W');
+
+    setState('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({
+        checkedAt: 2,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 39,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'seven_day',
+            label: 'Weekly All-Model',
+            unit: 'requests',
+            remaining: 30,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'monthly_limit',
+            label: 'Monthly Limit',
+            unit: 'requests',
+            remaining: 1,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      }),
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.toolbar-limit-chip-prefix')?.textContent).toBe('W');
   });
 
   it('removes the context button title while the popup is open', async () => {

@@ -50,39 +50,15 @@ export function getPrimaryProviderLimitWindow(limit: ProviderLimitStatus | null 
  *
  * - If `selectedId` matches an available window, prefer it.
  * - Otherwise fall back to the narrowest period window (5H, D, W, M).
- * - Auto-override: if any other window has a strictly smaller remaining percent
- *   than the selected one, surface that smaller window instead so the user is
- *   warned about the more urgent quota.
  */
 export function resolveProviderLimitWindow(
   limit: ProviderLimitStatus | null | undefined,
-  selectedId?: string | null,
-  selectedCheckedAt?: number | null
+  selectedId?: string | null
 ): ProviderLimitWindow | null {
   if (!limit || limit.status !== 'available' || limit.windows.length === 0) return null;
 
   const selected = selectedId ? limit.windows.find((w) => w.id === selectedId) : null;
-  if (!selected) return getDefaultProviderLimitWindow(limit);
-
-  if (selectedId && selectedCheckedAt != null && selectedCheckedAt >= limit.checkedAt) {
-    return selected;
-  }
-
-  const selectedRemaining = getProviderLimitWindowRemainingPercent(selected);
-  if (selectedRemaining == null) return selected;
-
-  let best = selected;
-  let bestRemaining = selectedRemaining;
-  for (const w of limit.windows) {
-    if (w.id === selected.id) continue;
-    const remaining = getProviderLimitWindowRemainingPercent(w);
-    if (remaining == null) continue;
-    if (remaining < bestRemaining) {
-      best = w;
-      bestRemaining = remaining;
-    }
-  }
-  return best;
+  return selected ?? getDefaultProviderLimitWindow(limit);
 }
 
 export function getProviderLimitTone(

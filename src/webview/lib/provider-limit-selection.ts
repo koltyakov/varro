@@ -47,4 +47,5 @@ export function clearSelectedProviderLimitWindowId(providerID: string) {
 // Test-only reset hook (not exported via barrel).
 export function __resetProviderLimitWindowSelectionsForTests() {
   setSelections({});
+  writeStored(STORAGE_KEYS.providerLimitWindow, null);
 }

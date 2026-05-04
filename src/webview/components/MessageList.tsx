@@ -247,8 +247,6 @@ export function MessageList() {
     }
     return null;
   });
-  let scrollTimer: ReturnType<typeof setTimeout> | 0 = 0;
-  let lastScrollAt = 0;
   let expectedScrollTop = -1;
   let ignoreScrollUntil = 0;
   let lastObservedScrollTop = 0;
@@ -272,7 +270,6 @@ export function MessageList() {
   let pendingStickyPreviewScrollTop = 0;
   let pendingStickyPreviewViewportHeight = 0;
   let lastScrollbarInset = -1;
-  const SCROLL_INTERVAL_MS = 700;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
   const INITIAL_SCROLL_STABLE_FRAMES = 3;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
@@ -622,7 +619,7 @@ export function MessageList() {
         return;
       }
       if (hadResize && lastTrackHeight > previousTrackHeight + 1) {
-        scrollToBottom();
+        performScroll();
       }
     });
     measurementRafId = measurementScheduled ? rafId : 0;
@@ -755,14 +752,9 @@ export function MessageList() {
     expectedScrollTop = result.nextScrollTop;
     ignoreScrollUntil = result.nextIgnoreScrollUntil;
     lastObservedScrollTop = result.nextScrollTop;
-    lastScrollAt = result.nextLastScrollAt;
   }
 
   function cancelPendingScroll() {
-    if (scrollTimer) {
-      clearTimeout(scrollTimer);
-      scrollTimer = 0;
-    }
     if (stickyPreviewDebounceTimer) {
       clearTimeout(stickyPreviewDebounceTimer);
       stickyPreviewDebounceTimer = 0;
@@ -805,23 +797,6 @@ export function MessageList() {
       }
     };
     initialScrollRafId = requestAnimationFrame(tick);
-  }
-
-  function scrollToBottom() {
-    if (!containerRef || !autoScroll()) return;
-    const now = performance.now();
-    const elapsed = now - lastScrollAt;
-    if (elapsed >= SCROLL_INTERVAL_MS) {
-      cancelPendingScroll();
-      performScroll();
-      return;
-    }
-    if (scrollTimer) return;
-    scrollTimer = setTimeout(() => {
-      scrollTimer = 0;
-      if (!autoScroll()) return;
-      performScroll();
-    }, SCROLL_INTERVAL_MS - elapsed);
   }
 
   function onScroll() {
@@ -935,7 +910,6 @@ export function MessageList() {
       measuredRowObserver?.disconnect();
       measuredRowObserver = null;
       clearObservedVisibleMessages();
-      if (scrollTimer) clearTimeout(scrollTimer);
       if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       cancelScheduledMeasurement();
@@ -1077,10 +1051,6 @@ export function MessageList() {
   createEffect(() => {
     const loading = isLoading();
     if (prevLoading && !loading && autoScroll()) {
-      if (scrollTimer) {
-        clearTimeout(scrollTimer);
-        scrollTimer = 0;
-      }
       queueMicrotask(() => performScroll());
     }
     prevLoading = loading;

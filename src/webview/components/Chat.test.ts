@@ -1416,6 +1416,36 @@ describe('header status badges', () => {
     ).toBe(true);
   });
 
+  it('expands recycle bin entries that are missing snapshots', async () => {
+    const now = Date.now();
+    setState('sessions', [session('active', now - 1_000)]);
+    setState('activeSessionId', 'active');
+    setState('recycleBinEntries', [
+      {
+        rootID: 'deleted-session',
+        deletedAt: now - 10_000,
+        expiresAt: now + 10_000,
+      } as never,
+    ]);
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const toggle = Array.from(
+      container?.querySelectorAll('button.session-list-section-toggle') ?? []
+    ).find((item) => item.textContent?.includes('Recycle Bin')) as HTMLButtonElement | undefined;
+
+    toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('Something went wrong');
+    expect(
+      Array.from(container?.querySelectorAll('.session-item-title') ?? []).some(
+        (item) => item.textContent?.trim() === 'deleted-session'
+      )
+    ).toBe(true);
+  });
+
   it('invokes recycle bin row actions', async () => {
     const restoreSpy = vi.spyOn(openCodeModule, 'restoreSession').mockResolvedValue(undefined);
     const deleteSpy = vi

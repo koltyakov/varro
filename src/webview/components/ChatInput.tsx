@@ -103,7 +103,6 @@ import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
 import {
-  getSelectedProviderLimitWindowCheckedAt,
   getSelectedProviderLimitWindowId,
   setSelectedProviderLimitWindowId,
 } from '../lib/provider-limit-selection';
@@ -1285,10 +1284,7 @@ export function ChatInput() {
     if (!showCurrentProviderLimit()) return null;
     const providerID = currentModel().providerID;
     const selectedId = providerID ? getSelectedProviderLimitWindowId(providerID) : null;
-    const selectedCheckedAt = providerID
-      ? getSelectedProviderLimitWindowCheckedAt(providerID)
-      : null;
-    return resolveProviderLimitWindow(currentProviderLimit(), selectedId, selectedCheckedAt);
+    return resolveProviderLimitWindow(currentProviderLimit(), selectedId);
   });
 
   const currentProviderLimitCompact = createMemo(() =>

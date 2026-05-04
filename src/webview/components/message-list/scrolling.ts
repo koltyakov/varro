@@ -31,7 +31,6 @@ export function performScrollToBottom(args: {
   return {
     nextScrollTop,
     nextIgnoreScrollUntil: args.now + args.programmaticScrollWindowMs,
-    nextLastScrollAt: args.now,
   };
 }
 
