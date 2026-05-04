@@ -156,6 +156,9 @@ export function AgentPicker(props: {
 export function VariantPicker(props: {
   buttonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   popoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  boundaryRef?: HTMLElement;
+  alignTo?: 'left' | 'right';
+  popupGap?: number;
   variants: string[];
   selectedVariant: string | null;
   selectedLabel: string;
@@ -164,6 +167,29 @@ export function VariantPicker(props: {
   onToggle: () => void;
   onSelect: (variant: string) => void;
 }) {
+  let popupEl: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!props.showPicker || !popupEl || !props.boundaryRef) return;
+
+    const reposition = () => {
+      if (!popupEl || !props.boundaryRef) return;
+      alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+      clampPopupToViewport(popupEl);
+    };
+
+    onCleanup(observePopupViewport(popupEl, reposition));
+  });
+
+  const setPopoverRef = (el: HTMLDivElement) => {
+    popupEl = el;
+    const forwarded = props.popoverRef;
+    if (typeof forwarded === 'function') forwarded(el);
+  };
+
+  const popoverStyle = () =>
+    props.popupGap === undefined ? undefined : { 'margin-bottom': `${props.popupGap}px` };
+
   return (
     <div style={{ position: 'relative' }}>
       <button
@@ -176,7 +202,12 @@ export function VariantPicker(props: {
         <PickerChevron />
       </button>
       <Show when={props.showPicker}>
-        <div ref={props.popoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+        <div
+          ref={setPopoverRef}
+          class="toolbar-popover"
+          onClick={(e) => e.stopPropagation()}
+          style={popoverStyle()}
+        >
           <div class="toolbar-popover-header">Reasoning</div>
           <For each={props.variants}>
             {(variant) => (

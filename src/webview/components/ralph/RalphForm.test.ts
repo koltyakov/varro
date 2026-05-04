@@ -14,6 +14,7 @@ const stateMock = vi.hoisted(() => ({
   selectedModel: null,
   selectedAgent: null,
   providers: [],
+  providerDefaults: {},
   allAgents: [],
   messages: [],
   queuedMessages: [],
@@ -45,6 +46,7 @@ vi.mock('../../lib/client', () => ({
 }));
 
 vi.mock('../../lib/state', () => ({
+  getVisibleProviders: vi.fn((providers) => providers),
   isSessionAwaitingInput: vi.fn(() => false),
   state: stateMock,
 }));
@@ -89,6 +91,7 @@ beforeEach(() => {
   stateMock.selectedModel = null;
   stateMock.selectedAgent = null;
   stateMock.providers = [];
+  stateMock.providerDefaults = {};
   stateMock.allAgents = [];
   stateMock.messages = [];
   stateMock.queuedMessages = [];
@@ -214,6 +217,63 @@ describe('RalphForm', () => {
         model: { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' },
       })
     );
+  });
+
+  it('prefills the provider default model when no model is selected', () => {
+    stateMock.providers = [
+      {
+        id: 'github-copilot',
+        name: 'GitHub Copilot',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+          'gpt-5.4-mini': {
+            id: 'gpt-5.4-mini',
+            name: 'GPT-5.4 Mini',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    ];
+    stateMock.providerDefaults = { 'github-copilot': 'gpt-5.4-mini' };
+
+    cleanup = render(() => RalphForm(), container!);
+
+    const modelButton = document.body.querySelector<HTMLButtonElement>('.model-picker-btn');
+    expect(modelButton?.textContent).toContain('GPT-5.4 Mini');
+  });
+
+  it('uses a selection-only model popup in the Ralph form', async () => {
+    stateMock.providers = [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    ];
+    stateMock.selectedModel = { providerID: 'openai', modelID: 'gpt-5.4' };
+
+    cleanup = render(() => RalphForm(), container!);
+
+    const modelButton = document.body.querySelector<HTMLButtonElement>('.model-picker-btn');
+    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushMicrotasks();
+
+    expect(document.body.textContent).not.toContain('Manage Models');
   });
 
   it('identifies a previously active blank session for cleanup', () => {

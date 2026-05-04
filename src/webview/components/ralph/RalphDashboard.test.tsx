@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
-import type { RalphIteration, RalphRun, RalphStopReason } from '../../../shared/ralph';
-import { RalphDashboard, stopReasonLabel, stopReasonTooltip } from './RalphDashboard';
+import type { RalphIteration, RalphRun } from '../../../shared/ralph';
+import { RalphDashboard } from './RalphDashboard';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 
 const getRunMock = vi.hoisted(() => vi.fn());
@@ -209,9 +209,7 @@ describe('RalphDashboard', () => {
       'docs/PLAN.md'
     );
     expect(container?.querySelector('.ralph-dashboard-status')?.textContent).toBe('running');
-    expect(container?.querySelector('.ralph-dashboard-status')?.className).toContain(
-      'ralph-dashboard-status-running'
-    );
+    expect(container?.querySelector('.ralph-dashboard-stop-reason')).toBeNull();
     expect(container?.querySelector('.ralph-dashboard-meta')?.textContent).toContain(
       'Iterations: 3 / 5'
     );
@@ -339,7 +337,7 @@ describe('RalphDashboard', () => {
     expect(limits?.getAttribute('title')).toContain('Monthly: 40 / 100 left');
   });
 
-  it('shows the incomplete continue branch and stop-reason tooltip', () => {
+  it('shows the incomplete continue branch', () => {
     currentRun = run({
       status: 'incomplete',
       stopReason: 'iteration_limit_with_gap',
@@ -353,7 +351,6 @@ describe('RalphDashboard', () => {
     const continueButton = container?.querySelector<HTMLButtonElement>(
       'button[aria-label="Add 5 runs & continue"]'
     );
-    const stopReason = container?.querySelector('.ralph-dashboard-stop-reason');
 
     expect(continueButton).toBeInstanceOf(HTMLButtonElement);
     expect(continueButton?.className).toContain('ralph-dashboard-btn-continue');
@@ -362,8 +359,10 @@ describe('RalphDashboard', () => {
       'Increase the iteration limit by 5 and continue the Ralph loop.'
     );
     expect(container?.querySelector('button[aria-label="Stop"]')).toBeNull();
-    expect(stopReason?.textContent).toBe('iteration limit · verification gap');
-    expect(stopReason?.getAttribute('title')).toContain('configured iteration limit');
+    expect(container?.querySelector('.ralph-dashboard-status')?.textContent).toBe('incomplete');
+    expect(container?.querySelector('.ralph-dashboard-stop-reason')?.textContent).toBe(
+      'iteration limit · verification gap'
+    );
     expect(container?.querySelector('.ralph-dashboard-meta')?.textContent).toContain(
       'Model: anthropic/claude (Very High)'
     );
@@ -397,9 +396,6 @@ describe('RalphDashboard', () => {
 
     renderDashboard();
 
-    expect(container?.querySelector('.ralph-dashboard-stop-reason')?.getAttribute('title')).toBe(
-      'messages exhausted · retry in 28s · attempt #5'
-    );
     expect(container?.querySelector('.ralph-dashboard-error')).toBeNull();
   });
 
@@ -440,32 +436,21 @@ describe('RalphDashboard', () => {
     expect(container?.querySelector('button[aria-label="Pause"]')).toBeNull();
     expect(container?.querySelector('button[aria-label="Resume"]')).toBeNull();
     expect(container?.querySelector('button[aria-label="Stop"]')).toBeNull();
+    expect(container?.querySelector('.ralph-dashboard-status')?.textContent).toBe('done');
     expect(container?.querySelector('.ralph-dashboard-stop-reason')?.textContent).toBe(
       'plan marked DONE'
     );
   });
 
-  it.each([
-    [
-      'iteration_limit',
-      'iteration limit',
-      'Reached the configured iteration limit with no outstanding verification or plan items.',
-    ],
-    [
-      'iteration_limit_with_gap',
-      'iteration limit · verification gap',
-      'Reached the configured iteration limit while the plan still has unchecked items or the last iteration had failed verifications.',
-    ],
-    [
-      'consecutive_passes',
-      'consecutive passes',
-      'Stopped after consecutive passing iterations and a clean plan checklist.',
-    ],
-    ['done_marker', 'plan marked DONE', 'The plan document started with a DONE marker.'],
-    ['manual_stop', 'stopped manually', 'The run was stopped by the user.'],
-    ['iteration_error', 'iteration error', 'An iteration failed to start or run; the loop halted.'],
-  ] as const)('formats %s labels and tooltips', (reason, label, tooltip) => {
-    expect(stopReasonLabel(reason as RalphStopReason)).toBe(label);
-    expect(stopReasonTooltip(reason as RalphStopReason)).toBe(tooltip);
+  it('hides the redundant manual stop-reason tag while keeping the stopped status', () => {
+    currentRun = run({
+      status: 'stopped',
+      stopReason: 'manual_stop',
+    });
+
+    renderDashboard();
+
+    expect(container?.querySelector('.ralph-dashboard-status')?.textContent).toBe('stopped');
+    expect(container?.querySelector('.ralph-dashboard-stop-reason')).toBeNull();
   });
 });

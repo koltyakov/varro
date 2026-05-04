@@ -2258,7 +2258,7 @@ body.vscode-light
   border: none;
   background: transparent;
   border-radius: 7px;
-  padding: 6px 0 6px 8px;
+  padding: 6px 8px;
   text-align: left;
   color: var(--color-vscode-fg);
   cursor: pointer;
@@ -2336,6 +2336,26 @@ body.vscode-light
   flex: 1 1 auto;
 }
 
+.composer-completion-item.completion-slash .composer-completion-title-shell {
+  flex: 0 0 auto;
+  min-width: max-content;
+  overflow: visible;
+}
+
+.composer-completion-item.completion-slash .composer-completion-title {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.composer-completion-item.completion-slash .composer-completion-detail {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: right;
+}
+
 .composer-completion-item.completion-file .composer-completion-title-shell {
   flex: 1 1 auto;
 }
@@ -2378,7 +2398,7 @@ body.vscode-light
   align-items: center;
   gap: 3px;
   height: 26px;
-  padding: 0 9px;
+  padding: 0 6px 0 9px;
   min-width: 0;
   max-width: 100%;
   border-radius: var(--chat-radius-control);
@@ -2781,7 +2801,7 @@ body.vscode-light
 
 .chat-input-toolbars.compact-tight .toolbar-picker {
   padding-left: 7px;
-  padding-right: 7px;
+  padding-right: 5px;
 }
 
 .chat-input-toolbars.compact-tight .toolbar-limit-chip {
@@ -3637,6 +3657,7 @@ body.vscode-light
 }
 
 .loading-elapsed {
+  margin-left: auto;
   opacity: 0.5;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -6965,13 +6986,18 @@ body.vscode-high-contrast-light
 }
 
 .ralph-form-card {
+  --chat-radius-control: 6px;
+  --chat-radius-card: 10px;
+  --chat-radius-popover: 8px;
+  --chat-shadow-popover: 0 12px 28px
+    color-mix(in srgb, var(--color-vscode-widget-shadow) 92%, transparent);
   width: min(560px, 100%);
   max-height: 90vh;
   display: flex;
   flex-direction: column;
   background: var(--color-vscode-sidebar);
   border: 1px solid var(--color-vscode-border);
-  border-radius: 6px;
+  border-radius: var(--chat-radius-card);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   color: var(--color-vscode-fg);
 }
@@ -6995,7 +7021,6 @@ body.vscode-high-contrast-light
   color: var(--color-vscode-muted);
   font-size: 18px;
   cursor: pointer;
-  padding: 0 6px;
   line-height: 1;
 }
 
@@ -7031,12 +7056,20 @@ body.vscode-high-contrast-light
 .ralph-form-input {
   background: var(--color-vscode-input-bg, var(--color-vscode-bg));
   border: 1px solid var(--color-vscode-border);
-  border-radius: 4px;
+  border-radius: var(--chat-radius-control);
   padding: 6px 8px;
   font-size: 12px;
+  line-height: 1.2;
   color: var(--color-vscode-fg);
   font-family: inherit;
   outline: none;
+  box-sizing: border-box;
+}
+
+.ralph-form-input:not(textarea) {
+  height: 30px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .ralph-form-input:focus {
@@ -7110,7 +7143,8 @@ body.vscode-high-contrast-light
   border-radius: 0;
   width: 64px;
   text-align: center;
-  padding: 6px 4px;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
 .ralph-form-stepper-input.ralph-form-input:focus {
@@ -7131,6 +7165,8 @@ body.vscode-high-contrast-light
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-height: 30px;
+  box-sizing: border-box;
 }
 
 .ralph-form-model-picker {
@@ -7145,6 +7181,14 @@ body.vscode-high-contrast-light
   flex: 1 1 auto;
   min-width: 0;
   justify-content: space-between;
+}
+
+.ralph-form-model-picker > .toolbar-picker,
+.ralph-form-model-picker > div > .toolbar-picker {
+  height: 30px;
+  font-size: 12px;
+  line-height: 1.2;
+  box-sizing: border-box;
 }
 
 .ralph-form-model-picker > div {
@@ -7227,7 +7271,13 @@ body.vscode-high-contrast-light
   padding: 6px 12px;
   color: var(--color-vscode-fg);
   font-size: 12px;
+  line-height: 1.2;
   cursor: pointer;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 .ralph-form-button:hover {

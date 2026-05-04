@@ -15,6 +15,35 @@ import { formatVariantLabel } from '../../lib/format';
 
 const DEFAULT_ITERATIONS = 10;
 
+function getInitialRalphModelSelection(): RalphSelectedModel | null {
+  const selected = state.selectedModel;
+  if (selected) {
+    const provider = state.providers.find((item) => item.id === selected.providerID);
+    const model = provider?.models[selected.modelID];
+    if (provider && model) {
+      if (selected.variant && !model.variants?.[selected.variant]) {
+        return { providerID: selected.providerID, modelID: selected.modelID };
+      }
+      return selected;
+    }
+  }
+
+  for (const provider of state.providers) {
+    const defaultModelID = state.providerDefaults[provider.id];
+    if (defaultModelID && provider.models[defaultModelID]) {
+      return { providerID: provider.id, modelID: defaultModelID };
+    }
+  }
+
+  const firstProvider = state.providers[0];
+  if (!firstProvider) return null;
+
+  const firstModel = Object.values(firstProvider.models)[0];
+  if (!firstModel) return null;
+
+  return { providerID: firstProvider.id, modelID: firstModel.id };
+}
+
 type PreviousSessionCleanupState = {
   messages: Array<unknown>;
   queuedMessages: Array<{ sessionId: string }>;
@@ -47,6 +76,7 @@ export function RalphForm() {
   const [showModelPicker, setShowModelPicker] = createSignal(false);
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
+  const [modelPickerBoundaryRef, setModelPickerBoundaryRef] = createSignal<HTMLDivElement>();
 
   const visibleProviders = () => state.providers;
 
@@ -83,6 +113,7 @@ export function RalphForm() {
     if (visible && !wasVisible) {
       const activeFilePath = state.editorContext.activeFile?.relativePath;
       if (activeFilePath) setPlanPath(activeFilePath);
+      setModel(getInitialRalphModelSelection());
       setErrorMessage(null);
     }
     return visible;
@@ -263,7 +294,7 @@ export function RalphForm() {
               </Field>
 
               <Field label="Model" as="div">
-                <div class="ralph-form-model-picker">
+                <div ref={setModelPickerBoundaryRef} class="ralph-form-model-picker">
                   <ModelPickerButton
                     providerID={currentModelInfo().providerID}
                     providerName={currentModelInfo().providerName}
@@ -276,6 +307,9 @@ export function RalphForm() {
                   />
                   <Show when={availableVariants().length > 0}>
                     <VariantPicker
+                      boundaryRef={modelPickerBoundaryRef()}
+                      alignTo="right"
+                      popupGap={6}
                       variants={availableVariants()}
                       selectedVariant={effectiveVariant()}
                       selectedLabel={
@@ -303,6 +337,8 @@ export function RalphForm() {
                   <Show when={showModelPicker()}>
                     <ModelPicker
                       currentSelection={model()}
+                      showManageModels={false}
+                      popupGap={6}
                       onSelect={(sel) => {
                         if (sel.providerID && sel.modelID) {
                           const variants = getVariantsForModel(

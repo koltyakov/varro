@@ -23,6 +23,7 @@ export type SlashCommand = {
   name: string;
   aliases: string[];
   description: string;
+  source?: 'command' | 'mcp' | 'skill';
   action: (args: string) => void | Promise<void>;
 };
 

@@ -219,6 +219,65 @@ describe('ToolbarPickers', () => {
     expect(onSelect).toHaveBeenCalledWith('low');
   });
 
+  it('right-aligns the variant picker popover when a boundary is provided', async () => {
+    const boundary = document.createElement('div');
+    document.body.appendChild(boundary);
+    const [showPicker, setShowPicker] = createSignal(false);
+
+    cleanup = render(
+      () => (
+        <VariantPicker
+          boundaryRef={boundary}
+          alignTo="right"
+          variants={['low', 'high']}
+          selectedVariant="high"
+          selectedLabel="High"
+          showPicker={showPicker()}
+          getLabel={(variant) => variant.toUpperCase()}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const button = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+    const wrapper = button?.parentElement as HTMLDivElement | null;
+
+    vi.spyOn(boundary, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 24,
+      width: 200,
+      height: 24,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(wrapper!, 'getBoundingClientRect').mockReturnValue({
+      x: 140,
+      y: 0,
+      top: 0,
+      left: 140,
+      right: 200,
+      bottom: 24,
+      width: 60,
+      height: 24,
+      toJSON: () => ({}),
+    });
+
+    setShowPicker(true);
+    await flushMicrotasks();
+
+    const popover = container?.querySelector<HTMLElement>('.toolbar-popover');
+
+    expect(popover?.style.left).toBe('auto');
+    expect(popover?.style.right).toBe('0px');
+
+    boundary.remove();
+  });
+
   it('renders the model picker fallback when no model is selected', () => {
     const onToggle = vi.fn();
 

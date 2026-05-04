@@ -207,6 +207,8 @@ type CompletionSelection =
   | { type: 'run-slash'; value: string }
   | { type: 'apply-mention'; value: string; file?: DroppedFile };
 
+const SKILLS_COMMAND_NAME = 'skills';
+
 const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
   'permission',
   'attachments',
@@ -395,6 +397,10 @@ export function ChatInput() {
     })
   );
 
+  const skillCommands = createMemo(() =>
+    state.commands.filter((command) => command.source === 'skill')
+  );
+
   const slashCommands = createMemo(() =>
     getSlashCommands({
       isBusy: isLoading(),
@@ -481,7 +487,29 @@ export function ChatInput() {
     if (completion?.type !== 'slash') return [];
 
     const query = completion.query.toLowerCase();
+    if (query.startsWith(`${SKILLS_COMMAND_NAME} `)) {
+      const skillQuery = query.slice(SKILLS_COMMAND_NAME.length + 1).trim();
+      return skillCommands()
+        .filter((command) => {
+          if (!skillQuery) return true;
+          return (
+            command.name.toLowerCase().includes(skillQuery) ||
+            (command.description || command.template).toLowerCase().includes(skillQuery) ||
+            (command.hints || []).some((hint) => hint.toLowerCase().includes(skillQuery))
+          );
+        })
+        .map((command) => ({
+          name: command.name,
+          aliases: [],
+          description: command.description || command.template,
+          action: () => {},
+          key: `skill:${command.name}`,
+          type: 'slash' as const,
+        }));
+    }
+
     return slashCommands()
+      .filter((command) => command.source !== 'skill')
       .filter((command) => {
         if (!query) return true;
         return (
@@ -501,6 +529,18 @@ export function ChatInput() {
     const completion = activeCompletion();
     if (!completion) return [];
     return completion.type === 'slash' ? slashCompletions() : mentionCompletions();
+  });
+
+  const completionHeader = createMemo(() => {
+    if (showFileSearchHint()) return 'Type to search workspace files';
+    const completion = activeCompletion();
+    if (
+      completion?.type === 'slash' &&
+      completion.query.toLowerCase().startsWith(`${SKILLS_COMMAND_NAME} `)
+    ) {
+      return 'Skills';
+    }
+    return undefined;
   });
 
   const showCompletionMenu = () => {
@@ -689,6 +729,10 @@ export function ChatInput() {
     const normalized = raw.trim().replace(/^\/+/, '');
     const [name, ...rest] = normalized.split(/\s+/);
     const args = rest.join(' ');
+    if (name === SKILLS_COMMAND_NAME) {
+      setComposerValue(`/${SKILLS_COMMAND_NAME} `);
+      return;
+    }
     const command = slashCommands().find(
       (item) => item.name === name || item.aliases.includes(name)
     );
@@ -1689,7 +1733,7 @@ export function ChatInput() {
             showCompletionMenu={showCompletionMenu()}
             completionItems={composerCompletions()}
             completionSelectedIndex={completionIndex()}
-            completionHeader={showFileSearchHint() ? 'Type to search workspace files' : undefined}
+            completionHeader={completionHeader()}
             onInput={(e) => {
               setHistoryIndex(null);
               setHistoryDraft('');
@@ -2102,6 +2146,12 @@ export function getSlashCommands(props: {
 
   const commands: SlashCommand[] = [
     {
+      name: SKILLS_COMMAND_NAME,
+      aliases: [],
+      description: 'Browse available skills',
+      action: () => {},
+    },
+    {
       name: 'new',
       aliases: ['clear'],
       description: 'Start a new chat session',
@@ -2234,11 +2284,13 @@ export function getSlashCommands(props: {
   }
 
   for (const command of props.customCommands) {
+    if (command.source === 'skill') continue;
     if (reservedBuiltInNames.has(command.name)) continue;
     commands.push({
       name: command.name,
       aliases: [],
       description: command.description || command.template,
+      source: command.source,
       action: (args) => {
         void runSlashCommandByName(command.name, args);
       },
@@ -2280,6 +2332,16 @@ export function getActiveCompletion(text: string, cursor: number) {
     };
   }
 
+  const skillMatch = prefix.match(new RegExp(`^/${SKILLS_COMMAND_NAME}(?:\\s+([^\\s]*))?$`, 'i'));
+  if (skillMatch) {
+    return {
+      type: 'slash' as const,
+      query: prefix.slice(1),
+      start: 0,
+      end: cursor,
+    };
+  }
+
   const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
   const token = prefix.slice(tokenStart);
   if (!token.startsWith('@')) return null;
@@ -2301,6 +2363,15 @@ export function getCompletionSelection(
 
   if (completion.type === 'slash') {
     if (!('name' in item)) return null;
+    if (completion.query.toLowerCase().startsWith(`${SKILLS_COMMAND_NAME} `)) {
+      return {
+        type: 'set-slash',
+        value: `/${item.name}`,
+      };
+    }
+    if (item.name === SKILLS_COMMAND_NAME) {
+      return { type: 'set-slash', value: `/${SKILLS_COMMAND_NAME} ` };
+    }
     return {
       type: confirm ? 'run-slash' : 'set-slash',
       value: `/${item.name}`,

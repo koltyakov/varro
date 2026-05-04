@@ -108,7 +108,7 @@ export function RalphDashboard(props: { sessionId: string }) {
                     >
                       {activeRun().status}
                     </span>
-                    <Show when={activeRun().stopReason}>
+                    <Show when={visibleStopReason(activeRun().stopReason)}>
                       {(reason) => (
                         <span
                           class="ralph-dashboard-stop-reason"
@@ -270,7 +270,13 @@ function resumeButtonClass(status: RalphStatus): string {
   return 'ralph-dashboard-btn';
 }
 
-export function stopReasonLabel(reason: RalphStopReason): string {
+function visibleStopReason(
+  reason: RalphStopReason | null | undefined
+): RalphStopReason | undefined {
+  return reason && reason !== 'manual_stop' ? reason : undefined;
+}
+
+function stopReasonLabel(reason: RalphStopReason): string {
   switch (reason) {
     case 'iteration_limit':
       return 'iteration limit';
@@ -287,7 +293,7 @@ export function stopReasonLabel(reason: RalphStopReason): string {
   }
 }
 
-export function stopReasonTooltip(reason: RalphStopReason): string {
+function stopReasonTooltip(reason: RalphStopReason): string {
   switch (reason) {
     case 'iteration_limit':
       return 'Reached the configured iteration limit with no outstanding verification or plan items.';

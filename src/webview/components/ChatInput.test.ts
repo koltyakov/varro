@@ -1176,6 +1176,18 @@ describe('getActiveCompletion', () => {
       start: 0,
       end: 4,
     });
+    expect(getActiveCompletion('/skills ', 8)).toEqual({
+      type: 'slash',
+      query: 'skills ',
+      start: 0,
+      end: 8,
+    });
+    expect(getActiveCompletion('/skills browser', 15)).toEqual({
+      type: 'slash',
+      query: 'skills browser',
+      start: 0,
+      end: 15,
+    });
     expect(getActiveCompletion('prefix /rev', 11)).toBeNull();
   });
 
@@ -1227,6 +1239,40 @@ describe('getCompletionSelection', () => {
         }
       )
     ).toEqual({ type: 'set-slash', value: '/init' });
+  });
+
+  it('keeps selecting /skills as a composer text update', () => {
+    expect(
+      getCompletionSelection(
+        { type: 'slash', query: 'sk', start: 0, end: 3 },
+        {
+          key: 'slash:skills',
+          type: 'slash',
+          name: 'skills',
+          aliases: [],
+          description: 'Browse available skills',
+          action: () => {},
+        },
+        true
+      )
+    ).toEqual({ type: 'set-slash', value: '/skills ' });
+  });
+
+  it('keeps selecting a skill entry as a composer text update', () => {
+    expect(
+      getCompletionSelection(
+        { type: 'slash', query: 'skills bro', start: 0, end: 11 },
+        {
+          key: 'skill:browser-bridge',
+          type: 'slash',
+          name: 'browser-bridge',
+          aliases: [],
+          description: 'Token-efficient Chrome tab inspection',
+          action: () => {},
+        },
+        true
+      )
+    ).toEqual({ type: 'set-slash', value: '/browser-bridge' });
   });
 
   it('returns mention selections with attached file metadata', () => {
@@ -1284,6 +1330,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.name === 'init')).toBe(true);
     expect(commands.some((command) => command.name === 'export')).toBe(true);
     expect(commands.some((command) => command.name === 'redo')).toBe(true);
+    expect(commands.some((command) => command.name === 'skills')).toBe(true);
     expect(commands.some((command) => command.name === 'test')).toBe(true);
     expect(commands.filter((command) => command.name === 'settings')).toHaveLength(1);
   });
