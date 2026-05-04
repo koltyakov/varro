@@ -1162,8 +1162,30 @@ body.vscode-light
 }
 
 .chat-turn-content > :last-child,
-.chat-turn-content > :last-child.rendered-markdown :last-child,
-.chat-turn-content .assistant-message-flow > :last-child .rendered-markdown:last-child :last-child {
+.chat-turn-content
+  > :last-child.rendered-markdown
+  > [data-markdown-segment='tail']
+  > :last-child,
+.chat-turn-content
+  > :last-child.rendered-markdown
+  > [data-markdown-segment='stable']:not(
+    :has(+ [data-markdown-segment='tail'] > :first-child)
+  )
+  > :last-child,
+.chat-turn-content
+  .assistant-message-flow
+  > :last-child
+  .rendered-markdown:last-child
+  > [data-markdown-segment='tail']
+  > :last-child,
+.chat-turn-content
+  .assistant-message-flow
+  > :last-child
+  .rendered-markdown:last-child
+  > [data-markdown-segment='stable']:not(
+    :has(+ [data-markdown-segment='tail'] > :first-child)
+  )
+  > :last-child {
   margin-bottom: 0;
 }
 
