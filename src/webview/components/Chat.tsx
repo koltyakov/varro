@@ -48,6 +48,7 @@ const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
 const RECONNECT_BANNER_SHOW_DELAY_MS = 1500;
 const RECONNECT_BANNER_MIN_VISIBLE_MS = 4000;
 const CHAT_VIEW_ENTER_DURATION_MS = 180;
+const EMPTY_SESSION_DELETE_DELAY_MS = 0;
 
 export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
@@ -76,7 +77,7 @@ export function Chat() {
   let reconnectBannerHideTimer: number | undefined;
   let reconnectBannerVisibleSince = 0;
   let chatViewEnterTimer: number | undefined;
-  const pendingEmptySessionDeletes = new Set<string>();
+  const pendingEmptySessionDeleteTimers = new Map<string, number>();
 
   const clearReconnectBannerShowTimer = () => {
     if (reconnectBannerShowTimer == null) return;
@@ -145,12 +146,30 @@ export function Chat() {
 
   createEffect(() => {
     const indicators = sessionIndicators();
+    const candidateIds = new Set<string>();
     for (const session of state.sessions) {
       if (!shouldAutoDeleteEmptySession(session, state.activeSessionId, indicators)) continue;
-      if (pendingEmptySessionDeletes.has(session.id)) continue;
+      candidateIds.add(session.id);
+      if (pendingEmptySessionDeleteTimers.has(session.id)) continue;
 
-      pendingEmptySessionDeletes.add(session.id);
-      void deleteEmptySession(session.id);
+      const timer = window.setTimeout(() => {
+        pendingEmptySessionDeleteTimers.delete(session.id);
+        const latestSession = state.sessions.find((item) => item.id === session.id);
+        if (!latestSession) return;
+        if (
+          !shouldAutoDeleteEmptySession(latestSession, state.activeSessionId, sessionIndicators())
+        ) {
+          return;
+        }
+        void deleteEmptySession(session.id);
+      }, EMPTY_SESSION_DELETE_DELAY_MS);
+      pendingEmptySessionDeleteTimers.set(session.id, timer);
+    }
+
+    for (const [sessionId, timer] of pendingEmptySessionDeleteTimers) {
+      if (candidateIds.has(sessionId)) continue;
+      window.clearTimeout(timer);
+      pendingEmptySessionDeleteTimers.delete(sessionId);
     }
   });
 
@@ -158,6 +177,10 @@ export function Chat() {
     clearReconnectBannerShowTimer();
     clearReconnectBannerHideTimer();
     clearChatViewEnterTimer();
+    for (const timer of pendingEmptySessionDeleteTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    pendingEmptySessionDeleteTimers.clear();
   });
 
   const shouldDiscardActiveBlankSession = () => {

@@ -5243,7 +5243,7 @@ kbd {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 4px 0;
+  padding: 4px 0 0 0;
   outline: none;
 }
 
@@ -5331,7 +5331,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-list-bottom-groups {
   flex-shrink: 0;
-  padding-top: 4px;
+}
+
+.session-list-bottom-groups .session-list-section-header:first-child {
+  margin-top: 0;
 }
 
 .session-empty {
@@ -5363,10 +5366,8 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   gap: 4px;
   width: 100%;
   min-width: 0;
-  margin-top: 4px;
   padding-left: 12px;
   border-top: 1px solid var(--color-vscode-border-soft);
-  border-radius: 4px;
   color: var(--color-vscode-muted);
   transition:
     background-color 0.1s,
@@ -5501,6 +5502,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   padding: 8px 12px;
   background: none;
   transition: background-color 0.08s;
+}
+
+.session-list-section-header + .session-item {
+  padding-top: 4px;
 }
 
 .session-item-main {

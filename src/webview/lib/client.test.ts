@@ -173,6 +173,14 @@ describe('client', () => {
     );
   });
 
+  it('treats malformed recycle bin payloads as empty', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue('<!doctype html><html></html>');
+
+    await expect(client.varro.recycleBin.list()).resolves.toEqual([]);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/varro/session-trash');
+  });
+
   it('dedupes concurrent session status requests', async () => {
     const { client } = await loadClient();
     const deferred = Promise.resolve({ 'session-1': { type: 'idle' } });

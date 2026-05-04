@@ -87,6 +87,15 @@ export class OpenCodeTransport {
     if (pathname === '/session' && method.toUpperCase() === 'POST') {
       return this.options.getWorkspaceCwd();
     }
+    if (method.toUpperCase() === 'POST' && /^\/session\/[^/]+\/prompt_async$/.test(pathname)) {
+      return this.options.getWorkspaceCwd();
+    }
+    if (
+      method.toUpperCase() === 'GET' &&
+      (/^\/session\/[^/]+$/.test(pathname) || /^\/session\/[^/]+\/message$/.test(pathname))
+    ) {
+      return this.options.getWorkspaceCwd();
+    }
     if (pathname === '/session/status' || pathname.startsWith('/session/')) {
       return undefined;
     }

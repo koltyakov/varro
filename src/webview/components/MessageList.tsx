@@ -618,7 +618,7 @@ export function MessageList() {
       if (hadResize && restoreExpansionScrollAnchor()) {
         return;
       }
-      if (hadResize && lastTrackHeight > previousTrackHeight + 1) {
+      if (hadResize && lastTrackHeight > previousTrackHeight + 1 && autoScroll()) {
         performScroll();
       }
     });

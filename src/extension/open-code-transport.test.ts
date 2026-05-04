@@ -90,7 +90,7 @@ describe('OpenCodeTransport reconnect delay', () => {
 });
 
 describe('OpenCodeTransport request scoping', () => {
-  it('does not scope session list or session-id requests to a workspace directory', async () => {
+  it('does not scope session list or destructive session-id requests to a workspace directory', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -120,6 +120,69 @@ describe('OpenCodeTransport request scoping', () => {
     );
     expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(1, undefined);
     expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(2, undefined);
+  });
+
+  it('scopes session metadata and message fetches to the current workspace directory', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.request('GET', '/session/session-1');
+    await transport.request('GET', '/session/session-1/message');
+
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:4096',
+      '/session/session-1',
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:4096',
+      '/session/session-1/message',
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(
+      1,
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(
+      2,
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+  });
+
+  it('scopes prompt_async session sends to the current workspace directory', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.request('POST', '/session/session-1/prompt_async', { parts: [] });
+
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session/session-1/prompt_async',
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenLastCalledWith(
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
   });
 
   it('still scopes session creation to the current workspace directory', async () => {

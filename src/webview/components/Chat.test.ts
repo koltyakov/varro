@@ -27,6 +27,7 @@ import {
   shouldAutoDeleteEmptySession,
   shouldShowSessionHeaderBadge,
 } from './Chat';
+import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
   requestOpenAttentionSessions,
   setDesktopSessionPaneSide,
@@ -287,7 +288,13 @@ describe('empty session pruning', () => {
   });
 
   it('auto-deletes only inactive empty sessions without meaningful status', () => {
-    const empty = session('empty', 100, { time: { created: 100, updated: 100 } });
+    const now = Date.now();
+    const empty = session('empty', now - EMPTY_SESSION_PRUNE_GRACE_MS - 100, {
+      time: {
+        created: now - EMPTY_SESSION_PRUNE_GRACE_MS - 100,
+        updated: now - EMPTY_SESSION_PRUNE_GRACE_MS - 100,
+      },
+    });
     const indicators = {
       runningIds: new Set<string>(),
       attentionIds: new Set<string>(),
@@ -306,16 +313,34 @@ describe('empty session pruning', () => {
     ).toBe(false);
   });
 
+  it('does not auto-delete a freshly created empty session during the grace window', () => {
+    const now = Date.now();
+    const fresh = session('fresh', now, {
+      time: { created: now, updated: now },
+    });
+    const indicators = {
+      runningIds: new Set<string>(),
+      attentionIds: new Set<string>(),
+      failedIds: new Set<string>(),
+      planReadyIds: new Set<string>(),
+      newlyCompletedIds: new Set<string>(),
+    };
+
+    expect(shouldAutoDeleteEmptySession(fresh, null, indicators)).toBe(false);
+  });
+
   it('hides inactive empty sessions from the list and deletes them', async () => {
     const deleteImmediatelySpy = vi
       .spyOn(openCodeModule, 'deleteSessionImmediately')
       .mockResolvedValue(undefined);
 
+    const staleTime = Date.now() - EMPTY_SESSION_PRUNE_GRACE_MS - 100;
+
     setState('sessions', [
       session('active', 200),
-      session('empty', 100, {
+      session('empty', staleTime, {
         title: 'Empty session',
-        time: { created: 100, updated: 100 },
+        time: { created: staleTime, updated: staleTime },
       }),
     ]);
     setState('activeSessionId', 'active');
@@ -323,10 +348,37 @@ describe('empty session pruning', () => {
 
     cleanup = render(() => Chat(), container!);
     await Promise.resolve();
+    vi.runOnlyPendingTimers();
     await Promise.resolve();
 
     expect(container?.textContent).not.toContain('Empty session');
     expect(deleteImmediatelySpy).toHaveBeenCalledWith('empty');
+  });
+
+  it('does not delete a newly created empty session that becomes active before the prune timer runs', async () => {
+    const deleteImmediatelySpy = vi
+      .spyOn(openCodeModule, 'deleteSessionImmediately')
+      .mockResolvedValue(undefined);
+
+    const now = Date.now();
+
+    setState('sessions', [
+      session('new-session', now, {
+        title: 'New session',
+        time: { created: now, updated: now },
+      }),
+    ]);
+    setState('activeSessionId', null);
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+    await Promise.resolve();
+
+    setState('activeSessionId', 'new-session');
+    vi.runOnlyPendingTimers();
+    await Promise.resolve();
+
+    expect(deleteImmediatelySpy).not.toHaveBeenCalled();
   });
 });
 

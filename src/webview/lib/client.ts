@@ -21,6 +21,21 @@ import type {
   ServerEventName,
 } from '../../shared/protocol';
 
+type RecycleBinSessionRecord = {
+  id: string;
+  projectID: string;
+  directory: string;
+  parentID?: string;
+  summary?: {
+    additions: number;
+    deletions: number;
+    files: number;
+  };
+  title: string;
+  version: string;
+  time: { created: number; updated: number; compacting?: number };
+};
+
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
     return apiCall('GET', '/global/health');
@@ -162,7 +177,7 @@ export const client = {
     },
     recycleBin: {
       async list(): Promise<RecycleBinEntry[]> {
-        return apiCall('GET', '/varro/session-trash');
+        return normalizeRecycleBinEntries(await apiCall('GET', '/varro/session-trash'));
       },
       async restore(rootID: string): Promise<boolean> {
         return apiCall('POST', `/varro/session-trash/${encodeURIComponent(rootID)}/restore`);
@@ -253,6 +268,80 @@ function getSharedQuestionList(): Promise<QuestionRequest[]> {
   });
   questionListRequest = promise;
   return promise;
+}
+
+function normalizeRecycleBinEntries(value: unknown): RecycleBinEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeRecycleBinEntry).filter((entry): entry is RecycleBinEntry => !!entry);
+}
+
+function normalizeRecycleBinEntry(value: unknown): RecycleBinEntry | null {
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const rootID = typeof record.rootID === 'string' ? record.rootID : null;
+  const deletedAt = typeof record.deletedAt === 'number' ? record.deletedAt : null;
+  const expiresAt = typeof record.expiresAt === 'number' ? record.expiresAt : null;
+  const root = normalizeRecycleBinSession(record.root);
+  const sessions = Array.isArray(record.sessions)
+    ? record.sessions
+        .map(normalizeRecycleBinSession)
+        .filter((session): session is RecycleBinSessionRecord => !!session)
+    : [];
+
+  if (!rootID || deletedAt === null || expiresAt === null || !root || sessions.length === 0) {
+    return null;
+  }
+
+  return { rootID, deletedAt, expiresAt, root, sessions };
+}
+
+function normalizeRecycleBinSession(value: unknown): RecycleBinSessionRecord | null {
+  const record = asRecord(value);
+  const time = asRecord(record?.time);
+  if (
+    !record ||
+    typeof record.id !== 'string' ||
+    typeof record.projectID !== 'string' ||
+    typeof record.directory !== 'string' ||
+    typeof record.title !== 'string' ||
+    typeof record.version !== 'string' ||
+    typeof time?.created !== 'number' ||
+    typeof time.updated !== 'number'
+  ) {
+    return null;
+  }
+
+  const summary = asRecord(record.summary);
+  return {
+    id: record.id,
+    projectID: record.projectID,
+    directory: record.directory,
+    ...(typeof record.parentID === 'string' ? { parentID: record.parentID } : {}),
+    ...(summary &&
+    typeof summary.additions === 'number' &&
+    typeof summary.deletions === 'number' &&
+    typeof summary.files === 'number'
+      ? {
+          summary: {
+            additions: summary.additions,
+            deletions: summary.deletions,
+            files: summary.files,
+          },
+        }
+      : {}),
+    title: record.title,
+    version: record.version,
+    time: {
+      created: time.created,
+      updated: time.updated,
+      ...(typeof time.compacting === 'number' ? { compacting: time.compacting } : {}),
+    },
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
 type EventHandler<TEvent extends ServerEvent = ServerEvent> = (data: TEvent) => void;
