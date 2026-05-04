@@ -24,6 +24,8 @@ type RecycleBinRequest =
   | { kind: 'restore'; rootID: string }
   | { kind: 'delete'; rootID: string };
 
+type PermanentDeleteRequest = { sessionID: string };
+
 type OpenCodeConfigRequest =
   | { kind: 'get' }
   | {
@@ -110,6 +112,13 @@ export class RestProxy {
       const recycleBinRequest = this.parseRecycleBinRequest(method, payload.path);
       if (recycleBinRequest) {
         const data = await this.handleRecycleBinRequest(recycleBinRequest);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const permanentDeleteRequest = this.parsePermanentDeleteRequest(method, payload.path);
+      if (permanentDeleteRequest) {
+        const data = await this.deleteSessionPermanently(permanentDeleteRequest.sessionID);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -226,6 +235,14 @@ export class RestProxy {
     const url = new URL(path, 'http://localhost');
     const match = url.pathname.match(/^\/session\/([^/]+)$/);
     return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  private parsePermanentDeleteRequest(method: string, path: string): PermanentDeleteRequest | null {
+    if (method !== 'DELETE') return null;
+    const url = new URL(path, 'http://localhost');
+    const match = url.pathname.match(/^\/varro\/session\/([^/]+)\/delete$/);
+    if (!match) return null;
+    return { sessionID: decodeURIComponent(match[1]) };
   }
 
   private getHiddenSessionIdFromPath(path: string) {
@@ -367,6 +384,12 @@ export class RestProxy {
       throw new Error('404 Session not found');
     }
     this.callbacks.sessionState.removeSessions(entry.sessions.map((session) => session.id));
+    return true;
+  }
+
+  private async deleteSessionPermanently(sessionID: string) {
+    await this.callbacks.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`);
+    this.callbacks.sessionState.removeSessions([sessionID]);
     return true;
   }
 

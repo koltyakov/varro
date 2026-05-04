@@ -14,6 +14,7 @@ function createRuntimeMock(label: string) {
       selectSession: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue(`${label}-session`),
       deleteSession: vi.fn().mockResolvedValue(undefined),
+      deleteSessionImmediately: vi.fn().mockResolvedValue(undefined),
       restoreSession: vi.fn().mockResolvedValue(undefined),
       deleteSessionPermanently: vi.fn().mockResolvedValue(undefined),
       emptyRecycleBin: vi.fn().mockResolvedValue(undefined),
@@ -118,6 +119,11 @@ describe('useOpenCode.runtime', () => {
       {
         invoke: () => module.deleteSession('session-1'),
         mock: installed.runtime.deleteSession,
+        args: ['session-1'],
+      },
+      {
+        invoke: () => module.deleteSessionImmediately('session-1'),
+        mock: installed.runtime.deleteSessionImmediately,
         args: ['session-1'],
       },
       {

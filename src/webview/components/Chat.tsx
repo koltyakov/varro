@@ -9,10 +9,19 @@ import {
   getSessionTreeRootId,
 } from '../lib/state';
 import { createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
-import { selectSession, createSession, deleteSession } from '../hooks/useOpenCode';
+import {
+  selectSession,
+  createSession,
+  deleteSession,
+  deleteSessionImmediately,
+} from '../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { ChatWorkspace } from './chat/ChatWorkspace';
 import { ralphStore } from '../lib/stores/ralph-store';
+import {
+  isEmptySession as isEmptySessionMetadata,
+  shouldPruneEmptySession,
+} from '../lib/empty-session';
 import {
   deriveSessionIndicators,
   getPrimarySessionsForFilter,
@@ -48,8 +57,14 @@ export function Chat() {
   const [isEnteringChatView, setIsEnteringChatView] = createSignal(false);
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
   const isDesktopSessionPaneRight = () => desktopSessionPaneSide() === 'right';
-  const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
+  const visibleSessions = createMemo(() =>
+    state.sessions.filter(
+      (session) =>
+        !shouldAutoDeleteEmptySession(session, state.activeSessionId, sessionIndicators())
+    )
+  );
+  const primarySessions = createMemo(() => visibleSessions().filter(isPrimarySession));
   const sessionsById = createMemo(
     () => new Map(state.sessions.map((session) => [session.id, session]))
   );
@@ -61,6 +76,7 @@ export function Chat() {
   let reconnectBannerHideTimer: number | undefined;
   let reconnectBannerVisibleSince = 0;
   let chatViewEnterTimer: number | undefined;
+  const pendingEmptySessionDeletes = new Set<string>();
 
   const clearReconnectBannerShowTimer = () => {
     if (reconnectBannerShowTimer == null) return;
@@ -126,6 +142,17 @@ export function Chat() {
       }, remainingVisibleMs);
     })
   );
+
+  createEffect(() => {
+    const indicators = sessionIndicators();
+    for (const session of state.sessions) {
+      if (!shouldAutoDeleteEmptySession(session, state.activeSessionId, indicators)) continue;
+      if (pendingEmptySessionDeletes.has(session.id)) continue;
+
+      pendingEmptySessionDeletes.add(session.id);
+      void deleteEmptySession(session.id);
+    }
+  });
 
   onCleanup(() => {
     clearReconnectBannerShowTimer();
@@ -395,6 +422,10 @@ export function Chat() {
   );
 }
 
+async function deleteEmptySession(sessionId: string) {
+  await deleteSessionImmediately(sessionId);
+}
+
 export {
   SessionListSectionHeader,
   archiveSessionGroup,
@@ -460,6 +491,30 @@ export function getHeaderAttentionCount(
     if (!isSessionPickerOpen && session.id === activeSessionId) return count;
     return count + 1;
   }, 0);
+}
+
+export function isEmptySession(session: (typeof state.sessions)[number]) {
+  return isEmptySessionMetadata(session);
+}
+
+export function shouldAutoDeleteEmptySession(
+  session: (typeof state.sessions)[number],
+  activeSessionId: string | null,
+  indicators: Pick<
+    ReturnType<typeof deriveSessionIndicators>,
+    'runningIds' | 'attentionIds' | 'failedIds' | 'planReadyIds'
+  >
+) {
+  return shouldPruneEmptySession(session, {
+    activeSessionId,
+    isQueued: (sessionId) => state.queuedMessages.some((item) => item.sessionId === sessionId),
+    isAwaitingInput: isSessionAwaitingInput,
+    isRunning: (sessionId) => indicators.runningIds.has(sessionId),
+    needsAttention: (sessionId) => indicators.attentionIds.has(sessionId),
+    isFailed: (sessionId) => indicators.failedIds.has(sessionId),
+    isPlanReady: (item) => indicators.planReadyIds.has(item.id),
+    statusType: state.sessionStatus[session.id]?.type,
+  });
 }
 
 export function getHeaderFailedCount(

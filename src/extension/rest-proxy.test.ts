@@ -297,6 +297,23 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 11, data: true });
   });
 
+  it('routes varro permanent delete directly to the server without recycle bin', async () => {
+    const serverRequest = vi.fn(() => Promise.resolve(true));
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(111, 'DELETE', '/varro/session/some-id/delete'));
+
+    expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/some-id');
+    expect(callbacks.sessionTrash.moveToTrash).not.toHaveBeenCalled();
+    expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['some-id']);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 111, data: true });
+  });
+
   it('ignores workspace-specific directory scoping when looking up a session tree for soft delete', async () => {
     const entry = { sessions: [{ id: 's1' }] };
     const serverRequest = vi.fn(() => Promise.resolve([]));

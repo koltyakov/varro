@@ -5,6 +5,7 @@ export {
   continueInterruptedSession,
   createSession,
   deleteSession,
+  deleteSessionImmediately,
   deleteSessionPermanently,
   emptyRecycleBin,
   implementPlan,

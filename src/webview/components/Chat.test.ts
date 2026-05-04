@@ -20,9 +20,11 @@ import {
   getSessionListFilterLabel,
   getSubagentSessionsForParent,
   groupSessions,
+  isEmptySession,
   isFailedSession,
   isRunningSession,
   SessionListSectionHeader,
+  shouldAutoDeleteEmptySession,
   shouldShowSessionHeaderBadge,
 } from './Chat';
 import {
@@ -273,6 +275,58 @@ describe('groupSessions', () => {
     expect(groups.failed.map((item) => item.id)).toEqual(['failed-newer', 'failed-older']);
     expect(groups.attention.map((item) => item.id)).toEqual(['attention-newer', 'attention-older']);
     expect(groups.surfacedOther.map((item) => item.id)).toEqual(['other']);
+  });
+});
+
+describe('empty session pruning', () => {
+  it('identifies sessions whose metadata was never updated after creation', () => {
+    expect(isEmptySession(session('empty', 100, { time: { created: 100, updated: 100 } }))).toBe(
+      true
+    );
+    expect(isEmptySession(session('non-empty', 200))).toBe(false);
+  });
+
+  it('auto-deletes only inactive empty sessions without meaningful status', () => {
+    const empty = session('empty', 100, { time: { created: 100, updated: 100 } });
+    const indicators = {
+      runningIds: new Set<string>(),
+      attentionIds: new Set<string>(),
+      failedIds: new Set<string>(),
+      planReadyIds: new Set<string>(),
+      newlyCompletedIds: new Set<string>(),
+    };
+
+    expect(shouldAutoDeleteEmptySession(empty, null, indicators)).toBe(true);
+    expect(shouldAutoDeleteEmptySession(empty, 'empty', indicators)).toBe(false);
+    expect(
+      shouldAutoDeleteEmptySession(empty, null, {
+        ...indicators,
+        runningIds: new Set(['empty']),
+      })
+    ).toBe(false);
+  });
+
+  it('hides inactive empty sessions from the list and deletes them', async () => {
+    const deleteImmediatelySpy = vi
+      .spyOn(openCodeModule, 'deleteSessionImmediately')
+      .mockResolvedValue(undefined);
+
+    setState('sessions', [
+      session('active', 200),
+      session('empty', 100, {
+        title: 'Empty session',
+        time: { created: 100, updated: 100 },
+      }),
+    ]);
+    setState('activeSessionId', 'active');
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('Empty session');
+    expect(deleteImmediatelySpy).toHaveBeenCalledWith('empty');
   });
 });
 

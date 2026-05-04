@@ -16,6 +16,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/workspace-file/pick')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/varro/session/session-1/delete')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session-trash')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/restore')).toBe(true);
     expect(isAllowedApiRequest('DELETE', '/varro/session-trash/session-1/delete')).toBe(true);
@@ -37,6 +38,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/opencode-config')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config/model-routing')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/plan/open')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/session/session-1/delete')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/delete')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/varro/session-trash/session-1/restore')).toBe(false);
   });

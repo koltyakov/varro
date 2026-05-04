@@ -134,6 +134,11 @@ export const client = {
   },
 
   varro: {
+    session: {
+      async deleteImmediately(sessionID: string): Promise<boolean> {
+        return apiCall('DELETE', `/varro/session/${encodeURIComponent(sessionID)}/delete`);
+      },
+    },
     async openPlan(content: string): Promise<{ path: string }> {
       return apiCall('POST', '/varro/plan/open', { content });
     },

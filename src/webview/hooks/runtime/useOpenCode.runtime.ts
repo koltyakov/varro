@@ -49,6 +49,10 @@ export async function deleteSession(id: string) {
   await getCurrentOpenCodeRuntime().deleteSession(id);
 }
 
+export async function deleteSessionImmediately(id: string) {
+  await getCurrentOpenCodeRuntime().deleteSessionImmediately(id);
+}
+
 export async function restoreSession(rootID: string) {
   await getCurrentOpenCodeRuntime().restoreSession(rootID);
 }

@@ -60,6 +60,7 @@ export interface OpenCodeRuntime {
   selectSession(id: string, options?: { markSeen?: boolean }): Promise<void>;
   createSession(title?: string, initialPermissionMode?: 'default' | 'full'): Promise<string | null>;
   deleteSession(id: string): Promise<void>;
+  deleteSessionImmediately(id: string): Promise<void>;
   restoreSession(rootID: string): Promise<void>;
   deleteSessionPermanently(rootID: string): Promise<void>;
   emptyRecycleBin(): Promise<void>;
@@ -660,6 +661,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await sessionManagementOperations.deleteSession(id);
   }
 
+  async function deleteSessionImmediately(id: string) {
+    await client.varro.session.deleteImmediately(id);
+  }
+
   async function restoreSession(rootID: string) {
     await sessionManagementOperations.restoreSession(rootID);
   }
@@ -764,6 +769,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     selectSession,
     createSession,
     deleteSession,
+    deleteSessionImmediately,
     restoreSession,
     deleteSessionPermanently,
     emptyRecycleBin,

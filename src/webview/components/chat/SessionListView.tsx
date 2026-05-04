@@ -29,6 +29,7 @@ import {
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry } from '../../../shared/protocol';
 import { ralphStore } from '../../lib/stores/ralph-store';
+import { shouldPruneEmptySession } from '../../lib/empty-session';
 
 type SessionGroups = {
   failed: (typeof state.sessions)[number][];
@@ -360,11 +361,27 @@ export function SessionListView(props: {
   const normalizedSearchQuery = createMemo(() => searchQuery().trim().toLowerCase());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
 
-  const primarySessions = createMemo(() => state.sessions.filter(isPrimarySession));
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
+  const visibleSessionsForList = createMemo(() =>
+    state.sessions.filter(
+      (session) =>
+        !shouldPruneEmptySession(session, {
+          activeSessionId: state.activeSessionId,
+          isQueued: (sessionId) =>
+            state.queuedMessages.some((item) => item.sessionId === sessionId),
+          isAwaitingInput: isSessionAwaitingInput,
+          isRunning: (sessionId) => sessionIndicators().runningIds.has(sessionId),
+          needsAttention: (sessionId) => sessionIndicators().attentionIds.has(sessionId),
+          isFailed: (sessionId) => sessionIndicators().failedIds.has(sessionId),
+          isPlanReady: (item) => sessionIndicators().planReadyIds.has(item.id),
+          statusType: state.sessionStatus[session.id]?.type,
+        })
+    )
+  );
+  const primarySessions = createMemo(() => visibleSessionsForList().filter(isPrimarySession));
   const groupedSessions = createMemo(() =>
     groupSessions(
-      state.sessions,
+      visibleSessionsForList(),
       (sessionId) => sessionIndicators().runningIds.has(sessionId),
       (sessionId) => sessionIndicators().attentionIds.has(sessionId),
       (sessionId) => sessionIndicators().failedIds.has(sessionId),
@@ -381,7 +398,7 @@ export function SessionListView(props: {
   const surfacedOtherSessions = () => groupedSessions().surfacedOther;
   const overflowOtherSessions = () => groupedSessions().overflowOther;
   const subagentSessions = createMemo(() =>
-    getSubagentSessionsForParent(state.sessions, props.subagentParentId ?? null)
+    getSubagentSessionsForParent(visibleSessionsForList(), props.subagentParentId ?? null)
   );
   const recycleBinEntries = createMemo(() => state.recycleBinEntries || []);
   const filteredSessions = createMemo(() =>

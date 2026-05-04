@@ -231,6 +231,9 @@ export function isAllowedApiRequest(method: string, path: string) {
   if (pathname === '/varro/opencode-config/model-routing') {
     return method === 'POST' && noQuery();
   }
+  if (segments[0] === 'varro' && segments[1] === 'session' && segments.length === 4) {
+    return method === 'DELETE' && noQuery() && segments[3] === 'delete';
+  }
   if (pathname === '/varro/session-trash') {
     return (method === 'GET' || method === 'DELETE') && noQuery();
   }
