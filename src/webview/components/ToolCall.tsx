@@ -1,11 +1,12 @@
 import { Show, For, createEffect, createMemo, createSignal } from 'solid-js';
-import type { ToolPart, ToolStateCompleted, ToolStateError } from '../types';
+import type { QuestionRequest, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
+import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 import { isAbortedToolError } from '../lib/aborted';
@@ -150,15 +151,17 @@ function isDirectoryOutput(toolState: ToolPart['state']): boolean {
   return /<type>\s*directory\s*<\/type>/i.test(output) || /<entries>/i.test(output);
 }
 
-export function ToolCall(props: { part: ToolPart }) {
+export function ToolCall(props: {
+  part: ToolPart;
+  questionRequest?: QuestionRequest | null;
+  permissionMatch?: ToolCallPermissionMatch | null;
+}) {
   const tool = () => props.part;
   const expansionKey = () => getToolCallExpansionKey(tool());
   const [expanded, setExpanded] = createSignal(getToolCallExpanded(expansionKey()));
   const state = () => tool().state;
-  const toolSessionRootId = createMemo(
-    () => getSessionTreeRootId(tool().sessionID) || tool().sessionID
-  );
-  const questionRequest = createMemo(() => {
+  const toolSessionRootId = createMemo(() => getSessionTreeRootId(tool().sessionID) || tool().sessionID);
+  const fallbackQuestionRequest = createMemo(() => {
     const currentTool = tool();
     const sessionRootId = toolSessionRootId();
     return appState.questions.find(
@@ -168,31 +171,34 @@ export function ToolCall(props: { part: ToolPart }) {
         request.tool?.callID === currentTool.callID
     );
   });
-
-  const permissionRequest = createMemo(() => {
+  const fallbackPermissionMatch = createMemo<ToolCallPermissionMatch | null>(() => {
     const currentTool = tool();
     const sessionRootId = toolSessionRootId();
-    return appState.permissions.find((permission) =>
-      getPermissionGroupMembers(permission).some(
-        (member) =>
-          (getSessionTreeRootId(member.sessionID) || member.sessionID) === sessionRootId &&
-          member.messageID === currentTool.messageID &&
-          member.callID === currentTool.callID
-      )
-    );
-  });
 
-  const isPrimaryPermissionOwner = createMemo(() => {
-    const permission = permissionRequest();
-    if (!permission) return false;
-    const [primaryMember] = getPermissionGroupMembers(permission);
-    return (
-      (getSessionTreeRootId(primaryMember.sessionID) || primaryMember.sessionID) ===
-        toolSessionRootId() &&
-      primaryMember.messageID === tool().messageID &&
-      primaryMember.callID === tool().callID
-    );
+    for (const permission of appState.permissions) {
+      const members = getPermissionGroupMembers(permission);
+      for (const [index, member] of members.entries()) {
+        if ((getSessionTreeRootId(member.sessionID) || member.sessionID) !== sessionRootId) continue;
+        if (member.messageID !== currentTool.messageID || member.callID !== currentTool.callID) {
+          continue;
+        }
+        return {
+          permission,
+          isPrimaryOwner: index === 0,
+        };
+      }
+    }
+
+    return null;
   });
+  const questionRequest = createMemo(() =>
+    props.questionRequest !== undefined ? props.questionRequest : (fallbackQuestionRequest() ?? null)
+  );
+  const permissionMatch = createMemo(() =>
+    props.permissionMatch !== undefined ? props.permissionMatch : fallbackPermissionMatch()
+  );
+  const permissionRequest = createMemo(() => permissionMatch()?.permission ?? null);
+  const isPrimaryPermissionOwner = createMemo(() => permissionMatch()?.isPrimaryOwner ?? false);
 
   const filePath = () => {
     return getToolReadPath(tool().tool, state());

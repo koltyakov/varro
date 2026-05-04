@@ -22,12 +22,14 @@ import type {
 import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
+  getAssistantDialogSummaryMap,
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
   getLatestPlanImplementationMessageId,
   MessageList,
   shouldShowPlanImplementationAction,
 } from './MessageList';
+import * as toolCallMatching from '../lib/tool-call-matching';
 import {
   getNextVisibleUserMessageTopMap,
   getStickyUserMessagePreview,
@@ -1095,6 +1097,95 @@ describe('standalone action prompts', () => {
 });
 
 describe('MessageList sticky prompt preview', () => {
+  it('builds shared tool prompt lookups once per render for tool-heavy chats', async () => {
+    const questionLookupSpy = vi.spyOn(toolCallMatching, 'buildQuestionRequestLookup');
+    const permissionLookupSpy = vi.spyOn(toolCallMatching, 'buildPermissionRequestLookup');
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [
+          {
+            ...toolPart('tool-1', 'assistant-1', 'call-1'),
+            state: { status: 'completed', input: { command: 'pwd' }, output: '', title: 'pwd', metadata: {}, time: { start: 0, end: 1 } },
+          },
+          {
+            ...toolPart('tool-2', 'assistant-1', 'call-2'),
+            state: { status: 'completed', input: { command: 'ls' }, output: '', title: 'ls', metadata: {}, time: { start: 0, end: 1 } },
+          },
+          {
+            ...toolPart('tool-3', 'assistant-1', 'call-3'),
+            state: { status: 'completed', input: { command: 'git status' }, output: '', title: 'git status', metadata: {}, time: { start: 0, end: 1 } },
+          },
+        ],
+      },
+    ]);
+    setState('questions', [
+      {
+        id: 'question-1',
+        sessionID: 'session-1',
+        tool: { messageID: 'assistant-1', callID: 'call-1' },
+        questions: [{ question: 'Proceed?', header: 'Confirm', options: [] }],
+      },
+    ]);
+    setState('permissions', [
+      {
+        id: 'permission-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        callID: 'call-2',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(questionLookupSpy).toHaveBeenCalledTimes(1);
+    expect(permissionLookupSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('limits assistant dialog summaries to rendered messages when virtualized', () => {
+    const messages = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt 1')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 3_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+      {
+        info: { ...userMessage('user-2'), time: { created: 4_000 } },
+        parts: [textPart('text-2', 'Prompt 2')],
+      },
+      {
+        info: assistantMessage('assistant-2', {
+          time: { created: 5_000, completed: 6_000 },
+          tokens: { input: 200, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+    ];
+
+    const summaries = getAssistantDialogSummaryMap(messages, new Set(['assistant-2']));
+
+    expect(summaries.has('assistant-1')).toBe(false);
+    expect(summaries.get('assistant-2')).toMatchObject({
+      durationMs: 2_000,
+      inputTokens: 200,
+      outputTokens: 20,
+      agentCount: 0,
+    });
+  });
+
   it('summarizes elapsed time and tokens across nested agent children', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -1538,6 +1629,92 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('does not auto-scroll again when the track bounces back to an already-followed height', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    expect(resizeCallbacks).toHaveLength(2);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    trackHeight = 1700;
+    scrollHeightValue = 1700;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(1300);
+
+    const assignmentCountAfterGrowth = assignedScrollTops.length;
+
+    trackHeight = 1688;
+    scrollHeightValue = 1688;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterGrowth);
+
+    trackHeight = 1700;
+    scrollHeightValue = 1700;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterGrowth);
+    expect(scrollTopValue).toBe(1300);
+    animationFrames.restore();
+  });
+
   it('updates the scrollbar inset css variable only when the inset changes', async () => {
     const resizeCallbacks: ResizeObserverCallback[] = [];
 
@@ -1579,9 +1756,79 @@ describe('MessageList auto-scroll', () => {
     expect(setPropertySpy).toHaveBeenCalledTimes(1);
 
     clientWidthValue = 280;
+    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 320 });
     for (const callback of resizeCallbacks) {
       callback([], {} as ResizeObserver);
     }
+    expect(setPropertySpy).toHaveBeenCalledTimes(2);
+    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '40px');
+  });
+
+  it('does not rewrite scrollbar inset during height-only resize churn', async () => {
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let clientWidthValue = 288;
+    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 300 });
+    Object.defineProperty(list!, 'clientWidth', {
+      configurable: true,
+      get: () => clientWidthValue,
+    });
+
+    const setPropertySpy = vi.spyOn(container!.style, 'setProperty');
+
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    expect(setPropertySpy).toHaveBeenCalledTimes(1);
+
+    trackHeight = 1300;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    trackHeight = 1500;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+
+    expect(setPropertySpy).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 320 });
+    clientWidthValue = 300;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+
     expect(setPropertySpy).toHaveBeenCalledTimes(2);
     expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '20px');
   });

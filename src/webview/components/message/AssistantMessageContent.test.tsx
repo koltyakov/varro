@@ -149,6 +149,12 @@ afterEach(() => {
   resetDefaultAppState();
 });
 
+function createManyTextParts(count: number): Part[] {
+  return Array.from({ length: count }, (_, index) =>
+    textPart(`text-${index + 1}`, `Paragraph ${index + 1}`)
+  );
+}
+
 describe('deduplicateFileEdits', () => {
   it('keeps only the last file edit in each consecutive duplicate run', () => {
     const initial = textPart('text-1', 'Status update');
@@ -253,5 +259,89 @@ describe('AssistantMessageContent', () => {
     button?.click();
 
     expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it('keeps the active last assistant message fully rendered even when it has many parts', () => {
+    renderAssistantMessageContent({
+      parts: createManyTextParts(45),
+      isLastAssistant: true,
+    });
+
+    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
+  });
+
+  it('still virtualizes non-last assistant messages with many parts', () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      const interactiveList = document.createElement('div');
+      interactiveList.className = 'interactive-list';
+      Object.defineProperty(interactiveList, 'clientHeight', { configurable: true, value: 240 });
+      container?.appendChild(interactiveList);
+
+      cleanup = render(
+        () =>
+          AssistantMessageContent({
+            info: createAssistantMessage(),
+            parts: createManyTextParts(45),
+            errorMessage: null,
+            onRetry: undefined,
+            highlightFinalAnswer: false,
+            highlightPlanningAnswer: false,
+            suppressHighlightedCardMetaParts: false,
+            isLastAssistant: false,
+            textForPart: (part) =>
+              part.type === 'text' || part.type === 'reasoning' ? part.text : null,
+          }),
+        interactiveList
+      );
+
+      expect(container?.querySelectorAll('[data-assistant-render-key]').length).toBeLessThan(45);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it('keeps assistant parts fully rendered when the outer message list is virtualized', () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      const interactiveList = document.createElement('div');
+      interactiveList.className = 'interactive-list';
+      Object.defineProperty(interactiveList, 'clientHeight', { configurable: true, value: 240 });
+      container?.appendChild(interactiveList);
+
+      cleanup = render(
+        () =>
+          AssistantMessageContent({
+            info: createAssistantMessage(),
+            parts: createManyTextParts(45),
+            errorMessage: null,
+            onRetry: undefined,
+            highlightFinalAnswer: false,
+            highlightPlanningAnswer: false,
+            suppressHighlightedCardMetaParts: false,
+            isLastAssistant: false,
+            outerListVirtualized: true,
+            textForPart: (part) =>
+              part.type === 'text' || part.type === 'reasoning' ? part.text : null,
+          }),
+        interactiveList
+      );
+
+      expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 });

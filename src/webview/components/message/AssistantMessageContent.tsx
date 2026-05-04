@@ -6,7 +6,8 @@ import {
   shouldShowAssistantPartInHighlightedCard,
 } from '../../lib/part-utils';
 import { getToolFileChange } from '../../lib/tool-file-change';
-import type { AssistantMessage, Part, TextPart, ToolPart } from '../../types';
+import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
+import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
 
@@ -188,7 +189,11 @@ export function AssistantMessageContent(props: {
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
   suppressHighlightedCardMetaParts?: boolean;
+  isLastAssistant?: boolean;
+  outerListVirtualized?: boolean;
   textForPart: (part: Part) => string | null;
+  questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
+  permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
 }) {
   let flowRef: HTMLDivElement | undefined;
   let scrollContainerRef: HTMLDivElement | null = null;
@@ -295,6 +300,8 @@ export function AssistantMessageContent(props: {
   const shouldVirtualizeParts = createMemo(
     () =>
       hasScrollContainer() &&
+      !props.isLastAssistant &&
+      !props.outerListVirtualized &&
       !readModeOpen() &&
       renderItems().length >= ASSISTANT_PART_VIRTUALIZE_THRESHOLD
   );
@@ -435,6 +442,12 @@ export function AssistantMessageContent(props: {
                 part={part}
                 messageInfo={props.info}
                 streamedText={props.textForPart(part)}
+                questionRequest={
+                  part.type === 'tool' ? props.questionRequestForTool?.(part as ToolPart) : undefined
+                }
+                permissionMatch={
+                  part.type === 'tool' ? props.permissionMatchForTool?.(part as ToolPart) : undefined
+                }
               />
             )}
           </For>
@@ -470,6 +483,16 @@ export function AssistantMessageContent(props: {
           part={item.part}
           messageInfo={props.info}
           streamedText={props.textForPart(item.part)}
+          questionRequest={
+            item.part.type === 'tool'
+              ? props.questionRequestForTool?.(item.part as ToolPart)
+              : undefined
+          }
+          permissionMatch={
+            item.part.type === 'tool'
+              ? props.permissionMatchForTool?.(item.part as ToolPart)
+              : undefined
+          }
         />
       </div>
     );

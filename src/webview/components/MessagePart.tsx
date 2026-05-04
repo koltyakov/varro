@@ -3,6 +3,7 @@ import { expandThinkingByDefault, getMessageById, state, showThinking } from '..
 import { formatAgentLabel, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
+import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ImagePreviewOverlay, createImagePreviewEffect } from './ImagePreview';
 import type { PreviewImage } from './ImagePreview';
@@ -15,6 +16,8 @@ export function MessagePart(props: {
   part: Part;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
+  questionRequest?: typeof state.questions[number] | null;
+  permissionMatch?: ToolCallPermissionMatch | null;
 }) {
   const p = () => props.part;
 
@@ -29,7 +32,13 @@ export function MessagePart(props: {
           />
         );
       case 'tool':
-        return <ToolCall part={part} />;
+        return (
+          <ToolCall
+            part={part}
+            questionRequest={props.questionRequest}
+            permissionMatch={props.permissionMatch}
+          />
+        );
       case 'reasoning':
         return (
           <Show when={showThinking()}>

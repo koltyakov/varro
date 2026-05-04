@@ -500,6 +500,7 @@ body.vscode-high-contrast-light .interactive-session {
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
   overflow-anchor: none;
   padding: 0 0 8px 0;
   scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;

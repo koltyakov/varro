@@ -37,6 +37,11 @@ import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
 import { shouldShowAssistantPartInline } from '../lib/part-utils';
+import {
+  buildPermissionRequestLookup,
+  buildQuestionRequestLookup,
+  getToolCallLookupKey,
+} from '../lib/tool-call-matching';
 import { PendingActionRows, StickyUserMessagePreviewCard } from './message-list/MessageListChrome';
 import {
   getNextVisibleUserMessageTopMap,
@@ -176,6 +181,10 @@ function getRenderedMessages(
   return shouldVirtualize ? messages.slice(range.start, range.end) : messages;
 }
 
+function getMessageIdSet(messages: Array<{ info: Message }>) {
+  return new Set(messages.map((message) => message.info.id));
+}
+
 export function buildPlanImplementationPrompt(parts: Part[]) {
   void parts;
   return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
@@ -270,6 +279,9 @@ export function MessageList() {
   let pendingStickyPreviewScrollTop = 0;
   let pendingStickyPreviewViewportHeight = 0;
   let lastScrollbarInset = -1;
+  let lastContainerOffsetWidth = -1;
+  let lastAutoScrolledTrackHeight = 0;
+  let previousAutoScrollEnabled = true;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
   const INITIAL_SCROLL_STABLE_FRAMES = 3;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
@@ -432,6 +444,14 @@ export function MessageList() {
   const measuredHeights = new Map<string, number>();
   let lastTrackHeight = 0;
 
+  createEffect(() => {
+    const enabled = autoScroll();
+    if (enabled && !previousAutoScrollEnabled) {
+      lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
+    }
+    previousAutoScrollEnabled = enabled;
+  });
+
   const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
 
   createEffect(() => {
@@ -460,12 +480,13 @@ export function MessageList() {
       viewportHeight: viewportHeight(),
     });
   });
+  const renderedMessages = createMemo(() =>
+    getRenderedMessages(messages(), visibleRange(), shouldVirtualize())
+  );
+  const renderedMessageIds = createMemo(() => getMessageIdSet(renderedMessages()));
   const linkedToolCalls = createMemo(() => {
     messageStructureVersion();
-    const allMessages = untrack(() => state.messages);
-    return getLinkedToolCallKeys(
-      getRenderedMessages(allMessages, visibleRange(), shouldVirtualize())
-    );
+    return getLinkedToolCallKeys(renderedMessages());
   });
   const standalonePermissions = createMemo(() =>
     getStandalonePermissionPrompts(
@@ -483,6 +504,25 @@ export function MessageList() {
       linkedToolCalls()
     )
   );
+  const activeSessionRootId = createMemo(
+    () => getSessionTreeRootId(state.activeSessionId) || state.activeSessionId
+  );
+  const questionRequestsByToolCall = createMemo(() =>
+    buildQuestionRequestLookup(state.questions, activeSessionRootId())
+  );
+  const permissionRequestsByToolCall = createMemo(() =>
+    buildPermissionRequestLookup(state.permissions, activeSessionRootId())
+  );
+
+  function getQuestionRequestForTool(part: Extract<Part, { type: 'tool' }>) {
+    const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
+    return key ? (questionRequestsByToolCall().get(key) ?? null) : null;
+  }
+
+  function getPermissionMatchForTool(part: Extract<Part, { type: 'tool' }>) {
+    const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
+    return key ? (permissionRequestsByToolCall().get(key) ?? null) : null;
+  }
 
   const stickyUserMessagePreviewCandidate = createMemo(() => {
     const throttledViewportHeight = stickyPreviewViewportHeight();
@@ -618,7 +658,7 @@ export function MessageList() {
       if (hadResize && restoreExpansionScrollAnchor()) {
         return;
       }
-      if (hadResize && lastTrackHeight > previousTrackHeight + 1 && autoScroll()) {
+      if (hadResize && lastTrackHeight > lastAutoScrolledTrackHeight + 1 && autoScroll()) {
         performScroll();
       }
     });
@@ -752,6 +792,7 @@ export function MessageList() {
     expectedScrollTop = result.nextScrollTop;
     ignoreScrollUntil = result.nextIgnoreScrollUntil;
     lastObservedScrollTop = result.nextScrollTop;
+    lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
   }
 
   function cancelPendingScroll() {
@@ -781,10 +822,13 @@ export function MessageList() {
       if (shouldVirtualize() && !measuredRowObserver) {
         measureVisibleItems();
       }
-      performScroll();
 
       const currentHeight = trackRef.getBoundingClientRect().height;
-      if (currentHeight === lastHeight) {
+      if (currentHeight > lastAutoScrolledTrackHeight + 1) {
+        performScroll();
+      }
+
+      if (Math.abs(currentHeight - lastHeight) <= 1) {
         stableFrames++;
         if (stableFrames >= INITIAL_SCROLL_STABLE_FRAMES) return;
       } else {
@@ -840,6 +884,7 @@ export function MessageList() {
   onMount(() => {
     if (!containerRef) return;
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
+    lastContainerOffsetWidth = containerRef.offsetWidth;
     updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
     setScrollTop(containerRef.scrollTop);
@@ -893,9 +938,14 @@ export function MessageList() {
     lastObservedScrollTop = containerRef.scrollTop ?? 0;
     if (!trackRef) return;
     lastTrackHeight = trackRef.getBoundingClientRect().height;
+    lastAutoScrolledTrackHeight = lastTrackHeight;
     const observer = new ResizeObserver(() => {
       if (!containerRef) return;
-      updateScrollbarInset();
+      const currentContainerOffsetWidth = containerRef.offsetWidth;
+      if (currentContainerOffsetWidth !== lastContainerOffsetWidth) {
+        lastContainerOffsetWidth = currentContainerOffsetWidth;
+        updateScrollbarInset();
+      }
       setViewportHeight(containerRef.clientHeight);
       scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
       scheduleVisibleMeasurement({ afterResize: true });
@@ -1122,7 +1172,7 @@ export function MessageList() {
 
   const assistantDialogSummaryMap = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => getAssistantDialogSummaryMap(state.messages));
+    return untrack(() => getAssistantDialogSummaryMap(state.messages, renderedMessageIds()));
   });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
 
@@ -1162,6 +1212,7 @@ export function MessageList() {
                 messages={messages()}
                 modelChangeMap={modelChangeMap()}
                 lastAssistantID={lastAssistantID()}
+                outerListVirtualized={false}
                 previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
                 fileEditStackGroupMap={assistantStackGroupMap()}
                 assistantDialogSummaryMap={assistantDialogSummaryMap()}
@@ -1169,6 +1220,8 @@ export function MessageList() {
                 latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
                 observeMeasuredRow={observeMeasuredRow}
                 isPlanningAssistantMessage={isPlanningAssistantMessage}
+                questionRequestForTool={getQuestionRequestForTool}
+                permissionMatchForTool={getPermissionMatchForTool}
                 shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
                 buildPlanImplementationPrompt={buildPlanImplementationPrompt}
                 buildPlanDocumentContent={buildPlanDocumentContent}
@@ -1179,6 +1232,7 @@ export function MessageList() {
               messages={messages()}
               modelChangeMap={modelChangeMap()}
               lastAssistantID={lastAssistantID()}
+              outerListVirtualized
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               fileEditStackGroupMap={assistantStackGroupMap()}
               assistantDialogSummaryMap={assistantDialogSummaryMap()}
@@ -1187,6 +1241,8 @@ export function MessageList() {
               visibleRange={visibleRange()}
               observeMeasuredRow={observeMeasuredRow}
               isPlanningAssistantMessage={isPlanningAssistantMessage}
+              questionRequestForTool={getQuestionRequestForTool}
+              permissionMatchForTool={getPermissionMatchForTool}
               shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
               buildPlanImplementationPrompt={buildPlanImplementationPrompt}
               buildPlanDocumentContent={buildPlanDocumentContent}
@@ -1213,9 +1269,12 @@ export function MessageList() {
   );
 }
 
-function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Part[] }>) {
+export function getAssistantDialogSummaryMap(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  targetMessageIds?: ReadonlySet<string>
+) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
-  const childRunsByParentId = getChildRunsByParentId(messages);
+  let childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> | null = null;
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
@@ -1238,6 +1297,16 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
       currentUserRequestCreated = null;
       return;
     }
+
+    if (targetMessageIds && !targetMessageIds.has(lastMessage.id)) {
+      currentMessages = [];
+      currentPrimaryMessageIds = [];
+      currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
+      return;
+    }
+
+    childRunsByParentId ||= getChildRunsByParentId(messages);
 
     const aggregateMessages = collectAssistantDialogMessages(currentMessages, childRunsByParentId);
     const completedMessages = aggregateMessages.filter((message) => !!message.time.completed);
