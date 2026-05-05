@@ -36,6 +36,7 @@ export class FileSearchService {
   private workspaceFileCacheGeneration = 0;
   private fileSearchCts: vscode.CancellationTokenSource | null = null;
   private cacheInvalidationDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private hasPendingWorkspaceFileCacheClear = false;
 
   /**
    * Launch a search for `query`. Results are delivered through `onResult`.
@@ -65,6 +66,7 @@ export class FileSearchService {
       clearTimeout(this.cacheInvalidationDebounceTimer);
       this.cacheInvalidationDebounceTimer = null;
     }
+    this.hasPendingWorkspaceFileCacheClear = false;
     this.clearWorkspaceFileCache();
   }
 
@@ -79,11 +81,23 @@ export class FileSearchService {
   }
 
   private scheduleWorkspaceFileCacheClear() {
-    if (this.cacheInvalidationDebounceTimer) return;
+    if (this.cacheInvalidationDebounceTimer) {
+      this.hasPendingWorkspaceFileCacheClear = true;
+      return;
+    }
 
     this.clearWorkspaceFileCache();
+    this.startWorkspaceFileCacheClearDebounce();
+  }
+
+  private startWorkspaceFileCacheClearDebounce() {
     this.cacheInvalidationDebounceTimer = setTimeout(() => {
       this.cacheInvalidationDebounceTimer = null;
+      if (!this.hasPendingWorkspaceFileCacheClear) return;
+
+      this.hasPendingWorkspaceFileCacheClear = false;
+      this.clearWorkspaceFileCache();
+      this.startWorkspaceFileCacheClearDebounce();
     }, FileSearchService.CACHE_INVALIDATION_DEBOUNCE_MS);
   }
 

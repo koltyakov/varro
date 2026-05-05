@@ -49,6 +49,7 @@ describe('FileSearchService', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.useRealTimers();
     const workspaceFolder = vscodeMock.workspaceFolder;
     vscodeMock.workspace.createFileSystemWatcher.mockImplementation(() => {
       let createListener: (() => void) | undefined;
@@ -249,6 +250,59 @@ describe('FileSearchService', () => {
     });
 
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
+    service.dispose();
+  });
+
+  it('clears the cache again after a debounced follow-up file event', async () => {
+    vi.useFakeTimers();
+    vscodeMock.workspace.findFiles
+      .mockResolvedValueOnce([{ fsPath: '/repo/src/first.ts' }])
+      .mockResolvedValueOnce([{ fsPath: '/repo/src/second.ts' }])
+      .mockResolvedValueOnce([{ fsPath: '/repo/src/third.ts' }]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const firstResult = vi.fn();
+    const secondResult = vi.fn();
+    const thirdResult = vi.fn();
+
+    service.search(1, '', 10, firstResult);
+    await vi.waitFor(() => {
+      expect(firstResult).toHaveBeenCalledTimes(1);
+    });
+
+    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
+      fireCreate: () => void;
+      fireChange: () => void;
+    };
+
+    watcher.fireCreate();
+
+    service.search(2, '', 10, secondResult);
+    await vi.waitFor(() => {
+      expect(secondResult).toHaveBeenCalledTimes(1);
+    });
+
+    watcher.fireChange();
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    service.search(3, '', 10, thirdResult);
+    await vi.waitFor(() => {
+      expect(thirdResult).toHaveBeenCalledTimes(1);
+    });
+
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(3);
+    expect(secondResult).toHaveBeenCalledWith({
+      requestId: 2,
+      query: '',
+      files: [{ path: '/repo/src/second.ts', relativePath: 'src/second.ts', type: 'file' }],
+    });
+    expect(thirdResult).toHaveBeenCalledWith({
+      requestId: 3,
+      query: '',
+      files: [{ path: '/repo/src/third.ts', relativePath: 'src/third.ts', type: 'file' }],
+    });
+
     service.dispose();
   });
 
