@@ -647,4 +647,19 @@ describe('format helpers', () => {
     expect(hasProviderLimitWindowWithinThreshold(limit, 10)).toBe(false);
     expect(hasProviderLimitWindowWithinThreshold(null, 40)).toBe(false);
   });
+
+  it('detects exhausted provider-limit windows without percentage metadata', () => {
+    const limit = availableLimit([
+      {
+        id: 'requests',
+        label: 'Requests',
+        unit: 'requests',
+        remaining: 0,
+        limit: null,
+        resetAt: null,
+      },
+    ]);
+
+    expect(hasProviderLimitWindowWithinThreshold(limit, 40)).toBe(true);
+  });
 });

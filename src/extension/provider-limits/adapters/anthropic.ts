@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { readFile, rename, stat, writeFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -58,11 +59,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
         let response = await fetchAnthropicUsage(credentials.accessToken);
         let note = 'Polled Anthropic OAuth usage endpoint';
 
-        if (
-          response.status === 429 &&
-          credentials.refreshToken &&
-          credentials.credentialsFilePath
-        ) {
+        if (shouldRefreshAnthropicCredentials(response.status, credentials)) {
           const refreshed = await refreshAnthropicAccessToken(credentials.refreshToken);
           if (refreshed.status === 'unsupported') {
             return unsupportedProviderStatus(provider.id, modelID, checkedAt, refreshed.note);
@@ -74,7 +71,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
               status: 'error',
               source: 'provider',
               checkedAt,
-              note: `${refreshed.note} after Anthropic usage endpoint returned 429`,
+              note: `${refreshed.note} after Anthropic usage endpoint returned ${response.status}`,
             };
           }
 
@@ -92,7 +89,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
               status: 'error',
               source: 'provider',
               checkedAt,
-              note: 'Anthropic usage endpoint returned 429 and refreshed credentials could not be saved',
+              note: `Anthropic usage endpoint returned ${response.status} and refreshed credentials could not be saved`,
             };
           }
 
@@ -152,6 +149,17 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
       }
     },
   };
+}
+
+function shouldRefreshAnthropicCredentials(
+  responseStatus: number,
+  credentials: AnthropicCredentials
+): credentials is AnthropicCredentials & { refreshToken: string; credentialsFilePath: string } {
+  return (
+    (responseStatus === 401 || responseStatus === 429) &&
+    Boolean(credentials.refreshToken) &&
+    Boolean(credentials.credentialsFilePath)
+  );
 }
 
 function extractAnthropicWindows(payload: unknown, checkedAt: number): ProviderLimitWindow[] {
@@ -417,14 +425,17 @@ async function writeAnthropicCredentials(
     updatedOauth.expiresAt = Date.now() + expiresInSeconds * 1000;
   }
 
-  const tempPath = `${credentialsFilePath}.tmp`;
+  const tempPath = `${credentialsFilePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+  const fileMode = await stat(credentialsFilePath)
+    .then((file) => file.mode & 0o777)
+    .catch(() => 0o600);
   await writeFile(
     tempPath,
     JSON.stringify({
       ...root,
       claudeAiOauth: updatedOauth,
     }),
-    'utf-8'
+    { encoding: 'utf-8', mode: fileMode }
   );
   await rename(tempPath, credentialsFilePath);
 }

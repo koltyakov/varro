@@ -751,7 +751,7 @@ export function ChatInput() {
     return true;
   }
 
-  async function handleSend(mode?: 'queue' | 'steer') {
+  async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     const text = inputText();
     const sendableText = getSendableInputText(text);
     const hasSendableImages = hasSendableClipboardImages();
@@ -781,6 +781,7 @@ export function ChatInput() {
 
     if (
       mode !== 'steer' &&
+      mode !== 'after-stop' &&
       isLoading() &&
       !hasActiveQuestion() &&
       !hasActivePermission() &&
@@ -1954,9 +1955,9 @@ export function ChatInput() {
               handleSend('steer');
               setShowBusyMenu(false);
             }}
-            onStopAndSend={() => {
-              abortSession();
-              handleSend();
+            onStopAndSend={async () => {
+              await abortSession();
+              await handleSend('after-stop');
               setShowBusyMenu(false);
             }}
           />

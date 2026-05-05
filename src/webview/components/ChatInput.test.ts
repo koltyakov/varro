@@ -718,6 +718,28 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[title="Add to queue (Enter)"]')).not.toBeNull();
   });
 
+  it('stops the active response before sending from the busy send menu', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setInputText('Follow up after stopping');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const menuButton = container?.querySelector<HTMLButtonElement>('[title="More send options"]');
+    menuButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    const stopAndSendButton = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('Stop and Send')
+    );
+    stopAndSendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith('Follow up after stopping', { noReply: false });
+    expect(state.queuedMessages).toEqual([]);
+  });
+
   it('runs a typed slash command with args on Enter', async () => {
     setState('commands', [
       {

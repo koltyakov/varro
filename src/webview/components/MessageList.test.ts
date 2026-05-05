@@ -1484,6 +1484,54 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
+  it('shows sticky prompts for message IDs that are not valid CSS selector values', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const unusualUserId = 'user-2"]';
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage(unusualUserId), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    const rectMap = new Map<Element, DOMRect>();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    const unusualUserRow = [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+      (element) => element.dataset.msgId === unusualUserId
+    );
+    const assistant2Row = container?.querySelector(
+      '[data-msg-id="assistant-2"]'
+    ) as HTMLDivElement | null;
+
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    expect(unusualUserRow).toBeInstanceOf(HTMLDivElement);
+    expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
+    rectMap.set(list!, new DOMRect(0, 0, 500, 500));
+    rectMap.set(unusualUserRow!, new DOMRect(0, -80, 500, 52));
+    rectMap.set(assistant2Row!, new DOMRect(0, 20, 500, 320));
+
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky).toBeInstanceOf(HTMLDivElement);
+    expect(sticky?.textContent).toContain('Prompt 2');
+
+    animationFrames.restore();
+  });
+
   it('hides the sticky preview as soon as any part of the prompt is visible outside it', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
@@ -2115,5 +2163,4 @@ describe('MessageList auto-scroll', () => {
     expect(scrollTopValue).toBe(840);
     animationFrames.restore();
   });
-
 });

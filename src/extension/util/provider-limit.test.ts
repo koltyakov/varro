@@ -196,4 +196,22 @@ describe('provider limit helpers', () => {
       )
     ).toBeNull();
   });
+
+  it('does not send known-provider auth tokens to custom API hosts', () => {
+    const authStore = parseProviderAuthStore(
+      JSON.stringify({
+        openai: { type: 'api', key: 'custom-openai-compatible-key' },
+      })
+    );
+
+    expect(
+      buildProviderLimitProbe(
+        {
+          id: 'openai',
+          models: { model: { api: { url: 'https://openai-compatible.example.test/v1' } } },
+        },
+        authStore
+      )
+    ).toBeNull();
+  });
 });

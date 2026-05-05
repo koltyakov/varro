@@ -288,10 +288,10 @@ export function MessageList() {
   let lastAutoScrolledBottomScrollTop = 0;
   let lastWheelUpAt = Number.NEGATIVE_INFINITY;
   let previousAutoScrollEnabled = true;
-const INITIAL_SCROLL_MAX_FRAMES = 30;
-const INITIAL_SCROLL_STABLE_FRAMES = 3;
-const AUTO_SCROLL_THRESHOLD_PX = 60;
-const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
+  const INITIAL_SCROLL_MAX_FRAMES = 30;
+  const INITIAL_SCROLL_STABLE_FRAMES = 3;
+  const AUTO_SCROLL_THRESHOLD_PX = 60;
+  const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
 
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
@@ -460,6 +460,15 @@ const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
   });
 
   const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
+
+  createEffect((previousVersion: number | undefined) => {
+    const version = messageStructureVersion();
+    if (previousVersion !== undefined && measuredHeights.size > 0) {
+      measuredHeights.clear();
+      setMeasurementVersion((current) => current + 1);
+    }
+    return version;
+  });
 
   createEffect(() => {
     if (pruneMeasuredHeights(measuredHeights, messageIds())) {
@@ -702,7 +711,9 @@ const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
 
   function getStickyUserMessageSourceElement(messageId: string) {
     if (!containerRef) return null;
-    const row = containerRef.querySelector<HTMLElement>(`[data-msg-id="${messageId}"]`);
+    const row = [...containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+      (element) => element.dataset.msgId === messageId
+    );
     return row?.querySelector<HTMLElement>('.user-message-card') ?? row;
   }
 

@@ -334,17 +334,17 @@ describe('createAnthropicAdapter', () => {
       })
     );
     expect(writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude\/\.credentials\.json\.tmp$/),
+      expect.stringMatching(/\.claude\/\.credentials\.json\..*\.tmp$/),
       expect.stringContaining('anthropic-refreshed-access-token'),
-      'utf-8'
+      { encoding: 'utf-8', mode: 0o600 }
     );
     expect(writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude\/\.credentials\.json\.tmp$/),
+      expect.stringMatching(/\.claude\/\.credentials\.json\..*\.tmp$/),
       expect.stringContaining('anthropic-refreshed-refresh-token'),
-      'utf-8'
+      { encoding: 'utf-8', mode: 0o600 }
     );
     expect(rename).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude\/\.credentials\.json\.tmp$/),
+      expect.stringMatching(/\.claude\/\.credentials\.json\..*\.tmp$/),
       expect.stringMatching(/\.claude\/\.credentials\.json$/)
     );
     expect(status).toEqual({
@@ -366,6 +366,53 @@ describe('createAnthropicAdapter', () => {
         },
       ],
     });
+  });
+
+  it('refreshes file-backed OAuth credentials and retries after a 401 response', async () => {
+    vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'anthropic-file-token',
+          refreshToken: 'anthropic-refresh-token',
+        },
+      })
+    );
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response('{}', { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: 'anthropic-refreshed-access-token',
+            refresh_token: 'anthropic-refreshed-refresh-token',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            five_hour: { utilization: 12, is_enabled: true },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: {},
+      modelID: null,
+      checkedAt: 1_000,
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(writeFile).toHaveBeenCalledWith(
+      expect.stringMatching(/\.claude\/\.credentials\.json\..*\.tmp$/),
+      expect.stringContaining('anthropic-refreshed-access-token'),
+      { encoding: 'utf-8', mode: 0o600 }
+    );
+    expect(status.status).toBe('available');
+    expect(status.note).toBe('Polled Anthropic OAuth usage endpoint after refreshing OAuth token');
   });
 
   it('treats an invalid_grant refresh response as unsupported', async () => {

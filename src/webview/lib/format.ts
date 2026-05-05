@@ -105,6 +105,7 @@ export function hasProviderLimitWindowWithinThreshold(
   if (!limit || limit.status !== 'available') return false;
 
   for (const window of limit.windows) {
+    if (window.remaining <= 0) return true;
     const remaining = getProviderLimitWindowRemainingPercent(window);
     if (remaining != null && remaining <= thresholdPercent) return true;
   }

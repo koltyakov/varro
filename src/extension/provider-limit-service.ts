@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import { createHash } from 'crypto';
 import type { ProviderLimitStatus, ServerStatus } from '../shared/protocol';
 import { readProviderLimitConfig } from './provider-limit-config';
 import { fetchProviderLimitFromAdapter } from './provider-limits';
@@ -324,8 +325,8 @@ function serializeProviderAuthStore(authStore: Record<string, ProviderAuthRecord
       .toSorted(([left], [right]) => left.localeCompare(right))
       .map(([providerID, auth]) =>
         auth.type === 'oauth'
-          ? [providerID, auth.type, auth.access]
-          : [providerID, auth.type, auth.key]
+          ? [providerID, auth.type, fingerprintSecret(auth.access)]
+          : [providerID, auth.type, fingerprintSecret(auth.key)]
       )
   );
 }
@@ -337,8 +338,13 @@ function getProviderCredentialFingerprint(
   return JSON.stringify({
     providerID: provider.id,
     authStore: JSON.parse(serializeProviderAuthStore(authStore)) as unknown,
-    apiKey: getProviderApiKey(provider),
+    apiKey: fingerprintSecret(getProviderApiKey(provider)),
   });
+}
+
+function fingerprintSecret(value: string) {
+  if (!value) return '';
+  return createHash('sha256').update(value).digest('hex');
 }
 
 function getProviderApiKey(provider: ProviderMetadata) {
