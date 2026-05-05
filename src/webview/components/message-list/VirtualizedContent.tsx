@@ -7,6 +7,7 @@ export function VirtualizedContent(
   props: {
     messages: Array<{ info: Message; parts: Part[] }>;
     visibleRange?: Partial<VisibleRange>;
+    outerListVirtualized?: boolean;
   } & MessageRowSharedProps
 ) {
   const visibleRange = createMemo<VisibleRange>(() => ({
@@ -31,8 +32,11 @@ export function VirtualizedContent(
         assistantDialogSummaryMap={props.assistantDialogSummaryMap}
         hasBuildAgent={props.hasBuildAgent}
         latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
+        outerListVirtualized={props.outerListVirtualized}
         observeMeasuredRow={props.observeMeasuredRow}
         isPlanningAssistantMessage={props.isPlanningAssistantMessage}
+        questionRequestForTool={props.questionRequestForTool}
+        permissionMatchForTool={props.permissionMatchForTool}
         shouldShowPlanImplementationAction={props.shouldShowPlanImplementationAction}
         buildPlanImplementationPrompt={props.buildPlanImplementationPrompt}
         buildPlanDocumentContent={props.buildPlanDocumentContent}

@@ -5,12 +5,15 @@ import { client } from '../lib/client';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
+import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import type {
   AssistantMessage,
   CompactionPart,
   FileDiff,
   Message as MessageType,
   Part,
+  QuestionRequest,
+  ToolPart,
 } from '../types';
 import {
   AssistantMessageContent,
@@ -41,12 +44,15 @@ export function Message(props: {
   info: MessageType;
   parts: Part[];
   isLastAssistant?: boolean;
+  outerListVirtualized?: boolean;
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
   previousTrailingFileEventSignature?: string | null;
   fileEditStackGroup?: AssistantFileEditStackGroup | null;
   streamingPartId?: string | null;
   streamingText?: string;
+  questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
+  permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
 }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
@@ -189,7 +195,11 @@ export function Message(props: {
                 suppressHighlightedCardMetaParts={
                   !!props.highlightFinalAnswer && assistantContainerVariant() !== 'plain'
                 }
+                isLastAssistant={props.isLastAssistant}
+                outerListVirtualized={props.outerListVirtualized}
                 textForPart={getEffectivePartText}
+                questionRequestForTool={props.questionRequestForTool}
+                permissionMatchForTool={props.permissionMatchForTool}
               />
             </Show>
           </div>

@@ -9,6 +9,7 @@ import {
   formatProviderLimitTitle,
   formatVariantInitial,
   formatVariantLabel,
+  getProviderLimitCompactBadges,
   hasProviderLimitWindowWithinThreshold,
   getProviderLimitTone,
   getOrderedProviderLimitWindows,
@@ -156,6 +157,70 @@ describe('format helpers', () => {
     expect(formatProviderLimitTitle(limit, 60_000)).toBe('Requests: 12 / 50 left, resets in 1m');
   });
 
+  it('keeps a compact badge for a single unprefixed window', () => {
+    const limit = availableLimit([
+      {
+        id: 'messages',
+        label: 'Messages',
+        unit: 'messages',
+        remaining: 0,
+        limit: 40,
+        resetAt: 120_000,
+      },
+    ]);
+
+    expect(formatProviderLimitCompactPrefix(limit)).toBe('');
+    expect(getProviderLimitCompactBadges(limit)).toEqual([{ label: '0%', tone: 'error' }]);
+    expect(formatProviderLimitTitle(limit, 60_000)).toBe('Messages: 0 / 40 left, resets in 1m');
+  });
+
+  it('omits 5h, W, and M prefixes in compact provider limit badge groups', () => {
+    const limit = availableLimit([
+      {
+        id: 'month',
+        label: 'Monthly',
+        unit: 'requests',
+        remaining: 40,
+        limit: 100,
+        resetAt: null,
+        percent: 60,
+      },
+      {
+        id: 'five_hour',
+        label: '5-hour',
+        unit: 'requests',
+        remaining: 0,
+        limit: 100,
+        resetAt: null,
+        percent: 100,
+      },
+      {
+        id: 'week',
+        label: 'Weekly',
+        unit: 'requests',
+        remaining: 12,
+        limit: 100,
+        resetAt: null,
+        percent: 88,
+      },
+      {
+        id: 'day',
+        label: 'Daily',
+        unit: 'requests',
+        remaining: 8,
+        limit: 100,
+        resetAt: null,
+        percent: 92,
+      },
+    ]);
+
+    expect(getProviderLimitCompactBadges(limit)).toEqual([
+      { label: '0%', tone: 'error' },
+      { label: '12%', tone: 'warning' },
+      { label: '40%', tone: 'default' },
+    ]);
+  });
+
   it('derives period prefixes for weekly and monthly windows', () => {
     expect(
       formatProviderLimitCompactPrefix(
@@ -200,7 +265,7 @@ describe('format helpers', () => {
           },
         ])
       )
-    ).toBe('5H');
+    ).toBe('5h');
   });
 
   it('resolves the selected window and overrides when another has lower remaining', () => {

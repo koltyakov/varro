@@ -27,7 +27,9 @@ export function performScrollToBottom(args: {
   if (!container) return null;
 
   const nextScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
-  container.scrollTop = nextScrollTop;
+  if (Math.abs(container.scrollTop - nextScrollTop) >= 1) {
+    container.scrollTop = nextScrollTop;
+  }
   return {
     nextScrollTop,
     nextIgnoreScrollUntil: args.now + args.programmaticScrollWindowMs,

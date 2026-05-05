@@ -49,7 +49,7 @@ export function getPrimaryProviderLimitWindow(limit: ProviderLimitStatus | null 
  * Resolve which window the toolbar chip should show.
  *
  * - If `selectedId` matches an available window, prefer it.
- * - Otherwise fall back to the narrowest period window (5H, D, W, M).
+ * - Otherwise fall back to the narrowest period window (5h, D, W, M).
  */
 export function resolveProviderLimitWindow(
   limit: ProviderLimitStatus | null | undefined,
@@ -159,6 +159,47 @@ export function formatProviderLimitCompactPrefix(
   return getProviderLimitWindowPeriodLabel(target);
 }
 
+export function getProviderLimitCompactBadges(
+  limit: ProviderLimitStatus | null | undefined,
+  options?: {
+    preferredPeriods?: string[];
+    fallbackCount?: number;
+  }
+) {
+  if (!limit || limit.status !== 'available') return [];
+
+  const preferredPeriods = options?.preferredPeriods ?? ['5h', 'W', 'M'];
+  const fallbackCount = options?.fallbackCount ?? 1;
+  const windows = getOrderedProviderLimitWindows(limit);
+  const preferred = windows.filter((window) => {
+    const prefix = formatProviderLimitCompactPrefix(limit, window);
+    return preferredPeriods.includes(prefix);
+  });
+  const visible =
+    preferred.length > 0
+      ? preferred
+      : windows
+          .filter((window) => {
+            const value = formatProviderLimitCompact(limit, window);
+            if (!value) return false;
+            const prefix = formatProviderLimitCompactPrefix(limit, window);
+            return !!prefix || windows.length === 1;
+          })
+          .slice(0, fallbackCount);
+
+  return visible.flatMap((window) => {
+    const value = formatProviderLimitCompact(limit, window);
+    if (!value) return [];
+    const prefix = formatProviderLimitCompactPrefix(limit, window);
+    return [
+      {
+        label: prefix === 'D' ? `${prefix} ${value}` : value,
+        tone: getProviderLimitTone(limit, window),
+      },
+    ];
+  });
+}
+
 function formatRemainingPercent(value: number) {
   if (value >= 10) return `${Math.round(value)}`;
   if (value <= 0) return '0';
@@ -205,7 +246,7 @@ function compareProviderLimitDisplayWindows(a: ProviderLimitWindow, b: ProviderL
 
 function getWindowPeriodPriority(window: ProviderLimitWindow) {
   const period = getProviderLimitWindowPeriodLabel(window);
-  if (period === '5H') return 0;
+  if (period === '5h') return 0;
   if (period === 'D') return 1;
   if (period === 'W') return 2;
   if (period === 'M') return 3;
@@ -242,7 +283,7 @@ function getProviderLimitWindowPeriodLabel(window: ProviderLimitWindow) {
   if (id.includes('month') || label.includes('month')) return 'M';
   if (id.includes('week') || id.includes('seven_day') || label.includes('week')) return 'W';
   if (id.includes('five_hour') || label.includes('5-hour') || label.includes('5 hour')) {
-    return '5H';
+    return '5h';
   }
   if (
     id.includes('day') ||

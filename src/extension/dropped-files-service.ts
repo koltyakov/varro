@@ -11,6 +11,9 @@ import { getRelativePath } from './util/path';
 
 type DroppedFileInput = Pick<DroppedFile, 'path' | 'relativePath' | 'type'>;
 const MAX_CONCURRENT_DROPPED_CONTENT_WRITES = 2;
+const MAX_CONCURRENT_DROPPED_PATH_STATS = 8;
+const MAX_DROPPED_CONTENT_FILES = 20;
+const MAX_DROPPED_CONTENT_SIZE_BYTES = 10 * 1024 * 1024;
 
 export class DroppedFilesService {
   private tempDropsDir: string | null = null;
@@ -21,14 +24,27 @@ export class DroppedFilesService {
     const dropsDir = await this.ensureDropsDir();
     if (!dropsDir) return [];
 
+    const acceptedFiles = files.slice(0, MAX_DROPPED_CONTENT_FILES);
+    if (files.length > acceptedFiles.length) {
+      logger.warn(
+        `Ignoring ${files.length - acceptedFiles.length} dropped files beyond the ${MAX_DROPPED_CONTENT_FILES} file limit`
+      );
+    }
+
     const createdPaths: string[] = [];
     try {
       const results: Array<DroppedFileInput | null> = [];
-      for (let index = 0; index < files.length; index += MAX_CONCURRENT_DROPPED_CONTENT_WRITES) {
-        const chunk = files.slice(index, index + MAX_CONCURRENT_DROPPED_CONTENT_WRITES);
+      for (
+        let index = 0;
+        index < acceptedFiles.length;
+        index += MAX_CONCURRENT_DROPPED_CONTENT_WRITES
+      ) {
+        const chunk = acceptedFiles.slice(index, index + MAX_CONCURRENT_DROPPED_CONTENT_WRITES);
         const chunkResults = await Promise.all(
           chunk.map(async (file) => {
             try {
+              if (!isDroppedContentWithinLimits(file)) return null;
+
               const buffer = Buffer.from(file.content, 'base64');
               const safeName = sanitizeDroppedFileName(file.name);
               const targetPath = join(
@@ -67,31 +83,37 @@ export class DroppedFilesService {
   }
 
   async fromPaths(paths: string[]) {
-    const dropped = await Promise.all(
-      Array.from(new Set(paths)).map(async (path) => {
-        try {
-          const uri = await this.resolveDroppedUri(path);
-          if (!uri) {
-            throw new Error('Path does not exist');
-          }
-          const stat = await vscode.workspace.fs.stat(uri);
-          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-          const relativePath = getRelativePath(uri, workspaceFolder);
+    const uniquePaths = Array.from(new Set(paths));
+    const dropped: Array<DroppedFileInput | null> = [];
+    for (let index = 0; index < uniquePaths.length; index += MAX_CONCURRENT_DROPPED_PATH_STATS) {
+      const chunk = uniquePaths.slice(index, index + MAX_CONCURRENT_DROPPED_PATH_STATS);
+      const chunkResults = await Promise.all(
+        chunk.map(async (path) => {
+          try {
+            const uri = await this.resolveDroppedUri(path);
+            if (!uri) {
+              throw new Error('Path does not exist');
+            }
+            const stat = await vscode.workspace.fs.stat(uri);
+            const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+            const relativePath = getRelativePath(uri, workspaceFolder);
 
-          return {
-            path: uri.fsPath,
-            relativePath,
-            type:
-              stat.type & vscode.FileType.Directory ? ('directory' as const) : ('file' as const),
-          } satisfies DroppedFileInput;
-        } catch (err) {
-          logger.warn(
-            `Ignoring dropped path ${path}: ${err instanceof Error ? err.message : String(err)}`
-          );
-          return null;
-        }
-      })
-    );
+            return {
+              path: uri.fsPath,
+              relativePath,
+              type:
+                stat.type & vscode.FileType.Directory ? ('directory' as const) : ('file' as const),
+            } satisfies DroppedFileInput;
+          } catch (err) {
+            logger.warn(
+              `Ignoring dropped path ${path}: ${err instanceof Error ? err.message : String(err)}`
+            );
+            return null;
+          }
+        })
+      );
+      dropped.push(...chunkResults);
+    }
 
     return dropped.filter((item): item is DroppedFileInput => Boolean(item));
   }
@@ -177,4 +199,23 @@ function sanitizeDroppedFileName(name: string): string {
   const base = name.split(/[\\/]/).pop() || 'dropped';
   const sanitized = base.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
   return sanitized || 'dropped';
+}
+
+function isDroppedContentWithinLimits(file: { name: string; content: string; size: number }) {
+  if (file.size > MAX_DROPPED_CONTENT_SIZE_BYTES) {
+    logger.warn(
+      `Ignoring dropped file ${file.name}: file is larger than ${MAX_DROPPED_CONTENT_SIZE_BYTES} bytes`
+    );
+    return false;
+  }
+
+  const maxBase64Length = Math.ceil(MAX_DROPPED_CONTENT_SIZE_BYTES / 3) * 4 + 4;
+  if (file.content.length > maxBase64Length) {
+    logger.warn(
+      `Ignoring dropped file ${file.name}: encoded content is larger than ${MAX_DROPPED_CONTENT_SIZE_BYTES} bytes`
+    );
+    return false;
+  }
+
+  return true;
 }

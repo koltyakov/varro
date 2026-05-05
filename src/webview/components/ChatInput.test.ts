@@ -20,6 +20,7 @@ import {
   setIsLoading,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
+  setShowModelPicker,
   setState,
   setInputText,
 } from '../lib/state';
@@ -67,6 +68,7 @@ afterEach(() => {
   setIsLoading(false);
   setProviderLimitPollIntervalSeconds(120);
   setProviderLimitThresholdPercent(40);
+  setShowModelPicker(false);
   setState('activeSessionId', null);
   setState('messages', []);
   setState('sessions', []);
@@ -332,6 +334,52 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
   });
 
+  it('shows provider-limit UI for a monthly-only Copilot-style limit', () => {
+    setProviderLimitThresholdPercent(60);
+    setState('providers', [
+      {
+        id: 'github-copilot',
+        name: 'GitHub Copilot',
+        source: 'api',
+        models: {
+          'gpt-5-mini': {
+            id: 'gpt-5-mini',
+            name: 'GPT-5 mini',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { 'github-copilot': 'gpt-5-mini' });
+    setState('selectedModel', { providerID: 'github-copilot', modelID: 'gpt-5-mini' });
+    setState('providerLimits', {
+      'github-copilot:gpt-5-mini': {
+        providerID: 'github-copilot',
+        modelID: 'gpt-5-mini',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'chat',
+            label: 'Monthly Chat',
+            unit: 'messages',
+            remaining: 12,
+            limit: 20,
+            resetAt: null,
+          },
+        ],
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
+    expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('Limits:');
+    expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('60%');
+  });
+
   it('keeps the selected provider-limit window after limit refreshes', async () => {
     setProviderLimitThresholdPercent(40);
     setupModelState();
@@ -369,13 +417,9 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    const chip = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
-    expect(container?.querySelector('.toolbar-limit-chip-prefix')?.textContent).toBe('5H');
-
-    chip?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
-    await Promise.resolve();
-
-    expect(container?.querySelector('.toolbar-limit-chip-prefix')?.textContent).toBe('W');
+    expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('39%');
+    expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('30%');
+    expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('80%');
 
     setState('providerLimits', {
       'openai:gpt-4o': availableProviderLimit({
@@ -410,7 +454,9 @@ describe('ChatInput', () => {
     });
     await Promise.resolve();
 
-    expect(container?.querySelector('.toolbar-limit-chip-prefix')?.textContent).toBe('W');
+    expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('39%');
+    expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('30%');
+    expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('1%');
   });
 
   it('removes the context button title while the popup is open', async () => {
@@ -448,6 +494,139 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.provider-limit-popup')).not.toBeNull();
     expect(button?.hasAttribute('title')).toBe(false);
     expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 39 / 100 left');
+  });
+
+  it('renders permission, context usage, and provider limits in the lower metadata row', () => {
+    setupModelState();
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+    setState('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit(),
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const shell = container?.querySelector('.chat-input-shell');
+    const frame = container?.querySelector('.chat-input-container');
+    const mainRow = container?.querySelector('.toolbar-main');
+    const metaRow = container?.querySelector('.toolbar-meta');
+
+    expect(frame?.contains(mainRow ?? null)).toBe(true);
+    expect(frame?.contains(metaRow ?? null)).toBe(false);
+    expect(shell?.contains(metaRow ?? null)).toBe(true);
+    expect(mainRow?.querySelector('.chat-context-usage')).toBeNull();
+    expect(mainRow?.querySelector('.toolbar-limit-chip')).toBeNull();
+    expect(
+      mainRow?.querySelector<HTMLButtonElement>('.permission-mode-button')?.textContent
+    ).toBeFalsy();
+    expect(metaRow?.querySelector('.chat-context-usage')).not.toBeNull();
+    expect(metaRow?.querySelector('.toolbar-limit-chip')).not.toBeNull();
+    expect(
+      metaRow?.querySelector<HTMLButtonElement>('.permission-mode-button')?.textContent
+    ).toContain('Default');
+    expect(metaRow?.querySelector('.context-anchor')).not.toBeNull();
+    expect(metaRow?.querySelector('.provider-limit-anchor')).not.toBeNull();
+  });
+
+  it('right-aligns the provider limit popup when no context is shown', async () => {
+    setProviderLimitThresholdPercent(40);
+    setupModelState();
+    setState('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit(),
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const button = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const popup = container?.querySelector<HTMLElement>('.provider-limit-popup');
+
+    expect(container?.querySelector('.context-anchor')).toBeNull();
+    expect(popup).not.toBeNull();
+    expect(popup?.style.right).toBe('0px');
+  });
+
+  it('right-aligns the provider limit popup when context is shown', async () => {
+    setProviderLimitThresholdPercent(40);
+    setupModelState();
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+    setState('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit(),
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const button = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const popup = container?.querySelector<HTMLElement>('.provider-limit-popup');
+
+    expect(container?.querySelector('.context-anchor')).not.toBeNull();
+    expect(popup).not.toBeNull();
+    expect(popup?.style.right).toBe('0px');
+  });
+
+  it('aligns the permission popup to the input frame left edge', async () => {
+    setupModelState();
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const frame = container?.querySelector<HTMLElement>('.chat-input-container');
+    const button = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
+
+    expect(frame).not.toBeNull();
+    expect(button).not.toBeNull();
+    expect(button?.style.position).toBe('');
+
+    const frameLeft = 24;
+    const buttonLeft = 60;
+    vi.spyOn(frame!, 'getBoundingClientRect').mockReturnValue({
+      x: frameLeft,
+      y: 0,
+      top: 0,
+      left: frameLeft,
+      right: 320,
+      bottom: 100,
+      width: 296,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(button!, 'getBoundingClientRect').mockReturnValue({
+      x: buttonLeft,
+      y: 0,
+      top: 0,
+      left: buttonLeft,
+      right: 120,
+      bottom: 24,
+      width: 60,
+      height: 24,
+      toJSON: () => ({}),
+    });
+
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const popup = container?.querySelector<HTMLElement>('.toolbar-popover');
+    expect(popup?.style.left).toBe('24px');
+  });
+
+  it('raises the input shell above sticky overlays while the model picker is open', () => {
+    setupModelState();
+    setShowModelPicker(true);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.chat-input-shell')?.className).toContain(
+      'showing-floating-popover'
+    );
+    expect(container?.querySelector('.dropdown-menu')).not.toBeNull();
   });
 
   it('queues busy composer attachments and clears them from the input', () => {
@@ -997,6 +1176,18 @@ describe('getActiveCompletion', () => {
       start: 0,
       end: 4,
     });
+    expect(getActiveCompletion('/skills ', 8)).toEqual({
+      type: 'slash',
+      query: 'skills ',
+      start: 0,
+      end: 8,
+    });
+    expect(getActiveCompletion('/skills browser', 15)).toEqual({
+      type: 'slash',
+      query: 'skills browser',
+      start: 0,
+      end: 15,
+    });
     expect(getActiveCompletion('prefix /rev', 11)).toBeNull();
   });
 
@@ -1048,6 +1239,40 @@ describe('getCompletionSelection', () => {
         }
       )
     ).toEqual({ type: 'set-slash', value: '/init' });
+  });
+
+  it('keeps selecting /skills as a composer text update', () => {
+    expect(
+      getCompletionSelection(
+        { type: 'slash', query: 'sk', start: 0, end: 3 },
+        {
+          key: 'slash:skills',
+          type: 'slash',
+          name: 'skills',
+          aliases: [],
+          description: 'Browse available skills',
+          action: () => {},
+        },
+        true
+      )
+    ).toEqual({ type: 'set-slash', value: '/skills ' });
+  });
+
+  it('keeps selecting a skill entry as a composer text update', () => {
+    expect(
+      getCompletionSelection(
+        { type: 'slash', query: 'skills bro', start: 0, end: 11 },
+        {
+          key: 'skill:browser-bridge',
+          type: 'slash',
+          name: 'browser-bridge',
+          aliases: [],
+          description: 'Token-efficient Chrome tab inspection',
+          action: () => {},
+        },
+        true
+      )
+    ).toEqual({ type: 'set-slash', value: '/browser-bridge' });
   });
 
   it('returns mention selections with attached file metadata', () => {
@@ -1105,6 +1330,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.name === 'init')).toBe(true);
     expect(commands.some((command) => command.name === 'export')).toBe(true);
     expect(commands.some((command) => command.name === 'redo')).toBe(true);
+    expect(commands.some((command) => command.name === 'skills')).toBe(true);
     expect(commands.some((command) => command.name === 'test')).toBe(true);
     expect(commands.filter((command) => command.name === 'settings')).toHaveLength(1);
   });

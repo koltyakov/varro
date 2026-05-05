@@ -40,6 +40,32 @@ export function clampPopupToViewport(el: HTMLElement, margin = 8): void {
   }
 }
 
+export function alignPopupToBoundary(
+  el: HTMLElement,
+  boundaryEl: HTMLElement,
+  side: 'left' | 'right'
+): void {
+  const positionedAncestor =
+    el.offsetParent instanceof HTMLElement
+      ? el.offsetParent
+      : el.parentElement instanceof HTMLElement
+        ? el.parentElement
+        : null;
+  if (!positionedAncestor) return;
+
+  const parentRect = positionedAncestor.getBoundingClientRect();
+  const boundaryRect = boundaryEl.getBoundingClientRect();
+
+  if (side === 'left') {
+    el.style.right = 'auto';
+    el.style.left = `${Math.round(boundaryRect.left - parentRect.left)}px`;
+    return;
+  }
+
+  el.style.left = 'auto';
+  el.style.right = `${Math.round(parentRect.right - boundaryRect.right)}px`;
+}
+
 /**
  * Cap an upward-opening popup to the space available above its anchored bottom edge.
  *

@@ -112,6 +112,26 @@ describe('ToolbarPickers', () => {
     expect(container?.querySelector('.toolbar-popover')).toBeNull();
   });
 
+  it('renders a labeled permission button when requested', () => {
+    cleanup = render(
+      () => (
+        <PermissionModePicker
+          mode="default"
+          showPicker={false}
+          showLabel={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
+
+    expect(toggleButton?.className).not.toContain('icon-only');
+    expect(toggleButton?.textContent).toContain('Default approvals');
+  });
+
   it('renders the agent picker state and forwards hover and selection', () => {
     const onToggle = vi.fn();
     const onSelect = vi.fn();
@@ -199,6 +219,65 @@ describe('ToolbarPickers', () => {
     expect(onSelect).toHaveBeenCalledWith('low');
   });
 
+  it('right-aligns the variant picker popover when a boundary is provided', async () => {
+    const boundary = document.createElement('div');
+    document.body.appendChild(boundary);
+    const [showPicker, setShowPicker] = createSignal(false);
+
+    cleanup = render(
+      () => (
+        <VariantPicker
+          boundaryRef={boundary}
+          alignTo="right"
+          variants={['low', 'high']}
+          selectedVariant="high"
+          selectedLabel="High"
+          showPicker={showPicker()}
+          getLabel={(variant) => variant.toUpperCase()}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const button = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+    const wrapper = button?.parentElement as HTMLDivElement | null;
+
+    vi.spyOn(boundary, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 24,
+      width: 200,
+      height: 24,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(wrapper!, 'getBoundingClientRect').mockReturnValue({
+      x: 140,
+      y: 0,
+      top: 0,
+      left: 140,
+      right: 200,
+      bottom: 24,
+      width: 60,
+      height: 24,
+      toJSON: () => ({}),
+    });
+
+    setShowPicker(true);
+    await flushMicrotasks();
+
+    const popover = container?.querySelector<HTMLElement>('.toolbar-popover');
+
+    expect(popover?.style.left).toBe('auto');
+    expect(popover?.style.right).toBe('0px');
+
+    boundary.remove();
+  });
+
   it('renders the model picker fallback when no model is selected', () => {
     const onToggle = vi.fn();
 
@@ -254,15 +333,7 @@ describe('ToolbarPickers', () => {
 
   it('omits the provider limit chip when no label is available', () => {
     cleanup = render(
-      () => (
-        <ProviderLimitChip
-          prefix={null}
-          label={null}
-          tone="default"
-          title={null}
-          onClick={vi.fn()}
-        />
-      ),
+      () => <ProviderLimitChip badges={[]} title={null} onClick={vi.fn()} />,
       container!
     );
 
@@ -271,23 +342,20 @@ describe('ToolbarPickers', () => {
 
   it('renders the provider limit chip interactions and cycle guard paths', () => {
     const onClick = vi.fn();
-    const onCycle = vi.fn();
 
     cleanup = render(
       () => (
         <div>
           <ProviderLimitChip
-            prefix="Daily"
-            label="3 left"
-            tone="warning"
+            badges={[
+              { label: '0%', tone: 'error' },
+              { label: '12%', tone: 'warning' },
+            ]}
             title="Daily requests remaining"
             onClick={onClick}
-            onCycle={onCycle}
           />
           <ProviderLimitChip
-            prefix={null}
-            label="Default"
-            tone="default"
+            badges={[{ label: '40%', tone: 'default' }]}
             title={null}
             ariaLabel={null}
             onClick={vi.fn()}
@@ -298,24 +366,23 @@ describe('ToolbarPickers', () => {
     );
 
     const buttons = container?.querySelectorAll<HTMLButtonElement>('.toolbar-limit-chip') ?? [];
-    const cycleEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
-    const defaultEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
-
     expect(buttons).toHaveLength(2);
-    expect(buttons[0]?.className).toContain('warning');
     expect(buttons[0]?.getAttribute('aria-label')).toBe('Daily requests remaining');
-    expect(buttons[0]?.textContent).toContain('Daily');
-    expect(buttons[0]?.textContent).toContain('3 left');
-    expect(buttons[1]?.className).not.toContain('default');
+    expect(buttons[0]?.textContent).toContain('Limits:');
+    expect(buttons[0]?.textContent).toContain('0%');
+    expect(buttons[0]?.textContent).toContain('12%');
+    expect(buttons[0]?.textContent).toContain('·');
     expect(buttons[1]?.getAttribute('aria-label')).toBe('Provider limits');
+    expect(buttons[1]?.textContent).toContain('40%');
+    expect(buttons[0]?.querySelector('.toolbar-limit-chip-badge.error')).toBeInstanceOf(
+      HTMLElement
+    );
+    expect(buttons[0]?.querySelector('.toolbar-limit-chip-badge.warning')).toBeInstanceOf(
+      HTMLElement
+    );
 
     buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    buttons[0]?.dispatchEvent(cycleEvent);
-    buttons[1]?.dispatchEvent(defaultEvent);
 
     expect(onClick).toHaveBeenCalledOnce();
-    expect(onCycle).toHaveBeenCalledOnce();
-    expect(cycleEvent.defaultPrevented).toBe(true);
-    expect(defaultEvent.defaultPrevented).toBe(false);
   });
 });

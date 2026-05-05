@@ -23,6 +23,7 @@ export type SlashCommand = {
   name: string;
   aliases: string[];
   description: string;
+  source?: 'command' | 'mcp' | 'skill';
   action: (args: string) => void | Promise<void>;
 };
 
@@ -40,12 +41,23 @@ export function CompletionMenu(props: {
   let menuRef: HTMLDivElement | undefined;
   const itemRefs = new Map<number, HTMLButtonElement>();
 
+  function updateScrollbarInset() {
+    if (!menuRef) return;
+    const scrollbarInset = Math.max(0, menuRef.offsetWidth - menuRef.clientWidth);
+    menuRef.style.setProperty('--composer-completion-scrollbar-inset', `${scrollbarInset}px`);
+  }
+
   createEffect(() => {
     const items = props.items;
     const activeIndices = new Set(items.map((_, i) => i));
     for (const key of itemRefs.keys()) {
       if (!activeIndices.has(key)) itemRefs.delete(key);
     }
+  });
+
+  createEffect(() => {
+    void props.items;
+    queueMicrotask(updateScrollbarInset);
   });
 
   createEffect(() => {
@@ -61,6 +73,15 @@ export function CompletionMenu(props: {
     } else if (elBottom > viewBottom) {
       menuRef.scrollTop = elBottom - menuRef.clientHeight;
     }
+  });
+
+  onMount(() => {
+    updateScrollbarInset();
+
+    if (typeof ResizeObserver === 'undefined' || !menuRef) return;
+    const observer = new ResizeObserver(() => updateScrollbarInset());
+    observer.observe(menuRef);
+    onCleanup(() => observer.disconnect());
   });
 
   return (

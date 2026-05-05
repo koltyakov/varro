@@ -49,7 +49,14 @@ export function TodoList() {
           <span class="todo-block-count-sep">/</span>
           {total()}
         </span>
-        <div class="todo-block-progress" aria-hidden="true">
+        <div
+          class="todo-block-progress"
+          role="progressbar"
+          aria-valuenow={completed()}
+          aria-valuemin={0}
+          aria-valuemax={total()}
+          aria-label={`${completed()} of ${total()} todos completed`}
+        >
           <div
             class={`todo-block-progress-fill ${allDone() ? 'is-complete' : ''}`}
             style={{ width: `${progress()}%` }}
@@ -112,9 +119,21 @@ function TodoItem(props: { todo: Todo }) {
     }
   };
 
+  const statusLabel = () => {
+    switch (props.todo.status) {
+      case 'completed':
+        return 'completed';
+      case 'in_progress':
+        return 'in progress';
+      default:
+        return 'pending';
+    }
+  };
   return (
     <li class={`todo-block-item status-${props.todo.status}`}>
-      <span class="todo-block-item-icon">{icon()}</span>
+      <span class="todo-block-item-icon" role="img" aria-label={statusLabel()}>
+        {icon()}
+      </span>
       <span class="todo-block-item-text">{props.todo.content}</span>
     </li>
   );

@@ -3,7 +3,18 @@ import { registerProviderLimitRefreshEffect } from '../hooks/session/session-eff
 import { getActiveProviderSelection } from '../hooks/routing-state';
 import { createAppState } from '../lib/state';
 import type { AssistantMessage, Provider } from '../types';
+import type { ProviderLimitStatus } from '../../shared/protocol';
 import { createPerfRoot, expectEffectDependencyIsolation, settlePerfEffects } from './harness';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function createProvider(): Provider {
   return {
@@ -101,6 +112,60 @@ describe('session effects perf guards', () => {
         configurable: true,
         value: originalVisibility,
       });
+    }
+  });
+
+  it('does not overlap provider-limit polling while a refresh is in flight', async () => {
+    vi.useFakeTimers();
+    const appState = createAppState();
+    const pendingLimit = deferred<ProviderLimitStatus | null>();
+    const loadProviderLimit = vi.fn(() => pendingLimit.promise);
+    const logError = vi.fn();
+
+    appState.setState('serverStatus', { state: 'running' });
+    appState.setState('providersLoaded', true);
+    appState.setState('providers', [createProvider()]);
+    appState.setState('providerDefaults', { openai: 'gpt-4o' });
+    appState.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+
+    const dispose = createPerfRoot(() => {
+      registerProviderLimitRefreshEffect({
+        getServerState: () => appState.state.serverStatus.state,
+        areProvidersLoaded: () => appState.state.providersLoaded,
+        isDocumentVisible: () => true,
+        getActiveProviderSelection: () =>
+          getActiveProviderSelection({
+            selectedModel: appState.state.selectedModel,
+            providers: appState.state.providers,
+            providerDefaults: appState.state.providerDefaults,
+          }),
+        getProviderLimit: (providerID, modelID) =>
+          appState.state.providerLimits[`${providerID}:${modelID ?? ''}`] ?? null,
+        loadProviderLimit,
+        setProviderLimit: (providerID, modelID, limit) => {
+          appState.setState('providerLimits', `${providerID}:${modelID ?? ''}`, limit);
+        },
+        getPollIntervalMs: () => 10,
+        logError,
+      });
+    });
+
+    try {
+      await settlePerfEffects();
+      expect(loadProviderLimit).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(50);
+      expect(loadProviderLimit).toHaveBeenCalledTimes(1);
+
+      pendingLimit.resolve(null);
+      await settlePerfEffects();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(loadProviderLimit).toHaveBeenCalledTimes(2);
+      expect(logError).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+      vi.useRealTimers();
     }
   });
 });

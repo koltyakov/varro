@@ -1871,11 +1871,25 @@ export function setMessagesIncremental(
       'messages',
       produce((msgs) => {
         let changed = false;
-        for (let i = 0; i < incoming.length; i++) {
+        let startIndex = 0;
+        while (startIndex < sharedPrefixLength && msgs[startIndex] === incoming[startIndex]) {
+          startIndex += 1;
+        }
+
+        for (let i = startIndex; i < incoming.length; i++) {
           const next = incoming[i];
-          const nextEntry = mergeMessageEntry(msgs[i], next, options);
+          const currentEntry = msgs[i];
+          if (
+            currentEntry &&
+            areMessageEntriesEquivalent(currentEntry, next) &&
+            !hasExtraMessagePartsToPreserve(currentEntry, next, options)
+          ) {
+            continue;
+          }
+
+          const nextEntry = mergeMessageEntry(currentEntry, next, options);
           if (i < sharedPrefixLength) {
-            if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
+            if (!areMessageEntriesEquivalent(currentEntry, nextEntry)) {
               msgs[i] = nextEntry;
               changed = true;
             }
@@ -1920,6 +1934,17 @@ function mergeMessageEntry(
   }
 
   return next;
+}
+
+function hasExtraMessagePartsToPreserve(
+  current: MessageEntry,
+  incoming: MessageEntry,
+  options?: { preserveExtraParts?: boolean }
+) {
+  if (!options?.preserveExtraParts || current.parts.length <= incoming.parts.length) return false;
+
+  const incomingPartIds = new Set(incoming.parts.map((part) => part.id));
+  return current.parts.some((part) => !incomingPartIds.has(part.id));
 }
 
 function cloneMessageEntries(entries: MessageEntry[]) {

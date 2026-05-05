@@ -5,12 +5,9 @@ import {
   type RalphStopReason,
 } from '../../../shared/ralph';
 import {
-  formatProviderLimitCompact,
-  formatProviderLimitCompactPrefix,
   formatProviderLimitTitle,
   formatVariantLabel,
-  getOrderedProviderLimitWindows,
-  getProviderLimitTone,
+  getProviderLimitCompactBadges,
 } from '../../lib/format';
 import { getProviderLimit } from '../../lib/state';
 import { ralphStore } from '../../lib/stores/ralph-store';
@@ -48,28 +45,7 @@ export function RalphDashboard(props: { sessionId: string }) {
   const providerLimitBadges = () => {
     const limit = providerLimit();
     if (!isRunning() || !limit || limit.status !== 'available') return [];
-
-    const windows = getOrderedProviderLimitWindows(limit);
-    const preferred = windows.filter((window) => {
-      const prefix = formatProviderLimitCompactPrefix(limit, window);
-      return prefix === '5H' || prefix === 'W' || prefix === 'M';
-    });
-    const visible =
-      preferred.length > 0
-        ? preferred
-        : windows.filter((window) => formatProviderLimitCompactPrefix(limit, window)).slice(0, 1);
-
-    return visible.flatMap((window) => {
-      const prefix = formatProviderLimitCompactPrefix(limit, window);
-      const value = formatProviderLimitCompact(limit, window);
-      if (!value) return [];
-      return [
-        {
-          label: prefix ? `${prefix} ${value}` : value,
-          tone: getProviderLimitTone(limit, window),
-        },
-      ];
-    });
+    return getProviderLimitCompactBadges(limit);
   };
   const providerLimitTitle = () => {
     const limit = providerLimit();
@@ -132,7 +108,7 @@ export function RalphDashboard(props: { sessionId: string }) {
                     >
                       {activeRun().status}
                     </span>
-                    <Show when={activeRun().stopReason}>
+                    <Show when={visibleStopReason(activeRun().stopReason)}>
                       {(reason) => (
                         <span
                           class="ralph-dashboard-stop-reason"
@@ -221,10 +197,15 @@ export function RalphDashboard(props: { sessionId: string }) {
                     >
                       <span class="ralph-dashboard-provider-limits-label">Limits:</span>
                       <For each={providerLimitBadges()}>
-                        {(badge) => (
-                          <span class={`ralph-dashboard-provider-limit ${badge.tone}`}>
-                            {badge.label}
-                          </span>
+                        {(badge, index) => (
+                          <>
+                            <Show when={index() > 0}>
+                              <span class="ralph-dashboard-provider-limit-separator">&middot;</span>
+                            </Show>
+                            <span class={`ralph-dashboard-provider-limit ${badge.tone}`}>
+                              {badge.label}
+                            </span>
+                          </>
                         )}
                       </For>
                     </div>
@@ -289,7 +270,13 @@ function resumeButtonClass(status: RalphStatus): string {
   return 'ralph-dashboard-btn';
 }
 
-export function stopReasonLabel(reason: RalphStopReason): string {
+function visibleStopReason(
+  reason: RalphStopReason | null | undefined
+): RalphStopReason | undefined {
+  return reason && reason !== 'manual_stop' ? reason : undefined;
+}
+
+function stopReasonLabel(reason: RalphStopReason): string {
   switch (reason) {
     case 'iteration_limit':
       return 'iteration limit';
@@ -306,7 +293,7 @@ export function stopReasonLabel(reason: RalphStopReason): string {
   }
 }
 
-export function stopReasonTooltip(reason: RalphStopReason): string {
+function stopReasonTooltip(reason: RalphStopReason): string {
   switch (reason) {
     case 'iteration_limit':
       return 'Reached the configured iteration limit with no outstanding verification or plan items.';

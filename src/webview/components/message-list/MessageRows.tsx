@@ -1,8 +1,9 @@
-import { For, Show, onCleanup, onMount } from 'solid-js';
+import { For, Show, createMemo, onCleanup, onMount } from 'solid-js';
 import { implementPlan, openPlan } from '../../hooks/useOpenCode';
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { formatDuration, formatNumber, isAssistantMessage } from '../../lib/message-metrics';
-import type { AssistantMessage, Message, Part } from '../../types';
+import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
+import type { AssistantMessage, Message, Part, QuestionRequest, ToolPart } from '../../types';
 import { Message as MessageComponent, type AssistantFileEditStackGroup } from '../Message';
 
 export type AssistantDialogSummaryInfo = {
@@ -15,6 +16,7 @@ export type AssistantDialogSummaryInfo = {
 export type MessageRowSharedProps = {
   modelChangeMap: Map<string, string>;
   lastAssistantID: string | null;
+  outerListVirtualized?: boolean;
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
@@ -22,6 +24,8 @@ export type MessageRowSharedProps = {
   latestPlanImplementationMessageId: string | null;
   observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
   isPlanningAssistantMessage: (info: AssistantMessage) => boolean;
+  questionRequestForTool: (part: ToolPart) => QuestionRequest | null;
+  permissionMatchForTool: (part: ToolPart) => ToolCallPermissionMatch | null;
   shouldShowPlanImplementationAction: (args: {
     hasBuildAgent: boolean;
     info: Message;
@@ -42,6 +46,12 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
+  const streamingPartId = createMemo(() => {
+    const partId = state.streamingPartId;
+    if (!partId) return null;
+    return props.msg.parts.some((part) => part.id === partId) ? partId : null;
+  });
+  const streamingText = () => (streamingPartId() ? state.streamingText : '');
   const highlightPlanningAnswer = () =>
     props.assistantDialogSummaryMap.has(props.msg.info.id) &&
     isAssistantMessage(props.msg.info) &&
@@ -77,14 +87,17 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
         info={props.msg.info}
         parts={props.msg.parts}
         isLastAssistant={props.msg.info.id === props.lastAssistantID}
+        outerListVirtualized={props.outerListVirtualized}
         highlightFinalAnswer={props.assistantDialogSummaryMap.has(props.msg.info.id)}
         highlightPlanningAnswer={highlightPlanningAnswer()}
         previousTrailingFileEventSignature={
           props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
         }
         fileEditStackGroup={fileEditStackGroup()}
-        streamingPartId={state.streamingPartId}
-        streamingText={state.streamingText}
+        streamingPartId={streamingPartId()}
+        streamingText={streamingText()}
+        questionRequestForTool={props.questionRequestForTool}
+        permissionMatchForTool={props.permissionMatchForTool}
       />
       <Show when={summary()}>
         {(assistantSummary) => (
@@ -129,7 +142,7 @@ function AssistantDialogSummary(props: {
     <div class="model-change-indicator assistant-dialog-summary">
       <div class="assistant-dialog-summary-content">
         <span class="model-change-label">
-          {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} | ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
+          {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} · ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
         </span>
       </div>
       <Show when={props.showImplementPlanAction}>

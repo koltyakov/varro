@@ -24,23 +24,18 @@ export type FileSearchResult = {
  */
 export class FileSearchService {
   private static readonly CACHE_TTL_MS = 15_000;
+  private static readonly CACHE_INVALIDATION_DEBOUNCE_MS = 100;
   private static readonly MAX_CANDIDATES = 4_000;
   private static readonly RESULT_LIMIT = 30;
 
-  private readonly workspaceWatcher: vscode.FileSystemWatcher;
+  private workspaceWatcher: vscode.FileSystemWatcher | null = null;
   private workspaceFileCache: WorkspaceFileSearchEntry[] = [];
   private workspaceFileCacheAt = 0;
   private hasWorkspaceFileCache = false;
   private workspaceFileCachePromise: Promise<WorkspaceFileSearchEntry[]> | null = null;
   private workspaceFileCacheGeneration = 0;
   private fileSearchCts: vscode.CancellationTokenSource | null = null;
-
-  constructor() {
-    this.workspaceWatcher = vscode.workspace.createFileSystemWatcher('**/*');
-    this.workspaceWatcher.onDidCreate(() => this.clearWorkspaceFileCache());
-    this.workspaceWatcher.onDidDelete(() => this.clearWorkspaceFileCache());
-    this.workspaceWatcher.onDidChange(() => this.clearWorkspaceFileCache());
-  }
+  private cacheInvalidationDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * Launch a search for `query`. Results are delivered through `onResult`.
@@ -52,6 +47,7 @@ export class FileSearchService {
     limit: number,
     onResult: (result: FileSearchResult) => void
   ): void {
+    this.ensureWorkspaceWatcher();
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = new vscode.CancellationTokenSource();
@@ -63,8 +59,32 @@ export class FileSearchService {
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = null;
-    this.workspaceWatcher.dispose();
+    this.workspaceWatcher?.dispose();
+    this.workspaceWatcher = null;
+    if (this.cacheInvalidationDebounceTimer) {
+      clearTimeout(this.cacheInvalidationDebounceTimer);
+      this.cacheInvalidationDebounceTimer = null;
+    }
     this.clearWorkspaceFileCache();
+  }
+
+  private ensureWorkspaceWatcher() {
+    if (this.workspaceWatcher) return;
+
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*');
+    watcher.onDidCreate(() => this.scheduleWorkspaceFileCacheClear());
+    watcher.onDidDelete(() => this.scheduleWorkspaceFileCacheClear());
+    watcher.onDidChange(() => this.scheduleWorkspaceFileCacheClear());
+    this.workspaceWatcher = watcher;
+  }
+
+  private scheduleWorkspaceFileCacheClear() {
+    if (this.cacheInvalidationDebounceTimer) return;
+
+    this.clearWorkspaceFileCache();
+    this.cacheInvalidationDebounceTimer = setTimeout(() => {
+      this.cacheInvalidationDebounceTimer = null;
+    }, FileSearchService.CACHE_INVALIDATION_DEBOUNCE_MS);
   }
 
   private clearWorkspaceFileCache() {

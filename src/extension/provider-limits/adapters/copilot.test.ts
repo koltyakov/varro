@@ -119,7 +119,7 @@ describe('createCopilotAdapter', () => {
       windows: [
         {
           id: 'premium_interactions',
-          label: 'Premium Requests',
+          label: 'Monthly Premium Requests',
           unit: 'requests',
           remaining: 473,
           limit: 1500,
@@ -162,7 +162,7 @@ describe('createCopilotAdapter', () => {
       windows: [
         {
           id: 'chat',
-          label: 'Chat',
+          label: 'Monthly Chat',
           unit: 'messages',
           remaining: 240,
           limit: 500,
@@ -171,7 +171,7 @@ describe('createCopilotAdapter', () => {
         },
         {
           id: 'completions',
-          label: 'Completions',
+          label: 'Monthly Completions',
           unit: 'requests',
           remaining: 673,
           limit: 4000,
@@ -291,7 +291,7 @@ describe('createCopilotAdapter', () => {
       windows: [
         {
           id: 'special_limit',
-          label: 'Special Limit',
+          label: 'Monthly Special Limit',
           unit: 'requests',
           remaining: 4,
           limit: 10,

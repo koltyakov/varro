@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  alignPopupToBoundary,
   clampAnchoredPopupHeight,
   clampPopupToViewport,
   observePopupViewport,
@@ -89,6 +90,43 @@ describe('popup-position', () => {
 
     expect(el.style.transform).toBe('translateX(-68px)');
     expect(el.style.maxHeight).toBe('212px');
+  });
+
+  it('right-aligns popups to a boundary edge', () => {
+    const popup = document.createElement('div');
+    const parent = document.createElement('div');
+    parent.appendChild(popup);
+    document.body.appendChild(parent);
+
+    vi.spyOn(parent, 'getBoundingClientRect').mockReturnValue({
+      x: 140,
+      y: 0,
+      top: 0,
+      left: 140,
+      right: 220,
+      bottom: 24,
+      width: 80,
+      height: 24,
+      toJSON: () => ({}),
+    });
+
+    const boundary = document.createElement('div');
+    vi.spyOn(boundary, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 220,
+      bottom: 24,
+      width: 220,
+      height: 24,
+      toJSON: () => ({}),
+    });
+
+    alignPopupToBoundary(popup, boundary, 'right');
+
+    expect(popup.style.left).toBe('auto');
+    expect(popup.style.right).toBe('0px');
   });
 
   it('observes popup and window changes for repositioning', async () => {

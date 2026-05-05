@@ -19,6 +19,8 @@ export function ModelPicker(props: {
   onClose: () => void;
   popoverRef?: (el: HTMLDivElement) => void;
   currentSelection?: { providerID?: string | null; modelID?: string | null } | null;
+  showManageModels?: boolean;
+  popupGap?: number;
 }) {
   const currentSelection = () =>
     props.currentSelection !== undefined ? props.currentSelection : state.selectedModel;
@@ -177,9 +179,9 @@ export function ModelPicker(props: {
 
   return (
     <div
-      class="absolute inset-x-0 z-50"
+      class="dropdown-anchor absolute inset-x-0 z-50"
       onClick={props.onClose}
-      style={{ bottom: 'calc(100% + 10px)' }}
+      style={{ bottom: '100%', 'padding-bottom': `${props.popupGap ?? 10}px` }}
     >
       <div
         ref={(el) => {
@@ -324,32 +326,34 @@ export function ModelPicker(props: {
           </Show>
         </div>
 
-        <div class="dropdown-footer">
-          <button
-            class="dropdown-item"
-            onClick={() => {
-              setShowSettings(true);
-              props.onClose();
-            }}
-          >
-            <span class="dropdown-footer-icon">
-              <svg
-                class="block h-[18px] w-[18px] text-vscode-muted"
-                viewBox="0 0 32 32"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M10 20c-1.657 0-3 1.343-3 3s1.343 3 3 3 3-1.343 3-3-1.343-3-3-3zm0 4c-.551 0-1-.449-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z" />
-                <circle cx="10" cy="16" r="3" />
-                <path d="M10 6C8.343 6 7 7.343 7 9s1.343 3 3 3 3-1.343 3-3-1.343-3-3-3zm0 4c-.551 0-1-.449-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z" />
-                <rect x="15" y="8" width="10" height="2" />
-                <rect x="15" y="15" width="10" height="2" />
-                <rect x="15" y="22" width="10" height="2" />
-              </svg>
-            </span>
-            <span class="dropdown-footer-label text-vscode-muted">Manage Models</span>
-          </button>
-        </div>
+        <Show when={props.showManageModels ?? true}>
+          <div class="dropdown-footer">
+            <button
+              class="dropdown-item"
+              onClick={() => {
+                setShowSettings(true);
+                props.onClose();
+              }}
+            >
+              <span class="dropdown-footer-icon">
+                <svg
+                  class="block h-[18px] w-[18px] text-vscode-muted"
+                  viewBox="0 0 32 32"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M10 20c-1.657 0-3 1.343-3 3s1.343 3 3 3 3-1.343 3-3-1.343-3-3-3zm0 4c-.551 0-1-.449-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z" />
+                  <circle cx="10" cy="16" r="3" />
+                  <path d="M10 6C8.343 6 7 7.343 7 9s1.343 3 3 3 3-1.343 3-3-1.343-3-3-3zm0 4c-.551 0-1-.449-1-1s.449-1 1-1 1 .449 1 1-.449 1-1 1z" />
+                  <rect x="15" y="8" width="10" height="2" />
+                  <rect x="15" y="15" width="10" height="2" />
+                  <rect x="15" y="22" width="10" height="2" />
+                </svg>
+              </span>
+              <span class="dropdown-footer-label text-vscode-muted">Manage Models</span>
+            </button>
+          </div>
+        </Show>
       </div>
     </div>
   );

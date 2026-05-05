@@ -64,19 +64,20 @@ import type { RalphSelectedModel } from '../../shared/ralph';
 import {
   formatAgentInitial,
   formatAgentLabel,
-  formatProviderLimitCompact,
-  formatProviderLimitCompactPrefix,
   formatProviderLimitTitle,
   formatVariantInitial,
   formatVariantLabel,
-  getProviderLimitTone,
+  getProviderLimitCompactBadges,
   hasProviderLimitWindowWithinThreshold,
-  getOrderedProviderLimitWindows,
   getPrimaryProviderLimitWindow,
-  resolveProviderLimitWindow,
 } from '../lib/format';
 import { getMatchingVariant, getPreferredVariant } from '../lib/model-variants';
-import { isAssistantMessage, getContextWindow, sumAssistantTokens } from '../lib/message-metrics';
+import {
+  isAssistantMessage,
+  getContextWindow,
+  getAssistantTotalTokens,
+  type TokenUsage,
+} from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
 import { getLeafPathName } from '../lib/path-display';
@@ -88,7 +89,7 @@ import {
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
 import { TodoList } from './TodoList';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
-import { ChatInputToolbar } from './chat-input/ChatInputToolbar';
+import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import { ComposerArea } from './chat-input/ComposerArea';
 import { DropOverlay } from './chat-input/DropOverlay';
 import { QueuedMessages } from './chat-input/QueuedMessages';
@@ -98,14 +99,10 @@ import type {
   MentionCompletionItem,
   SlashCommand,
 } from './chat-input/CompletionMenu';
-import type { Agent, Command, Part, TextPart } from '../types';
+import type { Agent, AssistantMessage, Command, Message, Part, TextPart } from '../types';
 import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
-import {
-  getSelectedProviderLimitWindowId,
-  setSelectedProviderLimitWindowId,
-} from '../lib/provider-limit-selection';
 
 type ToolbarControl =
   | 'permission'
@@ -156,10 +153,61 @@ type MentionCompletionSource = {
   exactFilePaths: ReadonlySet<string>;
 };
 
+type MessageInfoEntry = { info: Message };
+
+export function getLatestAssistantMessageInfo(
+  messages: readonly MessageInfoEntry[]
+): AssistantMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const info = messages[index]?.info;
+    if (info && isAssistantMessage(info)) return info;
+  }
+  return null;
+}
+
+export function getLatestAssistantMessageInfoWithTokens(
+  messages: readonly MessageInfoEntry[]
+): AssistantMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const info = messages[index]?.info;
+    if (!info || !isAssistantMessage(info)) continue;
+    if ((info.tokens.input || 0) + (info.tokens.output || 0) > 0) return info;
+  }
+  return null;
+}
+
+export function sumAssistantTokensFromMessageEntries(
+  messages: readonly MessageInfoEntry[]
+): TokenUsage {
+  const result: TokenUsage = {
+    total: 0,
+    input: 0,
+    output: 0,
+    reasoning: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+  };
+
+  for (const entry of messages) {
+    const info = entry.info;
+    if (!isAssistantMessage(info)) continue;
+    result.total += getAssistantTotalTokens(info);
+    result.input += info.tokens.input || 0;
+    result.output += info.tokens.output || 0;
+    result.reasoning += info.tokens.reasoning || 0;
+    result.cacheRead += info.tokens.cache?.read || 0;
+    result.cacheWrite += info.tokens.cache?.write || 0;
+  }
+
+  return result;
+}
+
 type CompletionSelection =
   | { type: 'set-slash'; value: string }
   | { type: 'run-slash'; value: string }
   | { type: 'apply-mention'; value: string; file?: DroppedFile };
+
+const SKILLS_COMMAND_NAME = 'skills';
 
 const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
   'permission',
@@ -237,6 +285,7 @@ export function isToolbarControlCompacted(
 export function ChatInput() {
   let textareaRef: HTMLTextAreaElement | undefined;
   let containerRef: HTMLDivElement | undefined;
+  let inputFrameRef: HTMLDivElement | undefined;
   let permissionPickerRef: HTMLButtonElement | undefined;
   let permissionPopoverRef: HTMLDivElement | undefined;
   let agentPickerRef: HTMLButtonElement | undefined;
@@ -312,7 +361,7 @@ export function ChatInput() {
   const visibleFiles = () => files();
   const activeContextEnabled = () => getCurrentDocumentEnabled(state.activeSessionId);
 
-  const activeContext = () => {
+  const activeContext = createMemo(() => {
     const file = activeFile();
     const selectedLines = getSelectionRangesFromEditorContext(selection());
     if (!file) return null;
@@ -323,7 +372,17 @@ export function ChatInput() {
       filename: displayPath,
       lineRange,
     };
-  };
+  });
+  const activeContextTitle = createMemo(() => {
+    const context = activeContext();
+    if (!context) return null;
+    const label = context.lineRange ? `${context.filename} ${context.lineRange}` : context.filename;
+    return `${label}${
+      activeContextEnabled()
+        ? ' · Click to disable current document context'
+        : ' · Current document context is disabled. Click to enable it again'
+    }`;
+  });
 
   const mentionAgents = createMemo(() =>
     state.allAgents
@@ -336,6 +395,10 @@ export function ChatInput() {
       agents: mentionAgents(),
       files: fileSearchResults(),
     })
+  );
+
+  const skillCommands = createMemo(() =>
+    state.commands.filter((command) => command.source === 'skill')
   );
 
   const slashCommands = createMemo(() =>
@@ -424,7 +487,29 @@ export function ChatInput() {
     if (completion?.type !== 'slash') return [];
 
     const query = completion.query.toLowerCase();
+    if (query.startsWith(`${SKILLS_COMMAND_NAME} `)) {
+      const skillQuery = query.slice(SKILLS_COMMAND_NAME.length + 1).trim();
+      return skillCommands()
+        .filter((command) => {
+          if (!skillQuery) return true;
+          return (
+            command.name.toLowerCase().includes(skillQuery) ||
+            (command.description || command.template).toLowerCase().includes(skillQuery) ||
+            (command.hints || []).some((hint) => hint.toLowerCase().includes(skillQuery))
+          );
+        })
+        .map((command) => ({
+          name: command.name,
+          aliases: [],
+          description: command.description || command.template,
+          action: () => {},
+          key: `skill:${command.name}`,
+          type: 'slash' as const,
+        }));
+    }
+
     return slashCommands()
+      .filter((command) => command.source !== 'skill')
       .filter((command) => {
         if (!query) return true;
         return (
@@ -446,6 +531,18 @@ export function ChatInput() {
     return completion.type === 'slash' ? slashCompletions() : mentionCompletions();
   });
 
+  const completionHeader = createMemo(() => {
+    if (showFileSearchHint()) return 'Type to search workspace files';
+    const completion = activeCompletion();
+    if (
+      completion?.type === 'slash' &&
+      completion.query.toLowerCase().startsWith(`${SKILLS_COMMAND_NAME} `)
+    ) {
+      return 'Skills';
+    }
+    return undefined;
+  });
+
   const showCompletionMenu = () => {
     if (suppressCompletion()) return false;
     const completion = activeCompletion();
@@ -454,6 +551,19 @@ export function ChatInput() {
       composerCompletions().length > 0 || (completion.type === 'mention' && showFileSearchHint())
     );
   };
+
+  const showFloatingInputPopover = createMemo(
+    () =>
+      showModelPicker() ||
+      showMcpPicker() ||
+      showAgentPicker() ||
+      showVariantPicker() ||
+      showPermissionModePicker() ||
+      showBusyMenu() ||
+      showContextPopup() ||
+      showProviderLimitPopup() ||
+      (isFocused() && showCompletionMenu())
+  );
 
   createEffect(() => {
     const length = composerCompletions().length;
@@ -619,6 +729,10 @@ export function ChatInput() {
     const normalized = raw.trim().replace(/^\/+/, '');
     const [name, ...rest] = normalized.split(/\s+/);
     const args = rest.join(' ');
+    if (name === SKILLS_COMMAND_NAME) {
+      setComposerValue(`/${SKILLS_COMMAND_NAME} `);
+      return;
+    }
     const command = slashCommands().find(
       (item) => item.name === name || item.aliases.includes(name)
     );
@@ -1133,10 +1247,6 @@ export function ChatInput() {
     });
   });
 
-  const assistantMessages = createMemo(() =>
-    state.messages.map((entry) => entry.info).filter(isAssistantMessage)
-  );
-
   const currentModel = createMemo(() => {
     const selected = resolveSelectedModel(
       state.selectedModel,
@@ -1156,7 +1266,7 @@ export function ChatInput() {
       };
     }
 
-    const latestAuto = [...assistantMessages()].toReversed()[0];
+    const latestAuto = getLatestAssistantMessageInfo(state.messages);
     if (latestAuto) {
       const provider = state.providers.find((item) => item.id === latestAuto.providerID);
       const model = provider?.models[latestAuto.modelID];
@@ -1246,24 +1356,14 @@ export function ChatInput() {
     clipboardImages().length > 0 && !currentModelSupportsVision();
 
   const contextUsage = createMemo(() => {
-    const assistants = assistantMessages();
-    if (assistants.length === 0) return null;
-    let best = null;
-    for (let i = assistants.length - 1; i >= 0; i--) {
-      const msg = assistants[i];
-      const hasTokens = (msg.tokens.input || 0) + (msg.tokens.output || 0) > 0;
-      if (hasTokens) {
-        best = msg;
-        break;
-      }
-    }
+    const best = getLatestAssistantMessageInfoWithTokens(state.messages);
     if (!best) return null;
     const ctx = getContextWindow(best, state.providers);
     if (!ctx) return null;
     return ctx;
   });
 
-  const sessionTokens = createMemo(() => sumAssistantTokens(assistantMessages()));
+  const sessionTokens = createMemo(() => sumAssistantTokensFromMessageEntries(state.messages));
 
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
   const showProviderLimits = createMemo(
@@ -1280,33 +1380,11 @@ export function ChatInput() {
       hasProviderLimitWindowWithinThreshold(currentProviderLimit(), providerLimitThresholdPercent())
   );
 
-  const currentProviderLimitWindow = createMemo(() => {
-    if (!showCurrentProviderLimit()) return null;
-    const providerID = currentModel().providerID;
-    const selectedId = providerID ? getSelectedProviderLimitWindowId(providerID) : null;
-    return resolveProviderLimitWindow(currentProviderLimit(), selectedId);
-  });
-
-  const currentProviderLimitCompact = createMemo(() =>
-    showCurrentProviderLimit()
-      ? formatProviderLimitCompact(currentProviderLimit(), currentProviderLimitWindow())
-      : null
-  );
-  const currentProviderLimitCompactLabel = createMemo(() =>
-    toolbarCompactMode() === 'full' ? currentProviderLimitCompact() : null
-  );
-  const currentProviderLimitCompactPrefix = createMemo(() =>
-    showCurrentProviderLimit()
-      ? formatProviderLimitCompactPrefix(currentProviderLimit(), currentProviderLimitWindow())
-      : null
-  );
   const currentProviderLimitTitle = createMemo(() =>
     showCurrentProviderLimit() ? formatProviderLimitTitle(currentProviderLimit()) : null
   );
-  const currentProviderLimitTone = createMemo(() =>
-    showCurrentProviderLimit()
-      ? getProviderLimitTone(currentProviderLimit(), currentProviderLimitWindow())
-      : 'default'
+  const currentProviderLimitBadges = createMemo(() =>
+    showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentProviderLimit()) : []
   );
   createEffect(() => {
     if (!showCurrentProviderLimit() && showProviderLimitPopup()) {
@@ -1318,7 +1396,7 @@ export function ChatInput() {
     if (!notice) return null;
 
     const current = currentModel();
-    const hasActiveAssistantContext = assistantMessages().length > 0;
+    const hasActiveAssistantContext = getLatestAssistantMessageInfo(state.messages) !== null;
     if (!notice.providerID && !notice.modelID) return notice;
     if (hasActiveAssistantContext && notice.source === 'status') return notice;
     if (notice.providerID && notice.providerID !== current.providerID) return null;
@@ -1355,8 +1433,9 @@ export function ChatInput() {
     modelProvider: currentModel().providerID,
     modelId: currentModel().modelID,
     modelName: currentModel().modelName,
-    providerLimitPrefix: currentProviderLimitCompactPrefix(),
-    providerLimit: currentProviderLimitCompact(),
+    providerLimit: currentProviderLimitBadges()
+      .map((badge) => badge.label)
+      .join('|'),
     variant: effectiveVariant(),
     hasContextUsage: !!contextUsage(),
     loading: isLoading(),
@@ -1557,24 +1636,7 @@ export function ChatInput() {
         ref={(el) => {
           containerRef = el;
         }}
-        class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showContextPopup() || showProviderLimitPopup() || showAgentPicker() || showVariantPicker() || showMcpPicker() || showPermissionModePicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
-        onDragEnter={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-          setIsDraggingOver(true);
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-          setIsDraggingOver(true);
-        }}
-        onDragLeave={(e) => {
-          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-          setIsDraggingOver(false);
-        }}
-        onDrop={handleDrop}
+        class={`chat-input-shell ${showFloatingInputPopover() ? 'showing-floating-popover' : ''}`}
       >
         <Show when={showModelPicker()}>
           <ModelPicker
@@ -1613,122 +1675,283 @@ export function ChatInput() {
           />
         </Show>
 
-        <Show when={hasContext() || hasMentions()}>
-          <AttachmentStrip
-            activeContext={activeContext()}
-            activeContextEnabled={activeContextEnabled()}
-            activeContextTitle={
-              activeContext()
-                ? `${
-                    activeContext()!.lineRange
-                      ? `${activeContext()!.filename} ${activeContext()!.lineRange}`
-                      : activeContext()!.filename
-                  }${
-                    activeContextEnabled()
-                      ? ' · Click to disable current document context'
-                      : ' · Current document context is disabled. Click to enable it again'
-                  }`
-                : null
-            }
-            terminalSelection={terminalSelection()}
-            files={visibleFiles()}
-            clipboardImages={clipboardImages()}
-            clipboardImagesDisabled={clipboardImagesDisabled()}
-            onToggleActiveContext={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
-            onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
-            onRemoveFile={(path) => {
-              removeContextFile(path);
-              postMessage({ type: 'files/remove', payload: { path } });
+        <div
+          ref={(el) => {
+            inputFrameRef = el;
+          }}
+          class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showAgentPicker() || showVariantPicker() || showMcpPicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            setIsDraggingOver(true);
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            setIsDraggingOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setIsDraggingOver(false);
+          }}
+          onDrop={handleDrop}
+        >
+          <Show when={hasContext() || hasMentions()}>
+            <AttachmentStrip
+              activeContext={activeContext()}
+              activeContextEnabled={activeContextEnabled()}
+              activeContextTitle={activeContextTitle()}
+              terminalSelection={terminalSelection()}
+              files={visibleFiles()}
+              clipboardImages={clipboardImages()}
+              clipboardImagesDisabled={clipboardImagesDisabled()}
+              onToggleActiveContext={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
+              onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
+              onRemoveFile={(path) => {
+                removeContextFile(path);
+                postMessage({ type: 'files/remove', payload: { path } });
+              }}
+              onRemoveClipboardImage={removeClipboardImage}
+            />
+          </Show>
+
+          <ComposerArea
+            textareaRef={(el) => {
+              textareaRef = el;
             }}
-            onRemoveClipboardImage={removeClipboardImage}
+            placeholder={
+              hasActiveQuestion() || hasActivePermission()
+                ? 'Respond to the prompt above to continue...'
+                : isLoading()
+                  ? 'Queue a follow-up or steer'
+                  : 'Describe what to build'
+            }
+            value={inputText()}
+            isFocused={isFocused()}
+            showCompletionMenu={showCompletionMenu()}
+            completionItems={composerCompletions()}
+            completionSelectedIndex={completionIndex()}
+            completionHeader={completionHeader()}
+            onInput={(e) => {
+              setHistoryIndex(null);
+              setHistoryDraft('');
+              setInputText(e.currentTarget.value);
+              setCaretPosition(e.currentTarget.selectionStart || 0);
+              setCompletionIndex(0);
+              setSuppressCompletion(false);
+              autoResize();
+            }}
+            onKeyDown={handleKeydown}
+            onPaste={handlePaste}
+            onFocus={(e) => {
+              setIsFocused(true);
+              setCaretPosition(e.currentTarget.selectionStart || 0);
+            }}
+            onBlur={() => setIsFocused(false)}
+            onClick={(e) => {
+              setCaretPosition(e.currentTarget.selectionStart || 0);
+              setShowAgentPicker(false);
+              setShowModelPicker(false);
+              setShowMcpPicker(false);
+              setShowVariantPicker(false);
+              setShowPermissionModePicker(false);
+              setShowBusyMenu(false);
+            }}
+            onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
+            onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
+            onSelectCompletion={(item) => {
+              const completion = activeCompletion();
+              const completionSelection = getCompletionSelection(completion, item, true);
+              if (!completionSelection) return;
+
+              if (completionSelection.type === 'run-slash') {
+                void runSlashCommand(completionSelection.value);
+                return;
+              }
+
+              if (completionSelection.type === 'set-slash') {
+                setComposerValue(completionSelection.value);
+                return;
+              }
+
+              if (completionSelection.file) addContextFile(completionSelection.file);
+              if (completion?.type !== 'mention') return;
+              applyMentionValue(completion, completionSelection.value);
+            }}
           />
-        </Show>
 
-        <ComposerArea
-          textareaRef={(el) => {
-            textareaRef = el;
-          }}
-          placeholder={
-            hasActiveQuestion() || hasActivePermission()
-              ? 'Respond to the prompt above to continue...'
-              : isLoading()
-                ? 'Queue a follow-up or steer'
-                : 'Describe what to build'
-          }
-          value={inputText()}
-          isFocused={isFocused()}
-          showCompletionMenu={showCompletionMenu()}
-          completionItems={composerCompletions()}
-          completionSelectedIndex={completionIndex()}
-          completionHeader={showFileSearchHint() ? 'Type to search workspace files' : undefined}
-          onInput={(e) => {
-            setHistoryIndex(null);
-            setHistoryDraft('');
-            setInputText(e.currentTarget.value);
-            setCaretPosition(e.currentTarget.selectionStart || 0);
-            setCompletionIndex(0);
-            setSuppressCompletion(false);
-            autoResize();
-          }}
-          onKeyDown={handleKeydown}
-          onPaste={handlePaste}
-          onFocus={(e) => {
-            setIsFocused(true);
-            setCaretPosition(e.currentTarget.selectionStart || 0);
-          }}
-          onBlur={() => setIsFocused(false)}
-          onClick={(e) => {
-            setCaretPosition(e.currentTarget.selectionStart || 0);
-            setShowAgentPicker(false);
-            setShowModelPicker(false);
-            setShowMcpPicker(false);
-            setShowVariantPicker(false);
-            setShowPermissionModePicker(false);
-            setShowBusyMenu(false);
-          }}
-          onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
-          onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
-          onSelectCompletion={(item) => {
-            const completion = activeCompletion();
-            const completionSelection = getCompletionSelection(completion, item, true);
-            if (!completionSelection) return;
+          <div class="chat-input-toolbar-divider" aria-hidden="true" />
 
-            if (completionSelection.type === 'run-slash') {
-              void runSlashCommand(completionSelection.value);
-              return;
-            }
+          <ChatInputMainToolbar
+            toolbarRef={(el) => {
+              toolbarRef = el;
+            }}
+            toolbarLeftRef={(el) => {
+              toolbarLeftRef = el;
+            }}
+            toolbarRightRef={(el) => {
+              toolbarRightRef = el;
+            }}
+            compactTight={toolbarCompactMode() === 'tight'}
+            showLeftPopupState={showAgentPicker() || showVariantPicker()}
+            showPermissionControl={true}
+            permissionButtonRef={(el) => {
+              permissionPickerRef = el;
+            }}
+            permissionPopoverRef={(el) => {
+              permissionPopoverRef = el;
+            }}
+            permissionMode={activePermissionMode()}
+            showPermissionPicker={showPermissionModePicker()}
+            onTogglePermissionPicker={() => {
+              const next = !showPermissionModePicker();
+              closePopups(next ? 'permission' : undefined);
+              setShowPermissionModePicker(next);
+            }}
+            onSelectPermissionMode={(mode) => {
+              void updatePermissionModeForSession(mode);
+              setShowPermissionModePicker(false);
+            }}
+            agents={state.agents}
+            selectedAgent={state.selectedAgent}
+            selectedAgentLabel={selectedAgentLabel()}
+            agentFocusIndex={agentFocusIndex()}
+            showAgentPicker={showAgentPicker()}
+            showAgentControl={isToolbarControlVisible('agent')}
+            agentButtonRef={(el) => {
+              agentPickerRef = el;
+            }}
+            agentPopoverRef={(el) => {
+              agentPopoverRef = el;
+            }}
+            getAgentLabel={(agent) => formatAgentLabel(agent.name)}
+            getAgentDetail={(agent) => agent.description || getAgentBadgeLine(agent)}
+            onToggleAgentPicker={() => {
+              const next = !showAgentPicker();
+              closePopups(next ? 'agent' : undefined);
+              setShowAgentPicker(next);
+              if (next) setAgentFocusIndex(0);
+            }}
+            onSelectAgent={(agent) => {
+              setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
+              setShowAgentPicker(false);
+            }}
+            onAgentFocusIndex={setAgentFocusIndex}
+            modelButtonRef={(el) => {
+              modelPickerRef = el;
+            }}
+            currentModel={currentModel()}
+            modelCanEllipsize={modelCanEllipsize()}
+            onToggleModelPicker={() => {
+              const next = !showModelPicker();
+              closePopups(next ? 'model' : undefined);
+              setShowModelPicker(next);
+            }}
+            providerLimitBadges={currentProviderLimitBadges()}
+            providerLimitTitle={currentProviderLimitTitle()}
+            providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
+            showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
+            providerLimitButtonRef={(el) => {
+              providerLimitButtonRef = el;
+            }}
+            providerLimitPopupRef={(el) => {
+              providerLimitPopupRef = el;
+            }}
+            onToggleProviderLimitPopup={() => {
+              if (!showCurrentProviderLimit()) return;
+              const next = !showProviderLimitPopup();
+              closePopups(next ? 'providerLimit' : undefined);
+              setShowProviderLimitPopup(next);
+            }}
+            onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
+            availableVariants={availableVariants()}
+            selectedVariant={effectiveVariant()}
+            selectedVariantLabel={selectedVariantLabel()}
+            showVariantPicker={showVariantPicker()}
+            showReasoningControl={isToolbarControlVisible('reasoning')}
+            variantButtonRef={(el) => {
+              variantPickerRef = el;
+            }}
+            variantPopoverRef={(el) => {
+              variantPopoverRef = el;
+            }}
+            getVariantLabel={formatVariantLabel}
+            onToggleVariantPicker={() => {
+              const next = !showVariantPicker();
+              closePopups(next ? 'variant' : undefined);
+              setShowVariantPicker(next);
+            }}
+            onSelectVariant={(variant) => {
+              const m = currentModel();
+              void handleSelectedModelChange({
+                providerID: m.providerID!,
+                modelID: m.modelID!,
+                variant,
+              });
+              setShowVariantPicker(false);
+            }}
+            contextUsage={contextUsage()}
+            showContextControl={!!contextUsage()}
+            contextButtonRef={(el) => {
+              contextButtonRef = el;
+            }}
+            contextPopupRef={(el) => {
+              contextPopupRef = el;
+            }}
+            showContextPopup={showContextPopup()}
+            sessionTokens={sessionTokens()}
+            contextCompactDisabled={isLoading() || isSessionCompacting()}
+            onToggleContextPopup={() => {
+              const next = !showContextPopup();
+              closePopups(next ? 'context' : undefined);
+              setShowContextPopup(next);
+            }}
+            onCloseContextPopup={() => setShowContextPopup(false)}
+            onCompactSession={() => {
+              void compactSession();
+            }}
+            showAttachmentsControl={isToolbarControlVisible('attachments')}
+            onAttach={() => postMessage({ type: 'files/pick' })}
+            showStopButton={showStopButton()}
+            onStop={() => abortSession()}
+            showSendControl={showSendControl()}
+            showBusySendControls={showBusySendControls()}
+            canSend={canSend()}
+            busyToggleRef={(el) => {
+              busyToggleRef = el;
+            }}
+            showBusyMenu={showBusyMenu()}
+            onSend={() => handleSend()}
+            onToggleBusyMenu={() => {
+              const next = !showBusyMenu();
+              closePopups(next ? 'busy' : undefined);
+              setShowBusyMenu(next);
+            }}
+            busyMenuRef={(el) => {
+              busyMenuRef = el;
+            }}
+            onQueue={() => {
+              handleSend('queue');
+              setShowBusyMenu(false);
+            }}
+            onSteer={() => {
+              handleSend('steer');
+              setShowBusyMenu(false);
+            }}
+            onStopAndSend={() => {
+              abortSession();
+              handleSend();
+              setShowBusyMenu(false);
+            }}
+          />
+        </div>
 
-            if (completionSelection.type === 'set-slash') {
-              setComposerValue(completionSelection.value);
-              return;
-            }
-
-            if (completionSelection.file) addContextFile(completionSelection.file);
-            if (completion?.type !== 'mention') return;
-            applyMentionValue(completion, completionSelection.value);
-          }}
-        />
-
-        <ChatInputToolbar
-          toolbarRef={(el) => {
-            toolbarRef = el;
-          }}
-          toolbarLeftRef={(el) => {
-            toolbarLeftRef = el;
-          }}
-          toolbarRightRef={(el) => {
-            toolbarRightRef = el;
-          }}
+        <ChatInputMetaToolbar
           compactTight={toolbarCompactMode() === 'tight'}
-          showLeftPopupState={
-            showContextPopup() ||
-            showAgentPicker() ||
-            showVariantPicker() ||
-            showMcpPicker() ||
-            showPermissionModePicker() ||
-            showProviderLimitPopup()
-          }
-          showPermissionControl={isToolbarControlVisible('permission')}
+          inputFrameRef={inputFrameRef}
+          showPermissionControl={true}
           permissionButtonRef={(el) => {
             permissionPickerRef = el;
           }}
@@ -1781,9 +2004,7 @@ export function ChatInput() {
             closePopups(next ? 'model' : undefined);
             setShowModelPicker(next);
           }}
-          providerLimitPrefix={currentProviderLimitCompactPrefix()}
-          providerLimitLabel={currentProviderLimitCompactLabel()}
-          providerLimitTone={currentProviderLimitTone()}
+          providerLimitBadges={currentProviderLimitBadges()}
           providerLimitTitle={currentProviderLimitTitle()}
           providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
           showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
@@ -1798,18 +2019,6 @@ export function ChatInput() {
             const next = !showProviderLimitPopup();
             closePopups(next ? 'providerLimit' : undefined);
             setShowProviderLimitPopup(next);
-          }}
-          onCycleProviderLimitWindow={() => {
-            const limit = currentProviderLimit();
-            const providerID = currentModel().providerID;
-            if (!limit || !providerID) return;
-            const windows = getOrderedProviderLimitWindows(limit);
-            if (windows.length <= 1) return;
-            const current = currentProviderLimitWindow();
-            const currentIndex = current ? windows.findIndex((w) => w.id === current.id) : -1;
-            const nextWindow = windows[(currentIndex + 1) % windows.length];
-            if (nextWindow)
-              setSelectedProviderLimitWindowId(providerID, nextWindow.id, limit.checkedAt);
           }}
           onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
           availableVariants={availableVariants()}
@@ -1839,7 +2048,7 @@ export function ChatInput() {
             setShowVariantPicker(false);
           }}
           contextUsage={contextUsage()}
-          showContextControl={isToolbarControlVisible('context')}
+          showContextControl={!!contextUsage()}
           contextButtonRef={(el) => {
             contextButtonRef = el;
           }}
@@ -1936,6 +2145,12 @@ export function getSlashCommands(props: {
   ]);
 
   const commands: SlashCommand[] = [
+    {
+      name: SKILLS_COMMAND_NAME,
+      aliases: [],
+      description: 'Browse available skills',
+      action: () => {},
+    },
     {
       name: 'new',
       aliases: ['clear'],
@@ -2069,11 +2284,13 @@ export function getSlashCommands(props: {
   }
 
   for (const command of props.customCommands) {
+    if (command.source === 'skill') continue;
     if (reservedBuiltInNames.has(command.name)) continue;
     commands.push({
       name: command.name,
       aliases: [],
       description: command.description || command.template,
+      source: command.source,
       action: (args) => {
         void runSlashCommandByName(command.name, args);
       },
@@ -2115,6 +2332,16 @@ export function getActiveCompletion(text: string, cursor: number) {
     };
   }
 
+  const skillMatch = prefix.match(new RegExp(`^/${SKILLS_COMMAND_NAME}(?:\\s+([^\\s]*))?$`, 'i'));
+  if (skillMatch) {
+    return {
+      type: 'slash' as const,
+      query: prefix.slice(1),
+      start: 0,
+      end: cursor,
+    };
+  }
+
   const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
   const token = prefix.slice(tokenStart);
   if (!token.startsWith('@')) return null;
@@ -2136,6 +2363,15 @@ export function getCompletionSelection(
 
   if (completion.type === 'slash') {
     if (!('name' in item)) return null;
+    if (completion.query.toLowerCase().startsWith(`${SKILLS_COMMAND_NAME} `)) {
+      return {
+        type: 'set-slash',
+        value: `/${item.name}`,
+      };
+    }
+    if (item.name === SKILLS_COMMAND_NAME) {
+      return { type: 'set-slash', value: `/${SKILLS_COMMAND_NAME} ` };
+    }
     return {
       type: confirm ? 'run-slash' : 'set-slash',
       value: `/${item.name}`,

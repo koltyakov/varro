@@ -29,7 +29,7 @@ export function ComposerArea(props: {
           width: '100%',
           resize: 'none',
           background: 'transparent',
-          padding: '4px 0 0 4px',
+          padding: '4px 4px 4px 4px',
           'font-size': '13px',
           'line-height': '1.45',
           color: 'var(--color-vscode-input-fg)',

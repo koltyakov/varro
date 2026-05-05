@@ -182,4 +182,50 @@ describe('ModelPicker', () => {
     expect(showSettings()).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('can hide the manage models footer and customize the popup gap', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+
+    cleanup = render(
+      () =>
+        ModelPicker({
+          onSelect: vi.fn(),
+          onClose: vi.fn(),
+          showManageModels: false,
+          popupGap: 6,
+        }),
+      container!
+    );
+    await flushMicrotasks();
+
+    const anchor = container?.firstElementChild as HTMLDivElement | null;
+    expect(anchor?.style.paddingBottom).toBe('6px');
+    expect(container?.textContent).not.toContain('Manage Models');
+  });
+
+  it('keeps the original popup gap', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+
+    cleanup = render(
+      () =>
+        ModelPicker({
+          onSelect: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      container!
+    );
+    await flushMicrotasks();
+
+    const anchor = container?.firstElementChild as HTMLDivElement | null;
+    expect(anchor?.style.bottom).toBe('100%');
+    expect(anchor?.style.paddingBottom).toBe('10px');
+  });
 });

@@ -6,7 +6,8 @@ import {
   shouldShowAssistantPartInHighlightedCard,
 } from '../../lib/part-utils';
 import { getToolFileChange } from '../../lib/tool-file-change';
-import type { AssistantMessage, Part, TextPart, ToolPart } from '../../types';
+import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
+import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
 
@@ -83,12 +84,29 @@ export function getAssistantContainerVariant(params: {
   return part.type === 'tool' && !isFileEditPart(part) ? 'bare' : false;
 }
 
-function shouldShowReadModeToggle(text: string): boolean {
-  const normalized = text.replace(/\r\n?/g, '\n').trim();
-  if (normalized.length === 0) return false;
+export function shouldShowReadModeToggle(text: string): boolean {
+  let start = 0;
+  let end = text.length;
+  while (start < end && text[start].trim().length === 0) start += 1;
+  while (end > start && text[end - 1].trim().length === 0) end -= 1;
 
-  const lineCount = normalized.split('\n').length;
-  return normalized.length >= 420 || lineCount >= 8;
+  if (end <= start) return false;
+  if (end - start >= 420) return true;
+
+  let lineCount = 1;
+  for (let index = start; index < end; index += 1) {
+    const char = text[index];
+    if (char === '\r') {
+      lineCount += 1;
+      if (text[index + 1] === '\n') index += 1;
+    } else if (char === '\n') {
+      lineCount += 1;
+    }
+
+    if (lineCount >= 8) return true;
+  }
+
+  return false;
 }
 
 export function deduplicateFileEdits(parts: Part[]): Part[] {
@@ -188,7 +206,11 @@ export function AssistantMessageContent(props: {
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
   suppressHighlightedCardMetaParts?: boolean;
+  isLastAssistant?: boolean;
+  outerListVirtualized?: boolean;
   textForPart: (part: Part) => string | null;
+  questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
+  permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
 }) {
   let flowRef: HTMLDivElement | undefined;
   let scrollContainerRef: HTMLDivElement | null = null;
@@ -295,6 +317,8 @@ export function AssistantMessageContent(props: {
   const shouldVirtualizeParts = createMemo(
     () =>
       hasScrollContainer() &&
+      !props.isLastAssistant &&
+      !props.outerListVirtualized &&
       !readModeOpen() &&
       renderItems().length >= ASSISTANT_PART_VIRTUALIZE_THRESHOLD
   );
@@ -435,6 +459,16 @@ export function AssistantMessageContent(props: {
                 part={part}
                 messageInfo={props.info}
                 streamedText={props.textForPart(part)}
+                questionRequest={
+                  part.type === 'tool'
+                    ? props.questionRequestForTool?.(part as ToolPart)
+                    : undefined
+                }
+                permissionMatch={
+                  part.type === 'tool'
+                    ? props.permissionMatchForTool?.(part as ToolPart)
+                    : undefined
+                }
               />
             )}
           </For>
@@ -470,6 +504,16 @@ export function AssistantMessageContent(props: {
           part={item.part}
           messageInfo={props.info}
           streamedText={props.textForPart(item.part)}
+          questionRequest={
+            item.part.type === 'tool'
+              ? props.questionRequestForTool?.(item.part as ToolPart)
+              : undefined
+          }
+          permissionMatch={
+            item.part.type === 'tool'
+              ? props.permissionMatchForTool?.(item.part as ToolPart)
+              : undefined
+          }
         />
       </div>
     );

@@ -28,6 +28,7 @@ import {
   getSessionTreeIds,
   messageStructureVersion,
   showStickyUserPrompt,
+  showModelPicker,
 } from '../lib/state';
 import { isAssistantMessage, sumAssistantTokens } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
@@ -37,7 +38,16 @@ import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
 import { shouldShowAssistantPartInline } from '../lib/part-utils';
-import { PendingActionRows, StickyUserMessagePreviewCard } from './message-list/MessageListChrome';
+import {
+  buildPermissionRequestLookup,
+  buildQuestionRequestLookup,
+  getToolCallLookupKey,
+} from '../lib/tool-call-matching';
+import {
+  ChatContentBottomFade,
+  PendingActionRows,
+  StickyUserMessagePreviewCard,
+} from './message-list/MessageListChrome';
 import {
   getNextVisibleUserMessageTopMap,
   getStickyUserMessagePreview,
@@ -45,7 +55,7 @@ import {
   shouldShowStickyUserMessagePreview,
   type StickyUserMessagePreview,
 } from './message-list/sticky-preview';
-import { hasVisibleBlockingStreamingPart } from './message-list/streaming';
+import { findStreamingPart, hasVisibleBlockingStreamingPart } from './message-list/streaming';
 import {
   buildVirtualMetrics,
   calculateVirtualRangeFromMetrics,
@@ -176,6 +186,10 @@ function getRenderedMessages(
   return shouldVirtualize ? messages.slice(range.start, range.end) : messages;
 }
 
+function getMessageIdSet(messages: Array<{ info: Message }>) {
+  return new Set(messages.map((message) => message.info.id));
+}
+
 export function buildPlanImplementationPrompt(parts: Part[]) {
   void parts;
   return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
@@ -270,6 +284,9 @@ export function MessageList() {
   let pendingStickyPreviewScrollTop = 0;
   let pendingStickyPreviewViewportHeight = 0;
   let lastScrollbarInset = -1;
+  let lastContainerOffsetWidth = -1;
+  let lastAutoScrolledTrackHeight = 0;
+  let previousAutoScrollEnabled = true;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
   const INITIAL_SCROLL_STABLE_FRAMES = 3;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
@@ -313,13 +330,14 @@ export function MessageList() {
     messageStructureVersion();
     return untrack(() => getLatestPlanImplementationMessageId(state.messages));
   });
-  const visibleBlockingStreamingPart = createMemo(() => {
+  const streamingPart = createMemo(() => {
     const streamingPartId = state.streamingPartId;
-    const streamingText = state.streamingText;
     messageStructureVersion();
-    return untrack(() =>
-      hasVisibleBlockingStreamingPart(state.messages, streamingPartId, streamingText)
-    );
+    return untrack(() => findStreamingPart(state.messages, streamingPartId));
+  });
+  const visibleBlockingStreamingPart = createMemo(() => {
+    const streamingText = state.streamingText;
+    return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
   const messageIndexById = createMemo(() => {
     messageStructureVersion();
@@ -432,6 +450,14 @@ export function MessageList() {
   const measuredHeights = new Map<string, number>();
   let lastTrackHeight = 0;
 
+  createEffect(() => {
+    const enabled = autoScroll();
+    if (enabled && !previousAutoScrollEnabled) {
+      lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
+    }
+    previousAutoScrollEnabled = enabled;
+  });
+
   const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
 
   createEffect(() => {
@@ -460,12 +486,13 @@ export function MessageList() {
       viewportHeight: viewportHeight(),
     });
   });
+  const renderedMessages = createMemo(() =>
+    getRenderedMessages(messages(), visibleRange(), shouldVirtualize())
+  );
+  const renderedMessageIds = createMemo(() => getMessageIdSet(renderedMessages()));
   const linkedToolCalls = createMemo(() => {
     messageStructureVersion();
-    const allMessages = untrack(() => state.messages);
-    return getLinkedToolCallKeys(
-      getRenderedMessages(allMessages, visibleRange(), shouldVirtualize())
-    );
+    return getLinkedToolCallKeys(renderedMessages());
   });
   const standalonePermissions = createMemo(() =>
     getStandalonePermissionPrompts(
@@ -483,6 +510,25 @@ export function MessageList() {
       linkedToolCalls()
     )
   );
+  const activeSessionRootId = createMemo(
+    () => getSessionTreeRootId(state.activeSessionId) || state.activeSessionId
+  );
+  const questionRequestsByToolCall = createMemo(() =>
+    buildQuestionRequestLookup(state.questions, activeSessionRootId())
+  );
+  const permissionRequestsByToolCall = createMemo(() =>
+    buildPermissionRequestLookup(state.permissions, activeSessionRootId())
+  );
+
+  function getQuestionRequestForTool(part: Extract<Part, { type: 'tool' }>) {
+    const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
+    return key ? (questionRequestsByToolCall().get(key) ?? null) : null;
+  }
+
+  function getPermissionMatchForTool(part: Extract<Part, { type: 'tool' }>) {
+    const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
+    return key ? (permissionRequestsByToolCall().get(key) ?? null) : null;
+  }
 
   const stickyUserMessagePreviewCandidate = createMemo(() => {
     const throttledViewportHeight = stickyPreviewViewportHeight();
@@ -575,12 +621,24 @@ export function MessageList() {
     return changed;
   }
 
-  function setMeasuredHeightFor(id: string, height: number) {
-    if (height <= 0) return false;
-    if ((measuredHeights.get(id) ?? 0) === height) return false;
-    measuredHeights.set(id, height);
+  function setMeasuredHeightsFor(entries: ResizeObserverEntry[]) {
+    let changed = false;
+    for (const entry of entries) {
+      const element = entry.target as HTMLDivElement;
+      const messageId = element.dataset.msgId;
+      const height = entry.contentRect.height;
+      if (!messageId || height <= 0 || (measuredHeights.get(messageId) ?? 0) === height) {
+        continue;
+      }
+
+      measuredHeights.set(messageId, height);
+      changed = true;
+    }
+
+    if (!changed) return;
+
     setMeasurementVersion((version) => version + 1);
-    return true;
+    scheduleVisibleMeasurement({ afterResize: true });
   }
 
   function observeMeasuredRow(element: HTMLDivElement, messageId: string, active: boolean) {
@@ -618,7 +676,7 @@ export function MessageList() {
       if (hadResize && restoreExpansionScrollAnchor()) {
         return;
       }
-      if (hadResize && lastTrackHeight > previousTrackHeight + 1 && autoScroll()) {
+      if (hadResize && lastTrackHeight > lastAutoScrolledTrackHeight + 1 && autoScroll()) {
         performScroll();
       }
     });
@@ -752,6 +810,11 @@ export function MessageList() {
     expectedScrollTop = result.nextScrollTop;
     ignoreScrollUntil = result.nextIgnoreScrollUntil;
     lastObservedScrollTop = result.nextScrollTop;
+    lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
+    batch(() => {
+      setScrollTop(result.nextScrollTop);
+      if (containerRef) setViewportHeight(containerRef.clientHeight);
+    });
   }
 
   function cancelPendingScroll() {
@@ -771,6 +834,7 @@ export function MessageList() {
     let attempts = 0;
     let stableFrames = 0;
     let lastHeight = -1;
+    let lastBottomScrollTop = -1;
 
     const tick = () => {
       initialScrollRafId = 0;
@@ -781,15 +845,28 @@ export function MessageList() {
       if (shouldVirtualize() && !measuredRowObserver) {
         measureVisibleItems();
       }
-      performScroll();
 
       const currentHeight = trackRef.getBoundingClientRect().height;
-      if (currentHeight === lastHeight) {
+      const currentBottomScrollTop = Math.max(
+        0,
+        containerRef.scrollHeight - containerRef.clientHeight
+      );
+      const belowBottomTarget = containerRef.scrollTop < currentBottomScrollTop - 1;
+      if (belowBottomTarget || currentHeight > lastAutoScrolledTrackHeight + 1) {
+        performScroll();
+      }
+
+      if (
+        Math.abs(currentHeight - lastHeight) <= 1 &&
+        Math.abs(currentBottomScrollTop - lastBottomScrollTop) <= 1 &&
+        distanceFromBottom() <= 1
+      ) {
         stableFrames++;
         if (stableFrames >= INITIAL_SCROLL_STABLE_FRAMES) return;
       } else {
         stableFrames = 0;
         lastHeight = currentHeight;
+        lastBottomScrollTop = currentBottomScrollTop;
       }
 
       if (++attempts < INITIAL_SCROLL_MAX_FRAMES) {
@@ -840,6 +917,7 @@ export function MessageList() {
   onMount(() => {
     if (!containerRef) return;
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
+    lastContainerOffsetWidth = containerRef.offsetWidth;
     updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
     setScrollTop(containerRef.scrollTop);
@@ -881,21 +959,21 @@ export function MessageList() {
 
     if (typeof ResizeObserver !== 'undefined') {
       measuredRowObserver = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          const element = entry.target as HTMLDivElement;
-          const messageId = element.dataset.msgId;
-          if (!messageId) continue;
-          setMeasuredHeightFor(messageId, entry.contentRect.height);
-        }
+        setMeasuredHeightsFor(entries);
       });
     }
 
     lastObservedScrollTop = containerRef.scrollTop ?? 0;
     if (!trackRef) return;
     lastTrackHeight = trackRef.getBoundingClientRect().height;
+    lastAutoScrolledTrackHeight = lastTrackHeight;
     const observer = new ResizeObserver(() => {
       if (!containerRef) return;
-      updateScrollbarInset();
+      const currentContainerOffsetWidth = containerRef.offsetWidth;
+      if (currentContainerOffsetWidth !== lastContainerOffsetWidth) {
+        lastContainerOffsetWidth = currentContainerOffsetWidth;
+        updateScrollbarInset();
+      }
       setViewportHeight(containerRef.clientHeight);
       scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
       scheduleVisibleMeasurement({ afterResize: true });
@@ -1122,100 +1200,113 @@ export function MessageList() {
 
   const assistantDialogSummaryMap = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => getAssistantDialogSummaryMap(state.messages));
+    return untrack(() => getAssistantDialogSummaryMap(state.messages, renderedMessageIds()));
   });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
 
   return (
-    <div
-      ref={containerRef}
-      class="interactive-list min-h-0 flex-1 overflow-y-auto"
-      role="log"
-      aria-live="polite"
-      aria-label="Chat messages"
-      onScroll={onScroll}
-    >
-      <div ref={trackRef} class="interactive-list-track">
-        <Show when={showStickyUserPrompt() && stickyUserMessagePreview()}>
-          {(preview) => <StickyUserMessagePreviewCard preview={preview()} />}
-        </Show>
-        <Show
-          when={state.messages.length > 0}
-          fallback={
-            <Show when={shouldShowStarterLogo()}>
-              <div class="chat-empty-state">
-                <img
-                  class="chat-empty-logo"
-                  src={state.emptyStateLogoUri}
-                  alt=""
-                  aria-hidden="true"
-                  draggable="false"
-                />
-              </div>
-            </Show>
-          }
-        >
+    <div class="interactive-list-shell min-h-0 flex-1">
+      <div
+        ref={containerRef}
+        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}`}
+        role="log"
+        aria-live="polite"
+        aria-label="Chat messages"
+        onScroll={onScroll}
+      >
+        <div ref={trackRef} class="interactive-list-track">
+          <Show when={showStickyUserPrompt() && stickyUserMessagePreview()}>
+            {(preview) => <StickyUserMessagePreviewCard preview={preview()} />}
+          </Show>
           <Show
-            when={shouldVirtualize()}
+            when={state.messages.length > 0}
             fallback={
-              <MessageRows
+              <Show when={shouldShowStarterLogo()}>
+                <div class="chat-empty-state">
+                  <img
+                    class="chat-empty-logo"
+                    src={state.emptyStateLogoUri}
+                    alt=""
+                    aria-hidden="true"
+                    draggable="false"
+                  />
+                </div>
+              </Show>
+            }
+          >
+            <Show
+              when={shouldVirtualize()}
+              fallback={
+                <MessageRows
+                  messages={messages()}
+                  modelChangeMap={modelChangeMap()}
+                  lastAssistantID={lastAssistantID()}
+                  outerListVirtualized={false}
+                  previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
+                  fileEditStackGroupMap={assistantStackGroupMap()}
+                  assistantDialogSummaryMap={assistantDialogSummaryMap()}
+                  hasBuildAgent={hasBuildAgent()}
+                  latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+                  observeMeasuredRow={observeMeasuredRow}
+                  isPlanningAssistantMessage={isPlanningAssistantMessage}
+                  questionRequestForTool={getQuestionRequestForTool}
+                  permissionMatchForTool={getPermissionMatchForTool}
+                  shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
+                  buildPlanImplementationPrompt={buildPlanImplementationPrompt}
+                  buildPlanDocumentContent={buildPlanDocumentContent}
+                />
+              }
+            >
+              <VirtualizedContent
                 messages={messages()}
                 modelChangeMap={modelChangeMap()}
                 lastAssistantID={lastAssistantID()}
+                outerListVirtualized
                 previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
                 fileEditStackGroupMap={assistantStackGroupMap()}
                 assistantDialogSummaryMap={assistantDialogSummaryMap()}
                 hasBuildAgent={hasBuildAgent()}
                 latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+                visibleRange={visibleRange()}
                 observeMeasuredRow={observeMeasuredRow}
                 isPlanningAssistantMessage={isPlanningAssistantMessage}
+                questionRequestForTool={getQuestionRequestForTool}
+                permissionMatchForTool={getPermissionMatchForTool}
                 shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
                 buildPlanImplementationPrompt={buildPlanImplementationPrompt}
                 buildPlanDocumentContent={buildPlanDocumentContent}
               />
+            </Show>
+          </Show>
+          <PendingActionRows
+            questions={standaloneQuestions()}
+            permissions={standalonePermissions()}
+          />
+          <Show
+            when={
+              (isLoading() || isSessionCompacting()) &&
+              !hasActiveQuestion() &&
+              !hasActivePermission() &&
+              !visibleBlockingStreamingPart() &&
+              !activeUsageLimit()
             }
           >
-            <VirtualizedContent
-              messages={messages()}
-              modelChangeMap={modelChangeMap()}
-              lastAssistantID={lastAssistantID()}
-              previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
-              fileEditStackGroupMap={assistantStackGroupMap()}
-              assistantDialogSummaryMap={assistantDialogSummaryMap()}
-              hasBuildAgent={hasBuildAgent()}
-              latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
-              visibleRange={visibleRange()}
-              observeMeasuredRow={observeMeasuredRow}
-              isPlanningAssistantMessage={isPlanningAssistantMessage}
-              shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
-              buildPlanImplementationPrompt={buildPlanImplementationPrompt}
-              buildPlanDocumentContent={buildPlanDocumentContent}
-            />
+            <LoadingRow compacting={isSessionCompacting()} />
           </Show>
-        </Show>
-        <PendingActionRows
-          questions={standaloneQuestions()}
-          permissions={standalonePermissions()}
-        />
-        <Show
-          when={
-            (isLoading() || isSessionCompacting()) &&
-            !hasActiveQuestion() &&
-            !hasActivePermission() &&
-            !visibleBlockingStreamingPart() &&
-            !activeUsageLimit()
-          }
-        >
-          <LoadingRow compacting={isSessionCompacting()} />
-        </Show>
+        </div>
       </div>
+      <ChatContentBottomFade />
     </div>
   );
 }
 
-function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Part[] }>) {
+export function getAssistantDialogSummaryMap(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  targetMessageIds?: ReadonlySet<string>
+) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
-  const childRunsByParentId = getChildRunsByParentId(messages);
+  let childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> | null =
+    null;
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
@@ -1238,6 +1329,16 @@ function getAssistantDialogSummaryMap(messages: Array<{ info: Message; parts: Pa
       currentUserRequestCreated = null;
       return;
     }
+
+    if (targetMessageIds && !targetMessageIds.has(lastMessage.id)) {
+      currentMessages = [];
+      currentPrimaryMessageIds = [];
+      currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
+      return;
+    }
+
+    childRunsByParentId ||= getChildRunsByParentId(messages);
 
     const aggregateMessages = collectAssistantDialogMessages(currentMessages, childRunsByParentId);
     const completedMessages = aggregateMessages.filter((message) => !!message.time.completed);

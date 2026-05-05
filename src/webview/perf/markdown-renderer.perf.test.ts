@@ -113,4 +113,29 @@ describe('MarkdownRenderer perf guards', () => {
     expect(parseSpy).toHaveBeenCalledTimes(1);
     expect(parseSpy).toHaveBeenCalledWith('Tail extended with more streamed text');
   });
+
+  it('skips table and copy-button hydration scans for plain streaming markdown', async () => {
+    const querySelectorAllSpy = vi.spyOn(Element.prototype, 'querySelectorAll');
+    const [content, setContent] = createSignal('Plain streaming response');
+
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await waitForAnimationFrame();
+    querySelectorAllSpy.mockClear();
+
+    setContent('Plain streaming response with more text and no rich blocks');
+    await waitForAnimationFrame();
+    await Promise.resolve();
+
+    const selectors = querySelectorAllSpy.mock.calls.map(([selector]) => selector);
+    expect(selectors).not.toContain('table');
+    expect(selectors).not.toContain('button[data-copy]');
+  });
 });

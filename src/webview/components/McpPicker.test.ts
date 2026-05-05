@@ -145,4 +145,25 @@ describe('McpPicker', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps the original popup gap', async () => {
+    setMcpStatuses({
+      alpha: { status: 'connected' },
+    });
+
+    cleanup = render(
+      () =>
+        McpPicker({
+          sessionId: 'session-1',
+          onChange: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      container!
+    );
+    await flushMicrotasks();
+
+    const anchor = container?.firstElementChild as HTMLDivElement | null;
+    expect(anchor?.style.bottom).toBe('100%');
+    expect(anchor?.style.paddingBottom).toBe('10px');
+  });
 });
