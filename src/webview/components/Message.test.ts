@@ -9,6 +9,7 @@ import {
   calculateAssistantPartVirtualRange,
   getAssistantContainerVariant,
   getUserMessagePreviewText,
+  parseUserMessageContent,
   stripCompactionBoundaryMarkdown,
 } from './Message';
 import { resetToolCallExpansionState } from './ToolCall';
@@ -508,6 +509,51 @@ describe('getUserMessagePreviewText', () => {
     expect(getUserMessagePreviewText([imageFilePart('file-1', 'diagram.png')])).toBe(
       'Attachment: diagram.png'
     );
+  });
+});
+
+describe('parseUserMessageContent', () => {
+  it('treats absolute paths with spaces as attachments', () => {
+    const parsed = parseUserMessageContent([
+      textPart('text-1', 'Test\n\n/Users/andrew/Downloads/report final 5397.pdf'),
+    ]);
+
+    expect(parsed.messageTexts).toEqual(['Test']);
+    expect(parsed.attachments).toEqual([
+      {
+        type: 'file-reference',
+        path: '/Users/andrew/Downloads/report final 5397.pdf',
+        isDirectory: false,
+      },
+    ]);
+  });
+
+  it('keeps slash-containing prose as text when whitespace touches the slash', () => {
+    const parsed = parseUserMessageContent([textPart('text-1', 'Use /help')]);
+
+    expect(parsed.messageTexts).toEqual(['Use /help']);
+    expect(parsed.attachments).toEqual([]);
+  });
+
+  it('renders extracted attachment lines from mixed user text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-attachment'),
+          parts: [
+            textPart(
+              'text-inline-attachment',
+              'Test\n\n/Users/andrew/Downloads/ПД Оккервиль ЛСТ Квартплата 5397.pdf'
+            ),
+          ],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.message-attachments .chip-label')?.textContent).toBe(
+      'ПД Оккервиль ЛСТ Квартплата 5397.pdf'
+    );
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe('Test');
   });
 });
 

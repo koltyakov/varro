@@ -1280,14 +1280,6 @@ body.vscode-light
   .interactive-item-container.interactive-request
   .chat-turn-card
   > .rendered-markdown
-  > :first-child {
-  margin-top: 0;
-}
-
-.interactive-session
-  .interactive-item-container.interactive-request
-  .chat-turn-card
-  > .rendered-markdown
   :last-child {
   margin-bottom: 0;
 }
@@ -2309,8 +2301,7 @@ body.vscode-light
   flex-shrink: 0;
 }
 
-.composer-completion-item.completion-file:hover .composer-completion-title.marquee,
-.composer-completion-item.completion-file.selected .composer-completion-title.marquee {
+.composer-completion-item.completion-file:hover .composer-completion-title.marquee {
   overflow: visible;
   text-overflow: clip;
   animation: composer-title-marquee var(--marquee-duration, 6s) linear infinite alternate;
@@ -3379,7 +3370,7 @@ body.vscode-light
   gap: 5px;
   font-size: 11.5px;
   font-weight: 500;
-  padding: 4px 9px;
+  padding: 2px 5px;
   border: 1px dashed var(--color-vscode-border-strong);
   border-radius: 6px;
   height: auto;
@@ -3458,9 +3449,116 @@ body.vscode-light
   background: none;
   font-size: 10px;
   transition: color 0.1s;
+  margin-right: -2px;
 }
 
 .chat-attachment-chip .chip-remove:hover {
+  color: var(--color-vscode-fg);
+}
+
+/* Rich Composer (contenteditable with inline chips) */
+.rich-composer {
+  min-height: 30px;
+  max-height: 200px;
+  width: 100%;
+  overflow-y: auto;
+  background: transparent;
+  padding: 4px 4px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-vscode-input-fg);
+  outline: none;
+  font-family: inherit;
+  border: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  cursor: text;
+}
+
+.rich-composer[data-empty='true']::before {
+  content: attr(data-placeholder);
+  color: var(--color-vscode-muted);
+  pointer-events: none;
+  position: absolute;
+}
+
+.rich-composer .inline-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 1px 5px 1px 5px;
+  margin: 0 1px;
+  border: none;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-input-bg));
+  color: var(--color-vscode-fg);
+  vertical-align: baseline;
+  line-height: 1.45;
+  cursor: default;
+  user-select: none;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.rich-composer .inline-chip:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 16%, var(--color-vscode-input-bg));
+}
+
+.rich-composer .inline-chip.disabled {
+  color: var(--color-vscode-fg-muted);
+  opacity: 0.55;
+}
+
+.rich-composer .inline-chip.disabled .inline-chip-label {
+  text-decoration: line-through;
+}
+
+.rich-composer .inline-chip .inline-chip-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.rich-composer .inline-chip .inline-chip-icon {
+  color: var(--color-vscode-fg-muted);
+  flex-shrink: 0;
+}
+
+.rich-composer .inline-chip .inline-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.rich-composer .inline-chip .inline-chip-detail {
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.rich-composer .inline-chip .inline-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  appearance: none;
+  color: color-mix(in srgb, var(--color-vscode-fg) 72%, var(--color-vscode-input-bg));
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: -3px;
+}
+
+.rich-composer .inline-chip .inline-chip-remove:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
   color: var(--color-vscode-fg);
 }
 
@@ -4822,26 +4920,19 @@ kbd {
 }
 
 .message-attachments.message-attachments-leading {
-  margin-bottom: 12px;
-  margin-inline: -15px;
-  padding: 0 15px 10px;
-  position: relative;
-  z-index: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
-}
-
-.message-attachments.message-attachments-leading::before {
-  content: '';
-  position: absolute;
-  inset: -12px 0 0;
+  margin: -12px -15px 12px;
+  width: calc(100% + 30px);
+  max-width: calc(100% + 30px);
+  padding: 12px 15px 10px;
+  overflow: hidden;
+  border-top-left-radius: 15px;
+  border-top-right-radius: 15px;
   background: color-mix(
     in srgb,
     var(--color-vscode-widget-bg) 62%,
     var(--color-vscode-request-bubble)
   );
-  border-top-left-radius: 15px;
-  border-top-right-radius: 15px;
-  z-index: -1;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
 }
 
 .message-attachments.message-attachments-standalone {
@@ -4850,39 +4941,43 @@ kbd {
   border: none;
 }
 
-.message-attachment-chip {
+.message-attachments > .message-attachment-chip,
+.message-attachments > .chat-attachment-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
   font-weight: 500;
-  padding: 2px 7px;
+  padding: 1px 5px;
   border: 1px solid var(--color-vscode-border-strong);
   border-radius: 5px;
   background: var(--color-vscode-surface-hover);
   color: var(--color-vscode-fg);
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   max-width: var(--attachment-chip-max-width);
   min-width: 0;
   width: auto;
   overflow: hidden;
 }
 
-.message-attachment-chip .chip-icon {
+.message-attachments > .message-attachment-chip .chip-icon,
+.message-attachments > .chat-attachment-chip .chip-icon {
   font-size: 11px;
   color: var(--color-vscode-fg-muted);
   flex-shrink: 0;
 }
 
-.message-attachment-chip .chip-label {
-  flex: 1 1 auto;
+.message-attachments > .message-attachment-chip .chip-label,
+.message-attachments > .chat-attachment-chip .chip-label {
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
 }
 
-.message-attachment-chip .chip-detail {
+.message-attachments > .message-attachment-chip .chip-detail,
+.message-attachments > .chat-attachment-chip .chip-detail {
   color: var(--color-vscode-fg-muted);
   font-size: 10px;
   flex-shrink: 0;
@@ -4906,7 +5001,7 @@ kbd {
 
   .chat-attachment-chip {
     gap: 4px;
-    padding: 4px 7px;
+    padding: 2px 5px;
   }
 
   .message-attachments {
@@ -4914,9 +5009,10 @@ kbd {
     --attachment-chip-pair-min-width: 14ch;
   }
 
-  .message-attachment-chip {
+  .message-attachments > .message-attachment-chip,
+  .message-attachments > .chat-attachment-chip {
     gap: 3px;
-    padding: 2px 6px;
+    padding: 2px 5px;
   }
 }
 

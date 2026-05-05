@@ -1189,7 +1189,13 @@ export function clearContextFiles() {
 }
 
 export function addClipboardImage(image: ClipboardImage) {
-  if (image.size > MAX_CLIPBOARD_IMAGE_SIZE) return;
+  if (image.size > MAX_CLIPBOARD_IMAGE_SIZE) return false;
+
+  const duplicateKey = image.contentKey ?? image.url;
+  if (state.clipboardImages.some((item) => (item.contentKey ?? item.url) === duplicateKey)) {
+    return false;
+  }
+
   setState(
     'clipboardImages',
     produce((images) => {
@@ -1199,6 +1205,8 @@ export function addClipboardImage(image: ClipboardImage) {
       }
     })
   );
+
+  return true;
 }
 
 export function removeClipboardImage(id: string) {

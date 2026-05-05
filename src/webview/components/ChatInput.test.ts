@@ -7,9 +7,11 @@ import {
   ChatInput,
   getActiveCompletion,
   getCompletionSelection,
+  getMentionInsertionTrailingSpace,
   getLeadingSlashCommand,
   getMentionCompletionItems,
   parseDroppedText,
+  getInlineInsertionSuffix,
   shouldRequestMentionFileSearch,
   shouldPadInlineInsertion,
   isToolbarControlCompacted,
@@ -18,6 +20,7 @@ import {
 } from './ChatInput';
 import {
   state,
+  inputText,
   setIsLoading,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
@@ -81,6 +84,7 @@ afterEach(() => {
   setState('messages', []);
   setState('sessions', []);
   setState('providers', []);
+  setState('allAgents', []);
   setState('providerDefaults', {});
   setState('selectedModel', null);
   setState('providerLimits', {});
@@ -161,6 +165,15 @@ async function flushAsyncWork(count = 4) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
   }
+}
+
+function setCollapsedSelection(target: Node, offset: number) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.setStart(target, offset);
+  range.collapse(true);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
 }
 
 function availableProviderLimit(
@@ -656,7 +669,7 @@ describe('ChatInput', () => {
     );
     queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
-    expect(container?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
+    expect(inputText()).toBe('');
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(container?.querySelector('.chat-queue-item')).not.toBeNull();
     expect(state.droppedFiles).toEqual([]);
@@ -752,13 +765,13 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    const textarea = container?.querySelector<HTMLTextAreaElement>('textarea');
-    textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await flushAsyncWork();
 
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
     expect(sendMessageMock).not.toHaveBeenCalled();
-    expect(textarea?.value).toBe('');
+    expect(inputText()).toBe('');
   });
 
   it('runs a typed slash command with args from the send button', async () => {
@@ -779,24 +792,35 @@ describe('ChatInput', () => {
 
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
     expect(sendMessageMock).not.toHaveBeenCalled();
-    expect(container?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
+    expect(inputText()).toBe('');
   });
 
-  it('resizes the composer when draft text changes outside input events', async () => {
+  it('uses a contenteditable rich composer instead of textarea', async () => {
     cleanup = render(() => ChatInput(), container!);
 
-    const textarea = container?.querySelector<HTMLTextAreaElement>('textarea');
-    expect(textarea).not.toBeNull();
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    expect(editor).not.toBeNull();
+    expect(editor?.getAttribute('contenteditable')).toBe('true');
+    expect(editor?.getAttribute('role')).toBe('textbox');
+  });
 
-    Object.defineProperty(textarea!, 'scrollHeight', {
-      configurable: true,
-      get: () => (textarea!.value.includes('\n') ? 320 : 44),
-    });
+  it('renders inline image chips without a remove button', async () => {
+    setState('clipboardImages', [
+      {
+        id: 'img-1',
+        url: 'data:image/png;base64,abc',
+        mime: 'image/png',
+        filename: 'Image',
+        size: 12,
+      },
+    ]);
+    setInputText('[Image]');
 
-    setInputText('First line\nSecond line\nThird line');
-    await flushAsyncWork(2);
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
 
-    expect(textarea?.style.height).toBe('200px');
+    expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
+    expect(container?.querySelector('.rich-composer .inline-chip-remove')).toBeNull();
   });
 
   it('updates the active Ralph run model and interrupts a usage-limit retry when switching models', async () => {
@@ -1404,6 +1428,7 @@ describe('getCompletionSelection', () => {
       )
     ).toEqual({ type: 'apply-mention', value: '@README.md ', file });
   });
+
 });
 
 describe('getSlashCommands', () => {
@@ -1541,5 +1566,25 @@ describe('shouldPadInlineInsertion', () => {
     expect(shouldPadInlineInsertion(' ')).toBe(false);
     expect(shouldPadInlineInsertion('\n')).toBe(false);
     expect(shouldPadInlineInsertion(undefined)).toBe(false);
+  });
+
+  it('treats end-of-input as requiring a trailing separator for inline insertions', () => {
+    expect(getInlineInsertionSuffix('Look at this', 'Look at this'.length)).toBe(' ');
+    expect(getInlineInsertionSuffix('Look at this?', 12)).toBe(' ');
+    expect(getInlineInsertionSuffix('Look at this ', 'Look at this'.length)).toBe('');
+  });
+});
+
+describe('getMentionInsertionTrailingSpace', () => {
+  it('does not add a second trailing space when the mention value already has one', () => {
+    expect(getMentionInsertionTrailingSpace('@helper ', undefined)).toBe('');
+    expect(getMentionInsertionTrailingSpace('@README.md ', 'x')).toBe('');
+  });
+
+  it('adds a trailing space only when the mention is adjacent to non-whitespace', () => {
+    expect(getMentionInsertionTrailingSpace('@helper', undefined)).toBe(' ');
+    expect(getMentionInsertionTrailingSpace('@helper', 'x')).toBe(' ');
+    expect(getMentionInsertionTrailingSpace('@helper', ' ')).toBe('');
+    expect(getMentionInsertionTrailingSpace('@helper', '\n')).toBe('');
   });
 });

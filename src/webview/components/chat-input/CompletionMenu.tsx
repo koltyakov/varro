@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { DocumentIcon } from '../DocumentIcon';
+import { FolderIcon } from '../FolderIcon';
 import type { DroppedFile } from '../../../shared/protocol';
 
 export type MentionCompletionItem =
@@ -106,7 +107,13 @@ export function CompletionMenu(props: {
                 <span class="composer-completion-icon">
                   <Show
                     when={item.type === 'agent'}
-                    fallback={<DocumentIcon width={14} height={14} />}
+                    fallback={
+                      item.type === 'file' && item.file.type === 'directory' ? (
+                        <FolderIcon width={14} height={14} />
+                      ) : (
+                        <DocumentIcon width={14} height={14} />
+                      )
+                    }
                   >
                     <svg width="14" height="14" viewBox="0 0 32 32" aria-hidden="true">
                       <path

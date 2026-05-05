@@ -17,6 +17,7 @@ import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
 import type { PreviewImage } from '../ImagePreview';
 import { renderCodeBlockHtml } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
+import { FolderIcon } from '../FolderIcon';
 
 export type MessageAttachment =
   | {
@@ -94,56 +95,114 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
     const text = (part as TextPart).text;
     if (!text) continue;
 
-    if (text.startsWith('[Working directory:')) continue;
-
-    if (text.startsWith('[Selection from ') && !text.startsWith('[Selection from terminal')) {
-      const selectionRef = parseSelectionReference(text);
-      if (selectionRef) {
-        attachments.push({
-          type: 'file-selection',
-          filename: selectionRef.path,
-          lineRanges: selectionRef.lineRanges,
-        });
-        continue;
-      }
-    }
-
-    if (text.startsWith('[Selection from terminal')) {
-      const match = text.match(/^\[Selection from terminal (.+?)\]/);
-      if (match) {
-        attachments.push({
-          type: 'terminal-selection',
-          terminalName: match[1],
-        });
-        continue;
-      }
-    }
-
-    if (text.startsWith('[Active file:')) {
-      const match = text.match(/^\[Active file: (.+?)\]/);
-      if (match) {
-        attachments.push({
-          type: 'file-reference',
-          path: match[1],
-          isDirectory: false,
-        });
-        continue;
-      }
-    }
-
-    if (isStandaloneFileReference(text)) {
-      attachments.push({
-        type: 'file-reference',
-        path: text,
-        isDirectory: text.endsWith('/'),
-      });
-      continue;
-    }
-
-    messageTexts.push(text);
+    const parsedText = parseUserMessageText(text);
+    attachments.push(...parsedText.attachments);
+    messageTexts.push(...parsedText.messageTexts);
   }
 
   return { messageTexts, attachments, fileParts };
+}
+
+function parseUserMessageText(text: string): {
+  messageTexts: string[];
+  attachments: MessageAttachment[];
+} {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+  const messageTexts: string[] = [];
+  const attachments: MessageAttachment[] = [];
+  const textBuffer: string[] = [];
+  let inCodeFence = false;
+
+  const flushTextBuffer = () => {
+    const content = textBuffer.join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+    textBuffer.length = 0;
+    if (content.length > 0) {
+      messageTexts.push(content);
+    }
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmedLine = line.trim();
+
+    if (!inCodeFence) {
+      if (trimmedLine.startsWith('[Working directory:')) {
+        flushTextBuffer();
+        continue;
+      }
+
+      const terminalMatch = trimmedLine.match(/^\[Selection from terminal (.+?)\]/);
+      if (terminalMatch) {
+        flushTextBuffer();
+        attachments.push({
+          type: 'terminal-selection',
+          terminalName: terminalMatch[1],
+        });
+
+        if (lines[index + 1]?.trim().startsWith('```')) {
+          index += 2;
+          while (index < lines.length) {
+            if (lines[index].trim() === '```') break;
+            index += 1;
+          }
+        }
+        continue;
+      }
+
+      const attachment = parseUserMessageAttachmentLine(trimmedLine);
+      if (attachment) {
+        flushTextBuffer();
+        attachments.push(attachment);
+        continue;
+      }
+    }
+
+    textBuffer.push(line);
+    if (trimmedLine.startsWith('```')) {
+      inCodeFence = !inCodeFence;
+    }
+  }
+
+  flushTextBuffer();
+
+  return { messageTexts, attachments };
+}
+
+function parseUserMessageAttachmentLine(line: string): MessageAttachment | null {
+  if (!line) return null;
+
+  if (line.startsWith('[Selection from ') && !line.startsWith('[Selection from terminal')) {
+    const selectionRef = parseSelectionReference(line);
+    if (selectionRef) {
+      return {
+        type: 'file-selection',
+        filename: selectionRef.path,
+        lineRanges: selectionRef.lineRanges,
+      };
+    }
+  }
+
+  if (line.startsWith('[Active file:')) {
+    const match = line.match(/^\[Active file: (.+?)\]/);
+    if (match) {
+      return {
+        type: 'file-reference',
+        path: match[1],
+        isDirectory: false,
+      };
+    }
+  }
+
+  if (isStandaloneFileReference(line)) {
+    return {
+      type: 'file-reference',
+      path: line,
+      isDirectory: line.endsWith('/'),
+    };
+  }
+
+  return null;
 }
 
 export function getUserMessagePreviewText(parts: Part[]): string {
@@ -420,9 +479,17 @@ function isStandaloneFileReference(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.startsWith('[')) return false;
   if (trimmed.includes('\n')) return false;
-  if (trimmed.includes(' ')) return false;
   if (trimmed.length <= 1 || trimmed.length > 300) return false;
-  return trimmed.includes('/') || /^\w[\w.-]*\.\w{1,12}$/.test(trimmed);
+
+  const normalized = normalizePath(trimmed);
+  if (/\s\/|\/\s/.test(normalized)) return false;
+  if (isAbsolutePath(normalized)) return true;
+  if (trimmed.includes(' ') && !normalized.endsWith('/') && !/\.\w{1,12}$/.test(trimmed)) {
+    return false;
+  }
+  if (normalized.includes('/')) return true;
+  if (trimmed.includes(' ')) return false;
+  return /^\w[\w.-]*\.\w{1,12}$/.test(trimmed);
 }
 
 function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
@@ -456,11 +523,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
 
   const iconSvg = () => {
     if (isFolder()) {
-      return (
-        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
-        </svg>
-      );
+      return <FolderIcon class="chip-icon" width="12" height="12" />;
     }
     if (isTerminal()) {
       return (

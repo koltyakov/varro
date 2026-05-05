@@ -15,6 +15,7 @@ import {
 } from '../../shared/context-files';
 import { postMessage } from '../lib/bridge';
 import { DocumentIcon } from './DocumentIcon';
+import { FolderIcon } from './FolderIcon';
 
 export function ContextBar() {
   const files = () => state.droppedFiles;
@@ -156,9 +157,7 @@ function ContextChip(props: {
           </Show>
         }
       >
-        <svg class="h-3 w-3 shrink-0 text-vscode-muted/60" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
-        </svg>
+        <FolderIcon class="h-3 w-3 shrink-0 text-vscode-muted/60" />
       </Show>
       <span class="max-w-[140px] truncate">{props.label}</span>
       <Show when={props.detail}>
