@@ -438,6 +438,51 @@ describe('Message user prompt rendering', () => {
     expect(children[3]?.classList.contains('chat-image-figure')).toBe(true);
     expect(children[3]?.textContent).toContain('diagram.png');
   });
+
+  it('renders inline file mentions as chips inside the user bubble text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-file'),
+          parts: [
+            textPart('text-1', 'Test @README.md and @preview.html'),
+            textPart('text-2', 'README.md'),
+            textPart('text-3', 'preview.html'),
+          ],
+        }),
+      container!
+    );
+
+    const messageText = container?.querySelector('.user-message-text');
+
+    expect(messageText?.textContent).toContain('Test README.md and preview.html');
+    expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(2);
+    expect(messageText?.querySelectorAll('.inline-chip-clickable')).toHaveLength(2);
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+  });
+
+  it('keeps unrelated context attachments in the leading attachment strip', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-file-with-extra-context'),
+          parts: [
+            textPart('text-1', 'Test @README.md'),
+            textPart('text-2', 'README.md'),
+            textPart('text-3', 'preview.html'),
+          ],
+        }),
+      container!
+    );
+
+    const inlineChips = container?.querySelectorAll('.user-message-text .inline-chip');
+    const attachmentStrip = container?.querySelector('.message-attachments');
+
+    expect(inlineChips).toHaveLength(1);
+    expect(attachmentStrip).toBeInstanceOf(HTMLDivElement);
+    expect(attachmentStrip?.textContent).toContain('preview.html');
+    expect(attachmentStrip?.textContent).not.toContain('README.md');
+  });
 });
 
 describe('Message tool call expansion', () => {
@@ -554,6 +599,28 @@ describe('parseUserMessageContent', () => {
       'ПД Оккервиль ЛСТ Квартплата 5397.pdf'
     );
     expect(container?.querySelector('.user-message-text')?.textContent).toBe('Test');
+  });
+
+  it('keeps inline mentions in message text while hiding duplicated attachment refs', () => {
+    const parsed = parseUserMessageContent([
+      textPart('text-1', 'Test @README.md and @preview.html'),
+      textPart('text-2', 'README.md'),
+      textPart('text-3', 'preview.html'),
+    ]);
+
+    expect(parsed.messageTexts).toEqual(['Test @README.md and @preview.html']);
+    expect(parsed.attachments).toEqual([
+      {
+        type: 'file-reference',
+        path: 'README.md',
+        isDirectory: false,
+      },
+      {
+        type: 'file-reference',
+        path: 'preview.html',
+        isDirectory: false,
+      },
+    ]);
   });
 });
 

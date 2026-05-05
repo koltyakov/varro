@@ -118,6 +118,35 @@ describe('RichComposerArea', () => {
     expect(onInput).toHaveBeenCalledWith('pasted text', 11);
   });
 
+  it('copies the underlying chip markers instead of visible labels', () => {
+    const chip: RichComposerChip = {
+      id: 'file:/workspace/README.md',
+      type: 'mention-file',
+      label: 'README.md',
+      icon: 'file',
+      textMarker: '@README.md',
+    };
+
+    renderComposer({ value: 'Review @README.md please', cursorOffset: 22, chips: [chip] });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editor!);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const setData = vi.fn();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData },
+    });
+
+    editor?.dispatchEvent(event);
+
+    expect(setData).toHaveBeenCalledWith('text/plain', 'Review @README.md please');
+  });
+
   it('removes attachment state when a chip disappears from the composer input', async () => {
     const chip: RichComposerChip = {
       id: 'file:/workspace/README.md',
@@ -272,6 +301,29 @@ describe('RichComposerArea', () => {
     const inlineChip = container?.querySelector<HTMLElement>('.inline-chip');
     expect(inlineChip?.getAttribute('title')).toBe(
       'src/webview/components/chat-input/BusySendMenu.test.tsx'
+    );
+  });
+
+  it('renders directory chips with the folder icon', async () => {
+    const chip: RichComposerChip = {
+      id: 'file:/workspace/src',
+      type: 'mention-file',
+      label: 'src',
+      icon: 'folder',
+      textMarker: '@src/',
+    };
+
+    renderComposer({
+      value: '@src/',
+      cursorOffset: 0,
+      chips: [chip],
+    });
+
+    await flushAsyncWork();
+
+    const iconPath = container?.querySelector('.inline-chip .inline-chip-icon path');
+    expect(iconPath?.getAttribute('d')).toBe(
+      'M1.75 3h3.1c.31 0 .6.14.79.38l.86 1.12h7.75c.41 0 .75.34.75.75V6H1V3.75C1 3.34 1.34 3 1.75 3zM1 7h14v4.25c0 .97-.78 1.75-1.75 1.75H2.75A1.75 1.75 0 011 11.25V7z'
     );
   });
 });

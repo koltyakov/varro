@@ -80,11 +80,13 @@ import {
 } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
-import { getLeafPathName } from '../lib/path-display';
+import { getLeafPathName, getWorkspaceRelativePath, isAbsolutePath, normalizePath } from '../lib/path-display';
 import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
+  mergeContextFile,
+  parseSelectionReference,
 } from '../../shared/context-files';
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
 import { TodoList } from './TodoList';
@@ -1200,6 +1202,20 @@ export function ChatInput() {
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
 
+    const pastedText = clipboardData.getData('text/plain');
+    const pastedContextFiles = getPastedContextFiles(pastedText, state.editorContext.workspacePath);
+    const pastedPromptText = getPromptTextWithoutContextReferences(pastedText);
+    const pasteHandledAsContextOnly = pastedContextFiles.length > 0 && pastedPromptText.length === 0;
+    if (pastedContextFiles.length > 0) {
+      for (const file of pastedContextFiles) {
+        addContextFile(file);
+      }
+      (e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText = pastedPromptText;
+      if (pasteHandledAsContextOnly) {
+        e.preventDefault();
+      }
+    }
+
     const imageItems = Array.from(clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
     );
@@ -2181,6 +2197,115 @@ export function ChatInput() {
       </div>
     </div>
   );
+}
+
+function getPastedContextFiles(text: string, workspacePath: string | null): DroppedFile[] {
+  if (!text.trim()) return [];
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const files = new Map<string, DroppedFile>();
+
+  for (const line of lines) {
+    const selectionRef = parseSelectionReference(line);
+    if (selectionRef) {
+      const file = createDroppedFileFromReference(selectionRef.path, workspacePath, false);
+      if (!file) continue;
+      addOrMergePastedContextFile(files, { ...file, lineRanges: selectionRef.lineRanges });
+      continue;
+    }
+
+    const activeFileMatch = line.match(/^\[Active file: (.+?)\]$/);
+    if (activeFileMatch) {
+      const file = createDroppedFileFromReference(activeFileMatch[1], workspacePath, false);
+      if (file) addOrMergePastedContextFile(files, file);
+      continue;
+    }
+
+    for (const mention of extractPastedFileMentions(line)) {
+      const file = createDroppedFileFromReference(mention.path, workspacePath, mention.isDirectory);
+      if (file) addOrMergePastedContextFile(files, file);
+    }
+  }
+
+  return Array.from(files.values());
+}
+
+function getPromptTextWithoutContextReferences(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (parseSelectionReference(line)) return false;
+      if (/^\[Active file: .+\]$/.test(line)) return false;
+      return extractPastedFileMentions(line).length === 0 || line.replace(/(^|[\s(])@([^\s@]+?\/?)(?=$|[\s),.:;!?])/g, '$1').trim().length > 0;
+    })
+    .join('\n')
+    .trim();
+}
+
+function extractPastedFileMentions(line: string): Array<{ path: string; isDirectory: boolean }> {
+  const matches = line.matchAll(/(^|[\s(])@([^\s@)]+?\/?)(?=$|[\s),:;!?])/g);
+  const mentions: Array<{ path: string; isDirectory: boolean }> = [];
+
+  for (const match of matches) {
+    const rawPath = match[2]?.trim();
+    const isDirectory = rawPath?.endsWith('/') ?? false;
+    if (!rawPath || !isLikelyFileMentionPath(rawPath, isDirectory)) continue;
+    mentions.push({
+      path: rawPath.replace(/\/+$/, ''),
+      isDirectory,
+    });
+  }
+
+  return mentions;
+}
+
+function isLikelyFileMentionPath(value: string, isDirectory = false) {
+  const normalized = normalizePath(value.replace(/^\.\//, ''));
+  if (!normalized) return false;
+  if (normalized === '.' || normalized === '..') return false;
+  if (isDirectory) return true;
+  if (normalized.includes('/')) return true;
+  return /\.[A-Za-z0-9_-]{1,16}$/.test(normalized);
+}
+
+function createDroppedFileFromReference(
+  referencePath: string,
+  workspacePath: string | null,
+  isDirectory: boolean
+): DroppedFile | null {
+  const normalizedReference = normalizePath(referencePath);
+  if (!normalizedReference) return null;
+
+  const relativePath = isAbsolutePath(normalizedReference)
+    ? getWorkspaceRelativePath(normalizedReference, workspacePath) ?? normalizedReference
+    : normalizedReference;
+  const absolutePath = isAbsolutePath(normalizedReference)
+    ? normalizedReference
+    : workspacePath
+      ? `${normalizePath(workspacePath).replace(/\/+$/, '')}/${normalizedReference.replace(/^\.\//, '')}`
+      : normalizedReference;
+
+  return {
+    path: absolutePath,
+    relativePath,
+    type: isDirectory ? 'directory' : 'file',
+  };
+}
+
+function addOrMergePastedContextFile(files: Map<string, DroppedFile>, file: DroppedFile) {
+  const current = files.get(file.path);
+  if (!current) {
+    files.set(file.path, file);
+    return;
+  }
+
+  files.set(file.path, mergeContextFile(current, file));
 }
 
 export function getSlashCommands(props: {

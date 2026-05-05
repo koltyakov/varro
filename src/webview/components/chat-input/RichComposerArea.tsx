@@ -2,8 +2,12 @@ import { Show, createEffect, onMount, onCleanup } from 'solid-js';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 import type { InlineChipData } from './InlineChip';
 
+type ComposerClipboardEvent = ClipboardEvent & {
+  __varroPasteText?: string;
+};
+
 const FOLDER_ICON_SVG =
-  '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M1.75 3h3.1l1.15 1.5h8c.55 0 1 .45 1 1v5.75c0 .97-.78 1.75-1.75 1.75H1.75C.78 13 0 12.22 0 11.25V4.75C0 3.78.78 3 1.75 3zm0 1A.75.75 0 001 4.75v6.5c0 .41.34.75.75.75h12.5c.41 0 .75-.34.75-.75V5.5h-8.5L5.35 4H1.75z"/></svg>';
+  '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M1.75 3h3.1c.31 0 .6.14.79.38l.86 1.12h7.75c.41 0 .75.34.75.75V6H1V3.75C1 3.34 1.34 3 1.75 3zM1 7h14v4.25c0 .97-.78 1.75-1.75 1.75H2.75A1.75 1.75 0 011 11.25V7z"/></svg>';
 
 const CARET_SPACER = '\u200B';
 
@@ -114,13 +118,9 @@ export function RichComposerArea(props: {
 
   function getSelectionOffsets(): { start: number; end: number } | null {
     if (!editorEl) return null;
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return null;
+    const range = getSelectionRange();
+    if (!range) return null;
 
-    const range = sel.getRangeAt(0);
-    if (!editorEl.contains(range.startContainer) || !editorEl.contains(range.endContainer)) {
-      return null;
-    }
     const preRange = document.createRange();
     const postRange = document.createRange();
     preRange.selectNodeContents(editorEl);
@@ -132,6 +132,18 @@ export function RichComposerArea(props: {
       start: extractRangeTextLength(preRange),
       end: extractRangeTextLength(postRange),
     };
+  }
+
+  function getSelectionRange(): Range | null {
+    if (!editorEl) return null;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+
+    const range = sel.getRangeAt(0);
+    if (!editorEl.contains(range.startContainer) || !editorEl.contains(range.endContainer)) {
+      return null;
+    }
+    return range;
   }
 
   function extractRangeTextLength(range: Range): number {
@@ -222,7 +234,11 @@ export function RichComposerArea(props: {
     props.onPaste(e);
     if (e.defaultPrevented) return;
 
-    const text = e.clipboardData?.getData('text/plain');
+    const overrideText = (e as ComposerClipboardEvent).__varroPasteText;
+    const text = overrideText ?? e.clipboardData?.getData('text/plain') ?? '';
+    if (overrideText !== undefined) {
+      e.preventDefault();
+    }
     if (!text) return;
     const selection = getSelectionOffsets() || {
       start: props.value.length,
@@ -231,6 +247,20 @@ export function RichComposerArea(props: {
     e.preventDefault();
     const nextValue = `${props.value.slice(0, selection.start)}${text}${props.value.slice(selection.end)}`;
     props.onInput(nextValue, selection.start + text.length);
+  }
+
+  function handleCopy(e: ClipboardEvent) {
+    const range = getSelectionRange();
+    if (!range || range.collapsed) return;
+    if (!e.clipboardData) return;
+
+    const fragment = document.createElement('div');
+    fragment.appendChild(range.cloneContents());
+    const text = extractText(fragment);
+    if (!text) return;
+
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault();
   }
 
   onMount(() => {
@@ -259,6 +289,7 @@ export function RichComposerArea(props: {
         onInput={handleInput}
         onKeyDown={(e) => props.onKeyDown(e)}
         onPaste={handlePaste}
+        onCopy={handleCopy}
         onFocus={() => props.onFocus()}
         onBlur={() => props.onBlur()}
         onClick={() => props.onClick(getCursorOffset())}

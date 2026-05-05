@@ -804,6 +804,82 @@ describe('ChatInput', () => {
     expect(editor?.getAttribute('role')).toBe('textbox');
   });
 
+  it('rehydrates pasted file mentions into context files', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    expect(editor).not.toBeNull();
+
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? 'Review @README.md and @docs/' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(state.droppedFiles).toEqual([
+      { path: '/repo/README.md', relativePath: 'README.md', type: 'file' },
+      { path: '/repo/docs', relativePath: 'docs', type: 'directory' },
+    ]);
+    expect(inputText()).toBe('Review @README.md and @docs/');
+  });
+
+  it('strips pasted context reference lines while restoring them as attachments', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    expect(editor).not.toBeNull();
+
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) =>
+          type === 'text/plain'
+            ? 'Please review this\n\n[Selection from src/app.ts lines 3-5]\n[Active file: README.md]'
+            : '',
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(state.droppedFiles).toEqual([
+      {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 3, endLine: 5 }],
+      },
+      { path: '/repo/README.md', relativePath: 'README.md', type: 'file' },
+    ]);
+    expect(inputText()).toBe('Please review this');
+  });
+
   it('renders inline image chips without a remove button', async () => {
     setState('clipboardImages', [
       {

@@ -17,6 +17,7 @@ import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
 import type { PreviewImage } from '../ImagePreview';
 import { renderCodeBlockHtml } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
+import { DocumentIcon } from '../DocumentIcon';
 import { FolderIcon } from '../FolderIcon';
 
 export type MessageAttachment =
@@ -36,6 +37,12 @@ export type ParsedUserMessageContent = {
   messageTexts: string[];
   attachments: MessageAttachment[];
   fileParts: FilePart[];
+};
+
+type IndexedMessageAttachment = {
+  id: string;
+  attachment: MessageAttachment;
+  marker: string | null;
 };
 
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
@@ -234,6 +241,19 @@ export function getUserMessagePreviewText(parts: Part[]): string {
 
 export function UserMessageContent(props: { parts: Part[] }) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));
+  const indexedAttachments = createMemo<IndexedMessageAttachment[]>(() =>
+    parsed().attachments.map((attachment, index) => ({
+      id: `attachment-${index}`,
+      attachment,
+      marker: getAttachmentTextMarker(attachment),
+    }))
+  );
+  const inlineAttachmentIds = createMemo(() =>
+    getInlineAttachmentIds(parsed().messageTexts, indexedAttachments())
+  );
+  const visibleAttachments = createMemo(() =>
+    indexedAttachments().filter(({ id }) => !inlineAttachmentIds().has(id))
+  );
 
   const imageParts = createMemo(() =>
     parsed().fileParts.filter((part) => part.mime.startsWith('image/'))
@@ -253,19 +273,21 @@ export function UserMessageContent(props: { parts: Part[] }) {
     <div
       class={`rendered-markdown${imageParts().length > 0 ? ' user-message-content-has-image' : ''}`}
     >
-      <Show when={parsed().attachments.length > 0}>
+      <Show when={visibleAttachments().length > 0}>
         <div
           class={`message-attachments${hasTrailingAttachmentContent() ? ' message-attachments-leading' : ' message-attachments-standalone'}`}
         >
-          <For each={parsed().attachments}>
-            {(attachment) => <MessageAttachmentChip attachment={attachment} />}
+          <For each={visibleAttachments()}>
+            {({ attachment }) => <MessageAttachmentChip attachment={attachment} />}
           </For>
         </div>
       </Show>
       <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
       <Show when={parsed().messageTexts.length > 0}>
         <div class="user-message-text-scroll">
-          <For each={parsed().messageTexts}>{(text) => <UserMessageTextContent text={text} />}</For>
+          <For each={parsed().messageTexts}>
+            {(text) => <UserMessageTextContent text={text} attachments={indexedAttachments()} />}
+          </For>
         </div>
       </Show>
       <Show when={!hasContent()}>
@@ -281,7 +303,10 @@ export function UserMessageContent(props: { parts: Part[] }) {
   );
 }
 
-function UserMessageTextContent(props: { text: string }) {
+function UserMessageTextContent(props: {
+  text: string;
+  attachments: IndexedMessageAttachment[];
+}) {
   const segments = createMemo(() => parseUserMessageSegments(props.text));
 
   return (
@@ -298,8 +323,29 @@ function UserMessageTextContent(props: { text: string }) {
           />
         ) : (
           <Show when={segment.content.length > 0}>
-            <p class="user-message-text">{segment.content}</p>
+            <p class="user-message-text">
+              <InlineAttachmentText content={segment.content} attachments={props.attachments} />
+            </p>
           </Show>
+        )
+      }
+    </For>
+  );
+}
+
+function InlineAttachmentText(props: {
+  content: string;
+  attachments: IndexedMessageAttachment[];
+}) {
+  const segments = createMemo(() => buildInlineTextSegments(props.content, props.attachments));
+
+  return (
+    <For each={segments()}>
+      {(segment) =>
+        segment.type === 'attachment' ? (
+          <InlineMessageAttachmentChip attachment={segment.attachment} />
+        ) : (
+          segment.content
         )
       }
     </For>
@@ -492,6 +538,132 @@ function isStandaloneFileReference(text: string): boolean {
   return /^\w[\w.-]*\.\w{1,12}$/.test(trimmed);
 }
 
+function getAttachmentTextMarker(attachment: MessageAttachment): string | null {
+  switch (attachment.type) {
+    case 'file-reference':
+      return `@${attachment.path}`;
+    case 'file-selection':
+      return `@${attachment.filename}`;
+    case 'terminal-selection':
+      return null;
+  }
+}
+
+function getInlineAttachmentIds(
+  messageTexts: string[],
+  attachments: IndexedMessageAttachment[]
+): Set<string> {
+  const attachmentByMarker = new Map<string, IndexedMessageAttachment>();
+
+  for (const attachment of attachments) {
+    if (!attachment.marker) continue;
+    attachmentByMarker.set(attachment.marker, attachment);
+  }
+
+  const inlineIds = new Set<string>();
+  for (const text of messageTexts) {
+    for (const [marker, attachment] of attachmentByMarker) {
+      if (text.includes(marker)) {
+        inlineIds.add(attachment.id);
+      }
+    }
+  }
+
+  return inlineIds;
+}
+
+function buildInlineTextSegments(content: string, attachments: IndexedMessageAttachment[]) {
+  const attachmentByMarker = new Map<string, IndexedMessageAttachment>();
+
+  for (const attachment of attachments) {
+    if (!attachment.marker) continue;
+    attachmentByMarker.set(attachment.marker, attachment);
+  }
+
+  const markers = Array.from(attachmentByMarker.keys())
+    .filter((marker) => content.includes(marker))
+    .toSorted((a, b) => b.length - a.length);
+  if (markers.length === 0) {
+    return [{ type: 'text' as const, content }];
+  }
+
+  const pattern = new RegExp(`(${markers.map((marker) => escapeRegex(marker)).join('|')})`, 'g');
+  const segments: Array<
+    | { type: 'text'; content: string }
+    | { type: 'attachment'; attachment: MessageAttachment }
+  > = [];
+
+  for (const part of content.split(pattern)) {
+    if (!part) continue;
+    const attachment = attachmentByMarker.get(part);
+    if (attachment) {
+      segments.push({ type: 'attachment', attachment: attachment.attachment });
+      continue;
+    }
+    segments.push({ type: 'text', content: part });
+  }
+
+  return segments;
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
+  const attachment = () => props.attachment;
+  const isFolder = () =>
+    attachment().type === 'file-reference' &&
+    (attachment() as Extract<MessageAttachment, { type: 'file-reference' }>).isDirectory;
+  const fileSelection = () =>
+    attachment().type === 'file-selection'
+      ? (attachment() as Extract<MessageAttachment, { type: 'file-selection' }>)
+      : null;
+
+  const handleClick = () => openAttachment(attachment());
+
+  return (
+    <button
+      type="button"
+      class="inline-chip inline-chip-clickable"
+      title={getAttachmentTitle(attachment())}
+      onClick={handleClick}
+    >
+      <Show when={isFolder()} fallback={<DocumentIcon class="inline-chip-icon" width="11" height="11" />}>
+        <FolderIcon class="inline-chip-icon" width="11" height="11" />
+      </Show>
+      <span class="inline-chip-label">{getAttachmentLabel(attachment())}</span>
+      <Show when={fileSelection()}>
+        {(selection) => (
+          <span class="inline-chip-detail">{formatContextLineRanges(selection().lineRanges)}</span>
+        )}
+      </Show>
+    </button>
+  );
+}
+
+function openAttachment(value: MessageAttachment) {
+  if (value.type === 'terminal-selection') return;
+
+  const filePath = normalizePath(value.type === 'file-reference' ? value.path : value.filename);
+  const workspacePath = state.editorContext.workspacePath;
+  const absolutePath = isAbsolutePath(filePath)
+    ? filePath
+    : workspacePath
+      ? `${normalizePath(workspacePath).replace(/\/+$/, '')}/${filePath.replace(/^\.\//, '')}`
+      : filePath;
+  const line = value.type === 'file-selection' ? getFirstContextLine(value.lineRanges) : undefined;
+
+  postMessage({
+    type: 'vscode/open',
+    payload: {
+      path: absolutePath,
+      line,
+      kind: value.type === 'file-reference' && value.isDirectory ? 'directory' : 'file',
+    },
+  });
+}
+
 function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const attachment = () => props.attachment;
   const isFolder = () =>
@@ -499,27 +671,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
     (attachment() as Extract<MessageAttachment, { type: 'file-reference' }>).isDirectory;
   const isTerminal = () => attachment().type === 'terminal-selection';
 
-  const handleClick = () => {
-    const value = attachment();
-    if (value.type === 'terminal-selection') return;
-    const filePath = normalizePath(value.type === 'file-reference' ? value.path : value.filename);
-    const workspacePath = state.editorContext.workspacePath;
-    const absolutePath = isAbsolutePath(filePath)
-      ? filePath
-      : workspacePath
-        ? `${normalizePath(workspacePath).replace(/\/+$/, '')}/${filePath.replace(/^\.\//, '')}`
-        : filePath;
-    const line =
-      value.type === 'file-selection' ? getFirstContextLine(value.lineRanges) : undefined;
-    postMessage({
-      type: 'vscode/open',
-      payload: {
-        path: absolutePath,
-        line,
-        kind: value.type === 'file-reference' && value.isDirectory ? 'directory' : 'file',
-      },
-    });
-  };
+  const handleClick = () => openAttachment(attachment());
 
   const iconSvg = () => {
     if (isFolder()) {
