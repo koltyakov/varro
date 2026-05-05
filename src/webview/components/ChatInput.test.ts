@@ -1327,6 +1327,25 @@ describe('getSlashCommands', () => {
       ],
     });
 
+    expect(commands.map((command) => command.name)).toEqual([
+      'attach',
+      'compact',
+      'connect',
+      'export',
+      'init',
+      'mcps',
+      'models',
+      'new',
+      'ralph',
+      'redo',
+      'review',
+      'sessions',
+      'settings',
+      'skills',
+      'test',
+      'thinking',
+      'undo',
+    ]);
     expect(commands.some((command) => command.name === 'init')).toBe(true);
     expect(commands.some((command) => command.name === 'export')).toBe(true);
     expect(commands.some((command) => command.name === 'redo')).toBe(true);

@@ -2297,7 +2297,7 @@ export function getSlashCommands(props: {
     });
   }
 
-  return commands;
+  return commands.toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 function describeUsageLimit(
