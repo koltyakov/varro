@@ -7,6 +7,7 @@ import {
   ChatInput,
   getActiveCompletion,
   getCompletionSelection,
+  getLeadingSlashCommand,
   getMentionCompletionItems,
   parseDroppedText,
   shouldRequestMentionFileSearch,
@@ -26,9 +27,15 @@ import {
 } from '../lib/state';
 import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-limit-selection';
 
-const { abortSessionMock, continueInterruptedSessionMock, sendMessageMock } = vi.hoisted(() => ({
+const {
+  abortSessionMock,
+  continueInterruptedSessionMock,
+  runSlashCommandByNameMock,
+  sendMessageMock,
+} = vi.hoisted(() => ({
   abortSessionMock: vi.fn(async () => {}),
   continueInterruptedSessionMock: vi.fn(async () => {}),
+  runSlashCommandByNameMock: vi.fn(async () => true),
   sendMessageMock: vi.fn(async () => {}),
 }));
 
@@ -38,6 +45,7 @@ vi.mock('../hooks/useOpenCode', async () => {
     ...actual,
     abortSession: abortSessionMock,
     continueInterruptedSession: continueInterruptedSessionMock,
+    runSlashCommandByName: runSlashCommandByNameMock,
     sendMessage: sendMessageMock,
   };
 });
@@ -86,6 +94,8 @@ afterEach(() => {
   setState('hiddenModels', []);
   __resetProviderLimitWindowSelectionsForTests();
   sendMessageMock.mockReset();
+  runSlashCommandByNameMock.mockReset();
+  runSlashCommandByNameMock.mockResolvedValue(true);
   abortSessionMock.mockReset();
   continueInterruptedSessionMock.mockReset();
 });
@@ -708,6 +718,48 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[title="Add to queue (Enter)"]')).not.toBeNull();
   });
 
+  it('runs a typed slash command with args on Enter', async () => {
+    setState('commands', [
+      {
+        name: 'test',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputText('/test --watch');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const textarea = container?.querySelector<HTMLTextAreaElement>('textarea');
+    textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(textarea?.value).toBe('');
+  });
+
+  it('runs a typed slash command with args from the send button', async () => {
+    setState('commands', [
+      {
+        name: 'test',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputText('/test --watch');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(container?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
+  });
+
   it('updates the active Ralph run model and interrupts a usage-limit retry when switching models', async () => {
     const { ralphStore } = await import('../lib/stores/ralph-store');
 
@@ -1204,6 +1256,22 @@ describe('getActiveCompletion', () => {
   it('rejects cursor positions outside the input bounds', () => {
     expect(getActiveCompletion('abc', -1)).toBeNull();
     expect(getActiveCompletion('abc', 4)).toBeNull();
+  });
+});
+
+describe('getLeadingSlashCommand', () => {
+  it('parses a leading slash command with optional arguments', () => {
+    expect(getLeadingSlashCommand('/test')).toEqual({ name: 'test', args: '' });
+    expect(getLeadingSlashCommand('/test --watch')).toEqual({ name: 'test', args: '--watch' });
+    expect(getLeadingSlashCommand('  /review branch  ')).toEqual({
+      name: 'review',
+      args: 'branch',
+    });
+  });
+
+  it('rejects slash commands that are not the whole trimmed input', () => {
+    expect(getLeadingSlashCommand('prefix /test')).toBeNull();
+    expect(getLeadingSlashCommand('')).toBeNull();
   });
 });
 

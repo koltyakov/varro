@@ -645,9 +645,9 @@ export function ChatInput() {
       }
 
       const completion = activeCompletion();
-      if (completion?.type === 'slash') {
+      if (completion?.type === 'slash' || getLeadingSlashCommand(inputText())) {
         e.preventDefault();
-        runSlashCommand(inputText());
+        void runSlashCommand(inputText());
         return;
       }
     }
@@ -726,19 +726,19 @@ export function ChatInput() {
   }
 
   async function runSlashCommand(raw: string) {
-    const normalized = raw.trim().replace(/^\/+/, '');
-    const [name, ...rest] = normalized.split(/\s+/);
-    const args = rest.join(' ');
+    const parsed = getLeadingSlashCommand(raw);
+    if (!parsed) return false;
+
+    const { name, args } = parsed;
     if (name === SKILLS_COMMAND_NAME) {
       setComposerValue(`/${SKILLS_COMMAND_NAME} `);
-      return;
+      return true;
     }
     const command = slashCommands().find(
       (item) => item.name === name || item.aliases.includes(name)
     );
     if (!command) {
-      await handleSend();
-      return;
+      return false;
     }
 
     setHistoryIndex(null);
@@ -748,6 +748,7 @@ export function ChatInput() {
     setCompletionIndex(0);
     if (textareaRef) textareaRef.style.height = 'auto';
     await command.action(args);
+    return true;
   }
 
   async function handleSend(mode?: 'queue' | 'steer') {
@@ -772,6 +773,11 @@ export function ChatInput() {
       queuedAttachments.droppedFiles?.length ||
       queuedAttachments.clipboardImages?.length ||
       queuedAttachments.terminalSelection;
+
+    if (mode !== 'queue' && !hasQueuedAttachments) {
+      const ranSlashCommand = await runSlashCommand(text);
+      if (ranSlashCommand) return;
+    }
 
     if (
       mode !== 'steer' &&
@@ -2351,6 +2357,17 @@ export function getActiveCompletion(text: string, cursor: number) {
     query: token.slice(1),
     start: tokenStart,
     end: cursor,
+  };
+}
+
+export function getLeadingSlashCommand(text: string) {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^\/([^\s]+)(?:\s+(.*))?$/);
+  if (!match) return null;
+
+  return {
+    name: match[1].toLowerCase(),
+    args: match[2]?.trim() || '',
   };
 }
 
