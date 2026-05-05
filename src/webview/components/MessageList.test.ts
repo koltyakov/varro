@@ -249,6 +249,7 @@ afterEach(() => {
   setState('queuedMessages', []);
   setState('streamingPartId', null);
   setState('streamingText', '');
+  setState('sessionSelectedAgents', reconcile({}));
   setState('sessionStatus', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
   setShowThinkingPreference(true);
@@ -636,6 +637,17 @@ describe('getLatestPlanImplementationMessageId', () => {
         entry(userMessage('user-1')),
         entry(assistantMessage('assistant-1', { agent: 'plan' })),
         entry(assistantMessage('assistant-2', { agent: 'build' })),
+      ])
+    ).toBeNull();
+  });
+
+  it('ignores the currently selected plan agent for older non-plan responses', () => {
+    setState('sessionSelectedAgents', reconcile({ 'session-1': 'plan' }));
+
+    expect(
+      getLatestPlanImplementationMessageId([
+        entry(userMessage('user-1')),
+        entry(assistantMessage('assistant-1')),
       ])
     ).toBeNull();
   });

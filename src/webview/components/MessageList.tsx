@@ -9,7 +9,6 @@ import {
   untrack,
 } from 'solid-js';
 import {
-  getSelectedAgentForSession,
   getPermissionGroupMembers,
   isSessionAwaitingInput,
   state,
@@ -88,7 +87,7 @@ export {
 } from './message-list/sticky-preview';
 
 function isPlanningAssistantMessage(info: AssistantMessage): boolean {
-  return info.agent === 'plan' || getSelectedAgentForSession(info.sessionID) === 'plan';
+  return info.agent === 'plan';
 }
 
 function getLinkedToolCallKey(
