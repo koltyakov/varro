@@ -285,11 +285,13 @@ export function MessageList() {
   let lastScrollbarInset = -1;
   let lastContainerOffsetWidth = -1;
   let lastAutoScrolledTrackHeight = 0;
+  let lastAutoScrolledBottomScrollTop = 0;
+  let lastWheelUpAt = Number.NEGATIVE_INFINITY;
   let previousAutoScrollEnabled = true;
-  const INITIAL_SCROLL_MAX_FRAMES = 30;
-  const INITIAL_SCROLL_STABLE_FRAMES = 3;
-  const AUTO_SCROLL_THRESHOLD_PX = 60;
-  const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
+const INITIAL_SCROLL_MAX_FRAMES = 30;
+const INITIAL_SCROLL_STABLE_FRAMES = 3;
+const AUTO_SCROLL_THRESHOLD_PX = 60;
+const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
 
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
@@ -675,7 +677,11 @@ export function MessageList() {
       if (hadResize && restoreExpansionScrollAnchor()) {
         return;
       }
-      if (hadResize && lastTrackHeight > lastAutoScrolledTrackHeight + 1 && autoScroll()) {
+      if (
+        hadResize &&
+        lastTrackHeight > lastAutoScrolledTrackHeight + 1 &&
+        shouldCorrectBottomAfterResize()
+      ) {
         performScroll();
       }
     });
@@ -797,6 +803,21 @@ export function MessageList() {
     return getDistanceFromBottom(containerRef);
   }
 
+  function bottomScrollTop() {
+    if (!containerRef) return 0;
+
+    return Math.max(0, containerRef.scrollHeight - containerRef.clientHeight);
+  }
+
+  function shouldCorrectBottomAfterResize() {
+    if (!containerRef || !autoScroll()) return false;
+
+    const nextBottomScrollTop = bottomScrollTop();
+    const bottomTargetMoved = Math.abs(nextBottomScrollTop - lastAutoScrolledBottomScrollTop) > 1;
+    const alreadyAtBottomTarget = Math.abs(containerRef.scrollTop - nextBottomScrollTop) <= 1;
+    return bottomTargetMoved && !alreadyAtBottomTarget;
+  }
+
   function performScroll() {
     const now = performance.now();
     const result = performScrollToBottom({
@@ -810,6 +831,7 @@ export function MessageList() {
     ignoreScrollUntil = result.nextIgnoreScrollUntil;
     lastObservedScrollTop = result.nextScrollTop;
     lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
+    lastAutoScrolledBottomScrollTop = result.nextScrollTop;
     batch(() => {
       setScrollTop(result.nextScrollTop);
       if (containerRef) setViewportHeight(containerRef.clientHeight);
@@ -879,12 +901,17 @@ export function MessageList() {
     if (!containerRef) return;
     const top = containerRef.scrollTop;
     const currentViewportHeight = containerRef.clientHeight;
+    const distance = distanceFromBottom();
+    const bottomTargetStable = Math.abs(bottomScrollTop() - lastAutoScrolledBottomScrollTop) <= 1;
     scheduleViewportState(top, currentViewportHeight);
     scheduleStickyPreviewViewportState(top, currentViewportHeight);
     const decision = resolveAutoScrollOnUserScroll({
       top,
-      nearBottom: distanceFromBottom() < AUTO_SCROLL_THRESHOLD_PX,
+      distanceFromBottom: distance,
+      nearBottom: distance < AUTO_SCROLL_THRESHOLD_PX,
       autoScroll: autoScroll(),
+      userScrolledUp: performance.now() - lastWheelUpAt <= 160,
+      bottomTargetStable,
       expectedScrollTop,
       lastObservedScrollTop,
       ignoreScrollUntil,
@@ -896,6 +923,12 @@ export function MessageList() {
     ignoreScrollUntil = decision.nextIgnoreScrollUntil;
     if (decision.shouldCancelPendingScroll) cancelPendingScroll();
     if (decision.nextAutoScroll !== null) setAutoScroll(decision.nextAutoScroll);
+  }
+
+  function onWheel(event: WheelEvent) {
+    if (event.deltaY < -0.5) {
+      lastWheelUpAt = performance.now();
+    }
   }
 
   function handleClickCapture(event: MouseEvent) {
@@ -1211,6 +1244,7 @@ export function MessageList() {
         role="log"
         aria-live="polite"
         aria-label="Chat messages"
+        onWheel={onWheel}
         onScroll={onScroll}
       >
         <div ref={trackRef} class="interactive-list-track">

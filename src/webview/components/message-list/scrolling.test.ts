@@ -48,8 +48,11 @@ describe('resolveAutoScrollOnUserScroll', () => {
     expect(
       resolveAutoScrollOnUserScroll({
         top: 495,
+        distanceFromBottom: 1,
         nearBottom: true,
         autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: false,
         expectedScrollTop: 496,
         lastObservedScrollTop: 480,
         ignoreScrollUntil: 1000,
@@ -65,12 +68,39 @@ describe('resolveAutoScrollOnUserScroll', () => {
     });
   });
 
+  it('disables auto-scroll when the user scrolls upward near the bottom threshold', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 460,
+        distanceFromBottom: 40,
+        nearBottom: true,
+        autoScroll: true,
+        userScrolledUp: true,
+        bottomTargetStable: true,
+        expectedScrollTop: -1,
+        lastObservedScrollTop: 495,
+        ignoreScrollUntil: 0,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: false,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 460,
+      shouldCancelPendingScroll: true,
+    });
+  });
+
   it('disables auto-scroll when the user pulls away from the target during a programmatic scroll window', () => {
     expect(
       resolveAutoScrollOnUserScroll({
         top: 200,
+        distanceFromBottom: 300,
         nearBottom: false,
         autoScroll: true,
+        userScrolledUp: true,
+        bottomTargetStable: true,
         expectedScrollTop: 500,
         lastObservedScrollTop: 480,
         ignoreScrollUntil: 1000,
@@ -82,6 +112,54 @@ describe('resolveAutoScrollOnUserScroll', () => {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: 0,
       nextLastObservedScrollTop: 200,
+      shouldCancelPendingScroll: true,
+    });
+  });
+
+  it('keeps auto-scroll active near bottom when scroll drift was not user initiated', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 460,
+        distanceFromBottom: 40,
+        nearBottom: true,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: false,
+        expectedScrollTop: -1,
+        lastObservedScrollTop: 495,
+        ignoreScrollUntil: 0,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: true,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 460,
+      shouldCancelPendingScroll: false,
+    });
+  });
+
+  it('disables auto-scroll near bottom when the user scrolls upward and the bottom target is stable', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 460,
+        distanceFromBottom: 40,
+        nearBottom: true,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: true,
+        expectedScrollTop: -1,
+        lastObservedScrollTop: 495,
+        ignoreScrollUntil: 0,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: false,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 460,
       shouldCancelPendingScroll: true,
     });
   });

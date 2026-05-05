@@ -123,12 +123,13 @@ export function Message(props: {
     });
     return hasOtherVisibleContent ? null : compactions[compactions.length - 1];
   });
-  const shouldRender = () =>
-    !!compactionDivider() ||
-    isUser() ||
-    !!assistantErrorMessage() ||
-    visibleAssistantParts().length > 0 ||
-    visibleDiffs().length > 0;
+  const shouldRender = () => {
+    if (compactionDivider()) return true;
+    if (isUser()) return hasUserContent();
+    return (
+      !!assistantErrorMessage() || visibleAssistantParts().length > 0 || visibleDiffs().length > 0
+    );
+  };
   const hasStructuredAssistantParts = () =>
     assistant()
       ? visibleAssistantParts().some((part) => part.type !== 'text' && part.type !== 'file')
@@ -158,6 +159,15 @@ export function Message(props: {
     return `assistant-turn-content${props.highlightFinalAnswer ? ' assistant-turn-content-highlighted' : ''}${props.highlightPlanningAnswer ? ' assistant-turn-content-planning' : ''}`;
   };
   const isWrapperlessAssistant = () => assistantContainerVariant() === 'plain';
+  const hasUserContent = createMemo(() => {
+    if (!isUser()) return false;
+    const parsed = parseUserMessageContent(normalizedParts());
+    return (
+      parsed.messageTexts.some((text) => text.trim().length > 0) ||
+      parsed.attachments.length > 0 ||
+      parsed.fileParts.length > 0
+    );
+  });
 
   return (
     <Show when={shouldRender()}>
@@ -177,7 +187,7 @@ export function Message(props: {
                 : ''
             }`}
           >
-            <Show when={isUser()}>
+            <Show when={isUser() && hasUserContent()}>
               <UserMessageContent parts={normalizedParts()} />
             </Show>
             <Show when={!isUser() && assistant()}>

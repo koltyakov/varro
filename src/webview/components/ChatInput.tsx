@@ -1240,6 +1240,14 @@ export function ChatInput() {
   });
 
   createEffect(() => {
+    const text = inputText();
+    queueMicrotask(() => {
+      if (!textareaRef || textareaRef.value !== text) return;
+      autoResize();
+    });
+  });
+
+  createEffect(() => {
     const focusKey = composerFocusKey();
     if (focusKey === 0) return;
 

@@ -1970,58 +1970,8 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('updates the scrollbar inset css variable only when the inset changes', async () => {
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-
-    cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
-
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    const shell = container?.querySelector('.interactive-list-shell') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-    expect(shell).toBeInstanceOf(HTMLDivElement);
-
-    let clientWidthValue = 288;
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 300 });
-    Object.defineProperty(list!, 'clientWidth', {
-      configurable: true,
-      get: () => clientWidthValue,
-    });
-
-    const setPropertySpy = vi.spyOn(shell!.style, 'setProperty');
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    expect(setPropertySpy).toHaveBeenCalledTimes(1);
-    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '12px');
-
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    expect(setPropertySpy).toHaveBeenCalledTimes(1);
-
-    clientWidthValue = 280;
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 320 });
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    expect(setPropertySpy).toHaveBeenCalledTimes(2);
-    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '40px');
-  });
-
-  it('does not rewrite scrollbar inset during height-only resize churn', async () => {
+  it('does not snap back to bottom after a small upward scroll near the threshold', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -2050,45 +2000,120 @@ describe('MessageList auto-scroll', () => {
     ]);
 
     cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
+    expect(resizeCallbacks).toHaveLength(2);
 
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    const shell = container?.querySelector('.interactive-list-shell') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
-    expect(shell).toBeInstanceOf(HTMLDivElement);
 
-    let clientWidthValue = 288;
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 300 });
-    Object.defineProperty(list!, 'clientWidth', {
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
       configurable: true,
-      get: () => clientWidthValue,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
     });
 
-    const setPropertySpy = vi.spyOn(shell!.style, 'setProperty');
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
 
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    const assignmentCountAfterUserScroll = assignedScrollTops.length;
+
+    trackHeight = 1240;
+    scrollHeightValue = 1240;
     for (const callback of resizeCallbacks) {
       callback([], {} as ResizeObserver);
     }
-    expect(setPropertySpy).toHaveBeenCalledTimes(1);
+    animationFrames.flush();
 
-    trackHeight = 1300;
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    trackHeight = 1500;
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-
-    expect(setPropertySpy).toHaveBeenCalledTimes(1);
-
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 320 });
-    clientWidthValue = 300;
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-
-    expect(setPropertySpy).toHaveBeenCalledTimes(2);
-    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '20px');
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterUserScroll);
+    expect(scrollTopValue).toBe(760);
+    animationFrames.restore();
   });
+
+  it('keeps auto-scroll enabled when the bottom target shifts before a near-bottom scroll event', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    expect(resizeCallbacks).toHaveLength(2);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    scrollHeightValue = 1240;
+    scrollTopValue = 800;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    trackHeight = 1240;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(assignedScrollTops.at(-1)).toBe(840);
+    expect(scrollTopValue).toBe(840);
+    animationFrames.restore();
+  });
+
 });

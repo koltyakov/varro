@@ -511,6 +511,30 @@ describe('getUserMessagePreviewText', () => {
   });
 });
 
+describe('Message user rendering', () => {
+  it('does not render empty user message shells with no meaningful content', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-empty-user'),
+          parts: [
+            {
+              id: 'text-empty-user',
+              sessionID: 'session-1',
+              messageID: 'message-empty-user',
+              type: 'text',
+              text: '[Working directory: /repo]',
+            },
+          ],
+        }),
+      container!
+    );
+
+    expect(container?.textContent).toBe('');
+    expect(container?.querySelector('.user-message-empty')).toBeNull();
+  });
+});
+
 describe('Message streamed assistant text rendering', () => {
   it('renders streamed assistant markdown formatting immediately', () => {
     cleanup = render(

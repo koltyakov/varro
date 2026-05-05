@@ -77,8 +77,11 @@ export function restoreExpansionScrollAnchor(args: {
 
 export function resolveAutoScrollOnUserScroll(args: {
   top: number;
+  distanceFromBottom: number;
   nearBottom: boolean;
   autoScroll: boolean;
+  userScrolledUp: boolean;
+  bottomTargetStable: boolean;
   expectedScrollTop: number;
   lastObservedScrollTop: number;
   ignoreScrollUntil: number;
@@ -86,10 +89,17 @@ export function resolveAutoScrollOnUserScroll(args: {
   autoScrollThresholdPx: number;
 }): AutoScrollDecision {
   const delta = args.top - args.lastObservedScrollTop;
+  const userMovedAwayNearBottom =
+    args.autoScroll &&
+    delta < -1 &&
+    args.distanceFromBottom > 1 &&
+    (args.userScrolledUp || args.bottomTargetStable);
   const matchesExpected =
     args.expectedScrollTop !== -1 &&
     (Math.abs(args.top - args.expectedScrollTop) < 2 ||
-      (args.nearBottom && args.top >= args.expectedScrollTop - args.autoScrollThresholdPx));
+      (args.nearBottom &&
+        args.top >= args.expectedScrollTop - args.autoScrollThresholdPx &&
+        !userMovedAwayNearBottom));
 
   if (matchesExpected) {
     return {
@@ -103,8 +113,9 @@ export function resolveAutoScrollOnUserScroll(args: {
 
   if (args.now <= args.ignoreScrollUntil) {
     const userMovedAwayFromTarget =
-      args.expectedScrollTop !== -1 &&
-      args.top < args.expectedScrollTop - args.autoScrollThresholdPx;
+      userMovedAwayNearBottom ||
+      (args.expectedScrollTop !== -1 &&
+        args.top < args.expectedScrollTop - args.autoScrollThresholdPx);
 
     if (!userMovedAwayFromTarget) {
       return {
@@ -126,6 +137,16 @@ export function resolveAutoScrollOnUserScroll(args: {
   }
 
   if (args.nearBottom) {
+    if (userMovedAwayNearBottom) {
+      return {
+        nextAutoScroll: false,
+        nextExpectedScrollTop: -1,
+        nextIgnoreScrollUntil: args.ignoreScrollUntil,
+        nextLastObservedScrollTop: args.top,
+        shouldCancelPendingScroll: true,
+      };
+    }
+
     return {
       nextAutoScroll: true,
       nextExpectedScrollTop: -1,

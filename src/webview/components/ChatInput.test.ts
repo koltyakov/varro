@@ -760,6 +760,23 @@ describe('ChatInput', () => {
     expect(container?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
   });
 
+  it('resizes the composer when draft text changes outside input events', async () => {
+    cleanup = render(() => ChatInput(), container!);
+
+    const textarea = container?.querySelector<HTMLTextAreaElement>('textarea');
+    expect(textarea).not.toBeNull();
+
+    Object.defineProperty(textarea!, 'scrollHeight', {
+      configurable: true,
+      get: () => (textarea!.value.includes('\n') ? 320 : 44),
+    });
+
+    setInputText('First line\nSecond line\nThird line');
+    await flushAsyncWork(2);
+
+    expect(textarea?.style.height).toBe('200px');
+  });
+
   it('updates the active Ralph run model and interrupts a usage-limit retry when switching models', async () => {
     const { ralphStore } = await import('../lib/stores/ralph-store');
 

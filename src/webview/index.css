@@ -728,6 +728,7 @@ body.vscode-high-contrast-light .interactive-session {
 
 .chat-turn-content {
   width: 100%;
+  min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -3372,8 +3373,9 @@ body.vscode-light
   border: 1px dashed var(--color-vscode-border-strong);
   border-radius: 6px;
   height: auto;
-  max-width: 100%;
-  width: fit-content;
+  max-width: min(100%, 32ch);
+  min-width: 0;
+  width: auto;
   background: transparent;
   color: var(--color-vscode-fg);
   transition:
@@ -3423,6 +3425,7 @@ body.vscode-light
 }
 
 .chat-attachment-chip .chip-label {
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4793,6 +4796,8 @@ kbd {
   flex-direction: row;
   gap: 4px;
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .message-attachments.message-attachments-leading {
@@ -4835,7 +4840,9 @@ kbd {
   border-radius: 5px;
   background: var(--color-vscode-surface-hover);
   color: var(--color-vscode-fg);
-  max-width: 100%;
+  max-width: min(100%, 32ch);
+  min-width: 0;
+  width: auto;
   overflow: hidden;
 }
 
@@ -4846,6 +4853,7 @@ kbd {
 }
 
 .message-attachment-chip .chip-label {
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
