@@ -1271,6 +1271,49 @@ describe('MessageList sticky prompt preview', () => {
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 · ↓ 310 - Agents 2');
   });
 
+  it('summarizes in and out tokens for subagent sessions parented to the root session', () => {
+    const messages = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 5_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            id: 'agent-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'agent',
+            name: 'explore',
+          },
+        ],
+      },
+      {
+        info: assistantMessage('assistant-child-1', {
+          mode: 'subagent',
+          parentID: 'session-1',
+          sessionID: 'child-1',
+          time: { created: 2_500, completed: 8_000 },
+          tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+    ];
+
+    const summaries = getAssistantDialogSummaryMap(messages, new Set(['assistant-1']));
+
+    expect(summaries.get('assistant-1')).toMatchObject({
+      durationMs: 7_000,
+      inputTokens: 1_100,
+      outputTokens: 110,
+      agentCount: 1,
+    });
+  });
+
   it('renders with virtualization enabled without hitting initialization order errors', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');

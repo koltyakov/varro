@@ -1339,7 +1339,11 @@ export function getAssistantDialogSummaryMap(
 
     childRunsByParentId ||= getChildRunsByParentId(messages);
 
-    const aggregateMessages = collectAssistantDialogMessages(currentMessages, childRunsByParentId);
+    const aggregateMessages = collectAssistantDialogMessages(
+      currentMessages,
+      childRunsByParentId,
+      new Set(currentMessages.map((message) => message.sessionID))
+    );
     const completedMessages = aggregateMessages.filter((message) => !!message.time.completed);
     const end = Math.max(...completedMessages.map((message) => message.time.completed || 0));
     const tokens = sumAssistantTokens(aggregateMessages);
@@ -1371,10 +1375,10 @@ export function getAssistantDialogSummaryMap(
     }
 
     const assistant = entry.info as AssistantMessage;
+    if (assistant.mode === 'subagent') continue;
+
     currentMessages.push(assistant);
-    if (assistant.mode !== 'subagent') {
-      currentPrimaryMessageIds.push(assistant.id);
-    }
+    currentPrimaryMessageIds.push(assistant.id);
     for (const part of entry.parts) {
       if (part.type === 'agent' && part.name.trim()) {
         currentSubagentHandoffCount++;
@@ -1393,7 +1397,8 @@ export function getAssistantDialogSummaryMap(
 
 function collectAssistantDialogMessages(
   messages: AssistantMessage[],
-  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>
+  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>,
+  parentSessionIds: ReadonlySet<string>
 ) {
   const result: AssistantMessage[] = [];
   const visited = new Set<string>();
@@ -1406,6 +1411,11 @@ function collectAssistantDialogMessages(
     result.push(message);
 
     for (const child of childRunsByParentId.get(message.id) || []) {
+      pending.push(child.info);
+    }
+
+    if (!parentSessionIds.has(message.sessionID)) continue;
+    for (const child of childRunsByParentId.get(message.sessionID) || []) {
       pending.push(child.info);
     }
   }
