@@ -157,6 +157,23 @@ describe('format helpers', () => {
     expect(formatProviderLimitTitle(limit, 60_000)).toBe('Requests: 12 / 50 left, resets in 1m');
   });
 
+  it('keeps a compact badge for a single unprefixed window', () => {
+    const limit = availableLimit([
+      {
+        id: 'messages',
+        label: 'Messages',
+        unit: 'messages',
+        remaining: 0,
+        limit: 40,
+        resetAt: 120_000,
+      },
+    ]);
+
+    expect(formatProviderLimitCompactPrefix(limit)).toBe('');
+    expect(getProviderLimitCompactBadges(limit)).toEqual([{ label: '0%', tone: 'error' }]);
+    expect(formatProviderLimitTitle(limit, 60_000)).toBe('Messages: 0 / 40 left, resets in 1m');
+  });
+
   it('omits 5h, W, and M prefixes in compact provider limit badge groups', () => {
     const limit = availableLimit([
       {

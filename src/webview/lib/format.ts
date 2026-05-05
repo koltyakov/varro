@@ -179,7 +179,12 @@ export function getProviderLimitCompactBadges(
     preferred.length > 0
       ? preferred
       : windows
-          .filter((window) => formatProviderLimitCompactPrefix(limit, window))
+          .filter((window) => {
+            const value = formatProviderLimitCompact(limit, window);
+            if (!value) return false;
+            const prefix = formatProviderLimitCompactPrefix(limit, window);
+            return !!prefix || windows.length === 1;
+          })
           .slice(0, fallbackCount);
 
   return visible.flatMap((window) => {

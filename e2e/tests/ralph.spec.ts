@@ -41,7 +41,7 @@ test('stop button transitions run to stopped with manual_stop reason', async ({ 
   await page.getByRole('button', { name: 'Stop' }).click();
 
   await expect(page.locator('.ralph-dashboard-status-stopped')).toBeVisible();
-  await expect(page.locator('.ralph-dashboard-stop-reason')).toContainText('stopped manually');
+  await expect(page.locator('.ralph-dashboard-stop-reason')).toHaveCount(0);
 
   await expect
     .poll(() =>

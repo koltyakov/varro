@@ -4,8 +4,9 @@ test('exhausted provider limit shows error chip in toolbar', async ({ page }) =>
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
   const chip = page.locator('.toolbar-limit-chip');
+  const badge = chip.locator('.toolbar-limit-chip-badge');
   await expect(chip).toBeVisible();
-  await expect(chip).toHaveClass(/\berror\b/);
+  await expect(badge).toHaveClass(/\berror\b/);
   await expect(chip).toContainText('0%');
 });
 
@@ -39,8 +40,9 @@ test('retry session status shows provider limit context alongside error', async 
   await expect(page.locator('.chat-usage-limit-message')).toBeVisible();
 
   const chip = page.locator('.toolbar-limit-chip');
+  const badge = chip.locator('.toolbar-limit-chip-badge');
   await expect(chip).toBeVisible();
-  await expect(chip).toHaveClass(/\berror\b/);
+  await expect(badge).toHaveClass(/\berror\b/);
 });
 
 test('narrow toolbar compacts provider limit before leaving controls overflowed', async ({ page }) => {
