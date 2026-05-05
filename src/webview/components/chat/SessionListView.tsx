@@ -6,7 +6,7 @@ import {
   isSessionAwaitingInput,
   isSessionUnread,
   isSkippedPlanSession,
-  setShowSessionPicker,
+  setPersistentShowSessionPicker as setShowSessionPicker,
   state,
 } from '../../lib/state';
 import {

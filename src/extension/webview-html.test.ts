@@ -41,6 +41,9 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain(
       'window.__sendToExtension = function(msg) { vscode.postMessage(msg); };'
     );
+    expect(html).toContain('window.__vscodeWebviewState = {');
+    expect(html).toContain('getState: function() { return vscode.getState() || {}; }');
+    expect(html).toContain('setState: function(state) { vscode.setState(state); }');
     expect(html).toContain('"emptyStateLogoUri":"\\u003C/script\\u003E\\u0026\\u2028\\u2029"');
   });
 

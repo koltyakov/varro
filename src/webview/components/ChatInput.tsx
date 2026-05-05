@@ -18,7 +18,7 @@ import {
   MAX_CLIPBOARD_IMAGES,
   showModelPicker,
   setShowModelPicker,
-  setShowSessionPicker,
+  setPersistentShowSessionPicker as setShowSessionPicker,
   composerFocusKey,
   removeClipboardImage,
   addContextFile,

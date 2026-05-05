@@ -2,7 +2,7 @@ import {
   desktopSessionPaneSide,
   state,
   showSessionPicker,
-  setShowSessionPicker,
+  setPersistentShowSessionPicker as setShowSessionPicker,
   showSettings,
   openAttentionSessionsKey,
   isSessionAwaitingInput,

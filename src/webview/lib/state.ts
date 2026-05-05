@@ -111,6 +111,16 @@ export interface AppState {
   interruptedSessionIds: string[];
 }
 
+export type LastOpenedView =
+  | { type: 'new-session'; timestamp: number }
+  | { type: 'sessions-list'; timestamp: number }
+  | { type: 'session'; sessionId: string; timestamp: number };
+
+type LastOpenedViewInput =
+  | { type: 'new-session' }
+  | { type: 'sessions-list' }
+  | { type: 'session'; sessionId: string };
+
 export const MAX_CLIPBOARD_IMAGES = 5;
 const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
 const EMPTY_SESSION_TREE_IDS: string[] = [];
@@ -386,6 +396,18 @@ export const error = defaultAppState.error;
 export const setError = defaultAppState.setError;
 export const showSessionPicker = defaultAppState.showSessionPicker;
 export const setShowSessionPicker = defaultAppState.setShowSessionPicker;
+export function setPersistentShowSessionPicker(value: boolean) {
+  setShowSessionPicker(value);
+  if (value) {
+    persistLastOpenedView({ type: 'sessions-list' });
+    return;
+  }
+  persistLastOpenedView(
+    state.activeSessionId
+      ? { type: 'session', sessionId: state.activeSessionId }
+      : { type: 'new-session' }
+  );
+}
 export const showModelPicker = defaultAppState.showModelPicker;
 export const setShowModelPicker = defaultAppState.setShowModelPicker;
 export const showSettings = defaultAppState.showSettings;
@@ -690,6 +712,28 @@ export function clearQueuedMessagesForSession(sessionId: string) {
 
 export function persistActiveSessionId(id: string | null) {
   writeStored(STORAGE_KEYS.lastActiveSessionId, id);
+}
+
+function normalizeLastOpenedView(value: unknown): LastOpenedView | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const timestamp = typeof record.timestamp === 'number' ? record.timestamp : null;
+  if (timestamp === null || !Number.isFinite(timestamp)) return null;
+
+  if (record.type === 'new-session') return { type: 'new-session', timestamp };
+  if (record.type === 'sessions-list') return { type: 'sessions-list', timestamp };
+  if (record.type === 'session' && typeof record.sessionId === 'string') {
+    return { type: 'session', sessionId: record.sessionId, timestamp };
+  }
+  return null;
+}
+
+export function persistLastOpenedView(view: LastOpenedViewInput, now = Date.now()) {
+  writeStored(STORAGE_KEYS.lastOpenedView, { ...view, timestamp: now });
+}
+
+export function getPersistedLastOpenedView(): LastOpenedView | null {
+  return normalizeLastOpenedView(readStored<unknown>(STORAGE_KEYS.lastOpenedView));
 }
 
 export function getPersistedSelectedModel(): SelectedModel | null {

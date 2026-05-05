@@ -103,6 +103,10 @@ type ScenarioState = {
     sessionSelectedMcps?: Record<string, string[]>;
     sessionPermissionModes?: Record<string, 'default' | 'full'>;
     lastSeenSessions?: Record<string, number>;
+    lastOpenedView?:
+      | { type: 'new-session'; timestamp: number }
+      | { type: 'sessions-list'; timestamp: number }
+      | { type: 'session'; sessionId: string; timestamp: number };
     ralphRuns?: Record<string, unknown>;
   };
   postReadyMessages: unknown[];
@@ -641,6 +645,22 @@ function createDenseMcpStatus() {
   };
 }
 
+function persistRecentSessionView(state: ScenarioState, sessionId = state.persistedActiveSessionId) {
+  if (!sessionId) return;
+  state.storedState.lastOpenedView = {
+    type: 'session',
+    sessionId,
+    timestamp: Date.now(),
+  };
+}
+
+function persistRecentSessionsListView(state: ScenarioState) {
+  state.storedState.lastOpenedView = {
+    type: 'sessions-list',
+    timestamp: Date.now(),
+  };
+}
+
 function createScenarioState(name: ScenarioName): ScenarioState {
   const state: ScenarioState = {
     workspacePath: name === 'file-search' ? TMP_WORKSPACE_PATH : WORKSPACE_PATH,
@@ -1105,6 +1125,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         [planReady.id]: BASE_TIME - 10_000,
       },
     };
+    persistRecentSessionsListView(state);
     return state;
   }
 
@@ -1344,6 +1365,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[beta.id] = [];
     state.messagesBySessionId[gamma.id] = [];
     state.persistedActiveSessionId = alpha.id;
+    persistRecentSessionsListView(state);
     state.nextSequence = 170;
     return state;
   }
@@ -1481,6 +1503,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       state.messagesBySessionId[session.id] = [];
     }
     state.persistedActiveSessionId = sessions[0]?.id || null;
+    persistRecentSessionsListView(state);
     state.nextSequence = 250;
     return state;
   }
@@ -1698,6 +1721,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[childA.id] = [];
     state.messagesBySessionId[childB.id] = [];
     state.persistedActiveSessionId = null;
+    persistRecentSessionsListView(state);
     state.nextSequence = 310;
     return state;
   }
@@ -1711,6 +1735,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[alpha.id] = [];
     state.messagesBySessionId[beta.id] = [];
     state.persistedActiveSessionId = beta.id;
+    persistRecentSessionsListView(state);
     state.nextSequence = 320;
     return state;
   }
@@ -2640,6 +2665,9 @@ function setUpHarness() {
 
   if (shouldResetStorage) {
     window.localStorage.clear();
+    if (scenarioState.persistedActiveSessionId && !scenarioState.storedState.lastOpenedView) {
+      persistRecentSessionView(scenarioState);
+    }
     if (scenarioState.persistedActiveSessionId) {
       window.localStorage.setItem(
         'varro.lastActiveSessionId',
@@ -2668,6 +2696,12 @@ function setUpHarness() {
       window.localStorage.setItem(
         'varro.lastSeenSessions',
         JSON.stringify(scenarioState.storedState.lastSeenSessions)
+      );
+    }
+    if (scenarioState.storedState.lastOpenedView) {
+      window.localStorage.setItem(
+        'varro.lastOpenedView',
+        JSON.stringify(scenarioState.storedState.lastOpenedView)
       );
     }
     if (scenarioState.storedState.ralphRuns) {
