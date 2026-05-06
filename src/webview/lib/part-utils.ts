@@ -72,6 +72,7 @@ export function getFinalAssistantTextPartId(parts: Part[], isCompleted: boolean)
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index];
     if (!shouldShowAssistantPartInline(part, false)) continue;
+    if (part.type !== 'text') return null;
     if (part.type === 'text' && part.text.trim().length > 0) return part.id;
   }
 

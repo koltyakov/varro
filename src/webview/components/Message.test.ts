@@ -983,6 +983,31 @@ describe('Message assistant final answer rendering', () => {
     expect(finalItem?.textContent).toContain('Final answer.');
   });
 
+  it('does not mark text as a dedicated final answer block when a visible tool call follows it', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-tool-after-text'),
+          parts: [
+            textPart('text-1', 'Selected excerpt'),
+            toolPart('tool-1', {
+              status: 'completed',
+              input: { command: 'pwd' },
+              output: '/workspace',
+              title: 'Inspect cwd',
+              time: { start: 1, end: 2 },
+              metadata: {},
+            }),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-header')).toBeInstanceOf(HTMLButtonElement);
+  });
+
   it('renders changed files outside the assistant response block', async () => {
     vi.spyOn(client.session, 'diff').mockResolvedValue([
       {

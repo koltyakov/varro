@@ -178,4 +178,19 @@ describe('part utils', () => {
 
     expect(getFinalAssistantTextPartId(parts, true)).toBeNull();
   });
+
+  it('does not mark an earlier text part as final when visible tool content follows it', () => {
+    const parts: Part[] = [
+      {
+        id: 'text-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'text',
+        text: 'Selected excerpt',
+      },
+      toolPart('bash', completedState({ command: 'pwd' }, 'Inspect cwd')),
+    ];
+
+    expect(getFinalAssistantTextPartId(parts, true)).toBeNull();
+  });
 });
