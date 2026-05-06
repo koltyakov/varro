@@ -9,7 +9,7 @@ type LastOpenedView =
   | { type: 'sessions-list'; timestamp: number }
   | { type: 'session'; sessionId: string; timestamp: number };
 
-export const STARTUP_VIEW_RESTORE_WINDOW_MS = 5 * 60 * 1000;
+export const STARTUP_VIEW_RESTORE_WINDOW_MS = 10 * 60 * 1000;
 
 export type InterruptedSessionContinueBody = {
   parts: Array<{ type: 'text'; text: string }>;
@@ -176,37 +176,41 @@ async function restoreStartupView(
   generation: number,
   generationRef: { isCurrent(generation: number): boolean }
 ) {
+  const sessionCount = deps.getSessionCount?.() ?? 0;
   const lastOpenedView = deps.getPersistedLastOpenedView?.() ?? null;
-  const shouldRestoreLastOpenedView =
-    !!lastOpenedView &&
-    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS;
 
-  if (shouldRestoreLastOpenedView) {
-    if (lastOpenedView.type === 'session') {
-      if (deps.hasSession(lastOpenedView.sessionId)) {
-        deps.setShowSessionPicker(false);
-        await deps.selectSession(lastOpenedView.sessionId);
-        return;
-      }
-    } else {
-      deps.setShowSessionPicker(lastOpenedView.type === 'sessions-list');
-      return;
-    }
+  if (
+    lastOpenedView?.type === 'session' &&
+    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS &&
+    deps.hasSession(lastOpenedView.sessionId)
+  ) {
+    deps.setShowSessionPicker(false);
+    await deps.selectSession(lastOpenedView.sessionId);
+    return;
+  }
+
+  if (
+    lastOpenedView?.type === 'sessions-list' &&
+    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS
+  ) {
+    deps.setShowSessionPicker(true);
+    return;
   }
 
   const onlyPrimarySessionId = deps.getOnlyPrimarySessionId();
-  const shouldRestoreLegacySingleActiveSession =
-    !lastOpenedView &&
-    onlyPrimarySessionId !== null &&
-    deps.getPersistedActiveSessionId() === onlyPrimarySessionId;
-
-  if (shouldRestoreLegacySingleActiveSession) {
+  if (sessionCount === 1 && onlyPrimarySessionId && deps.hasSession(onlyPrimarySessionId)) {
     deps.setShowSessionPicker(false);
     await deps.selectSession(onlyPrimarySessionId);
     return;
   }
 
   if (!generationRef.isCurrent(generation)) return;
+
+  if (sessionCount > 0) {
+    deps.setShowSessionPicker(true);
+    return;
+  }
+
   deps.setShowSessionPicker(false);
 }
 
