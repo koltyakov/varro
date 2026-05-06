@@ -600,7 +600,7 @@ body.vscode-high-contrast-light .interactive-session {
   width: 100%;
   max-width: 100%;
   margin: 0;
-  padding: 12px 15px 10px;
+  padding: 12px 15px;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
   background: var(--color-vscode-request-bubble);

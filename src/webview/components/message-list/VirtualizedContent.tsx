@@ -30,6 +30,7 @@ export function VirtualizedContent(
         previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
         fileEditStackGroupMap={props.fileEditStackGroupMap}
         assistantDialogSummaryMap={props.assistantDialogSummaryMap}
+        highlightedAssistantMessageIds={props.highlightedAssistantMessageIds}
         hasBuildAgent={props.hasBuildAgent}
         latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
         outerListVirtualized={props.outerListVirtualized}

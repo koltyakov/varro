@@ -1221,6 +1221,57 @@ describe('MessageList sticky prompt preview', () => {
     });
   });
 
+  it('keeps highlighted assistant card styling stable when virtualization hides the summary row', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        if (index === 58) {
+          return {
+            info: { ...userMessage(`user-${index}`), time: { created: index * 1000 } },
+            parts: [textPart(`text-user-${index}`, `Prompt ${index}`)],
+          };
+        }
+
+        if (index === 59) {
+          return {
+            info: assistantMessage(`assistant-${index}`, {
+              time: { created: index * 1000 + 100, completed: index * 1000 + 900 },
+              tokens: { input: 100, output: 25, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+            parts: [textPart(`text-assistant-${index}`, 'Final visible response')],
+          };
+        }
+
+        return {
+          info: assistantMessage(`assistant-${index}`),
+          parts: [textPart(`text-${index}`, `Response ${index}`)],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 7200 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6800 });
+
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const finalResponse = container?.querySelector('[data-msg-id="assistant-59"] .chat-turn-content');
+    expect(finalResponse?.className).toContain('assistant-turn-content-highlighted');
+    expect(finalResponse?.className).not.toContain('assistant-turn-content-plain');
+
+    animationFrames.restore();
+  });
+
   it('summarizes elapsed time and tokens across nested agent children', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -1422,9 +1473,7 @@ describe('MessageList sticky prompt preview', () => {
     sticky = container?.querySelector('.latest-user-message-sticky');
     expect(sticky).toBeInstanceOf(HTMLDivElement);
     expect(sticky?.textContent).toContain('Prompt 2');
-    expect(container?.querySelector('.interactive-list-track .latest-user-message-sticky')).toBe(
-      sticky
-    );
+    expect(container?.querySelectorAll('.interactive-list-track .latest-user-message-sticky')).toHaveLength(1);
     expect(container?.querySelector('.latest-user-message-sticky [data-msg-id]')).toBeNull();
 
     animationFrames.restore();
@@ -1707,6 +1756,81 @@ describe('MessageList auto-scroll', () => {
       container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
     expect(firstRenderedMessageId).not.toBe('assistant-0');
 
+    animationFrames.restore();
+  });
+
+  it('stays pinned to the real bottom when virtualized messages update in place', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, `Response ${index}`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollTopValue = 0;
+    let scrollHeightValue = 7200;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(6800);
+
+    scrollTopValue = 6800;
+    scrollHeightValue = 7440;
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(
+                `text-${index}`,
+                index === 59 ? 'Updated response with more content' : `Response ${index}`
+              ),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(7040);
     animationFrames.restore();
   });
 

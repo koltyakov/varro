@@ -20,6 +20,7 @@ export type MessageRowSharedProps = {
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
+  highlightedAssistantMessageIds?: ReadonlySet<string>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
   observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
@@ -46,6 +47,7 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
+  const highlightFinalAnswer = () => props.highlightedAssistantMessageIds?.has(props.msg.info.id) ?? props.assistantDialogSummaryMap.has(props.msg.info.id);
   const streamingPartId = createMemo(() => {
     const partId = state.streamingPartId;
     if (!partId) return null;
@@ -88,7 +90,7 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
         parts={props.msg.parts}
         isLastAssistant={props.msg.info.id === props.lastAssistantID}
         outerListVirtualized={props.outerListVirtualized}
-        highlightFinalAnswer={props.assistantDialogSummaryMap.has(props.msg.info.id)}
+        highlightFinalAnswer={highlightFinalAnswer()}
         highlightPlanningAnswer={highlightPlanningAnswer()}
         previousTrailingFileEventSignature={
           props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
