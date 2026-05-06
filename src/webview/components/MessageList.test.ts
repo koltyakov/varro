@@ -3,6 +3,7 @@ import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import {
   replaceMessages,
+  requestMessageListScrollToBottom,
   setSessions,
   setShowModelPicker,
   setShowThinkingPreference,
@@ -249,6 +250,7 @@ afterEach(() => {
   setState('queuedMessages', []);
   setState('streamingPartId', null);
   setState('streamingText', '');
+  setState('sessionSelectedAgents', reconcile({}));
   setState('sessionStatus', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
   setShowThinkingPreference(true);
@@ -636,6 +638,17 @@ describe('getLatestPlanImplementationMessageId', () => {
         entry(userMessage('user-1')),
         entry(assistantMessage('assistant-1', { agent: 'plan' })),
         entry(assistantMessage('assistant-2', { agent: 'build' })),
+      ])
+    ).toBeNull();
+  });
+
+  it('ignores the currently selected plan agent for older non-plan responses', () => {
+    setState('sessionSelectedAgents', reconcile({ 'session-1': 'plan' }));
+
+    expect(
+      getLatestPlanImplementationMessageId([
+        entry(userMessage('user-1')),
+        entry(assistantMessage('assistant-1')),
       ])
     ).toBeNull();
   });
@@ -1208,6 +1221,59 @@ describe('MessageList sticky prompt preview', () => {
     });
   });
 
+  it('keeps highlighted assistant card styling stable when virtualization hides the summary row', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        if (index === 58) {
+          return {
+            info: { ...userMessage(`user-${index}`), time: { created: index * 1000 } },
+            parts: [textPart(`text-user-${index}`, `Prompt ${index}`)],
+          };
+        }
+
+        if (index === 59) {
+          return {
+            info: assistantMessage(`assistant-${index}`, {
+              time: { created: index * 1000 + 100, completed: index * 1000 + 900 },
+              tokens: { input: 100, output: 25, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+            parts: [textPart(`text-assistant-${index}`, 'Final visible response')],
+          };
+        }
+
+        return {
+          info: assistantMessage(`assistant-${index}`),
+          parts: [textPart(`text-${index}`, `Response ${index}`)],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9600 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 9200 });
+
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const finalResponse = container?.querySelector(
+      '[data-msg-id="assistant-59"] .chat-turn-content'
+    );
+    expect(finalResponse?.className).toContain('assistant-turn-content-highlighted');
+    expect(finalResponse?.className).not.toContain('assistant-turn-content-plain');
+
+    animationFrames.restore();
+  });
+
   it('summarizes elapsed time and tokens across nested agent children', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -1257,6 +1323,49 @@ describe('MessageList sticky prompt preview', () => {
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 · ↓ 310 - Agents 2');
+  });
+
+  it('summarizes in and out tokens for subagent sessions parented to the root session', () => {
+    const messages = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 5_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            id: 'agent-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'agent',
+            name: 'explore',
+          },
+        ],
+      },
+      {
+        info: assistantMessage('assistant-child-1', {
+          mode: 'subagent',
+          parentID: 'session-1',
+          sessionID: 'child-1',
+          time: { created: 2_500, completed: 8_000 },
+          tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+    ];
+
+    const summaries = getAssistantDialogSummaryMap(messages, new Set(['assistant-1']));
+
+    expect(summaries.get('assistant-1')).toMatchObject({
+      durationMs: 7_000,
+      inputTokens: 1_100,
+      outputTokens: 110,
+      agentCount: 1,
+    });
   });
 
   it('renders with virtualization enabled without hitting initialization order errors', async () => {
@@ -1366,15 +1475,15 @@ describe('MessageList sticky prompt preview', () => {
     sticky = container?.querySelector('.latest-user-message-sticky');
     expect(sticky).toBeInstanceOf(HTMLDivElement);
     expect(sticky?.textContent).toContain('Prompt 2');
-    expect(container?.querySelector('.interactive-list-track .latest-user-message-sticky')).toBe(
-      sticky
-    );
+    expect(
+      container?.querySelectorAll('.interactive-list-track .latest-user-message-sticky')
+    ).toHaveLength(1);
     expect(container?.querySelector('.latest-user-message-sticky [data-msg-id]')).toBeNull();
 
     animationFrames.restore();
   });
 
-  it('coalesces raw viewport scroll state updates until the next animation frame', async () => {
+  it('updates rendered messages synchronously without waiting for the next animation frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 
     setState('activeSessionId', 'session-1');
@@ -1410,14 +1519,16 @@ describe('MessageList sticky prompt preview', () => {
     expect(firstRenderedMessageIdBeforeScroll).toBe('assistant-0');
 
     list!.scrollTop = 3_600;
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: 120 }));
     list?.dispatchEvent(new Event('scroll'));
     list!.scrollTop = 4_800;
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: 120 }));
     list?.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
 
-    const firstRenderedMessageIdBeforeFrame =
+    const firstRenderedMessageIdAfterScroll =
       container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-    expect(firstRenderedMessageIdBeforeFrame).toBe('assistant-0');
+    expect(firstRenderedMessageIdAfterScroll).not.toBe('assistant-0');
 
     animationFrames.flush();
     await Promise.resolve();
@@ -1425,6 +1536,54 @@ describe('MessageList sticky prompt preview', () => {
     const firstRenderedMessageIdAfterFrame =
       container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
     expect(firstRenderedMessageIdAfterFrame).not.toBe('assistant-0');
+
+    animationFrames.restore();
+  });
+
+  it('shows sticky prompts for message IDs that are not valid CSS selector values', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const unusualUserId = 'user-2"]';
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage(unusualUserId), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    const rectMap = new Map<Element, DOMRect>();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    const unusualUserRow = [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+      (element) => element.dataset.msgId === unusualUserId
+    );
+    const assistant2Row = container?.querySelector(
+      '[data-msg-id="assistant-2"]'
+    ) as HTMLDivElement | null;
+
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    expect(unusualUserRow).toBeInstanceOf(HTMLDivElement);
+    expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
+    rectMap.set(list!, new DOMRect(0, 0, 500, 500));
+    rectMap.set(unusualUserRow!, new DOMRect(0, -80, 500, 52));
+    rectMap.set(assistant2Row!, new DOMRect(0, 20, 500, 320));
+
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky).toBeInstanceOf(HTMLDivElement);
+    expect(sticky?.textContent).toContain('Prompt 2');
 
     animationFrames.restore();
   });
@@ -1603,6 +1762,140 @@ describe('MessageList auto-scroll', () => {
       container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
     expect(firstRenderedMessageId).not.toBe('assistant-0');
 
+    animationFrames.restore();
+  });
+
+  it('virtualizes after mount-time measurement when resize observers do not emit', async () => {
+    // Principle: exact-height virtualization must still activate in test/no-layout environments.
+    // If this regresses, the list falls back to rendering every row and future refactors may hide it
+    // behind fake performance improvements.
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, `Response ${index}`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 7200 });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 7200);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
+    expect(container?.querySelector('.virtual-spacer-top')).toBeTruthy();
+
+    animationFrames.restore();
+  });
+
+  it('stays pinned to the real bottom when virtualized messages update in place', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, `Response ${index}`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollTopValue = 0;
+    let scrollHeightValue = 7200;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(6800);
+
+    scrollTopValue = 6800;
+    scrollHeightValue = 7440;
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(
+                `text-${index}`,
+                index === 59 ? 'Updated response with more content' : `Response ${index}`
+              ),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(7040);
     animationFrames.restore();
   });
 
@@ -1915,58 +2208,8 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('updates the scrollbar inset css variable only when the inset changes', async () => {
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-
-    cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
-
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    const shell = container?.querySelector('.interactive-list-shell') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-    expect(shell).toBeInstanceOf(HTMLDivElement);
-
-    let clientWidthValue = 288;
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 300 });
-    Object.defineProperty(list!, 'clientWidth', {
-      configurable: true,
-      get: () => clientWidthValue,
-    });
-
-    const setPropertySpy = vi.spyOn(shell!.style, 'setProperty');
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    expect(setPropertySpy).toHaveBeenCalledTimes(1);
-    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '12px');
-
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    expect(setPropertySpy).toHaveBeenCalledTimes(1);
-
-    clientWidthValue = 280;
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 320 });
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    expect(setPropertySpy).toHaveBeenCalledTimes(2);
-    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '40px');
-  });
-
-  it('does not rewrite scrollbar inset during height-only resize churn', async () => {
+  it('does not snap back to bottom after a small upward scroll near the threshold', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
 
@@ -1995,45 +2238,331 @@ describe('MessageList auto-scroll', () => {
     ]);
 
     cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
+    expect(resizeCallbacks).toHaveLength(2);
 
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    const shell = container?.querySelector('.interactive-list-shell') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
-    expect(shell).toBeInstanceOf(HTMLDivElement);
 
-    let clientWidthValue = 288;
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 300 });
-    Object.defineProperty(list!, 'clientWidth', {
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
       configurable: true,
-      get: () => clientWidthValue,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
     });
 
-    const setPropertySpy = vi.spyOn(shell!.style, 'setProperty');
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
 
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    const assignmentCountAfterUserScroll = assignedScrollTops.length;
+
+    trackHeight = 1240;
+    scrollHeightValue = 1240;
     for (const callback of resizeCallbacks) {
       callback([], {} as ResizeObserver);
     }
-    expect(setPropertySpy).toHaveBeenCalledTimes(1);
+    animationFrames.flush();
 
-    trackHeight = 1300;
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterUserScroll);
+    expect(scrollTopValue).toBe(760);
+    animationFrames.restore();
+  });
+
+  it('does not re-pin to bottom after loading settles when the user moved slightly upward', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1200 });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    const assignmentCountAfterUserScroll = assignedScrollTops.length;
+
+    stopLoading();
+    await Promise.resolve();
+    animationFrames.flush();
+
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterUserScroll);
+    expect(scrollTopValue).toBe(760);
+    animationFrames.restore();
+  });
+
+  it('keeps auto-scroll enabled when the bottom target shifts before a near-bottom scroll event', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    expect(resizeCallbacks).toHaveLength(2);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    scrollHeightValue = 1240;
+    scrollTopValue = 800;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    trackHeight = 1240;
     for (const callback of resizeCallbacks) {
       callback([], {} as ResizeObserver);
     }
-    trackHeight = 1500;
+    animationFrames.flush();
+
+    expect(assignedScrollTops.at(-1)).toBe(840);
+    expect(scrollTopValue).toBe(840);
+    animationFrames.restore();
+  });
+
+  it('releases the send-triggered follow lock after bottom scroll stabilizes', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    expect(resizeCallbacks).toHaveLength(2);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    scrollTopValue = 400;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    animationFrames.flush();
+    animationFrames.flush();
+    animationFrames.flush();
+
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    trackHeight = 1240;
+    scrollHeightValue = 1240;
     for (const callback of resizeCallbacks) {
       callback([], {} as ResizeObserver);
     }
+    animationFrames.flush();
 
-    expect(setPropertySpy).toHaveBeenCalledTimes(1);
+    expect(assignedScrollTops.at(-1)).toBe(800);
+    expect(scrollTopValue).toBe(760);
+    animationFrames.restore();
+  });
 
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 320 });
-    clientWidthValue = 300;
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
+  it('re-attaches to bottom again on the next explicit scroll request', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    const trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
     }
 
-    expect(setPropertySpy).toHaveBeenCalledTimes(2);
-    expect(setPropertySpy).toHaveBeenLastCalledWith('--interactive-list-scrollbar-inset', '20px');
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    expect(resizeCallbacks).toHaveLength(2);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    const scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    animationFrames.flush();
+    animationFrames.flush();
+    animationFrames.flush();
+
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    const assignmentCountAfterNearBottomScroll = assignedScrollTops.length;
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    animationFrames.flush();
+
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterNearBottomScroll + 1);
+    expect(assignedScrollTops.at(-1)).toBe(800);
+    expect(scrollTopValue).toBe(800);
+    animationFrames.restore();
   });
 });

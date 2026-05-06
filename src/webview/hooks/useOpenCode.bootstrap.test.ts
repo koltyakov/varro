@@ -69,7 +69,7 @@ describe('useOpenCode initialization', () => {
     }
   });
 
-  it('hydrates 429 retry status for listed sessions before they are opened', async () => {
+  it('hydrates 429 retry status for listed sessions before any session is opened', async () => {
     let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
     bridgeMocks.onMessage.mockImplementation((handler) => {
       bridgeHandler = handler as typeof bridgeHandler;
@@ -79,7 +79,7 @@ describe('useOpenCode initialization', () => {
     });
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
-    clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+    clientMocks.sessionList.mockResolvedValue([session('session-1'), session('session-2')]);
     clientMocks.sessionStatus.mockResolvedValue({
       'session-1': {
         type: 'retry',
@@ -87,6 +87,7 @@ describe('useOpenCode initialization', () => {
         message: '429 usage limit reached',
         next: 8,
       },
+      'session-2': { type: 'idle' },
     });
     clientMocks.agentList.mockResolvedValue([]);
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
@@ -230,6 +231,7 @@ describe('useOpenCode initialization', () => {
 
       await vi.waitFor(() => {
         expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+          agent: 'build',
           parts: [
             {
               type: 'text',

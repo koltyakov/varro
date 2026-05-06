@@ -188,9 +188,30 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('routes recycle bin empty request', async () => {
-    const { proxy, callbacks } = createProxy();
+    const empty = vi.fn(
+      async (deleteSession: (session: { id: string; directory?: string }) => Promise<unknown>) => {
+        await deleteSession({ id: 's1', directory: '/repo/a' });
+        await deleteSession({ id: 's2', directory: '/repo/b' });
+        return [{ sessions: [{ id: 's1' }, { id: 's2' }] } as never];
+      }
+    );
+    const serverRequest = vi.fn(() => Promise.resolve(true));
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        empty,
+      } as never,
+    });
     await proxy.handleRequest(makePayload(3, 'DELETE', '/varro/session-trash'));
     expect(callbacks.sessionTrash.empty).toHaveBeenCalled();
+    expect(serverRequest.mock.calls).toEqual([
+      ['DELETE', '/session/s1?directory=%2Frepo%2Fa'],
+      ['DELETE', '/session/s2?directory=%2Frepo%2Fb'],
+    ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 3, data: true });
   });
 
@@ -209,13 +230,32 @@ describe('RestProxy handleRequest', () => {
 
   it('routes recycle bin delete request and removes sessions', async () => {
     const removed = { sessions: [{ id: 's1' }, { id: 's2' }] };
+    const deletePermanently = vi.fn(
+      async (
+        _rootID: string,
+        deleteSession: (session: { id: string; directory?: string }) => Promise<unknown>
+      ) => {
+        await deleteSession({ id: 's1', directory: '/repo/a' });
+        await deleteSession({ id: 's2', directory: '/repo/b' });
+        return removed;
+      }
+    );
+    const serverRequest = vi.fn(() => Promise.resolve(true));
     const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
       sessionTrash: {
         ...createCallbacks().sessionTrash,
-        deletePermanently: vi.fn(() => Promise.resolve(removed)),
+        deletePermanently,
       } as never,
     });
     await proxy.handleRequest(makePayload(5, 'DELETE', '/varro/session-trash/abc/delete'));
+    expect(serverRequest.mock.calls).toEqual([
+      ['DELETE', '/session/s1?directory=%2Frepo%2Fa'],
+      ['DELETE', '/session/s2?directory=%2Frepo%2Fb'],
+    ]);
     expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['s1', 's2']);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 5, data: true });
   });
@@ -298,7 +338,10 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('routes varro permanent delete directly to the server without recycle bin', async () => {
-    const serverRequest = vi.fn(() => Promise.resolve(true));
+    const serverRequest = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 'some-id', directory: '/repo/archive' }])
+      .mockResolvedValueOnce(true);
     const { proxy, callbacks } = createProxy({
       server: {
         ...createCallbacks().server,
@@ -308,7 +351,10 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(111, 'DELETE', '/varro/session/some-id/delete'));
 
-    expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/some-id');
+    expect(serverRequest.mock.calls).toEqual([
+      ['GET', '/session'],
+      ['DELETE', '/session/some-id?directory=%2Frepo%2Farchive'],
+    ]);
     expect(callbacks.sessionTrash.moveToTrash).not.toHaveBeenCalled();
     expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['some-id']);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 111, data: true });

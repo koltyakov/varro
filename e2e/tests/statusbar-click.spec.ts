@@ -7,7 +7,7 @@ test('focus-input without pending attention focuses textarea but does not show a
   await page.goto('/e2e/harness/index.html?scenario=statusbar-focus');
   const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
 
-  await expect(page.locator('textarea')).toBeFocused();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.getByText('Filtered:', { exact: true })).not.toBeVisible();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).not.toBeVisible();
 });
@@ -19,7 +19,7 @@ test('open-attention-sessions with pending attention shows filter and lists sess
   await page.goto('/e2e/harness/index.html?scenario=command-events');
   const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
 
-  await expect(page.locator('textarea')).toBeFocused();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.getByText('Filtered:', { exact: true })).toBeVisible();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).toHaveText(
     'Needs attention'
@@ -37,12 +37,12 @@ test('posting focus-input at runtime focuses textarea without activating attenti
   await page.goto('/e2e/harness/index.html?scenario=blank');
   const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
   await page.evaluate(() => {
     window.postMessage({ type: 'command/focus-input' }, '*');
   });
 
-  await expect(page.locator('textarea')).toBeFocused();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).not.toBeVisible();
 });
 
@@ -53,7 +53,7 @@ test('focus-input followed by open-attention-sessions switches from plain focus 
   await page.goto('/e2e/harness/index.html?scenario=command-events');
   const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
 
-  await expect(page.locator('textarea')).toBeFocused();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).toHaveText(
     'Needs attention'
   );
@@ -62,7 +62,7 @@ test('focus-input followed by open-attention-sessions switches from plain focus 
     window.postMessage({ type: 'command/focus-input' }, '*');
   });
 
-  await expect(page.locator('textarea')).toBeFocused();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).toHaveText(
     'Needs attention'
   );

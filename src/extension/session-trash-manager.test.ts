@@ -42,27 +42,34 @@ describe('SessionTrashManager', () => {
       session('child-1', 2_000, { parentID: 'root' }),
       session('child-2', 1_000, { parentID: 'child-1' }),
     ];
-    const deleteSession = vi.fn(async (_id: string) => undefined);
+    const deleteSession = vi.fn(async (_target: { id: string; directory?: string }) => undefined);
 
     await manager.moveToTrash('root', sessions as never[], 5_000);
     await manager.deletePermanently('root', deleteSession);
 
     expect(deleteSession).toHaveBeenCalledTimes(3);
-    expect(deleteSession.mock.calls.map(([id]) => id)).toEqual(['root', 'child-1', 'child-2']);
+    expect(deleteSession.mock.calls.map(([target]) => target)).toEqual([
+      { id: 'root', directory: '/repo' },
+      { id: 'child-1', directory: '/repo' },
+      { id: 'child-2', directory: '/repo' },
+    ]);
     expect(manager.list()).toEqual([]);
   });
 
   it('ignores missing sessions while emptying the recycle bin', async () => {
     const manager = new SessionTrashManager(workspaceState as never);
     const sessions = [session('root', 2_000), session('child', 1_000, { parentID: 'root' })];
-    const deleteSession = vi.fn(async (id: string) => {
-      if (id === 'child') throw new Error('404 Session not found');
+    const deleteSession = vi.fn(async (target: { id: string; directory?: string }) => {
+      if (target.id === 'child') throw new Error('404 Session not found');
     });
 
     await manager.moveToTrash('root', sessions as never[], 5_000);
     const removed = await manager.empty(deleteSession);
 
-    expect(deleteSession.mock.calls.map(([id]) => id)).toEqual(['root', 'child']);
+    expect(deleteSession.mock.calls.map(([target]) => target)).toEqual([
+      { id: 'root', directory: '/repo' },
+      { id: 'child', directory: '/repo' },
+    ]);
     expect(removed).toHaveLength(1);
     expect(manager.list()).toEqual([]);
   });
@@ -111,7 +118,7 @@ describe('SessionTrashManager', () => {
     await manager.moveToTrash('fresh', [session('fresh', 2_000)] as never[], 50_000);
 
     const deleteSession = vi
-      .fn(async (_sessionID: string) => undefined)
+      .fn(async (_target: { id: string; directory?: string }) => undefined)
       .mockRejectedValueOnce(new Error('temporary failure'));
     const now = 10_000 + SESSION_TRASH_RETENTION_MS + 1;
 
@@ -121,7 +128,10 @@ describe('SessionTrashManager', () => {
     await expect(manager.cleanupExpired(deleteSession, now)).resolves.toMatchObject([
       { rootID: 'expired' },
     ]);
-    expect(deleteSession.mock.calls.map(([id]) => id)).toEqual(['expired', 'expired']);
+    expect(deleteSession.mock.calls.map(([target]) => target)).toEqual([
+      { id: 'expired', directory: '/repo' },
+      { id: 'expired', directory: '/repo' },
+    ]);
     expect(manager.list().map(({ rootID }) => rootID)).toEqual(['fresh']);
   });
 

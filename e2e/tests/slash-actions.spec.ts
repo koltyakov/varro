@@ -4,7 +4,7 @@ import { getE2EState } from './helpers';
 test('slash commands trigger provider setup, settings, and file picker actions', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
 
   await composer.click();
   await composer.fill('/connect');
@@ -46,7 +46,7 @@ test('slash commands trigger provider setup, settings, and file picker actions',
 test('supports keyboard navigation and tab completion for slash command suggestions', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/co');
   await expect(page.getByText('Open provider login in the terminal')).toBeVisible();
@@ -57,13 +57,13 @@ test('supports keyboard navigation and tab completion for slash command suggesti
   const selectedText = await selectedTitle.textContent();
   await composer.press('Tab');
 
-  await expect(composer).toHaveValue(selectedText?.trim() || '');
+  await expect(composer).toHaveText(selectedText?.trim() || '');
 });
 
 test('closes slash command suggestions with escape', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/co');
   await expect(page.locator('.composer-completion-menu')).toBeVisible();
@@ -71,5 +71,5 @@ test('closes slash command suggestions with escape', async ({ page }) => {
   await composer.press('Escape');
 
   await expect(page.locator('.composer-completion-menu')).toHaveCount(0);
-  await expect(composer).toHaveValue('');
+  await expect(composer).toHaveText('');
 });

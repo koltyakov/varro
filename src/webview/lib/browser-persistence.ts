@@ -7,6 +7,9 @@ export class BrowserPersistence implements Persistence {
   constructor(private readonly storage: Storage = window.localStorage) {}
 
   get<T>(key: string): T | undefined {
+    const vscodeValue = readVsCodeWebviewStateValue<T>(key);
+    if (vscodeValue !== undefined) return vscodeValue;
+
     try {
       const raw = this.storage.getItem(key);
       return raw ? (JSON.parse(raw) as T) : undefined;
@@ -16,6 +19,8 @@ export class BrowserPersistence implements Persistence {
   }
 
   set(key: string, value: unknown) {
+    writeVsCodeWebviewStateValue(key, value);
+
     try {
       const serialized = JSON.stringify(value);
       if (serialized === undefined) {
@@ -40,8 +45,46 @@ export class BrowserPersistence implements Persistence {
   }
 
   remove(key: string) {
+    removeVsCodeWebviewStateValue(key);
+
     try {
       this.storage.removeItem(key);
     } catch {}
   }
+}
+
+type VsCodeWebviewStateApi = {
+  getState(): Record<string, unknown>;
+  setState(state: Record<string, unknown>): void;
+};
+
+function getVsCodeWebviewStateApi(): VsCodeWebviewStateApi | undefined {
+  return (window as unknown as { __vscodeWebviewState?: VsCodeWebviewStateApi })
+    .__vscodeWebviewState;
+}
+
+function readVsCodeWebviewStateValue<T>(key: string): T | undefined {
+  try {
+    return getVsCodeWebviewStateApi()?.getState()?.[key] as T | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeVsCodeWebviewStateValue(key: string, value: unknown) {
+  try {
+    const api = getVsCodeWebviewStateApi();
+    if (!api) return;
+    api.setState({ ...api.getState(), [key]: value });
+  } catch {}
+}
+
+function removeVsCodeWebviewStateValue(key: string) {
+  try {
+    const api = getVsCodeWebviewStateApi();
+    if (!api) return;
+    const next = { ...api.getState() };
+    delete next[key];
+    api.setState(next);
+  } catch {}
 }

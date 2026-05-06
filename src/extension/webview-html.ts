@@ -31,6 +31,10 @@ export function renderWebviewHtml(
     window.__initialWebviewState = ${serializedInitialState};
     window.__initialTheme = window.__initialWebviewState.theme;
     window.__sendToExtension = function(msg) { vscode.postMessage(msg); };
+    window.__vscodeWebviewState = {
+      getState: function() { return vscode.getState() || {}; },
+      setState: function(state) { vscode.setState(state); },
+    };
   </script>
   <script nonce="${nonce}">${assets.scriptContent}</script>
 </body>

@@ -36,7 +36,12 @@ import type {
   RecycleBinEntry,
   ServerStatus,
   WebviewThemeKind,
+  WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
+import type {
+  ProviderAuthMethodsByProvider,
+  WorkspaceStatusEntry,
+} from '../../shared/opencode-types';
 import {
   readProviderLimitPollIntervalSeconds,
   readProviderLimitThresholdPercent,
@@ -44,6 +49,17 @@ import {
 import { mergeContextFile } from '../../shared/context-files';
 import type { UsageLimitNotice } from './usage-limit';
 import { isAbortedAssistantError } from './aborted';
+import {
+  clearClipboardImageAttachmentSequences,
+  clearContextFileAttachmentSequences,
+  ensureClipboardImageAttachmentSequence,
+  ensureContextFileAttachmentSequence,
+  removeClipboardImageAttachmentSequence,
+  removeContextFileAttachmentSequence,
+  resetAttachmentOrderState,
+  seedClipboardImageAttachmentSequences,
+  seedContextFileAttachmentSequences,
+} from './attachment-order';
 import { createMessageIndex } from './message-index';
 import {
   getSessionMarkerWorkspaceScope,
@@ -109,7 +125,20 @@ export interface AppState {
   failedSessionIds: string[];
   sessionUsageLimits: Record<string, UsageLimitNotice | null>;
   interruptedSessionIds: string[];
+  providerAuthMethods: ProviderAuthMethodsByProvider;
+  workspaceStatuses: WorkspaceStatusEntry[];
+  workspaceStatusSummary: WorkspaceStatusEventSummary;
 }
+
+export type LastOpenedView =
+  | { type: 'new-session'; timestamp: number }
+  | { type: 'sessions-list'; timestamp: number }
+  | { type: 'session'; sessionId: string; timestamp: number };
+
+type LastOpenedViewInput =
+  | { type: 'new-session' }
+  | { type: 'sessions-list' }
+  | { type: 'session'; sessionId: string };
 
 export const MAX_CLIPBOARD_IMAGES = 5;
 const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -189,6 +218,9 @@ export interface AppStateInstance {
 
 export function createAppState(): AppStateInstance {
   const initialWebviewState = readInitialWebviewState();
+  resetAttachmentOrderState();
+  seedContextFileAttachmentSequences(initialWebviewState.droppedFiles ?? []);
+  seedClipboardImageAttachmentSequences([]);
   const sessionMarkerWorkspaceScope = getSessionMarkerWorkspaceScope(
     initialWebviewState.editorContext?.workspacePath
   );
@@ -250,6 +282,9 @@ export function createAppState(): AppStateInstance {
     failedSessionIds: [],
     sessionUsageLimits: {},
     interruptedSessionIds: initialWebviewState.interruptedSessionIds ?? [],
+    providerAuthMethods: {},
+    workspaceStatuses: [],
+    workspaceStatusSummary: { entries: [] },
   });
 
   const [showThinking, setShowThinking] = createSignal(readShowThinking());
@@ -386,6 +421,18 @@ export const error = defaultAppState.error;
 export const setError = defaultAppState.setError;
 export const showSessionPicker = defaultAppState.showSessionPicker;
 export const setShowSessionPicker = defaultAppState.setShowSessionPicker;
+export function setPersistentShowSessionPicker(value: boolean) {
+  setShowSessionPicker(value);
+  if (value) {
+    persistLastOpenedView({ type: 'sessions-list' });
+    return;
+  }
+  persistLastOpenedView(
+    state.activeSessionId
+      ? { type: 'session', sessionId: state.activeSessionId }
+      : { type: 'new-session' }
+  );
+}
 export const showModelPicker = defaultAppState.showModelPicker;
 export const setShowModelPicker = defaultAppState.setShowModelPicker;
 export const showSettings = defaultAppState.showSettings;
@@ -690,6 +737,28 @@ export function clearQueuedMessagesForSession(sessionId: string) {
 
 export function persistActiveSessionId(id: string | null) {
   writeStored(STORAGE_KEYS.lastActiveSessionId, id);
+}
+
+function normalizeLastOpenedView(value: unknown): LastOpenedView | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const timestamp = typeof record.timestamp === 'number' ? record.timestamp : null;
+  if (timestamp === null || !Number.isFinite(timestamp)) return null;
+
+  if (record.type === 'new-session') return { type: 'new-session', timestamp };
+  if (record.type === 'sessions-list') return { type: 'sessions-list', timestamp };
+  if (record.type === 'session' && typeof record.sessionId === 'string') {
+    return { type: 'session', sessionId: record.sessionId, timestamp };
+  }
+  return null;
+}
+
+export function persistLastOpenedView(view: LastOpenedViewInput, now = Date.now()) {
+  writeStored(STORAGE_KEYS.lastOpenedView, { ...view, timestamp: now });
+}
+
+export function getPersistedLastOpenedView(): LastOpenedView | null {
+  return normalizeLastOpenedView(readStored<unknown>(STORAGE_KEYS.lastOpenedView));
 }
 
 export function getPersistedSelectedModel(): SelectedModel | null {
@@ -1100,15 +1169,19 @@ export function saveProjectPermissionMode(mode: PermissionMode) {
 }
 
 export function addContextFile(file: DroppedFile) {
+  const attachmentSequence = ensureContextFileAttachmentSequence(
+    file.path,
+    file.attachmentSequence
+  );
   setState(
     'droppedFiles',
     produce((files) => {
       const idx = files.findIndex((f) => f.path === file.path);
       if (idx === -1) {
-        files.push(file);
+        files.push({ ...file, attachmentSequence });
         return;
       }
-      files[idx] = mergeContextFile(files[idx], file);
+      files[idx] = { ...mergeContextFile(files[idx], file), attachmentSequence };
     })
   );
 }
@@ -1119,18 +1192,23 @@ export function addContextFiles(files: DroppedFile[]) {
     'droppedFiles',
     produce((current) => {
       for (const file of files) {
+        const attachmentSequence = ensureContextFileAttachmentSequence(
+          file.path,
+          file.attachmentSequence
+        );
         const idx = current.findIndex((item) => item.path === file.path);
         if (idx === -1) {
-          current.push(file);
+          current.push({ ...file, attachmentSequence });
           continue;
         }
-        current[idx] = mergeContextFile(current[idx], file);
+        current[idx] = { ...mergeContextFile(current[idx], file), attachmentSequence };
       }
     })
   );
 }
 
 export function removeContextFile(path: string) {
+  removeContextFileAttachmentSequence(path);
   setState(
     'droppedFiles',
     produce((files) => {
@@ -1141,24 +1219,41 @@ export function removeContextFile(path: string) {
 }
 
 export function clearContextFiles() {
+  clearContextFileAttachmentSequences();
   setState('droppedFiles', []);
 }
 
 export function addClipboardImage(image: ClipboardImage) {
-  if (image.size > MAX_CLIPBOARD_IMAGE_SIZE) return;
+  if (image.size > MAX_CLIPBOARD_IMAGE_SIZE) return false;
+
+  const duplicateKey = image.contentKey ?? image.url;
+  if (state.clipboardImages.some((item) => (item.contentKey ?? item.url) === duplicateKey)) {
+    return false;
+  }
+
+  const attachmentSequence = ensureClipboardImageAttachmentSequence(
+    image.id,
+    image.attachmentSequence
+  );
   setState(
     'clipboardImages',
     produce((images) => {
-      if (images.length >= MAX_CLIPBOARD_IMAGES) images.shift();
+      if (images.length >= MAX_CLIPBOARD_IMAGES) {
+        const removed = images.shift();
+        if (removed) removeClipboardImageAttachmentSequence(removed.id);
+      }
       if (!images.find((item) => item.id === image.id)) {
-        images.push(image);
+        images.push({ ...image, attachmentSequence });
       }
     })
   );
+
+  return true;
 }
 
 export function removeClipboardImage(id: string) {
   const image = state.clipboardImages.find((item) => item.id === id);
+  removeClipboardImageAttachmentSequence(id);
   setState(
     'clipboardImages',
     produce((images) => {
@@ -1173,6 +1268,7 @@ export function clearClipboardImages() {
   for (const image of state.clipboardImages) {
     replaceClipboardImagePlaceholder(image.filename);
   }
+  clearClipboardImageAttachmentSequences();
   setState('clipboardImages', []);
   if (inputText().trim().length === 0) setNextPastedImageIndex(1);
 }
@@ -1190,6 +1286,18 @@ export function resetPastedImageIndex() {
 
 export function setQuestions(questions: QuestionRequest[]) {
   setState('questions', questions);
+}
+
+export function setProviderAuthMethods(methods: ProviderAuthMethodsByProvider) {
+  setState('providerAuthMethods', methods);
+}
+
+export function setWorkspaceStatuses(entries: WorkspaceStatusEntry[]) {
+  setState('workspaceStatuses', entries);
+}
+
+export function setWorkspaceStatusSummary(summary: WorkspaceStatusEventSummary) {
+  setState('workspaceStatusSummary', summary);
 }
 
 export function setCommands(commands: Command[]) {

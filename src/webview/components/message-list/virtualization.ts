@@ -1,5 +1,5 @@
-const DEFAULT_ITEM_HEIGHT = 120;
-const OVERSCAN = 5;
+const DEFAULT_ITEM_HEIGHT = 160;
+const OVERSCAN = 9;
 
 export type VirtualMetrics = {
   prefix: number[];
@@ -12,6 +12,8 @@ export type VisibleRange = {
   end: number;
   topPad: number;
   bottomPad: number;
+  coreStart: number;
+  coreEnd: number;
 };
 
 export function buildVirtualMetrics(args: {
@@ -25,8 +27,8 @@ export function buildVirtualMetrics(args: {
   prefix[0] = 0;
 
   for (let index = 0; index < itemCount; index += 1) {
-    prefix[index + 1] =
-      prefix[index] + (args.measuredHeights.get(args.itemIds[index]) ?? defaultItemHeight);
+    const id = args.itemIds[index];
+    prefix[index + 1] = prefix[index] + (args.measuredHeights.get(id) ?? defaultItemHeight);
   }
 
   return {
@@ -46,7 +48,8 @@ export function calculateVirtualRangeFromMetrics(args: {
   const itemCount = args.metrics.itemCount;
   const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
   const overscan = args.overscan ?? OVERSCAN;
-  if (itemCount === 0) return { start: 0, end: 0, topPad: 0, bottomPad: 0 };
+  if (itemCount === 0)
+    return { start: 0, end: 0, topPad: 0, bottomPad: 0, coreStart: 0, coreEnd: 0 };
 
   const overscanPx = overscan * defaultItemHeight;
   const startOffset = Math.max(0, args.scrollTop - overscanPx);
@@ -60,9 +63,23 @@ export function calculateVirtualRangeFromMetrics(args: {
     Math.max(start + 1, lowerBound(args.metrics.prefix, endOffset + 1))
   );
 
+  const coreStart = Math.max(
+    start,
+    Math.min(itemCount - 1, lowerBound(args.metrics.prefix, args.scrollTop + 1) - 1)
+  );
+  const coreEnd = Math.min(
+    end,
+    Math.max(
+      coreStart + 1,
+      lowerBound(args.metrics.prefix, args.scrollTop + args.viewportHeight + 1)
+    )
+  );
+
   return {
     start,
     end,
+    coreStart,
+    coreEnd,
     topPad: args.metrics.prefix[start] || 0,
     bottomPad: args.metrics.totalHeight - (args.metrics.prefix[end] || 0),
   };

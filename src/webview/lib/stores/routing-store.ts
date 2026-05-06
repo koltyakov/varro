@@ -20,12 +20,14 @@ import {
   setCommands,
   setMcpStatus,
   setModelVisible,
+  setProviderAuthMethods,
   setProviderLimit,
   setProviderVisible,
   setSelectedAgent,
   setSelectedMcpsForSession,
   setSelectedModel,
   setState,
+  setWorkspaceStatuses,
   state,
 } from '../state';
 
@@ -43,6 +45,8 @@ export const routingStore = {
   clearSelectedMcpsForSession,
   resolveSelectedModel,
   setMcpStatus,
+  setProviderAuthMethods,
+  setWorkspaceStatuses,
   getAvailableMcpNames,
   setCommands,
   getProviderLimit,

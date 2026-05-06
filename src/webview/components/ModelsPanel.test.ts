@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { setState } from '../lib/state';
-import { SettingsPanel } from './SettingsPanel';
+import { ModelsPanel } from './ModelsPanel';
 
 const clientMocks = vi.hoisted(() => ({
   openCodeConfig: vi.fn(),
   saveModelRouting: vi.fn(),
+  providerAuth: vi.fn(),
+  workspaceStatus: vi.fn(),
 }));
 
 const refreshRoutingStateMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const beginProviderAuthorizationMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock('../lib/client', () => ({
   client: {
@@ -16,7 +19,16 @@ vi.mock('../lib/client', () => ({
       openCodeConfig: clientMocks.openCodeConfig,
       saveModelRouting: clientMocks.saveModelRouting,
     },
+    config: {
+      providerAuth: clientMocks.providerAuth,
+      workspaceStatus: clientMocks.workspaceStatus,
+    },
   },
+}));
+
+vi.mock('../lib/provider-setup', () => ({
+  openProviderSetup: vi.fn(),
+  beginProviderAuthorization: beginProviderAuthorizationMock,
 }));
 
 vi.mock('../hooks/useOpenCode', () => ({
@@ -45,6 +57,10 @@ beforeEach(() => {
     small_model: 'openai/gpt-5',
     agent: { build: { model: 'openai/gpt-5' } },
   });
+  clientMocks.providerAuth.mockResolvedValue({
+    openai: [{ type: 'oauth', label: 'Browser login' }],
+  });
+  clientMocks.workspaceStatus.mockResolvedValue([{ workspaceID: 'ws-1', status: 'connected' }]);
   setState('providers', [
     {
       id: 'openai',
@@ -112,9 +128,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('SettingsPanel', () => {
+describe('ModelsPanel', () => {
   it('shows routing tags loaded from opencode config and agents', async () => {
-    cleanup = render(() => SettingsPanel(), container!);
+    cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
     expect(container?.textContent).toContain('small_model');
@@ -127,7 +143,7 @@ describe('SettingsPanel', () => {
       agent: { review: { model: 'openai/gpt-5' } },
     });
 
-    cleanup = render(() => SettingsPanel(), container!);
+    cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
     expect(container?.textContent).toContain('small_model');
@@ -135,7 +151,7 @@ describe('SettingsPanel', () => {
   });
 
   it('opens the model context menu and saves a routing assignment', async () => {
-    cleanup = render(() => SettingsPanel(), container!);
+    cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
     const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
@@ -174,5 +190,21 @@ describe('SettingsPanel', () => {
       modelID: 'gpt-5',
     });
     expect(refreshRoutingStateMock).toHaveBeenCalled();
+  });
+
+  it('shows workspace status and provider auth actions', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Workspaces: ws-1 (connected)');
+    expect(container?.textContent).toContain('Connect provider in browser');
+
+    const button = Array.from(container?.querySelectorAll('button') || []).find((item) =>
+      item.textContent?.includes('Connect provider in browser')
+    ) as HTMLButtonElement;
+    button.click();
+
+    expect(beginProviderAuthorizationMock).toHaveBeenCalledWith('openai', 0);
   });
 });

@@ -9,6 +9,7 @@ import {
   calculateAssistantPartVirtualRange,
   getAssistantContainerVariant,
   getUserMessagePreviewText,
+  parseUserMessageContent,
   stripCompactionBoundaryMarkdown,
 } from './Message';
 import { resetToolCallExpansionState } from './ToolCall';
@@ -437,6 +438,117 @@ describe('Message user prompt rendering', () => {
     expect(children[3]?.classList.contains('chat-image-figure')).toBe(true);
     expect(children[3]?.textContent).toContain('diagram.png');
   });
+
+  it('renders inline file mentions as chips inside the user bubble text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-file'),
+          parts: [
+            textPart('text-1', 'Test @README.md and @preview.html'),
+            textPart('text-2', 'README.md'),
+            textPart('text-3', 'preview.html'),
+          ],
+        }),
+      container!
+    );
+
+    const messageText = container?.querySelector('.user-message-text');
+
+    expect(messageText?.textContent).toContain('Test README.md and preview.html');
+    expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(2);
+    expect(messageText?.querySelectorAll('.inline-chip-clickable')).toHaveLength(2);
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+  });
+
+  it('renders inline image placeholders as chips inside the user bubble text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-image'),
+          parts: [
+            textPart('text-1', 'Test @e2e/tests/review.spec.ts and this @preview.html [Image 2]'),
+            textPart('text-2', 'e2e/tests/review.spec.ts'),
+            textPart('text-3', 'preview.html'),
+            imageFilePart('image-1', 'Image 1'),
+            imageFilePart('image-2', 'Image 2'),
+          ],
+        }),
+      container!
+    );
+
+    const messageText = container?.querySelector('.user-message-text');
+    const inlineChips = messageText?.querySelectorAll('.inline-chip');
+
+    expect(messageText?.textContent).toContain('Test review.spec.ts and this preview.html Image 2');
+    expect(inlineChips).toHaveLength(3);
+    expect(messageText?.querySelectorAll('.inline-chip-clickable')).toHaveLength(3);
+    expect(Array.from(inlineChips ?? []).map((chip) => chip.textContent?.trim())).toContain(
+      'Image 2'
+    );
+    expect(container?.querySelector('.message-image-carousel')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.message-image-carousel-caption-row')?.textContent).toContain(
+      'Image 1'
+    );
+  });
+
+  it('opens the matching image preview from an inline image chip and syncs the carousel', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-image-preview'),
+          parts: [
+            textPart('text-1', 'Test @e2e/tests/review.spec.ts and this @preview.html [Image 2]'),
+            textPart('text-2', 'e2e/tests/review.spec.ts'),
+            textPart('text-3', 'preview.html'),
+            imageFilePart('image-1', 'Image 1'),
+            imageFilePart('image-2', 'Image 2'),
+          ],
+        }),
+      container!
+    );
+
+    const imageChip = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.user-message-text .inline-chip-clickable') ??
+        []
+    ).find((chip) => chip.textContent?.includes('Image 2'));
+
+    expect(imageChip).toBeInstanceOf(HTMLButtonElement);
+
+    imageChip?.click();
+
+    const overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    const overlayCaption = container?.querySelector('.chat-image-preview-caption');
+    const carouselCaption = container?.querySelector('.message-image-carousel-caption-row');
+
+    expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
+    expect(overlayCaption?.textContent).toContain('Image 2');
+    expect(carouselCaption?.textContent).toContain('2 / 2');
+    expect(carouselCaption?.textContent).toContain('Image 2');
+  });
+
+  it('keeps unrelated context attachments in the leading attachment strip', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-file-with-extra-context'),
+          parts: [
+            textPart('text-1', 'Test @README.md'),
+            textPart('text-2', 'README.md'),
+            textPart('text-3', 'preview.html'),
+          ],
+        }),
+      container!
+    );
+
+    const inlineChips = container?.querySelectorAll('.user-message-text .inline-chip');
+    const attachmentStrip = container?.querySelector('.message-attachments');
+
+    expect(inlineChips).toHaveLength(1);
+    expect(attachmentStrip).toBeInstanceOf(HTMLDivElement);
+    expect(attachmentStrip?.textContent).toContain('preview.html');
+    expect(attachmentStrip?.textContent).not.toContain('README.md');
+  });
 });
 
 describe('Message tool call expansion', () => {
@@ -508,6 +620,110 @@ describe('getUserMessagePreviewText', () => {
     expect(getUserMessagePreviewText([imageFilePart('file-1', 'diagram.png')])).toBe(
       'Attachment: diagram.png'
     );
+  });
+});
+
+describe('parseUserMessageContent', () => {
+  it('treats absolute paths with spaces as attachments', () => {
+    const parsed = parseUserMessageContent([
+      textPart('text-1', 'Test\n\n/Users/andrew/Downloads/report final 5397.pdf'),
+    ]);
+
+    expect(parsed.messageTexts).toEqual(['Test']);
+    expect(parsed.attachments).toEqual([
+      {
+        type: 'file-reference',
+        path: '/Users/andrew/Downloads/report final 5397.pdf',
+        isDirectory: false,
+      },
+    ]);
+  });
+
+  it('keeps slash-containing prose as text when whitespace touches the slash', () => {
+    const parsed = parseUserMessageContent([textPart('text-1', 'Use /help')]);
+
+    expect(parsed.messageTexts).toEqual(['Use /help']);
+    expect(parsed.attachments).toEqual([]);
+  });
+
+  it('treats relative folder references as attachments', () => {
+    const parsed = parseUserMessageContent([textPart('text-1', 'See that\n\nsrc/')]);
+
+    expect(parsed.messageTexts).toEqual(['See that']);
+    expect(parsed.attachments).toEqual([
+      {
+        type: 'file-reference',
+        path: 'src/',
+        isDirectory: true,
+      },
+    ]);
+  });
+
+  it('renders extracted attachment lines from mixed user text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-attachment'),
+          parts: [
+            textPart(
+              'text-inline-attachment',
+              'Test\n\n/Users/andrew/Downloads/ПД Оккервиль ЛСТ Квартплата 5397.pdf'
+            ),
+          ],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.message-attachments .chip-label')?.textContent).toBe(
+      'ПД Оккервиль ЛСТ Квартплата 5397.pdf'
+    );
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe('Test');
+  });
+
+  it('keeps inline mentions in message text while hiding duplicated attachment refs', () => {
+    const parsed = parseUserMessageContent([
+      textPart('text-1', 'Test @README.md and @preview.html'),
+      textPart('text-2', 'README.md'),
+      textPart('text-3', 'preview.html'),
+    ]);
+
+    expect(parsed.messageTexts).toEqual(['Test @README.md and @preview.html']);
+    expect(parsed.attachments).toEqual([
+      {
+        type: 'file-reference',
+        path: 'README.md',
+        isDirectory: false,
+      },
+      {
+        type: 'file-reference',
+        path: 'preview.html',
+        isDirectory: false,
+      },
+    ]);
+  });
+});
+
+describe('Message user rendering', () => {
+  it('does not render empty user message shells with no meaningful content', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-empty-user'),
+          parts: [
+            {
+              id: 'text-empty-user',
+              sessionID: 'session-1',
+              messageID: 'message-empty-user',
+              type: 'text',
+              text: '[Working directory: /repo]',
+            },
+          ],
+        }),
+      container!
+    );
+
+    expect(container?.textContent).toBe('');
+    expect(container?.querySelector('.user-message-empty')).toBeNull();
   });
 });
 
@@ -765,6 +981,31 @@ describe('Message assistant final answer rendering', () => {
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);
     expect(finalItem).toBeInstanceOf(HTMLDivElement);
     expect(finalItem?.textContent).toContain('Final answer.');
+  });
+
+  it('does not mark text as a dedicated final answer block when a visible tool call follows it', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-tool-after-text'),
+          parts: [
+            textPart('text-1', 'Selected excerpt'),
+            toolPart('tool-1', {
+              status: 'completed',
+              input: { command: 'pwd' },
+              output: '/workspace',
+              title: 'Inspect cwd',
+              time: { start: 1, end: 2 },
+              metadata: {},
+            }),
+          ],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-header')).toBeInstanceOf(HTMLButtonElement);
   });
 
   it('renders changed files outside the assistant response block', async () => {

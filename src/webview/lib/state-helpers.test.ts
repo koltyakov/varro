@@ -115,6 +115,13 @@ describe('state helpers', () => {
     stateModule.persistActiveSessionId('session-1');
     expect(stateModule.getPersistedActiveSessionId()).toBe('session-1');
 
+    stateModule.persistLastOpenedView({ type: 'session', sessionId: 'session-1' });
+    expect(stateModule.getPersistedLastOpenedView()).toEqual({
+      type: 'session',
+      sessionId: 'session-1',
+      timestamp: 1_000,
+    });
+
     stateModule.markSessionSeen('session-1');
     stateModule.markSessionSeen('session-2');
     stateModule.setState('activeSessionId', 'session-1');
@@ -372,15 +379,16 @@ describe('state helpers', () => {
       lineRanges: [{ startLine: 8, endLine: 9 }],
     });
     expect(stateModule.state.droppedFiles).toEqual([
-      {
+      expect.objectContaining({
         path: '/repo/a.ts',
         relativePath: 'a.ts',
         type: 'file',
+        attachmentSequence: expect.any(Number),
         lineRanges: [
           { startLine: 2, endLine: 4 },
           { startLine: 8, endLine: 9 },
         ],
-      },
+      }),
     ]);
 
     stateModule.removeContextFile('/repo/a.ts');
@@ -400,7 +408,12 @@ describe('state helpers', () => {
       },
     ]);
     expect(stateModule.state.droppedFiles).toEqual([
-      { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+      expect.objectContaining({
+        path: '/repo/a.ts',
+        relativePath: 'a.ts',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      }),
     ]);
 
     stateModule.clearContextFiles();

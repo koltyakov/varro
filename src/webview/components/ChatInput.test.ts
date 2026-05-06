@@ -7,8 +7,11 @@ import {
   ChatInput,
   getActiveCompletion,
   getCompletionSelection,
+  getMentionInsertionTrailingSpace,
+  getLeadingSlashCommand,
   getMentionCompletionItems,
   parseDroppedText,
+  getInlineInsertionSuffix,
   shouldRequestMentionFileSearch,
   shouldPadInlineInsertion,
   isToolbarControlCompacted,
@@ -17,6 +20,7 @@ import {
 } from './ChatInput';
 import {
   state,
+  inputText,
   setIsLoading,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
@@ -26,9 +30,15 @@ import {
 } from '../lib/state';
 import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-limit-selection';
 
-const { abortSessionMock, continueInterruptedSessionMock, sendMessageMock } = vi.hoisted(() => ({
+const {
+  abortSessionMock,
+  continueInterruptedSessionMock,
+  runSlashCommandByNameMock,
+  sendMessageMock,
+} = vi.hoisted(() => ({
   abortSessionMock: vi.fn(async () => {}),
   continueInterruptedSessionMock: vi.fn(async () => {}),
+  runSlashCommandByNameMock: vi.fn(async () => true),
   sendMessageMock: vi.fn(async () => {}),
 }));
 
@@ -38,6 +48,7 @@ vi.mock('../hooks/useOpenCode', async () => {
     ...actual,
     abortSession: abortSessionMock,
     continueInterruptedSession: continueInterruptedSessionMock,
+    runSlashCommandByName: runSlashCommandByNameMock,
     sendMessage: sendMessageMock,
   };
 });
@@ -73,6 +84,7 @@ afterEach(() => {
   setState('messages', []);
   setState('sessions', []);
   setState('providers', []);
+  setState('allAgents', []);
   setState('providerDefaults', {});
   setState('selectedModel', null);
   setState('providerLimits', {});
@@ -86,6 +98,8 @@ afterEach(() => {
   setState('hiddenModels', []);
   __resetProviderLimitWindowSelectionsForTests();
   sendMessageMock.mockReset();
+  runSlashCommandByNameMock.mockReset();
+  runSlashCommandByNameMock.mockResolvedValue(true);
   abortSessionMock.mockReset();
   continueInterruptedSessionMock.mockReset();
 });
@@ -151,6 +165,15 @@ async function flushAsyncWork(count = 4) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
   }
+}
+
+function setCollapsedSelection(target: Node, offset: number) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.setStart(target, offset);
+  range.collapse(true);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
 }
 
 function availableProviderLimit(
@@ -646,7 +669,7 @@ describe('ChatInput', () => {
     );
     queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
-    expect(container?.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
+    expect(inputText()).toBe('');
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(container?.querySelector('.chat-queue-item')).not.toBeNull();
     expect(state.droppedFiles).toEqual([]);
@@ -655,9 +678,23 @@ describe('ChatInput', () => {
     expect(state.queuedMessages).toHaveLength(1);
     expect(state.queuedMessages[0]).toMatchObject({
       text: 'Follow up with context',
-      droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+      droppedFiles: [
+        {
+          path: '/repo/src/a.ts',
+          relativePath: 'src/a.ts',
+          type: 'file',
+          attachmentSequence: undefined,
+        },
+      ],
       clipboardImages: [
-        { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        {
+          id: 'img-1',
+          url: 'blob:1',
+          mime: 'image/png',
+          filename: 'img-1.png',
+          size: 10,
+          attachmentSequence: undefined,
+        },
       ],
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },
     });
@@ -706,6 +743,190 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('[title="Stop"]')).toBeNull();
     expect(container?.querySelector('[title="Add to queue (Enter)"]')).not.toBeNull();
+  });
+
+  it('stops the active response before sending from the busy send menu', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setInputText('Follow up after stopping');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const menuButton = container?.querySelector<HTMLButtonElement>('[title="More send options"]');
+    menuButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    const stopAndSendButton = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('Stop and Send')
+    );
+    stopAndSendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith('Follow up after stopping', { noReply: false });
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('runs a typed slash command with args on Enter', async () => {
+    setState('commands', [
+      {
+        name: 'test',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputText('/test --watch');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('runs a typed slash command with args from the send button', async () => {
+    setState('commands', [
+      {
+        name: 'test',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputText('/test --watch');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('uses a contenteditable rich composer instead of textarea', async () => {
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    expect(editor).not.toBeNull();
+    expect(editor?.getAttribute('contenteditable')).toBe('true');
+    expect(editor?.getAttribute('role')).toBe('textbox');
+  });
+
+  it('rehydrates pasted file mentions into context files', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    expect(editor).not.toBeNull();
+
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? 'Review @README.md and @docs/' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(state.droppedFiles).toEqual([
+      {
+        path: '/repo/README.md',
+        relativePath: 'README.md',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      },
+      {
+        path: '/repo/docs',
+        relativePath: 'docs',
+        type: 'directory',
+        attachmentSequence: expect.any(Number),
+      },
+    ]);
+    expect(inputText()).toBe('Review @README.md and @docs/');
+  });
+
+  it('strips pasted context reference lines while restoring them as attachments', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    expect(editor).not.toBeNull();
+
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) =>
+          type === 'text/plain'
+            ? 'Please review this\n\n[Selection from src/app.ts lines 3-5]\n[Active file: README.md]'
+            : '',
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(state.droppedFiles).toEqual([
+      {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+        lineRanges: [{ startLine: 3, endLine: 5 }],
+      },
+      {
+        path: '/repo/README.md',
+        relativePath: 'README.md',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      },
+    ]);
+    expect(inputText()).toBe('Please review this');
+  });
+
+  it('renders inline image chips without a remove button', async () => {
+    setState('clipboardImages', [
+      {
+        id: 'img-1',
+        url: 'data:image/png;base64,abc',
+        mime: 'image/png',
+        filename: 'Image',
+        size: 12,
+      },
+    ]);
+    setInputText('[Image]');
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
+    expect(container?.querySelector('.rich-composer .inline-chip-remove')).toBeNull();
   });
 
   it('updates the active Ralph run model and interrupts a usage-limit retry when switching models', async () => {
@@ -1207,6 +1428,22 @@ describe('getActiveCompletion', () => {
   });
 });
 
+describe('getLeadingSlashCommand', () => {
+  it('parses a leading slash command with optional arguments', () => {
+    expect(getLeadingSlashCommand('/test')).toEqual({ name: 'test', args: '' });
+    expect(getLeadingSlashCommand('/test --watch')).toEqual({ name: 'test', args: '--watch' });
+    expect(getLeadingSlashCommand('  /review branch  ')).toEqual({
+      name: 'review',
+      args: 'branch',
+    });
+  });
+
+  it('rejects slash commands that are not the whole trimmed input', () => {
+    expect(getLeadingSlashCommand('prefix /test')).toBeNull();
+    expect(getLeadingSlashCommand('')).toBeNull();
+  });
+});
+
 describe('getCompletionSelection', () => {
   it('confirms slash selections by invoking the command path', () => {
     expect(
@@ -1434,5 +1671,25 @@ describe('shouldPadInlineInsertion', () => {
     expect(shouldPadInlineInsertion(' ')).toBe(false);
     expect(shouldPadInlineInsertion('\n')).toBe(false);
     expect(shouldPadInlineInsertion(undefined)).toBe(false);
+  });
+
+  it('treats end-of-input as requiring a trailing separator for inline insertions', () => {
+    expect(getInlineInsertionSuffix('Look at this', 'Look at this'.length)).toBe(' ');
+    expect(getInlineInsertionSuffix('Look at this?', 12)).toBe(' ');
+    expect(getInlineInsertionSuffix('Look at this ', 'Look at this'.length)).toBe('');
+  });
+});
+
+describe('getMentionInsertionTrailingSpace', () => {
+  it('does not add a second trailing space when the mention value already has one', () => {
+    expect(getMentionInsertionTrailingSpace('@helper ', undefined)).toBe('');
+    expect(getMentionInsertionTrailingSpace('@README.md ', 'x')).toBe('');
+  });
+
+  it('adds a trailing space only when the mention is adjacent to non-whitespace', () => {
+    expect(getMentionInsertionTrailingSpace('@helper', undefined)).toBe(' ');
+    expect(getMentionInsertionTrailingSpace('@helper', 'x')).toBe(' ');
+    expect(getMentionInsertionTrailingSpace('@helper', ' ')).toBe('');
+    expect(getMentionInsertionTrailingSpace('@helper', '\n')).toBe('');
   });
 });

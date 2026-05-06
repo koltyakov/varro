@@ -155,6 +155,7 @@ export function ToolCall(props: {
   part: ToolPart;
   questionRequest?: QuestionRequest | null;
   permissionMatch?: ToolCallPermissionMatch | null;
+  lightweight?: boolean;
 }) {
   const tool = () => props.part;
   const expansionKey = () => getToolCallExpansionKey(tool());
@@ -299,10 +300,11 @@ export function ToolCall(props: {
         statusClass={statusClass()}
         title={title()}
         preview={preview()}
-        expanded={expanded()}
+        expanded={expanded() && !props.lightweight}
         toggleExpand={toggleExpand}
         inputEntries={inputEntries()}
         truncatedOutput={truncatedOutput()}
+        lightweight={props.lightweight}
       />
     );
   };
@@ -549,6 +551,7 @@ function GenericToolCall(props: {
   toggleExpand: () => void;
   inputEntries: Array<[string, unknown]>;
   truncatedOutput: string;
+  lightweight?: boolean;
 }) {
   const openFile = (path: string) => {
     postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
@@ -580,6 +583,10 @@ function GenericToolCall(props: {
     if (isTask()) return taskResult();
     return { label: 'result', value: props.truncatedOutput || '(no output)' };
   };
+  const completedDurationMs = () => {
+    if (props.state.status !== 'completed') return null;
+    return getDisplayedCompletedToolDurationMs(props.tool.tool, props.state as ToolStateCompleted);
+  };
 
   const bodyId = createUniqueId();
   return (
@@ -594,12 +601,7 @@ function GenericToolCall(props: {
         <span class={`tool-status-dot ${props.statusClass}`} />
         <span class="tool-invocation-title">{props.title}</span>
         <Show when={props.state.status === 'completed'}>
-          <span class="tool-invocation-duration">
-            {formatDuration(
-              (props.state as ToolStateCompleted).time.end -
-                (props.state as ToolStateCompleted).time.start
-            )}
-          </span>
+          <span class="tool-invocation-duration">{formatDuration(completedDurationMs() || 0)}</span>
         </Show>
         <Show when={props.state.status === 'error'}>
           <span class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}`}>
@@ -780,6 +782,73 @@ function StructuredToolCard(props: {
       </Show>
     </div>
   );
+}
+
+function getDisplayedCompletedToolDurationMs(toolName: string, state: ToolStateCompleted): number {
+  const recordedDurationMs = Math.max(0, state.time.end - state.time.start);
+  const reportedDurationMs =
+    normalizeToolName(toolName) === 'bash'
+      ? extractCommandReportedDurationMs(state.output || '')
+      : null;
+
+  if (
+    reportedDurationMs !== null &&
+    reportedDurationMs >= 1000 &&
+    reportedDurationMs > Math.max(recordedDurationMs * 10, 250)
+  ) {
+    return reportedDurationMs;
+  }
+
+  return recordedDurationMs;
+}
+
+function extractCommandReportedDurationMs(output: string): number | null {
+  const lines = output.split(/\r?\n/).toReversed();
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const summaryMatch = trimmed.match(
+      /^(?:\d+\s+)?(?:passed|failed|skipped|todo|flaky|timed out)(?:[\s,].*)?\(([\d.]+(?:ms|s|m|h))\)$/i
+    );
+    if (summaryMatch) {
+      return parseDurationTokenMs(summaryMatch[1]);
+    }
+
+    const doneMatch = trimmed.match(/\bDone in\s+([\d.]+(?:ms|s|m|h))\.?$/i);
+    if (doneMatch) {
+      return parseDurationTokenMs(doneMatch[1]);
+    }
+
+    const durationMatch = trimmed.match(/^Duration\s+([\d.]+(?:ms|s|m|h))$/i);
+    if (durationMatch) {
+      return parseDurationTokenMs(durationMatch[1]);
+    }
+  }
+
+  return null;
+}
+
+function parseDurationTokenMs(token: string): number | null {
+  const match = token.trim().match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/i);
+  if (!match) return null;
+
+  const value = Number.parseFloat(match[1]);
+  if (!Number.isFinite(value)) return null;
+
+  switch (match[2].toLowerCase()) {
+    case 'ms':
+      return Math.round(value);
+    case 's':
+      return Math.round(value * 1000);
+    case 'm':
+      return Math.round(value * 60 * 1000);
+    case 'h':
+      return Math.round(value * 60 * 60 * 1000);
+    default:
+      return null;
+  }
 }
 
 function formatDuration(ms: number): string {

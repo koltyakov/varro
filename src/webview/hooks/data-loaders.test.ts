@@ -8,10 +8,12 @@ import {
   loadAgentsWithDependencies,
   loadCommandsWithDependencies,
   loadMcpsWithDependencies,
+  loadProviderAuthMethodsWithDependencies,
   loadProvidersWithDependencies,
   loadQuestionsWithDependencies,
   loadRecycleBinWithDependencies,
   loadSessionsWithDependencies,
+  loadWorkspaceStatusesWithDependencies,
   refreshProviderLimitWithDependencies,
 } from './data-loaders';
 
@@ -252,6 +254,38 @@ describe('data loaders', () => {
     expect(applySessions).toHaveBeenCalled();
     expect(setRecycleBinEntries).toHaveBeenCalled();
     expect(setProviderLimit).toHaveBeenCalledWith('openai', 'gpt-5', limit);
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('loads provider auth methods and workspace statuses', async () => {
+    const setProviderAuthMethods = vi.fn();
+    const setWorkspaceStatuses = vi.fn();
+    const logError = vi.fn();
+
+    await loadProviderAuthMethodsWithDependencies(
+      {
+        listProviderAuthMethods: async () => ({
+          openai: [{ type: 'oauth', label: 'Browser login' }],
+        }),
+        setProviderAuthMethods,
+      },
+      logError
+    );
+
+    await loadWorkspaceStatusesWithDependencies(
+      {
+        listWorkspaceStatuses: async () => [{ workspaceID: 'ws-1', status: 'connected' }],
+        setWorkspaceStatuses,
+      },
+      logError
+    );
+
+    expect(setProviderAuthMethods).toHaveBeenCalledWith({
+      openai: [{ type: 'oauth', label: 'Browser login' }],
+    });
+    expect(setWorkspaceStatuses).toHaveBeenCalledWith([
+      { workspaceID: 'ws-1', status: 'connected' },
+    ]);
     expect(logError).not.toHaveBeenCalled();
   });
 

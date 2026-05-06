@@ -231,7 +231,7 @@ describe('connection-bootstrap helpers', () => {
     expect(selectSession).not.toHaveBeenCalled();
   });
 
-  it('restores the only session when it matches the persisted active session on startup', async () => {
+  it('restores the only primary session on startup', async () => {
     const callOrder: string[] = [];
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async (sessionId: string) => {
@@ -250,7 +250,7 @@ describe('connection-bootstrap helpers', () => {
           callOrder.push('hydrateSessionStatuses');
         },
         getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => 'session-1',
+        getPersistedActiveSessionId: () => null,
         getSessionCount: () => 1,
         getOnlyPrimarySessionId: () => 'session-1',
         selectSession,
@@ -278,7 +278,147 @@ describe('connection-bootstrap helpers', () => {
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
   });
 
-  it('restores the only primary session when child sessions also exist', async () => {
+  it('restores the only primary session when the last active session marker is stale', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => {});
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => {}),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => 'session-1',
+        getPersistedLastOpenedView: () => ({
+          type: 'session',
+          sessionId: 'session-1',
+          timestamp: 1_000_000,
+        }),
+        getSessionCount: () => 1,
+        getOnlyPrimarySessionId: () => 'session-1',
+        hasSession: () => true,
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_000 + 10 * 60 * 1000,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(setShowSessionPicker).toHaveBeenCalledWith(false);
+    expect(selectSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('restores a recent active session on startup', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => {});
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => {}),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => 'session-1',
+        getPersistedLastOpenedView: () => ({
+          type: 'session',
+          sessionId: 'session-1',
+          timestamp: 1_000_000,
+        }),
+        getSessionCount: () => 2,
+        getOnlyPrimarySessionId: () => null,
+        hasSession: (sessionId) => sessionId === 'session-1',
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_000,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(setShowSessionPicker).toHaveBeenCalledWith(false);
+    expect(selectSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('opens the sessions list when that was the recent startup fallback', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => {});
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => {}),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => null,
+        getPersistedLastOpenedView: () => ({ type: 'sessions-list', timestamp: 1_000_000 }),
+        getSessionCount: () => 2,
+        getOnlyPrimarySessionId: () => null,
+        hasSession: () => true,
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_000 + 1_000,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(setShowSessionPicker).toHaveBeenCalledWith(true);
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
+  it('opens the sessions list when the last active session is stale and multiple sessions exist', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => {});
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => {}),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => 'session-1',
+        getPersistedLastOpenedView: () => ({
+          type: 'session',
+          sessionId: 'session-1',
+          timestamp: 1_000_000,
+        }),
+        getSessionCount: () => 2,
+        getOnlyPrimarySessionId: () => 'session-1',
+        hasSession: () => true,
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_000 + 10 * 60 * 1000,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(setShowSessionPicker).toHaveBeenCalledWith(true);
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
+  it('opens the sessions list when child sessions exist alongside the only primary session', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});
 
@@ -304,11 +444,11 @@ describe('connection-bootstrap helpers', () => {
       }
     );
 
-    expect(setShowSessionPicker).toHaveBeenCalledWith(false);
-    expect(selectSession).toHaveBeenCalledWith('session-1');
+    expect(setShowSessionPicker).toHaveBeenCalledWith(true);
+    expect(selectSession).not.toHaveBeenCalled();
   });
 
-  it('opens the sessions list when the only primary session was not the persisted active session', async () => {
+  it('opens the sessions list when child sessions exist even if another session was active previously', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});
 
@@ -327,6 +467,42 @@ describe('connection-bootstrap helpers', () => {
         recoverInterruptedSessions: vi.fn(async () => {}),
         setInitialized: vi.fn(),
         setError: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(setShowSessionPicker).toHaveBeenCalledWith(true);
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
+  it('opens the sessions list when multiple primary sessions exist and the recent session is stale', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => {});
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => {}),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => 'session-1',
+        getPersistedLastOpenedView: () => ({
+          type: 'session',
+          sessionId: 'session-1',
+          timestamp: 1_000_000,
+        }),
+        getSessionCount: () => 2,
+        getOnlyPrimarySessionId: () => null,
+        hasSession: () => true,
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_000 + 10 * 60 * 1000,
       },
       {
         next: () => 1,
@@ -477,6 +653,6 @@ describe('connection-bootstrap helpers', () => {
 
     await operations.initConnection();
 
-    expect(callOrder).toEqual(['health', 'load', 'hydrate', 'picker:true']);
+    expect(callOrder).toEqual(['health', 'load', 'hydrate', 'picker:false']);
   });
 });

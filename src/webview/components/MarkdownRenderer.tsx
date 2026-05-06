@@ -46,6 +46,7 @@ import { formatCommandDisplay } from '../lib/command-display';
 interface MarkdownProps {
   content: string;
   cacheByContent?: boolean;
+  lightweight?: boolean;
 }
 
 type ParseMarkdownOptions = {
@@ -889,6 +890,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
   // oxlint-disable-next-line no-unassigned-vars
   let tailRef: HTMLDivElement | undefined;
 
+  const lw = () => props.lightweight ?? false;
+
   let pendingContent: string | null = null;
   let rafId: number | null = null;
   let idleHighlightId: IdleWorkHandle | null = null;
@@ -899,12 +902,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let lastAppliedStableContent = initialSegments.stableContent;
   let lastAppliedTailContent = initialSegments.tailContent;
   let lastAppliedStableHtml = initialSegments.stableContent
-    ? parseMarkdown(initialSegments.stableContent, { cacheByContent: true })
+    ? parseMarkdown(initialSegments.stableContent, {
+        cacheByContent: true,
+        disablePathLinkify: lw(),
+        disableCodeHighlighting: lw(),
+      })
     : '';
   let lastAppliedTailHtml = parseMarkdown(initialSegments.tailContent, {
     cacheByContent: initialSegments.stableContent.length === 0 && !!props.cacheByContent,
-    disablePathLinkify: !props.cacheByContent,
-    disableCodeHighlighting: initialSegments.hasUnclosedFence,
+    disablePathLinkify: !props.cacheByContent || lw(),
+    disableCodeHighlighting: initialSegments.hasUnclosedFence || lw(),
   });
   let lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(lastAppliedStableHtml);
   let lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(lastAppliedTailHtml);
@@ -913,6 +920,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
 
   function scheduleDeferredTailHighlight(content: string, workspacePath: string) {
+    if (lw()) return;
     cancelIdleWork(idleHighlightId);
     idleHighlightId = requestIdleWork(() => {
       idleHighlightId = null;
@@ -942,6 +950,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       pendingContent = null;
       cancelIdleWork(idleHighlightId);
       idleHighlightId = null;
+      const isLightweight = lw();
       const segments = getMarkdownRenderSegments(
         content,
         !!props.cacheByContent,
@@ -958,9 +967,14 @@ export function MarkdownRenderer(props: MarkdownProps) {
         segments.stableContent.length === 0
           ? ''
           : stableContentChanged
-            ? parseMarkdown(segments.stableContent, { cacheByContent: true })
+            ? parseMarkdown(segments.stableContent, {
+                cacheByContent: true,
+                disablePathLinkify: isLightweight,
+                disableCodeHighlighting: isLightweight,
+              })
             : lastAppliedStableHtml;
       const shouldDeferTailHighlight =
+        !isLightweight &&
         hasProcessedStreamingUpdate &&
         tailContentChanged &&
         !props.cacheByContent &&
@@ -969,8 +983,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const nextTailHtml = tailContentChanged
         ? parseMarkdown(segments.tailContent, {
             cacheByContent: segments.stableContent.length === 0 && !!props.cacheByContent,
-            disablePathLinkify: !props.cacheByContent,
-            disableCodeHighlighting: segments.hasUnclosedFence || shouldDeferTailHighlight,
+            disablePathLinkify: !props.cacheByContent || isLightweight,
+            disableCodeHighlighting:
+              segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
           })
         : lastAppliedTailHtml;
 

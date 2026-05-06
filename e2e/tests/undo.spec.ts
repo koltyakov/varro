@@ -4,7 +4,7 @@ import { getE2EState } from './helpers';
 test('undo slash command reverts the latest assistant response', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=undo-session');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/undo');
   await expect(page.getByText('Undo the last assistant response')).toBeVisible();

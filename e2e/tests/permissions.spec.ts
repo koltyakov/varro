@@ -87,7 +87,7 @@ test('default permissions end up with a bash permission request for opencode ver
   await page.getByRole('button', { name: 'GLM 5.1' }).click();
   await expect(page.locator('.model-name-text')).toContainText('GLM 5.1');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('In default permissions mode, get opencode version using bash by running opencode --version.');
   await page.getByTitle('Send (Enter)').click();
 

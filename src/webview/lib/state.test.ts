@@ -539,6 +539,61 @@ describe('clipboard image placeholders', () => {
     expect(inputText()).toBe('_____ _____ _____');
     expect(state.clipboardImages).toEqual([]);
   });
+
+  it('ignores an exact duplicate clipboard image without evicting existing images', () => {
+    addClipboardImage({
+      id: 'img-1',
+      url: 'data:image/png;base64,one',
+      mime: 'image/png',
+      filename: 'image-1.png',
+      size: 1,
+    });
+    addClipboardImage({
+      id: 'img-2',
+      url: 'data:image/png;base64,two',
+      mime: 'image/png',
+      filename: 'image-2.png',
+      size: 1,
+    });
+    addClipboardImage({
+      id: 'img-3',
+      url: 'data:image/png;base64,three',
+      mime: 'image/png',
+      filename: 'image-3.png',
+      size: 1,
+    });
+    addClipboardImage({
+      id: 'img-4',
+      url: 'data:image/png;base64,four',
+      mime: 'image/png',
+      filename: 'image-4.png',
+      size: 1,
+    });
+    addClipboardImage({
+      id: 'img-5',
+      url: 'data:image/png;base64,five',
+      mime: 'image/png',
+      filename: 'image-5.png',
+      size: 1,
+    });
+
+    const didAddDuplicate = addClipboardImage({
+      id: 'img-duplicate',
+      url: 'data:image/png;base64,three',
+      mime: 'image/png',
+      filename: 'image-duplicate.png',
+      size: 1,
+    });
+
+    expect(didAddDuplicate).toBe(false);
+    expect(state.clipboardImages.map((image) => image.id)).toEqual([
+      'img-1',
+      'img-2',
+      'img-3',
+      'img-4',
+      'img-5',
+    ]);
+  });
 });
 
 describe('message lookup helpers', () => {

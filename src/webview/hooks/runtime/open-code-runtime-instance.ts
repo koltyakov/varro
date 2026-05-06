@@ -325,6 +325,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     loadAgents,
     loadCommands,
     loadProviders,
+    loadCompatibilityState,
     refreshProviderLimit,
     loadSessions,
     loadRecycleBin,
@@ -360,6 +361,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         loadAgents(),
         loadCommands(),
         loadProviders(),
+        loadCompatibilityState(),
         loadMcps(),
         loadQuestions(),
         loadRecycleBin(),
@@ -368,6 +370,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     hydrateSessionStatuses,
     getActiveSessionId: () => appStore.state.activeSessionId,
     getPersistedActiveSessionId: sessionStore.getPersistedActiveSessionId,
+    getPersistedLastOpenedView: sessionStore.getPersistedLastOpenedView,
     getSessionCount: () => appStore.state.sessions.length,
     getOnlyPrimarySessionId: () => {
       const primarySessions = appStore.state.sessions.filter((session) => !session.parentID);
@@ -640,6 +643,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function selectSession(id: string, options?: { markSeen?: boolean }) {
     await sessionSyncOperations.selectSession(id, options);
+    if (appStore.state.activeSessionId === id) {
+      sessionStore.persistLastOpenedView({ type: 'session', sessionId: id });
+    }
   }
 
   async function syncSessionMessages(sessionId: string) {
@@ -654,7 +660,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     title?: string,
     initialPermissionMode = permissionsStore.getPermissionModeForSession(null)
   ): Promise<string | null> {
-    return sessionManagementOperations.createSession(title, initialPermissionMode);
+    const sessionId = await sessionManagementOperations.createSession(title, initialPermissionMode);
+    if (sessionId) sessionStore.persistLastOpenedView({ type: 'session', sessionId });
+    return sessionId;
   }
 
   async function deleteSession(id: string) {

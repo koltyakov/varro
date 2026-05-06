@@ -4,6 +4,7 @@ import {
   isModelVisible,
   setModelVisible,
   setProviderVisible,
+  setState,
   setShowSettings,
   state,
 } from '../lib/state';
@@ -13,7 +14,7 @@ import {
   modelSupportsVariants,
   modelSupportsVision,
 } from '../lib/model-capabilities';
-import { openProviderSetup } from '../lib/provider-setup';
+import { beginProviderAuthorization, openProviderSetup } from '../lib/provider-setup';
 import { client } from '../lib/client';
 import { refreshRoutingState } from '../hooks/useOpenCode';
 import type { OpenCodeModelRouting } from '../types';
@@ -27,12 +28,20 @@ type ModelContextMenuState = {
   modelID: string;
 };
 
-export function SettingsPanel() {
+export function ModelsPanel() {
   const [query, setQuery] = createSignal('');
   const [routing, setRouting] = createSignal<OpenCodeModelRouting>(createEmptyRouting());
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [isSaving, setIsSaving] = createSignal(false);
   let bodyRef: HTMLDivElement | undefined;
+
+  const providerAuthEntries = createMemo(() =>
+    Object.entries(state.providerAuthMethods).filter(([, methods]) => methods.length > 0)
+  );
+
+  const workspaceStatusText = createMemo(() =>
+    state.workspaceStatuses.map((entry) => `${entry.workspaceID} (${entry.status})`).join(', ')
+  );
 
   const routableAgents = () => state.allAgents.filter((agent) => agent.mode === 'subagent');
 
@@ -79,6 +88,20 @@ export function SettingsPanel() {
     }
   }
 
+  async function loadCompatibilityState() {
+    try {
+      setState('providerAuthMethods', await client.config.providerAuth());
+    } catch {
+      setState('providerAuthMethods', {});
+    }
+
+    try {
+      setState('workspaceStatuses', await client.config.workspaceStatus());
+    } catch {
+      setState('workspaceStatuses', []);
+    }
+  }
+
   async function saveRouting(body: {
     target: 'small_model' | 'agent';
     providerID: string;
@@ -103,6 +126,7 @@ export function SettingsPanel() {
   onMount(() => {
     updateScrollbarInset();
     void loadRouting();
+    void loadCompatibilityState();
     if (!bodyRef) return;
     const observer = new ResizeObserver(() => updateScrollbarInset());
     observer.observe(bodyRef);
@@ -147,6 +171,29 @@ export function SettingsPanel() {
           </button>
         </div>
       </div>
+
+      <Show when={state.workspaceStatuses.length > 0 || providerAuthEntries().length > 0}>
+        <div class="settings-toolbar">
+          <div class="settings-toolbar-inner flex flex-wrap items-center gap-2">
+            <Show when={state.workspaceStatuses.length > 0}>
+              <div class="text-[11px] text-vscode-muted">Workspaces: {workspaceStatusText()}</div>
+            </Show>
+            <Show when={providerAuthEntries().length > 0}>
+              <button
+                type="button"
+                class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
+                onClick={() => {
+                  const first = providerAuthEntries()[0];
+                  if (!first) return;
+                  void beginProviderAuthorization(first[0], 0);
+                }}
+              >
+                Connect provider in browser
+              </button>
+            </Show>
+          </div>
+        </div>
+      </Show>
 
       <Show when={state.providers.length > 0}>
         <div class="settings-toolbar">

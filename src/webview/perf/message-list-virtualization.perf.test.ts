@@ -159,6 +159,18 @@ describe('MessageList virtualization perf guards', () => {
   });
 
   it('renders only a bounded row window for large transcripts', async () => {
+    // Principle: once the exact-height bootstrap completes, large transcripts must return to a
+    // bounded DOM window with virtual spacers. Rendering the whole transcript is a regression.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 24_000);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
+
     replaceMessages(
       Array.from({ length: 200 }, (_, index) => {
         const id = `message-${index}`;
@@ -172,5 +184,6 @@ describe('MessageList virtualization perf guards', () => {
     await settlePerfEffects();
 
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
+    expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
   });
 });

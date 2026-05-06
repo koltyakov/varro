@@ -226,4 +226,23 @@ describe('AttachmentStrip', () => {
     expect(enabledImageChip?.getAttribute('data-disabled')).toBe('false');
     expect(enabledImageChip?.getAttribute('data-title')).toBe('diagram.png');
   });
+
+  it('renders files and images in attachment sequence order', () => {
+    renderAttachmentStrip({
+      files: [
+        createDroppedFile({
+          path: '/workspace/src',
+          relativePath: 'src',
+          type: 'directory',
+          attachmentSequence: 2,
+        }),
+      ],
+      clipboardImages: [createClipboardImage({ attachmentSequence: 1 })],
+    });
+
+    expect(getChips().map((chip) => chip.getAttribute('data-label'))).toEqual([
+      'diagram.png',
+      'src',
+    ]);
+  });
 });

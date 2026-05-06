@@ -4,6 +4,13 @@ type SessionEntry = { info: Message; parts: Part[] };
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 
+type LastOpenedView =
+  | { type: 'new-session'; timestamp: number }
+  | { type: 'sessions-list'; timestamp: number }
+  | { type: 'session'; sessionId: string; timestamp: number };
+
+export const STARTUP_VIEW_RESTORE_WINDOW_MS = 10 * 60 * 1000;
+
 export type InterruptedSessionContinueBody = {
   parts: Array<{ type: 'text'; text: string }>;
   model?: { providerID: string; modelID: string };
@@ -116,13 +123,16 @@ export async function initConnectionWithDependencies(
     hydrateSessionStatuses(): Promise<void>;
     getActiveSessionId(): string | null;
     getPersistedActiveSessionId(): string | null;
-    getSessionCount(): number;
+    getPersistedLastOpenedView?(): LastOpenedView | null;
+    getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
+    hasSession(sessionId: string): boolean;
     selectSession(sessionId: string): Promise<void>;
     setShowSessionPicker(value: boolean): void;
     recoverInterruptedSessions(generation: number): Promise<void>;
     setInitialized(value: boolean): void;
     setError(message: string | null): void;
+    now?(): number;
   },
   generationRef: { next(): number; isCurrent(generation: number): boolean }
 ) {
@@ -138,18 +148,8 @@ export async function initConnectionWithDependencies(
     if (!generationRef.isCurrent(generation)) return;
 
     if (!deps.getActiveSessionId()) {
-      const onlyPrimarySessionId = deps.getOnlyPrimarySessionId();
-      const shouldRestoreSingleActiveSession =
-        onlyPrimarySessionId !== null &&
-        deps.getPersistedActiveSessionId() === onlyPrimarySessionId;
-
-      if (shouldRestoreSingleActiveSession) {
-        deps.setShowSessionPicker(false);
-        await deps.selectSession(onlyPrimarySessionId);
-        if (!generationRef.isCurrent(generation)) return;
-      } else {
-        deps.setShowSessionPicker(deps.getSessionCount() > 0);
-      }
+      await restoreStartupView(deps, generation, generationRef);
+      if (!generationRef.isCurrent(generation)) return;
     }
 
     await deps.recoverInterruptedSessions(generation);
@@ -160,6 +160,58 @@ export async function initConnectionWithDependencies(
     deps.setInitialized(false);
     deps.setError('Failed to connect to OpenCode server');
   }
+}
+
+async function restoreStartupView(
+  deps: {
+    getPersistedActiveSessionId(): string | null;
+    getPersistedLastOpenedView?(): LastOpenedView | null;
+    getSessionCount?(): number;
+    getOnlyPrimarySessionId(): string | null;
+    hasSession(sessionId: string): boolean;
+    selectSession(sessionId: string): Promise<void>;
+    setShowSessionPicker(value: boolean): void;
+    now?(): number;
+  },
+  generation: number,
+  generationRef: { isCurrent(generation: number): boolean }
+) {
+  const sessionCount = deps.getSessionCount?.() ?? 0;
+  const lastOpenedView = deps.getPersistedLastOpenedView?.() ?? null;
+
+  if (
+    lastOpenedView?.type === 'session' &&
+    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS &&
+    deps.hasSession(lastOpenedView.sessionId)
+  ) {
+    deps.setShowSessionPicker(false);
+    await deps.selectSession(lastOpenedView.sessionId);
+    return;
+  }
+
+  if (
+    lastOpenedView?.type === 'sessions-list' &&
+    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS
+  ) {
+    deps.setShowSessionPicker(true);
+    return;
+  }
+
+  const onlyPrimarySessionId = deps.getOnlyPrimarySessionId();
+  if (sessionCount === 1 && onlyPrimarySessionId && deps.hasSession(onlyPrimarySessionId)) {
+    deps.setShowSessionPicker(false);
+    await deps.selectSession(onlyPrimarySessionId);
+    return;
+  }
+
+  if (!generationRef.isCurrent(generation)) return;
+
+  if (sessionCount > 0) {
+    deps.setShowSessionPicker(true);
+    return;
+  }
+
+  deps.setShowSessionPicker(false);
 }
 
 export function ensureConnectionInitializedWithDependencies(deps: {
@@ -181,7 +233,8 @@ export function createConnectionBootstrapOperations(deps: {
   hydrateSessionStatuses(): Promise<void>;
   getActiveSessionId(): string | null;
   getPersistedActiveSessionId(): string | null;
-  getSessionCount(): number;
+  getPersistedLastOpenedView?(): LastOpenedView | null;
+  getSessionCount?(): number;
   getOnlyPrimarySessionId(): string | null;
   hasSession(sessionId: string): boolean;
   selectSession(sessionId: string): Promise<void>;
@@ -202,6 +255,7 @@ export function createConnectionBootstrapOperations(deps: {
   sendAsync(sessionId: string, body: InterruptedSessionContinueBody): Promise<void>;
   syncSession(sessionId: string): Promise<void>;
   recheckSessionStatus(sessionId: string): Promise<void>;
+  now?(): number;
 }) {
   const recoverInterruptedSessions = (generation: number) => {
     return recoverInterruptedSessionsWithDependencies(
@@ -242,13 +296,16 @@ export function createConnectionBootstrapOperations(deps: {
         hydrateSessionStatuses: deps.hydrateSessionStatuses,
         getActiveSessionId: deps.getActiveSessionId,
         getPersistedActiveSessionId: deps.getPersistedActiveSessionId,
+        getPersistedLastOpenedView: deps.getPersistedLastOpenedView,
         getSessionCount: deps.getSessionCount,
         getOnlyPrimarySessionId: deps.getOnlyPrimarySessionId,
+        hasSession: deps.hasSession,
         selectSession: deps.selectSession,
         setShowSessionPicker: deps.setShowSessionPicker,
         recoverInterruptedSessions,
         setInitialized: deps.setInitialized,
         setError: deps.setError,
+        now: deps.now || Date.now,
       },
       {
         next: deps.nextConnectionGeneration,

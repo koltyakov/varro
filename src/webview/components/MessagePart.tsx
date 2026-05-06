@@ -18,6 +18,7 @@ export function MessagePart(props: {
   streamedText?: string | null;
   questionRequest?: (typeof state.questions)[number] | null;
   permissionMatch?: ToolCallPermissionMatch | null;
+  lightweight?: boolean;
 }) {
   const p = () => props.part;
 
@@ -29,6 +30,7 @@ export function MessagePart(props: {
           <MarkdownRenderer
             content={props.streamedText ?? (part as TextPart).text}
             cacheByContent={!!props.messageInfo?.time.completed}
+            lightweight={props.lightweight}
           />
         );
       case 'tool':
@@ -37,6 +39,7 @@ export function MessagePart(props: {
             part={part}
             questionRequest={props.questionRequest}
             permissionMatch={props.permissionMatch}
+            lightweight={props.lightweight}
           />
         );
       case 'reasoning':

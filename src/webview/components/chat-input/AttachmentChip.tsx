@@ -1,5 +1,6 @@
 import { Show } from 'solid-js';
 import { DocumentIcon } from '../DocumentIcon';
+import { FolderIcon } from '../FolderIcon';
 
 export function AttachmentChip(props: {
   label: string;
@@ -47,9 +48,7 @@ export function AttachmentChip(props: {
         </svg>
       </Show>
       <Show when={props.icon === 'folder'}>
-        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M1.75 3A1.75 1.75 0 000 4.75v6.5C0 12.22.78 13 1.75 13h12.5c.97 0 1.75-.78 1.75-1.75V5.75C16 4.78 15.22 4 14.25 4H8.41L6.7 2.29A1 1 0 005.99 2H1.75z" />
-        </svg>
+        <FolderIcon class="chip-icon" width="12" height="12" />
       </Show>
       <Show when={props.icon === 'terminal'}>
         <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">

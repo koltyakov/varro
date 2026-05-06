@@ -4,6 +4,7 @@ import { resetDefaultAppState, setState } from '../lib/state';
 
 const postMessageMock = vi.hoisted(() => vi.fn());
 const openProviderSetupMock = vi.hoisted(() => vi.fn());
+const beginProviderAuthorizationMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock('../lib/bridge', () => ({
   postMessage: postMessageMock,
@@ -11,6 +12,7 @@ vi.mock('../lib/bridge', () => ({
 
 vi.mock('../lib/provider-setup', () => ({
   openProviderSetup: openProviderSetupMock,
+  beginProviderAuthorization: beginProviderAuthorizationMock,
 }));
 
 import { ServerStatus } from './ServerStatus';
@@ -95,6 +97,7 @@ describe('ServerStatus', () => {
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
     setState('providersLoaded', true);
     setState('providers', []);
+    setState('providerAuthMethods', { openai: [{ type: 'oauth', label: 'Browser login' }] });
 
     renderServerStatus();
 
@@ -103,14 +106,19 @@ describe('ServerStatus', () => {
 
     const buttons = Array.from(container?.querySelectorAll('button') || []);
     const setupButton = buttons.find((button) => button.textContent?.includes('Open terminal'));
+    const browserButton = buttons.find((button) =>
+      button.textContent?.includes('Open browser auth')
+    );
     const docsButton = buttons.find((button) =>
       button.textContent?.includes('Provider setup docs')
     );
 
     setupButton?.click();
+    browserButton?.click();
     docsButton?.click();
 
     expect(openProviderSetupMock).toHaveBeenCalledTimes(1);
+    expect(beginProviderAuthorizationMock).toHaveBeenCalledWith('openai');
     expect(postMessageMock).toHaveBeenCalledWith({
       type: 'vscode/open-external',
       payload: { url: 'https://opencode.ai/docs/providers' },

@@ -4,8 +4,8 @@ test('shows the degraded transport banner while keeping chat usable', async ({ p
   await page.goto('/e2e/harness/index.html?scenario=transport-degraded');
 
   await expect(page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' })).toBeVisible();
-  await expect(page.locator('textarea')).toBeVisible();
-  await expect(page.locator('textarea')).toBeEditable();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
 });
 
 test('clears the reconnect banner after live updates recover for an active session', async ({ page }) => {
@@ -27,7 +27,7 @@ test('clears the reconnect banner after live updates recover for an active sessi
   });
 
   await expect(banner).toBeVisible();
-  await expect(page.locator('textarea')).toBeEditable();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
 
   await page.evaluate(() => {
     window.postMessage(
@@ -64,7 +64,7 @@ test('keeps the active session visible through a maintenance reconnect cycle', a
 
   const banner = page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' });
   await expect(banner).toBeVisible();
-  await expect(page.locator('textarea')).toBeEditable();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
 
   await expect
     .poll(() => banner.count(), { timeout: 7_000 })
@@ -75,23 +75,23 @@ test('keeps the active session visible through a maintenance reconnect cycle', a
       exact: true,
     })
   ).toBeVisible();
-  await expect(page.locator('textarea')).toBeEditable();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
 });
 
 test('preserves composer input through a maintenance reconnect cycle', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=maintenance-reconnect');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Keep this draft while transport reconnects');
 
   const banner = page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' });
   await expect(banner).toBeVisible();
-  await expect(composer).toHaveValue('Keep this draft while transport reconnects');
+  await expect(composer).toHaveText('Keep this draft while transport reconnects');
 
   await expect
     .poll(() => banner.count(), { timeout: 7_000 })
     .toBe(0);
 
-  await expect(composer).toHaveValue('Keep this draft while transport reconnects');
+  await expect(composer).toHaveText('Keep this draft while transport reconnects');
   await expect(composer).toBeEditable();
 });

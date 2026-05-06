@@ -103,6 +103,8 @@ export function RalphDashboard(props: { sessionId: string }) {
                     <span class="ralph-dashboard-plan" title={activeRun().config.planDocPath}>
                       {planLabel(activeRun().config.planDocPath)}
                     </span>
+                  </div>
+                  <div class="ralph-dashboard-header-right">
                     <span
                       class={`ralph-dashboard-status ralph-dashboard-status-${activeRun().status}`}
                     >
@@ -118,8 +120,6 @@ export function RalphDashboard(props: { sessionId: string }) {
                         </span>
                       )}
                     </Show>
-                  </div>
-                  <div class="ralph-dashboard-header-right">
                     <Show when={isRunning()}>
                       <button
                         type="button"

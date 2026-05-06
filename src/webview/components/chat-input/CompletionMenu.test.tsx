@@ -33,6 +33,19 @@ const fileItem: CompletionItem = {
   },
 };
 
+const directoryItem: CompletionItem = {
+  key: 'file-docs',
+  type: 'file',
+  label: 'docs',
+  detail: 'Folder',
+  value: '@docs/',
+  file: {
+    path: '/workspace/docs',
+    relativePath: 'docs',
+    type: 'directory',
+  },
+};
+
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
@@ -128,7 +141,7 @@ describe('CompletionMenu', () => {
     expect(container?.querySelectorAll('button')).toHaveLength(0);
   });
 
-  it('scrolls the selected item into view and enables marquee overflow for files', async () => {
+  it('scrolls the selected item into view and enables marquee overflow only on hover for files', async () => {
     vi.spyOn(HTMLButtonElement.prototype, 'offsetTop', 'get').mockImplementation(
       function (this: HTMLButtonElement) {
         return this.textContent?.includes('/plan') ? 0 : 60;
@@ -173,6 +186,7 @@ describe('CompletionMenu', () => {
     expect(menu?.scrollTop).toBe(40);
     expect(fileTitle?.className).toContain('marquee');
     expect(fileTitle?.style.getPropertyValue('--marquee-distance')).toBe('100px');
+    expect(fileTitle?.className).not.toContain('selected');
 
     if (!menu) {
       throw new Error('Expected completion menu to render');
@@ -187,5 +201,20 @@ describe('CompletionMenu', () => {
     cleanup?.();
     cleanup = undefined;
     expect(disconnectObserverMock).toHaveBeenCalled();
+  });
+
+  it('renders a folder icon for directory mention completions', () => {
+    cleanup = render(
+      () =>
+        CompletionMenu({
+          items: [directoryItem],
+          selectedIndex: 0,
+          onSelect: vi.fn(),
+        }),
+      container!
+    );
+
+    const icon = container?.querySelector('.composer-completion-icon svg');
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 16 16');
   });
 });

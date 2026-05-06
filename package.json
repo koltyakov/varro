@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.15.2",
+  "version": "0.16.1",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -44,7 +44,7 @@
     "vscode:install": "rm -f varro-*.vsix && npm run package && code --install-extension varro-*.vsix"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.14.25",
+    "@opencode-ai/sdk": "^1.14.39",
     "dompurify": "^3.4.1",
     "highlight.js": "11.11.1",
     "marked": "18.0.2",

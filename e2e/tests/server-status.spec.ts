@@ -93,15 +93,28 @@ test('recovers when the first startup connection attempt loses the race', async 
 test('preserves composer input when startup recovers after a race', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=startup-race');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await expect(composer).toBeVisible();
-  await composer.fill('Keep this draft through startup recovery');
 
   await expect(
     page.getByText('The second startup attempt connected and restored the session state.', {
       exact: true,
     })
   ).toBeVisible();
-  await expect(composer).toHaveValue('Keep this draft through startup recovery');
+
+  await composer.fill('Keep this draft through startup recovery');
+  await expect(composer).toHaveText('Keep this draft through startup recovery');
+
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'server/status',
+        payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
+      },
+      '*'
+    );
+  });
+
+  await expect(composer).toHaveText('Keep this draft through startup recovery');
   await expect(composer).toBeEditable();
 });

@@ -4,7 +4,7 @@ import { getE2EState } from './helpers';
 test('shows the drop overlay when a drag enters and hides on dragleave', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await page.evaluate(() => {
     const event = new DragEvent('dragenter', { bubbles: true, cancelable: true });
@@ -25,7 +25,7 @@ test('shows the drop overlay when a drag enters and hides on dragleave', async (
 test('displays files received from files/dropped in the attachment strip', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await page.evaluate(() => {
     window.postMessage(
@@ -47,7 +47,7 @@ test('displays files received from files/dropped in the attachment strip', async
 test('includes dropped file references in the prompt body', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await page.evaluate(() => {
     window.postMessage(
@@ -63,7 +63,7 @@ test('includes dropped file references in the prompt body', async ({ page }) => 
 
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'utils.ts' })).toBeVisible();
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Check the utilities');
   await page.keyboard.press('Enter');
 
@@ -91,7 +91,7 @@ test('includes dropped file references in the prompt body', async ({ page }) => 
 test('removes individual dropped files via the chip remove button', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await page.evaluate(() => {
     window.postMessage(

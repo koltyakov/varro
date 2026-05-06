@@ -16,11 +16,13 @@ export function shouldPruneEmptySession(
     needsAttention: (sessionId: string) => boolean;
     isFailed: (sessionId: string) => boolean;
     isPlanReady: (session: Session) => boolean;
+    preserve?: boolean;
     statusType?: string;
   }
 ) {
   if (!isEmptySession(session)) return false;
   if (Date.now() - session.time.updated < EMPTY_SESSION_PRUNE_GRACE_MS) return false;
+  if (options.preserve) return false;
   if (session.id === options.activeSessionId) return false;
   if (options.isQueued(session.id)) return false;
   if (options.isAwaitingInput(session.id)) return false;

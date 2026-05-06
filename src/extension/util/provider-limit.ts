@@ -30,6 +30,11 @@ const PROVIDER_LIMIT_PROBE_BASES: Record<string, string> = {
   'github-copilot': 'https://api.githubcopilot.com',
 };
 
+const PROVIDER_LIMIT_PROBE_HOSTS: Record<string, string> = {
+  openai: 'api.openai.com',
+  'github-copilot': 'api.githubcopilot.com',
+};
+
 const DIRECT_WINDOW_DEFS: Array<{ key: string; label: string; unit: ProviderLimitUnit }> = [
   { key: 'requests', label: 'Requests', unit: 'requests' },
   { key: 'tokens', label: 'Tokens', unit: 'tokens' },
@@ -365,7 +370,26 @@ function buildDirectWindow(
 }
 
 function getProviderApiBaseUrl(provider: ProviderMetadata) {
-  return PROVIDER_LIMIT_PROBE_BASES[provider.id] || null;
+  const baseUrl = PROVIDER_LIMIT_PROBE_BASES[provider.id];
+  if (!baseUrl || !usesOfficialProviderApiHost(provider)) return null;
+  return baseUrl;
+}
+
+function usesOfficialProviderApiHost(provider: ProviderMetadata) {
+  const expectedHost = PROVIDER_LIMIT_PROBE_HOSTS[provider.id];
+  if (!expectedHost) return false;
+
+  for (const model of Object.values(provider.models)) {
+    const apiUrl = model.api?.url?.trim();
+    if (!apiUrl) continue;
+    try {
+      if (new URL(apiUrl).hostname !== expectedHost) return false;
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function resolveProviderAuthToken(

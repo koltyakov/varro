@@ -16,10 +16,12 @@ export type AssistantDialogSummaryInfo = {
 export type MessageRowSharedProps = {
   modelChangeMap: Map<string, string>;
   lastAssistantID: string | null;
+  nearViewport?: boolean;
   outerListVirtualized?: boolean;
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
+  highlightedAssistantMessageIds?: ReadonlySet<string>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
   observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
@@ -41,11 +43,16 @@ export function MessageRows(
   return <For each={props.messages}>{(msg) => <MessageRow msg={msg} {...props} />}</For>;
 }
 
-function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps) {
+export function MessageRow(
+  props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps
+) {
   let rowRef: HTMLDivElement | undefined;
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
+  const highlightFinalAnswer = () =>
+    props.highlightedAssistantMessageIds?.has(props.msg.info.id) ??
+    props.assistantDialogSummaryMap.has(props.msg.info.id);
   const streamingPartId = createMemo(() => {
     const partId = state.streamingPartId;
     if (!partId) return null;
@@ -87,8 +94,9 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
         info={props.msg.info}
         parts={props.msg.parts}
         isLastAssistant={props.msg.info.id === props.lastAssistantID}
+        nearViewport={props.nearViewport}
         outerListVirtualized={props.outerListVirtualized}
-        highlightFinalAnswer={props.assistantDialogSummaryMap.has(props.msg.info.id)}
+        highlightFinalAnswer={highlightFinalAnswer()}
         highlightPlanningAnswer={highlightPlanningAnswer()}
         previousTrailingFileEventSignature={
           props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null

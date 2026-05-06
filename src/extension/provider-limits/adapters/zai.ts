@@ -9,6 +9,7 @@ import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types
 const ZAI_QUOTA_ENDPOINT = 'https://api.z.ai/api/monitor/usage/quota/limit';
 const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 const ZAI_PROVIDER_IDS = new Set(['zai', 'zai-coding-plan']);
+const ZAI_MONTHLY_SEARCH_MODELS = new Set(['search-prime', 'web-reader', 'zread']);
 
 type ZaiPayloadResult =
   | { kind: 'available'; windows: ProviderLimitWindow[] }
@@ -156,19 +157,22 @@ function buildZaiWindow(
   const type = getString(limitRecord.type).toUpperCase();
   if (!type) return null;
 
-  const remaining = parseFiniteNumber(limitRecord.remaining);
+  const percent = clampPercent(parseFiniteNumber(limitRecord.percentage));
+  const currentValue = parseFiniteNumber(limitRecord.currentValue);
+  const explicitRemaining = parseFiniteNumber(limitRecord.remaining);
+  const usage = parseFiniteNumber(limitRecord.usage);
+  const limit =
+    usage ??
+    (currentValue != null && explicitRemaining != null ? currentValue + explicitRemaining : null);
+  const remaining = explicitRemaining ?? (percent != null ? Math.max(0, 100 - percent) : null);
   if (remaining == null) return null;
 
-  const currentValue = parseFiniteNumber(limitRecord.currentValue);
-  const limit =
-    parseFiniteNumber(limitRecord.usage) ??
-    (currentValue != null ? Math.max(currentValue + remaining, 0) : null);
-  const percent = clampPercent(parseFiniteNumber(limitRecord.percentage));
+  const descriptor = getZaiWindowDescriptor(type, limitRecord);
 
   return {
-    id: getZaiWindowID(type),
-    label: getZaiWindowLabel(type),
-    unit: type === 'TOKENS_LIMIT' ? 'tokens' : 'unknown',
+    id: descriptor.id,
+    label: descriptor.label,
+    unit: descriptor.unit,
     remaining,
     limit: limit != null && limit > 0 ? limit : null,
     resetAt: parseRateLimitResetAt(limitRecord.nextResetTime, checkedAt),
@@ -201,27 +205,39 @@ function findAliasedZaiAuthRecord(
   return null;
 }
 
-function getZaiWindowID(type: string) {
-  if (type === 'TOKENS_LIMIT') return 'tokens';
-  if (type === 'TIME_LIMIT') return 'time';
-  return (
-    type
-      .toLowerCase()
-      .replace(/_limit$/i, '')
-      .replace(/[^a-z0-9]+/g, '-') || 'limit'
-  );
-}
+function getZaiWindowDescriptor(type: string, limitRecord: Record<string, unknown>) {
+  if (type === 'TOKENS_LIMIT') {
+    return {
+      id: 'five_hour',
+      label: '5 Hours Quota',
+      unit: 'unknown' as const,
+    };
+  }
 
-function getZaiWindowLabel(type: string) {
-  if (type === 'TOKENS_LIMIT') return 'Tokens';
-  if (type === 'TIME_LIMIT') return 'Time';
-  return (
-    type
-      .toLowerCase()
-      .replace(/_+/g, ' ')
-      .trim()
-      .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit'
-  );
+  if (type === 'TIME_LIMIT' && isZaiMonthlySearchQuota(limitRecord)) {
+    return {
+      id: 'monthly_web_search_reader_zread',
+      label: 'Total Monthly Web Search / Reader / Zread Quota',
+      unit: 'unknown' as const,
+    };
+  }
+
+  if (type === 'TIME_LIMIT') return { id: 'time', label: 'Time', unit: 'unknown' as const };
+
+  return {
+    id:
+      type
+        .toLowerCase()
+        .replace(/_limit$/i, '')
+        .replace(/[^a-z0-9]+/g, '-') || 'limit',
+    label:
+      type
+        .toLowerCase()
+        .replace(/_+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit',
+    unit: 'unknown' as const,
+  };
 }
 
 function buildZaiApiErrorNote(code: number | null, message: string) {
@@ -233,6 +249,16 @@ function buildZaiApiErrorNote(code: number | null, message: string) {
 
 function formatNumeric(value: number) {
   return Number.isInteger(value) ? String(value) : String(value);
+}
+
+function isZaiMonthlySearchQuota(limitRecord: Record<string, unknown>) {
+  const usageDetails = Array.isArray(limitRecord.usageDetails) ? limitRecord.usageDetails : [];
+  if (usageDetails.length === 0) return false;
+
+  return usageDetails.some((detail) => {
+    const modelCode = getString(asRecord(detail)?.modelCode).toLowerCase();
+    return ZAI_MONTHLY_SEARCH_MODELS.has(modelCode);
+  });
 }
 
 function unsupportedProviderStatus(

@@ -3,7 +3,7 @@ import { getE2EState } from './helpers';
 
 test('context bar shows file with selection line range after context/update', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
-  await page.locator('textarea').waitFor();
+  await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
   await page.evaluate(() => {
     window.postMessage(
@@ -30,7 +30,7 @@ test('context bar shows file with selection line range after context/update', as
 
 test('prompt body includes selection reference from active editor', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
-  await page.locator('textarea').waitFor();
+  await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
   await page.evaluate(() => {
     window.postMessage(
@@ -53,7 +53,7 @@ test('prompt body includes selection reference from active editor', async ({ pag
 
   await expect(page.locator('[title*="L42-58"]')).toBeVisible();
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('Explain this function');
   await page.keyboard.press('Enter');
@@ -84,7 +84,7 @@ test('prompt body includes selection reference from active editor', async ({ pag
 
 test('updating selection range updates the context bar display', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
-  await page.locator('textarea').waitFor();
+  await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
   await page.evaluate(() => {
     window.postMessage(
@@ -132,7 +132,7 @@ test('updating selection range updates the context bar display', async ({ page }
 
 test('clearing selection shows active file without line range', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
-  await page.locator('textarea').waitFor();
+  await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
   await page.evaluate(() => {
     window.postMessage(

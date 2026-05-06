@@ -1,4 +1,4 @@
-import type { ServerEventPropertiesByName } from './opencode-types';
+import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
 import type { WebviewConfigUpdatePayload } from './provider-limit-config';
 
 export interface EditorContext {
@@ -30,6 +30,7 @@ export interface DroppedFile {
   relativePath: string;
   type: 'file' | 'directory';
   lineRanges?: ContextLineRange[];
+  attachmentSequence?: number;
 }
 
 export type PermissionMode = 'default' | 'full';
@@ -99,6 +100,14 @@ export type RecycleBinEntry = {
   sessions: RecycleBinSession[];
 };
 
+export type WorkspaceStatusEventSummary = {
+  latest?: {
+    type: 'workspace.ready' | 'workspace.failed';
+    message: string;
+  };
+  entries: WorkspaceStatusEntry[];
+};
+
 /**
  * `/varro/*` is Varro's extension-host API namespace on the shared `api/request`
  * transport. These paths are resolved locally by the extension and are never
@@ -112,6 +121,9 @@ export const VARRO_API_ENDPOINTS = {
   openCodeConfig: '/varro/opencode-config',
   openCodeConfigModelRouting: '/varro/opencode-config/model-routing',
   sessionTrash: '/varro/session-trash',
+  providerAuth: '/provider/auth',
+  providerAuthorize: '/provider',
+  workspaceStatus: '/experimental/workspace/status',
 } as const;
 
 export type { OpenCodeModelRoute, OpenCodeModelRouting } from './opencode-types';
@@ -137,6 +149,35 @@ export const SERVER_EVENT_NAMES = [
   'todo.updated',
   'mcp.tools.changed',
   'mcp.browser.open.failed',
+  'workspace.ready',
+  'workspace.failed',
+  'workspace.status',
+  'session.next.agent.switched',
+  'session.next.model.switched',
+  'session.next.prompted',
+  'session.next.synthetic',
+  'session.next.shell.started',
+  'session.next.shell.ended',
+  'session.next.step.started',
+  'session.next.step.ended',
+  'session.next.step.failed',
+  'session.next.text.started',
+  'session.next.text.delta',
+  'session.next.text.ended',
+  'session.next.reasoning.started',
+  'session.next.reasoning.delta',
+  'session.next.reasoning.ended',
+  'session.next.tool.input.started',
+  'session.next.tool.input.delta',
+  'session.next.tool.input.ended',
+  'session.next.tool.called',
+  'session.next.tool.progress',
+  'session.next.tool.success',
+  'session.next.tool.failed',
+  'session.next.retried',
+  'session.next.compaction.started',
+  'session.next.compaction.delta',
+  'session.next.compaction.ended',
 ] as const;
 
 const SERVER_EVENT_NAME_SET = new Set<string>(SERVER_EVENT_NAMES);

@@ -268,6 +268,12 @@ function isDroppedFile(value: unknown): value is DroppedFile {
   if (!record) return false;
   if (typeof record.path !== 'string' || typeof record.relativePath !== 'string') return false;
   if (record.type !== 'file' && record.type !== 'directory') return false;
+  if (
+    record.attachmentSequence !== undefined &&
+    (typeof record.attachmentSequence !== 'number' || !Number.isFinite(record.attachmentSequence))
+  ) {
+    return false;
+  }
   if (record.lineRanges === undefined) return true;
   return Array.isArray(record.lineRanges) && record.lineRanges.every(isLineRange);
 }

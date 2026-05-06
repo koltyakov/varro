@@ -490,6 +490,55 @@ export type TodoUpdatedProperties = {
   todos: unknown;
 };
 
+export type WorkspaceConnectionState = 'connected' | 'connecting' | 'disconnected' | 'error';
+
+export type WorkspaceStatusEntry = {
+  workspaceID: string;
+  status: WorkspaceConnectionState;
+};
+
+export type ProviderAuthPromptText = {
+  type: 'text';
+  key: string;
+  message: string;
+  placeholder?: string;
+  when?: {
+    key: string;
+    op: 'eq' | 'neq';
+    value: string;
+  };
+};
+
+export type ProviderAuthPromptSelect = {
+  type: 'select';
+  key: string;
+  message: string;
+  options: Array<{
+    label: string;
+    value: string;
+    hint?: string;
+  }>;
+  when?: {
+    key: string;
+    op: 'eq' | 'neq';
+    value: string;
+  };
+};
+
+export type ProviderAuthMethod = {
+  type: 'oauth' | 'api';
+  label: string;
+  prompts?: Array<ProviderAuthPromptText | ProviderAuthPromptSelect>;
+};
+
+export type ProviderAuthMethodsByProvider = Record<string, ProviderAuthMethod[]>;
+
+export type ProviderAuthAuthorization = {
+  url: string;
+  method: 'auto' | 'code';
+  instructions: string;
+};
+
 export type ServerEventPropertiesByName = {
   'session.created': { info: SessionEventInfo };
   'session.updated': { info: SessionEventInfo };
@@ -511,4 +560,94 @@ export type ServerEventPropertiesByName = {
   'todo.updated': TodoUpdatedProperties;
   'mcp.tools.changed': Record<string, unknown>;
   'mcp.browser.open.failed': Record<string, unknown>;
+  'workspace.ready': { name?: string };
+  'workspace.failed': { message?: string };
+  'workspace.status': WorkspaceStatusEntry;
+  'session.next.agent.switched': { timestamp?: number; sessionID: string; agent: string };
+  'session.next.model.switched': {
+    timestamp?: number;
+    sessionID: string;
+    model: { id?: string; providerID?: string; variant?: string };
+  };
+  'session.next.prompted': {
+    timestamp?: number;
+    sessionID: string;
+    prompt?: Record<string, unknown>;
+  };
+  'session.next.synthetic': { timestamp?: number; sessionID: string; text?: string };
+  'session.next.shell.started': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    command?: string;
+  };
+  'session.next.shell.ended': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    output?: string;
+  };
+  'session.next.step.started': {
+    timestamp?: number;
+    sessionID: string;
+    agent?: string;
+    model?: { id?: string; providerID?: string; variant?: string };
+    snapshot?: string;
+  };
+  'session.next.step.ended': {
+    timestamp?: number;
+    sessionID: string;
+    finish?: string;
+    cost?: number;
+    tokens?: Record<string, unknown>;
+    snapshot?: string;
+  };
+  'session.next.step.failed': {
+    timestamp?: number;
+    sessionID: string;
+    error?: { type?: string; message?: string };
+  };
+  'session.next.text.started': { timestamp?: number; sessionID: string };
+  'session.next.text.delta': { timestamp?: number; sessionID: string; text?: string };
+  'session.next.text.ended': { timestamp?: number; sessionID: string };
+  'session.next.reasoning.started': { timestamp?: number; sessionID: string };
+  'session.next.reasoning.delta': { timestamp?: number; sessionID: string; text?: string };
+  'session.next.reasoning.ended': { timestamp?: number; sessionID: string };
+  'session.next.tool.input.started': { timestamp?: number; sessionID: string; callID?: string };
+  'session.next.tool.input.delta': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    input?: string;
+  };
+  'session.next.tool.input.ended': { timestamp?: number; sessionID: string; callID?: string };
+  'session.next.tool.called': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    tool?: string;
+    title?: string;
+  };
+  'session.next.tool.progress': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    progress?: string;
+  };
+  'session.next.tool.success': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    output?: string;
+  };
+  'session.next.tool.failed': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    error?: string;
+  };
+  'session.next.retried': { timestamp?: number; sessionID: string; attempt?: number };
+  'session.next.compaction.started': { timestamp?: number; sessionID: string };
+  'session.next.compaction.delta': { timestamp?: number; sessionID: string; text?: string };
+  'session.next.compaction.ended': { timestamp?: number; sessionID: string };
 };

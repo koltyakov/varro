@@ -4,7 +4,7 @@ import { getE2EState } from './helpers';
 test('slash /export sends session/export message for active session', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=restored-session');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/export');
   await expect(page.getByText('Export the current session')).toBeVisible();
@@ -25,7 +25,7 @@ test('slash /export sends session/export message for active session', async ({ p
 test('/export does nothing when no session is active', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/export');
   await expect(page.getByText('Export the current session')).toBeVisible();
@@ -46,7 +46,7 @@ test('/export sends correct session after switching sessions', async ({ page }) 
 
   await page.locator('.session-item').filter({ hasText: 'Completed sticky cleanup' }).click();
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/export');
   await expect(page.getByText('Export the current session')).toBeVisible();

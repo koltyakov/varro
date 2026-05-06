@@ -3,6 +3,7 @@ import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
 import { sessionStore } from '../lib/stores/session-store';
 import { uiStore } from '../lib/stores/ui-store';
+import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { syncSessionMarkersForWorkspace } from '../lib/state';
 import { normalizeProjectPath } from './session/session-lifecycle';
 
@@ -70,6 +71,9 @@ export function createMountBridgeOperations(deps: {
         requestOpenAttentionSessions: uiStore.requestOpenAttentionSessions,
         abortSession: deps.abortSession,
         refreshMcps: deps.refreshMcps,
+        setWorkspaceStatusSummary: (summary) =>
+          appStore.setState('workspaceStatusSummary', summary),
+        setWorkspaceStatuses: (entries) => appStore.setState('workspaceStatuses', entries),
       },
       msg
     );
@@ -106,6 +110,13 @@ export function handleExtensionMessageWithDependencies(
     requestOpenAttentionSessions(): void;
     abortSession(): void;
     refreshMcps(): void;
+    setWorkspaceStatusSummary(summary: ReturnType<typeof getWorkspaceStatusEventSummary>): void;
+    setWorkspaceStatuses(
+      payload: {
+        workspaceID: string;
+        status: 'connected' | 'connecting' | 'disconnected' | 'error';
+      }[]
+    ): void;
   },
   msg: ExtensionMessage
 ) {
@@ -166,6 +177,15 @@ export function handleExtensionMessageWithDependencies(
       deps.abortSession();
       break;
     case 'server/event':
+      if (
+        msg.payload.type === 'workspace.ready' ||
+        msg.payload.type === 'workspace.failed' ||
+        msg.payload.type === 'workspace.status'
+      ) {
+        const summary = getWorkspaceStatusEventSummary();
+        deps.setWorkspaceStatusSummary(summary);
+        deps.setWorkspaceStatuses(summary.entries);
+      }
       if (
         msg.payload.type === 'mcp.tools.changed' ||
         msg.payload.type === 'mcp.browser.open.failed'

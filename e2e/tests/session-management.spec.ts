@@ -5,7 +5,7 @@ test('host new-session command creates and focuses a fresh session', async ({ pa
   await page.goto('/e2e/harness/index.html?scenario=new-session-command');
 
   await expect(page.locator('.chat-header-title-text').first()).toHaveText('Mock Session 2');
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await expect
     .poll(() =>
@@ -51,7 +51,7 @@ test('opens a filtered session with keyboard navigation', async ({ page }) => {
   await search.press('Enter');
 
   await expect(page.locator('.chat-header-title-text').first()).toHaveText('Gamma cleanup pass');
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 });
 
 test('wraps session keyboard focus from the end of the list', async ({ page }) => {

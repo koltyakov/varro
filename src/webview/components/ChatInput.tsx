@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import {
   state,
   inputText,
@@ -18,7 +18,7 @@ import {
   MAX_CLIPBOARD_IMAGES,
   showModelPicker,
   setShowModelPicker,
-  setShowSessionPicker,
+  setPersistentShowSessionPicker as setShowSessionPicker,
   composerFocusKey,
   removeClipboardImage,
   addContextFile,
@@ -80,17 +80,28 @@ import {
 } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
-import { getLeafPathName } from '../lib/path-display';
+import {
+  getClipboardImageAttachmentSequence,
+  getContextFileAttachmentSequence,
+} from '../lib/attachment-order';
+import {
+  getLeafPathName,
+  getWorkspaceRelativePath,
+  isAbsolutePath,
+  normalizePath,
+} from '../lib/path-display';
 import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
+  mergeContextFile,
+  parseSelectionReference,
 } from '../../shared/context-files';
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
 import { TodoList } from './TodoList';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
-import { ComposerArea } from './chat-input/ComposerArea';
+import { RichComposerArea, type RichComposerChip } from './chat-input/RichComposerArea';
 import { DropOverlay } from './chat-input/DropOverlay';
 import { QueuedMessages } from './chat-input/QueuedMessages';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
@@ -283,7 +294,7 @@ export function isToolbarControlCompacted(
 }
 
 export function ChatInput() {
-  let textareaRef: HTMLTextAreaElement | undefined;
+  let richEditorRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let inputFrameRef: HTMLDivElement | undefined;
   let permissionPickerRef: HTMLButtonElement | undefined;
@@ -357,9 +368,155 @@ export function ChatInput() {
   const explicitContextForActiveFile = () => hasExplicitContextForPath(files(), activeFile()?.path);
   const hasContext = () => !!activeFile() || !!selection() || !!terminalSelection();
 
-  const hasMentions = () => files().length > 0 || clipboardImages().length > 0;
-  const visibleFiles = () => files();
+  const currentModel = createMemo(() => {
+    const selected = resolveSelectedModel(
+      state.selectedModel,
+      state.providers,
+      state.providerDefaults
+    );
+    if (selected) {
+      const provider = state.providers.find((item) => item.id === selected.providerID);
+      const model = provider?.models[selected.modelID];
+      return {
+        providerID: selected.providerID,
+        modelID: selected.modelID,
+        variant: selected.variant || null,
+        providerName: provider?.name || selected.providerID,
+        modelName: model?.name || selected.modelID,
+        contextLimit: model?.limit?.context || null,
+      };
+    }
+
+    const latestAuto = getLatestAssistantMessageInfo(state.messages);
+    if (latestAuto) {
+      const provider = state.providers.find((item) => item.id === latestAuto.providerID);
+      const model = provider?.models[latestAuto.modelID];
+      return {
+        providerID: latestAuto.providerID,
+        modelID: latestAuto.modelID,
+        variant: latestAuto.variant || null,
+        providerName: provider?.name || latestAuto.providerID,
+        modelName: model?.name || latestAuto.modelID,
+        contextLimit: model?.limit?.context || null,
+      };
+    }
+
+    for (const provider of state.providers) {
+      const defaultModelID = state.providerDefaults[provider.id];
+      if (defaultModelID && provider.models[defaultModelID]) {
+        const model = provider.models[defaultModelID];
+        return {
+          providerID: provider.id,
+          modelID: model.id,
+          variant: null,
+          providerName: provider.name,
+          modelName: model.name,
+          contextLimit: model.limit?.context || null,
+        };
+      }
+    }
+
+    const firstProvider = state.providers[0];
+    if (firstProvider) {
+      const firstModel = Object.values(firstProvider.models)[0];
+      if (firstModel) {
+        return {
+          providerID: firstProvider.id,
+          modelID: firstModel.id,
+          variant: null,
+          providerName: firstProvider.name,
+          modelName: firstModel.name,
+          contextLimit: firstModel.limit?.context || null,
+        };
+      }
+    }
+
+    return {
+      providerID: null as string | null,
+      modelID: null as string | null,
+      variant: null as string | null,
+      providerName: '',
+      modelName: '',
+      contextLimit: null as number | null,
+    };
+  });
+
+  const hasMentions = () => visibleFiles().length > 0 || visibleClipboardImages().length > 0;
   const activeContextEnabled = () => getCurrentDocumentEnabled(state.activeSessionId);
+
+  const inlineChips = createMemo((): RichComposerChip[] => {
+    const chips: RichComposerChip[] = [];
+    const text = inputText();
+
+    for (const file of files()) {
+      const label = getLeafPathName(file.relativePath || file.path);
+      const marker = `@${file.relativePath || file.path}`;
+      if (text.includes(marker)) {
+        const lineRange = formatContextLineRanges(file.lineRanges);
+        const title = lineRange
+          ? `${file.relativePath || file.path} ${lineRange}`
+          : file.relativePath || file.path;
+        chips.push({
+          id: `file:${file.path}`,
+          type: 'mention-file',
+          label,
+          title,
+          detail: lineRange || undefined,
+          icon: file.type === 'directory' ? 'folder' : 'file',
+          textMarker: marker,
+        });
+      }
+    }
+
+    for (const image of clipboardImages()) {
+      const marker = `[${image.filename}]`;
+      if (text.includes(marker)) {
+        chips.push({
+          id: `img:${image.id}`,
+          type: 'image',
+          label: image.filename,
+          icon: 'image',
+          disabled: !currentModelSupportsVision(),
+          textMarker: marker,
+        });
+      }
+    }
+
+    for (const agent of state.allAgents) {
+      const marker = `@${agent.name}`;
+      if (text.includes(marker)) {
+        chips.push({
+          id: `agent:${agent.name}`,
+          type: 'mention-agent',
+          label: agent.name,
+          icon: 'agent',
+          textMarker: marker,
+        });
+      }
+    }
+
+    return chips;
+  });
+
+  const inlineChipIds = createMemo(() => new Set(inlineChips().map((c) => c.id)));
+
+  const visibleFiles = createMemo(() =>
+    files()
+      .filter((f) => !inlineChipIds().has(`file:${f.path}`))
+      .map((file) => ({
+        ...file,
+        attachmentSequence: file.attachmentSequence ?? getContextFileAttachmentSequence(file.path),
+      }))
+  );
+  const visibleClipboardImages = createMemo(() =>
+    clipboardImages()
+      .filter((img) => !inlineChipIds().has(`img:${img.id}`))
+      .map((image) => ({
+        ...image,
+        attachmentSequence:
+          image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
+      }))
+  );
 
   const activeContext = createMemo(() => {
     const file = activeFile();
@@ -426,7 +583,7 @@ export function ChatInput() {
 
   const activeCompletion = createMemo(() => {
     const fallbackCursor = caretPosition();
-    return getActiveCompletion(inputText(), textareaRef?.selectionStart ?? fallbackCursor);
+    return getActiveCompletion(inputText(), fallbackCursor);
   });
 
   createEffect(() => {
@@ -645,9 +802,9 @@ export function ChatInput() {
       }
 
       const completion = activeCompletion();
-      if (completion?.type === 'slash') {
+      if (completion?.type === 'slash' || getLeadingSlashCommand(inputText())) {
         e.preventDefault();
-        runSlashCommand(inputText());
+        void runSlashCommand(inputText());
         return;
       }
     }
@@ -709,36 +866,38 @@ export function ChatInput() {
     value: string
   ) {
     const text = inputText();
-    const nextValue = `${text.slice(0, completion.start)}${value}${text.slice(completion.end)}`;
-    setInputText(nextValue);
-    setCompletionIndex(0);
-    setFileSearchResults([]);
+    const trailingSpace = getMentionInsertionTrailingSpace(value, text[completion.end]);
+    const nextValue = `${text.slice(0, completion.start)}${value}${trailingSpace}${text.slice(completion.end)}`;
+    const nextCursor = completion.start + value.length + trailingSpace.length;
+    batch(() => {
+      setInputText(nextValue);
+      setCaretPosition(nextCursor);
+      setCompletionIndex(0);
+      setFileSearchResults([]);
+    });
     latestFileSearchQuery = '';
 
     queueMicrotask(() => {
-      autoResize();
-      if (!textareaRef) return;
-      const nextCursor = completion.start + value.length;
-      textareaRef.focus();
-      textareaRef.setSelectionRange(nextCursor, nextCursor);
-      setCaretPosition(nextCursor);
+      if (richEditorRef) {
+        richEditorRef.focus();
+      }
     });
   }
 
   async function runSlashCommand(raw: string) {
-    const normalized = raw.trim().replace(/^\/+/, '');
-    const [name, ...rest] = normalized.split(/\s+/);
-    const args = rest.join(' ');
+    const parsed = getLeadingSlashCommand(raw);
+    if (!parsed) return false;
+
+    const { name, args } = parsed;
     if (name === SKILLS_COMMAND_NAME) {
       setComposerValue(`/${SKILLS_COMMAND_NAME} `);
-      return;
+      return true;
     }
     const command = slashCommands().find(
       (item) => item.name === name || item.aliases.includes(name)
     );
     if (!command) {
-      await handleSend();
-      return;
+      return false;
     }
 
     setHistoryIndex(null);
@@ -746,11 +905,11 @@ export function ChatInput() {
     setInputText('');
     resetPastedImageIndex();
     setCompletionIndex(0);
-    if (textareaRef) textareaRef.style.height = 'auto';
     await command.action(args);
+    return true;
   }
 
-  async function handleSend(mode?: 'queue' | 'steer') {
+  async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     const text = inputText();
     const sendableText = getSendableInputText(text);
     const hasSendableImages = hasSendableClipboardImages();
@@ -773,8 +932,14 @@ export function ChatInput() {
       queuedAttachments.clipboardImages?.length ||
       queuedAttachments.terminalSelection;
 
+    if (mode !== 'queue' && !hasQueuedAttachments) {
+      const ranSlashCommand = await runSlashCommand(text);
+      if (ranSlashCommand) return;
+    }
+
     if (
       mode !== 'steer' &&
+      mode !== 'after-stop' &&
       isLoading() &&
       !hasActiveQuestion() &&
       !hasActivePermission() &&
@@ -800,7 +965,6 @@ export function ChatInput() {
       resetPastedImageIndex();
       postMessage({ type: 'files/clear' });
       postMessage({ type: 'terminal-selection/clear' });
-      if (textareaRef) textareaRef.style.height = 'auto';
       return;
     }
 
@@ -810,7 +974,6 @@ export function ChatInput() {
     const prevError = error();
     setInputText('');
     resetPastedImageIndex();
-    if (textareaRef) textareaRef.style.height = 'auto';
     await sendMessage(text, { noReply: mode === 'steer' });
     if (error() && error() !== prevError) {
       setInputText(text);
@@ -866,40 +1029,42 @@ export function ChatInput() {
   });
 
   function setComposerValue(value: string) {
-    setInputText(value);
-    if (value.trim().length === 0 && state.clipboardImages.length === 0) resetPastedImageIndex();
-    setCompletionIndex(0);
-    queueMicrotask(() => {
-      autoResize();
-      if (!textareaRef) return;
-      textareaRef.focus();
-      textareaRef.setSelectionRange(value.length, value.length);
+    batch(() => {
+      setInputText(value);
       setCaretPosition(value.length);
+      if (value.trim().length === 0 && state.clipboardImages.length === 0) resetPastedImageIndex();
+      setCompletionIndex(0);
+    });
+    queueMicrotask(() => {
+      if (richEditorRef) {
+        richEditorRef.focus();
+      }
     });
   }
 
   function replaceComposerSelection(value: string, padWithSpaces = false) {
     const text = inputText();
-    const selectionStart = textareaRef?.selectionStart ?? caretPosition();
-    const selectionEnd = textareaRef?.selectionEnd ?? selectionStart;
+    const selectionStart = caretPosition();
+    const selectionEnd = selectionStart;
     const prefix = padWithSpaces && shouldPadInlineInsertion(text[selectionStart - 1]) ? ' ' : '';
-    const suffix = padWithSpaces && shouldPadInlineInsertion(text[selectionEnd]) ? ' ' : '';
+    const suffix = padWithSpaces ? getInlineInsertionSuffix(text, selectionEnd) : '';
     const insertedValue = `${prefix}${value}${suffix}`;
     const nextValue = `${text.slice(0, selectionStart)}${insertedValue}${text.slice(selectionEnd)}`;
     const nextCaret = selectionStart + insertedValue.length;
 
-    setHistoryIndex(null);
-    setHistoryDraft('');
-    setInputText(nextValue);
-    setCompletionIndex(0);
-    setSuppressCompletion(false);
+    batch(() => {
+      setHistoryIndex(null);
+      setHistoryDraft('');
+      setInputText(nextValue);
+      setCaretPosition(nextCaret);
+      setCompletionIndex(0);
+      setSuppressCompletion(false);
+    });
 
     queueMicrotask(() => {
-      autoResize();
-      if (!textareaRef) return;
-      textareaRef.focus();
-      textareaRef.setSelectionRange(nextCaret, nextCaret);
-      setCaretPosition(nextCaret);
+      if (richEditorRef) {
+        richEditorRef.focus();
+      }
     });
   }
 
@@ -943,12 +1108,6 @@ export function ChatInput() {
     setHistoryIndex(nextIndex);
     setComposerValue(history[nextIndex]);
     return true;
-  }
-
-  function autoResize() {
-    if (!textareaRef) return;
-    textareaRef.style.height = 'auto';
-    textareaRef.style.height = Math.min(textareaRef.scrollHeight, 200) + 'px';
   }
 
   function getToolbarGap() {
@@ -1062,6 +1221,21 @@ export function ChatInput() {
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
 
+    const pastedText = clipboardData.getData('text/plain');
+    const pastedContextFiles = getPastedContextFiles(pastedText, state.editorContext.workspacePath);
+    const pastedPromptText = getPromptTextWithoutContextReferences(pastedText);
+    const pasteHandledAsContextOnly =
+      pastedContextFiles.length > 0 && pastedPromptText.length === 0;
+    if (pastedContextFiles.length > 0) {
+      for (const file of pastedContextFiles) {
+        addContextFile(file);
+      }
+      (e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText = pastedPromptText;
+      if (pasteHandledAsContextOnly) {
+        e.preventDefault();
+      }
+    }
+
     const imageItems = Array.from(clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
     );
@@ -1073,32 +1247,40 @@ export function ChatInput() {
     const availableSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - state.clipboardImages.length);
     if (availableSlots === 0) return;
 
-    const filenames: string[] = [];
     const attachableItems = imageItems.slice(0, availableSlots);
     const nextIndex = nextPastedImageIndex();
+    let acceptedImageCount = 0;
+    const insertedPlaceholders: string[] = [];
 
     for (const [index, item] of attachableItems.entries()) {
       const file = item.getAsFile();
       if (!file) continue;
 
       const filename = getPastedImageFilename(nextIndex + index);
-      filenames.push(filename);
-
       const url = await readFileAsDataUrl(file);
-      addClipboardImage({
+      const didAddImage = addClipboardImage({
         id: createAttachmentID(),
         url,
         mime: file.type || 'image/png',
         filename,
         size: file.size,
+        contentKey: url,
       });
+
+      if (!didAddImage) continue;
+
+      acceptedImageCount += 1;
+      insertedPlaceholders.push(filename);
     }
 
-    setNextPastedImageIndex(nextIndex + attachableItems.length);
+    setNextPastedImageIndex(nextIndex + acceptedImageCount);
 
-    if (filenames.length === 0 || inputText().trim().length === 0) return;
+    if (insertedPlaceholders.length === 0 || inputText().trim().length === 0) return;
 
-    replaceComposerSelection(filenames.map((filename) => `[${filename}]`).join(' '), true);
+    replaceComposerSelection(
+      insertedPlaceholders.map((filename) => `[${filename}]`).join(' '),
+      true
+    );
   }
 
   onMount(() => {
@@ -1238,88 +1420,12 @@ export function ChatInput() {
     if (focusKey === 0) return;
 
     queueMicrotask(() => {
-      if (!textareaRef) return;
-      const cursor = textareaRef.value.length;
-      textareaRef.focus();
-      textareaRef.setSelectionRange(cursor, cursor);
-      setCaretPosition(cursor);
-      setIsFocused(true);
+      if (richEditorRef) {
+        richEditorRef.focus();
+        setCaretPosition(inputText().length);
+        setIsFocused(true);
+      }
     });
-  });
-
-  const currentModel = createMemo(() => {
-    const selected = resolveSelectedModel(
-      state.selectedModel,
-      state.providers,
-      state.providerDefaults
-    );
-    if (selected) {
-      const provider = state.providers.find((item) => item.id === selected.providerID);
-      const model = provider?.models[selected.modelID];
-      return {
-        providerID: selected.providerID,
-        modelID: selected.modelID,
-        variant: selected.variant || null,
-        providerName: provider?.name || selected.providerID,
-        modelName: model?.name || selected.modelID,
-        contextLimit: model?.limit?.context || null,
-      };
-    }
-
-    const latestAuto = getLatestAssistantMessageInfo(state.messages);
-    if (latestAuto) {
-      const provider = state.providers.find((item) => item.id === latestAuto.providerID);
-      const model = provider?.models[latestAuto.modelID];
-      return {
-        providerID: latestAuto.providerID,
-        modelID: latestAuto.modelID,
-        variant: latestAuto.variant || null,
-        providerName: provider?.name || latestAuto.providerID,
-        modelName: model?.name || latestAuto.modelID,
-        contextLimit: model?.limit?.context || null,
-      };
-    }
-
-    // Prefer a provider that has a configured default model
-    for (const provider of state.providers) {
-      const defaultModelID = state.providerDefaults[provider.id];
-      if (defaultModelID && provider.models[defaultModelID]) {
-        const model = provider.models[defaultModelID];
-        return {
-          providerID: provider.id,
-          modelID: model.id,
-          variant: null,
-          providerName: provider.name,
-          modelName: model.name,
-          contextLimit: model.limit?.context || null,
-        };
-      }
-    }
-
-    // Fall back to first provider's first model
-    const firstProvider = state.providers[0];
-    if (firstProvider) {
-      const firstModel = Object.values(firstProvider.models)[0];
-      if (firstModel) {
-        return {
-          providerID: firstProvider.id,
-          modelID: firstModel.id,
-          variant: null,
-          providerName: firstProvider.name,
-          modelName: firstModel.name,
-          contextLimit: firstModel.limit?.context || null,
-        };
-      }
-    }
-
-    return {
-      providerID: null as string | null,
-      modelID: null as string | null,
-      variant: null as string | null,
-      providerName: '',
-      modelName: '',
-      contextLimit: null as number | null,
-    };
   });
 
   function currentModelSupportsVision() {
@@ -1705,7 +1811,7 @@ export function ChatInput() {
               activeContextTitle={activeContextTitle()}
               terminalSelection={terminalSelection()}
               files={visibleFiles()}
-              clipboardImages={clipboardImages()}
+              clipboardImages={visibleClipboardImages()}
               clipboardImagesDisabled={clipboardImagesDisabled()}
               onToggleActiveContext={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
               onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
@@ -1717,9 +1823,9 @@ export function ChatInput() {
             />
           </Show>
 
-          <ComposerArea
-            textareaRef={(el) => {
-              textareaRef = el;
+          <RichComposerArea
+            editorRef={(el) => {
+              richEditorRef = el;
             }}
             placeholder={
               hasActiveQuestion() || hasActivePermission()
@@ -1729,29 +1835,29 @@ export function ChatInput() {
                   : 'Describe what to build'
             }
             value={inputText()}
+            cursorOffset={caretPosition()}
+            chips={inlineChips()}
             isFocused={isFocused()}
             showCompletionMenu={showCompletionMenu()}
             completionItems={composerCompletions()}
             completionSelectedIndex={completionIndex()}
             completionHeader={completionHeader()}
-            onInput={(e) => {
+            onInput={(text, cursorOffset) => {
               setHistoryIndex(null);
               setHistoryDraft('');
-              setInputText(e.currentTarget.value);
-              setCaretPosition(e.currentTarget.selectionStart || 0);
+              setInputText(text);
+              setCaretPosition(cursorOffset);
               setCompletionIndex(0);
               setSuppressCompletion(false);
-              autoResize();
             }}
             onKeyDown={handleKeydown}
             onPaste={handlePaste}
-            onFocus={(e) => {
+            onFocus={() => {
               setIsFocused(true);
-              setCaretPosition(e.currentTarget.selectionStart || 0);
             }}
             onBlur={() => setIsFocused(false)}
-            onClick={(e) => {
-              setCaretPosition(e.currentTarget.selectionStart || 0);
+            onClick={(cursorOffset) => {
+              setCaretPosition(cursorOffset);
               setShowAgentPicker(false);
               setShowModelPicker(false);
               setShowMcpPicker(false);
@@ -1759,8 +1865,18 @@ export function ChatInput() {
               setShowPermissionModePicker(false);
               setShowBusyMenu(false);
             }}
-            onKeyUp={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
-            onSelect={(e) => setCaretPosition(e.currentTarget.selectionStart || 0)}
+            onKeyUp={(cursorOffset) => setCaretPosition(cursorOffset)}
+            onSelect={(cursorOffset) => setCaretPosition(cursorOffset)}
+            onRemoveChip={(chipId) => {
+              if (chipId.startsWith('file:')) {
+                const path = chipId.slice(5);
+                removeContextFile(path);
+                postMessage({ type: 'files/remove', payload: { path } });
+              } else if (chipId.startsWith('img:')) {
+                const id = chipId.slice(4);
+                removeClipboardImage(id);
+              }
+            }}
             onSelectCompletion={(item) => {
               const completion = activeCompletion();
               const completionSelection = getCompletionSelection(completion, item, true);
@@ -1940,9 +2056,9 @@ export function ChatInput() {
               handleSend('steer');
               setShowBusyMenu(false);
             }}
-            onStopAndSend={() => {
-              abortSession();
-              handleSend();
+            onStopAndSend={async () => {
+              await abortSession();
+              await handleSend('after-stop');
               setShowBusyMenu(false);
             }}
           />
@@ -2104,6 +2220,118 @@ export function ChatInput() {
       </div>
     </div>
   );
+}
+
+function getPastedContextFiles(text: string, workspacePath: string | null): DroppedFile[] {
+  if (!text.trim()) return [];
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const files = new Map<string, DroppedFile>();
+
+  for (const line of lines) {
+    const selectionRef = parseSelectionReference(line);
+    if (selectionRef) {
+      const file = createDroppedFileFromReference(selectionRef.path, workspacePath, false);
+      if (!file) continue;
+      addOrMergePastedContextFile(files, { ...file, lineRanges: selectionRef.lineRanges });
+      continue;
+    }
+
+    const activeFileMatch = line.match(/^\[Active file: (.+?)\]$/);
+    if (activeFileMatch) {
+      const file = createDroppedFileFromReference(activeFileMatch[1], workspacePath, false);
+      if (file) addOrMergePastedContextFile(files, file);
+      continue;
+    }
+
+    for (const mention of extractPastedFileMentions(line)) {
+      const file = createDroppedFileFromReference(mention.path, workspacePath, mention.isDirectory);
+      if (file) addOrMergePastedContextFile(files, file);
+    }
+  }
+
+  return Array.from(files.values());
+}
+
+function getPromptTextWithoutContextReferences(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (parseSelectionReference(line)) return false;
+      if (/^\[Active file: .+\]$/.test(line)) return false;
+      return (
+        extractPastedFileMentions(line).length === 0 ||
+        line.replace(/(^|[\s(])@([^\s@]+?\/?)(?=$|[\s),.:;!?])/g, '$1').trim().length > 0
+      );
+    })
+    .join('\n')
+    .trim();
+}
+
+function extractPastedFileMentions(line: string): Array<{ path: string; isDirectory: boolean }> {
+  const matches = line.matchAll(/(^|[\s(])@([^\s@)]+?\/?)(?=$|[\s),:;!?])/g);
+  const mentions: Array<{ path: string; isDirectory: boolean }> = [];
+
+  for (const match of matches) {
+    const rawPath = match[2]?.trim();
+    const isDirectory = rawPath?.endsWith('/') ?? false;
+    if (!rawPath || !isLikelyFileMentionPath(rawPath, isDirectory)) continue;
+    mentions.push({
+      path: rawPath.replace(/\/+$/, ''),
+      isDirectory,
+    });
+  }
+
+  return mentions;
+}
+
+function isLikelyFileMentionPath(value: string, isDirectory = false) {
+  const normalized = normalizePath(value.replace(/^\.\//, ''));
+  if (!normalized) return false;
+  if (normalized === '.' || normalized === '..') return false;
+  if (isDirectory) return true;
+  if (normalized.includes('/')) return true;
+  return /\.[A-Za-z0-9_-]{1,16}$/.test(normalized);
+}
+
+function createDroppedFileFromReference(
+  referencePath: string,
+  workspacePath: string | null,
+  isDirectory: boolean
+): DroppedFile | null {
+  const normalizedReference = normalizePath(referencePath);
+  if (!normalizedReference) return null;
+
+  const relativePath = isAbsolutePath(normalizedReference)
+    ? (getWorkspaceRelativePath(normalizedReference, workspacePath) ?? normalizedReference)
+    : normalizedReference;
+  const absolutePath = isAbsolutePath(normalizedReference)
+    ? normalizedReference
+    : workspacePath
+      ? `${normalizePath(workspacePath).replace(/\/+$/, '')}/${normalizedReference.replace(/^\.\//, '')}`
+      : normalizedReference;
+
+  return {
+    path: absolutePath,
+    relativePath,
+    type: isDirectory ? 'directory' : 'file',
+  };
+}
+
+function addOrMergePastedContextFile(files: Map<string, DroppedFile>, file: DroppedFile) {
+  const current = files.get(file.path);
+  if (!current) {
+    files.set(file.path, file);
+    return;
+  }
+
+  files.set(file.path, mergeContextFile(current, file));
 }
 
 export function getSlashCommands(props: {
@@ -2351,6 +2579,17 @@ export function getActiveCompletion(text: string, cursor: number) {
     query: token.slice(1),
     start: tokenStart,
     end: cursor,
+  };
+}
+
+export function getLeadingSlashCommand(text: string) {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^\/([^\s]+)(?:\s+(.*))?$/);
+  if (!match) return null;
+
+  return {
+    name: match[1].toLowerCase(),
+    args: match[2]?.trim() || '',
   };
 }
 
@@ -2855,6 +3094,15 @@ function readFileAsBase64(file: File): Promise<string> {
 
 export function shouldPadInlineInsertion(value: string | undefined) {
   return !!value && !/\s/.test(value);
+}
+
+export function getInlineInsertionSuffix(text: string, selectionEnd: number) {
+  return selectionEnd >= text.length || shouldPadInlineInsertion(text[selectionEnd]) ? ' ' : '';
+}
+
+export function getMentionInsertionTrailingSpace(value: string, after: string | undefined) {
+  if (value.endsWith(' ') || value.endsWith('\n')) return '';
+  return !after || (after !== ' ' && after !== '\n') ? ' ' : '';
 }
 
 function getPastedImageFilename(index: number) {

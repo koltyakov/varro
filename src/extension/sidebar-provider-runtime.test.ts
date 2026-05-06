@@ -55,7 +55,7 @@ function createRecycleBinEntry(rootID: string, sessionIDs: string[]): RecycleBin
 function createRuntime(options?: {
   serverStatus?: ServerStatus;
   cleanupExpired?: (
-    callback: (sessionID: string) => Promise<unknown>
+    callback: (session: { id: string; directory?: string }) => Promise<unknown>
   ) => Promise<RecycleBinEntry[]>;
   isHidden?: (sessionID: string) => boolean;
   start?: () => Promise<string>;
@@ -148,7 +148,7 @@ describe('SidebarProviderRuntime', () => {
 
     const { runtime, server, sessionState, sessionTrash } = createRuntime({
       cleanupExpired: vi.fn(async (removeSession) => {
-        await removeSession('session one');
+        await removeSession({ id: 'session one', directory: '/repo/archived' });
         return cleanup.promise;
       }),
     });
@@ -157,7 +157,10 @@ describe('SidebarProviderRuntime', () => {
     const overlappingRun = runtime.cleanupExpiredRecycleBin(RUNNING_STATUS);
 
     expect(sessionTrash.cleanupExpired).toHaveBeenCalledTimes(1);
-    expect(server.request).toHaveBeenCalledWith('DELETE', '/session/session%20one');
+    expect(server.request).toHaveBeenCalledWith(
+      'DELETE',
+      '/session/session%20one?directory=%2Frepo%2Farchived'
+    );
 
     cleanup.resolve([
       createRecycleBinEntry('root-1', ['session-1', 'session-2']),

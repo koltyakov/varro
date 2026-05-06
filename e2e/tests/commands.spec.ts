@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('supports slash commands for sessions and settings-adjacent pickers', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/sessions');
   await expect(page.getByText('Open the session list')).toBeVisible();
@@ -29,7 +29,7 @@ test('reacts to host command events for focus and attention sessions', async ({ 
   await page.goto('/e2e/harness/index.html?scenario=command-events');
   const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
 
-  await expect(page.locator('textarea')).toBeFocused();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.getByText('Filtered:', { exact: true })).toBeVisible();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).toHaveText('Needs attention');
   await expect(sessionsPane.locator('.session-item-title')).toContainText([
@@ -62,7 +62,7 @@ test('reapplies the attention filter after reload when host command events fire 
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).toHaveText('Needs attention');
   await page.reload();
 
-  await expect(page.locator('textarea')).toBeFocused();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).toHaveText('Needs attention');
   await expect(sessionsPane.locator('.session-item-title')).toContainText([
     'Follow up attention queue',
