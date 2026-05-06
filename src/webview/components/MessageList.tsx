@@ -439,6 +439,9 @@ export function MessageList() {
 
   const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
 
+  // Principle: native scrollbar mapping must come from real layout, not guessed row heights.
+  // Large transcripts stay non-virtualized until every row has an exact measured height; only then
+  // do we switch to prefix-sum virtualization. Do not replace this with estimated heights.
   const shouldMeasureRows = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
 
   function hasMeasuredEveryMessage() {
@@ -632,6 +635,9 @@ export function MessageList() {
   }
 
   function measureMountedRow(element: HTMLDivElement, messageId: string) {
+    // Principle: mount-time measurement is part of the exact-height bootstrap. Tests and no-layout
+    // environments may never deliver ResizeObserver entries, so virtualization must not depend on
+    // observer callbacks alone.
     const height = element.getBoundingClientRect().height || 160;
     if ((measuredHeights.get(messageId) ?? -1) === height) return;
     measuredHeights.set(messageId, height);

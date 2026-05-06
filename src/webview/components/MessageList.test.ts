@@ -1765,6 +1765,65 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('virtualizes after mount-time measurement when resize observers do not emit', async () => {
+    // Principle: exact-height virtualization must still activate in test/no-layout environments.
+    // If this regresses, the list falls back to rendering every row and future refactors may hide it
+    // behind fake performance improvements.
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, `Response ${index}`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 7200 });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 7200);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
+    expect(container?.querySelector('.virtual-spacer-top')).toBeTruthy();
+
+    animationFrames.restore();
+  });
+
   it('stays pinned to the real bottom when virtualized messages update in place', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 

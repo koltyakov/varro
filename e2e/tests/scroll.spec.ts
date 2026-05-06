@@ -991,6 +991,8 @@ test.describe('viewport content coverage', () => {
   });
 
   test('virtual spacers keep their measured height in a long varied chat', async ({ page }) => {
+    // Principle: virtual spacers represent exact offscreen layout height. If they shrink or collapse,
+    // scroll offsets and visible content drift apart even when row math looks otherwise correct.
     await page.goto('/e2e/harness/index.html?scenario=heterogeneous-large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1063,6 +1065,8 @@ test.describe('viewport content coverage', () => {
   });
 
   test('huge transcript has a measured scrollbar range', async ({ page }) => {
+    // Principle: dragging the native scrollbar in a huge chat must map to real message position.
+    // The range must be established from measured layout before virtualization owns the scrollbar.
     await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1112,6 +1116,69 @@ test.describe('viewport content coverage', () => {
     for (let index = 1; index < samples.length; index += 1) {
       expect(samples[index].firstIndex).toBeGreaterThan(samples[index - 1].firstIndex);
       expect(samples[index].scrollTop).toBeGreaterThan(samples[index - 1].scrollTop);
+    }
+  });
+
+  test('huge transcript keeps scrollbar mapping stable across repeated jumps', async ({ page }) => {
+    // Principle: repeated large scrollbar jumps must preserve both bounded rendering and monotonic
+    // position mapping. This catches regressions that only show up after multiple remaps.
+    await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+
+    const samples: Array<{
+      ratio: number;
+      firstIndex: number;
+      renderedRowCount: number;
+      topSpacerHeight: number;
+      bottomSpacerHeight: number;
+    }> = [];
+
+    for (const ratio of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+      await list.evaluate((element, targetRatio) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * targetRatio);
+        element.dispatchEvent(new Event('scroll'));
+      }, ratio);
+      await waitForAnimationFrames(page, 4);
+
+      const sample = await list.evaluate((element, targetRatio) => {
+        const containerRect = element.getBoundingClientRect();
+        const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+        const firstVisible = rows.find((row) => {
+          const rect = row.getBoundingClientRect();
+          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+        });
+        const id = firstVisible?.dataset.msgId ?? '';
+        const match = /message-huge-(user|assistant)-(\d+)/.exec(id);
+        return {
+          ratio: targetRatio,
+          firstIndex: match ? Number(match[2]) * 2 + (match[1] === 'assistant' ? 1 : 0) : -1,
+          renderedRowCount: rows.length,
+          topSpacerHeight:
+            element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
+              .height ?? 0,
+          bottomSpacerHeight:
+            element.querySelector<HTMLElement>('.virtual-spacer-bottom')?.getBoundingClientRect()
+              .height ?? 0,
+        };
+      }, ratio);
+      samples.push(sample);
+    }
+
+    for (const sample of samples) {
+      expect(sample.firstIndex).toBeGreaterThanOrEqual(0);
+      expect(sample.renderedRowCount).toBeLessThan(40);
+      expect(sample.topSpacerHeight + sample.bottomSpacerHeight).toBeGreaterThan(1000);
+      expect(Math.abs(sample.firstIndex / 180 - sample.ratio)).toBeLessThan(0.14);
+    }
+
+    for (let index = 1; index < samples.length; index += 1) {
+      expect(samples[index].firstIndex).toBeGreaterThan(samples[index - 1].firstIndex);
     }
   });
 
