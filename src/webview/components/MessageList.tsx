@@ -265,6 +265,7 @@ export function MessageList() {
   let lastObservedScrollTop = 0;
   let pendingInitialScrollSessionId: string | null = null;
   let initialScrollRafId = 0;
+  let pendingScrollToBottomRequest = false;
   let previousStickyPreviewId: string | null = null;
   let previousStickyPreviewBounds: { top: number; bottom: number } | null = null;
   let pendingExpansionScrollAnchor: ExpansionScrollAnchor | null = null;
@@ -722,7 +723,7 @@ export function MessageList() {
     messageIndex: number,
     containerRect: DOMRect
   ) {
-    if (firstVisibleMessageObserver) {
+    if (firstVisibleMessageObserver && !shouldVirtualize()) {
       return nextVisibleUserMessageTopByMessageId().get(messageId) ?? null;
     }
 
@@ -776,6 +777,28 @@ export function MessageList() {
     return true;
   }
 
+  function getNextUserMessageTopFromDOM(
+    messageIndex: number,
+    containerRect: DOMRect
+  ): number | null {
+    if (!containerRef) return null;
+    for (let index = messageIndex + 1; index < messages().length; index += 1) {
+      const nextMessage = messages()[index];
+      if (nextMessage?.info.role !== 'user') continue;
+
+      const nextElement = getStickyUserMessageSourceElement(nextMessage.info.id);
+      const nextRect = nextElement?.getBoundingClientRect();
+      if (!nextRect) return null;
+
+      const nextTop = nextRect.top - containerRect.top;
+      const nextBottom = nextRect.bottom - containerRect.top;
+      if (nextBottom <= 0) continue;
+
+      return nextTop;
+    }
+    return null;
+  }
+
   function shouldHideStickyUserMessagePreviewImmediately(preview: StickyUserMessagePreview | null) {
     if (!containerRef || !preview) return false;
 
@@ -783,11 +806,7 @@ export function MessageList() {
     const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
     if (!stickyBounds) return false;
 
-    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(
-      preview.id,
-      preview.index,
-      containerRect
-    );
+    const nextUserMessageTop = getNextUserMessageTopFromDOM(preview.index, containerRect);
     if (
       nextUserMessageTop !== null &&
       nextUserMessageTop !== undefined &&
@@ -873,6 +892,8 @@ export function MessageList() {
       if (!containerRef || !trackRef) return;
       if (state.activeSessionId !== sessionId) return;
       if (!autoScroll()) return;
+
+      ignoreScrollUntil = Math.max(ignoreScrollUntil, performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS);
 
       if (shouldVirtualize() && !measuredRowObserver) {
         measureVisibleItems();
@@ -1113,10 +1134,26 @@ export function MessageList() {
   });
 
   createEffect(() => {
+    stickyPreviewScrollTop();
+    const current = untrack(stickyUserMessagePreview);
+    if (!current) return;
+    if (shouldHideStickyUserMessagePreviewImmediately(current)) {
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = current.id;
+      previousStickyPreviewBounds = null;
+      if (stickyPreviewDebounceTimer) {
+        clearTimeout(stickyPreviewDebounceTimer);
+        stickyPreviewDebounceTimer = 0;
+      }
+    }
+  });
+
+  createEffect(() => {
     const sessionId = state.activeSessionId;
     measuredHeights.clear();
     pendingInitialScrollSessionId = sessionId;
     cancelPendingScroll();
+    pendingScrollToBottomRequest = false;
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
     setStickyUserMessagePreview(null);
@@ -1140,8 +1177,13 @@ export function MessageList() {
         return;
       }
 
-      if (sessionId && autoScroll()) {
+      if (sessionId && (autoScroll() || pendingScrollToBottomRequest)) {
+        if (pendingScrollToBottomRequest) {
+          pendingScrollToBottomRequest = false;
+          setAutoScroll(true);
+        }
         performScroll();
+        scrollToBottomUntilStable(sessionId);
       }
     });
   });
@@ -1152,6 +1194,7 @@ export function MessageList() {
     if (previousRequestKey === undefined) return requestKey;
     if (!sessionId || !containerRef) return requestKey;
 
+    pendingScrollToBottomRequest = true;
     setAutoScroll(true);
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;

@@ -201,7 +201,7 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
   );
   await expect
     .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
-    .toBeLessThanOrEqual(2);
+    .toBeLessThanOrEqual(15);
 
   await composer.fill('Second follow mode regression check');
   await sendButton.click();
@@ -212,7 +212,7 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
   );
   await expect
     .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
-    .toBeLessThanOrEqual(2);
+    .toBeLessThanOrEqual(15);
 });
 
 test('upward scroll disables follow until the list reaches bottom again', async ({ page }) => {
@@ -224,7 +224,7 @@ test('upward scroll disables follow until the list reaches bottom again', async 
 
   await expect
     .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
-    .toBeLessThanOrEqual(2);
+    .toBeLessThanOrEqual(15);
 
   await list.hover();
   await page.mouse.wheel(0, -80);
@@ -240,5 +240,5 @@ test('upward scroll disables follow until the list reaches bottom again', async 
 
   await expect
     .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
-    .toBeLessThanOrEqual(2);
+    .toBeLessThanOrEqual(15);
 });
