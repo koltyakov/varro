@@ -445,10 +445,11 @@ describe('sendMessage', () => {
       parts: [
         { type: 'text', text: 'Review this image' },
         { type: 'text', text: '[Working directory: /repo]' },
-        { type: 'text', text: 'src/extra.ts' },
         { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
+        { type: 'text', text: 'src/extra.ts' },
       ],
       model: { providerID: 'openai', modelID: 'gpt-4o' },
+      variant: undefined,
     });
   });
 

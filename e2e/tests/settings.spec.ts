@@ -7,7 +7,7 @@ test('toggling /thinking hides and shows reasoning blocks', async ({ page }) => 
   const thinkingBoxes = page.locator('.chat-thinking-box');
   await expect(thinkingBoxes).toBeVisible();
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/thinking');
   await page.keyboard.press('Enter');
@@ -24,7 +24,7 @@ test('toggling /thinking hides and shows reasoning blocks', async ({ page }) => 
 test('/thinking description reflects current visibility state', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/thinking');
 
@@ -45,7 +45,7 @@ test('thinking preference persists across reload', async ({ page }) => {
 
   await expect(page.locator('.chat-thinking-box')).toBeVisible();
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/thinking');
   await page.keyboard.press('Enter');

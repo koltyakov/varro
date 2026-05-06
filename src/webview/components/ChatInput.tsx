@@ -80,7 +80,16 @@ import {
 } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
-import { getLeafPathName, getWorkspaceRelativePath, isAbsolutePath, normalizePath } from '../lib/path-display';
+import {
+  getClipboardImageAttachmentSequence,
+  getContextFileAttachmentSequence,
+} from '../lib/attachment-order';
+import {
+  getLeafPathName,
+  getWorkspaceRelativePath,
+  isAbsolutePath,
+  normalizePath,
+} from '../lib/path-display';
 import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
@@ -492,10 +501,21 @@ export function ChatInput() {
   const inlineChipIds = createMemo(() => new Set(inlineChips().map((c) => c.id)));
 
   const visibleFiles = createMemo(() =>
-    files().filter((f) => !inlineChipIds().has(`file:${f.path}`))
+    files()
+      .filter((f) => !inlineChipIds().has(`file:${f.path}`))
+      .map((file) => ({
+        ...file,
+        attachmentSequence: file.attachmentSequence ?? getContextFileAttachmentSequence(file.path),
+      }))
   );
   const visibleClipboardImages = createMemo(() =>
-    clipboardImages().filter((img) => !inlineChipIds().has(`img:${img.id}`))
+    clipboardImages()
+      .filter((img) => !inlineChipIds().has(`img:${img.id}`))
+      .map((image) => ({
+        ...image,
+        attachmentSequence:
+          image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
+      }))
   );
 
   const activeContext = createMemo(() => {
@@ -1090,7 +1110,6 @@ export function ChatInput() {
     return true;
   }
 
-
   function getToolbarGap() {
     if (!toolbarRef) return 0;
     const styles = window.getComputedStyle(toolbarRef);
@@ -1205,7 +1224,8 @@ export function ChatInput() {
     const pastedText = clipboardData.getData('text/plain');
     const pastedContextFiles = getPastedContextFiles(pastedText, state.editorContext.workspacePath);
     const pastedPromptText = getPromptTextWithoutContextReferences(pastedText);
-    const pasteHandledAsContextOnly = pastedContextFiles.length > 0 && pastedPromptText.length === 0;
+    const pasteHandledAsContextOnly =
+      pastedContextFiles.length > 0 && pastedPromptText.length === 0;
     if (pastedContextFiles.length > 0) {
       for (const file of pastedContextFiles) {
         addContextFile(file);
@@ -1257,7 +1277,10 @@ export function ChatInput() {
 
     if (insertedPlaceholders.length === 0 || inputText().trim().length === 0) return;
 
-    replaceComposerSelection(insertedPlaceholders.map((filename) => `[${filename}]`).join(' '), true);
+    replaceComposerSelection(
+      insertedPlaceholders.map((filename) => `[${filename}]`).join(' '),
+      true
+    );
   }
 
   onMount(() => {
@@ -2242,7 +2265,10 @@ function getPromptTextWithoutContextReferences(text: string) {
       if (!line) return false;
       if (parseSelectionReference(line)) return false;
       if (/^\[Active file: .+\]$/.test(line)) return false;
-      return extractPastedFileMentions(line).length === 0 || line.replace(/(^|[\s(])@([^\s@]+?\/?)(?=$|[\s),.:;!?])/g, '$1').trim().length > 0;
+      return (
+        extractPastedFileMentions(line).length === 0 ||
+        line.replace(/(^|[\s(])@([^\s@]+?\/?)(?=$|[\s),.:;!?])/g, '$1').trim().length > 0
+      );
     })
     .join('\n')
     .trim();
@@ -2283,7 +2309,7 @@ function createDroppedFileFromReference(
   if (!normalizedReference) return null;
 
   const relativePath = isAbsolutePath(normalizedReference)
-    ? getWorkspaceRelativePath(normalizedReference, workspacePath) ?? normalizedReference
+    ? (getWorkspaceRelativePath(normalizedReference, workspacePath) ?? normalizedReference)
     : normalizedReference;
   const absolutePath = isAbsolutePath(normalizedReference)
     ? normalizedReference

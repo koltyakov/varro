@@ -17,7 +17,7 @@ test('opens read mode for long assistant answers and preserves rendered content'
 
   await dialog.getByRole('button', { name: 'Exit read mode' }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 });
 
 test('closes read mode with escape', async ({ page }) => {
@@ -30,7 +30,7 @@ test('closes read mode with escape', async ({ page }) => {
   await page.keyboard.press('Escape');
 
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 });
 
 test('routes safe external markdown links through the extension bridge', async ({ page }) => {

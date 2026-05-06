@@ -379,15 +379,16 @@ describe('state helpers', () => {
       lineRanges: [{ startLine: 8, endLine: 9 }],
     });
     expect(stateModule.state.droppedFiles).toEqual([
-      {
+      expect.objectContaining({
         path: '/repo/a.ts',
         relativePath: 'a.ts',
         type: 'file',
+        attachmentSequence: expect.any(Number),
         lineRanges: [
           { startLine: 2, endLine: 4 },
           { startLine: 8, endLine: 9 },
         ],
-      },
+      }),
     ]);
 
     stateModule.removeContextFile('/repo/a.ts');
@@ -407,7 +408,12 @@ describe('state helpers', () => {
       },
     ]);
     expect(stateModule.state.droppedFiles).toEqual([
-      { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+      expect.objectContaining({
+        path: '/repo/a.ts',
+        relativePath: 'a.ts',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      }),
     ]);
 
     stateModule.clearContextFiles();

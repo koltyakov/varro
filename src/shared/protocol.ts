@@ -30,6 +30,7 @@ export interface DroppedFile {
   relativePath: string;
   type: 'file' | 'directory';
   lineRanges?: ContextLineRange[];
+  attachmentSequence?: number;
 }
 
 export type PermissionMode = 'default' | 'full';

@@ -678,9 +678,23 @@ describe('ChatInput', () => {
     expect(state.queuedMessages).toHaveLength(1);
     expect(state.queuedMessages[0]).toMatchObject({
       text: 'Follow up with context',
-      droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+      droppedFiles: [
+        {
+          path: '/repo/src/a.ts',
+          relativePath: 'src/a.ts',
+          type: 'file',
+          attachmentSequence: undefined,
+        },
+      ],
       clipboardImages: [
-        { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        {
+          id: 'img-1',
+          url: 'blob:1',
+          mime: 'image/png',
+          filename: 'img-1.png',
+          size: 10,
+          attachmentSequence: undefined,
+        },
       ],
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },
     });
@@ -832,8 +846,18 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(state.droppedFiles).toEqual([
-      { path: '/repo/README.md', relativePath: 'README.md', type: 'file' },
-      { path: '/repo/docs', relativePath: 'docs', type: 'directory' },
+      {
+        path: '/repo/README.md',
+        relativePath: 'README.md',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      },
+      {
+        path: '/repo/docs',
+        relativePath: 'docs',
+        type: 'directory',
+        attachmentSequence: expect.any(Number),
+      },
     ]);
     expect(inputText()).toBe('Review @README.md and @docs/');
   });
@@ -873,9 +897,15 @@ describe('ChatInput', () => {
         path: '/repo/src/app.ts',
         relativePath: 'src/app.ts',
         type: 'file',
+        attachmentSequence: expect.any(Number),
         lineRanges: [{ startLine: 3, endLine: 5 }],
       },
-      { path: '/repo/README.md', relativePath: 'README.md', type: 'file' },
+      {
+        path: '/repo/README.md',
+        relativePath: 'README.md',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      },
     ]);
     expect(inputText()).toBe('Please review this');
   });
@@ -1504,7 +1534,6 @@ describe('getCompletionSelection', () => {
       )
     ).toEqual({ type: 'apply-mention', value: '@README.md ', file });
   });
-
 });
 
 describe('getSlashCommands', () => {

@@ -303,10 +303,7 @@ export function UserMessageContent(props: { parts: Part[] }) {
   );
 }
 
-function UserMessageTextContent(props: {
-  text: string;
-  attachments: IndexedMessageAttachment[];
-}) {
+function UserMessageTextContent(props: { text: string; attachments: IndexedMessageAttachment[] }) {
   const segments = createMemo(() => parseUserMessageSegments(props.text));
 
   return (
@@ -333,10 +330,7 @@ function UserMessageTextContent(props: {
   );
 }
 
-function InlineAttachmentText(props: {
-  content: string;
-  attachments: IndexedMessageAttachment[];
-}) {
+function InlineAttachmentText(props: { content: string; attachments: IndexedMessageAttachment[] }) {
   const segments = createMemo(() => buildInlineTextSegments(props.content, props.attachments));
 
   return (
@@ -527,11 +521,16 @@ function isStandaloneFileReference(text: string): boolean {
   if (trimmed.includes('\n')) return false;
   if (trimmed.length <= 1 || trimmed.length > 300) return false;
 
+  const normalizedInput = trimmed.replace(/\\/g, '/');
+  const hasTrailingSlash = normalizedInput.endsWith('/');
   const normalized = normalizePath(trimmed);
   if (/\s\/|\/\s/.test(normalized)) return false;
   if (isAbsolutePath(normalized)) return true;
   if (trimmed.includes(' ') && !normalized.endsWith('/') && !/\.\w{1,12}$/.test(trimmed)) {
     return false;
+  }
+  if (hasTrailingSlash) {
+    return normalizedInput.includes('/') || /^[A-Za-z0-9_.-]+\/$/.test(normalizedInput);
   }
   if (normalized.includes('/')) return true;
   if (trimmed.includes(' ')) return false;
@@ -589,8 +588,7 @@ function buildInlineTextSegments(content: string, attachments: IndexedMessageAtt
 
   const pattern = new RegExp(`(${markers.map((marker) => escapeRegex(marker)).join('|')})`, 'g');
   const segments: Array<
-    | { type: 'text'; content: string }
-    | { type: 'attachment'; attachment: MessageAttachment }
+    { type: 'text'; content: string } | { type: 'attachment'; attachment: MessageAttachment }
   > = [];
 
   for (const part of content.split(pattern)) {
@@ -629,7 +627,10 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
       title={getAttachmentTitle(attachment())}
       onClick={handleClick}
     >
-      <Show when={isFolder()} fallback={<DocumentIcon class="inline-chip-icon" width="11" height="11" />}>
+      <Show
+        when={isFolder()}
+        fallback={<DocumentIcon class="inline-chip-icon" width="11" height="11" />}
+      >
         <FolderIcon class="inline-chip-icon" width="11" height="11" />
       </Show>
       <span class="inline-chip-label">{getAttachmentLabel(attachment())}</span>

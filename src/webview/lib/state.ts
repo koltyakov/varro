@@ -44,6 +44,17 @@ import {
 import { mergeContextFile } from '../../shared/context-files';
 import type { UsageLimitNotice } from './usage-limit';
 import { isAbortedAssistantError } from './aborted';
+import {
+  clearClipboardImageAttachmentSequences,
+  clearContextFileAttachmentSequences,
+  ensureClipboardImageAttachmentSequence,
+  ensureContextFileAttachmentSequence,
+  removeClipboardImageAttachmentSequence,
+  removeContextFileAttachmentSequence,
+  resetAttachmentOrderState,
+  seedClipboardImageAttachmentSequences,
+  seedContextFileAttachmentSequences,
+} from './attachment-order';
 import { createMessageIndex } from './message-index';
 import {
   getSessionMarkerWorkspaceScope,
@@ -199,6 +210,9 @@ export interface AppStateInstance {
 
 export function createAppState(): AppStateInstance {
   const initialWebviewState = readInitialWebviewState();
+  resetAttachmentOrderState();
+  seedContextFileAttachmentSequences(initialWebviewState.droppedFiles ?? []);
+  seedClipboardImageAttachmentSequences([]);
   const sessionMarkerWorkspaceScope = getSessionMarkerWorkspaceScope(
     initialWebviewState.editorContext?.workspacePath
   );
@@ -1144,15 +1158,19 @@ export function saveProjectPermissionMode(mode: PermissionMode) {
 }
 
 export function addContextFile(file: DroppedFile) {
+  const attachmentSequence = ensureContextFileAttachmentSequence(
+    file.path,
+    file.attachmentSequence
+  );
   setState(
     'droppedFiles',
     produce((files) => {
       const idx = files.findIndex((f) => f.path === file.path);
       if (idx === -1) {
-        files.push(file);
+        files.push({ ...file, attachmentSequence });
         return;
       }
-      files[idx] = mergeContextFile(files[idx], file);
+      files[idx] = { ...mergeContextFile(files[idx], file), attachmentSequence };
     })
   );
 }
@@ -1163,18 +1181,23 @@ export function addContextFiles(files: DroppedFile[]) {
     'droppedFiles',
     produce((current) => {
       for (const file of files) {
+        const attachmentSequence = ensureContextFileAttachmentSequence(
+          file.path,
+          file.attachmentSequence
+        );
         const idx = current.findIndex((item) => item.path === file.path);
         if (idx === -1) {
-          current.push(file);
+          current.push({ ...file, attachmentSequence });
           continue;
         }
-        current[idx] = mergeContextFile(current[idx], file);
+        current[idx] = { ...mergeContextFile(current[idx], file), attachmentSequence };
       }
     })
   );
 }
 
 export function removeContextFile(path: string) {
+  removeContextFileAttachmentSequence(path);
   setState(
     'droppedFiles',
     produce((files) => {
@@ -1185,6 +1208,7 @@ export function removeContextFile(path: string) {
 }
 
 export function clearContextFiles() {
+  clearContextFileAttachmentSequences();
   setState('droppedFiles', []);
 }
 
@@ -1196,12 +1220,19 @@ export function addClipboardImage(image: ClipboardImage) {
     return false;
   }
 
+  const attachmentSequence = ensureClipboardImageAttachmentSequence(
+    image.id,
+    image.attachmentSequence
+  );
   setState(
     'clipboardImages',
     produce((images) => {
-      if (images.length >= MAX_CLIPBOARD_IMAGES) images.shift();
+      if (images.length >= MAX_CLIPBOARD_IMAGES) {
+        const removed = images.shift();
+        if (removed) removeClipboardImageAttachmentSequence(removed.id);
+      }
       if (!images.find((item) => item.id === image.id)) {
-        images.push(image);
+        images.push({ ...image, attachmentSequence });
       }
     })
   );
@@ -1211,6 +1242,7 @@ export function addClipboardImage(image: ClipboardImage) {
 
 export function removeClipboardImage(id: string) {
   const image = state.clipboardImages.find((item) => item.id === id);
+  removeClipboardImageAttachmentSequence(id);
   setState(
     'clipboardImages',
     produce((images) => {
@@ -1225,6 +1257,7 @@ export function clearClipboardImages() {
   for (const image of state.clipboardImages) {
     replaceClipboardImagePlaceholder(image.filename);
   }
+  clearClipboardImageAttachmentSequences();
   setState('clipboardImages', []);
   if (inputText().trim().length === 0) setNextPastedImageIndex(1);
 }

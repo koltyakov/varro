@@ -18,7 +18,7 @@ test('keeps selected model, agent, MCP, and permission mode after reload', async
   await page.getByRole('button', { name: 'Full access' }).click();
   await expect(page.getByRole('button', { name: 'Full access permissions' })).toBeVisible();
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/mcps');
   await page.keyboard.press('Enter');

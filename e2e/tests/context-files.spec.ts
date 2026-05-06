@@ -4,7 +4,7 @@ import { getE2EState } from './helpers';
 test('searches workspace files via @ mention and adds file to context', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('@StickyHeader');
 
@@ -25,7 +25,7 @@ test('searches workspace files via @ mention and adds file to context', async ({
 test('message body includes attached file reference', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('@README');
   await expect(page.getByText('README.md', { exact: false })).toBeVisible();
@@ -34,8 +34,7 @@ test('message body includes attached file reference', async ({ page }) => {
 
   await expect(page.getByTitle(/README\.md/)).toBeVisible();
 
-  await composer.click();
-  await composer.fill('Review the project');
+  await page.keyboard.type(' Review the project');
   await page.keyboard.press('Enter');
 
   await expect
@@ -61,7 +60,7 @@ test('message body includes attached file reference', async ({ page }) => {
 test('removing a file chip clears it from context', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('@README');
   await expect(page.getByText('README.md', { exact: false })).toBeVisible();
@@ -70,8 +69,7 @@ test('removing a file chip clears it from context', async ({ page }) => {
 
   await expect(page.getByTitle(/README\.md/)).toBeVisible();
 
-  const chip = page.locator('.chat-attachment-chip').filter({ hasText: 'README.md' });
-  await chip.locator('.chip-remove').click();
+  await composer.fill('');
 
   await expect(page.getByTitle(/README\.md/)).toHaveCount(0);
 });
@@ -79,7 +77,7 @@ test('removing a file chip clears it from context', async ({ page }) => {
 test('message uses workspace-relative path for file references', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('@session-filter');
   await expect(page.getByText('session-filter.ts', { exact: false })).toBeVisible();
@@ -88,8 +86,7 @@ test('message uses workspace-relative path for file references', async ({ page }
 
   await expect(page.getByTitle(/session-filter\.ts/)).toBeVisible();
 
-  await composer.click();
-  await composer.fill('Check the filter');
+  await page.keyboard.type(' Check the filter');
   await page.keyboard.press('Enter');
 
   await expect

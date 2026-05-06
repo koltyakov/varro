@@ -33,7 +33,7 @@ test('large transcripts keep rendered rows bounded while scrolling', async ({ pa
   await waitForAnimationFrame(page);
   await expect.poll(() => getRenderedMessageRowCount(page)).toBeLessThan(90);
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 });
 
 test('large transcripts stay virtualized near the bottom after a small upward scroll', async ({

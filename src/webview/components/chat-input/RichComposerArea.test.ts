@@ -1,7 +1,12 @@
 import { createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
-import { RichComposerArea, extractText, findNodeAtOffset, type RichComposerChip } from './RichComposerArea';
+import {
+  RichComposerArea,
+  extractText,
+  findNodeAtOffset,
+  type RichComposerChip,
+} from './RichComposerArea';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;

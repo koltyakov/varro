@@ -6,7 +6,7 @@ test('full access mode sends a bash request without showing a permission prompt'
 
   await expect(page.getByRole('button', { name: 'Full access permissions' })).toBeVisible();
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('In full access mode, get opencode version using bash by running opencode --version.');
   await page.getByTitle('Send (Enter)').click();
 
@@ -30,5 +30,5 @@ test('restores full access mode after reload', async ({ page }) => {
   await page.reload();
 
   await expect(page.getByRole('button', { name: 'Full access permissions' })).toBeVisible();
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 });

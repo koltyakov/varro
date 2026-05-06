@@ -4,7 +4,7 @@ import { getE2EState } from './helpers';
 test('review slash command sends the review prompt', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=review-slash');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/review');
   await expect(page.getByText('Review current code changes')).toBeVisible();

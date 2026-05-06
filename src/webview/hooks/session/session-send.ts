@@ -14,6 +14,10 @@ import { uiStore } from '../../lib/stores/ui-store';
 import type { ClipboardImage, QueuedMessage, SelectedModel } from '../../lib/app-state-types';
 import { postMessage } from '../../lib/bridge';
 import { getPromptTextForClipboardImages } from '../../lib/clipboard-images';
+import {
+  getClipboardImageAttachmentSequence,
+  getContextFileAttachmentSequence,
+} from '../../lib/attachment-order';
 import { modelSupportsVision } from '../../lib/model-capabilities';
 import { getPreferredVariant } from '../../lib/model-variants';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
@@ -159,26 +163,39 @@ export function buildSessionSendBody(
     });
   }
 
-  for (const file of composerState.droppedFiles) {
-    if (isSamePath(file.path, activeFile?.path)) continue;
-    const fileReference = getAttachmentReference(file, workspacePath);
-    parts.push({
-      type: 'text',
-      text: file.lineRanges?.length
-        ? formatSelectionReference(fileReference, file.lineRanges)
-        : fileReference,
-    });
-  }
+  const orderedAttachments = [
+    ...composerState.droppedFiles.map((file) => ({
+      kind: 'file' as const,
+      sequence: file.attachmentSequence ?? Number.MAX_SAFE_INTEGER,
+      file,
+    })),
+    ...composerState.clipboardImages.map((image) => ({
+      kind: 'image' as const,
+      sequence: image.attachmentSequence ?? Number.MAX_SAFE_INTEGER,
+      image,
+    })),
+  ].toSorted((a, b) => a.sequence - b.sequence);
 
-  if (includeClipboardImages) {
-    for (const image of composerState.clipboardImages) {
+  for (const attachment of orderedAttachments) {
+    if (attachment.kind === 'file') {
+      if (isSamePath(attachment.file.path, activeFile?.path)) continue;
+      const fileReference = getAttachmentReference(attachment.file, workspacePath);
       parts.push({
-        type: 'file',
-        mime: image.mime,
-        filename: image.filename,
-        url: image.url,
+        type: 'text',
+        text: attachment.file.lineRanges?.length
+          ? formatSelectionReference(fileReference, attachment.file.lineRanges)
+          : fileReference,
       });
+      continue;
     }
+
+    if (!includeClipboardImages) continue;
+    parts.push({
+      type: 'file',
+      mime: attachment.image.mime,
+      filename: attachment.image.filename,
+      url: attachment.image.url,
+    });
   }
 
   if (parts.length === 0) return null;
@@ -213,6 +230,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
       path: file.path,
       relativePath: file.relativePath,
       type: file.type,
+      attachmentSequence: file.attachmentSequence ?? getContextFileAttachmentSequence(file.path),
       lineRanges: file.lineRanges?.map((range) => ({
         startLine: range.startLine,
         endLine: range.endLine,
@@ -224,6 +242,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
       mime: image.mime,
       filename: image.filename,
       size: image.size,
+      attachmentSequence: image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
     })),
     terminalSelection: composerState.terminalSelection
       ? {

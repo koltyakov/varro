@@ -3,14 +3,14 @@ import { expect, test } from '@playwright/test';
 test('initial load uses the dark theme from the harness', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
   await expect(page.locator('body')).toHaveClass(/\bvscode-dark\b/);
 });
 
 test('theme/update message switches body to light theme', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await page.evaluate(() => {
     window.postMessage({ type: 'theme/update', payload: { theme: 'light' } }, '*');
@@ -26,7 +26,7 @@ test('theme/update message switches body to light theme', async ({ page }) => {
 test('theme/update message switches body to high-contrast theme', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await page.evaluate(() => {
     window.postMessage(
@@ -45,7 +45,7 @@ test('theme/update message switches body to high-contrast theme', async ({ page 
 test('rapid consecutive theme updates settle on the final value', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await expect(page.locator('textarea')).toBeVisible();
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await page.evaluate(() => {
     window.postMessage({ type: 'theme/update', payload: { theme: 'light' } }, '*');

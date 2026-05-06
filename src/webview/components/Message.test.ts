@@ -580,6 +580,19 @@ describe('parseUserMessageContent', () => {
     expect(parsed.attachments).toEqual([]);
   });
 
+  it('treats relative folder references as attachments', () => {
+    const parsed = parseUserMessageContent([textPart('text-1', 'See that\n\nsrc/')]);
+
+    expect(parsed.messageTexts).toEqual(['See that']);
+    expect(parsed.attachments).toEqual([
+      {
+        type: 'file-reference',
+        path: 'src/',
+        isDirectory: true,
+      },
+    ]);
+  });
+
   it('renders extracted attachment lines from mixed user text', () => {
     cleanup = render(
       () =>

@@ -151,6 +151,42 @@ describe('session-send helpers', () => {
     });
   });
 
+  it('preserves mixed attachment send order between files and images', () => {
+    const result = buildSessionSendBody(
+      createState({
+        editorContext: createEditorContext({ workspacePath: '/repo' }),
+        droppedFiles: [
+          {
+            path: '/repo/src',
+            relativePath: 'src',
+            type: 'directory',
+            attachmentSequence: 2,
+          },
+        ],
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'blob:1',
+            mime: 'image/png',
+            filename: 'img-1.png',
+            size: 10,
+            attachmentSequence: 1,
+          },
+        ],
+      }),
+      'session-1',
+      'Review this image',
+      () => false
+    );
+
+    expect(result?.body.parts).toEqual([
+      { type: 'text', text: 'Review this image' },
+      { type: 'text', text: '[Working directory: /repo]' },
+      { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
+      { type: 'text', text: 'src/' },
+    ]);
+  });
+
   it('strips clipboard placeholders for non-vision models and applies preferred variant fallback', () => {
     const result = buildSessionSendBody(
       createState({
@@ -262,6 +298,7 @@ describe('session-send helpers', () => {
           path: '/repo/src/a.ts',
           relativePath: 'src/a.ts',
           type: 'file',
+          attachmentSequence: undefined,
           lineRanges: [{ startLine: 1, endLine: 3 }],
         },
       ],
@@ -272,6 +309,7 @@ describe('session-send helpers', () => {
           mime: 'image/png',
           filename: 'img-1.png',
           size: 10,
+          attachmentSequence: undefined,
         },
       ],
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },

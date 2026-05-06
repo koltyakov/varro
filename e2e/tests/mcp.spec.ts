@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('opens the MCP picker from slash commands and updates connection state', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-pickers');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/mcp');
   await expect(page.getByText('Open the MCP picker for this session')).toBeVisible();
@@ -21,7 +21,7 @@ test('opens the MCP picker from slash commands and updates connection state', as
 test('restores preselected MCPs after reload', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-pickers');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/mcps');
   await page.keyboard.press('Enter');

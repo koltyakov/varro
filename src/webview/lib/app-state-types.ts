@@ -22,4 +22,5 @@ export interface ClipboardImage {
   filename: string;
   size: number;
   contentKey?: string;
+  attachmentSequence?: number;
 }

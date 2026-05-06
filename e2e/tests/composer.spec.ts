@@ -3,14 +3,15 @@ import { expect, test } from '@playwright/test';
 test('creates a session and sends a prompt through the mocked bridge', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await expect(composer).toBeVisible();
+  await composer.click();
   await composer.fill('Add a smoke test for the sidebar');
-  await page.getByTitle('Send (Enter)').click();
+  await expect(composer).toHaveText('Add a smoke test for the sidebar');
 
-  await expect(page.getByText('Add a smoke test for the sidebar', { exact: true })).toBeVisible();
-  await expect(page.locator('.chat-turn-assistant').last()).toContainText('Mock assistant response for:');
-  await expect(page.locator('.chat-turn-assistant').last()).toContainText('Add a smoke test for the sidebar');
+  const sendButton = page.getByTitle('Send (Enter)');
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
 
   await expect
     .poll(() =>
@@ -22,6 +23,10 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
       })
     )
     .toBe(1);
+
+  await expect(page.getByText('Add a smoke test for the sidebar', { exact: true })).toBeVisible();
+  await expect(page.locator('.chat-turn-assistant').last()).toContainText('Mock assistant response for:');
+  await expect(page.locator('.chat-turn-assistant').last()).toContainText('Add a smoke test for the sidebar');
 });
 
 test('shows todos and queues follow-up messages while a session is busy', async ({ page }) => {
@@ -33,7 +38,7 @@ test('shows todos and queues follow-up messages while a session is busy', async 
     'Confirm todos stay visible above the composer',
   ]);
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Queue the follow-up after the current response finishes');
   await page.getByTitle('Add to queue (Enter)').click();
 
@@ -43,7 +48,10 @@ test('shows todos and queues follow-up messages while a session is busy', async 
     'Queue the follow-up after the current response finishes'
   );
 
-  await page.getByRole('button', { name: 'Send as Steer' }).click();
+  const steerButton = page.getByRole('button', { name: 'Send as Steer' });
+  await expect(steerButton).toBeVisible();
+  await steerButton.focus();
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('list', { name: 'Queued messages' })).toHaveCount(0);
   await expect(page.locator('.chat-turn-user').last()).toContainText(
     'Queue the follow-up after the current response finishes'
@@ -53,7 +61,7 @@ test('shows todos and queues follow-up messages while a session is busy', async 
 test('removes queued follow-up messages before sending them', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-queue');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Queue this and then remove it');
   await page.getByTitle('Add to queue (Enter)').click();
 
@@ -148,14 +156,14 @@ test('refreshes todos from the final assistant message after stale todo events',
 test('attaches files from @ search using the tmp workspace fixture', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('@sticky');
 
   await expect(page.getByText('src/components/StickyHeader.tsx')).toBeVisible();
   await page.keyboard.press('Enter');
 
-  await expect(page.locator('.chat-attachment-chip')).toContainText('StickyHeader.tsx');
+  await expect(page.getByTitle('src/components/StickyHeader.tsx')).toContainText('StickyHeader.tsx');
 
   await composer.fill('@queue');
   await expect(page.getByText('tests/e2e/queue.spec.ts')).toBeVisible();

@@ -41,7 +41,7 @@ test('supports keyboard navigation and escape in the model picker', async ({ pag
 test('filters MCPs in the MCP picker and shows a no-match state', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-search');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/mcps');
   await page.keyboard.press('Enter');
@@ -59,7 +59,7 @@ test('filters MCPs in the MCP picker and shows a no-match state', async ({ page 
 test('supports keyboard navigation and escape in the MCP picker', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-search');
 
-  const composer = page.locator('textarea');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/mcps');
   await page.keyboard.press('Enter');
