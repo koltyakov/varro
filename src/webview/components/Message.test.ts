@@ -461,6 +461,72 @@ describe('Message user prompt rendering', () => {
     expect(container?.querySelector('.message-attachments')).toBeNull();
   });
 
+  it('renders inline image placeholders as chips inside the user bubble text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-image'),
+          parts: [
+            textPart('text-1', 'Test @e2e/tests/review.spec.ts and this @preview.html [Image 2]'),
+            textPart('text-2', 'e2e/tests/review.spec.ts'),
+            textPart('text-3', 'preview.html'),
+            imageFilePart('image-1', 'Image 1'),
+            imageFilePart('image-2', 'Image 2'),
+          ],
+        }),
+      container!
+    );
+
+    const messageText = container?.querySelector('.user-message-text');
+    const inlineChips = messageText?.querySelectorAll('.inline-chip');
+
+    expect(messageText?.textContent).toContain('Test review.spec.ts and this preview.html Image 2');
+    expect(inlineChips).toHaveLength(3);
+    expect(messageText?.querySelectorAll('.inline-chip-clickable')).toHaveLength(3);
+    expect(Array.from(inlineChips ?? []).map((chip) => chip.textContent?.trim())).toContain(
+      'Image 2'
+    );
+    expect(container?.querySelector('.message-image-carousel')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.message-image-carousel-caption-row')?.textContent).toContain(
+      'Image 1'
+    );
+  });
+
+  it('opens the matching image preview from an inline image chip and syncs the carousel', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-image-preview'),
+          parts: [
+            textPart('text-1', 'Test @e2e/tests/review.spec.ts and this @preview.html [Image 2]'),
+            textPart('text-2', 'e2e/tests/review.spec.ts'),
+            textPart('text-3', 'preview.html'),
+            imageFilePart('image-1', 'Image 1'),
+            imageFilePart('image-2', 'Image 2'),
+          ],
+        }),
+      container!
+    );
+
+    const imageChip = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.user-message-text .inline-chip-clickable') ??
+        []
+    ).find((chip) => chip.textContent?.includes('Image 2'));
+
+    expect(imageChip).toBeInstanceOf(HTMLButtonElement);
+
+    imageChip?.click();
+
+    const overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    const overlayCaption = container?.querySelector('.chat-image-preview-caption');
+    const carouselCaption = container?.querySelector('.message-image-carousel-caption-row');
+
+    expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
+    expect(overlayCaption?.textContent).toContain('Image 2');
+    expect(carouselCaption?.textContent).toContain('2 / 2');
+    expect(carouselCaption?.textContent).toContain('Image 2');
+  });
+
   it('keeps unrelated context attachments in the leading attachment strip', () => {
     cleanup = render(
       () =>

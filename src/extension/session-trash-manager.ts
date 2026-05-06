@@ -1,6 +1,11 @@
 import type { Persistence } from '../shared/persistence';
 import type { RecycleBinEntry, RecycleBinSession } from '../shared/protocol';
 
+export type SessionDeleteTarget = {
+  id: string;
+  directory?: string;
+};
+
 const SESSION_TRASH_KEY = 'varro.sessionTrash';
 export const SESSION_TRASH_RETENTION_MS = 24 * 60 * 60 * 1000;
 
@@ -76,7 +81,10 @@ export class SessionTrashManager {
     return entry;
   }
 
-  async deletePermanently(rootID: string, deleteSession: (sessionID: string) => Promise<unknown>) {
+  async deletePermanently(
+    rootID: string,
+    deleteSession: (target: SessionDeleteTarget) => Promise<unknown>
+  ) {
     const entry = this.entries.get(rootID) || null;
     if (!entry) return null;
     await deleteEntrySessions(entry, deleteSession);
@@ -85,7 +93,10 @@ export class SessionTrashManager {
     return entry;
   }
 
-  async cleanupExpired(deleteSession: (sessionID: string) => Promise<unknown>, now = Date.now()) {
+  async cleanupExpired(
+    deleteSession: (target: SessionDeleteTarget) => Promise<unknown>,
+    now = Date.now()
+  ) {
     const removed: RecycleBinEntry[] = [];
     for (const entry of this.list()) {
       if (entry.expiresAt > now) continue;
@@ -104,7 +115,7 @@ export class SessionTrashManager {
     return removed;
   }
 
-  async empty(deleteSession: (sessionID: string) => Promise<unknown>) {
+  async empty(deleteSession: (target: SessionDeleteTarget) => Promise<unknown>) {
     const removed: RecycleBinEntry[] = [];
     for (const entry of this.list()) {
       await deleteEntrySessions(entry, deleteSession);
@@ -206,11 +217,11 @@ function normalizeSession(value: unknown): RecycleBinSession | null {
 }
 
 async function deleteIgnoringMissing(
-  sessionID: string,
-  deleteSession: (sessionID: string) => Promise<unknown>
+  session: RecycleBinSession,
+  deleteSession: (target: SessionDeleteTarget) => Promise<unknown>
 ) {
   try {
-    await deleteSession(sessionID);
+    await deleteSession({ id: session.id, directory: session.directory });
   } catch (error) {
     if (!(error instanceof Error) || !/\b404\b/.test(error.message)) throw error;
   }
@@ -218,9 +229,9 @@ async function deleteIgnoringMissing(
 
 async function deleteEntrySessions(
   entry: RecycleBinEntry,
-  deleteSession: (sessionID: string) => Promise<unknown>
+  deleteSession: (target: SessionDeleteTarget) => Promise<unknown>
 ) {
   for (const session of entry.sessions) {
-    await deleteIgnoringMissing(session.id, deleteSession);
+    await deleteIgnoringMissing(session, deleteSession);
   }
 }

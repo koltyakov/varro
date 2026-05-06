@@ -9,6 +9,7 @@ export type AutoScrollDecision = {
   nextExpectedScrollTop: number;
   nextIgnoreScrollUntil: number;
   nextLastObservedScrollTop: number;
+  nextFollowModeLocked: boolean;
   shouldCancelPendingScroll: boolean;
 };
 
@@ -82,6 +83,7 @@ export function resolveAutoScrollOnUserScroll(args: {
   autoScroll: boolean;
   userScrolledUp: boolean;
   bottomTargetStable: boolean;
+  followModeLocked: boolean;
   expectedScrollTop: number;
   lastObservedScrollTop: number;
   ignoreScrollUntil: number;
@@ -89,11 +91,14 @@ export function resolveAutoScrollOnUserScroll(args: {
   autoScrollThresholdPx: number;
 }): AutoScrollDecision {
   const delta = args.top - args.lastObservedScrollTop;
+  const intentionalUserBreak =
+    delta < -1 && (args.userScrolledUp || args.distanceFromBottom >= args.autoScrollThresholdPx);
+  const nextFollowModeLocked = args.followModeLocked && !intentionalUserBreak;
   const userMovedAwayNearBottom =
     args.autoScroll &&
     delta < -1 &&
     args.distanceFromBottom > 1 &&
-    (args.userScrolledUp || args.bottomTargetStable);
+    (args.userScrolledUp || (args.bottomTargetStable && !nextFollowModeLocked));
   const matchesExpected =
     args.expectedScrollTop !== -1 &&
     (Math.abs(args.top - args.expectedScrollTop) < 2 ||
@@ -107,15 +112,18 @@ export function resolveAutoScrollOnUserScroll(args: {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: args.ignoreScrollUntil,
       nextLastObservedScrollTop: args.top,
+      nextFollowModeLocked,
       shouldCancelPendingScroll: false,
     };
   }
 
   if (args.now <= args.ignoreScrollUntil) {
     const userMovedAwayFromTarget =
+      intentionalUserBreak ||
       userMovedAwayNearBottom ||
       (args.expectedScrollTop !== -1 &&
-        args.top < args.expectedScrollTop - args.autoScrollThresholdPx);
+        args.top < args.expectedScrollTop - args.autoScrollThresholdPx &&
+        !nextFollowModeLocked);
 
     if (!userMovedAwayFromTarget) {
       return {
@@ -123,6 +131,7 @@ export function resolveAutoScrollOnUserScroll(args: {
         nextExpectedScrollTop: args.expectedScrollTop,
         nextIgnoreScrollUntil: args.ignoreScrollUntil,
         nextLastObservedScrollTop: args.top,
+        nextFollowModeLocked,
         shouldCancelPendingScroll: false,
       };
     }
@@ -132,17 +141,19 @@ export function resolveAutoScrollOnUserScroll(args: {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: 0,
       nextLastObservedScrollTop: args.top,
+      nextFollowModeLocked: false,
       shouldCancelPendingScroll: true,
     };
   }
 
   if (args.nearBottom) {
-    if (userMovedAwayNearBottom) {
+    if (intentionalUserBreak || userMovedAwayNearBottom) {
       return {
         nextAutoScroll: false,
         nextExpectedScrollTop: -1,
         nextIgnoreScrollUntil: args.ignoreScrollUntil,
         nextLastObservedScrollTop: args.top,
+        nextFollowModeLocked: false,
         shouldCancelPendingScroll: true,
       };
     }
@@ -152,16 +163,18 @@ export function resolveAutoScrollOnUserScroll(args: {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: args.ignoreScrollUntil,
       nextLastObservedScrollTop: args.top,
+      nextFollowModeLocked,
       shouldCancelPendingScroll: false,
     };
   }
 
-  if (args.autoScroll && delta >= 0) {
+  if (args.autoScroll && (delta >= 0 || nextFollowModeLocked)) {
     return {
       nextAutoScroll: null,
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: args.ignoreScrollUntil,
       nextLastObservedScrollTop: args.top,
+      nextFollowModeLocked,
       shouldCancelPendingScroll: false,
     };
   }
@@ -171,6 +184,7 @@ export function resolveAutoScrollOnUserScroll(args: {
     nextExpectedScrollTop: -1,
     nextIgnoreScrollUntil: args.ignoreScrollUntil,
     nextLastObservedScrollTop: args.top,
+    nextFollowModeLocked: false,
     shouldCancelPendingScroll: true,
   };
 }

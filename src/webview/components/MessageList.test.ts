@@ -3,6 +3,7 @@ import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import {
   replaceMessages,
+  requestMessageListScrollToBottom,
   setSessions,
   setShowModelPicker,
   setShowThinkingPreference,
@@ -2092,6 +2093,52 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('does not re-pin to bottom after loading settles when the user moved slightly upward', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1200 });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    const assignmentCountAfterUserScroll = assignedScrollTops.length;
+
+    stopLoading();
+    await Promise.resolve();
+    animationFrames.flush();
+
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterUserScroll);
+    expect(scrollTopValue).toBe(760);
+    animationFrames.restore();
+  });
+
   it('keeps auto-scroll enabled when the bottom target shifts before a near-bottom scroll event', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
@@ -2161,6 +2208,172 @@ describe('MessageList auto-scroll', () => {
 
     expect(assignedScrollTops.at(-1)).toBe(840);
     expect(scrollTopValue).toBe(840);
+    animationFrames.restore();
+  });
+
+  it('releases the send-triggered follow lock after bottom scroll stabilizes', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    expect(resizeCallbacks).toHaveLength(2);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    scrollTopValue = 400;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    animationFrames.flush();
+    animationFrames.flush();
+    animationFrames.flush();
+
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    trackHeight = 1240;
+    scrollHeightValue = 1240;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(assignedScrollTops.at(-1)).toBe(800);
+    expect(scrollTopValue).toBe(760);
+    animationFrames.restore();
+  });
+
+  it('re-attaches to bottom again on the next explicit scroll request', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    expect(resizeCallbacks).toHaveLength(2);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    animationFrames.flush();
+    animationFrames.flush();
+    animationFrames.flush();
+
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+
+    const assignmentCountAfterNearBottomScroll = assignedScrollTops.length;
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    animationFrames.flush();
+
+    expect(assignedScrollTops).toHaveLength(assignmentCountAfterNearBottomScroll + 1);
+    expect(assignedScrollTops.at(-1)).toBe(800);
+    expect(scrollTopValue).toBe(800);
     animationFrames.restore();
   });
 });

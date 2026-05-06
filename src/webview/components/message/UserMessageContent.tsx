@@ -17,7 +17,6 @@ import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
 import type { PreviewImage } from '../ImagePreview';
 import { renderCodeBlockHtml } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
-import { DocumentIcon } from '../DocumentIcon';
 import { FolderIcon } from '../FolderIcon';
 
 export type MessageAttachment =
@@ -44,6 +43,14 @@ type IndexedMessageAttachment = {
   attachment: MessageAttachment;
   marker: string | null;
 };
+
+type InlineRenderableAttachment =
+  | { type: 'message-attachment'; attachment: MessageAttachment }
+  | { type: 'image-file'; part: FilePart; index: number };
+
+type InlineTextSegment =
+  | { type: 'text'; content: string }
+  | { type: 'attachment'; attachment: InlineRenderableAttachment };
 
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 
@@ -261,6 +268,68 @@ export function UserMessageContent(props: { parts: Part[] }) {
   const otherFileParts = createMemo(() =>
     parsed().fileParts.filter((part) => !part.mime.startsWith('image/'))
   );
+  const [activeImageIndex, setActiveImageIndex] = createSignal(0);
+  const [previewIndex, setPreviewIndex] = createSignal<number | null>(null);
+
+  createEffect(() => {
+    const maxIndex = imageParts().length - 1;
+    setActiveImageIndex((index) => {
+      if (maxIndex < 0) return 0;
+      return Math.min(index, maxIndex);
+    });
+    setPreviewIndex((index) => {
+      if (index === null) return null;
+      if (maxIndex < 0) return null;
+      return Math.min(index, maxIndex);
+    });
+  });
+
+  const previewPosition = () => {
+    const index = previewIndex();
+    return index === null ? undefined : index + 1;
+  };
+  const previewPart = () => {
+    const index = previewIndex();
+    if (index === null) return null;
+    return imageParts()[index] ?? null;
+  };
+  const previewImage = (): PreviewImage | null => {
+    const part = previewPart();
+    if (!part) return null;
+
+    const name = getImageDisplayName(part);
+    return {
+      url: part.url,
+      alt: name,
+      title: name,
+      mime: part.mime,
+    };
+  };
+  const openImagePreview = (index: number) => {
+    if (!imageParts()[index]) return;
+    setActiveImageIndex(index);
+    setPreviewIndex(index);
+  };
+  const stepPreview = (delta: number) => {
+    const count = imageParts().length;
+    if (count <= 1) return;
+    setPreviewIndex((index) => {
+      if (index === null) return index;
+      const nextIndex = (index + delta + count) % count;
+      setActiveImageIndex(nextIndex);
+      return nextIndex;
+    });
+  };
+
+  createImagePreviewEffect(
+    () => previewIndex() !== null,
+    () => setPreviewIndex(null),
+    {
+      canNavigate: () => imageParts().length > 1,
+      onPrevious: () => stepPreview(-1),
+      onNext: () => stepPreview(1),
+    }
+  );
 
   const hasContent = () =>
     parsed().messageTexts.length > 0 ||
@@ -286,24 +355,54 @@ export function UserMessageContent(props: { parts: Part[] }) {
       <Show when={parsed().messageTexts.length > 0}>
         <div class="user-message-text-scroll">
           <For each={parsed().messageTexts}>
-            {(text) => <UserMessageTextContent text={text} attachments={indexedAttachments()} />}
+            {(text) => (
+              <UserMessageTextContent
+                text={text}
+                attachments={indexedAttachments()}
+                imageParts={imageParts()}
+                onOpenImagePreview={openImagePreview}
+              />
+            )}
           </For>
         </div>
       </Show>
       <Show when={!hasContent()}>
         <p class="user-message-empty">(no content)</p>
       </Show>
-      <Show
-        when={imageParts().length > 1}
-        fallback={<For each={imageParts()}>{(part) => <MessagePart part={part} />}</For>}
-      >
-        <UserImageCarousel imageParts={imageParts()} />
+      <Show when={imageParts().length > 0}>
+        <Show
+          when={imageParts().length > 1}
+          fallback={
+            <UserMessageImage part={imageParts()[0]!} onOpenPreview={() => openImagePreview(0)} />
+          }
+        >
+          <UserImageCarousel
+            imageParts={imageParts()}
+            activeIndex={activeImageIndex()}
+            onActiveIndexChange={setActiveImageIndex}
+            onOpenPreview={openImagePreview}
+          />
+        </Show>
       </Show>
+      <ImagePreviewOverlay
+        image={previewImage()}
+        onClose={() => setPreviewIndex(null)}
+        onPrevious={() => stepPreview(-1)}
+        onNext={() => stepPreview(1)}
+        showNavigation={imageParts().length > 1}
+        position={previewPosition()}
+        total={imageParts().length}
+      />
     </div>
   );
 }
 
-function UserMessageTextContent(props: { text: string; attachments: IndexedMessageAttachment[] }) {
+function UserMessageTextContent(props: {
+  text: string;
+  attachments: IndexedMessageAttachment[];
+  imageParts: FilePart[];
+  onOpenImagePreview: (index: number) => void;
+}) {
   const segments = createMemo(() => parseUserMessageSegments(props.text));
 
   return (
@@ -321,7 +420,12 @@ function UserMessageTextContent(props: { text: string; attachments: IndexedMessa
         ) : (
           <Show when={segment.content.length > 0}>
             <p class="user-message-text">
-              <InlineAttachmentText content={segment.content} attachments={props.attachments} />
+              <InlineAttachmentText
+                content={segment.content}
+                attachments={props.attachments}
+                imageParts={props.imageParts}
+                onOpenImagePreview={props.onOpenImagePreview}
+              />
             </p>
           </Show>
         )
@@ -330,188 +434,121 @@ function UserMessageTextContent(props: { text: string; attachments: IndexedMessa
   );
 }
 
-function InlineAttachmentText(props: { content: string; attachments: IndexedMessageAttachment[] }) {
-  const segments = createMemo(() => buildInlineTextSegments(props.content, props.attachments));
+function InlineAttachmentText(props: {
+  content: string;
+  attachments: IndexedMessageAttachment[];
+  imageParts: FilePart[];
+  onOpenImagePreview: (index: number) => void;
+}) {
+  const segments = createMemo(() =>
+    buildInlineTextSegments(props.content, props.attachments, props.imageParts)
+  );
 
   return (
     <For each={segments()}>
-      {(segment) =>
-        segment.type === 'attachment' ? (
-          <InlineMessageAttachmentChip attachment={segment.attachment} />
-        ) : (
-          segment.content
-        )
-      }
+      {(segment) => {
+        if (segment.type !== 'attachment') return segment.content;
+        if (segment.attachment.type === 'image-file') {
+          const imageAttachment = segment.attachment;
+          return (
+            <InlineImageAttachmentChip
+              part={imageAttachment.part}
+              onClick={() => props.onOpenImagePreview(imageAttachment.index)}
+            />
+          );
+        }
+
+        return <InlineMessageAttachmentChip attachment={segment.attachment.attachment} />;
+      }}
     </For>
   );
 }
 
-function UserImageCarousel(props: { imageParts: FilePart[] }) {
-  const [activeIndex, setActiveIndex] = createSignal(0);
-  const [previewIndex, setPreviewIndex] = createSignal<number | null>(null);
+function UserImageCarousel(props: {
+  imageParts: FilePart[];
+  activeIndex: number;
+  onActiveIndexChange: (index: number) => void;
+  onOpenPreview: (index: number) => void;
+}) {
   const total = () => props.imageParts.length;
-  const currentPart = () => props.imageParts[activeIndex()];
-  const previewPosition = () => {
-    const index = previewIndex();
-    return index === null ? undefined : index + 1;
-  };
-  const previewPart = () => {
-    const index = previewIndex();
-    if (index === null) return null;
-    return props.imageParts[index] ?? null;
-  };
-  const previewImage = (): PreviewImage | null => {
-    const part = previewPart();
-    if (!part) return null;
-
-    const name = part.source?.path
-      ? formatDisplayPath(part.source.path, state.editorContext.workspacePath)
-      : part.filename
-        ? formatDisplayPath(part.filename, state.editorContext.workspacePath)
-        : '(file)';
-
-    return {
-      url: part.url,
-      alt: name,
-      title: name,
-      mime: part.mime,
-    };
-  };
-  const currentDisplayName = () => {
-    const part = currentPart();
-    if (!part) return '(file)';
-    if (part.source?.path) {
-      return formatDisplayPath(part.source.path, state.editorContext.workspacePath);
-    }
-    if (part.filename) {
-      return formatDisplayPath(part.filename, state.editorContext.workspacePath);
-    }
-    return '(file)';
-  };
-
-  createEffect(() => {
-    const maxIndex = total() - 1;
-    setActiveIndex((index) => {
-      if (maxIndex < 0) return 0;
-      return Math.min(index, maxIndex);
-    });
-    setPreviewIndex((index) => {
-      if (index === null) return null;
-      if (maxIndex < 0) return null;
-      return Math.min(index, maxIndex);
-    });
-  });
+  const currentPart = () => props.imageParts[props.activeIndex];
+  const currentDisplayName = () => getImageDisplayName(currentPart());
 
   const step = (delta: number) => {
     const count = total();
     if (count <= 1) return;
-    setActiveIndex((index) => (index + delta + count) % count);
+    props.onActiveIndexChange((props.activeIndex + delta + count) % count);
   };
-  const openPreview = () => {
-    if (!currentPart()) return;
-    setPreviewIndex(activeIndex());
-  };
-  const stepPreview = (delta: number) => {
-    const count = total();
-    if (count <= 1) return;
-    setPreviewIndex((index) => {
-      if (index === null) return index;
-      const nextIndex = (index + delta + count) % count;
-      setActiveIndex(nextIndex);
-      return nextIndex;
-    });
-  };
-
-  createImagePreviewEffect(
-    () => previewIndex() !== null,
-    () => setPreviewIndex(null),
-    {
-      canNavigate: () => total() > 1,
-      onPrevious: () => stepPreview(-1),
-      onNext: () => stepPreview(1),
-    }
-  );
 
   return (
-    <>
-      <div class="message-image-carousel">
-        <div class="message-image-carousel-frame">
-          <div class="message-image-carousel-slide">
-            <Show when={currentPart()}>
-              {(part) => (
-                <figure class="chat-image-figure message-image-carousel-figure">
-                  <button
-                    type="button"
-                    class="chat-image-preview-trigger message-image-carousel-preview-trigger"
-                    aria-label={`Open image preview: ${currentDisplayName()}`}
-                    title="Open image preview"
-                    onClick={openPreview}
-                  >
-                    <img src={part().url} alt={currentDisplayName()} class="chat-image-img" />
-                  </button>
-                  <figcaption class="chat-image-caption message-image-carousel-caption-row">
-                    <span class="message-image-carousel-caption" title={currentDisplayName()}>
-                      <span class="message-image-carousel-count">
-                        {activeIndex() + 1} / {total()}
-                      </span>
-                      <span class="message-image-carousel-separator">&middot;</span>
-                      {currentDisplayName()} <span class="chat-image-mime">· {part().mime}</span>
+    <div class="message-image-carousel">
+      <div class="message-image-carousel-frame">
+        <div class="message-image-carousel-slide">
+          <Show when={currentPart()}>
+            {(part) => (
+              <figure class="chat-image-figure message-image-carousel-figure">
+                <button
+                  type="button"
+                  class="chat-image-preview-trigger message-image-carousel-preview-trigger"
+                  aria-label={`Open image preview: ${currentDisplayName()}`}
+                  title="Open image preview"
+                  onClick={() => props.onOpenPreview(props.activeIndex)}
+                >
+                  <img src={part().url} alt={currentDisplayName()} class="chat-image-img" />
+                </button>
+                <figcaption class="chat-image-caption message-image-carousel-caption-row">
+                  <span class="message-image-carousel-caption" title={currentDisplayName()}>
+                    <span class="message-image-carousel-count">
+                      {props.activeIndex + 1} / {total()}
                     </span>
-                    <div class="message-image-carousel-controls">
-                      <button
-                        type="button"
-                        class="message-image-carousel-nav"
-                        onClick={() => step(-1)}
-                        aria-label="Previous image"
-                        title="Previous image"
+                    <span class="message-image-carousel-separator">&middot;</span>
+                    {currentDisplayName()} <span class="chat-image-mime">· {part().mime}</span>
+                  </span>
+                  <div class="message-image-carousel-controls">
+                    <button
+                      type="button"
+                      class="message-image-carousel-nav"
+                      onClick={() => step(-1)}
+                      aria-label="Previous image"
+                      title="Previous image"
+                    >
+                      <svg
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        width="14"
+                        height="14"
                       >
-                        <svg
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.5"
-                          width="14"
-                          height="14"
-                        >
-                          <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        class="message-image-carousel-nav"
-                        onClick={() => step(1)}
-                        aria-label="Next image"
-                        title="Next image"
+                        <path d="M10 3 5 8l5 5" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="message-image-carousel-nav"
+                      onClick={() => step(1)}
+                      aria-label="Next image"
+                      title="Next image"
+                    >
+                      <svg
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        width="14"
+                        height="14"
                       >
-                        <svg
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.5"
-                          width="14"
-                          height="14"
-                        >
-                          <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                      </button>
-                    </div>
-                  </figcaption>
-                </figure>
-              )}
-            </Show>
-          </div>
+                        <path d="m6 3 5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </figcaption>
+              </figure>
+            )}
+          </Show>
         </div>
       </div>
-      <ImagePreviewOverlay
-        image={previewImage()}
-        onClose={() => setPreviewIndex(null)}
-        onPrevious={() => stepPreview(-1)}
-        onNext={() => stepPreview(1)}
-        showNavigation={total() > 1}
-        position={previewPosition()}
-        total={total()}
-      />
-    </>
+    </div>
   );
 }
 
@@ -571,12 +608,25 @@ function getInlineAttachmentIds(
   return inlineIds;
 }
 
-function buildInlineTextSegments(content: string, attachments: IndexedMessageAttachment[]) {
-  const attachmentByMarker = new Map<string, IndexedMessageAttachment>();
+function buildInlineTextSegments(
+  content: string,
+  attachments: IndexedMessageAttachment[],
+  imageParts: FilePart[]
+): InlineTextSegment[] {
+  const attachmentByMarker = new Map<string, InlineRenderableAttachment>();
 
   for (const attachment of attachments) {
     if (!attachment.marker) continue;
-    attachmentByMarker.set(attachment.marker, attachment);
+    attachmentByMarker.set(attachment.marker, {
+      type: 'message-attachment',
+      attachment: attachment.attachment,
+    });
+  }
+
+  for (const [index, part] of imageParts.entries()) {
+    const marker = getInlineImageMarker(part);
+    if (!marker) continue;
+    attachmentByMarker.set(marker, { type: 'image-file', part, index });
   }
 
   const markers = Array.from(attachmentByMarker.keys())
@@ -587,15 +637,13 @@ function buildInlineTextSegments(content: string, attachments: IndexedMessageAtt
   }
 
   const pattern = new RegExp(`(${markers.map((marker) => escapeRegex(marker)).join('|')})`, 'g');
-  const segments: Array<
-    { type: 'text'; content: string } | { type: 'attachment'; attachment: MessageAttachment }
-  > = [];
+  const segments: InlineTextSegment[] = [];
 
   for (const part of content.split(pattern)) {
     if (!part) continue;
     const attachment = attachmentByMarker.get(part);
     if (attachment) {
-      segments.push({ type: 'attachment', attachment: attachment.attachment });
+      segments.push({ type: 'attachment', attachment });
       continue;
     }
     segments.push({ type: 'text', content: part });
@@ -606,6 +654,66 @@ function buildInlineTextSegments(content: string, attachments: IndexedMessageAtt
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getInlineImageMarker(part: FilePart): string | null {
+  return part.filename ? `[${part.filename}]` : null;
+}
+
+function getInlineImageLabel(part: FilePart): string {
+  return getImageDisplayName(part);
+}
+
+function getImageDisplayName(part: FilePart | null | undefined): string {
+  if (!part) return '(image)';
+  if (part.source?.path) {
+    return formatDisplayPath(part.source.path, state.editorContext.workspacePath);
+  }
+  if (part.filename) {
+    return formatDisplayPath(part.filename, state.editorContext.workspacePath);
+  }
+  return '(image)';
+}
+
+function UserMessageImage(props: { part: FilePart; onOpenPreview: () => void }) {
+  const displayName = () => getImageDisplayName(props.part);
+
+  return (
+    <figure class="chat-image-figure">
+      <button
+        type="button"
+        class="chat-image-preview-trigger"
+        aria-label={`Open image preview: ${displayName()}`}
+        title="Open image preview"
+        onClick={props.onOpenPreview}
+      >
+        <img src={props.part.url} alt={displayName()} class="chat-image-img" />
+      </button>
+      <figcaption class="chat-image-caption">
+        {displayName()} <span class="chat-image-mime">· {props.part.mime}</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+function InlineImageAttachmentChip(props: { part: FilePart; onClick: () => void }) {
+  const label = () => getInlineImageLabel(props.part);
+  const title = () => `${label()}${props.part.mime ? ` · ${props.part.mime}` : ''}`;
+
+  return (
+    <button
+      type="button"
+      class="inline-chip inline-chip-clickable"
+      title={title()}
+      aria-label={`Open image preview: ${label()}`}
+      onClick={props.onClick}
+    >
+      <svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
+        <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+      </svg>
+      <span class="inline-chip-label">{label()}</span>
+    </button>
+  );
 }
 
 function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
@@ -629,7 +737,17 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
     >
       <Show
         when={isFolder()}
-        fallback={<DocumentIcon class="inline-chip-icon" width="11" height="11" />}
+        fallback={
+          <svg
+            class="inline-chip-icon"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            width="11"
+            height="11"
+          >
+            <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
+          </svg>
+        }
       >
         <FolderIcon class="inline-chip-icon" width="11" height="11" />
       </Show>

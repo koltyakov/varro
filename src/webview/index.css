@@ -3491,7 +3491,7 @@ body.vscode-light
   gap: 4px;
   font-size: 11px;
   font-weight: 500;
-  padding: 1px 5px 1px 5px;
+  padding: 1px 5px;
   margin: 0 1px;
   border: 1px solid transparent;
   border-radius: 5px;
@@ -4679,11 +4679,20 @@ kbd {
 }
 
 .message-image-carousel {
-  margin-top: 11px;
+  margin-top: 12px;
 }
 
 .message-image-carousel-frame {
   display: block;
+}
+
+.message-image-carousel-frame,
+.chat-image-figure {
+  margin: 3px 0px !important;
+}
+
+.user-message-content-has-image > .user-message-text-scroll {
+  margin-bottom: 12px;
 }
 
 .message-image-carousel-slide {
@@ -4853,17 +4862,26 @@ kbd {
 .user-message-text > .inline-chip {
   vertical-align: baseline;
   margin: 0 1px;
+  gap: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 42%, transparent);
   background: color-mix(in srgb, var(--color-vscode-request-bubble-hover) 84%, transparent);
   color: var(--color-vscode-fg-soft);
   box-shadow: none;
+  line-height: 1.35;
+}
+
+.user-message-text > .inline-chip .inline-chip-icon {
+  width: 12px;
+  height: 12px;
 }
 
 .user-message-text > .inline-chip-clickable {
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
-  font: inherit;
+  font-family: inherit;
 }
 
 .user-message-text > .inline-chip-clickable:hover {
@@ -4892,8 +4910,8 @@ kbd {
 }
 
 .user-message-card > .rendered-markdown.user-message-content-has-image {
-  padding-top: 0;
-  padding-bottom: 3px;
+  padding-top: 0px;
+  padding-bottom: 0px;
 }
 
 .user-message-card > .rendered-markdown > .user-message-text-scroll + .chat-image-figure {
@@ -4901,7 +4919,7 @@ kbd {
 }
 
 .user-message-card > .rendered-markdown > .user-message-text-scroll + .message-image-carousel {
-  margin-top: 18px;
+  margin-top: 12px;
 }
 
 .interactive-session
@@ -4918,7 +4936,7 @@ kbd {
   > .rendered-markdown
   .user-message-text
   > .inline-chip {
-  padding: 0px 4px 0px 4px;
+  padding: 1px 5px;
   max-width: min(220px, 100%);
 }
 

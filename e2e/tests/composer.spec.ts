@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { getScrollMetrics } from './helpers';
 
 test('creates a session and sends a prompt through the mocked bridge', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
@@ -170,4 +171,74 @@ test('attaches files from @ search using the tmp workspace fixture', async ({ pa
   await page.keyboard.press('Enter');
 
   await expect(page.getByTitle('tests/e2e/queue.spec.ts')).toContainText('queue.spec.ts');
+});
+
+test('sending from mid transcript snaps back to bottom and keeps following new turns', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+
+  const list = page.locator('.interactive-list');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  const sendButton = page.getByTitle('Send (Enter)');
+
+  await expect(list).toBeVisible();
+  await expect(composer).toBeVisible();
+
+  await list.evaluate((element) => {
+    element.scrollTop = Math.max(0, Math.floor(element.scrollHeight / 2));
+    element.dispatchEvent(new Event('scroll'));
+  });
+
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeGreaterThan(2000);
+
+  await composer.fill('First follow mode regression check');
+  await sendButton.click();
+
+  await expect(page.getByText('First follow mode regression check', { exact: true })).toBeVisible();
+  await expect(page.locator('.chat-turn-assistant').last()).toContainText(
+    'Mock assistant response for: First follow mode regression check'
+  );
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeLessThanOrEqual(2);
+
+  await composer.fill('Second follow mode regression check');
+  await sendButton.click();
+
+  await expect(page.getByText('Second follow mode regression check', { exact: true })).toBeVisible();
+  await expect(page.locator('.chat-turn-assistant').last()).toContainText(
+    'Mock assistant response for: Second follow mode regression check'
+  );
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeLessThanOrEqual(2);
+});
+
+test('upward scroll disables follow until the list reaches bottom again', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+
+  const list = page.locator('.interactive-list');
+
+  await expect(list).toBeVisible();
+
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeLessThanOrEqual(2);
+
+  await list.hover();
+  await page.mouse.wheel(0, -80);
+
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeGreaterThan(1);
+
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event('scroll'));
+  });
+
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeLessThanOrEqual(2);
 });

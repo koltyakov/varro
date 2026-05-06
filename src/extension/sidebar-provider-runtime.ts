@@ -59,8 +59,13 @@ export class SidebarProviderRuntime {
     this.recycleBinMaintenanceInFlight = true;
     this.lastRecycleBinCleanupAt = now;
     try {
-      const removed = await this.sessionTrash.cleanupExpired((sessionID) =>
-        this.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`)
+      const removed = await this.sessionTrash.cleanupExpired((session) =>
+        this.server.request(
+          'DELETE',
+          session.directory
+            ? `/session/${encodeURIComponent(session.id)}?directory=${encodeURIComponent(session.directory)}`
+            : `/session/${encodeURIComponent(session.id)}`
+        )
       );
       if (removed.length > 0) {
         this.sessionState.removeSessions(

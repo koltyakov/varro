@@ -288,6 +288,7 @@ export function MessageList() {
   let lastAutoScrolledBottomScrollTop = 0;
   let lastWheelUpAt = Number.NEGATIVE_INFINITY;
   let previousAutoScrollEnabled = true;
+  let followModeLocked = false;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
   const INITIAL_SCROLL_STABLE_FRAMES = 3;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
@@ -868,6 +869,10 @@ export function MessageList() {
     let lastHeight = -1;
     let lastBottomScrollTop = -1;
 
+    const releaseFollowModeLock = () => {
+      followModeLocked = false;
+    };
+
     const tick = () => {
       initialScrollRafId = 0;
       if (!containerRef || !trackRef) return;
@@ -894,7 +899,10 @@ export function MessageList() {
         distanceFromBottom() <= 1
       ) {
         stableFrames++;
-        if (stableFrames >= INITIAL_SCROLL_STABLE_FRAMES) return;
+        if (stableFrames >= INITIAL_SCROLL_STABLE_FRAMES) {
+          releaseFollowModeLock();
+          return;
+        }
       } else {
         stableFrames = 0;
         lastHeight = currentHeight;
@@ -903,6 +911,8 @@ export function MessageList() {
 
       if (++attempts < INITIAL_SCROLL_MAX_FRAMES) {
         initialScrollRafId = requestAnimationFrame(tick);
+      } else {
+        releaseFollowModeLock();
       }
     };
     initialScrollRafId = requestAnimationFrame(tick);
@@ -923,6 +933,7 @@ export function MessageList() {
       autoScroll: autoScroll(),
       userScrolledUp: performance.now() - lastWheelUpAt <= 160,
       bottomTargetStable,
+      followModeLocked,
       expectedScrollTop,
       lastObservedScrollTop,
       ignoreScrollUntil,
@@ -932,6 +943,7 @@ export function MessageList() {
     lastObservedScrollTop = decision.nextLastObservedScrollTop;
     expectedScrollTop = decision.nextExpectedScrollTop;
     ignoreScrollUntil = decision.nextIgnoreScrollUntil;
+    followModeLocked = decision.nextFollowModeLocked;
     if (decision.shouldCancelPendingScroll) cancelPendingScroll();
     if (decision.nextAutoScroll !== null) setAutoScroll(decision.nextAutoScroll);
   }
@@ -1118,6 +1130,7 @@ export function MessageList() {
     cancelPendingScroll();
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
+    followModeLocked = false;
     setStickyUserMessagePreview(null);
     previousStickyPreviewId = null;
     previousStickyPreviewBounds = null;
@@ -1145,16 +1158,20 @@ export function MessageList() {
     });
   });
 
-  createEffect(() => {
+  createEffect((previousRequestKey: number | undefined) => {
     const sessionId = state.activeSessionId;
-    messageListScrollRequestKey();
-    if (!sessionId || !containerRef) return;
+    const requestKey = messageListScrollRequestKey();
+    if (previousRequestKey === undefined) return requestKey;
+    if (!sessionId || !containerRef) return requestKey;
+
+    followModeLocked = true;
     setAutoScroll(true);
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
       performScroll();
       scrollToBottomUntilStable(sessionId);
     });
+    return requestKey;
   });
 
   createEffect(() => {

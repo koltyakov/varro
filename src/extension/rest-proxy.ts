@@ -6,7 +6,7 @@ import { logger } from './logger';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { OpenCodeServer } from './server';
 import type { SessionStateManager } from './session-state-manager';
-import type { SessionTrashManager } from './session-trash-manager';
+import type { SessionDeleteTarget, SessionTrashManager } from './session-trash-manager';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
 import {
   getOpenCodePlansDirectory,
@@ -353,8 +353,7 @@ export class RestProxy {
       case 'delete': {
         const removed = await this.callbacks.sessionTrash.deletePermanently(
           request.rootID,
-          (sessionID) =>
-            this.callbacks.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`)
+          (session) => this.deleteSessionForDirectory(session)
         );
         if (removed) {
           this.callbacks.sessionState.removeSessions(removed.sessions.map((session) => session.id));
@@ -362,8 +361,8 @@ export class RestProxy {
         return Boolean(removed);
       }
       case 'empty': {
-        const removed = await this.callbacks.sessionTrash.empty((sessionID) =>
-          this.callbacks.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`)
+        const removed = await this.callbacks.sessionTrash.empty((session) =>
+          this.deleteSessionForDirectory(session)
         );
         if (removed.length > 0) {
           this.callbacks.sessionState.removeSessions(
@@ -388,9 +387,28 @@ export class RestProxy {
   }
 
   private async deleteSessionPermanently(sessionID: string) {
-    await this.callbacks.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`);
+    const sessionDirectory = await this.lookupSessionDirectory(sessionID);
+    await this.deleteSessionForDirectory({ id: sessionID, directory: sessionDirectory });
     this.callbacks.sessionState.removeSessions([sessionID]);
     return true;
+  }
+
+  private async deleteSessionForDirectory(session: SessionDeleteTarget) {
+    const path = this.buildScopedSessionPath(session.id, session.directory);
+    return this.callbacks.server.request('DELETE', path);
+  }
+
+  private async lookupSessionDirectory(sessionID: string) {
+    const sessions = await this.callbacks.server.request('GET', '/session');
+    if (!Array.isArray(sessions)) return undefined;
+    const match = sessions.find((session) => asRecord(session)?.id === sessionID);
+    const record = asRecord(match);
+    return typeof record?.directory === 'string' ? record.directory : undefined;
+  }
+
+  private buildScopedSessionPath(sessionID: string, directory?: string) {
+    const path = `/session/${encodeURIComponent(sessionID)}`;
+    return directory ? `${path}?directory=${encodeURIComponent(directory)}` : path;
   }
 
   private parseProviderLimitRequest(method: string, path: string) {

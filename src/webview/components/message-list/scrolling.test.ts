@@ -53,6 +53,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
         autoScroll: true,
         userScrolledUp: false,
         bottomTargetStable: false,
+        followModeLocked: false,
         expectedScrollTop: 496,
         lastObservedScrollTop: 480,
         ignoreScrollUntil: 1000,
@@ -64,6 +65,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: 1000,
       nextLastObservedScrollTop: 495,
+      nextFollowModeLocked: false,
       shouldCancelPendingScroll: false,
     });
   });
@@ -77,6 +79,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
         autoScroll: true,
         userScrolledUp: true,
         bottomTargetStable: true,
+        followModeLocked: false,
         expectedScrollTop: -1,
         lastObservedScrollTop: 495,
         ignoreScrollUntil: 0,
@@ -88,6 +91,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: 0,
       nextLastObservedScrollTop: 460,
+      nextFollowModeLocked: false,
       shouldCancelPendingScroll: true,
     });
   });
@@ -101,6 +105,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
         autoScroll: true,
         userScrolledUp: true,
         bottomTargetStable: true,
+        followModeLocked: false,
         expectedScrollTop: 500,
         lastObservedScrollTop: 480,
         ignoreScrollUntil: 1000,
@@ -112,6 +117,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: 0,
       nextLastObservedScrollTop: 200,
+      nextFollowModeLocked: false,
       shouldCancelPendingScroll: true,
     });
   });
@@ -125,6 +131,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
         autoScroll: true,
         userScrolledUp: false,
         bottomTargetStable: false,
+        followModeLocked: false,
         expectedScrollTop: -1,
         lastObservedScrollTop: 495,
         ignoreScrollUntil: 0,
@@ -136,6 +143,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: 0,
       nextLastObservedScrollTop: 460,
+      nextFollowModeLocked: false,
       shouldCancelPendingScroll: false,
     });
   });
@@ -149,6 +157,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
         autoScroll: true,
         userScrolledUp: false,
         bottomTargetStable: true,
+        followModeLocked: false,
         expectedScrollTop: -1,
         lastObservedScrollTop: 495,
         ignoreScrollUntil: 0,
@@ -160,7 +169,86 @@ describe('resolveAutoScrollOnUserScroll', () => {
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: 0,
       nextLastObservedScrollTop: 460,
+      nextFollowModeLocked: false,
       shouldCancelPendingScroll: true,
+    });
+  });
+
+  it('keeps auto-scroll locked after an explicit follow request despite small stable upward drift', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 460,
+        distanceFromBottom: 40,
+        nearBottom: true,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: true,
+        followModeLocked: true,
+        expectedScrollTop: -1,
+        lastObservedScrollTop: 495,
+        ignoreScrollUntil: 0,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: true,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 460,
+      nextFollowModeLocked: true,
+      shouldCancelPendingScroll: false,
+    });
+  });
+
+  it('unlocks follow mode when the user intentionally pulls far away from bottom', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 380,
+        distanceFromBottom: 120,
+        nearBottom: false,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: true,
+        followModeLocked: true,
+        expectedScrollTop: -1,
+        lastObservedScrollTop: 495,
+        ignoreScrollUntil: 0,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: false,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 380,
+      nextFollowModeLocked: false,
+      shouldCancelPendingScroll: true,
+    });
+  });
+
+  it('keeps auto-scroll active for tiny near-bottom drift without a clear user-upward signal', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 494,
+        distanceFromBottom: 2,
+        nearBottom: true,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: false,
+        followModeLocked: false,
+        expectedScrollTop: -1,
+        lastObservedScrollTop: 495,
+        ignoreScrollUntil: 0,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: true,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 494,
+      nextFollowModeLocked: false,
+      shouldCancelPendingScroll: false,
     });
   });
 });
