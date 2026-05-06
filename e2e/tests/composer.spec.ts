@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { getScrollMetrics } from './helpers';
 
+async function waitForAnimationFrames(page: import('@playwright/test').Page, count: number) {
+  for (let index = 0; index < count; index += 1) {
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+  }
+}
+
 test('creates a session and sends a prompt through the mocked bridge', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
@@ -183,14 +189,22 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
   await expect(list).toBeVisible();
   await expect(composer).toBeVisible();
 
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeLessThanOrEqual(15);
+  await waitForAnimationFrames(page, 3);
+
+  const bottomScrollTop = await list.evaluate((element) => element.scrollTop);
+
   await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
     element.scrollTop = Math.max(0, Math.floor(element.scrollHeight / 2));
     element.dispatchEvent(new Event('scroll'));
   });
 
   await expect
-    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
-    .toBeGreaterThan(2000);
+    .poll(async () => await list.evaluate((element) => element.scrollTop))
+    .toBeLessThan(bottomScrollTop - 500);
 
   await composer.fill('First follow mode regression check');
   await sendButton.click();
@@ -226,12 +240,14 @@ test('upward scroll disables follow until the list reaches bottom again', async 
     .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
     .toBeLessThanOrEqual(15);
 
+  const scrollTopBefore = await list.evaluate((element) => element.scrollTop);
+
   await list.hover();
   await page.mouse.wheel(0, -80);
 
   await expect
-    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
-    .toBeGreaterThan(1);
+    .poll(async () => await list.evaluate((element) => element.scrollTop))
+    .toBeLessThan(scrollTopBefore - 20);
 
   await list.evaluate((element) => {
     element.scrollTop = element.scrollHeight;

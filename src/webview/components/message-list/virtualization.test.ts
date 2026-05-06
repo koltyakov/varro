@@ -44,6 +44,8 @@ describe('calculateVirtualRange', () => {
     ).toEqual({
       start: 2,
       end: 3,
+      coreStart: 2,
+      coreEnd: 3,
       topPad: 100,
       bottomPad: 100,
     });
@@ -65,6 +67,8 @@ describe('calculateVirtualRange', () => {
     ).toEqual({
       start: 1,
       end: 4,
+      coreStart: 2,
+      coreEnd: 3,
       topPad: 40,
       bottomPad: 0,
     });
@@ -78,7 +82,7 @@ describe('calculateVirtualRange', () => {
         scrollTop: 100,
         viewportHeight: 50,
       })
-    ).toEqual({ start: 0, end: 0, topPad: 0, bottomPad: 0 });
+    ).toEqual({ start: 0, end: 0, coreStart: 0, coreEnd: 0, topPad: 0, bottomPad: 0 });
   });
 });
 

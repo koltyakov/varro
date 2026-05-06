@@ -139,15 +139,6 @@ export class ProviderLimitService {
       });
     }
 
-    const direct = extractOpenCodeProviderLimit(provider, modelID, checkedAt);
-    if (direct) return createProviderLimitLoadResult(direct, true);
-
-    try {
-      const rawConsole = await this.server.request('GET', '/experimental/console');
-      const consoleLimit = extractOpenCodeConsoleLimit(rawConsole, providerID, modelID, checkedAt);
-      if (consoleLimit) return createProviderLimitLoadResult(consoleLimit, true);
-    } catch {}
-
     const cachedAuthFailure = this.providerAuthFailureCache.get(provider.id);
     const authStore = await this.readProviderAuthStore(Boolean(cachedAuthFailure));
     const credentialFingerprint = getProviderCredentialFingerprint(provider, authStore);
@@ -173,20 +164,29 @@ export class ProviderLimitService {
         note: providerLimit.note,
       });
     }
-    if (!providerLimit) {
-      return createProviderLimitLoadResult({
-        providerID,
-        modelID,
-        status: 'unsupported',
-        source: 'provider',
+    if (providerLimit) {
+      return this.withLastKnownGoodFallback(cacheKey, {
+        ...providerLimit,
         checkedAt,
-        note: 'No zero-cost provider quota endpoint is known for this provider',
       });
     }
 
-    return this.withLastKnownGoodFallback(cacheKey, {
-      ...providerLimit,
+    const direct = extractOpenCodeProviderLimit(provider, modelID, checkedAt);
+    if (direct) return createProviderLimitLoadResult(direct, true);
+
+    try {
+      const rawConsole = await this.server.request('GET', '/experimental/console');
+      const consoleLimit = extractOpenCodeConsoleLimit(rawConsole, providerID, modelID, checkedAt);
+      if (consoleLimit) return createProviderLimitLoadResult(consoleLimit, true);
+    } catch {}
+
+    return createProviderLimitLoadResult({
+      providerID,
+      modelID,
+      status: 'unsupported',
+      source: 'provider',
       checkedAt,
+      note: 'No zero-cost provider quota endpoint is known for this provider',
     });
   }
 

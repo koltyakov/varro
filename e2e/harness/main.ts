@@ -68,6 +68,12 @@ const SCENARIO_NAMES = [
   'ralph-dashboard',
   'statusbar-focus',
   'large-transcript',
+  'mixed-small-transcript',
+  'heterogeneous-large-transcript',
+  'huge-content-transcript',
+  'multi-agent-streaming',
+  'rapid-streaming-jitter',
+  'multi-agent-large-streaming',
 ] as const;
 type ScenarioName = (typeof SCENARIO_NAMES)[number];
 
@@ -2034,6 +2040,574 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 390;
+    return state;
+  }
+
+  if (name === 'mixed-small-transcript') {
+    const session = makeSession(
+      'session-mixed-small-transcript',
+      'Small mixed transcript scroll stability',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 18; index += 1) {
+      const createdAt = BASE_TIME - (200 - index) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-small-user-${index}`,
+        [
+          index % 4 === 0
+            ? `Small-chat scroll check ${index}. ${'This prompt is intentionally taller than average. '.repeat(6)}`
+            : `Small-chat prompt ${index}.`,
+        ],
+        createdAt
+      );
+      const assistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-small-assistant-${index}`,
+        user.info.id,
+        createdAt + 1,
+        [
+          `### Mixed response ${index}`,
+          '',
+          `${'Non-virtualized scroll should not jump while wheel input is active. '.repeat(3 + (index % 5))}`,
+          '',
+          index % 5 === 0 ? '```sh\nnpm run test:e2e -- e2e/tests/scroll.spec.ts\n```' : '- stable viewport',
+        ].join('\n'),
+        index % 6 === 0
+          ? [
+              makeTodoToolPart(
+                session.id,
+                `message-small-assistant-${index}`,
+                `message-small-assistant-${index}-todo`,
+                [
+                  {
+                    id: `small-todo-${index}`,
+                    content: 'Keep scroll position under direct user control',
+                    status: 'completed',
+                    priority: 'high',
+                  },
+                ]
+              ),
+            ]
+          : []
+      );
+      messages.push(user, assistant);
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 395;
+    return state;
+  }
+
+  if (name === 'heterogeneous-large-transcript') {
+    const session = makeSession(
+      'session-heterogeneous-large-transcript',
+      'Chat scroll jitter and e2e regression tests',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 120; index += 1) {
+      const createdAt = BASE_TIME - (500 - index) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-heterogeneous-user-${index}`,
+        [
+          index % 9 === 0
+            ? `Investigate chat scroll jitter regression ${index}. Include browser reproduction details and acceptance criteria. ${'Keep the viewport stable while moving through earlier content. '.repeat(5)}`
+            : `Review scroll stability section ${index}.`,
+        ],
+        createdAt
+      );
+      messages.push(user);
+
+      const firstAssistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-heterogeneous-assistant-${index}-a`,
+        user.info.id,
+        createdAt + 1,
+        [
+          `## Diagnostic pass ${index}`,
+          '',
+          `This assistant turn intentionally varies height and content type for virtualized scrolling. ${'The row may be much taller than the default estimate. '.repeat(index % 7)}`,
+          '',
+          index % 5 === 0
+            ? '```ts\nexport function keepScrollStable() {\n  return true;\n}\n```'
+            : '- measured row height should include padding',
+        ].join('\n'),
+        [
+          ...(index % 4 === 0
+            ? [
+                makeReasoningPart(
+                  session.id,
+                  `message-heterogeneous-assistant-${index}-a`,
+                  `message-heterogeneous-assistant-${index}-reasoning`,
+                  `Reasoning through scroll anchoring and virtualization for section ${index}. ${'Anchor corrections must not fight user wheel input. '.repeat(3)}`,
+                  createdAt + 1,
+                  createdAt + 2
+                ),
+              ]
+            : []),
+          ...(index % 6 === 0
+            ? [
+                makeTodoToolPart(
+                  session.id,
+                  `message-heterogeneous-assistant-${index}-a`,
+                  `message-heterogeneous-assistant-${index}-todo`,
+                  [
+                    {
+                      id: `todo-${index}-1`,
+                      content: 'Reproduce jitter in a heterogeneous long chat',
+                      status: 'completed',
+                      priority: 'high',
+                    },
+                    {
+                      id: `todo-${index}-2`,
+                      content: 'Add e2e regression coverage for large upward jumps',
+                      status: 'in_progress',
+                      priority: 'high',
+                    },
+                  ]
+                ),
+              ]
+            : []),
+        ]
+      );
+      messages.push(firstAssistant);
+
+      if (index % 3 === 0) {
+        const finalAssistant = makeCompletedAssistantMessageWithParts(
+          session.id,
+          `message-heterogeneous-assistant-${index}-b`,
+          user.info.id,
+          createdAt + 3,
+          [
+            `Final answer ${index}`,
+            '',
+            `The fix should preserve user intent and avoid applying stale measurement anchors. ${'This text represents a final answer block in a multi-agent session. '.repeat(4 + (index % 5))}`,
+            '',
+            index % 12 === 0 ? '- agent handoff summarized\n- tool output reviewed\n- regression covered' : 'Done.',
+          ].join('\n'),
+          index % 12 === 0
+            ? [
+                {
+                  id: `message-heterogeneous-assistant-${index}-agent`,
+                  sessionID: session.id,
+                  messageID: `message-heterogeneous-assistant-${index}-b`,
+                  type: 'agent',
+                  name: 'explore',
+                },
+                {
+                  id: `message-heterogeneous-assistant-${index}-subtask`,
+                  sessionID: session.id,
+                  messageID: `message-heterogeneous-assistant-${index}-b`,
+                  type: 'subtask',
+                  prompt: 'Inspect scroll code paths',
+                  description: 'Explore virtualized message scrolling',
+                  agent: 'explore',
+                },
+              ]
+            : []
+        );
+        messages.push(finalAssistant);
+      }
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 400;
+    return state;
+  }
+
+  if (name === 'huge-content-transcript') {
+    const session = makeSession(
+      'session-huge-content-transcript',
+      'Huge content scroll size regression',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 90; index += 1) {
+      const createdAt = BASE_TIME - (500 - index) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-huge-user-${index}`,
+        [`Review huge-content section ${index}. The scrollbar size must match the transcript size.`],
+        createdAt
+      );
+      const assistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-huge-assistant-${index}`,
+        user.info.id,
+        createdAt + 1,
+        [
+          `## Huge section ${index}`,
+          '',
+          Array.from(
+            { length: 80 },
+            (_, lineIndex) =>
+              `Line ${lineIndex} of section ${index}: virtual height estimation must account for large markdown content before this row is measured.`
+          ).join('\n'),
+          '',
+          '```ts',
+          `export const hugeSection${index} = true;`,
+          '```',
+        ].join('\n')
+      );
+      messages.push(user, assistant);
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 405;
+    return state;
+  }
+
+  if (name === 'multi-agent-streaming') {
+    const session = makeSession(
+      'session-multi-agent-streaming',
+      'Multi-agent streaming scroll test',
+      BASE_TIME - 300
+    );
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 4; index += 1) {
+      const createdAt = BASE_TIME - (300 - index * 60) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-multi-agent-user-${index}`,
+        [`Investigate section ${index} and provide a comprehensive analysis with code examples. ${'Include detailed reasoning about the approach and potential edge cases. '.repeat(4)}`],
+        createdAt
+      );
+      messages.push(user);
+
+      const firstAssistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-multi-agent-assistant-${index}-a`,
+        user.info.id,
+        createdAt + 1,
+        [
+          `## Analysis ${index}`,
+          '',
+          `Working through the approach for section ${index}. ${'This initial analysis covers the main algorithmic considerations and data flow patterns. '.repeat(6)}`,
+          '',
+          '```ts',
+          `export function analyze${index}() {`,
+          '  // Detailed implementation',
+          '  return { result: true, confidence: 0.95 };',
+          '}',
+          '```',
+        ].join('\n'),
+        [
+          makeReasoningPart(
+            session.id,
+            `message-multi-agent-assistant-${index}-a`,
+            `message-multi-agent-assistant-${index}-a-reasoning`,
+            `Let me think through the approach for section ${index}. ${'The key consideration is ensuring scroll stability when multiple agent responses exist. '.repeat(4)}`,
+            createdAt + 1,
+            createdAt + 3
+          ),
+          makeTodoToolPart(
+            session.id,
+            `message-multi-agent-assistant-${index}-a`,
+            `message-multi-agent-assistant-${index}-a-todo`,
+            [
+              { id: `multi-todo-${index}-1`, content: `Analyze section ${index}`, status: 'completed', priority: 'high' },
+              { id: `multi-todo-${index}-2`, content: 'Write test coverage', status: 'completed', priority: 'high' },
+              { id: `multi-todo-${index}-3`, content: 'Review edge cases', status: 'completed', priority: 'medium' },
+            ]
+          ),
+        ]
+      );
+      messages.push(firstAssistant);
+
+      const finalAssistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-multi-agent-assistant-${index}-b`,
+        user.info.id,
+        createdAt + 10,
+        [
+          `Final answer ${index}`,
+          '',
+          `The solution for section ${index} is complete. ${'This final response summarizes the key findings and provides the definitive implementation. '.repeat(8)}`,
+          '',
+          '- Finding 1: Scroll anchoring preserves position',
+          '- Finding 2: Virtualization does not interfere with streaming',
+          '- Finding 3: Auto-scroll re-engagement works correctly',
+          '',
+          `Conclusion: All ${index + 1} sections pass the regression suite.`,
+        ].join('\n'),
+        [
+          {
+            id: `message-multi-agent-assistant-${index}-b-agent`,
+            sessionID: session.id,
+            messageID: `message-multi-agent-assistant-${index}-b`,
+            type: 'agent',
+            name: 'build',
+          },
+        ]
+      );
+      messages.push(finalAssistant);
+    }
+
+    const streamingUser = makeUserMessage(
+      session.id,
+      'message-multi-agent-user-streaming',
+      ['Now verify the scroll behavior during active streaming with all previous results visible.'],
+      BASE_TIME
+    );
+    messages.push(streamingUser);
+
+    const streamingAssistant: MessageEntry<AssistantMessage> = {
+      info: {
+        id: 'message-multi-agent-assistant-streaming',
+        sessionID: session.id,
+        role: 'assistant',
+        time: { created: BASE_TIME + 1 },
+        parentID: streamingUser.info.id,
+        modelID: DEFAULT_MODEL_ID,
+        providerID: DEFAULT_PROVIDER_ID,
+        mode: 'primary',
+        agent: 'build',
+        path: { cwd: WORKSPACE_PATH, root: WORKSPACE_PATH },
+        summary: false,
+        cost: 0,
+        tokens: { input: 32, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: 'message-multi-agent-assistant-streaming-text-1',
+          sessionID: session.id,
+          messageID: 'message-multi-agent-assistant-streaming',
+          type: 'text',
+          text: 'Starting streaming response...',
+        },
+      ],
+    };
+    messages.push(streamingAssistant);
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'busy' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 500;
+    return state;
+  }
+
+  if (name === 'rapid-streaming-jitter') {
+    const session = makeSession(
+      'session-rapid-streaming-jitter',
+      'Rapid streaming jitter test',
+      BASE_TIME - 200
+    );
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 48; index += 1) {
+      const createdAt = BASE_TIME - (200 - index) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-rapid-user-${index}`,
+        [`Rapid jitter test prompt ${index}. ${index % 5 === 0 ? 'This is a taller prompt with extra text to vary heights. '.repeat(3) : ''}`],
+        createdAt
+      );
+      const assistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-rapid-assistant-${index}`,
+        user.info.id,
+        createdAt + 1,
+        [
+          `Response ${index}`,
+          '',
+          `${'Rapid jitter test content for scroll stability verification. '.repeat(2 + (index % 4))}`,
+          index % 6 === 0 ? '```js\nconst test = true;\n```' : '- stable',
+        ].join('\n')
+      );
+      messages.push(user, assistant);
+    }
+
+    const streamingUser = makeUserMessage(
+      session.id,
+      'message-rapid-user-streaming',
+      ['Stream rapidly while at the bottom to exercise jitter resistance.'],
+      BASE_TIME
+    );
+    messages.push(streamingUser);
+
+    const streamingAssistant: MessageEntry<AssistantMessage> = {
+      info: {
+        id: 'message-rapid-assistant-streaming',
+        sessionID: session.id,
+        role: 'assistant',
+        time: { created: BASE_TIME + 1 },
+        parentID: streamingUser.info.id,
+        modelID: DEFAULT_MODEL_ID,
+        providerID: DEFAULT_PROVIDER_ID,
+        mode: 'primary',
+        agent: 'build',
+        path: { cwd: WORKSPACE_PATH, root: WORKSPACE_PATH },
+        summary: false,
+        cost: 0,
+        tokens: { input: 32, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: 'message-rapid-assistant-streaming-text-1',
+          sessionID: session.id,
+          messageID: 'message-rapid-assistant-streaming',
+          type: 'text',
+          text: 'Starting...',
+        },
+      ],
+    };
+    messages.push(streamingAssistant);
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'busy' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 600;
+    return state;
+  }
+
+  if (name === 'multi-agent-large-streaming') {
+    const session = makeSession(
+      'session-multi-agent-large-streaming',
+      'Large multi-agent streaming scroll test',
+      BASE_TIME - 600
+    );
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 25; index += 1) {
+      const createdAt = BASE_TIME - (600 - index * 20) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-mla-user-${index}`,
+        [`Investigate section ${index} with detailed analysis. ${'Include reasoning about edge cases and potential issues. '.repeat(2 + (index % 3))}`],
+        createdAt
+      );
+      messages.push(user);
+
+      const firstAssistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-mla-assistant-${index}-a`,
+        user.info.id,
+        createdAt + 1,
+        [
+          `## Analysis ${index}`,
+          '',
+          `Working through section ${index}. ${'This analysis covers algorithmic considerations and data flow patterns for scroll stability. '.repeat(3 + (index % 5))}`,
+          '',
+          index % 4 === 0 ? '```ts\nexport function analyze() {\n  return { stable: true };\n}\n```' : '- measured row height',
+        ].join('\n'),
+        [
+          ...(index % 3 === 0
+            ? [
+                makeReasoningPart(
+                  session.id,
+                  `message-mla-assistant-${index}-a`,
+                  `message-mla-assistant-${index}-a-reasoning`,
+                  `Reasoning through scroll anchoring for section ${index}. ${'Anchor corrections must not fight user wheel input. '.repeat(2)}`,
+                  createdAt + 1,
+                  createdAt + 2
+                ),
+              ]
+            : []),
+          ...(index % 5 === 0
+            ? [
+                makeTodoToolPart(
+                  session.id,
+                  `message-mla-assistant-${index}-a`,
+                  `message-mla-assistant-${index}-a-todo`,
+                  [
+                    { id: `mla-todo-${index}-1`, content: `Analyze section ${index}`, status: 'completed', priority: 'high' },
+                    { id: `mla-todo-${index}-2`, content: 'Verify scroll stability', status: 'completed', priority: 'medium' },
+                  ]
+                ),
+              ]
+            : []),
+        ]
+      );
+      messages.push(firstAssistant);
+
+      const finalAssistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        `message-mla-assistant-${index}-b`,
+        user.info.id,
+        createdAt + 5,
+        [
+          `Final answer ${index}`,
+          '',
+          `Solution for section ${index} is complete. ${'This final response summarizes key findings and provides the definitive implementation. '.repeat(4 + (index % 4))}`,
+          '',
+          '- Scroll anchoring preserves position',
+          '- Virtualization does not interfere with streaming',
+          `Conclusion: Section ${index} passes.`,
+        ].join('\n'),
+        index % 8 === 0
+          ? [
+              {
+                id: `message-mla-assistant-${index}-b-agent`,
+                sessionID: session.id,
+                messageID: `message-mla-assistant-${index}-b`,
+                type: 'agent',
+                name: 'explore',
+              },
+            ]
+          : []
+      );
+      messages.push(finalAssistant);
+    }
+
+    const streamingUser = makeUserMessage(
+      session.id,
+      'message-mla-user-streaming',
+      ['Verify scroll behavior during active streaming with all previous agent results visible.'],
+      BASE_TIME
+    );
+    messages.push(streamingUser);
+
+    const streamingAssistant: MessageEntry<AssistantMessage> = {
+      info: {
+        id: 'message-mla-assistant-streaming',
+        sessionID: session.id,
+        role: 'assistant',
+        time: { created: BASE_TIME + 1 },
+        parentID: streamingUser.info.id,
+        modelID: DEFAULT_MODEL_ID,
+        providerID: DEFAULT_PROVIDER_ID,
+        mode: 'primary',
+        agent: 'build',
+        path: { cwd: WORKSPACE_PATH, root: WORKSPACE_PATH },
+        summary: false,
+        cost: 0,
+        tokens: { input: 32, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: 'message-mla-assistant-streaming-text-1',
+          sessionID: session.id,
+          messageID: 'message-mla-assistant-streaming',
+          type: 'text',
+          text: 'Starting streaming response in large multi-agent session...',
+        },
+      ],
+    };
+    messages.push(streamingAssistant);
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'busy' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 700;
     return state;
   }
 

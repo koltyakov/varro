@@ -462,6 +462,66 @@ describe('ProviderLimitService', () => {
     );
   });
 
+  it('prefers provider adapter snapshots over OpenCode metadata when available', async () => {
+    const server = createProviderServer([{ id: 'zai', models: { 'glm-4.5': {} } }]);
+    const service = new ProviderLimitService(server);
+    mocks.extractOpenCodeProviderLimitMock.mockReturnValue({
+      providerID: 'zai',
+      modelID: 'glm-4.5',
+      status: 'available',
+      source: 'opencode',
+      checkedAt: Date.now(),
+      note: 'Read from OpenCode metadata',
+      windows: [
+        {
+          id: 'messages',
+          label: 'Messages',
+          unit: 'messages',
+          remaining: 0,
+          limit: 1000,
+          resetAt: null,
+        },
+      ],
+    });
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue({
+      providerID: 'zai',
+      modelID: 'glm-4.5',
+      status: 'available',
+      source: 'provider',
+      checkedAt: Date.now(),
+      note: 'Polled Z.ai quota endpoint',
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5-Hour Limit',
+          unit: 'unknown',
+          remaining: 981,
+          limit: 1000,
+          resetAt: null,
+          percent: 1,
+        },
+      ],
+    });
+
+    await expect(service.get('zai', 'glm-4.5')).resolves.toMatchObject({
+      providerID: 'zai',
+      modelID: 'glm-4.5',
+      status: 'available',
+      source: 'provider',
+      note: 'Polled Z.ai quota endpoint',
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5-Hour Limit',
+          remaining: 981,
+          limit: 1000,
+        },
+      ],
+    });
+
+    expect(mocks.extractOpenCodeProviderLimitMock).not.toHaveBeenCalled();
+  });
+
   it('suppresses repeated credential rejections for the rest of the session', async () => {
     const server = createProviderServer([{ id: 'anthropic', models: {} }]);
     const service = new ProviderLimitService(server);

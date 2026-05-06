@@ -16,6 +16,7 @@ export type AssistantDialogSummaryInfo = {
 export type MessageRowSharedProps = {
   modelChangeMap: Map<string, string>;
   lastAssistantID: string | null;
+  nearViewport?: boolean;
   outerListVirtualized?: boolean;
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
@@ -42,7 +43,9 @@ export function MessageRows(
   return <For each={props.messages}>{(msg) => <MessageRow msg={msg} {...props} />}</For>;
 }
 
-function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps) {
+export function MessageRow(
+  props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps
+) {
   let rowRef: HTMLDivElement | undefined;
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
@@ -91,6 +94,7 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
         info={props.msg.info}
         parts={props.msg.parts}
         isLastAssistant={props.msg.info.id === props.lastAssistantID}
+        nearViewport={props.nearViewport}
         outerListVirtualized={props.outerListVirtualized}
         highlightFinalAnswer={highlightFinalAnswer()}
         highlightPlanningAnswer={highlightPlanningAnswer()}

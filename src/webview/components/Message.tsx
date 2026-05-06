@@ -44,6 +44,7 @@ export function Message(props: {
   info: MessageType;
   parts: Part[];
   isLastAssistant?: boolean;
+  nearViewport?: boolean;
   outerListVirtualized?: boolean;
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
@@ -206,6 +207,7 @@ export function Message(props: {
                   !!props.highlightFinalAnswer && assistantContainerVariant() !== 'plain'
                 }
                 isLastAssistant={props.isLastAssistant}
+                nearViewport={props.nearViewport}
                 outerListVirtualized={props.outerListVirtualized}
                 textForPart={getEffectivePartText}
                 questionRequestForTool={props.questionRequestForTool}

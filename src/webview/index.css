@@ -702,6 +702,17 @@ body.vscode-high-contrast-light .interactive-session {
   -webkit-user-select: text;
 }
 
+.interactive-list-track.virtualized .interactive-item-container {
+  contain: layout style paint;
+  flex: 0 0 auto;
+}
+
+.interactive-list-track.virtualized .virtual-spacer {
+  flex: 0 0 auto;
+  min-height: 0;
+  pointer-events: none;
+}
+
 /* An empty message row (no rendered content) must not contribute any
    vertical space — otherwise it inflates the gap between two adjacent
    non-empty rows from the canonical 12px to ~24px. */

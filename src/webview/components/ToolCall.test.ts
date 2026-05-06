@@ -172,6 +172,30 @@ describe('ToolCall', () => {
     );
   });
 
+  it('falls back to the reported bash duration when persisted timestamps are implausibly short', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: {
+        status: 'completed',
+        input: { command: 'rtk npm run test:e2e 2>&1 | tail -30' },
+        output:
+          '1 failed\n  [chromium] > e2e/tests/composer.spec.ts:229:5 > upward scroll\n  148 passed (17.6s)\n',
+        title: 'Run full e2e test suite',
+        metadata: {},
+        time: { start: 1778052631591, end: 1778052631596 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('17.6s');
+  });
+
   it('renders a collapsed path preview as an open-file link', () => {
     const sendSpy = setExtensionSender();
     setState('editorContext', {

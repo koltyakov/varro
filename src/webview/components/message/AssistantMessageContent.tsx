@@ -207,6 +207,7 @@ export function AssistantMessageContent(props: {
   highlightPlanningAnswer?: boolean;
   suppressHighlightedCardMetaParts?: boolean;
   isLastAssistant?: boolean;
+  nearViewport?: boolean;
   outerListVirtualized?: boolean;
   textForPart: (part: Part) => string | null;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
@@ -449,6 +450,10 @@ export function AssistantMessageContent(props: {
     });
   });
 
+  const isLightweight = createMemo(
+    () => props.outerListVirtualized && props.nearViewport === false
+  );
+
   const renderAssistantItem = (item: AssistantRenderItem) =>
     item.kind === 'file-edit-stack' ? (
       <div class="assistant-message-flow-item" data-assistant-render-key={item.key}>
@@ -459,6 +464,7 @@ export function AssistantMessageContent(props: {
                 part={part}
                 messageInfo={props.info}
                 streamedText={props.textForPart(part)}
+                lightweight={isLightweight()}
                 questionRequest={
                   part.type === 'tool'
                     ? props.questionRequestForTool?.(part as ToolPart)
@@ -504,6 +510,7 @@ export function AssistantMessageContent(props: {
           part={item.part}
           messageInfo={props.info}
           streamedText={props.textForPart(item.part)}
+          lightweight={isLightweight()}
           questionRequest={
             item.part.type === 'tool'
               ? props.questionRequestForTool?.(item.part as ToolPart)

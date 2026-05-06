@@ -1258,8 +1258,8 @@ describe('MessageList sticky prompt preview', () => {
     expect(list).toBeInstanceOf(HTMLDivElement);
 
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 7200 });
-    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6800 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9600 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 9200 });
 
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
@@ -1483,7 +1483,7 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
-  it('coalesces raw viewport scroll state updates until the next animation frame', async () => {
+  it('updates rendered messages synchronously without waiting for the next animation frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 
     setState('activeSessionId', 'session-1');
@@ -1519,14 +1519,16 @@ describe('MessageList sticky prompt preview', () => {
     expect(firstRenderedMessageIdBeforeScroll).toBe('assistant-0');
 
     list!.scrollTop = 3_600;
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: 120 }));
     list?.dispatchEvent(new Event('scroll'));
     list!.scrollTop = 4_800;
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: 120 }));
     list?.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
 
-    const firstRenderedMessageIdBeforeFrame =
+    const firstRenderedMessageIdAfterScroll =
       container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-    expect(firstRenderedMessageIdBeforeFrame).toBe('assistant-0');
+    expect(firstRenderedMessageIdAfterScroll).not.toBe('assistant-0');
 
     animationFrames.flush();
     await Promise.resolve();
