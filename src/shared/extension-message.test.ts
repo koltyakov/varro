@@ -113,6 +113,22 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({
         type: 'server/event',
+        payload: {
+          type: 'workspace.status',
+          properties: { workspaceID: 'ws-1', status: 'connected' },
+        },
+      })
+    ).toEqual({
+      type: 'server/event',
+      payload: {
+        type: 'workspace.status',
+        properties: { workspaceID: 'ws-1', status: 'connected' },
+      },
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'server/event',
         payload: { type: 'totally.unknown', properties: { a: 1 } },
       })
     ).toBeNull();

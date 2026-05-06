@@ -366,7 +366,7 @@ export function SessionListView(props: {
     state.sessions.filter(
       (session) =>
         !shouldPruneEmptySession(session, {
-          activeSessionId: state.activeSessionId,
+          activeSessionId: null,
           isQueued: (sessionId) =>
             state.queuedMessages.some((item) => item.sessionId === sessionId),
           isAwaitingInput: isSessionAwaitingInput,
@@ -374,6 +374,7 @@ export function SessionListView(props: {
           needsAttention: (sessionId) => sessionIndicators().attentionIds.has(sessionId),
           isFailed: (sessionId) => sessionIndicators().failedIds.has(sessionId),
           isPlanReady: (item) => sessionIndicators().planReadyIds.has(item.id),
+          preserve: ralphStore.isRalphSession(session.id),
           statusType: state.sessionStatus[session.id]?.type,
         })
     )

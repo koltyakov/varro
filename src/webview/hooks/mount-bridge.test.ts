@@ -20,6 +20,8 @@ const {
   setDesktopSessionPaneSide,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
+  setWorkspaceStatusSummary,
+  setWorkspaceStatuses,
 } = vi.hoisted(() => ({
   setState: vi.fn(),
   setError: vi.fn(),
@@ -37,6 +39,8 @@ const {
   setDesktopSessionPaneSide: vi.fn(),
   setProviderLimitPollIntervalSeconds: vi.fn(),
   setProviderLimitThresholdPercent: vi.fn(),
+  setWorkspaceStatusSummary: vi.fn(),
+  setWorkspaceStatuses: vi.fn(),
 }));
 
 vi.mock('../lib/state', async () => {
@@ -66,12 +70,20 @@ vi.mock('../lib/state', async () => {
   };
 });
 
+const getWorkspaceStatusEventSummaryMock = vi.hoisted(() =>
+  vi.fn(() => ({ entries: [], latest: undefined }))
+);
+
 import {
   createMountBridgeOperations,
   handleExtensionMessageWithDependencies,
   postFocusStateWithDependencies,
   registerFocusStateTracking,
 } from './mount-bridge';
+
+vi.mock('../lib/client', () => ({
+  getWorkspaceStatusEventSummary: getWorkspaceStatusEventSummaryMock,
+}));
 
 describe('mount bridge helpers', () => {
   it('starts connection initialization when server status becomes running', () => {
@@ -103,6 +115,8 @@ describe('mount bridge helpers', () => {
         requestOpenAttentionSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
+        setWorkspaceStatusSummary: vi.fn(),
+        setWorkspaceStatuses: vi.fn(),
       },
       {
         type: 'server/status',
@@ -146,6 +160,8 @@ describe('mount bridge helpers', () => {
         requestOpenAttentionSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
+        setWorkspaceStatusSummary: vi.fn(),
+        setWorkspaceStatuses: vi.fn(),
       },
       {
         type: 'server/status',
@@ -239,6 +255,8 @@ describe('mount bridge helpers', () => {
       requestOpenAttentionSessions: openAttentionSessions,
       abortSession,
       refreshMcps,
+      setWorkspaceStatusSummary: vi.fn(),
+      setWorkspaceStatuses: vi.fn(),
     };
 
     handleExtensionMessageWithDependencies(deps, { type: 'command/new-session' });
@@ -312,6 +330,52 @@ describe('mount bridge helpers', () => {
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
     expect(setProviderLimitPollIntervalSeconds).toHaveBeenCalledWith(90);
     expect(setProviderLimitThresholdPercent).toHaveBeenCalledWith(25);
+  });
+
+  it('routes workspace status events into shared workspace state', () => {
+    getWorkspaceStatusEventSummaryMock.mockReturnValue({
+      entries: [{ workspaceID: 'ws-1', status: 'connected' }],
+      latest: undefined,
+    });
+
+    const deps = {
+      setServerStatus: vi.fn(),
+      clearError: vi.fn(),
+      ensureConnectionInitialized: vi.fn(),
+      clearProvidersState: vi.fn(),
+      setTheme: vi.fn(),
+      setConfig: vi.fn(),
+      getPreviousActiveFilePath: () => null,
+      getCurrentWorkspacePath: () => null,
+      setCurrentWorkspacePath: vi.fn(),
+      setEditorContext: vi.fn(),
+      rememberCurrentDocumentNavigation: vi.fn(),
+      syncWorkspaceState: vi.fn(),
+      reloadSessionsForWorkspaceChange: vi.fn(),
+      isInitialized: () => false,
+      setTerminalSelection: vi.fn(),
+      addContextFiles: vi.fn(),
+      removeContextFile: vi.fn(),
+      createSession: vi.fn(),
+      requestComposerFocus: vi.fn(),
+      requestOpenAttentionSessions: vi.fn(),
+      abortSession: vi.fn(),
+      refreshMcps: vi.fn(),
+      setWorkspaceStatusSummary,
+      setWorkspaceStatuses,
+    };
+
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'server/event',
+      payload: {
+        type: 'workspace.status',
+        properties: { workspaceID: 'ws-1', status: 'connected' },
+      },
+    });
+
+    expect(setWorkspaceStatuses).toHaveBeenCalledWith([
+      { workspaceID: 'ws-1', status: 'connected' },
+    ]);
   });
 
   it('posts focus state based on visibility and document focus', () => {

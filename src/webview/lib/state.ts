@@ -36,7 +36,12 @@ import type {
   RecycleBinEntry,
   ServerStatus,
   WebviewThemeKind,
+  WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
+import type {
+  ProviderAuthMethodsByProvider,
+  WorkspaceStatusEntry,
+} from '../../shared/opencode-types';
 import {
   readProviderLimitPollIntervalSeconds,
   readProviderLimitThresholdPercent,
@@ -120,6 +125,9 @@ export interface AppState {
   failedSessionIds: string[];
   sessionUsageLimits: Record<string, UsageLimitNotice | null>;
   interruptedSessionIds: string[];
+  providerAuthMethods: ProviderAuthMethodsByProvider;
+  workspaceStatuses: WorkspaceStatusEntry[];
+  workspaceStatusSummary: WorkspaceStatusEventSummary;
 }
 
 export type LastOpenedView =
@@ -274,6 +282,9 @@ export function createAppState(): AppStateInstance {
     failedSessionIds: [],
     sessionUsageLimits: {},
     interruptedSessionIds: initialWebviewState.interruptedSessionIds ?? [],
+    providerAuthMethods: {},
+    workspaceStatuses: [],
+    workspaceStatusSummary: { entries: [] },
   });
 
   const [showThinking, setShowThinking] = createSignal(readShowThinking());
@@ -1275,6 +1286,18 @@ export function resetPastedImageIndex() {
 
 export function setQuestions(questions: QuestionRequest[]) {
   setState('questions', questions);
+}
+
+export function setProviderAuthMethods(methods: ProviderAuthMethodsByProvider) {
+  setState('providerAuthMethods', methods);
+}
+
+export function setWorkspaceStatuses(entries: WorkspaceStatusEntry[]) {
+  setState('workspaceStatuses', entries);
+}
+
+export function setWorkspaceStatusSummary(summary: WorkspaceStatusEventSummary) {
+  setState('workspaceStatusSummary', summary);
 }
 
 export function setCommands(commands: Command[]) {

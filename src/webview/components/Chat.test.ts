@@ -380,6 +380,80 @@ describe('empty session pruning', () => {
 
     expect(deleteImmediatelySpy).not.toHaveBeenCalled();
   });
+
+  it('hides an active empty session from the list without auto-deleting it', async () => {
+    const deleteImmediatelySpy = vi
+      .spyOn(openCodeModule, 'deleteSessionImmediately')
+      .mockResolvedValue(undefined);
+
+    const staleTime = Date.now() - EMPTY_SESSION_PRUNE_GRACE_MS - 100;
+
+    setState('sessions', [
+      session('new-session', staleTime, {
+        title: 'New session',
+        time: { created: staleTime, updated: staleTime },
+      }),
+    ]);
+    setState('activeSessionId', 'new-session');
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+    await Promise.resolve();
+    vi.runOnlyPendingTimers();
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('New session');
+    expect(container?.textContent).toContain('Sessions (0)');
+    expect(deleteImmediatelySpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps a Ralph manager session visible and skips auto-delete when it is otherwise empty', async () => {
+    const deleteImmediatelySpy = vi
+      .spyOn(openCodeModule, 'deleteSessionImmediately')
+      .mockResolvedValue(undefined);
+
+    const staleTime = Date.now() - EMPTY_SESSION_PRUNE_GRACE_MS - 100;
+
+    setState('sessions', [
+      session('manager', staleTime, {
+        title: 'Ralph manager',
+        time: { created: staleTime, updated: staleTime },
+      }),
+      session('child-1', staleTime + 1_000, {
+        title: 'Ralph iter 1',
+        parentID: 'manager',
+      }),
+    ]);
+    setShowSessionPicker(true);
+    ralphStore.startRun({
+      managerSessionId: 'manager',
+      planDocPath: 'TESTS.md',
+      iterations: 15,
+      promptTemplate: 'Prompt',
+      permissionMode: 'full',
+      model: null,
+      agent: null,
+      createdAt: 1,
+    });
+    ralphStore.upsertIteration('manager', {
+      index: 1,
+      childSessionId: 'child-1',
+      status: 'running',
+      startedAt: 100,
+      endedAt: null,
+      filesChanged: [],
+      verification: {},
+    });
+
+    cleanup = render(() => Chat(), container!);
+    await Promise.resolve();
+    vi.runOnlyPendingTimers();
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Ralph manager');
+    expect(container?.textContent).toContain('Ralph');
+    expect(deleteImmediatelySpy).not.toHaveBeenCalled();
+  });
 });
 
 describe('getAttentionSessions', () => {

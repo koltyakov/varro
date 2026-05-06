@@ -1,7 +1,7 @@
 import { Show } from 'solid-js';
 import { MessageList } from '../MessageList';
 import { ChatInput } from '../ChatInput';
-import { SettingsPanel } from '../SettingsPanel';
+import { ModelsPanel } from '../ModelsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionListFilter } from './SessionListView';
@@ -194,7 +194,7 @@ export function ChatWorkspace(props: {
         }
       >
         <Show when={props.showSettings}>
-          <SettingsPanel />
+          <ModelsPanel />
         </Show>
 
         <div

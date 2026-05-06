@@ -86,6 +86,9 @@ describe('client', () => {
       messageID: 'message-1',
     });
     await client.config.providers();
+    await client.config.providerAuth();
+    await client.config.authorizeProvider({ providerID: 'openai', method: 0 });
+    await client.config.workspaceStatus();
     await client.agent.list();
     await client.question.list();
     await client.question.reply('question-1', [['Yes'], ['No']]);
@@ -137,6 +140,9 @@ describe('client', () => {
         },
       ],
       ['GET', '/config/providers'],
+      ['GET', '/provider/auth'],
+      ['POST', '/provider/openai/oauth/authorize', { method: 0 }],
+      ['GET', '/experimental/workspace/status'],
       ['GET', '/agent'],
       ['GET', '/question'],
       ['POST', '/question/question-1/reply', { answers: [['Yes'], ['No']] }],
@@ -171,6 +177,27 @@ describe('client', () => {
       'GET',
       '/varro/provider-limit?providerID=openai&modelID=gpt-4.1'
     );
+  });
+
+  it('tracks workspace status event summaries from newer servers', async () => {
+    const { getWorkspaceStatusEventSummary } = await loadClient();
+
+    emitMessage({
+      type: 'server/event',
+      payload: {
+        type: 'workspace.status',
+        properties: { workspaceID: 'ws-1', status: 'connecting' },
+      },
+    });
+    emitMessage({
+      type: 'server/event',
+      payload: { type: 'workspace.ready', properties: { name: 'Main workspace' } },
+    });
+
+    expect(getWorkspaceStatusEventSummary()).toEqual({
+      entries: [{ workspaceID: 'ws-1', status: 'connecting' }],
+      latest: { type: 'workspace.ready', message: 'Main workspace' },
+    });
   });
 
   it('treats malformed recycle bin payloads as empty', async () => {

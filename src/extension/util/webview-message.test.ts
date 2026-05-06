@@ -25,6 +25,12 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/mcp')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/connect')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/disconnect')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/provider/auth')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/provider/openai/oauth/authorize')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/provider/openai/oauth/callback')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/experimental/workspace/status')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/experimental/workspace/warp')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/global/config')).toBe(true);
   });
 
   it('rejects absolute and unsupported API routes', () => {
@@ -41,6 +47,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/delete')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/delete')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/varro/session-trash/session-1/restore')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/provider/openai/oauth/authorize')).toBe(false);
   });
 
   it('rejects unsafe extension-host actions from malformed messages', () => {
@@ -71,6 +78,16 @@ describe('webview message validation', () => {
         payload: { url: 'http://example.com' },
       })
     ).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'terminal/run',
+        payload: { command: 'opencode auth', title: 'Auth' },
+      })
+    ).toEqual({
+      type: 'terminal/run',
+      payload: { command: 'opencode auth', title: 'Auth' },
+    });
   });
 
   it('allows only https external URLs', () => {

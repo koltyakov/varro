@@ -47,7 +47,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       const command = getBoundedString(payload?.command, 200);
       const title = getOptionalBoundedString(payload?.title, 120);
-      if (command !== 'opencode auth login') return null;
+      if (command !== 'opencode auth login' && command !== 'opencode auth') return null;
       return { type, payload: title ? { command, title } : { command } };
     }
 
@@ -202,7 +202,9 @@ export function isAllowedApiRequest(method: string, path: string) {
   const noQuery = () => !url.search;
 
   if (pathname === '/global/health') return method === 'GET' && noQuery();
+  if (pathname === '/global/config') return method === 'GET' && noQuery();
   if (pathname === '/config/providers') return method === 'GET' && noQuery();
+  if (pathname === '/provider/auth') return method === 'GET' && noQuery();
   if (pathname === '/command') return method === 'GET' && noQuery();
   if (pathname === '/mcp') return method === 'GET' && noQuery();
   if (pathname === '/file/status') return method === 'GET' && noQuery();
@@ -210,6 +212,7 @@ export function isAllowedApiRequest(method: string, path: string) {
   if (pathname === '/question') return method === 'GET' && noQuery();
   if (pathname === '/session') return (method === 'GET' || method === 'POST') && noQuery();
   if (pathname === '/session/status') return method === 'GET' && noQuery();
+  if (pathname === '/experimental/workspace/status') return method === 'GET' && noQuery();
   if (pathname === '/varro/provider-limit') {
     return (
       method === 'GET' &&
@@ -255,6 +258,19 @@ export function isAllowedApiRequest(method: string, path: string) {
     return (
       method === 'POST' && noQuery() && (segments[2] === 'connect' || segments[2] === 'disconnect')
     );
+  }
+
+  if (segments[0] === 'provider' && segments.length === 4) {
+    return (
+      method === 'POST' &&
+      noQuery() &&
+      segments[2] === 'oauth' &&
+      (segments[3] === 'authorize' || segments[3] === 'callback')
+    );
+  }
+
+  if (pathname === '/experimental/workspace/warp') {
+    return method === 'POST' && noQuery();
   }
 
   if (segments[0] !== 'session' || segments.length < 2) return false;

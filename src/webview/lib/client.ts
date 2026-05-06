@@ -19,7 +19,13 @@ import type {
   RecycleBinEntry,
   ServerEvent,
   ServerEventName,
+  WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
+import type {
+  ProviderAuthAuthorization,
+  ProviderAuthMethodsByProvider,
+  WorkspaceStatusEntry,
+} from '../../shared/opencode-types';
 
 type RecycleBinSessionRecord = {
   id: string;
@@ -145,6 +151,22 @@ export const client = {
       const params = new URLSearchParams({ providerID });
       if (modelID) params.set('modelID', modelID);
       return apiCall('GET', `/varro/provider-limit?${params.toString()}`);
+    },
+    async providerAuth(): Promise<ProviderAuthMethodsByProvider> {
+      return apiCall('GET', '/provider/auth');
+    },
+    async authorizeProvider(body: {
+      providerID: string;
+      method: number;
+      inputs?: Record<string, string>;
+    }): Promise<ProviderAuthAuthorization> {
+      return apiCall('POST', `/provider/${encodeURIComponent(body.providerID)}/oauth/authorize`, {
+        method: body.method,
+        ...(body.inputs ? { inputs: body.inputs } : {}),
+      });
+    },
+    async workspaceStatus(): Promise<WorkspaceStatusEntry[]> {
+      return apiCall('GET', '/experimental/workspace/status');
     },
   },
 
@@ -355,10 +377,47 @@ type ServerEventsApi = {
 };
 
 const eventListeners = new Map<string, Set<EventHandler>>();
+let workspaceStatusSummary: WorkspaceStatusEventSummary = { entries: [] };
 
 onMessage((msg) => {
   if (msg.type !== 'server/event') return;
   const evt = msg.payload;
+  if (evt.type === 'workspace.status') {
+    const entry = normalizeWorkspaceStatusEntry(evt.properties);
+    if (entry) {
+      workspaceStatusSummary = {
+        ...workspaceStatusSummary,
+        entries: [
+          ...workspaceStatusSummary.entries.filter(
+            (item) => item.workspaceID !== entry.workspaceID
+          ),
+          entry,
+        ],
+      };
+    }
+  }
+  if (evt.type === 'workspace.ready') {
+    workspaceStatusSummary = {
+      ...workspaceStatusSummary,
+      latest: {
+        type: 'workspace.ready',
+        message:
+          typeof evt.properties?.name === 'string' ? evt.properties.name : 'Workspace connected',
+      },
+    };
+  }
+  if (evt.type === 'workspace.failed') {
+    workspaceStatusSummary = {
+      ...workspaceStatusSummary,
+      latest: {
+        type: 'workspace.failed',
+        message:
+          typeof evt.properties?.message === 'string'
+            ? evt.properties.message
+            : 'Workspace connection failed',
+      },
+    };
+  }
   const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
   if (handlers) {
     for (const h of handlers) {
@@ -394,3 +453,21 @@ export const serverEvents: ServerEventsApi = {
     return () => eventListeners.get(type)?.delete(handler);
   },
 };
+
+export function getWorkspaceStatusEventSummary() {
+  return workspaceStatusSummary;
+}
+
+function normalizeWorkspaceStatusEntry(value: unknown): WorkspaceStatusEntry | null {
+  const record = asRecord(value);
+  if (!record || typeof record.workspaceID !== 'string') return null;
+  if (
+    record.status !== 'connected' &&
+    record.status !== 'connecting' &&
+    record.status !== 'disconnected' &&
+    record.status !== 'error'
+  ) {
+    return null;
+  }
+  return { workspaceID: record.workspaceID, status: record.status };
+}

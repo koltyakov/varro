@@ -7675,8 +7675,12 @@ body.vscode-high-contrast-light
 
 .ralph-dashboard-header-right {
   display: flex;
+  align-items: center;
   flex: 0 0 auto;
+  margin-left: auto;
   gap: 6px;
+  min-width: 0;
+  justify-content: flex-end;
 }
 
 .ralph-dashboard-btn {
@@ -7759,7 +7763,7 @@ body.vscode-high-contrast-light
 .ralph-dashboard-provider-limits {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   margin-left: auto;
   white-space: nowrap;
 }

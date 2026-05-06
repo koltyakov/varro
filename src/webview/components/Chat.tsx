@@ -59,12 +59,10 @@ export function Chat() {
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
   const isDesktopSessionPaneRight = () => desktopSessionPaneSide() === 'right';
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
-  const visibleSessions = createMemo(() =>
-    state.sessions.filter(
-      (session) =>
-        !shouldAutoDeleteEmptySession(session, state.activeSessionId, sessionIndicators())
-    )
-  );
+  const visibleSessions = createMemo(() => {
+    const indicators = sessionIndicators();
+    return state.sessions.filter((session) => !shouldHideSessionFromList(session, indicators));
+  });
   const primarySessions = createMemo(() => visibleSessions().filter(isPrimarySession));
   const sessionsById = createMemo(
     () => new Map(state.sessions.map((session) => [session.id, session]))
@@ -536,6 +534,27 @@ export function shouldAutoDeleteEmptySession(
     needsAttention: (sessionId) => indicators.attentionIds.has(sessionId),
     isFailed: (sessionId) => indicators.failedIds.has(sessionId),
     isPlanReady: (item) => indicators.planReadyIds.has(item.id),
+    preserve: ralphStore.isRalphSession(session.id),
+    statusType: state.sessionStatus[session.id]?.type,
+  });
+}
+
+function shouldHideSessionFromList(
+  session: (typeof state.sessions)[number],
+  indicators: Pick<
+    ReturnType<typeof deriveSessionIndicators>,
+    'runningIds' | 'attentionIds' | 'failedIds' | 'planReadyIds'
+  >
+) {
+  return shouldPruneEmptySession(session, {
+    activeSessionId: null,
+    isQueued: (sessionId) => state.queuedMessages.some((item) => item.sessionId === sessionId),
+    isAwaitingInput: isSessionAwaitingInput,
+    isRunning: (sessionId) => indicators.runningIds.has(sessionId),
+    needsAttention: (sessionId) => indicators.attentionIds.has(sessionId),
+    isFailed: (sessionId) => indicators.failedIds.has(sessionId),
+    isPlanReady: (item) => indicators.planReadyIds.has(item.id),
+    preserve: ralphStore.isRalphSession(session.id),
     statusType: state.sessionStatus[session.id]?.type,
   });
 }

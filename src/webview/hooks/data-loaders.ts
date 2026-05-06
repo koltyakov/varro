@@ -5,7 +5,16 @@ import { permissionsStore } from '../lib/stores/permissions-store';
 import { routingStore } from '../lib/stores/routing-store';
 import { sessionStore } from '../lib/stores/session-store';
 import type { McpStatus, ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
-import type { Agent, Command, Provider, QuestionRequest, Session, SessionStatus } from '../types';
+import type {
+  Agent,
+  Command,
+  Provider,
+  ProviderAuthMethodsByProvider,
+  QuestionRequest,
+  Session,
+  SessionStatus,
+  WorkspaceStatusEntry,
+} from '../types';
 import { reconcileLoadedAgents, reconcileLoadedProviders } from './routing-state';
 
 type Logger = (context: string, err: unknown) => void;
@@ -44,6 +53,10 @@ export function createStateBoundDataLoaderOperations(deps: {
     setSelectedModel: routingStore.setSelectedModel,
     loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),
     setProviderLimit: routingStore.setProviderLimit,
+    listProviderAuthMethods: () => client.config.providerAuth(),
+    setProviderAuthMethods: routingStore.setProviderAuthMethods,
+    listWorkspaceStatuses: () => client.config.workspaceStatus(),
+    setWorkspaceStatuses: routingStore.setWorkspaceStatuses,
     listSessions: () => client.session.list(),
     applySessions: deps.applySessions,
     listRecycleBin: () => client.varro.recycleBin.list(),
@@ -88,6 +101,10 @@ export function createDataLoaderOperations(deps: {
     modelID: string | null | undefined,
     limit: ProviderLimitStatus
   ): void;
+  listProviderAuthMethods(): Promise<ProviderAuthMethodsByProvider>;
+  setProviderAuthMethods(methods: ProviderAuthMethodsByProvider): void;
+  listWorkspaceStatuses(): Promise<WorkspaceStatusEntry[]>;
+  setWorkspaceStatuses(entries: WorkspaceStatusEntry[]): void;
   listSessions(): Promise<Session[]>;
   applySessions(sessions: Session[]): void;
   listRecycleBin(): Promise<RecycleBinEntry[] | null | undefined>;
@@ -181,6 +198,25 @@ export function createDataLoaderOperations(deps: {
     );
   };
 
+  const loadCompatibilityState = async () => {
+    await Promise.all([
+      loadProviderAuthMethodsWithDependencies(
+        {
+          listProviderAuthMethods: deps.listProviderAuthMethods,
+          setProviderAuthMethods: deps.setProviderAuthMethods,
+        },
+        deps.logError
+      ),
+      loadWorkspaceStatusesWithDependencies(
+        {
+          listWorkspaceStatuses: deps.listWorkspaceStatuses,
+          setWorkspaceStatuses: deps.setWorkspaceStatuses,
+        },
+        deps.logError
+      ),
+    ]);
+  };
+
   const loadSessions = async () => {
     await loadSessionsWithDependencies(
       {
@@ -221,10 +257,39 @@ export function createDataLoaderOperations(deps: {
     loadProviders,
     refreshRoutingState,
     refreshProviderLimit,
+    loadCompatibilityState,
     loadSessions,
     loadRecycleBin,
     hydrateSessionStatuses,
   };
+}
+
+export async function loadProviderAuthMethodsWithDependencies(
+  deps: {
+    listProviderAuthMethods(): Promise<ProviderAuthMethodsByProvider>;
+    setProviderAuthMethods(methods: ProviderAuthMethodsByProvider): void;
+  },
+  logError: Logger
+) {
+  try {
+    deps.setProviderAuthMethods((await deps.listProviderAuthMethods()) || {});
+  } catch (err) {
+    logError('loadProviderAuthMethods', err);
+  }
+}
+
+export async function loadWorkspaceStatusesWithDependencies(
+  deps: {
+    listWorkspaceStatuses(): Promise<WorkspaceStatusEntry[]>;
+    setWorkspaceStatuses(entries: WorkspaceStatusEntry[]): void;
+  },
+  logError: Logger
+) {
+  try {
+    deps.setWorkspaceStatuses((await deps.listWorkspaceStatuses()) || []);
+  } catch (err) {
+    logError('loadWorkspaceStatuses', err);
+  }
 }
 
 export async function loadMcpsWithDependencies(
