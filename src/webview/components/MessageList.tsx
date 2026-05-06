@@ -266,9 +266,17 @@ export function MessageList() {
   let pendingInitialScrollSessionId: string | null = null;
   let initialScrollRafId = 0;
   let pendingScrollToBottomRequest = false;
+  let followModeLocked = false;
   let previousStickyPreviewId: string | null = null;
   let previousStickyPreviewBounds: { top: number; bottom: number } | null = null;
   let pendingExpansionScrollAnchor: ExpansionScrollAnchor | null = null;
+  let pendingVirtualMeasurementAnchor: {
+    messageId: string;
+    top: number;
+    height: number;
+    scrollTop: number;
+    expiresAt: number;
+  } | null = null;
   let stickyPreviewDebounceTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let firstVisibleMessageObserver: IntersectionObserver | null = null;
   let measuredRowObserver: ResizeObserver | null = null;
@@ -281,14 +289,18 @@ export function MessageList() {
   let pendingViewportHeight = 0;
   let stickyPreviewRafId = 0;
   let stickyPreviewViewportStateScheduled = false;
+  let virtualMeasurementAnchorRafId = 0;
+  let streamingFollowRafId = 0;
   let pendingStickyPreviewScrollTop = 0;
   let pendingStickyPreviewViewportHeight = 0;
   let lastScrollbarInset = -1;
   let lastContainerOffsetWidth = -1;
   let lastAutoScrolledTrackHeight = 0;
   let lastAutoScrolledBottomScrollTop = 0;
+  let lastWheelAt = Number.NEGATIVE_INFINITY;
   let lastWheelUpAt = Number.NEGATIVE_INFINITY;
   let previousAutoScrollEnabled = true;
+  let pinnedToBottom = true;
   const INITIAL_SCROLL_MAX_FRAMES = 30;
   const INITIAL_SCROLL_STABLE_FRAMES = 3;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
@@ -337,6 +349,7 @@ export function MessageList() {
     messageStructureVersion();
     return untrack(() => findStreamingPart(state.messages, streamingPartId));
   });
+  const streamingTextLength = createMemo(() => state.streamingText.length);
   const visibleBlockingStreamingPart = createMemo(() => {
     const streamingText = state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
@@ -461,15 +474,6 @@ export function MessageList() {
   });
 
   const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
-
-  createEffect((previousVersion: number | undefined) => {
-    const version = messageStructureVersion();
-    if (previousVersion !== undefined && measuredHeights.size > 0) {
-      measuredHeights.clear();
-      setMeasurementVersion((current) => current + 1);
-    }
-    return version;
-  });
 
   createEffect(() => {
     if (pruneMeasuredHeights(measuredHeights, messageIds())) {
@@ -627,7 +631,9 @@ export function MessageList() {
       }
     });
     if (changed) {
+      captureVirtualMeasurementAnchor();
       setMeasurementVersion((version) => version + 1);
+      scheduleVirtualMeasurementAnchorRestore();
     }
     return changed;
   }
@@ -637,7 +643,7 @@ export function MessageList() {
     for (const entry of entries) {
       const element = entry.target as HTMLDivElement;
       const messageId = element.dataset.msgId;
-      const height = entry.contentRect.height;
+      const height = element.getBoundingClientRect().height;
       if (!messageId || height <= 0 || (measuredHeights.get(messageId) ?? 0) === height) {
         continue;
       }
@@ -648,7 +654,9 @@ export function MessageList() {
 
     if (!changed) return;
 
+    captureVirtualMeasurementAnchor();
     setMeasurementVersion((version) => version + 1);
+    scheduleVirtualMeasurementAnchorRestore();
     scheduleVisibleMeasurement({ afterResize: true });
   }
 
@@ -669,6 +677,85 @@ export function MessageList() {
     measurementScheduled = false;
   }
 
+  function cancelScheduledVirtualMeasurementAnchorRestore() {
+    if (virtualMeasurementAnchorRafId) cancelAnimationFrame(virtualMeasurementAnchorRafId);
+    virtualMeasurementAnchorRafId = 0;
+    pendingVirtualMeasurementAnchor = null;
+  }
+
+  function captureVirtualMeasurementAnchor() {
+    if (!containerRef || !shouldVirtualize() || autoScroll() || pinnedToBottom) return;
+
+    const containerRect = containerRef.getBoundingClientRect();
+    let best: { messageId: string; top: number; height: number; distance: number } | null = null;
+    const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
+    for (const row of rows) {
+      const messageId = row.dataset.msgId;
+      if (!messageId) continue;
+
+      const rowRect = row.getBoundingClientRect();
+      const rowTop = rowRect.top - containerRect.top;
+      const rowBottom = rowRect.bottom - containerRect.top;
+      if (rowBottom <= 0 || rowTop >= containerRef.clientHeight) continue;
+
+      const distance = Math.abs(rowTop);
+      if (!best || distance < best.distance) {
+        best = { messageId, top: rowTop, height: rowRect.height, distance };
+      }
+    }
+
+    if (!best) return;
+    pendingVirtualMeasurementAnchor = {
+      messageId: best.messageId,
+      top: best.top,
+      height: best.height,
+      scrollTop: containerRef.scrollTop,
+      expiresAt: performance.now() + EXPANSION_SCROLL_ANCHOR_WINDOW_MS,
+    };
+  }
+
+  function scheduleVirtualMeasurementAnchorRestore() {
+    if (virtualMeasurementAnchorRafId || !pendingVirtualMeasurementAnchor) return;
+
+    virtualMeasurementAnchorRafId = requestAnimationFrame(() => {
+      virtualMeasurementAnchorRafId = 0;
+      restoreVirtualMeasurementAnchor();
+    });
+  }
+
+  function restoreVirtualMeasurementAnchor() {
+    const anchor = pendingVirtualMeasurementAnchor;
+    pendingVirtualMeasurementAnchor = null;
+    if (!anchor || !containerRef) return;
+    if (performance.now() > anchor.expiresAt) return;
+    if (autoScroll() || pinnedToBottom) return;
+
+    const containerRect = containerRef.getBoundingClientRect();
+    const row = [...containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+      (element) => element.dataset.msgId === anchor.messageId
+    );
+    if (!row) return;
+
+    const userScrollDelta = containerRef.scrollTop - anchor.scrollTop;
+    const expectedRowTop = anchor.top - userScrollDelta;
+    const expectedRowBottom = expectedRowTop + anchor.height;
+    if (expectedRowBottom <= 0 || expectedRowTop >= containerRef.clientHeight) return;
+
+    const rowTop = row.getBoundingClientRect().top - containerRect.top;
+    const layoutDelta = rowTop - anchor.top + userScrollDelta;
+    if (Math.abs(layoutDelta) < 1) return;
+
+    const nextScrollTop = Math.max(0, containerRef.scrollTop + layoutDelta);
+    containerRef.scrollTop = nextScrollTop;
+    lastObservedScrollTop = nextScrollTop;
+    ignoreScrollUntil = Math.max(
+      ignoreScrollUntil,
+      performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS
+    );
+    scheduleViewportState(nextScrollTop, containerRef.clientHeight);
+    scheduleStickyPreviewViewportState(nextScrollTop, containerRef.clientHeight);
+  }
+
   function scheduleVisibleMeasurement(options?: { afterResize?: boolean }) {
     if (options?.afterResize) pendingMeasurementAfterResize = true;
     if (measurementScheduled) return;
@@ -687,12 +774,10 @@ export function MessageList() {
       if (hadResize && restoreExpansionScrollAnchor()) {
         return;
       }
-      if (
-        hadResize &&
-        lastTrackHeight > lastAutoScrolledTrackHeight + 1 &&
-        shouldCorrectBottomAfterResize()
-      ) {
+      if (shouldCorrectBottomAfterResize()) {
         performScroll();
+        const sessionId = state.activeSessionId;
+        if (sessionId) scrollToBottomUntilStable(sessionId);
       }
     });
     measurementRafId = measurementScheduled ? rafId : 0;
@@ -843,9 +928,7 @@ export function MessageList() {
     if (!containerRef || !autoScroll()) return false;
 
     const nextBottomScrollTop = bottomScrollTop();
-    const bottomTargetMoved = Math.abs(nextBottomScrollTop - lastAutoScrolledBottomScrollTop) > 1;
-    const alreadyAtBottomTarget = Math.abs(containerRef.scrollTop - nextBottomScrollTop) <= 1;
-    return bottomTargetMoved && !alreadyAtBottomTarget;
+    return nextBottomScrollTop > containerRef.scrollTop + 1;
   }
 
   function performScroll() {
@@ -862,13 +945,14 @@ export function MessageList() {
     lastObservedScrollTop = result.nextScrollTop;
     lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
     lastAutoScrolledBottomScrollTop = result.nextScrollTop;
+    pinnedToBottom = true;
     batch(() => {
       setScrollTop(result.nextScrollTop);
       if (containerRef) setViewportHeight(containerRef.clientHeight);
     });
   }
 
-  function cancelPendingScroll() {
+  function cancelPendingScroll(options?: { preserveVirtualMeasurementAnchor?: boolean }) {
     if (stickyPreviewDebounceTimer) {
       clearTimeout(stickyPreviewDebounceTimer);
       stickyPreviewDebounceTimer = 0;
@@ -878,6 +962,11 @@ export function MessageList() {
       initialScrollRafId = 0;
     }
     cancelScheduledMeasurement();
+    if (!options?.preserveVirtualMeasurementAnchor) {
+      cancelScheduledVirtualMeasurementAnchorRestore();
+    }
+    if (streamingFollowRafId) cancelAnimationFrame(streamingFollowRafId);
+    streamingFollowRafId = 0;
   }
 
   function scrollToBottomUntilStable(sessionId: string) {
@@ -893,7 +982,10 @@ export function MessageList() {
       if (state.activeSessionId !== sessionId) return;
       if (!autoScroll()) return;
 
-      ignoreScrollUntil = Math.max(ignoreScrollUntil, performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS);
+      ignoreScrollUntil = Math.max(
+        ignoreScrollUntil,
+        performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS
+      );
 
       if (shouldVirtualize() && !measuredRowObserver) {
         measureVisibleItems();
@@ -915,7 +1007,11 @@ export function MessageList() {
         distanceFromBottom() <= 1
       ) {
         stableFrames++;
-        if (stableFrames >= INITIAL_SCROLL_STABLE_FRAMES) return;
+        if (stableFrames >= INITIAL_SCROLL_STABLE_FRAMES) {
+          expectedScrollTop = -1;
+          followModeLocked = false;
+          return;
+        }
       } else {
         stableFrames = 0;
         lastHeight = currentHeight;
@@ -924,13 +1020,30 @@ export function MessageList() {
 
       if (++attempts < INITIAL_SCROLL_MAX_FRAMES) {
         initialScrollRafId = requestAnimationFrame(tick);
+      } else {
+        expectedScrollTop = -1;
+        followModeLocked = false;
       }
     };
     initialScrollRafId = requestAnimationFrame(tick);
   }
 
+  function followStreamingBottomAfterLayout(sessionId: string) {
+    if (streamingFollowRafId) return;
+
+    streamingFollowRafId = requestAnimationFrame(() => {
+      streamingFollowRafId = 0;
+      if (state.activeSessionId !== sessionId || !autoScroll()) return;
+      scheduleVisibleMeasurement();
+      performScroll();
+      scrollToBottomUntilStable(sessionId);
+    });
+  }
+
   function onScroll() {
     if (!containerRef) return;
+    const autoScrollEnabled = autoScroll();
+    const now = performance.now();
     const top = containerRef.scrollTop;
     const currentViewportHeight = containerRef.clientHeight;
     const distance = distanceFromBottom();
@@ -940,27 +1053,51 @@ export function MessageList() {
     const decision = resolveAutoScrollOnUserScroll({
       top,
       distanceFromBottom: distance,
-      nearBottom: distance < AUTO_SCROLL_THRESHOLD_PX,
+      nearBottom: distance < AUTO_SCROLL_THRESHOLD_PX && (autoScrollEnabled || distance <= 1),
       autoScroll: autoScroll(),
-      userScrolledUp: performance.now() - lastWheelUpAt <= 160,
+      userScrolledUp: now - lastWheelUpAt <= 160,
       bottomTargetStable,
-      followModeLocked: false,
+      followModeLocked,
       expectedScrollTop,
       lastObservedScrollTop,
       ignoreScrollUntil,
-      now: performance.now(),
+      now,
       autoScrollThresholdPx: AUTO_SCROLL_THRESHOLD_PX,
     });
+    const shouldReattachToBottom =
+      (!autoScrollEnabled && distance <= 1) ||
+      (autoScrollEnabled && decision.nextAutoScroll === true && distance > 1);
+    if (decision.shouldCancelPendingScroll) {
+      pinnedToBottom = false;
+    } else if (distance < AUTO_SCROLL_THRESHOLD_PX) {
+      pinnedToBottom = true;
+    }
     lastObservedScrollTop = decision.nextLastObservedScrollTop;
     expectedScrollTop = decision.nextExpectedScrollTop;
     ignoreScrollUntil = decision.nextIgnoreScrollUntil;
+    followModeLocked = decision.nextFollowModeLocked;
     if (decision.shouldCancelPendingScroll) cancelPendingScroll();
     if (decision.nextAutoScroll !== null) setAutoScroll(decision.nextAutoScroll);
+    if (shouldReattachToBottom) {
+      const sessionId = state.activeSessionId;
+      queueMicrotask(() => {
+        if (sessionId && state.activeSessionId !== sessionId) return;
+        performScroll();
+        if (sessionId) scrollToBottomUntilStable(sessionId);
+      });
+    }
   }
 
   function onWheel(event: WheelEvent) {
+    lastWheelAt = performance.now();
     if (event.deltaY < -0.5) {
-      lastWheelUpAt = performance.now();
+      lastWheelUpAt = lastWheelAt;
+      followModeLocked = false;
+      pinnedToBottom = false;
+      expectedScrollTop = -1;
+      ignoreScrollUntil = 0;
+      cancelPendingScroll({ preserveVirtualMeasurementAnchor: true });
+      if (autoScroll()) setAutoScroll(false);
     }
   }
 
@@ -1056,6 +1193,9 @@ export function MessageList() {
       if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       cancelScheduledMeasurement();
+      cancelScheduledVirtualMeasurementAnchorRestore();
+      if (streamingFollowRafId) cancelAnimationFrame(streamingFollowRafId);
+      streamingFollowRafId = 0;
       cancelScheduledViewportState();
       cancelScheduledStickyPreviewViewportState();
     });
@@ -1156,6 +1296,8 @@ export function MessageList() {
     pendingScrollToBottomRequest = false;
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
+    followModeLocked = false;
+    pinnedToBottom = true;
     setStickyUserMessagePreview(null);
     previousStickyPreviewId = null;
     previousStickyPreviewBounds = null;
@@ -1188,6 +1330,20 @@ export function MessageList() {
     });
   });
 
+  createEffect(() => {
+    const sessionId = state.activeSessionId;
+    const currentStreamingTextLength = streamingTextLength();
+    if (!sessionId || currentStreamingTextLength === 0 || (!autoScroll() && !pinnedToBottom))
+      return;
+
+    queueMicrotask(() => {
+      if (state.activeSessionId !== sessionId || (!autoScroll() && !pinnedToBottom)) return;
+      followModeLocked = true;
+      setAutoScroll(true);
+      followStreamingBottomAfterLayout(sessionId);
+    });
+  });
+
   createEffect((previousRequestKey: number | undefined) => {
     const sessionId = state.activeSessionId;
     const requestKey = messageListScrollRequestKey();
@@ -1195,6 +1351,7 @@ export function MessageList() {
     if (!sessionId || !containerRef) return requestKey;
 
     pendingScrollToBottomRequest = true;
+    followModeLocked = true;
     setAutoScroll(true);
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
@@ -1219,7 +1376,11 @@ export function MessageList() {
   createEffect(() => {
     const loading = isLoading();
     if (prevLoading && !loading && autoScroll()) {
-      queueMicrotask(() => performScroll());
+      const sessionId = state.activeSessionId;
+      queueMicrotask(() => {
+        if (!sessionId || state.activeSessionId !== sessionId) return;
+        performScroll();
+      });
     }
     prevLoading = loading;
   });

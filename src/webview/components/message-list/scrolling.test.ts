@@ -51,7 +51,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
         distanceFromBottom: 1,
         nearBottom: true,
         autoScroll: true,
-        userScrolledUp: false,
+        userScrolledUp: true,
         bottomTargetStable: false,
         followModeLocked: false,
         expectedScrollTop: 496,
@@ -78,7 +78,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
         nearBottom: true,
         autoScroll: true,
         userScrolledUp: true,
-        bottomTargetStable: true,
+        bottomTargetStable: false,
         followModeLocked: false,
         expectedScrollTop: -1,
         lastObservedScrollTop: 495,
@@ -119,6 +119,58 @@ describe('resolveAutoScrollOnUserScroll', () => {
       nextLastObservedScrollTop: 200,
       nextFollowModeLocked: false,
       shouldCancelPendingScroll: true,
+    });
+  });
+
+  it('disables auto-scroll for a large upward pull from the expected target without a wheel event', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 24_000,
+        distanceFromBottom: 24_000,
+        nearBottom: false,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: true,
+        followModeLocked: false,
+        expectedScrollTop: 48_000,
+        lastObservedScrollTop: 48_000,
+        ignoreScrollUntil: 1000,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: false,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 24_000,
+      nextFollowModeLocked: false,
+      shouldCancelPendingScroll: true,
+    });
+  });
+
+  it('keeps auto-scroll active when programmatic settling briefly drops below the expected target', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 57446,
+        distanceFromBottom: 69,
+        nearBottom: false,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: true,
+        followModeLocked: false,
+        expectedScrollTop: 57515,
+        lastObservedScrollTop: 57446,
+        ignoreScrollUntil: 2000,
+        now: 1900,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: null,
+      nextExpectedScrollTop: 57515,
+      nextIgnoreScrollUntil: 2000,
+      nextLastObservedScrollTop: 57446,
+      nextFollowModeLocked: false,
+      shouldCancelPendingScroll: false,
     });
   });
 
@@ -200,6 +252,32 @@ describe('resolveAutoScrollOnUserScroll', () => {
     });
   });
 
+  it('keeps the explicit follow lock active during a large non-user drift inside the programmatic window', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 57446,
+        distanceFromBottom: 69,
+        nearBottom: false,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: true,
+        followModeLocked: true,
+        expectedScrollTop: 57515,
+        lastObservedScrollTop: 57483,
+        ignoreScrollUntil: 2000,
+        now: 1900,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: null,
+      nextExpectedScrollTop: 57515,
+      nextIgnoreScrollUntil: 2000,
+      nextLastObservedScrollTop: 57446,
+      nextFollowModeLocked: true,
+      shouldCancelPendingScroll: false,
+    });
+  });
+
   it('unlocks follow mode when the user intentionally pulls far away from bottom', () => {
     expect(
       resolveAutoScrollOnUserScroll({
@@ -207,7 +285,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
         distanceFromBottom: 120,
         nearBottom: false,
         autoScroll: true,
-        userScrolledUp: false,
+        userScrolledUp: true,
         bottomTargetStable: true,
         followModeLocked: true,
         expectedScrollTop: -1,

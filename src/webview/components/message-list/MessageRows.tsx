@@ -47,7 +47,9 @@ function MessageRow(props: { msg: { info: Message; parts: Part[] } } & MessageRo
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
-  const highlightFinalAnswer = () => props.highlightedAssistantMessageIds?.has(props.msg.info.id) ?? props.assistantDialogSummaryMap.has(props.msg.info.id);
+  const highlightFinalAnswer = () =>
+    props.highlightedAssistantMessageIds?.has(props.msg.info.id) ??
+    props.assistantDialogSummaryMap.has(props.msg.info.id);
   const streamingPartId = createMemo(() => {
     const partId = state.streamingPartId;
     if (!partId) return null;

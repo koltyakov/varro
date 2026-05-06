@@ -92,13 +92,22 @@ export function resolveAutoScrollOnUserScroll(args: {
 }): AutoScrollDecision {
   const delta = args.top - args.lastObservedScrollTop;
   const intentionalUserBreak =
-    delta < -1 && (args.userScrolledUp || args.distanceFromBottom >= args.autoScrollThresholdPx);
+    delta < -1 &&
+    (args.userScrolledUp ||
+      (args.distanceFromBottom >= args.autoScrollThresholdPx &&
+        args.bottomTargetStable &&
+        !args.followModeLocked));
   const nextFollowModeLocked = args.followModeLocked && !intentionalUserBreak;
   const userMovedAwayNearBottom =
     args.autoScroll &&
     delta < -1 &&
     args.distanceFromBottom > 1 &&
     (args.userScrolledUp || (args.bottomTargetStable && !nextFollowModeLocked));
+  const userMovedAwayFromExpectedTarget =
+    args.expectedScrollTop !== -1 &&
+    args.userScrolledUp &&
+    args.top < args.expectedScrollTop - args.autoScrollThresholdPx * 2 &&
+    !nextFollowModeLocked;
   const matchesExpected =
     args.expectedScrollTop !== -1 &&
     (Math.abs(args.top - args.expectedScrollTop) < 2 ||
@@ -121,8 +130,10 @@ export function resolveAutoScrollOnUserScroll(args: {
     const userMovedAwayFromTarget =
       intentionalUserBreak ||
       userMovedAwayNearBottom ||
+      userMovedAwayFromExpectedTarget ||
       (args.expectedScrollTop !== -1 &&
         args.top < args.expectedScrollTop - args.autoScrollThresholdPx &&
+        args.userScrolledUp &&
         !nextFollowModeLocked);
 
     if (!userMovedAwayFromTarget) {

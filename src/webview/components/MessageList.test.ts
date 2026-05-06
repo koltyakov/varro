@@ -1265,7 +1265,9 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.flush();
     await Promise.resolve();
 
-    const finalResponse = container?.querySelector('[data-msg-id="assistant-59"] .chat-turn-content');
+    const finalResponse = container?.querySelector(
+      '[data-msg-id="assistant-59"] .chat-turn-content'
+    );
     expect(finalResponse?.className).toContain('assistant-turn-content-highlighted');
     expect(finalResponse?.className).not.toContain('assistant-turn-content-plain');
 
@@ -1473,7 +1475,9 @@ describe('MessageList sticky prompt preview', () => {
     sticky = container?.querySelector('.latest-user-message-sticky');
     expect(sticky).toBeInstanceOf(HTMLDivElement);
     expect(sticky?.textContent).toContain('Prompt 2');
-    expect(container?.querySelectorAll('.interactive-list-track .latest-user-message-sticky')).toHaveLength(1);
+    expect(
+      container?.querySelectorAll('.interactive-list-track .latest-user-message-sticky')
+    ).toHaveLength(1);
     expect(container?.querySelector('.latest-user-message-sticky [data-msg-id]')).toBeNull();
 
     animationFrames.restore();
@@ -2423,7 +2427,7 @@ describe('MessageList auto-scroll', () => {
   it('re-attaches to bottom again on the next explicit scroll request', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
+    const trackHeight = 1200;
 
     class TestResizeObserver {
       constructor(callback: ResizeObserverCallback) {
@@ -2455,7 +2459,7 @@ describe('MessageList auto-scroll', () => {
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
-    let scrollHeightValue = 1200;
+    const scrollHeightValue = 1200;
     let scrollTopValue = 0;
     const assignedScrollTops: number[] = [];
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
