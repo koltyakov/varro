@@ -11,7 +11,6 @@ const clientMocks = vi.hoisted(() => ({
 }));
 
 const refreshRoutingStateMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-const beginProviderAuthorizationMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock('../lib/client', () => ({
   client: {
@@ -28,7 +27,6 @@ vi.mock('../lib/client', () => ({
 
 vi.mock('../lib/provider-setup', () => ({
   openProviderSetup: vi.fn(),
-  beginProviderAuthorization: beginProviderAuthorizationMock,
 }));
 
 vi.mock('../hooks/useOpenCode', () => ({
@@ -58,7 +56,7 @@ beforeEach(() => {
     agent: { build: { model: 'openai/gpt-5' } },
   });
   clientMocks.providerAuth.mockResolvedValue({
-    openai: [{ type: 'oauth', label: 'Browser login' }],
+    openai: [{ type: 'api', label: 'API key' }],
   });
   clientMocks.workspaceStatus.mockResolvedValue([{ workspaceID: 'ws-1', status: 'connected' }]);
   setState('providers', [
@@ -192,19 +190,11 @@ describe('ModelsPanel', () => {
     expect(refreshRoutingStateMock).toHaveBeenCalled();
   });
 
-  it('shows workspace status and provider auth actions', async () => {
+  it('shows workspace status', async () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Workspaces: ws-1 (connected)');
-    expect(container?.textContent).toContain('Connect provider in browser');
-
-    const button = Array.from(container?.querySelectorAll('button') || []).find((item) =>
-      item.textContent?.includes('Connect provider in browser')
-    ) as HTMLButtonElement;
-    button.click();
-
-    expect(beginProviderAuthorizationMock).toHaveBeenCalledWith('openai', 0);
   });
 });

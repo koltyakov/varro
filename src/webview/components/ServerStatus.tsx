@@ -1,6 +1,6 @@
 import { Show } from 'solid-js';
 import { postMessage } from '../lib/bridge';
-import { beginProviderAuthorization, openProviderSetup } from '../lib/provider-setup';
+import { openProviderSetup } from '../lib/provider-setup';
 import { useAppState } from '../lib/app-state-context';
 
 export function ServerStatus() {
@@ -10,7 +10,6 @@ export function ServerStatus() {
     status().state === 'running' &&
     appState.state.providersLoaded &&
     appState.state.providers.length === 0;
-  const authProviderIds = () => Object.keys(appState.state.providerAuthMethods || {});
   const serverErrorMessage = () => {
     const currentStatus = status();
     return currentStatus.state === 'error' ? currentStatus.message.trim() : '';
@@ -154,15 +153,6 @@ export function ServerStatus() {
           <button type="button" class="server-status-action-button" onClick={openProviderSetup}>
             Open terminal and add a provider
           </button>
-          <Show when={authProviderIds().length > 0}>
-            <button
-              type="button"
-              class="server-status-action-button"
-              onClick={() => void beginProviderAuthorization(authProviderIds()[0] || '')}
-            >
-              Open browser auth flow
-            </button>
-          </Show>
           <button
             type="button"
             class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"

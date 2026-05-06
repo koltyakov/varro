@@ -393,6 +393,20 @@ describe('SessionStateManager notifications', () => {
     expect(manager.isSessionInWorkspace('session-1', '/repo-b')).toBe(false);
   });
 
+  it('treats nested session directories as in-workspace', () => {
+    const manager = createManager(() => false);
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: { id: 'session-1', title: 'Nested workspace session', directory: '/repo/project-a' },
+      },
+    });
+
+    expect(manager.isSessionInWorkspace('session-1', '/repo')).toBe(true);
+    expect(manager.isSessionInWorkspace('session-1', '/other')).toBe(false);
+  });
+
   it('treats restored blocking requests without a directory as out of workspace', () => {
     const manager = createManager(() => false);
 

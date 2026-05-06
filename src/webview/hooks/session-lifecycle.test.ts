@@ -185,6 +185,21 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 
+  it('keeps sessions whose directory is nested under the active workspace', () => {
+    const setup = createDeps({
+      sessions: [
+        session('session-1', '/repo/project-a', 2),
+        session('session-2', '/other/project-b', 1),
+      ],
+      workspace: '/repo',
+    });
+
+    applySessions(setup.deps, setup.current.sessions);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+    expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
+  });
+
   it('tracks deleted session trees and next selection candidates', () => {
     const sessions = [
       session('root', '/repo', 1),

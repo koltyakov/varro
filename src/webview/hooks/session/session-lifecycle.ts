@@ -116,7 +116,12 @@ export function isSessionInWorkspace(
 ): boolean {
   const normalizedWorkspace = normalizeProjectPath(workspacePath);
   if (!normalizedWorkspace) return true;
-  return isSamePath(session.directory, normalizedWorkspace);
+  const normalizedSessionDirectory = normalizeProjectPath(session.directory);
+  if (!normalizedSessionDirectory) return false;
+  return (
+    isSamePath(normalizedSessionDirectory, normalizedWorkspace) ||
+    normalizedSessionDirectory.startsWith(`${normalizedWorkspace}/`)
+  );
 }
 
 export function sortSessions(sessions: Session[]) {

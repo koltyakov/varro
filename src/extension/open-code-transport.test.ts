@@ -90,7 +90,7 @@ describe('OpenCodeTransport reconnect delay', () => {
 });
 
 describe('OpenCodeTransport request scoping', () => {
-  it('does not scope session list or destructive session-id requests to a workspace directory', async () => {
+  it('scopes session list but not destructive session-id requests to a workspace directory', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -110,7 +110,7 @@ describe('OpenCodeTransport request scoping', () => {
       1,
       'http://localhost:4096',
       '/session',
-      undefined
+      'C:\\Users\\Andrew\\Projects\\Varro'
     );
     expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
       2,
@@ -118,7 +118,10 @@ describe('OpenCodeTransport request scoping', () => {
       '/session/session-1',
       undefined
     );
-    expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(1, undefined);
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(
+      1,
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
     expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(2, undefined);
   });
 

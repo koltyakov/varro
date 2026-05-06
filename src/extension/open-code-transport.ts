@@ -84,7 +84,7 @@ export class OpenCodeTransport {
 
   private getWorkspaceDirectoryForRequest(method: string, path: string) {
     const pathname = new URL(path, 'http://localhost').pathname;
-    if (pathname === '/session' && method.toUpperCase() === 'POST') {
+    if (pathname === '/session') {
       return this.options.getWorkspaceCwd();
     }
     if (method.toUpperCase() === 'POST' && /^\/session\/[^/]+\/prompt_async$/.test(pathname)) {
@@ -97,9 +97,6 @@ export class OpenCodeTransport {
       return this.options.getWorkspaceCwd();
     }
     if (pathname === '/session/status' || pathname.startsWith('/session/')) {
-      return undefined;
-    }
-    if (pathname === '/session') {
       return undefined;
     }
     return this.options.getWorkspaceCwd();

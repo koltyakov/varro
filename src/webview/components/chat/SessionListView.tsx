@@ -415,7 +415,7 @@ export function SessionListView(props: {
         )
       : []
   );
-  const surfacedSessions = createMemo(() =>
+  const defaultSurfacedSessions = createMemo(() =>
     [
       ...failedSessions(),
       ...planReadySessions(),
@@ -425,10 +425,16 @@ export function SessionListView(props: {
       ...surfacedOtherSessions(),
     ].toSorted((left, right) => right.time.updated - left.time.updated)
   );
+  const surfacedSessions = createMemo(() => {
+    const sessions = defaultSurfacedSessions();
+    return sessions.length > 0 ? sessions : overflowOtherSessions();
+  });
   const availableGroupedSections = createMemo(() => {
     const sections: SessionListGroupedSection[] = [];
-    if (surfacedSessions().length > 0) sections.push('recent');
-    if (overflowOtherSessions().length > 0) sections.push('archive');
+    if (defaultSurfacedSessions().length > 0) sections.push('recent');
+    if (defaultSurfacedSessions().length > 0 && overflowOtherSessions().length > 0) {
+      sections.push('archive');
+    }
     if (recycleBinEntries().length > 0) sections.push('recycle-bin');
     return sections;
   });
@@ -439,7 +445,8 @@ export function SessionListView(props: {
     () =>
       isDefaultGroupedView() &&
       !activeGroupedSection() &&
-      (overflowOtherSessions().length > 0 || recycleBinEntries().length > 0)
+      ((defaultSurfacedSessions().length > 0 && overflowOtherSessions().length > 0) ||
+        recycleBinEntries().length > 0)
   );
   const directSessions = createMemo(() => {
     if (props.subagentParentId) return subagentSessions();
@@ -563,16 +570,18 @@ export function SessionListView(props: {
   const renderBottomGroups = () => (
     <div class="session-list-bottom-groups">
       <Show when={overflowOtherSessions().length > 0}>
-        <SessionListSectionHeader
-          ref={(el) => {
-            archiveHeaderRef = el;
-          }}
-          title="Archive"
-          count={overflowOtherSessions().length}
-          expanded={false}
-          onToggle={() => toggleGroupedSection('archive')}
-          onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
-        />
+        <Show when={defaultSurfacedSessions().length > 0}>
+          <SessionListSectionHeader
+            ref={(el) => {
+              archiveHeaderRef = el;
+            }}
+            title="Archive"
+            count={overflowOtherSessions().length}
+            expanded={false}
+            onToggle={() => toggleGroupedSection('archive')}
+            onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
+          />
+        </Show>
       </Show>
       <Show when={recycleBinEntries().length > 0}>
         <SessionListSectionHeader

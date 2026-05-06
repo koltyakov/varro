@@ -14,7 +14,7 @@ import {
   modelSupportsVariants,
   modelSupportsVision,
 } from '../lib/model-capabilities';
-import { beginProviderAuthorization, openProviderSetup } from '../lib/provider-setup';
+import { openProviderSetup } from '../lib/provider-setup';
 import { client } from '../lib/client';
 import { refreshRoutingState } from '../hooks/useOpenCode';
 import type { OpenCodeModelRouting } from '../types';
@@ -34,10 +34,6 @@ export function ModelsPanel() {
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [isSaving, setIsSaving] = createSignal(false);
   let bodyRef: HTMLDivElement | undefined;
-
-  const providerAuthEntries = createMemo(() =>
-    Object.entries(state.providerAuthMethods).filter(([, methods]) => methods.length > 0)
-  );
 
   const workspaceStatusText = createMemo(() =>
     state.workspaceStatuses.map((entry) => `${entry.workspaceID} (${entry.status})`).join(', ')
@@ -172,24 +168,11 @@ export function ModelsPanel() {
         </div>
       </div>
 
-      <Show when={state.workspaceStatuses.length > 0 || providerAuthEntries().length > 0}>
+      <Show when={state.workspaceStatuses.length > 0}>
         <div class="settings-toolbar">
           <div class="settings-toolbar-inner flex flex-wrap items-center gap-2">
             <Show when={state.workspaceStatuses.length > 0}>
               <div class="text-[11px] text-vscode-muted">Workspaces: {workspaceStatusText()}</div>
-            </Show>
-            <Show when={providerAuthEntries().length > 0}>
-              <button
-                type="button"
-                class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
-                onClick={() => {
-                  const first = providerAuthEntries()[0];
-                  if (!first) return;
-                  void beginProviderAuthorization(first[0], 0);
-                }}
-              >
-                Connect provider in browser
-              </button>
             </Show>
           </div>
         </div>

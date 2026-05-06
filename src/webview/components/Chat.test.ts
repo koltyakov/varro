@@ -1447,6 +1447,31 @@ describe('header status badges', () => {
     ).toEqual(['Archive']);
   });
 
+  it('keeps showing sessions in the default list when all are older than one day', () => {
+    const now = Date.now();
+    setState('sessions', [
+      session('older-session-a', now - (24 * 60 * 60 * 1_000 + 1), { title: 'Older session A' }),
+      session('older-session-b', now - (2 * 24 * 60 * 60 * 1_000 + 1), {
+        title: 'Older session B',
+      }),
+    ]);
+    setState('activeSessionId', 'older-session-a');
+    setState('lastSeenSessions', {
+      'older-session-a': now - (24 * 60 * 60 * 1_000 + 1),
+      'older-session-b': now - (2 * 24 * 60 * 60 * 1_000 + 1),
+    });
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(
+      Array.from(container?.querySelectorAll('.session-item-title') ?? []).map((item) =>
+        item.textContent?.trim()
+      )
+    ).toEqual(['Older session A', 'Older session B']);
+    expect(container?.querySelector('.session-list-bottom-groups')).toBeNull();
+  });
+
   it('scrolls the show more header into view when expanded', async () => {
     const scrollIntoView = vi.fn();
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
