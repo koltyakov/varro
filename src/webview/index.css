@@ -2646,7 +2646,7 @@ body.vscode-light
   opacity: 0.85;
 }
 
-.provider-limit-popup-model {
+.provider-limit-popup-provider {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--color-vscode-border-soft);

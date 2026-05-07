@@ -243,10 +243,7 @@ export function ChatInputMetaToolbar(props: ToolbarSharedProps) {
                   boundaryRef={props.inputFrameRef}
                   alignTo="right"
                   limit={props.providerLimit}
-                  model={{
-                    providerName: props.currentModel.providerName,
-                    modelName: props.currentModel.modelName,
-                  }}
+                  providerName={props.currentModel.providerName}
                   onClose={props.onCloseProviderLimitPopup}
                 />
               </Show>

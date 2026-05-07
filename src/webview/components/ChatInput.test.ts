@@ -543,7 +543,11 @@ describe('ChatInput', () => {
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
-    expect(container?.querySelector('.provider-limit-popup')).not.toBeNull();
+    const popup = container?.querySelector('.provider-limit-popup');
+
+    expect(popup).not.toBeNull();
+    expect(popup?.textContent).toContain('OpenAI');
+    expect(popup?.textContent).not.toContain('GPT-4o');
     expect(button?.hasAttribute('title')).toBe(false);
     expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 39 / 100 left');
   });
