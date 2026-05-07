@@ -33,12 +33,14 @@ import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-li
 const {
   abortSessionMock,
   continueInterruptedSessionMock,
+  redoSessionMock,
   undoSessionMock,
   runSlashCommandByNameMock,
   sendMessageMock,
 } = vi.hoisted(() => ({
   abortSessionMock: vi.fn(async () => {}),
   continueInterruptedSessionMock: vi.fn(async () => {}),
+  redoSessionMock: vi.fn(async () => {}),
   undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
   sendMessageMock: vi.fn(async () => {}),
@@ -50,6 +52,7 @@ vi.mock('../hooks/useOpenCode', async () => {
     ...actual,
     abortSession: abortSessionMock,
     continueInterruptedSession: continueInterruptedSessionMock,
+    redoSession: redoSessionMock,
     undoSession: undoSessionMock,
     runSlashCommandByName: runSlashCommandByNameMock,
     sendMessage: sendMessageMock,
@@ -105,6 +108,7 @@ afterEach(() => {
   runSlashCommandByNameMock.mockResolvedValue(true);
   abortSessionMock.mockReset();
   continueInterruptedSessionMock.mockReset();
+  redoSessionMock.mockReset();
   undoSessionMock.mockReset();
 });
 
@@ -852,6 +856,25 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('');
   });
 
+  it('sends slash-prefixed text on Enter when it is not a known slash command', async () => {
+    setInputText("/not-a-real-command and /redo commands doesn't work");
+    runSlashCommandByNameMock.mockResolvedValue(false);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      "/not-a-real-command and /redo commands doesn't work",
+      {
+        noReply: false,
+      }
+    );
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+  });
+
   it('runs the built-in undo slash command from the send button', async () => {
     setState('activeSessionId', 'session-1');
     setState('messages', [
@@ -887,6 +910,36 @@ describe('ChatInput', () => {
 
     expect(undoSessionMock).toHaveBeenCalledTimes(1);
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('runs undo from the send button even when the suggestion list omits it', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('/undo');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(undoSessionMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('runs redo from the send button even when the suggestion list omits it', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('/redo');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(redoSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
   });

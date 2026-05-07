@@ -800,13 +800,6 @@ export function ChatInput() {
         void applyActiveCompletion(true);
         return;
       }
-
-      const completion = activeCompletion();
-      if (completion?.type === 'slash' || getLeadingSlashCommand(inputText())) {
-        e.preventDefault();
-        void runSlashCommand(inputText());
-        return;
-      }
     }
 
     if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.isComposing) {
@@ -893,19 +886,44 @@ export function ChatInput() {
       setComposerValue(`/${SKILLS_COMMAND_NAME} `);
       return true;
     }
-    const command = slashCommands().find(
-      (item) => item.name === name || item.aliases.includes(name)
-    );
-    if (!command) {
-      return false;
-    }
+    const runBuiltInSlashCommand = () => {
+      if ((name === 'undo' || name === 'revert') && !args) {
+        return undoSession();
+      }
+      if (name === 'redo' && !args) {
+        return redoSession();
+      }
+      if (name === 'review' && !args) {
+        return reviewSession();
+      }
+      if ((name === 'compact' || name === 'summarize') && !args) {
+        return compactSession();
+      }
+      if ((name === 'abort' || name === 'stop') && !args) {
+        return abortSession();
+      }
+      if (name === 'init' && !args) {
+        return initSession();
+      }
+      return null;
+    };
 
+    const builtInCommand = runBuiltInSlashCommand();
+    const fallbackCommand =
+      builtInCommand === null
+        ? slashCommands().find((item) => item.name === name || item.aliases.includes(name))
+        : null;
     setHistoryIndex(null);
     setHistoryDraft('');
     setInputText('');
     resetPastedImageIndex();
     setCompletionIndex(0);
-    await command.action(args);
+    if (builtInCommand) {
+      await builtInCommand;
+      return true;
+    }
+    if (!fallbackCommand) return false;
+    await fallbackCommand.action(args);
     return true;
   }
 
