@@ -5,30 +5,33 @@ import type { ServerStatus } from '../shared/protocol';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
 
-const { loggerMock, mkdirMock, spawnMock, vscodeMock, writeFileMock } = vi.hoisted(() => ({
-  loggerMock: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-  mkdirMock: vi.fn(() => Promise.resolve(undefined)),
-  spawnMock: vi.fn(),
-  vscodeMock: {
-    window: {
-      activeTextEditor: undefined,
-      showInformationMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
-      createTerminal: vi.fn(() => ({
-        show: vi.fn(),
-        sendText: vi.fn(),
-      })),
+const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writeFileMock } =
+  vi.hoisted(() => ({
+    getConfigurationMock: vi.fn(),
+    loggerMock: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
     },
-    workspace: {
-      getWorkspaceFolder: vi.fn(),
-      workspaceFolders: undefined,
+    mkdirMock: vi.fn(() => Promise.resolve(undefined)),
+    spawnMock: vi.fn(),
+    vscodeMock: {
+      window: {
+        activeTextEditor: undefined,
+        showInformationMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
+        createTerminal: vi.fn(() => ({
+          show: vi.fn(),
+          sendText: vi.fn(),
+        })),
+      },
+      workspace: {
+        getConfiguration: vi.fn(),
+        getWorkspaceFolder: vi.fn(),
+        workspaceFolders: undefined,
+      },
     },
-  },
-  writeFileMock: vi.fn(() => Promise.resolve(undefined)),
-}));
+    writeFileMock: vi.fn(() => Promise.resolve(undefined)),
+  }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
@@ -171,6 +174,10 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   vi.stubGlobal('fetch', vi.fn());
+  getConfigurationMock.mockImplementation(() => ({
+    get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? false : fallback),
+  }));
+  vscodeMock.workspace.getConfiguration = getConfigurationMock;
   spawnMock.mockReset();
   mkdirMock.mockReset();
   mkdirMock.mockResolvedValue(undefined);
@@ -755,6 +762,49 @@ describe('OpenCodeServer maintenance', () => {
     });
     expect(terminal.show).toHaveBeenCalledWith(false);
     expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+  });
+
+  it('can auto-update the CLI in background when enabled', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    api.readLatestCliVersion = readLatestCliVersion;
+    spawnMock.mockImplementation((_command, _args) => {
+      let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+      const proc = {
+        stdout: { on: vi.fn(), off: vi.fn() },
+        stderr: { on: vi.fn(), off: vi.fn() },
+        once: vi.fn((event: string, listener: typeof exitHandler) => {
+          if (event === 'exit') {
+            exitHandler = listener;
+          }
+        }),
+        removeAllListeners: vi.fn(),
+        kill: vi.fn(),
+        exitCode: null,
+        signalCode: null,
+      };
+      queueMicrotask(() => {
+        exitHandler?.(0, null);
+      });
+      return proc as never;
+    });
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
+
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(['upgrade']),
+      expect.any(Object)
+    );
   });
 
   it('uses opencode upgrade on Windows when suggesting and running a CLI upgrade', async () => {

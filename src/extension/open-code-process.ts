@@ -84,6 +84,7 @@ export class OpenCodeProcess {
   private static readonly CLI_UPGRADE_COMMAND = 'opencode upgrade';
   private static readonly CLI_UPGRADE_ACTION = 'Run Upgrade';
   private static readonly CLI_COMMAND_TIMEOUT_MS = 5000;
+  private static readonly CLI_BACKGROUND_UPGRADE_TIMEOUT_MS = 2 * 60_000;
   private static readonly VERSION_CHECK_INTERVAL_MS = 5 * 60_000;
   private static readonly CLI_UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60_000;
   private static readonly CLI_REGISTRY_TIMEOUT_MS = 10_000;
@@ -522,6 +523,21 @@ export class OpenCodeProcess {
       return;
     }
 
+    if (this.isBackgroundCliAutoUpdateEnabled() && process.platform !== 'win32') {
+      if (this.lastSuggestedCliVersion === latestCliVersion) {
+        return;
+      }
+      try {
+        await this.runBackgroundCliUpgrade(installedCliVersion, latestCliVersion);
+        this.lastSuggestedCliVersion = latestCliVersion;
+        return;
+      } catch (err) {
+        logger.warn(
+          `Failed to auto-update OpenCode CLI in background: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+
     if (this.lastSuggestedCliVersion === latestCliVersion) {
       return;
     }
@@ -577,6 +593,18 @@ export class OpenCodeProcess {
     }
   }
 
+  private isBackgroundCliAutoUpdateEnabled() {
+    return vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', false);
+  }
+
+  private async runBackgroundCliUpgrade(installedCliVersion: string, latestCliVersion: string) {
+    logger.info(
+      `Automatically updating OpenCode CLI from ${installedCliVersion} to ${latestCliVersion} in background`
+    );
+    await this.runCliCommand(['upgrade'], OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS);
+    logger.info(`Updated OpenCode CLI to ${latestCliVersion} in background`);
+  }
+
   resolveCommand(): string {
     if (this.command) return this.command;
 
@@ -612,7 +640,10 @@ export class OpenCodeProcess {
     };
   }
 
-  private async runCliCommand(args: string[]): Promise<string> {
+  private async runCliCommand(
+    args: string[],
+    timeoutMs = OpenCodeProcess.CLI_COMMAND_TIMEOUT_MS
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       let stdout = '';
       let stderr = '';
@@ -691,7 +722,7 @@ export class OpenCodeProcess {
             runningProc.kill('SIGKILL');
           }
           finish({ error: new Error('OpenCode CLI command timed out') });
-        }, OpenCodeProcess.CLI_COMMAND_TIMEOUT_MS);
+        }, timeoutMs);
       } catch (err) {
         finish({ error: err instanceof Error ? err : new Error(String(err)) });
       }

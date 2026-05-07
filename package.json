@@ -186,6 +186,11 @@
           "default": true,
           "description": "Automatically start the OpenCode server when Varro first needs it"
         },
+        "varro.server.autoUpdate": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run OpenCode CLI updates in the background when Varro detects a newer version. If the background update fails, Varro falls back to the normal upgrade prompt"
+        },
         "varro.chat.expandThinkingByDefault": {
           "type": "boolean",
           "default": false,
@@ -257,13 +262,13 @@
           "markdownDescription": "Show provider-limit UI only when at least one provider-limit window has this remaining percent or less."
         },
         "varro.debug.simulateMissingCli": {
-          "hidden": true,
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
           "type": "boolean",
           "default": false,
           "description": "Debug only: make Varro behave as if the OpenCode CLI is not installed"
         },
         "varro.debug.simulateNoProviders": {
-          "hidden": true,
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
           "type": "boolean",
           "default": false,
           "description": "Debug only: make Varro behave as if no providers are configured"
