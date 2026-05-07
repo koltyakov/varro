@@ -393,38 +393,49 @@ onMessage((msg) => {
   if (evt.type === 'workspace.status') {
     const entry = normalizeWorkspaceStatusEntry(evt.properties);
     if (entry) {
-      workspaceStatusSummary = {
-        ...workspaceStatusSummary,
-        entries: [
-          ...workspaceStatusSummary.entries.filter(
-            (item) => item.workspaceID !== entry.workspaceID
-          ),
-          entry,
-        ],
-      };
+      const existing = workspaceStatusSummary.entries.find(
+        (item) => item.workspaceID === entry.workspaceID
+      );
+      if (!existing || existing.status !== entry.status) {
+        workspaceStatusSummary = {
+          ...workspaceStatusSummary,
+          entries: [
+            ...workspaceStatusSummary.entries.filter(
+              (item) => item.workspaceID !== entry.workspaceID
+            ),
+            entry,
+          ],
+        };
+      }
     }
   }
   if (evt.type === 'workspace.ready') {
-    workspaceStatusSummary = {
-      ...workspaceStatusSummary,
-      latest: {
-        type: 'workspace.ready',
-        message:
-          typeof evt.properties?.name === 'string' ? evt.properties.name : 'Workspace connected',
-      },
-    };
+    const message =
+      typeof evt.properties?.name === 'string' ? evt.properties.name : 'Workspace connected';
+    if (
+      workspaceStatusSummary.latest?.type !== 'workspace.ready' ||
+      workspaceStatusSummary.latest.message !== message
+    ) {
+      workspaceStatusSummary = {
+        ...workspaceStatusSummary,
+        latest: { type: 'workspace.ready', message },
+      };
+    }
   }
   if (evt.type === 'workspace.failed') {
-    workspaceStatusSummary = {
-      ...workspaceStatusSummary,
-      latest: {
-        type: 'workspace.failed',
-        message:
-          typeof evt.properties?.message === 'string'
-            ? evt.properties.message
-            : 'Workspace connection failed',
-      },
-    };
+    const message =
+      typeof evt.properties?.message === 'string'
+        ? evt.properties.message
+        : 'Workspace connection failed';
+    if (
+      workspaceStatusSummary.latest?.type !== 'workspace.failed' ||
+      workspaceStatusSummary.latest.message !== message
+    ) {
+      workspaceStatusSummary = {
+        ...workspaceStatusSummary,
+        latest: { type: 'workspace.failed', message },
+      };
+    }
   }
   const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
   if (handlers) {
