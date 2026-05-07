@@ -74,6 +74,7 @@ describe('session-controls helpers', () => {
 
     await abortSessionWithDependencies({
       getActiveSessionId: () => 'session-1',
+      getSessionTreeRootId: () => null,
       getSessionTreeIds: () => ['session-1', 'child-1'],
       getSelectedAgentForSession: () => 'plan',
       skipPlanSession: vi.fn(),
@@ -200,6 +201,7 @@ describe('session-controls helpers', () => {
     const operations = new SessionControlOperations({
       getActiveSessionId: () => 'session-1',
       sendMessage: vi.fn(async () => {}),
+      getSessionTreeRootId: () => null,
       getSessionTreeIds: () => ['session-1'],
       getSelectedAgentForSession: () => 'build',
       skipPlanSession: vi.fn(),
@@ -234,5 +236,298 @@ describe('session-controls helpers', () => {
     await operations.compactSession();
 
     expect(true).toBe(true);
+  });
+
+  it('reviewSession does not call sendMessage when no active session', async () => {
+    const sendMessage = vi.fn(async () => {});
+
+    await reviewSessionWithDependencies({
+      getActiveSessionId: () => null,
+      sendMessage,
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('abortSession returns early when no active session', async () => {
+    const markPendingAbortTree = vi.fn();
+    const stopLoading = vi.fn();
+
+    await abortSessionWithDependencies({
+      getActiveSessionId: () => null,
+      getSessionTreeRootId: vi.fn(),
+      getSessionTreeIds: vi.fn(),
+      getSelectedAgentForSession: vi.fn(),
+      skipPlanSession: vi.fn(),
+      getSessionStatus: vi.fn(),
+      getSessionUsageLimit: vi.fn(),
+      markPendingAbortTree,
+      setSessionStatusEntry: vi.fn(),
+      stopLoading,
+      abortRemoteSession: vi.fn(async () => {}),
+      clearPendingAbortTree: vi.fn(),
+      setSessionUsageLimit: vi.fn(),
+      logError: vi.fn(),
+    });
+
+    expect(markPendingAbortTree).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('undoSession returns early when no active session', async () => {
+    const startLoading = vi.fn();
+
+    await undoSessionWithDependencies({
+      getActiveSessionId: () => null,
+      getMessages: vi.fn(),
+      startLoading,
+      revertSession: vi.fn(async () => {}),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      stopLoading: vi.fn(),
+      setError: vi.fn(),
+    });
+
+    expect(startLoading).not.toHaveBeenCalled();
+  });
+
+  it('undoSession returns early when no assistant messages exist', async () => {
+    const startLoading = vi.fn();
+
+    await undoSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [{ info: userMessage('user-1') }],
+      startLoading,
+      revertSession: vi.fn(async () => {}),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      stopLoading: vi.fn(),
+      setError: vi.fn(),
+    });
+
+    expect(startLoading).not.toHaveBeenCalled();
+  });
+
+  it('undoSession calls stopLoading and setError when revert throws an Error', async () => {
+    const stopLoading = vi.fn();
+    const setError = vi.fn();
+
+    await undoSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [
+        { info: userMessage('user-1') },
+        { info: assistantMessage('assistant-1') },
+      ],
+      startLoading: vi.fn(),
+      revertSession: vi.fn(async () => {
+        throw new Error('revert failed');
+      }),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      stopLoading,
+      setError,
+    });
+
+    expect(stopLoading).toHaveBeenCalled();
+    expect(setError).toHaveBeenCalledWith('revert failed');
+  });
+
+  it('undoSession calls setError with generic message when non-Error is thrown', async () => {
+    const setError = vi.fn();
+
+    await undoSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [
+        { info: userMessage('user-1') },
+        { info: assistantMessage('assistant-1') },
+      ],
+      startLoading: vi.fn(),
+      revertSession: vi.fn(async () => {
+        throw 'something went wrong';
+      }),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      stopLoading: vi.fn(),
+      setError,
+    });
+
+    expect(setError).toHaveBeenCalledWith('Failed to undo');
+  });
+
+  it('redoSession returns early when no active session', async () => {
+    const startLoading = vi.fn();
+
+    await redoSessionWithDependencies({
+      getActiveSessionId: () => null,
+      startLoading,
+      unrevertSession: vi.fn(async () => session('session-1')),
+      upsertSession: vi.fn(),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      stopLoading: vi.fn(),
+      setError: vi.fn(),
+    });
+
+    expect(startLoading).not.toHaveBeenCalled();
+  });
+
+  it('redoSession calls stopLoading and setError when unrevert throws an Error', async () => {
+    const stopLoading = vi.fn();
+    const setError = vi.fn();
+
+    await redoSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      startLoading: vi.fn(),
+      unrevertSession: vi.fn(async () => {
+        throw new Error('unrevert failed');
+      }),
+      upsertSession: vi.fn(),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      stopLoading,
+      setError,
+    });
+
+    expect(stopLoading).toHaveBeenCalled();
+    expect(setError).toHaveBeenCalledWith('unrevert failed');
+  });
+
+  it('redoSession calls setError with generic message when non-Error is thrown', async () => {
+    const setError = vi.fn();
+
+    await redoSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      startLoading: vi.fn(),
+      unrevertSession: vi.fn(async () => {
+        throw 42;
+      }),
+      upsertSession: vi.fn(),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      stopLoading: vi.fn(),
+      setError,
+    });
+
+    expect(setError).toHaveBeenCalledWith('Failed to redo');
+  });
+
+  it('compactSession returns early when no active session', async () => {
+    const startLoading = vi.fn();
+
+    await compactSessionWithDependencies({
+      getActiveSessionId: () => null,
+      clearPendingAbort: vi.fn(),
+      resolveSelectedModel: vi.fn(),
+      setError: vi.fn(),
+      setSessionCompacting: vi.fn(),
+      startLoading,
+      compactRemoteSession: vi.fn(async () => {}),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      getSession: () => undefined,
+      stopLoading: vi.fn(),
+    });
+
+    expect(startLoading).not.toHaveBeenCalled();
+  });
+
+  it('compactSession calls stopLoading, setSessionCompacting(false), and setError when compact throws an Error', async () => {
+    const stopLoading = vi.fn();
+    const setSessionCompacting = vi.fn();
+    const setError = vi.fn();
+
+    await compactSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      clearPendingAbort: vi.fn(),
+      resolveSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+      setError,
+      setSessionCompacting,
+      startLoading: vi.fn(),
+      compactRemoteSession: vi.fn(async () => {
+        throw new Error('compact failed');
+      }),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      getSession: () => undefined,
+      stopLoading,
+    });
+
+    expect(stopLoading).toHaveBeenCalled();
+    expect(setSessionCompacting).toHaveBeenCalledWith('session-1', false);
+    expect(setError).toHaveBeenCalledWith('compact failed');
+  });
+
+  it('compactSession calls setError with generic message when non-Error is thrown', async () => {
+    const setError = vi.fn();
+
+    await compactSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      clearPendingAbort: vi.fn(),
+      resolveSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+      setError,
+      setSessionCompacting: vi.fn(),
+      startLoading: vi.fn(),
+      compactRemoteSession: vi.fn(async () => {
+        throw 'oops';
+      }),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      getSession: () => undefined,
+      stopLoading: vi.fn(),
+    });
+
+    expect(setError).toHaveBeenCalledWith('Failed to compact session');
+  });
+
+  it('compactSession does not call setSessionCompacting(false) when session has time.compacting set', async () => {
+    const setSessionCompacting = vi.fn();
+
+    await compactSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      clearPendingAbort: vi.fn(),
+      resolveSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+      setError: vi.fn(),
+      setSessionCompacting,
+      startLoading: vi.fn(),
+      compactRemoteSession: vi.fn(async () => {}),
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      getSession: () =>
+        session('session-1', { time: { created: 0, updated: 0, compacting: Date.now() } }),
+      stopLoading: vi.fn(),
+    });
+
+    // Only called once to set compacting to true; never called with false
+    expect(setSessionCompacting).toHaveBeenCalledTimes(1);
+    expect(setSessionCompacting).toHaveBeenCalledWith('session-1', true);
+  });
+
+  it('aborts the root session tree when a subagent session is active', async () => {
+    const abortRemoteSession = vi.fn(async () => true);
+    const skipPlanSession = vi.fn();
+
+    await abortSessionWithDependencies({
+      getActiveSessionId: () => 'child-1',
+      getSessionTreeRootId: (sessionId) => (sessionId === 'child-1' ? 'session-1' : null),
+      getSessionTreeIds: (sessionId) =>
+        sessionId === 'session-1' ? ['session-1', 'child-1', 'child-2'] : [sessionId],
+      getSelectedAgentForSession: () => 'build',
+      skipPlanSession,
+      getSessionStatus: () => ({ type: 'busy' }),
+      getSessionUsageLimit: () => null,
+      markPendingAbortTree: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      stopLoading: vi.fn(),
+      abortRemoteSession,
+      clearPendingAbortTree: vi.fn(),
+      setSessionUsageLimit: vi.fn(),
+      logError: vi.fn(),
+    });
+
+    expect(skipPlanSession).not.toHaveBeenCalled();
+    expect(abortRemoteSession).toHaveBeenCalledTimes(3);
+    expect(abortRemoteSession).toHaveBeenNthCalledWith(1, 'session-1');
+    expect(abortRemoteSession).toHaveBeenNthCalledWith(2, 'child-1');
+    expect(abortRemoteSession).toHaveBeenNthCalledWith(3, 'child-2');
   });
 });

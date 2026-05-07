@@ -2646,7 +2646,7 @@ body.vscode-light
   opacity: 0.85;
 }
 
-.provider-limit-popup-model {
+.provider-limit-popup-provider {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--color-vscode-border-soft);
@@ -4871,7 +4871,7 @@ kbd {
 }
 
 .user-message-text > .inline-chip {
-  vertical-align: baseline;
+  vertical-align: -1px;
   margin: 0 1px;
   gap: 4px;
   padding: 1px 5px;

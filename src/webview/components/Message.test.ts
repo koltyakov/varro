@@ -549,6 +549,26 @@ describe('Message user prompt rendering', () => {
     expect(attachmentStrip?.textContent).toContain('preview.html');
     expect(attachmentStrip?.textContent).not.toContain('README.md');
   });
+
+  it('renders trailing slash-style inline file mentions without duplicating the attachment strip', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-inline-file-trailing-path'),
+          parts: [
+            textPart('text-1', 'test @e2e/tests/review.spec.ts'),
+            textPart('text-2', 'e2e/tests/review.spec.ts'),
+          ],
+        }),
+      container!
+    );
+
+    const messageText = container?.querySelector('.user-message-text');
+
+    expect(messageText?.textContent).toContain('test review.spec.ts');
+    expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(1);
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+  });
 });
 
 describe('Message tool call expansion', () => {
@@ -701,6 +721,22 @@ describe('parseUserMessageContent', () => {
       },
     ]);
   });
+
+  it('keeps prose text when it ends with a slash-style inline file mention', () => {
+    const parsed = parseUserMessageContent([
+      textPart('text-1', 'test @e2e/tests/review.spec.ts'),
+      textPart('text-2', 'e2e/tests/review.spec.ts'),
+    ]);
+
+    expect(parsed.messageTexts).toEqual(['test @e2e/tests/review.spec.ts']);
+    expect(parsed.attachments).toEqual([
+      {
+        type: 'file-reference',
+        path: 'e2e/tests/review.spec.ts',
+        isDirectory: false,
+      },
+    ]);
+  });
 });
 
 describe('Message user rendering', () => {
@@ -724,6 +760,45 @@ describe('Message user rendering', () => {
 
     expect(container?.textContent).toBe('');
     expect(container?.querySelector('.user-message-empty')).toBeNull();
+  });
+
+  it('copies inline attachment mentions using their original marker text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-copy-inline-attachment'),
+          parts: [
+            textPart(
+              'text-copy-inline-attachment',
+              "Check @broserbridge/bbx and @handlers.js if it's aligned @README.md - don't do anything this is template test"
+            ),
+            textPart('attachment-broserbridge', 'broserbridge/bbx'),
+            textPart('attachment-handlers', 'handlers.js'),
+            textPart('attachment-readme', 'README.md'),
+          ],
+        }),
+      container!
+    );
+
+    const messageCard = container?.querySelector<HTMLElement>('.rendered-markdown');
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(messageCard!);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const setData = vi.fn();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData },
+    });
+
+    messageCard?.dispatchEvent(event);
+
+    expect(setData).toHaveBeenCalledWith(
+      'text/plain',
+      "Check @broserbridge/bbx and @handlers.js if it's aligned @README.md - don't do anything this is template test"
+    );
   });
 });
 

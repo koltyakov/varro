@@ -101,6 +101,7 @@ type EventHandlerDependencies = {
   removeDeletedSessionTree(sessionId: string): void;
   shouldIgnorePendingAbortStatus(sessionId: string, status: SessionStatus): boolean;
   hasPendingAbort(sessionId: string | null | undefined): boolean;
+  markPendingAbort(sessionId: string): void;
   clearPendingAbort(sessionId: string | null | undefined): void;
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   clearUsageLimitOnResumedProgress(sessionId: string, status?: SessionStatus | null): void;
@@ -125,6 +126,8 @@ type EventHandlerDependencies = {
     options?: { rethrow?: boolean }
   ): Promise<void>;
   setDiffs(diffs: FileDiff[]): void;
+  abortRemoteSession(sessionId: string): Promise<unknown>;
+  logError(context: string, err: unknown): void;
 };
 
 type EventHandlerOperationDependencies = {
@@ -140,6 +143,7 @@ type EventHandlerOperationDependencies = {
     EventHandlerDependencies,
     | 'shouldIgnorePendingAbortStatus'
     | 'hasPendingAbort'
+    | 'markPendingAbort'
     | 'clearPendingAbort'
     | 'clearUsageLimitOnResumedProgress'
     | 'updateUsageLimitState'
@@ -147,6 +151,8 @@ type EventHandlerOperationDependencies = {
   >;
   sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
   sessionApprovalOperations: Pick<EventHandlerDependencies, 'respondPermission'>;
+  abortRemoteSession: EventHandlerDependencies['abortRemoteSession'];
+  logError: EventHandlerDependencies['logError'];
 };
 
 function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
@@ -183,6 +189,7 @@ export class SessionEventHandlerOperations {
       shouldIgnorePendingAbortStatus:
         this.deps.sessionStatusOperations.shouldIgnorePendingAbortStatus,
       hasPendingAbort: this.deps.sessionStatusOperations.hasPendingAbort,
+      markPendingAbort: this.deps.sessionStatusOperations.markPendingAbort,
       clearPendingAbort: this.deps.sessionStatusOperations.clearPendingAbort,
       setSessionStatusEntry: sessionStore.setSessionStatusEntry,
       clearUsageLimitOnResumedProgress:
@@ -197,6 +204,8 @@ export class SessionEventHandlerOperations {
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
       respondPermission: this.deps.sessionApprovalOperations.respondPermission,
       setDiffs: sessionStore.setDiffs,
+      abortRemoteSession: this.deps.abortRemoteSession,
+      logError: this.deps.logError,
     });
   };
 }
@@ -208,11 +217,27 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
     return sessionId === deps.getActiveSessionId();
   };
+  const abortLateChildSession = (info: Session) => {
+    if (!info.parentID || !deps.hasPendingAbort(info.parentID)) return;
+
+    const alreadyPending = deps.hasPendingAbort(info.id);
+    deps.markPendingAbort(info.id);
+    deps.setSessionStatusEntry(info.id, { type: 'idle' });
+    if (alreadyPending) return;
+
+    void deps.abortRemoteSession(info.id).catch((err) => {
+      deps.clearPendingAbort(info.id);
+      deps.logError('abortSession', err);
+    });
+  };
 
   cleanups.push(
     serverEvents.on('session.created', (data) => {
       const info = data.properties?.info as Session | undefined;
-      if (info) deps.upsertSession(info);
+      if (info) {
+        deps.upsertSession(info);
+        abortLateChildSession(info);
+      }
     })
   );
 
@@ -222,6 +247,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (info) {
         if (!info.time.compacting) deps.setSessionCompacting(info.id, false);
         deps.upsertSession(info);
+        abortLateChildSession(info);
       }
     })
   );

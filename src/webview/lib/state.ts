@@ -1800,7 +1800,37 @@ export function addPermission(permission: Permission) {
       ) {
         return;
       }
-      perms.splice(0, perms.length, ...groupPermissions([...perms, permission]));
+
+      const signature = getPermissionSignature(permission);
+      const existingIndex = perms.findIndex((p) => getPermissionSignature(p) === signature);
+
+      if (existingIndex === -1) {
+        perms.push({
+          ...permission,
+          duplicateIDs: [...new Set(getPermissionGroupMembers(permission).map((m) => m.id))],
+          groupMembers: getPermissionGroupMembers(permission),
+        });
+        return;
+      }
+
+      const existing = perms[existingIndex]!;
+      const incomingMembers = getPermissionGroupMembers(permission);
+      const merged = [
+        ...(existing.groupMembers || getPermissionGroupMembers(existing)),
+        ...incomingMembers,
+      ];
+      const mergedIds = [...new Set(merged.map((m) => m.id))];
+
+      if (permission.time.created < existing.time.created) {
+        perms[existingIndex] = {
+          ...permission,
+          groupMembers: merged,
+          duplicateIDs: mergedIds,
+        };
+      } else {
+        existing.groupMembers = merged;
+        existing.duplicateIDs = mergedIds;
+      }
     })
   );
 }

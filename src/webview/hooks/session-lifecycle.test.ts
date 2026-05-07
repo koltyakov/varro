@@ -71,8 +71,11 @@ import {
   getDeletedSessionTreeIds,
   getNextSessionIdAfterDeletion,
   hideDeletedSessionTree,
+  isSessionInWorkspace,
   normalizeProjectPath,
+  removeDeletedSessionTree,
   SessionLifecycleOperations,
+  sortSessions,
   upsertSession,
 } from './session/session-lifecycle';
 
@@ -263,6 +266,106 @@ describe('session-lifecycle helpers', () => {
 
     expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1', 'session-2']);
     expect(setup.deps.markSessionSeen).toHaveBeenCalledWith('session-1', 3);
+  });
+
+  it('normalizeProjectPath returns null for null, undefined, and empty string', () => {
+    expect(normalizeProjectPath(null)).toBeNull();
+    expect(normalizeProjectPath(undefined)).toBeNull();
+    expect(normalizeProjectPath('')).toBeNull();
+  });
+
+  it('normalizeProjectPath returns an already-clean path as-is', () => {
+    expect(normalizeProjectPath('/repo')).toBe('/repo');
+    expect(normalizeProjectPath('/home/user/project')).toBe('/home/user/project');
+  });
+
+  it('isSessionInWorkspace returns false when session has null or empty directory', () => {
+    const nullDirSession = session('s1', undefined as unknown as string);
+    nullDirSession.directory = null as unknown as string;
+    expect(isSessionInWorkspace(nullDirSession, '/repo')).toBe(false);
+
+    const emptyDirSession = session('s2', '');
+    expect(isSessionInWorkspace(emptyDirSession, '/repo')).toBe(false);
+  });
+
+  it('isSessionInWorkspace returns true when workspace is null (all sessions match)', () => {
+    expect(isSessionInWorkspace(session('s1', '/any/path'), null)).toBe(true);
+  });
+
+  it('upsertSession filters out a session outside workspace that already exists in list', () => {
+    const setup = createDeps({
+      activeSessionId: null,
+      sessions: [session('session-1', '/repo', 1), session('session-2', '/other', 2)],
+      workspace: '/repo',
+    });
+
+    // session-2 is outside workspace and exists in the list — should be filtered out
+    upsertSession(setup.deps, session('session-2', '/other', 3));
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+  });
+
+  it('upsertSession is a no-op for a session outside workspace that does not exist in list', () => {
+    const setup = createDeps({
+      activeSessionId: null,
+      sessions: [session('session-1', '/repo', 1)],
+      workspace: '/repo',
+    });
+
+    upsertSession(setup.deps, session('session-new', '/other', 3));
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+  });
+
+  it('removeDeletedSessionTree removes tree and clears state', () => {
+    const setup = createDeps({
+      activeSessionId: 'root',
+      sessions: [session('root'), session('child', '/repo', 1, 'root'), session('other')],
+    });
+
+    const deletedIds = removeDeletedSessionTree(setup.deps, 'root', setup.current.sessions);
+
+    expect(deletedIds).toEqual(new Set(['root', 'child']));
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['other']);
+    expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('root');
+    expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('child');
+    expect(setup.deps.clearActiveSessionState).toHaveBeenCalled();
+  });
+
+  it('getNextSessionIdAfterDeletion returns null for empty array', () => {
+    expect(getNextSessionIdAfterDeletion([])).toBeNull();
+  });
+
+  it('getNextSessionIdAfterDeletion returns first session when only child sessions exist', () => {
+    const sessions = [
+      session('child-1', '/repo', 1, 'root'),
+      session('child-2', '/repo', 2, 'root'),
+    ];
+    expect(getNextSessionIdAfterDeletion(sessions)).toBe('child-1');
+  });
+
+  it('sortSessions sorts by updated time descending', () => {
+    const sessions = [
+      session('old', '/repo', 1),
+      session('newest', '/repo', 3),
+      session('mid', '/repo', 2),
+    ];
+
+    const sorted = sortSessions(sessions);
+
+    expect(sorted.map((s) => s.id)).toEqual(['newest', 'mid', 'old']);
+  });
+
+  it('applySessions does not call clearActiveSessionState when active session is in the list', () => {
+    const setup = createDeps({
+      activeSessionId: 'session-1',
+      sessions: [session('session-1', '/repo', 1), session('session-2', '/repo', 2)],
+      workspace: '/repo',
+    });
+
+    applySessions(setup.deps, setup.current.sessions);
+
+    expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 
   it('creates bound lifecycle operations from shared state dependencies', () => {

@@ -42,6 +42,7 @@ import {
   providerLimitPollIntervalSeconds,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
+import { client } from '../lib/client';
 import { openProviderSetup } from '../lib/provider-setup';
 import {
   applySessionMcps,
@@ -1254,6 +1255,8 @@ export function ChatInput() {
       }
     }
 
+    void addPastedMentionContextFiles(pastedText);
+
     const imageItems = Array.from(clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
     );
@@ -2263,16 +2266,32 @@ function getPastedContextFiles(text: string, workspacePath: string | null): Drop
     if (activeFileMatch) {
       const file = createDroppedFileFromReference(activeFileMatch[1], workspacePath, false);
       if (file) addOrMergePastedContextFile(files, file);
-      continue;
-    }
-
-    for (const mention of extractPastedFileMentions(line)) {
-      const file = createDroppedFileFromReference(mention.path, workspacePath, mention.isDirectory);
-      if (file) addOrMergePastedContextFile(files, file);
     }
   }
 
   return Array.from(files.values());
+}
+
+async function addPastedMentionContextFiles(text: string) {
+  if (!text.trim()) return;
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const files = new Map<string, DroppedFile>();
+
+  for (const line of lines) {
+    for (const mention of extractPastedFileMentions(line)) {
+      const file = await resolveDroppedFileReference(mention.path, mention.isDirectory);
+      if (file) addOrMergePastedContextFile(files, file);
+    }
+  }
+
+  for (const file of files.values()) {
+    addContextFile(file);
+  }
 }
 
 function getPromptTextWithoutContextReferences(text: string) {
@@ -2316,6 +2335,20 @@ function isLikelyFileMentionPath(value: string, isDirectory = false) {
   if (isDirectory) return true;
   if (normalized.includes('/')) return true;
   return /\.[A-Za-z0-9_-]{1,16}$/.test(normalized);
+}
+
+async function resolveDroppedFileReference(
+  referencePath: string,
+  isDirectory: boolean
+): Promise<DroppedFile | null> {
+  const normalizedReference = normalizePath(referencePath);
+  if (!normalizedReference) return null;
+
+  const resolved = await client.varro.resolveWorkspacePath(normalizedReference);
+  if (!resolved) return null;
+  if (isDirectory && resolved.type !== 'directory') return null;
+
+  return resolved;
 }
 
 function createDroppedFileFromReference(

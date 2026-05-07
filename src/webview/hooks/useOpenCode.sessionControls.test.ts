@@ -117,6 +117,54 @@ describe('useOpenCode session control flows', () => {
     }
   });
 
+  it('aborts child sessions that appear after stop has already started', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionAbort.mockResolvedValue(true);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('sessions', [session('session-1')]);
+      stateModule.setState('activeSessionId', 'session-1');
+
+      await hookModule.abortSession();
+
+      handlers.get('session.created')?.({
+        properties: {
+          info: {
+            ...session('child-1'),
+            parentID: 'session-1',
+          },
+        },
+      });
+
+      expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(2);
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1');
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1');
+    } finally {
+      dispose();
+    }
+  });
+
   it('aborts retrying subagent sessions when stopping the parent session', async () => {
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -186,6 +234,42 @@ describe('useOpenCode session control flows', () => {
         attempt: 2,
         sessionID: 'child-1',
       });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('aborts the full root session tree when stopping from a subagent session', async () => {
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionAbort.mockResolvedValue(true);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1' },
+        { ...session('child-2'), parentID: 'session-1' },
+      ]);
+      stateModule.setState('activeSessionId', 'child-1');
+
+      await hookModule.abortSession();
+
+      expect(clientMocks.sessionAbort).toHaveBeenCalledTimes(3);
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(1, 'session-1');
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(2, 'child-1');
+      expect(clientMocks.sessionAbort).toHaveBeenNthCalledWith(3, 'child-2');
     } finally {
       dispose();
     }

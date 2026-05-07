@@ -60,6 +60,16 @@ export class SessionStatusOperations {
     );
   };
 
+  readonly markPendingAbort = (sessionId: string) => {
+    markPendingAbortWithDependencies(
+      {
+        pendingAbortRetryAttempts: this.deps.pendingAbortRetryAttempts,
+        getSessionStatus: (id) => appStore.state.sessionStatus[id],
+      },
+      sessionId
+    );
+  };
+
   readonly shouldIgnorePendingAbortStatus = (
     sessionId: string,
     status: SessionStatus | null | undefined

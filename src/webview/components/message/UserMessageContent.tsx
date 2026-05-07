@@ -10,6 +10,7 @@ import { state } from '../../lib/state';
 import type { FilePart, Part, TextPart } from '../../types';
 import {
   formatContextLineRanges,
+  formatSelectionReference,
   getFirstContextLine,
   parseSelectionReference,
 } from '../../../shared/context-files';
@@ -17,6 +18,7 @@ import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
 import type { PreviewImage } from '../ImagePreview';
 import { renderCodeBlockHtml } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
+import { DocumentIcon } from '../DocumentIcon';
 import { FolderIcon } from '../FolderIcon';
 
 export type MessageAttachment =
@@ -208,6 +210,12 @@ function parseUserMessageAttachmentLine(line: string): MessageAttachment | null 
     }
   }
 
+  // Inline @file mentions belong to the prompt body, even when the line ends
+  // with a slash-style path like "test @e2e/tests/review.spec.ts".
+  if (hasEmbeddedMentionReference(line)) {
+    return null;
+  }
+
   if (isStandaloneFileReference(line)) {
     return {
       type: 'file-reference',
@@ -217,6 +225,11 @@ function parseUserMessageAttachmentLine(line: string): MessageAttachment | null 
   }
 
   return null;
+}
+
+function hasEmbeddedMentionReference(line: string): boolean {
+  const match = line.match(/(^|[\s(])@([^\s@)]+?\/?)(?=$|[\s),.:;!?])/);
+  return (match?.index ?? -1) > 0;
 }
 
 export function getUserMessagePreviewText(parts: Part[]): string {
@@ -337,10 +350,34 @@ export function UserMessageContent(props: { parts: Part[] }) {
     parsed().attachments.length > 0;
   const hasTrailingAttachmentContent = () =>
     otherFileParts().length > 0 || parsed().messageTexts.length > 0 || imageParts().length > 0;
+  const handleCopy = (event: ClipboardEvent) => {
+    if (!event.clipboardData) return;
+
+    const currentTarget = event.currentTarget;
+    if (!(currentTarget instanceof HTMLElement)) return;
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (range.collapsed) return;
+
+    const commonAncestor = range.commonAncestorContainer;
+    if (commonAncestor !== currentTarget && !currentTarget.contains(commonAncestor)) return;
+
+    const copiedText = normalizeCopiedSelectionText(
+      extractCopiedSelectionText(currentTarget, range)
+    );
+    if (!copiedText) return;
+
+    event.clipboardData.setData('text/plain', copiedText);
+    event.preventDefault();
+  };
 
   return (
     <div
       class={`rendered-markdown${imageParts().length > 0 ? ' user-message-content-has-image' : ''}`}
+      onCopy={handleCopy}
     >
       <Show when={visibleAttachments().length > 0}>
         <div
@@ -699,11 +736,13 @@ function UserMessageImage(props: { part: FilePart; onOpenPreview: () => void }) 
 function InlineImageAttachmentChip(props: { part: FilePart; onClick: () => void }) {
   const label = () => getInlineImageLabel(props.part);
   const title = () => `${label()}${props.part.mime ? ` · ${props.part.mime}` : ''}`;
+  const copyMarker = () => getInlineImageMarker(props.part) ?? label();
 
   return (
     <button
       type="button"
       class="inline-chip inline-chip-clickable"
+      data-copy-marker={copyMarker()}
       title={title()}
       aria-label={`Open image preview: ${label()}`}
       onClick={props.onClick}
@@ -725,6 +764,7 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
     attachment().type === 'file-selection'
       ? (attachment() as Extract<MessageAttachment, { type: 'file-selection' }>)
       : null;
+  const copyMarker = () => getInlineAttachmentCopyMarker(attachment());
 
   const handleClick = () => openAttachment(attachment());
 
@@ -732,22 +772,13 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
     <button
       type="button"
       class="inline-chip inline-chip-clickable"
+      data-copy-marker={copyMarker()}
       title={getAttachmentTitle(attachment())}
       onClick={handleClick}
     >
       <Show
         when={isFolder()}
-        fallback={
-          <svg
-            class="inline-chip-icon"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            width="11"
-            height="11"
-          >
-            <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-          </svg>
-        }
+        fallback={<DocumentIcon class="inline-chip-icon" width="11" height="11" />}
       >
         <FolderIcon class="inline-chip-icon" width="11" height="11" />
       </Show>
@@ -803,11 +834,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
         </svg>
       );
     }
-    return (
-      <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-        <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-      </svg>
-    );
+    return <DocumentIcon class="chip-icon" width="12" height="12" />;
   };
 
   const detail = () => {
@@ -827,6 +854,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
       fallback={
         <button
           class="message-attachment-chip message-attachment-chip-clickable"
+          data-copy-marker={getStandaloneAttachmentCopyText(attachment())}
           title={getAttachmentTitle(attachment())}
           onClick={handleClick}
         >
@@ -836,7 +864,11 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
         </button>
       }
     >
-      <span class="message-attachment-chip" title={getAttachmentTitle(attachment())}>
+      <span
+        class="message-attachment-chip"
+        data-copy-marker={getStandaloneAttachmentCopyText(attachment())}
+        title={getAttachmentTitle(attachment())}
+      >
         {iconSvg()}
         <span class="chip-label">{getAttachmentLabel(attachment())}</span>
         {detail()}
@@ -865,4 +897,112 @@ function getAttachmentTitle(attachment: MessageAttachment): string {
     case 'file-reference':
       return attachment.path;
   }
+}
+
+function getInlineAttachmentCopyMarker(attachment: MessageAttachment): string {
+  return getAttachmentTextMarker(attachment) ?? getStandaloneAttachmentCopyText(attachment);
+}
+
+function getStandaloneAttachmentCopyText(attachment: MessageAttachment): string {
+  switch (attachment.type) {
+    case 'file-selection':
+      return formatSelectionReference(attachment.filename, attachment.lineRanges);
+    case 'terminal-selection':
+      return `[Selection from terminal ${attachment.terminalName}]`;
+    case 'file-reference':
+      return attachment.path;
+  }
+}
+
+const BLOCK_COPY_TAGS = new Set([
+  'BLOCKQUOTE',
+  'BR',
+  'DIV',
+  'FIGCAPTION',
+  'FIGURE',
+  'LI',
+  'OL',
+  'P',
+  'PRE',
+  'TABLE',
+  'TBODY',
+  'TD',
+  'TH',
+  'THEAD',
+  'TR',
+  'UL',
+]);
+
+function extractCopiedSelectionText(node: Node, range: Range): string {
+  if (!rangeIntersectsNode(range, node)) return '';
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    return extractSelectedTextNode(node as Text, range);
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+  const element = node as HTMLElement;
+  if (element.tagName === 'BR') return '\n';
+
+  const copyMarker = element.dataset.copyMarker;
+  if (copyMarker) return copyMarker;
+
+  let result = '';
+  for (const child of Array.from(element.childNodes)) {
+    const childText = extractCopiedSelectionText(child, range);
+    if (!childText) continue;
+    result += childText;
+    if (
+      child.nodeType === Node.ELEMENT_NODE &&
+      BLOCK_COPY_TAGS.has((child as HTMLElement).tagName) &&
+      !result.endsWith('\n')
+    ) {
+      result += '\n';
+    }
+  }
+
+  return result;
+}
+
+function extractSelectedTextNode(node: Text, range: Range): string {
+  const text = node.data;
+  let start = 0;
+  let end = text.length;
+
+  if (range.startContainer === node) {
+    start = Math.max(0, Math.min(text.length, range.startOffset));
+  }
+  if (range.endContainer === node) {
+    end = Math.max(start, Math.min(text.length, range.endOffset));
+  }
+
+  return text.slice(start, end);
+}
+
+function rangeIntersectsNode(range: Range, node: Node): boolean {
+  if (typeof range.intersectsNode === 'function') {
+    return range.intersectsNode(node);
+  }
+
+  const nodeRange = document.createRange();
+  try {
+    nodeRange.selectNode(node);
+  } catch {
+    nodeRange.selectNodeContents(node);
+  }
+
+  return (
+    range.compareBoundaryPoints(Range.END_TO_START, nodeRange) < 0 &&
+    range.compareBoundaryPoints(Range.START_TO_END, nodeRange) > 0
+  );
+}
+
+function normalizeCopiedSelectionText(text: string): string {
+  return text
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n+$/g, '');
 }

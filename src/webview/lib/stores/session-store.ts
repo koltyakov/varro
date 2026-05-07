@@ -85,10 +85,11 @@ export const sessionStore = {
     setState('sessionStatus', statuses);
   },
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
-    setState('sessionStatus', (current) => ({
-      ...current,
-      [sessionId]: status,
-    }));
+    setState('sessionStatus', (current) => {
+      const prev = current[sessionId];
+      if (prev && isEqualSessionStatus(prev, status)) return current;
+      return { ...current, [sessionId]: status };
+    });
   },
   clearSessionStatusEntry(sessionId: string) {
     setState(
@@ -101,3 +102,11 @@ export const sessionStore = {
 };
 
 export type SessionStore = typeof sessionStore;
+
+function isEqualSessionStatus(a: SessionStatus, b: SessionStatus): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === 'retry' && b.type === 'retry') {
+    return a.attempt === b.attempt && a.message === b.message && a.next === b.next;
+  }
+  return true;
+}

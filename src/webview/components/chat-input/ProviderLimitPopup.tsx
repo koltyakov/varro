@@ -21,7 +21,7 @@ export function ProviderLimitPopup(props: {
   boundaryRef?: HTMLElement;
   alignTo?: 'left' | 'right';
   limit: ProviderLimitStatus | null;
-  model: { providerName: string; modelName: string };
+  providerName: string;
   onClose: () => void;
 }) {
   const windows = () => getOrderedProviderLimitWindows(props.limit);
@@ -65,10 +65,8 @@ export function ProviderLimitPopup(props: {
         </div>
       </Show>
 
-      <Show when={props.model.modelName}>
-        <div class="provider-limit-popup-model">
-          {props.model.providerName} / {props.model.modelName}
-        </div>
+      <Show when={props.providerName}>
+        <div class="provider-limit-popup-provider">{props.providerName}</div>
       </Show>
     </div>
   );

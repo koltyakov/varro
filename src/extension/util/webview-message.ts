@@ -225,6 +225,11 @@ export function isAllowedApiRequest(method: string, path: string) {
       method === 'GET' && hasOnlyQuery('path') && Boolean(url.searchParams.get('path')?.trim())
     );
   }
+  if (pathname === '/varro/workspace-path/resolve') {
+    return (
+      method === 'GET' && hasOnlyQuery('path') && Boolean(url.searchParams.get('path')?.trim())
+    );
+  }
   if (pathname === '/varro/workspace-file/pick') {
     return method === 'GET' && noQuery();
   }

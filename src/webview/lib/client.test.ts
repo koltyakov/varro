@@ -93,6 +93,7 @@ describe('client', () => {
     await client.question.list();
     await client.question.reply('question-1', [['Yes'], ['No']]);
     await client.question.reject('question-1');
+    await client.varro.resolveWorkspacePath('package.json');
     await client.varro.pickWorkspaceFile();
 
     expect(bridgeMocks.apiCall.mock.calls).toEqual([
@@ -147,6 +148,7 @@ describe('client', () => {
       ['GET', '/question'],
       ['POST', '/question/question-1/reply', { answers: [['Yes'], ['No']] }],
       ['POST', '/question/question-1/reject'],
+      ['GET', '/varro/workspace-path/resolve?path=package.json'],
       ['GET', '/varro/workspace-file/pick'],
     ]);
   });
@@ -335,5 +337,283 @@ describe('client', () => {
 
     expect(listener).not.toHaveBeenCalled();
     expect(bridgeMocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('normalizes recycle bin entries with parentID, summary, and compacting time', async () => {
+    const { client } = await loadClient();
+    const session = {
+      id: 'sess-1',
+      projectID: 'proj-1',
+      directory: '/tmp',
+      parentID: 'parent-1',
+      summary: { additions: 10, deletions: 5, files: 3 },
+      title: 'Test',
+      version: '1',
+      time: { created: 100, updated: 200, compacting: 300 },
+    };
+    bridgeMocks.apiCall.mockResolvedValue([
+      {
+        rootID: 'root-1',
+        deletedAt: 1000,
+        expiresAt: 2000,
+        root: session,
+        sessions: [session],
+      },
+    ]);
+
+    const result = await client.varro.recycleBin.list();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].root.parentID).toBe('parent-1');
+    expect(result[0].root.summary).toEqual({ additions: 10, deletions: 5, files: 3 });
+    expect(result[0].root.time.compacting).toBe(300);
+  });
+
+  it('normalizes recycle bin entries without optional fields', async () => {
+    const { client } = await loadClient();
+    const session = {
+      id: 'sess-1',
+      projectID: 'proj-1',
+      directory: '/tmp',
+      title: 'Test',
+      version: '1',
+      time: { created: 100, updated: 200 },
+    };
+    bridgeMocks.apiCall.mockResolvedValue([
+      {
+        rootID: 'root-1',
+        deletedAt: 1000,
+        expiresAt: 2000,
+        root: session,
+        sessions: [session],
+      },
+    ]);
+
+    const result = await client.varro.recycleBin.list();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].root.parentID).toBeUndefined();
+    expect(result[0].root.summary).toBeUndefined();
+    expect(result[0].root.time.compacting).toBeUndefined();
+  });
+
+  it('returns null for recycle bin entries with missing required fields', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue([
+      { rootID: 'root-1', deletedAt: 1000, expiresAt: 2000, root: null, sessions: [] },
+      { rootID: null, deletedAt: 1000, expiresAt: 2000 },
+      { deletedAt: 'not-a-number' },
+      'not-an-object',
+      null,
+    ]);
+
+    const result = await client.varro.recycleBin.list();
+    expect(result).toEqual([]);
+  });
+
+  it('returns null for recycle bin sessions with invalid shapes', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue([
+      {
+        rootID: 'root-1',
+        deletedAt: 1000,
+        expiresAt: 2000,
+        root: { id: 'sess-1' }, // missing required fields
+        sessions: [{ id: 'sess-1' }],
+      },
+      {
+        rootID: 'root-2',
+        deletedAt: 1000,
+        expiresAt: 2000,
+        root: {
+          id: 'sess-2',
+          projectID: 'proj',
+          directory: '/tmp',
+          title: 'T',
+          version: '1',
+          time: { created: 'not-a-number', updated: 200 },
+        },
+        sessions: [],
+      },
+    ]);
+
+    const result = await client.varro.recycleBin.list();
+    expect(result).toEqual([]);
+  });
+
+  it('handles workspace.failed event with missing properties.message', async () => {
+    const { getWorkspaceStatusEventSummary } = await loadClient();
+
+    emitMessage({
+      type: 'server/event',
+      payload: { type: 'workspace.failed', properties: {} },
+    });
+
+    expect(getWorkspaceStatusEventSummary().latest).toEqual({
+      type: 'workspace.failed',
+      message: 'Workspace connection failed',
+    });
+  });
+
+  it('handles workspace.ready event with missing properties.name', async () => {
+    const { getWorkspaceStatusEventSummary } = await loadClient();
+
+    emitMessage({
+      type: 'server/event',
+      payload: { type: 'workspace.ready', properties: {} },
+    });
+
+    expect(getWorkspaceStatusEventSummary().latest).toEqual({
+      type: 'workspace.ready',
+      message: 'Workspace connected',
+    });
+  });
+
+  it('ignores workspace.status events with invalid properties', async () => {
+    const { getWorkspaceStatusEventSummary } = await loadClient();
+
+    emitMessage({
+      type: 'server/event',
+      payload: {
+        type: 'workspace.status',
+        properties: { workspaceID: 'ws-1', status: 'unknown-status' },
+      },
+    });
+
+    expect(getWorkspaceStatusEventSummary().entries).toEqual([]);
+  });
+
+  it('ignores workspace.status events with missing workspaceID', async () => {
+    const { getWorkspaceStatusEventSummary } = await loadClient();
+
+    emitMessage({
+      type: 'server/event',
+      payload: {
+        type: 'workspace.status',
+        properties: { status: 'connected' },
+      },
+    });
+
+    expect(getWorkspaceStatusEventSummary().entries).toEqual([]);
+  });
+
+  it('forwards authorizeProvider with inputs', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue({});
+
+    await client.config.authorizeProvider({
+      providerID: 'openai',
+      method: 1,
+      inputs: { apiKey: 'sk-test' },
+    });
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('POST', '/provider/openai/oauth/authorize', {
+      method: 1,
+      inputs: { apiKey: 'sk-test' },
+    });
+  });
+
+  it('does not include modelID param when providerLimit is called with null modelID', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue({ status: 'available' });
+
+    await client.config.providerLimit('openai', null);
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'GET',
+      '/varro/provider-limit?providerID=openai'
+    );
+  });
+
+  it('forwards recycleBin restore, delete, and empty calls', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+
+    await client.varro.recycleBin.restore('root-1');
+    await client.varro.recycleBin.delete('root-2');
+    await client.varro.recycleBin.empty();
+
+    expect(bridgeMocks.apiCall.mock.calls).toEqual([
+      ['POST', '/varro/session-trash/root-1/restore'],
+      ['DELETE', '/varro/session-trash/root-2/delete'],
+      ['DELETE', '/varro/session-trash'],
+    ]);
+  });
+
+  it('forwards readWorkspaceFile, saveModelRouting, and openCodeConfig calls', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue({});
+
+    await client.varro.readWorkspaceFile('src/app.ts');
+    await client.varro.saveModelRouting({
+      target: 'small_model',
+      providerID: 'openai',
+      modelID: 'gpt-4.1',
+    });
+    await client.varro.openCodeConfig();
+
+    expect(bridgeMocks.apiCall.mock.calls).toEqual([
+      ['GET', '/varro/workspace-file?path=src%2Fapp.ts'],
+      [
+        'POST',
+        '/varro/opencode-config/model-routing',
+        {
+          target: 'small_model',
+          providerID: 'openai',
+          modelID: 'gpt-4.1',
+        },
+      ],
+      ['GET', '/varro/opencode-config'],
+    ]);
+  });
+
+  it('forwards mcp connect and disconnect calls', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+
+    await client.mcp.connect('my-server');
+    await client.mcp.disconnect('my-server');
+
+    expect(bridgeMocks.apiCall.mock.calls).toEqual([
+      ['POST', '/mcp/my-server/connect'],
+      ['POST', '/mcp/my-server/disconnect'],
+    ]);
+  });
+
+  it('forwards varro.session.deleteImmediately call', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+
+    await client.varro.session.deleteImmediately('sess-1');
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('DELETE', '/varro/session/sess-1/delete');
+  });
+
+  it('filters out entries with partial summary (missing fields)', async () => {
+    const { client } = await loadClient();
+    const session = {
+      id: 'sess-1',
+      projectID: 'proj-1',
+      directory: '/tmp',
+      summary: { additions: 10, deletions: 'not-a-number', files: 3 },
+      title: 'Test',
+      version: '1',
+      time: { created: 100, updated: 200 },
+    };
+    bridgeMocks.apiCall.mockResolvedValue([
+      {
+        rootID: 'root-1',
+        deletedAt: 1000,
+        expiresAt: 2000,
+        root: session,
+        sessions: [session],
+      },
+    ]);
+
+    const result = await client.varro.recycleBin.list();
+
+    expect(result).toHaveLength(1);
+    // summary should be omitted when fields are invalid
+    expect(result[0].root.summary).toBeUndefined();
   });
 });
