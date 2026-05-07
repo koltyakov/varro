@@ -454,6 +454,9 @@ export async function loadSessionsWithDependencies(
 ) {
   try {
     const sessions = await deps.listSessions();
+    // Session reads are intentionally broad. Workspace filtering belongs in
+    // applySessions(), not the transport/backend layer, to avoid platform-
+    // specific path formatting mismatches from hiding valid sessions.
     deps.applySessions(sessions);
   } catch (err) {
     logError('loadSessions', err);

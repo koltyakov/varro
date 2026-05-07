@@ -1048,7 +1048,7 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
   });
 
-  it('keeps the session picker visible until a new session finishes creating', async () => {
+  it('switches to the chat view immediately while a new session is creating', async () => {
     let resolveCreateSession: ((value: string | null) => void) | undefined;
     const createSessionSpy = vi.spyOn(openCodeModule, 'createSession').mockImplementation(
       () =>
@@ -1074,17 +1074,115 @@ describe('header status badges', () => {
     expect(createSessionSpy).toHaveBeenCalledTimes(1);
     expect(
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
-    ).toBeInstanceOf(HTMLDivElement);
-    expect(container?.querySelector('.chat-main-shell')).toBeNull();
+    ).toBeNull();
+    expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-header .chat-header-title-text')?.textContent).toBe(
+      'New Chat'
+    );
 
     resolveCreateSession?.('new-session');
     await Promise.resolve();
     await Promise.resolve();
 
+    expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('reuses an untouched active session instead of creating another from chat view', async () => {
+    const createSessionSpy = vi
+      .spyOn(openCodeModule, 'createSession')
+      .mockResolvedValue('new-session');
+    const deleteImmediatelySpy = vi
+      .spyOn(openCodeModule, 'deleteSessionImmediately')
+      .mockResolvedValue(undefined);
+
+    const now = Date.now();
+    setState('sessions', [
+      session('draft-session', now, {
+        title: 'New session',
+        time: { created: now, updated: now },
+      }),
+    ]);
+    setState('activeSessionId', 'draft-session');
+
+    cleanup = render(() => Chat(), container!);
+
+    const newChatButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="New chat"]'
+    ) as HTMLButtonElement | null;
+    expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
+
+    newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(deleteImmediatelySpy).not.toHaveBeenCalled();
+    expect(createSessionSpy).not.toHaveBeenCalled();
+    expect(state.activeSessionId).toBe('draft-session');
+  });
+
+  it('reuses an untouched active session instead of creating another from the session picker', async () => {
+    const createSessionSpy = vi
+      .spyOn(openCodeModule, 'createSession')
+      .mockResolvedValue('new-session');
+    const deleteImmediatelySpy = vi
+      .spyOn(openCodeModule, 'deleteSessionImmediately')
+      .mockResolvedValue(undefined);
+
+    const now = Date.now();
+    setState('sessions', [
+      session('draft-session', now, {
+        title: 'New session',
+        time: { created: now, updated: now },
+      }),
+    ]);
+    setState('activeSessionId', 'draft-session');
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const newChatButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="New chat"]'
+    ) as HTMLButtonElement | null;
+    expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
+
+    newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(deleteImmediatelySpy).not.toHaveBeenCalled();
+    expect(createSessionSpy).not.toHaveBeenCalled();
+    expect(state.activeSessionId).toBe('draft-session');
     expect(
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
     ).toBeNull();
-    expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('deletes an untouched active session when returning to the sessions list', async () => {
+    const deleteImmediatelySpy = vi
+      .spyOn(openCodeModule, 'deleteSessionImmediately')
+      .mockResolvedValue(undefined);
+
+    const now = Date.now();
+    setState('sessions', [
+      session('draft-session', now, {
+        title: 'New session',
+        time: { created: now, updated: now },
+      }),
+    ]);
+    setState('activeSessionId', 'draft-session');
+
+    cleanup = render(() => Chat(), container!);
+
+    const backButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="Back to sessions"]'
+    ) as HTMLButtonElement | null;
+    expect(backButton).toBeInstanceOf(HTMLButtonElement);
+
+    backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(deleteImmediatelySpy).toHaveBeenCalledWith('draft-session');
+    expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('adds a brief chat view transition class after the new chat opens', async () => {
@@ -1108,13 +1206,13 @@ describe('header status badges', () => {
     newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
-    resolveCreateSession?.('new-session');
-    await Promise.resolve();
-    await Promise.resolve();
-
     expect(
       container?.querySelector('.interactive-session')?.classList.contains('chat-view-entering')
     ).toBe(true);
+
+    resolveCreateSession?.('new-session');
+    await Promise.resolve();
+    await Promise.resolve();
 
     vi.advanceTimersByTime(180);
     await Promise.resolve();
@@ -1169,6 +1267,38 @@ describe('header status badges', () => {
       '.session-item.active .session-item-indicator'
     );
     expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
+  });
+
+  it('omits the active session from the sessions picker after returning from chat', async () => {
+    const now = Date.now();
+    setState('sessions', [
+      session('active-completed', now - 1_000),
+      session('plan-ready', now - 2_000),
+      session('other', now - 3_000),
+    ]);
+    setState('activeSessionId', 'active-completed');
+    setState('lastSeenSessions', {
+      'active-completed': now - 1_000,
+      'plan-ready': 0,
+      other: now - 3_000,
+    });
+    setState('sessionSelectedAgents', { 'plan-ready': 'plan' });
+
+    cleanup = render(() => Chat(), container!);
+
+    const backButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="Back to sessions"]'
+    ) as HTMLButtonElement | null;
+    expect(backButton).toBeInstanceOf(HTMLButtonElement);
+
+    backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map((item) =>
+      item.textContent?.trim()
+    );
+
+    expect(titles).toEqual(['plan-ready', 'other']);
   });
 
   it('keeps opening the filtered session list when multiple sibling sessions match', async () => {

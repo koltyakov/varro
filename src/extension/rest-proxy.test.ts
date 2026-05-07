@@ -104,9 +104,21 @@ describe('scopeOpenCodeRequest', () => {
     );
 
     expect(result.url).toBe(
-      'http://127.0.0.1:4096/session?directory=c%3A%2Fusers%2Fandrew%2Fprojects%2Fvarro'
+      'http://127.0.0.1:4096/session?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'
     );
-    expect(result.directory).toBe('c:/users/andrew/projects/varro');
+    expect(result.directory).toBe('C:\\Users\\Andrew\\Projects\\Varro');
+  });
+
+  it('preserves Windows path separators and casing when scoping requests', () => {
+    const result = scopeOpenCodeRequest(
+      'http://127.0.0.1:4096',
+      '/session',
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+
+    expect(result.url).toContain('directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro');
+    expect(result.url).not.toContain('c%3A%2Fusers%2Fandrew%2Fprojects%2Fvarro');
+    expect(result.directory).toBe('C:\\Users\\Andrew\\Projects\\Varro');
   });
 
   it('prefers an explicit directory query over the fallback workspace directory', () => {
@@ -119,7 +131,19 @@ describe('scopeOpenCodeRequest', () => {
     expect(result.url).toBe(
       'http://127.0.0.1:4096/session?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'
     );
-    expect(result.directory).toBe('c:/users/andrew/projects/varro');
+    expect(result.directory).toBe('C:\\Users\\Andrew\\Projects\\Varro');
+  });
+
+  it('normalizes an explicit Windows directory query for session deletes', () => {
+    const result = scopeOpenCodeRequest(
+      'http://127.0.0.1:4096',
+      '/session/some-id?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro%5C'
+    );
+
+    expect(result.url).toBe(
+      'http://127.0.0.1:4096/session/some-id?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'
+    );
+    expect(result.directory).toBe('C:\\Users\\Andrew\\Projects\\Varro');
   });
 
   it('skips directory param for global paths', () => {
@@ -159,8 +183,8 @@ describe('getOpenCodeDirectoryHeaders', () => {
   });
 
   it('encodes normalized Windows directory headers', () => {
-    expect(getOpenCodeDirectoryHeaders('c:/users/andrew/projects/varro')).toEqual({
-      'x-opencode-directory': 'c%3A%2Fusers%2Fandrew%2Fprojects%2Fvarro',
+    expect(getOpenCodeDirectoryHeaders('C:\\Users\\Andrew\\Projects\\Varro')).toEqual({
+      'x-opencode-directory': 'C%3A%5CUsers%5CAndrew%5CProjects%5CVarro',
     });
   });
 });

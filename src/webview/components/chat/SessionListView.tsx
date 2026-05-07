@@ -362,23 +362,27 @@ export function SessionListView(props: {
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
 
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
-  const visibleSessionsForList = createMemo(() =>
-    state.sessions.filter(
-      (session) =>
-        !shouldPruneEmptySession(session, {
-          activeSessionId: null,
-          isQueued: (sessionId) =>
-            state.queuedMessages.some((item) => item.sessionId === sessionId),
-          isAwaitingInput: isSessionAwaitingInput,
-          isRunning: (sessionId) => sessionIndicators().runningIds.has(sessionId),
-          needsAttention: (sessionId) => sessionIndicators().attentionIds.has(sessionId),
-          isFailed: (sessionId) => sessionIndicators().failedIds.has(sessionId),
-          isPlanReady: (item) => sessionIndicators().planReadyIds.has(item.id),
-          preserve: ralphStore.isRalphSession(session.id),
-          statusType: state.sessionStatus[session.id]?.type,
-        })
-    )
-  );
+  const visibleSessionsForList = createMemo(() => {
+    const isPickerView = !props.embedded || !!props.sessionFilter || !!props.subagentParentId;
+
+    return state.sessions.filter((session) => {
+      if (isPickerView && session.id === state.activeSessionId) {
+        return false;
+      }
+
+      return !shouldPruneEmptySession(session, {
+        activeSessionId: null,
+        isQueued: (sessionId) => state.queuedMessages.some((item) => item.sessionId === sessionId),
+        isAwaitingInput: isSessionAwaitingInput,
+        isRunning: (sessionId) => sessionIndicators().runningIds.has(sessionId),
+        needsAttention: (sessionId) => sessionIndicators().attentionIds.has(sessionId),
+        isFailed: (sessionId) => sessionIndicators().failedIds.has(sessionId),
+        isPlanReady: (item) => sessionIndicators().planReadyIds.has(item.id),
+        preserve: ralphStore.isRalphSession(session.id),
+        statusType: state.sessionStatus[session.id]?.type,
+      });
+    });
+  });
   const primarySessions = createMemo(() => visibleSessionsForList().filter(isPrimarySession));
   const groupedSessions = createMemo(() =>
     groupSessions(

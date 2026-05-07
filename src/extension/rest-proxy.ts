@@ -43,19 +43,24 @@ export function scopeOpenCodeRequest(baseUrl: string, path: string, directory?: 
   }
 
   const normalizedDirectory = normalizeOpenCodeDirectory(directory);
+  const hasExplicitDirectory = url.searchParams.has('directory');
+  const explicitDirectory = hasExplicitDirectory
+    ? normalizeOpenCodeDirectory(url.searchParams.get('directory') || undefined)
+    : undefined;
 
-  if (
-    normalizedDirectory &&
-    !url.pathname.startsWith('/global/') &&
-    !url.searchParams.has('directory')
-  ) {
-    url.searchParams.set('directory', normalizedDirectory);
+  if (!url.pathname.startsWith('/global/')) {
+    if (explicitDirectory) {
+      url.searchParams.set('directory', explicitDirectory);
+    } else if (hasExplicitDirectory) {
+      url.searchParams.delete('directory');
+    } else if (normalizedDirectory) {
+      url.searchParams.set('directory', normalizedDirectory);
+    }
   }
 
-  const scopedDirectory =
-    !url.pathname.startsWith('/global/') && url.searchParams.has('directory')
-      ? normalizeOpenCodeDirectory(url.searchParams.get('directory') || undefined)
-      : normalizedDirectory;
+  const scopedDirectory = !url.pathname.startsWith('/global/')
+    ? (explicitDirectory ?? normalizedDirectory)
+    : normalizedDirectory;
 
   return { url: url.toString(), directory: scopedDirectory };
 }
@@ -67,9 +72,14 @@ export function getOpenCodeDirectoryHeaders(directory?: string): Record<string, 
 
 function normalizeOpenCodeDirectory(directory: string | undefined) {
   if (!directory) return undefined;
-  const normalized = directory.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!normalized) return undefined;
-  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+  const trimmed = directory.trim();
+  if (!trimmed) return undefined;
+  // Preserve the original directory spelling. OpenCode session lookups on
+  // Windows have regressed when Varro rewrote drive casing or path separators.
+  // We only trim trailing separators so equivalent user input stays stable
+  // without changing the underlying path identity.
+  const normalized = trimmed.replace(/[\\/]+$/, '');
+  return normalized || trimmed;
 }
 
 export interface RestProxyCallbacks {

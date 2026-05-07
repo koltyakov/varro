@@ -45,6 +45,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function stubPlatform(platform: NodeJS.Platform) {
+  Object.defineProperty(process, 'platform', {
+    value: platform,
+    configurable: true,
+  });
+}
+
 describe('OpenCodeTransport reconnect delay', () => {
   it('keeps lower-bound jitter after reaching the max reconnect delay', () => {
     const transport = createTransport() as unknown as {
@@ -90,7 +97,8 @@ describe('OpenCodeTransport reconnect delay', () => {
 });
 
 describe('OpenCodeTransport request scoping', () => {
-  it('scopes session list but not destructive session-id requests to a workspace directory', async () => {
+  it('keeps session reads scoped on non-Windows platforms', async () => {
+    stubPlatform('darwin');
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -125,7 +133,86 @@ describe('OpenCodeTransport request scoping', () => {
     expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(2, undefined);
   });
 
-  it('scopes session metadata and message fetches to the current workspace directory', async () => {
+  it('keeps session reads unscoped on Windows while still scoping writes', async () => {
+    stubPlatform('win32');
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.request('GET', '/session');
+    await transport.request('POST', '/session', {});
+    await transport.request('GET', '/session/session-1/message');
+    await transport.request('POST', '/session/session-1/prompt_async', { parts: [] });
+
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:4096',
+      '/session',
+      undefined
+    );
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:4096',
+      '/session',
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      3,
+      'http://localhost:4096',
+      '/session/session-1/message',
+      undefined
+    );
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      4,
+      'http://localhost:4096',
+      '/session/session-1/prompt_async',
+      'C:\\Users\\Andrew\\Projects\\Varro'
+    );
+  });
+
+  it('does not scope session metadata and message fetches on Windows', async () => {
+    stubPlatform('win32');
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.request('GET', '/session/session-1');
+    await transport.request('GET', '/session/session-1/message');
+
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:4096',
+      '/session/session-1',
+      undefined
+    );
+    expect(scopeOpenCodeRequest).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:4096',
+      '/session/session-1/message',
+      undefined
+    );
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(1, undefined);
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenNthCalledWith(2, undefined);
+  });
+
+  it('keeps session metadata and message fetches scoped on non-Windows platforms', async () => {
+    stubPlatform('darwin');
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -164,6 +251,7 @@ describe('OpenCodeTransport request scoping', () => {
   });
 
   it('scopes prompt_async session sends to the current workspace directory', async () => {
+    stubPlatform('win32');
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -189,6 +277,7 @@ describe('OpenCodeTransport request scoping', () => {
   });
 
   it('still scopes session creation to the current workspace directory', async () => {
+    stubPlatform('win32');
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 

@@ -1,23 +1,27 @@
 import {
   desktopSessionPaneSide,
   state,
+  setState,
   showSessionPicker,
   setPersistentShowSessionPicker as setShowSessionPicker,
   showSettings,
+  setShowSettings,
   openAttentionSessionsKey,
   isSessionAwaitingInput,
   getSessionTreeRootId,
+  persistActiveSessionId,
+  clearMessages,
+  stopLoading,
+  setError,
+  setShowModelPicker,
+  setIsLoading,
 } from '../lib/state';
-import { createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
-import {
-  selectSession,
-  createSession,
-  deleteSession,
-  deleteSessionImmediately,
-} from '../hooks/useOpenCode';
+import { batch, createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
+import { selectSession, createSession, deleteSessionImmediately } from '../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { ChatWorkspace } from './chat/ChatWorkspace';
 import { ralphStore } from '../lib/stores/ralph-store';
+import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import {
   isEmptySession as isEmptySessionMetadata,
   shouldPruneEmptySession,
@@ -181,13 +185,15 @@ export function Chat() {
     pendingEmptySessionDeleteTimers.clear();
   });
 
-  const shouldDiscardActiveBlankSession = () => {
+  const getDiscardableActiveBlankSessionId = () => {
     const sessionId = state.activeSessionId;
     if (!sessionId || state.messages.length > 0) return false;
+    const session = sessionsById().get(sessionId);
+    if (!session || !isEmptySessionMetadata(session)) return false;
     if (state.queuedMessages.some((item) => item.sessionId === sessionId)) return false;
     if (isSessionAwaitingInput(sessionId)) return false;
     const statusType = state.sessionStatus[sessionId]?.type;
-    return statusType !== 'busy' && statusType !== 'retry';
+    return statusType !== 'busy' && statusType !== 'retry' ? sessionId : false;
   };
 
   const activeTitle = () => {
@@ -296,9 +302,10 @@ export function Chat() {
       await selectSession(ralphParentId);
       return;
     }
-    if (sessionId && shouldDiscardActiveBlankSession()) {
+    const discardableActiveBlankSessionId = getDiscardableActiveBlankSessionId();
+    if (sessionId && discardableActiveBlankSessionId) {
       setShowSessionPicker(true);
-      await deleteSession(sessionId);
+      await deleteEmptySession(discardableActiveBlankSessionId);
       return;
     }
     setShowSessionPicker(true);
@@ -357,16 +364,55 @@ export function Chat() {
     setSessionFilter(null);
     setSubagentParentId(null);
   };
+
+  const activateExistingBlankSession = () => {
+    batch(() => {
+      resetToolCallExpansionState();
+      clearMessages();
+      setError(null);
+      setShowSettings(false);
+      setShowModelPicker(false);
+      setShowSessionPicker(false);
+      stopLoading();
+    });
+  };
+
   const createSessionFromPicker = async () => {
     if (isCreatingSessionFromPicker()) return;
 
     setIsCreatingSessionFromPicker(true);
     try {
+      const discardableActiveBlankSessionId = getDiscardableActiveBlankSessionId();
+      if (discardableActiveBlankSessionId) {
+        activateExistingBlankSession();
+        return;
+      }
+
+      batch(() => {
+        resetToolCallExpansionState();
+        clearMessages();
+        setState('activeSessionId', null);
+        persistActiveSessionId(null);
+        setError(null);
+        setShowSettings(false);
+        setShowModelPicker(false);
+        setIsLoading(true);
+        setShowSessionPicker(false);
+      });
+
       const createdId = await createSession();
-      if (createdId) setShowSessionPicker(false);
+      if (!createdId) stopLoading();
     } finally {
       setIsCreatingSessionFromPicker(false);
     }
+  };
+  const createSessionFromChat = async () => {
+    const discardableActiveBlankSessionId = getDiscardableActiveBlankSessionId();
+    if (discardableActiveBlankSessionId) {
+      activateExistingBlankSession();
+      return;
+    }
+    await createSession();
   };
   const activeSubagentParent = createMemo(() => {
     const parentId = subagentParentId();
@@ -437,7 +483,7 @@ export function Chat() {
         void createSessionFromPicker();
       }}
       onCreateSession={() => {
-        void createSession();
+        void createSessionFromChat();
       }}
     />
   );

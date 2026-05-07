@@ -33,11 +33,13 @@ import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-li
 const {
   abortSessionMock,
   continueInterruptedSessionMock,
+  undoSessionMock,
   runSlashCommandByNameMock,
   sendMessageMock,
 } = vi.hoisted(() => ({
   abortSessionMock: vi.fn(async () => {}),
   continueInterruptedSessionMock: vi.fn(async () => {}),
+  undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
   sendMessageMock: vi.fn(async () => {}),
 }));
@@ -48,6 +50,7 @@ vi.mock('../hooks/useOpenCode', async () => {
     ...actual,
     abortSession: abortSessionMock,
     continueInterruptedSession: continueInterruptedSessionMock,
+    undoSession: undoSessionMock,
     runSlashCommandByName: runSlashCommandByNameMock,
     sendMessage: sendMessageMock,
   };
@@ -102,6 +105,7 @@ afterEach(() => {
   runSlashCommandByNameMock.mockResolvedValue(true);
   abortSessionMock.mockReset();
   continueInterruptedSessionMock.mockReset();
+  undoSessionMock.mockReset();
 });
 
 function setupModelState() {
@@ -805,6 +809,84 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('runs the built-in undo slash command on Enter', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('messages', [
+      {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 0 },
+          parentID: 'user-1',
+          modelID: 'gpt-4o',
+          providerID: 'openai',
+          mode: 'default',
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: {
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+        },
+        parts: [],
+      },
+    ]);
+    setInputText('/undo');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(undoSessionMock).toHaveBeenCalledTimes(1);
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('runs the built-in undo slash command from the send button', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('messages', [
+      {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 0 },
+          parentID: 'user-1',
+          modelID: 'gpt-4o',
+          providerID: 'openai',
+          mode: 'default',
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: {
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+        },
+        parts: [],
+      },
+    ]);
+    setInputText('/undo');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(undoSessionMock).toHaveBeenCalledTimes(1);
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
   });

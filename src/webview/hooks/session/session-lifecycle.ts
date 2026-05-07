@@ -118,10 +118,16 @@ export function isSessionInWorkspace(
   if (!normalizedWorkspace) return true;
   const normalizedSessionDirectory = normalizeProjectPath(session.directory);
   if (!normalizedSessionDirectory) return false;
+  const comparableWorkspace = normalizeProjectPathForComparison(normalizedWorkspace);
+  const comparableSessionDirectory = normalizeProjectPathForComparison(normalizedSessionDirectory);
   return (
     isSamePath(normalizedSessionDirectory, normalizedWorkspace) ||
-    normalizedSessionDirectory.startsWith(`${normalizedWorkspace}/`)
+    comparableSessionDirectory.startsWith(`${comparableWorkspace}/`)
   );
+}
+
+function normalizeProjectPathForComparison(path: string): string {
+  return /^[A-Za-z]:\//.test(path) ? path.toLowerCase() : path;
 }
 
 export function sortSessions(sessions: Session[]) {

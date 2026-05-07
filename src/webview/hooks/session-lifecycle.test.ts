@@ -185,6 +185,20 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 
+  it('keeps nested Windows sessions when workspace casing differs', () => {
+    const setup = createDeps({
+      sessions: [
+        session('session-1', 'C:\\Users\\Andrew\\Projects\\Varro\\packages\\cli', 2),
+        session('session-2', 'D:\\Other', 1),
+      ],
+      workspace: 'c:/users/andrew/projects/varro',
+    });
+
+    applySessions(setup.deps, setup.current.sessions);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+  });
+
   it('keeps sessions whose directory is nested under the active workspace', () => {
     const setup = createDeps({
       sessions: [

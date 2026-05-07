@@ -83,15 +83,34 @@ export class OpenCodeTransport {
   }
 
   private getWorkspaceDirectoryForRequest(method: string, path: string) {
+    const normalizedMethod = method.toUpperCase();
     const pathname = new URL(path, 'http://localhost').pathname;
-    if (pathname === '/session') {
+    const useUnscopedSessionReads = process.platform === 'win32';
+    // Keep workspace scoping only on writes that create or continue work in the
+    // current workspace. Session reads are intentionally unscoped: the webview
+    // already filters them by workspace, and re-adding backend scoping has
+    // repeatedly regressed Windows reload/delete flows when directory strings
+    // differ in separators, casing, or other formatting. Keep this Windows-only
+    // so macOS/Linux retain their narrower backend scoping.
+    if (normalizedMethod === 'POST' && pathname === '/session') {
       return this.options.getWorkspaceCwd();
     }
-    if (method.toUpperCase() === 'POST' && /^\/session\/[^/]+\/prompt_async$/.test(pathname)) {
+    if (normalizedMethod === 'POST' && /^\/session\/[^/]+\/prompt_async$/.test(pathname)) {
       return this.options.getWorkspaceCwd();
     }
     if (
-      method.toUpperCase() === 'GET' &&
+      useUnscopedSessionReads &&
+      (pathname === '/session' ||
+        pathname === '/session/status' ||
+        pathname.startsWith('/session/'))
+    ) {
+      return undefined;
+    }
+    if (pathname === '/session') {
+      return this.options.getWorkspaceCwd();
+    }
+    if (
+      normalizedMethod === 'GET' &&
       (/^\/session\/[^/]+$/.test(pathname) || /^\/session\/[^/]+\/message$/.test(pathname))
     ) {
       return this.options.getWorkspaceCwd();
