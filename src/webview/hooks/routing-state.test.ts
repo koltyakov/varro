@@ -178,6 +178,38 @@ describe('routing-state helpers', () => {
     ).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
   });
 
+  it('prefers the active Ralph model when present', () => {
+    const providers = [
+      provider('openai', {
+        'gpt-5': {
+          id: 'gpt-5',
+          name: 'GPT-5',
+          capabilities: { toolcall: true, vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+      provider('anthropic', {
+        claude: {
+          id: 'claude',
+          name: 'Claude',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(
+      getActiveProviderSelection({
+        activeSessionId: 'ralph-manager-1',
+        selectedModel: { providerID: 'anthropic', modelID: 'claude' },
+        providers,
+        providerDefaults: { openai: 'gpt-5', anthropic: 'claude' },
+        getActiveRalphModel: (sessionId) =>
+          sessionId === 'ralph-manager-1' ? { providerID: 'openai', modelID: 'gpt-5' } : null,
+      })
+    ).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
+  });
+
   it('derives the latest selected model and agent from messages', () => {
     const messages = [
       {

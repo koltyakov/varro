@@ -1,3 +1,4 @@
+import { createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type { RalphIteration, RalphRun } from '../../../shared/ralph';
@@ -335,6 +336,57 @@ describe('RalphDashboard', () => {
     expect(limits?.getAttribute('title')).toContain('5-hour: 0 / 100 left');
     expect(limits?.getAttribute('title')).toContain('Weekly: 12 / 100 left');
     expect(limits?.getAttribute('title')).toContain('Monthly: 40 / 100 left');
+  });
+
+  it('reacts to live provider-limit updates without remounting', async () => {
+    currentRun = run({
+      status: 'running',
+      config: {
+        model: { providerID: 'openai', modelID: 'gpt-5', variant: 'low' },
+      },
+    });
+    const [liveLimit, setLiveLimit] = createSignal<ProviderLimitStatus | null>(
+      providerLimit({
+        windows: [
+          {
+            id: 'daily',
+            label: 'Daily',
+            unit: 'requests',
+            remaining: 8,
+            limit: 100,
+            resetAt: Date.now() + 60_000,
+            percent: 92,
+          },
+        ],
+      })
+    );
+    getProviderLimitMock.mockImplementation(() => liveLimit());
+
+    renderDashboard();
+    expect(container?.querySelector('.ralph-dashboard-provider-limits')?.textContent).toContain(
+      'Limits: D 8%'
+    );
+
+    setLiveLimit(
+      providerLimit({
+        windows: [
+          {
+            id: 'daily',
+            label: 'Daily',
+            unit: 'requests',
+            remaining: 37,
+            limit: 100,
+            resetAt: Date.now() + 60_000,
+            percent: 63,
+          },
+        ],
+      })
+    );
+    await Promise.resolve();
+
+    expect(container?.querySelector('.ralph-dashboard-provider-limits')?.textContent).toContain(
+      'Limits: D 37%'
+    );
   });
 
   it('shows the incomplete continue branch', () => {

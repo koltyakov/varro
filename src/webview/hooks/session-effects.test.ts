@@ -107,6 +107,47 @@ describe('session effect helpers', () => {
     }
   });
 
+  it('refreshes provider limits for the active Ralph model when it differs from the composer model', async () => {
+    vi.useFakeTimers();
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+
+    const loadProviderLimit = vi.fn(async () => null);
+    const setProviderLimit = vi.fn();
+
+    const dispose = createRoot((cleanup) => {
+      registerProviderLimitRefreshEffect({
+        getServerState: () => 'running',
+        areProvidersLoaded: () => true,
+        isDocumentVisible: () => true,
+        getActiveProviderSelection: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
+        getProviderLimit: () => null,
+        loadProviderLimit,
+        setProviderLimit,
+        getPollIntervalMs: () => 120_000,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(loadProviderLimit).toHaveBeenCalledWith('openai', 'gpt-5');
+      expect(setProviderLimit).toHaveBeenCalledWith('openai', 'gpt-5', null);
+    } finally {
+      dispose();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: originalVisibility,
+      });
+      vi.useRealTimers();
+    }
+  });
+
   it('uses the configured provider-limit refresh interval', async () => {
     vi.useFakeTimers();
     const originalVisibility = document.visibilityState;

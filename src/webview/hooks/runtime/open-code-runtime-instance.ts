@@ -6,6 +6,7 @@ import type { QueuedMessage } from '../../lib/app-state-types';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
+import { ralphStore } from '../../lib/stores/ralph-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
@@ -299,9 +300,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   function getActiveProviderSelection() {
     return getActiveProviderSelectionForState({
+      activeSessionId: appStore.state.activeSessionId,
       selectedModel: appStore.state.selectedModel,
       providers: appStore.state.providers,
       providerDefaults: appStore.state.providerDefaults,
+      getActiveRalphModel: (sessionId) => {
+        const managerSessionId = ralphStore.isRalphSession(sessionId)
+          ? sessionId
+          : ralphStore.findManagerSessionIdForChild(sessionId);
+        const model = managerSessionId ? ralphStore.getRun(managerSessionId)?.config.model : null;
+        if (!model?.providerID) return null;
+        return { providerID: model.providerID, modelID: model.modelID };
+      },
     });
   }
 

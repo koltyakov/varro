@@ -139,10 +139,19 @@ export function reconcileLoadedProviders(args: {
 }
 
 export function getActiveProviderSelection(args: {
+  activeSessionId?: string | null;
   selectedModel: SelectedModel | null;
   providers: Provider[];
   providerDefaults: Record<string, string>;
+  getActiveRalphModel?: (
+    sessionId: string | null
+  ) => { providerID: string; modelID?: string | null } | null;
 }) {
+  const ralphModel = args.getActiveRalphModel?.(args.activeSessionId ?? null);
+  if (ralphModel?.providerID) {
+    return { providerID: ralphModel.providerID, modelID: ralphModel.modelID };
+  }
+
   const selected = resolveSelectedModel(args.selectedModel, args.providers, args.providerDefaults);
   if (selected) {
     return { providerID: selected.providerID, modelID: selected.modelID };
