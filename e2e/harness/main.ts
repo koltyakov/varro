@@ -1109,6 +1109,15 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       [planReady.id]: [],
       [completed.id]: [],
     };
+    state.postReadyMessages.push({
+      __message: {
+        type: 'server/event',
+        payload: {
+          type: 'message.updated',
+          properties: { info: failedAssistant.info },
+        },
+      },
+    });
     state.pendingPermissions = [
       {
         id: 'permission-status-filter',

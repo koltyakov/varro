@@ -160,6 +160,13 @@ function maybeSuggestCliUpdate(server: OpenCodeServer, installedCliVersion: stri
   ).maybeSuggestCliUpdate(installedCliVersion);
 }
 
+function stubPlatform(platform: NodeJS.Platform) {
+  Object.defineProperty(process, 'platform', {
+    value: platform,
+    configurable: true,
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
@@ -747,6 +754,79 @@ describe('OpenCodeServer maintenance', () => {
       cwd: undefined,
     });
     expect(terminal.show).toHaveBeenCalledWith(false);
+    expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+  });
+
+  it('uses opencode upgrade on Windows when suggesting and running a CLI upgrade', async () => {
+    stubPlatform('win32');
+
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const terminal = {
+      show: vi.fn(),
+      sendText: vi.fn(),
+    };
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+
+    api.readLatestCliVersion = readLatestCliVersion;
+    vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
+    vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
+
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      'OpenCode CLI 1.14.22 is available (installed: 1.14.20). Update with: opencode upgrade',
+      'Run Upgrade'
+    );
+    expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+  });
+
+  it('stops the managed process before running a Windows CLI upgrade', async () => {
+    stubPlatform('win32');
+
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const terminal = {
+      show: vi.fn(),
+      sendText: vi.fn(),
+    };
+    const kill = vi.fn();
+    const statuses: ServerStatus[] = [];
+    server.on('status', (status) => statuses.push(status));
+
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+      process: {
+        kill: typeof kill;
+        exitCode: number | null;
+        signalCode: NodeJS.Signals | null;
+        once: (event: string, listener: () => void) => void;
+        off: (event: string, listener: () => void) => void;
+      } | null;
+      managedProcess: boolean;
+    };
+
+    api.readLatestCliVersion = readLatestCliVersion;
+    api.process = {
+      kill,
+      exitCode: 0,
+      signalCode: null,
+      once: vi.fn(),
+      off: vi.fn(),
+    };
+    api.managedProcess = true;
+    setRunning(server);
+    vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
+    vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(statuses).toContainEqual({ state: 'stopped' });
     expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
   });
 });

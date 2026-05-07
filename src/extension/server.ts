@@ -519,7 +519,16 @@ export class OpenCodeServer extends EventEmitter {
     await this.processManager.maybeSuggestCliUpdate(installedCliVersion, {
       readLatestCliVersion: () => this.readLatestCliVersion(),
       getWorkspaceCwd: () => this.getWorkspaceCwd(),
+      prepareForWindowsCliUpgrade: () => this.prepareForWindowsCliUpgrade(),
     });
+  }
+
+  private async prepareForWindowsCliUpgrade() {
+    if (process.platform !== 'win32') return;
+    if (!this.process || !this.managedProcess) return;
+
+    await this.stopManagedProcessForRestart();
+    this.setStatus({ state: 'stopped' });
   }
 
   private async readInstalledCliVersion(): Promise<string | null> {

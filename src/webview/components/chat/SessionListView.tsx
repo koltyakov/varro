@@ -363,13 +363,7 @@ export function SessionListView(props: {
 
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const visibleSessionsForList = createMemo(() => {
-    const isPickerView = !props.embedded || !!props.sessionFilter || !!props.subagentParentId;
-
     return state.sessions.filter((session) => {
-      if (isPickerView && session.id === state.activeSessionId) {
-        return false;
-      }
-
       return !shouldPruneEmptySession(session, {
         activeSessionId: null,
         isQueued: (sessionId) => state.queuedMessages.some((item) => item.sessionId === sessionId),

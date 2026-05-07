@@ -1269,7 +1269,7 @@ describe('header status badges', () => {
     expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
   });
 
-  it('omits the active session from the sessions picker after returning from chat', async () => {
+  it('keeps the active session in the sessions picker after returning from chat', async () => {
     const now = Date.now();
     setState('sessions', [
       session('active-completed', now - 1_000),
@@ -1294,11 +1294,11 @@ describe('header status badges', () => {
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
-    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map((item) =>
-      item.textContent?.trim()
+    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
     );
 
-    expect(titles).toEqual(['plan-ready', 'other']);
+    expect(titles).toEqual(['active-completed', 'plan-ready', 'other']);
   });
 
   it('keeps opening the filtered session list when multiple sibling sessions match', async () => {

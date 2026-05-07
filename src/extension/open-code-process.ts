@@ -53,6 +53,7 @@ interface MaintenanceCallbacks {
 interface MaybeSuggestCliUpdateCallbacks {
   readLatestCliVersion: () => Promise<string | null>;
   getWorkspaceCwd: () => string | undefined;
+  prepareForWindowsCliUpgrade: () => Promise<void>;
 }
 
 interface RestartCallbacks {
@@ -526,13 +527,17 @@ export class OpenCodeProcess {
     }
     this.lastSuggestedCliVersion = latestCliVersion;
 
-    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${OpenCodeProcess.CLI_UPGRADE_COMMAND}`;
+    const upgradeCommand = OpenCodeProcess.CLI_UPGRADE_COMMAND;
+    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${upgradeCommand}`;
     logger.info(message);
     void vscode.window
       .showInformationMessage(message, OpenCodeProcess.CLI_UPGRADE_ACTION)
-      .then((action) => {
+      .then(async (action) => {
         if (action === OpenCodeProcess.CLI_UPGRADE_ACTION) {
-          this.runInTerminal(OpenCodeProcess.CLI_UPGRADE_COMMAND, 'OpenCode Upgrade', callbacks);
+          if (process.platform === 'win32') {
+            await callbacks.prepareForWindowsCliUpgrade();
+          }
+          this.runInTerminal(upgradeCommand, 'OpenCode Upgrade', callbacks);
         }
       });
   }
