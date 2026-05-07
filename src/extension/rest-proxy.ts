@@ -84,7 +84,7 @@ function normalizeOpenCodeDirectory(directory: string | undefined) {
 
 export interface RestProxyCallbacks {
   server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
-  contextProvider: Pick<ContextProvider, 'context' | 'readFile'>;
+  contextProvider: Pick<ContextProvider, 'context' | 'readFile' | 'resolvePath'>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
   sessionState: Pick<SessionStateManager, 'removeSessions'>;
   sessionTrash: Pick<
@@ -157,6 +157,13 @@ export class RestProxy {
       const workspaceFileRequest = this.parseWorkspaceFileRequest(method, payload.path);
       if (workspaceFileRequest) {
         const data = await this.callbacks.contextProvider.readFile(workspaceFileRequest.path);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const workspaceResolveRequest = this.parseWorkspaceResolveRequest(method, payload.path);
+      if (workspaceResolveRequest) {
+        const data = await this.callbacks.contextProvider.resolvePath(workspaceResolveRequest.path);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -452,6 +459,20 @@ export class RestProxy {
 
   private isWorkspaceFilePickRequest(method: string, path: string) {
     return method === 'GET' && path === '/varro/workspace-file/pick';
+  }
+
+  private parseWorkspaceResolveRequest(method: string, path: string) {
+    if (method !== 'GET') return null;
+
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== '/varro/workspace-path/resolve') return null;
+
+    const filePath = url.searchParams.get('path')?.trim();
+    if (!filePath) {
+      throw new Error('Workspace path is required');
+    }
+
+    return { path: filePath };
   }
 
   private async pickWorkspaceFile(): Promise<string | null> {

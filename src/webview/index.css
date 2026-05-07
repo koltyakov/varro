@@ -4871,7 +4871,7 @@ kbd {
 }
 
 .user-message-text > .inline-chip {
-  vertical-align: baseline;
+  vertical-align: -1px;
   margin: 0 1px;
   gap: 4px;
   padding: 1px 5px;

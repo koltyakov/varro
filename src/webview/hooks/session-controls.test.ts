@@ -74,6 +74,7 @@ describe('session-controls helpers', () => {
 
     await abortSessionWithDependencies({
       getActiveSessionId: () => 'session-1',
+      getSessionTreeRootId: () => null,
       getSessionTreeIds: () => ['session-1', 'child-1'],
       getSelectedAgentForSession: () => 'plan',
       skipPlanSession: vi.fn(),
@@ -200,6 +201,7 @@ describe('session-controls helpers', () => {
     const operations = new SessionControlOperations({
       getActiveSessionId: () => 'session-1',
       sendMessage: vi.fn(async () => {}),
+      getSessionTreeRootId: () => null,
       getSessionTreeIds: () => ['session-1'],
       getSelectedAgentForSession: () => 'build',
       skipPlanSession: vi.fn(),
@@ -234,5 +236,34 @@ describe('session-controls helpers', () => {
     await operations.compactSession();
 
     expect(true).toBe(true);
+  });
+
+  it('aborts the root session tree when a subagent session is active', async () => {
+    const abortRemoteSession = vi.fn(async () => true);
+    const skipPlanSession = vi.fn();
+
+    await abortSessionWithDependencies({
+      getActiveSessionId: () => 'child-1',
+      getSessionTreeRootId: (sessionId) => (sessionId === 'child-1' ? 'session-1' : null),
+      getSessionTreeIds: (sessionId) =>
+        sessionId === 'session-1' ? ['session-1', 'child-1', 'child-2'] : [sessionId],
+      getSelectedAgentForSession: () => 'build',
+      skipPlanSession,
+      getSessionStatus: () => ({ type: 'busy' }),
+      getSessionUsageLimit: () => null,
+      markPendingAbortTree: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      stopLoading: vi.fn(),
+      abortRemoteSession,
+      clearPendingAbortTree: vi.fn(),
+      setSessionUsageLimit: vi.fn(),
+      logError: vi.fn(),
+    });
+
+    expect(skipPlanSession).not.toHaveBeenCalled();
+    expect(abortRemoteSession).toHaveBeenCalledTimes(3);
+    expect(abortRemoteSession).toHaveBeenNthCalledWith(1, 'session-1');
+    expect(abortRemoteSession).toHaveBeenNthCalledWith(2, 'child-1');
+    expect(abortRemoteSession).toHaveBeenNthCalledWith(3, 'child-2');
   });
 });

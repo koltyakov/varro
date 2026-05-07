@@ -144,6 +144,7 @@ function createDefaultDeps(
     removeDeletedSessionTree: vi.fn(),
     shouldIgnorePendingAbortStatus: () => false,
     hasPendingAbort: () => false,
+    markPendingAbort: vi.fn(),
     clearPendingAbort: vi.fn(),
     setSessionStatusEntry: vi.fn(),
     clearUsageLimitOnResumedProgress: vi.fn(),
@@ -156,6 +157,8 @@ function createDefaultDeps(
     shouldAutoApprovePermissions: () => false,
     respondPermission: vi.fn().mockResolvedValue(undefined),
     setDiffs: vi.fn(),
+    abortRemoteSession: vi.fn().mockResolvedValue(true),
+    logError: vi.fn(),
     ...overrides,
   };
 }
@@ -1078,6 +1081,45 @@ describe('registerSessionEventHandlers', () => {
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(updateUsageLimitState).not.toHaveBeenCalled();
     expect(startLoading).not.toHaveBeenCalled();
+  });
+
+  it('aborts late-created child sessions when their parent is already stopping', async () => {
+    const handlers = installHandlers();
+    const upsertSession = vi.fn();
+    const markPendingAbort = vi.fn();
+    const setSessionStatusEntry = vi.fn();
+    const abortRemoteSession = vi.fn(async () => true);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        upsertSession,
+        hasPendingAbort: (sessionId) => sessionId === 'session-1',
+        markPendingAbort,
+        setSessionStatusEntry,
+        abortRemoteSession,
+      })
+    );
+
+    handlers.get('session.created')?.({
+      properties: {
+        info: {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          parentID: 'session-1',
+          title: 'Child',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        },
+      },
+    });
+
+    expect(upsertSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'child-1', parentID: 'session-1' })
+    );
+    expect(markPendingAbort).toHaveBeenCalledWith('child-1');
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('child-1', { type: 'idle' });
+    expect(abortRemoteSession).toHaveBeenCalledWith('child-1');
   });
 
   it('clears session usage-limit state for non-limit errors and resumed assistant progress', () => {

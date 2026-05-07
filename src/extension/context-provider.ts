@@ -295,6 +295,26 @@ export class ContextProvider implements vscode.Disposable {
     }
   }
 
+  async resolvePath(
+    path: string
+  ): Promise<{ path: string; relativePath: string; type: 'file' | 'directory' } | null> {
+    try {
+      const resolved = await this.resolveWorkspaceUri(path);
+      const uri = resolved?.uri;
+      if (!uri) return null;
+
+      const stat = await vscode.workspace.fs.stat(uri);
+      return {
+        path: uri.fsPath,
+        relativePath: getRelativePath(uri, resolved?.workspaceFolder),
+        type: stat.type & vscode.FileType.Directory ? 'directory' : 'file',
+      };
+    } catch (err) {
+      logger.error(`Failed to resolve file path ${path}:`, err);
+      return null;
+    }
+  }
+
   async openPath(path: string, options?: { line?: number; kind?: 'auto' | 'file' | 'directory' }) {
     try {
       const resolved = await this.resolveWorkspaceUri(path);

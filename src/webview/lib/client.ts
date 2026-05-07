@@ -186,6 +186,14 @@ export const client = {
       const params = new URLSearchParams({ path });
       return apiCall('GET', `/varro/workspace-file?${params.toString()}`);
     },
+    async resolveWorkspacePath(path: string): Promise<{
+      path: string;
+      relativePath: string;
+      type: 'file' | 'directory';
+    } | null> {
+      const params = new URLSearchParams({ path });
+      return apiCall('GET', `/varro/workspace-path/resolve?${params.toString()}`);
+    },
     async openCodeConfig(): Promise<OpenCodeModelRouting> {
       return apiCall('GET', '/varro/opencode-config');
     },

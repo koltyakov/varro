@@ -200,6 +200,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       sessionStatusOperations,
       sessionSyncOperations,
       sessionApprovalOperations,
+      abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
+      logError,
     });
 
     eventHandlerCleanups = sessionEventHandlerOperations.registerSessionEventHandlers();
@@ -529,6 +531,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const sessionControlOperations = new SessionControlOperations({
     getActiveSessionId: () => appStore.state.activeSessionId,
     sendMessage,
+    getSessionTreeRootId: sessionStore.getSessionTreeRootId,
     getSessionTreeIds: sessionStore.getSessionTreeIds,
     getSelectedAgentForSession: routingStore.getSelectedAgentForSession,
     skipPlanSession: sessionStore.skipPlanSession,

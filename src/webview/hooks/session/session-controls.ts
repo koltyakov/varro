@@ -15,6 +15,7 @@ export async function reviewSessionWithDependencies(
 
 export async function abortSessionWithDependencies(deps: {
   getActiveSessionId(): string | null;
+  getSessionTreeRootId(sessionId: string): string | null;
   getSessionTreeIds(sessionId: string): string[];
   getSelectedAgentForSession(sessionId: string): string | null;
   skipPlanSession(sessionId: string): void;
@@ -31,9 +32,10 @@ export async function abortSessionWithDependencies(deps: {
   const sessionId = deps.getActiveSessionId();
   if (!sessionId) return;
 
-  const sessionTreeIds = deps.getSessionTreeIds(sessionId);
-  if (deps.getSelectedAgentForSession(sessionId) === 'plan') {
-    deps.skipPlanSession(sessionId);
+  const rootSessionId = deps.getSessionTreeRootId(sessionId) || sessionId;
+  const sessionTreeIds = deps.getSessionTreeIds(rootSessionId);
+  if (deps.getSelectedAgentForSession(rootSessionId) === 'plan') {
+    deps.skipPlanSession(rootSessionId);
   }
 
   const previousStatuses = new Map(
@@ -167,6 +169,7 @@ export async function compactSessionWithDependencies(deps: {
 type SessionControlDependencies = {
   getActiveSessionId(): string | null;
   sendMessage(prompt: string): Promise<void>;
+  getSessionTreeRootId(sessionId: string): string | null;
   getSessionTreeIds(sessionId: string): string[];
   getSelectedAgentForSession(sessionId: string): string | null;
   skipPlanSession(sessionId: string): void;
@@ -210,6 +213,7 @@ export class SessionControlOperations {
   readonly abortSession = async () => {
     await abortSessionWithDependencies({
       getActiveSessionId: this.deps.getActiveSessionId,
+      getSessionTreeRootId: this.deps.getSessionTreeRootId,
       getSessionTreeIds: this.deps.getSessionTreeIds,
       getSelectedAgentForSession: this.deps.getSelectedAgentForSession,
       skipPlanSession: this.deps.skipPlanSession,

@@ -28,6 +28,7 @@ import {
   setState,
   setInputText,
 } from '../lib/state';
+import { client } from '../lib/client';
 import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-limit-selection';
 
 const {
@@ -58,6 +59,25 @@ vi.mock('../hooks/useOpenCode', async () => {
     sendMessage: sendMessageMock,
   };
 });
+
+vi.mock('../lib/client', () => ({
+  client: {
+    varro: {
+      resolveWorkspacePath: vi.fn(async (path: string) => {
+        if (path === 'README.md') {
+          return { path: '/repo/README.md', relativePath: 'README.md', type: 'file' as const };
+        }
+        if (path === 'src/app.ts') {
+          return { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' as const };
+        }
+        if (path === 'docs') {
+          return { path: '/repo/docs', relativePath: 'docs', type: 'directory' as const };
+        }
+        return null;
+      }),
+    },
+  },
+}));
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -110,6 +130,7 @@ afterEach(() => {
   continueInterruptedSessionMock.mockReset();
   redoSessionMock.mockReset();
   undoSessionMock.mockReset();
+  vi.mocked(client.varro.resolveWorkspacePath).mockClear();
 });
 
 function setupModelState() {
@@ -995,6 +1016,40 @@ describe('ChatInput', () => {
       },
     ]);
     expect(inputText()).toBe('Review @README.md and @docs/');
+    expect(client.varro.resolveWorkspacePath).toHaveBeenCalledWith('README.md');
+    expect(client.varro.resolveWorkspacePath).toHaveBeenCalledWith('docs');
+  });
+
+  it('keeps unresolved scoped package names as plain pasted text', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    expect(editor).not.toBeNull();
+
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? 'Use npx @scope/package init' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(state.droppedFiles).toEqual([]);
+    expect(inputText()).toBe('Use npx @scope/package init');
+    expect(client.varro.resolveWorkspacePath).toHaveBeenCalledWith('scope/package');
   });
 
   it('strips pasted context reference lines while restoring them as attachments', async () => {

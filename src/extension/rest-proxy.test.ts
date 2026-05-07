@@ -39,6 +39,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     contextProvider: {
       context: { workspacePath: '/repo', activeFile: null, selection: null, diagnostics: [] },
       readFile: vi.fn(() => Promise.resolve(null as string | null)),
+      resolvePath: vi.fn(() => Promise.resolve(null)),
     },
     providerLimitService: {
       get: vi.fn(() =>
@@ -295,6 +296,27 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(6, 'GET', '/varro/workspace-file?path=src/foo.ts'));
     expect(callbacks.contextProvider.readFile).toHaveBeenCalledWith('src/foo.ts');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 6, data: fileContent });
+  });
+
+  it('routes workspace path resolve request', async () => {
+    const resolved = {
+      path: '/repo/src/foo.ts',
+      relativePath: 'src/foo.ts',
+      type: 'file' as const,
+    };
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        resolvePath: vi.fn(() => Promise.resolve(resolved)),
+      } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(61, 'GET', '/varro/workspace-path/resolve?path=src/foo.ts')
+    );
+
+    expect(callbacks.contextProvider.resolvePath).toHaveBeenCalledWith('src/foo.ts');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 61, data: resolved });
   });
 
   it('returns error for workspace file request without path', async () => {
