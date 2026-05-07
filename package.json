@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.16.4",
+  "version": "0.16.5",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -84,7 +84,8 @@
           "icon": "assets/icon.png",
           "type": "webview",
           "id": "varro.chat",
-          "name": "Varro"
+          "name": "Varro",
+          "defaultViewLocation": "secondary"
         }
       ]
     },
