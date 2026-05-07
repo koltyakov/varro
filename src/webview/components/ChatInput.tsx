@@ -2478,27 +2478,33 @@ export function getSlashCommands(props: {
     });
   }
 
-  if (props.canUndo) {
-    commands.push({
-      name: 'undo',
-      aliases: ['revert'],
-      description: 'Undo the last assistant response',
-      action: () => {
-        undoSession();
-      },
-    });
-  }
-
-  if (props.canRedo) {
-    commands.push({
-      name: 'redo',
-      aliases: [],
-      description: 'Redo the last undone response',
-      action: () => {
-        redoSession();
-      },
-    });
-  }
+  /*
+   * Keep these registrations handy, but do not expose `/undo`, `/revert`, or
+   * `/redo` in slash-command completion for now. Direct submission still works
+   * through the built-in handling in `handleSubmit`.
+   *
+   * if (props.canUndo) {
+   *   commands.push({
+   *     name: 'undo',
+   *     aliases: ['revert'],
+   *     description: 'Undo the last assistant response',
+   *     action: () => {
+   *       undoSession();
+   *     },
+   *   });
+   * }
+   *
+   * if (props.canRedo) {
+   *   commands.push({
+   *     name: 'redo',
+   *     aliases: [],
+   *     description: 'Redo the last undone response',
+   *     action: () => {
+   *       redoSession();
+   *     },
+   *   });
+   * }
+   */
 
   commands.push({
     name: 'review',

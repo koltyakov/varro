@@ -7,7 +7,6 @@ test('undo slash command reverts the latest assistant response', async ({ page }
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
   await composer.fill('/undo');
-  await expect(page.getByText('Undo the last assistant response')).toBeVisible();
   await page.keyboard.press('Enter');
 
   const revertRequest = await getE2EState(page, () => {

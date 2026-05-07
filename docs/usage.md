@@ -87,15 +87,13 @@ Current built-in slash commands include:
 - `/thinking` or `/reasoning` toggles thinking block visibility
 - `/compact` or `/summarize` compacts conversation context
 - `/init` analyzes the workspace and creates or improves `AGENTS.md`
-- `/undo` or `/revert` undoes the last assistant response
-- `/redo` replays the last undone response
 - `/review` asks the agent to review current workspace changes
 - `/ralph` starts a Ralph loop from a plan or spec document
 - `/abort` or `/stop` stops the current run
 
 Custom OpenCode commands loaded from your local config also appear in the same completion list.
 
-Some commands only appear when they apply. For example, `/init` only appears in blank sessions, `/undo` only appears when there is an assistant response to revert, `/redo` only appears after an undo, and `/abort` only appears while a session is active.
+Some commands only appear when they apply. For example, `/init` only appears in blank sessions and `/abort` only appears while a session is active.
 
 ## Sessions
 

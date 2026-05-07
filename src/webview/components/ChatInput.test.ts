@@ -1709,20 +1709,19 @@ describe('getSlashCommands', () => {
       'models',
       'new',
       'ralph',
-      'redo',
       'review',
       'sessions',
       'settings',
       'skills',
       'test',
       'thinking',
-      'undo',
     ]);
     expect(commands.some((command) => command.name === 'init')).toBe(true);
     expect(commands.some((command) => command.name === 'export')).toBe(true);
-    expect(commands.some((command) => command.name === 'redo')).toBe(true);
+    expect(commands.some((command) => command.name === 'redo')).toBe(false);
     expect(commands.some((command) => command.name === 'skills')).toBe(true);
     expect(commands.some((command) => command.name === 'test')).toBe(true);
+    expect(commands.some((command) => command.name === 'undo')).toBe(false);
     expect(commands.filter((command) => command.name === 'settings')).toHaveLength(1);
   });
 
