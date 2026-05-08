@@ -311,6 +311,63 @@ describe('state helpers', () => {
     expect(window.localStorage.getItem('varro.draftPermissionMode')).toBeNull();
   });
 
+  it('inherits a parent session permission mode for child sessions', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Parent',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        parentID: 'session-1',
+        title: 'Child',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+    ]);
+
+    stateModule.setPermissionModeForSession('session-1', 'full');
+
+    expect(stateModule.getPermissionModeForSession('child-1')).toBe('full');
+  });
+
+  it('prefers an explicit child permission mode over the parent mode', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Parent',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        parentID: 'session-1',
+        title: 'Child',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+    ]);
+
+    stateModule.setPermissionModeForSession('session-1', 'full');
+    stateModule.setPermissionModeForSession('child-1', 'default');
+
+    expect(stateModule.getPermissionModeForSession('child-1')).toBe('default');
+  });
+
   it('tracks current document auto-context state by session in memory', async () => {
     const stateModule = await loadState();
 

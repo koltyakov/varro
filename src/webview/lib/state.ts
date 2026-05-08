@@ -962,7 +962,14 @@ export function requestMessageListScrollToBottom() {
 
 export function getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode {
   if (!sessionId) return draftPermissionMode();
-  return state.sessionPermissionModes[sessionId] || 'default';
+
+  const sessionMode = state.sessionPermissionModes[sessionId];
+  if (sessionMode) return sessionMode;
+
+  const parentId = state.sessions.find((session) => session.id === sessionId)?.parentID;
+  if (parentId) return getPermissionModeForSession(parentId);
+
+  return 'default';
 }
 
 export function getCurrentDocumentEnabled(
