@@ -59,16 +59,21 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
     },
     async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
       const statuslineStatus = await readAnthropicStatuslineStatus(provider.id, modelID, checkedAt);
-      if (statuslineStatus) return statuslineStatus;
 
       const localProxyBaseUrl = getAnthropicLocalProxyBaseUrl(provider);
       const localProxyStatus = localProxyBaseUrl
         ? await readAnthropicLocalProxyStatus(provider.id, modelID, checkedAt, localProxyBaseUrl)
         : null;
-      if (localProxyStatus?.status) return localProxyStatus.status;
+      const combinedStatus = mergeAnthropicStatuses(
+        statuslineStatus,
+        localProxyStatus ? localProxyStatus.status : null
+      );
+      if (combinedStatus && hasHiddenAnthropicWindows(combinedStatus)) return combinedStatus;
 
       const credentials = await resolveAnthropicCredentials(authStore);
       if (!credentials?.accessToken) {
+        if (combinedStatus) return combinedStatus;
+
         if (localProxyBaseUrl) {
           return {
             providerID: provider.id,
@@ -155,6 +160,8 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
         const payload = (await response.json()) as unknown;
         const windows = extractAnthropicWindows(payload, checkedAt);
         if (windows.length === 0) {
+          if (combinedStatus) return combinedStatus;
+
           return unsupportedProviderStatus(
             provider.id,
             modelID,
@@ -163,7 +170,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           );
         }
 
-        return {
+        const apiStatus: ProviderLimitStatus = {
           providerID: provider.id,
           modelID,
           status: 'available',
@@ -172,7 +179,11 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           windows,
           note,
         };
+
+        return mergeAnthropicStatuses(combinedStatus, apiStatus) ?? apiStatus;
       } catch {
+        if (combinedStatus) return combinedStatus;
+
         return {
           providerID: provider.id,
           modelID,
@@ -184,6 +195,48 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
       }
     },
   };
+}
+
+function mergeAnthropicStatuses(
+  primary: ProviderLimitStatus | null,
+  secondary: ProviderLimitStatus | null
+): ProviderLimitStatus | null {
+  if (!primary) return secondary;
+  if (!secondary) return primary;
+  if (primary.status !== 'available') return secondary;
+  if (secondary.status !== 'available') return primary;
+
+  const windows = mergeAnthropicWindows(primary.windows, secondary.windows);
+  const note = [primary.note, secondary.note].filter(Boolean).join(' + ') || undefined;
+  return {
+    ...primary,
+    checkedAt: Math.max(primary.checkedAt, secondary.checkedAt),
+    windows,
+    ...(note ? { note } : {}),
+  };
+}
+
+function mergeAnthropicWindows(
+  primary: ProviderLimitWindow[],
+  secondary: ProviderLimitWindow[]
+): ProviderLimitWindow[] {
+  const merged = new Map<string, ProviderLimitWindow>();
+  for (const window of secondary) {
+    merged.set(window.id, window);
+  }
+  for (const window of primary) {
+    merged.set(window.id, {
+      ...merged.get(window.id),
+      ...window,
+    });
+  }
+  return [...merged.values()];
+}
+
+function hasHiddenAnthropicWindows(status: ProviderLimitStatus | null) {
+  return (
+    status?.status === 'available' && status.windows.some((window) => window.id !== 'five_hour')
+  );
 }
 
 async function readAnthropicLocalProxyStatus(

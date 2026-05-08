@@ -7,8 +7,11 @@ type ProviderSelection = { providerID: string; modelID?: string | null };
 const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS = DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS * 1000;
 const ACTIVE_SESSION_PROVIDER_LIMIT_POLL_INTERVAL_MS = 30_000;
 
-function resolveProviderLimitPollIntervalMs(baseIntervalMs: number, hasActiveSessions: boolean) {
-  if (!hasActiveSessions || baseIntervalMs !== DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS) {
+function resolveProviderLimitPollIntervalMs(
+  baseIntervalMs: number,
+  isActiveSessionWorking: boolean
+) {
+  if (!isActiveSessionWorking || baseIntervalMs !== DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS) {
     return baseIntervalMs;
   }
 
@@ -47,7 +50,7 @@ export function registerProviderLimitRefreshEffect(deps: {
   getServerState(): string;
   areProvidersLoaded(): boolean;
   isDocumentVisible(): boolean;
-  hasActiveSessions(): boolean;
+  isActiveSessionWorking(): boolean;
   getActiveProviderSelection(): ProviderSelection | null;
   getProviderLimit(
     providerID: string,
@@ -81,7 +84,7 @@ export function registerProviderLimitRefreshEffect(deps: {
           modelID: active.modelID,
           pollIntervalMs: resolveProviderLimitPollIntervalMs(
             pollIntervalMs,
-            deps.hasActiveSessions()
+            deps.isActiveSessionWorking()
           ),
         };
       },

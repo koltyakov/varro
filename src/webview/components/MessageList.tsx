@@ -26,6 +26,7 @@ import {
   getSessionTreeRootId,
   getSessionTreeIds,
   messageStructureVersion,
+  messageInfoVersion,
   showStickyUserPrompt,
   showModelPicker,
 } from '../lib/state';
@@ -326,13 +327,12 @@ export function MessageList() {
     return session.time.created === session.time.updated;
   });
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
-
   const messages = createMemo(() => {
     messageStructureVersion();
     return untrack(() => state.messages);
   });
   const latestPlanImplementationMessageId = createMemo(() => {
-    messageStructureVersion();
+    messageInfoVersion();
     return untrack(() => getLatestPlanImplementationMessageId(state.messages));
   });
   const streamingPart = createMemo(() => {
@@ -346,7 +346,7 @@ export function MessageList() {
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
   const messageIndexById = createMemo(() => {
-    messageStructureVersion();
+    messageInfoVersion();
     return untrack(() => {
       const result = new Map<string, number>();
       for (const [index, entry] of state.messages.entries()) {
@@ -428,6 +428,18 @@ export function MessageList() {
 
   const measuredHeights = new Map<string, number>();
   let lastTrackHeight = 0;
+  let cachedVirtualMetrics: VirtualMetrics | null = null;
+  let cachedVirtualMetricsItemIds: string[] | null = null;
+  let dirtyVirtualMetricsFromIndex = Number.POSITIVE_INFINITY;
+
+  function markVirtualMetricsDirty(messageId: string) {
+    if (dirtyVirtualMetricsFromIndex === 0) return;
+    const index = messageIndexById().get(messageId);
+    if (typeof index !== 'number') return;
+    if (index < dirtyVirtualMetricsFromIndex) {
+      dirtyVirtualMetricsFromIndex = index;
+    }
+  }
 
   createEffect(() => {
     const enabled = autoScroll();
@@ -467,14 +479,28 @@ export function MessageList() {
 
   const virtualMetrics = createMemo(() => {
     if (!shouldVirtualize()) {
+      cachedVirtualMetrics = null;
+      cachedVirtualMetricsItemIds = null;
+      dirtyVirtualMetricsFromIndex = Number.POSITIVE_INFINITY;
       return { prefix: [0], totalHeight: 0, itemCount: 0 } satisfies VirtualMetrics;
     }
 
     measurementVersion();
-    return buildVirtualMetrics({
-      itemIds: messageIds(),
+    const ids = messageIds();
+    const previous =
+      cachedVirtualMetrics && cachedVirtualMetricsItemIds
+        ? { metrics: cachedVirtualMetrics, itemIds: cachedVirtualMetricsItemIds }
+        : undefined;
+    const result = buildVirtualMetrics({
+      itemIds: ids,
       measuredHeights,
+      previous,
+      dirtyFromIndex: previous ? Math.min(dirtyVirtualMetricsFromIndex, ids.length) : undefined,
     });
+    cachedVirtualMetrics = result;
+    cachedVirtualMetricsItemIds = ids;
+    dirtyVirtualMetricsFromIndex = ids.length;
+    return result;
   });
 
   const visibleRange = createMemo(() => {
@@ -627,6 +653,7 @@ export function MessageList() {
       const h = hasLayoutMeasurements ? measuredHeightsFromLayout[index] : noLayoutFallbackHeight;
       if ((measuredHeights.get(id) ?? -1) !== h) {
         measuredHeights.set(id, h);
+        markVirtualMetricsDirty(id);
         changed = true;
       }
     });
@@ -641,6 +668,7 @@ export function MessageList() {
     const height = element.getBoundingClientRect().height || 160;
     if ((measuredHeights.get(messageId) ?? -1) === height) return;
     measuredHeights.set(messageId, height);
+    markVirtualMetricsDirty(messageId);
     if (hasMeasuredEveryMessage()) scheduleMeasurementDebounce();
   }
 
@@ -655,6 +683,7 @@ export function MessageList() {
       }
 
       measuredHeights.set(messageId, height);
+      markVirtualMetricsDirty(messageId);
       element.style.setProperty('--cis', `${height}px`);
       element.dataset.cis = '';
       changed = true;
@@ -672,6 +701,19 @@ export function MessageList() {
 
   function captureVisibleScrollAnchor() {
     if (!containerRef || !shouldVirtualize()) return null;
+
+    if (observedVisibleMessageBounds.size > 0) {
+      const ids = messageIds();
+      const range = visibleRange();
+      for (let i = range.start; i < range.end && i < ids.length; i += 1) {
+        const id = ids[i];
+        const bounds = observedVisibleMessageBounds.get(id);
+        if (bounds && bounds.bottom > 0) {
+          return { messageId: id, top: bounds.top, topPad: range.topPad };
+        }
+      }
+    }
+
     const containerRect = containerRef.getBoundingClientRect();
     const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
     for (const row of rows) {
@@ -865,8 +907,13 @@ export function MessageList() {
 
   function getNextUserMessageTopFromDOM(
     messageIndex: number,
-    containerRect: DOMRect
+    containerRect: DOMRect,
+    messageId?: string
   ): number | null {
+    if (firstVisibleMessageObserver && !shouldVirtualize() && messageId) {
+      return nextVisibleUserMessageTopByMessageId().get(messageId) ?? null;
+    }
+
     if (!containerRef) return null;
     for (let index = messageIndex + 1; index < messages().length; index += 1) {
       const nextMessage = messages()[index];
@@ -892,7 +939,11 @@ export function MessageList() {
     const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
     if (!stickyBounds) return false;
 
-    const nextUserMessageTop = getNextUserMessageTopFromDOM(preview.index, containerRect);
+    const nextUserMessageTop = getNextUserMessageTopFromDOM(
+      preview.index,
+      containerRect,
+      preview.id
+    );
     if (
       nextUserMessageTop !== null &&
       nextUserMessageTop !== undefined &&
@@ -1406,7 +1457,7 @@ export function MessageList() {
   });
 
   const modelChangeMap = createMemo(() => {
-    messageStructureVersion();
+    messageInfoVersion();
     const providerMap = new Map(state.providers.map((p) => [p.id, p]));
     return untrack(() => {
       const result = new Map<string, string>();

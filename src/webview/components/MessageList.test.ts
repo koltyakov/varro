@@ -371,6 +371,39 @@ describe('getStickyUserMessagePreview', () => {
       )
     ).toBeNull();
   });
+
+  it('skips child-session user prompts that are rendered as compact handoff rows', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [
+          {
+            info: {
+              ...userMessage('user-child-1'),
+              sessionID: 'child-1',
+            },
+            parts: [
+              {
+                id: 'text-child-1',
+                sessionID: 'child-1',
+                messageID: 'user-child-1',
+                type: 'text',
+                text: 'Explore repo structure',
+              },
+            ],
+          },
+          {
+            info: assistantMessage('assistant-child-1', {
+              sessionID: 'child-1',
+              mode: 'subagent',
+            }),
+            parts: [],
+          },
+          { info: assistantMessage('assistant-1'), parts: [] },
+        ],
+        2
+      )
+    ).toBeNull();
+  });
 });
 
 describe('getNextVisibleUserMessageTopMap', () => {
@@ -693,6 +726,83 @@ describe('MessageList empty state', () => {
 
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
+  });
+});
+
+describe('MessageList session scoping', () => {
+  it('replaces child-session user prompts with a compact handoff row in the parent thread', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Explore Varro codebase structure',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ]);
+    replaceMessages([
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: assistantMessage('assistant-root-1', { parentID: 'user-root-1' }),
+        parts: [textPart('text-root-2', 'Root response')],
+      },
+      {
+        info: {
+          id: 'user-child-1',
+          sessionID: 'child-1',
+          role: 'user',
+          time: { created: 3 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-5.4' },
+        },
+        parts: [
+          {
+            id: 'text-child-1',
+            sessionID: 'child-1',
+            messageID: 'user-child-1',
+            type: 'text',
+            text: 'Explore Varro codebase structure',
+          },
+        ],
+      },
+      {
+        info: assistantMessage('assistant-child-1', {
+          sessionID: 'child-1',
+          mode: 'subagent',
+          agent: 'explore',
+          parentID: 'assistant-root-1',
+          time: { created: 4, completed: 5 },
+        }),
+        parts: [
+          {
+            id: 'text-child-2',
+            sessionID: 'child-1',
+            messageID: 'assistant-child-1',
+            type: 'text',
+            text: 'Subagent result',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Root prompt');
+    expect(container?.textContent).toContain('Root response');
+    expect(container?.textContent).toContain('Handed off to Explore');
+    expect(container?.querySelectorAll('.chat-subtask-handoff-row')).toHaveLength(1);
   });
 });
 

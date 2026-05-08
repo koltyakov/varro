@@ -1,10 +1,15 @@
 import { For, Show, createMemo, onCleanup, onMount } from 'solid-js';
 import { implementPlan, openPlan } from '../../hooks/useOpenCode';
-import { isLoading, skipPlanSession, state } from '../../lib/state';
+import { getMessageById, isLoading, skipPlanSession, state } from '../../lib/state';
+import { formatAgentLabel } from '../../lib/format';
 import { formatDuration, formatNumber, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { AssistantMessage, Message, Part, QuestionRequest, ToolPart } from '../../types';
-import { Message as MessageComponent, type AssistantFileEditStackGroup } from '../Message';
+import {
+  Message as MessageComponent,
+  getCompactSubagentHandoffDescription,
+  type AssistantFileEditStackGroup,
+} from '../Message';
 
 export type AssistantDialogSummaryInfo = {
   durationMs: number;
@@ -63,6 +68,33 @@ export function MessageRow(
     props.assistantDialogSummaryMap.has(props.msg.info.id) &&
     isAssistantMessage(props.msg.info) &&
     props.isPlanningAssistantMessage(props.msg.info as AssistantMessage);
+  const compactSubagentHandoff = createMemo(() => {
+    if (props.msg.info.role !== 'user') return null;
+
+    const session = state.sessions.find((item) => item.id === props.msg.info.sessionID);
+    if (!session?.parentID) return null;
+
+    const childAssistant = state.messages.find(
+      (entry) =>
+        entry.info.sessionID === props.msg.info.sessionID &&
+        isAssistantMessage(entry.info) &&
+        (entry.info as AssistantMessage).mode === 'subagent'
+    );
+    const childInfo = childAssistant?.info as AssistantMessage | undefined;
+    const parentInfo = childInfo ? getMessageById(childInfo.parentID)?.info : null;
+    const agentLabel = formatAgentLabel(childInfo?.agent || 'subagent');
+    const detailParts = [
+      parentInfo && isAssistantMessage(parentInfo)
+        ? `from ${parentInfo.agent || 'assistant'}`
+        : null,
+      session.title !== 'New Session' ? session.title : null,
+    ].filter(Boolean);
+    return {
+      label: `Handed off to ${agentLabel}`,
+      description: getCompactSubagentHandoffDescription(props.msg.parts),
+      detail: detailParts.join(' · '),
+    };
+  });
 
   onMount(() => {
     if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
@@ -106,6 +138,7 @@ export function MessageRow(
         streamingText={streamingText()}
         questionRequestForTool={props.questionRequestForTool}
         permissionMatchForTool={props.permissionMatchForTool}
+        compactSubagentHandoff={compactSubagentHandoff()}
       />
       <Show when={summary()}>
         {(assistantSummary) => (

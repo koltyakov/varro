@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.16.6",
+  "version": "0.16.8",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -259,8 +259,8 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 100,
-          "default": 40,
-          "markdownDescription": "Show provider-limit UI only when at least one provider-limit window has this remaining percent or less."
+          "default": 100,
+          "markdownDescription": "Show provider-limit UI only when at least one provider-limit window has this remaining percent less than or equal to the threshold."
         },
         "varro.debug.simulateMissingCli": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",

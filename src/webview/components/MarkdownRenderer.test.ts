@@ -288,7 +288,7 @@ describe('MarkdownRenderer', () => {
     expect(sanitizeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('does fresh sanitization when content caching is disabled', async () => {
+  it('reuses cached sanitization on re-mount when content is unchanged', async () => {
     const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
     const content = 'Streaming cache bypass test `d9q2p`';
 
@@ -307,7 +307,7 @@ describe('MarkdownRenderer', () => {
     cleanup = render(() => MarkdownRenderer({ content }), container!);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(sanitizeSpy.mock.calls.length).toBeGreaterThan(callsAfterFirstMount);
+    expect(sanitizeSpy.mock.calls.length).toBe(callsAfterFirstMount);
   });
 
   it('renders streaming content in stable and tail segments', async () => {

@@ -662,4 +662,19 @@ describe('format helpers', () => {
 
     expect(hasProviderLimitWindowWithinThreshold(limit, 40)).toBe(true);
   });
+
+  it('treats a 100 percent threshold as show any available limit', () => {
+    const limit = availableLimit([
+      {
+        id: 'requests',
+        label: 'Requests',
+        unit: 'requests',
+        remaining: 7,
+        limit: null,
+        resetAt: null,
+      },
+    ]);
+
+    expect(hasProviderLimitWindowWithinThreshold(limit, 100)).toBe(true);
+  });
 });

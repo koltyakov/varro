@@ -518,7 +518,6 @@ body.vscode-high-contrast-light .interactive-session {
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior-y: contain;
-  overflow-anchor: none;
   padding: 0 0 8px 0;
   scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
 }
@@ -544,6 +543,7 @@ body.vscode-high-contrast-light .interactive-session {
   --latest-user-message-sticky-bottom-solid-gap: var(--latest-user-message-sticky-gap);
   --latest-user-message-sticky-bottom-gap: calc(var(--latest-user-message-sticky-gap) * 2);
   position: sticky;
+  overflow-anchor: none;
   top: 0;
   z-index: 4;
   height: 0;
@@ -711,6 +711,7 @@ body.vscode-high-contrast-light .interactive-session {
   flex: 0 0 auto;
   min-height: 0;
   pointer-events: none;
+  overflow-anchor: none;
 }
 
 /* An empty message row (no rendered content) must not contribute any
@@ -4439,6 +4440,14 @@ kbd {
   padding: 8px 10px;
 }
 
+.chat-subtask-handoff-row {
+  width: 100%;
+}
+
+.chat-subtask-handoff-row .subtask-inline-description {
+  color: var(--color-vscode-fg-muted);
+}
+
 .chat-subtask-part .subtask-header {
   display: flex;
   align-items: center;
@@ -4862,6 +4871,7 @@ kbd {
 
 .interactive-loading-row {
   padding-top: 2px;
+  overflow-anchor: none;
 }
 
 .user-message-text {

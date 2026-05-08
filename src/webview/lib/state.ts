@@ -205,6 +205,8 @@ export interface AppStateInstance {
   setMessageListScrollRequestKey: Setter<number>;
   messageStructureVersion: Accessor<number>;
   setMessageStructureVersion: Setter<number>;
+  messageInfoVersion: Accessor<number>;
+  setMessageInfoVersion: Setter<number>;
   draftPermissionMode: Accessor<PermissionMode>;
   setDraftPermissionMode: Setter<PermissionMode>;
   theme: Accessor<WebviewThemeKind>;
@@ -316,9 +318,16 @@ export function createAppState(): AppStateInstance {
   const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
   const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
   const [messageStructureVersion, setMessageStructureVersion] = createSignal(0);
+  const [messageInfoVersion, setMessageInfoVersion] = createSignal(0);
   const sessionTreeIndex = createSessionTreeIndex();
-  const messageIndex = createMessageIndex(() => {
-    setMessageStructureVersion((value) => value + 1);
+  const messageIndex = createMessageIndex({
+    onInvalidate: () => {
+      setMessageStructureVersion((value) => value + 1);
+      setMessageInfoVersion((value) => value + 1);
+    },
+    onPartChange: () => {
+      setMessageStructureVersion((value) => value + 1);
+    },
   });
   const permissionWorkspace: string | null =
     initialWebviewState.editorContext?.workspacePath ?? null;
@@ -372,6 +381,8 @@ export function createAppState(): AppStateInstance {
     setMessageListScrollRequestKey,
     messageStructureVersion,
     setMessageStructureVersion,
+    messageInfoVersion,
+    setMessageInfoVersion,
     draftPermissionMode,
     setDraftPermissionMode,
     theme,
@@ -445,6 +456,8 @@ export const messageListScrollRequestKey = defaultAppState.messageListScrollRequ
 export const setMessageListScrollRequestKey = defaultAppState.setMessageListScrollRequestKey;
 export const messageStructureVersion = defaultAppState.messageStructureVersion;
 export const setMessageStructureVersion = defaultAppState.setMessageStructureVersion;
+export const messageInfoVersion = defaultAppState.messageInfoVersion;
+export const setMessageInfoVersion = defaultAppState.setMessageInfoVersion;
 export const draftPermissionMode = defaultAppState.draftPermissionMode;
 export const setDraftPermissionMode = defaultAppState.setDraftPermissionMode;
 export const theme = defaultAppState.theme;
@@ -476,6 +489,7 @@ export function resetDefaultAppState() {
   setOpenAttentionSessionsKey(next.openAttentionSessionsKey());
   setMessageListScrollRequestKey(next.messageListScrollRequestKey());
   setMessageStructureVersion(next.messageStructureVersion());
+  setMessageInfoVersion(next.messageInfoVersion());
   setDraftPermissionMode(next.draftPermissionMode());
   setTheme(next.theme());
   defaultAppState.sessionMarkerWorkspaceScope = next.sessionMarkerWorkspaceScope;
@@ -776,7 +790,7 @@ export function getPersistedActiveSessionId(): string | null {
 export function markSessionSeen(id: string, updatedAt?: number) {
   const nextSessions = nextSeenSessions(state.lastSeenSessions, id, updatedAt);
   if (!nextSessions) return;
-  setState('lastSeenSessions', reconcile(nextSessions));
+  setState('lastSeenSessions', id, nextSessions[id]);
   writeScopedSessionMarkerState(
     { readStored, writeStored },
     STORAGE_KEYS.lastSeenSessions,
@@ -788,7 +802,12 @@ export function markSessionSeen(id: string, updatedAt?: number) {
 export function clearSessionSeen(id: string) {
   const nextSessions = removeSessionMarker(state.lastSeenSessions, id);
   if (!nextSessions) return;
-  setState('lastSeenSessions', reconcile(nextSessions));
+  setState(
+    'lastSeenSessions',
+    produce((draft) => {
+      delete draft[id];
+    })
+  );
   writeScopedSessionMarkerState(
     { readStored, writeStored },
     STORAGE_KEYS.lastSeenSessions,
@@ -805,7 +824,7 @@ export function skipPlanSession(sessionId: string, updatedAt?: number) {
     updatedAt
   );
   if (!next) return;
-  setState('skippedPlanSessions', reconcile(next));
+  setState('skippedPlanSessions', sessionId, next[sessionId]);
   writeScopedSessionMarkerState(
     { readStored, writeStored },
     STORAGE_KEYS.skippedPlanSessions,
@@ -817,7 +836,12 @@ export function skipPlanSession(sessionId: string, updatedAt?: number) {
 export function clearSkippedPlanSession(sessionId: string) {
   const nextSessions = removeSessionMarker(state.skippedPlanSessions, sessionId);
   if (!nextSessions) return;
-  setState('skippedPlanSessions', reconcile(nextSessions));
+  setState(
+    'skippedPlanSessions',
+    produce((draft) => {
+      delete draft[sessionId];
+    })
+  );
   writeScopedSessionMarkerState(
     { readStored, writeStored },
     STORAGE_KEYS.skippedPlanSessions,
@@ -1059,7 +1083,12 @@ export function removePermissionModeForSession(sessionId: string) {
   const nextModes = Object.fromEntries(
     Object.entries(state.sessionPermissionModes).filter(([id]) => id !== sessionId)
   );
-  setState('sessionPermissionModes', reconcile(nextModes));
+  setState(
+    'sessionPermissionModes',
+    produce((draft) => {
+      delete draft[sessionId];
+    })
+  );
   writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
 }
 
@@ -1093,23 +1122,29 @@ export function setSelectedModel(
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedModel, model);
 
   if (sessionId) {
-    const nextSessionModels = model
-      ? { ...state.sessionSelectedModels, [sessionId]: model }
-      : Object.fromEntries(
-          Object.entries(state.sessionSelectedModels).filter(([id]) => id !== sessionId)
-        );
-    setState('sessionSelectedModels', reconcile(nextSessionModels));
-    writeStored(STORAGE_KEYS.sessionSelectedModels, nextSessionModels);
+    if (model) {
+      setState('sessionSelectedModels', sessionId, model);
+    } else {
+      setState(
+        'sessionSelectedModels',
+        produce((draft) => {
+          delete draft[sessionId];
+        })
+      );
+    }
+    writeStored(STORAGE_KEYS.sessionSelectedModels, { ...state.sessionSelectedModels });
   }
 }
 
 export function clearSelectedModelForSession(sessionId: string) {
   if (!state.sessionSelectedModels[sessionId]) return;
-  const nextSessionModels = Object.fromEntries(
-    Object.entries(state.sessionSelectedModels).filter(([id]) => id !== sessionId)
+  setState(
+    'sessionSelectedModels',
+    produce((draft) => {
+      delete draft[sessionId];
+    })
   );
-  setState('sessionSelectedModels', reconcile(nextSessionModels));
-  writeStored(STORAGE_KEYS.sessionSelectedModels, nextSessionModels);
+  writeStored(STORAGE_KEYS.sessionSelectedModels, { ...state.sessionSelectedModels });
 }
 
 export function setMcpStatus(status: Record<string, McpStatus>) {
@@ -1122,18 +1157,19 @@ export function getAvailableMcpNames() {
 
 export function setSelectedMcpsForSession(sessionId: string, names: string[]) {
   const nextNames = [...new Set(names)].toSorted((a, b) => a.localeCompare(b));
-  const nextSessionMcps = { ...state.sessionSelectedMcps, [sessionId]: nextNames };
-  setState('sessionSelectedMcps', reconcile(nextSessionMcps));
-  writeStored(STORAGE_KEYS.sessionSelectedMcps, nextSessionMcps);
+  setState('sessionSelectedMcps', sessionId, nextNames);
+  writeStored(STORAGE_KEYS.sessionSelectedMcps, { ...state.sessionSelectedMcps });
 }
 
 export function clearSelectedMcpsForSession(sessionId: string) {
   if (!state.sessionSelectedMcps[sessionId]) return;
-  const nextSessionMcps = Object.fromEntries(
-    Object.entries(state.sessionSelectedMcps).filter(([id]) => id !== sessionId)
+  setState(
+    'sessionSelectedMcps',
+    produce((draft) => {
+      delete draft[sessionId];
+    })
   );
-  setState('sessionSelectedMcps', reconcile(nextSessionMcps));
-  writeStored(STORAGE_KEYS.sessionSelectedMcps, nextSessionMcps);
+  writeStored(STORAGE_KEYS.sessionSelectedMcps, { ...state.sessionSelectedMcps });
 }
 
 export function resetDraftPermissionMode() {
@@ -1306,12 +1342,17 @@ export function setCommands(commands: Command[]) {
 
 export function setSessions(nextSessions: Session[]) {
   setState('sessions', nextSessions);
-  const nextMarkers = pruneSkippedPlanSessions(
-    state.skippedPlanSessions,
-    new Set(nextSessions.map((session) => session.id))
-  );
+  const sessionIds = new Set(nextSessions.map((session) => session.id));
+  const nextMarkers = pruneSkippedPlanSessions(state.skippedPlanSessions, sessionIds);
   if (nextMarkers) {
-    setState('skippedPlanSessions', reconcile(nextMarkers));
+    setState(
+      'skippedPlanSessions',
+      produce((draft) => {
+        for (const id of Object.keys(draft)) {
+          if (!sessionIds.has(id)) delete draft[id];
+        }
+      })
+    );
     writeScopedSessionMarkerState(
       { readStored, writeStored },
       STORAGE_KEYS.skippedPlanSessions,
@@ -1385,23 +1426,29 @@ export function setSelectedAgent(
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedAgent, agent);
 
   if (sessionId) {
-    const nextSessionAgents = agent
-      ? { ...state.sessionSelectedAgents, [sessionId]: agent }
-      : Object.fromEntries(
-          Object.entries(state.sessionSelectedAgents).filter(([id]) => id !== sessionId)
-        );
-    setState('sessionSelectedAgents', reconcile(nextSessionAgents));
-    writeStored(STORAGE_KEYS.sessionSelectedAgents, nextSessionAgents);
+    if (agent) {
+      setState('sessionSelectedAgents', sessionId, agent);
+    } else {
+      setState(
+        'sessionSelectedAgents',
+        produce((draft) => {
+          delete draft[sessionId];
+        })
+      );
+    }
+    writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
   }
 }
 
 export function clearSelectedAgentForSession(sessionId: string) {
   if (!state.sessionSelectedAgents[sessionId]) return;
-  const nextSessionAgents = Object.fromEntries(
-    Object.entries(state.sessionSelectedAgents).filter(([id]) => id !== sessionId)
+  setState(
+    'sessionSelectedAgents',
+    produce((draft) => {
+      delete draft[sessionId];
+    })
   );
-  setState('sessionSelectedAgents', reconcile(nextSessionAgents));
-  writeStored(STORAGE_KEYS.sessionSelectedAgents, nextSessionAgents);
+  writeStored(STORAGE_KEYS.sessionSelectedAgents, { ...state.sessionSelectedAgents });
 }
 
 export function modelVisibilityKey(providerID: string, modelID: string) {
@@ -1706,7 +1753,7 @@ export function updateMessagePart(part: Part) {
       const msg = msgs[location.msgIdx];
       if (msg) {
         msg.parts[location.partIdx] = part;
-        messageIndex.invalidate();
+        messageIndex.notifyPartContentChange();
       }
     })
   );

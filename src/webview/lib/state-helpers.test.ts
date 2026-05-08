@@ -963,7 +963,7 @@ describe('state helpers', () => {
     const stateModule = await loadState();
 
     expect(stateModule.providerLimitPollIntervalSeconds()).toBe(120);
-    expect(stateModule.providerLimitThresholdPercent()).toBe(40);
+    expect(stateModule.providerLimitThresholdPercent()).toBe(100);
   });
 
   it('reads provider-limit threshold percent from initial webview state', async () => {

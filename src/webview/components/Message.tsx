@@ -40,6 +40,39 @@ export { getUserMessagePreviewText, parseUserMessageContent } from './message/Us
 export type { AssistantFileEditStackGroup } from './message/AssistantMessageContent';
 export type { ParsedUserMessageContent } from './message/UserMessageContent';
 
+export function getCompactSubagentHandoffDescription(parts: Part[]) {
+  const parsed = parseUserMessageContent(parts);
+  const firstText = parsed.messageTexts
+    .map((text) => text.replace(/\s+/g, ' ').trim())
+    .find((text) => text.length > 0);
+  return firstText || getUserMessagePreviewText(parts);
+}
+
+export function SubagentHandoffRow(props: {
+  label?: string | null;
+  description: string;
+  detail?: string | null;
+}) {
+  return (
+    <div class="chat-subtask-part chat-subtask-handoff-row">
+      <div class="subtask-header">
+        <span class="subtask-dot" />
+        <span>
+          {props.label?.trim() || 'Handed off to subagent'}
+          <Show when={props.description.trim()}>
+            <span class="subtask-inline-description">: {props.description}</span>
+          </Show>
+        </span>
+      </div>
+      <Show when={props.detail?.trim()}>
+        <div class="subtask-meta">
+          <span>{props.detail}</span>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
 export function Message(props: {
   info: MessageType;
   parts: Part[];
@@ -54,6 +87,11 @@ export function Message(props: {
   streamingText?: string;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
+  compactSubagentHandoff?: {
+    label?: string | null;
+    description: string;
+    detail?: string | null;
+  } | null;
 }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
@@ -188,7 +226,16 @@ export function Message(props: {
                 : ''
             }`}
           >
-            <Show when={isUser() && hasUserContent()}>
+            <Show when={props.compactSubagentHandoff}>
+              {(handoff) => (
+                <SubagentHandoffRow
+                  label={handoff().label}
+                  description={handoff().description}
+                  detail={handoff().detail}
+                />
+              )}
+            </Show>
+            <Show when={isUser() && hasUserContent() && !props.compactSubagentHandoff}>
               <UserMessageContent parts={normalizedParts()} />
             </Show>
             <Show when={!isUser() && assistant()}>

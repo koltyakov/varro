@@ -76,7 +76,7 @@ describe('session effects perf guards', () => {
         getServerState: () => appState.state.serverStatus.state,
         areProvidersLoaded: () => appState.state.providersLoaded,
         isDocumentVisible: () => true,
-        hasActiveSessions: () => false,
+        isActiveSessionWorking: () => false,
         getActiveProviderSelection: () =>
           getActiveProviderSelection({
             selectedModel: appState.state.selectedModel,
@@ -134,7 +134,7 @@ describe('session effects perf guards', () => {
         getServerState: () => appState.state.serverStatus.state,
         areProvidersLoaded: () => appState.state.providersLoaded,
         isDocumentVisible: () => true,
-        hasActiveSessions: () => false,
+        isActiveSessionWorking: () => false,
         getActiveProviderSelection: () =>
           getActiveProviderSelection({
             selectedModel: appState.state.selectedModel,

@@ -214,6 +214,8 @@ const MAX_COPY_TEXT_LENGTH = 20_000;
 const codeBlockHtmlCache = new Map<string, string>();
 const highlightedCodeCache = new Map<string, string>();
 const renderedMarkdownCache = new Map<string, string>();
+const SANITIZE_CACHE_LIMIT = 100;
+const sanitizeHtmlCache = new Map<string, string>();
 const CODE_LANGUAGE_ALIASES = new Map<string, string>([
   ['console', 'bash'],
   ['html', 'xml'],
@@ -546,20 +548,37 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
 }
 
 function sanitizeHtml(html: string): string {
+  const cached = sanitizeHtmlCache.get(html);
+  if (cached !== undefined) {
+    sanitizeHtmlCache.delete(html);
+    sanitizeHtmlCache.set(html, cached);
+    return cached;
+  }
+
   const sanitized = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ALLOWED_HTML_TAGS,
     ALLOWED_ATTR: ALLOWED_HTML_ATTRIBUTES,
     FORBID_ATTR: ['style'],
   });
 
-  if (!sanitized.includes('<a')) return sanitized;
-
-  const template = document.createElement('template');
-  template.innerHTML = sanitized;
-  for (const anchor of Array.from(template.content.querySelectorAll<HTMLAnchorElement>('a'))) {
-    sanitizeAnchorHref(anchor);
+  let result: string;
+  if (!sanitized.includes('<a')) {
+    result = sanitized;
+  } else {
+    const template = document.createElement('template');
+    template.innerHTML = sanitized;
+    for (const anchor of Array.from(template.content.querySelectorAll<HTMLAnchorElement>('a'))) {
+      sanitizeAnchorHref(anchor);
+    }
+    result = template.innerHTML;
   }
-  return template.innerHTML;
+
+  sanitizeHtmlCache.set(html, result);
+  if (sanitizeHtmlCache.size > SANITIZE_CACHE_LIMIT) {
+    const oldest = sanitizeHtmlCache.keys().next().value;
+    if (oldest) sanitizeHtmlCache.delete(oldest);
+  }
+  return result;
 }
 
 function renderMarkdownHtml(
@@ -777,6 +796,7 @@ export function __resetMarkdownCachesForTests() {
   codeBlockHtmlCache.clear();
   highlightedCodeCache.clear();
   renderedMarkdownCache.clear();
+  sanitizeHtmlCache.clear();
 }
 
 function linkifyPaths(html: string): string {
