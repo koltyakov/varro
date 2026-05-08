@@ -775,12 +775,12 @@ describe('MessageList session scoping', () => {
       },
     ];
 
-    expect(getVisibleThreadMessages(messages, 'session-1').map((entry) => entry.info.id)).toEqual([
-      'user-root-1',
-    ]);
-    expect(getVisibleThreadMessages(messages, 'child-1').map((entry) => entry.info.id)).toEqual([
-      'user-child-1',
-    ]);
+    expect(
+      getVisibleThreadMessages(messages, 'session-1').map((messageEntry) => messageEntry.info.id)
+    ).toEqual(['user-root-1']);
+    expect(
+      getVisibleThreadMessages(messages, 'child-1').map((messageEntry) => messageEntry.info.id)
+    ).toEqual(['user-child-1']);
   });
 
   it('hides child-session user prompts in the parent thread', async () => {
@@ -1486,6 +1486,37 @@ describe('MessageList sticky prompt preview', () => {
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 · ↓ 310 - Agents 2');
+  });
+
+  it('keeps stopped assistant turns out of final answer formatting while preserving the summary', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 11_000 },
+          error: { name: 'aborted', data: { message: 'Aborted' } },
+          tokens: { input: 12, output: 4, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            ...textPart('text-assistant-1', 'Partial response before stop'),
+            messageID: 'assistant-1',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const response = container?.querySelector('[data-msg-id="assistant-1"] .chat-turn-content');
+    expect(response?.className).toContain('assistant-turn-content-plain');
+    expect(response?.className).not.toContain('assistant-turn-content-highlighted');
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 12 · ↓ 4');
   });
 
   it('summarizes in and out tokens for subagent sessions parented to the root session', () => {
