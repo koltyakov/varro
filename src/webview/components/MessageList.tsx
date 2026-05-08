@@ -186,6 +186,25 @@ function getRenderedMessages(
   return shouldVirtualize ? messages.slice(range.start, range.end) : messages;
 }
 
+function shouldHideChildSubagentUserMessage(
+  entry: { info: Message; parts: Part[] },
+  messages: Array<{ info: Message; parts: Part[] }>
+) {
+  if (entry.info.role !== 'user') return false;
+  const session = state.sessions.find((item) => item.id === entry.info.sessionID);
+  if (!session?.parentID) return false;
+  return messages.some(
+    (candidate) =>
+      candidate.info.sessionID === entry.info.sessionID &&
+      isAssistantMessage(candidate.info) &&
+      (candidate.info as AssistantMessage).mode === 'subagent'
+  );
+}
+
+export function getVisibleThreadMessages(messages: Array<{ info: Message; parts: Part[] }>) {
+  return messages.filter((entry) => !shouldHideChildSubagentUserMessage(entry, messages));
+}
+
 function getMessageIdSet(messages: Array<{ info: Message }>) {
   return new Set(messages.map((message) => message.info.id));
 }
@@ -329,7 +348,7 @@ export function MessageList() {
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
   const messages = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => state.messages);
+    return untrack(() => getVisibleThreadMessages(state.messages));
   });
   const latestPlanImplementationMessageId = createMemo(() => {
     messageInfoVersion();

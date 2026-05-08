@@ -4440,14 +4440,6 @@ kbd {
   padding: 8px 10px;
 }
 
-.chat-subtask-handoff-row {
-  width: 100%;
-}
-
-.chat-subtask-handoff-row .subtask-inline-description {
-  color: var(--color-vscode-fg-muted);
-}
-
 .chat-subtask-part .subtask-header {
   display: flex;
   align-items: center;

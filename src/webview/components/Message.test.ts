@@ -7,7 +7,6 @@ import { setExpandThinkingByDefault } from '../lib/state';
 import {
   Message,
   calculateAssistantPartVirtualRange,
-  getCompactSubagentHandoffDescription,
   getAssistantContainerVariant,
   getUserMessagePreviewText,
   parseUserMessageContent,
@@ -119,13 +118,6 @@ function assistantSummaryMessage(id: string) {
   return {
     ...assistantMessage(id),
     summary: true,
-  };
-}
-
-function childUserMessage(id: string) {
-  return {
-    ...userMessage(id),
-    sessionID: 'child-1',
   };
 }
 
@@ -291,17 +283,6 @@ describe('getAssistantContainerVariant', () => {
         hasError: true,
       })
     ).toBe('plain');
-  });
-});
-
-describe('getCompactSubagentHandoffDescription', () => {
-  it('uses the first visible prompt text when available', () => {
-    expect(
-      getCompactSubagentHandoffDescription([
-        textPart('text-1', '[Working directory: /repo]'),
-        textPart('text-2', 'Inspect the codebase thoroughly'),
-      ])
-    ).toBe('Inspect the codebase thoroughly');
   });
 });
 
@@ -1423,34 +1404,5 @@ describe('Message assistant final answer rendering', () => {
     expect(errorBlock).toBeNull();
     expect(retryButton).toBeNull();
     expect(retryMessageMock).not.toHaveBeenCalled();
-  });
-
-  it('renders child-session user prompts as a compact handoff row', async () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: childUserMessage('message-child-user-1'),
-          parts: [
-            {
-              id: 'text-child-user-1',
-              sessionID: 'child-1',
-              messageID: 'message-child-user-1',
-              type: 'text',
-              text: 'Explore Varro codebase structure',
-            },
-          ],
-          compactSubagentHandoff: {
-            label: 'Handed off to Explore',
-            description: 'Explore Varro codebase structure',
-            detail: 'Explore Varro codebase structure',
-          },
-        }),
-      container!
-    );
-
-    expect(container?.textContent).toContain('Handed off to Explore');
-    expect(container?.textContent).toContain('Explore Varro codebase structure');
-    expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
-    expect(container?.querySelector('.chat-subtask-handoff-row')).toBeInstanceOf(HTMLDivElement);
   });
 });

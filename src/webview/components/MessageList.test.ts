@@ -730,7 +730,7 @@ describe('MessageList empty state', () => {
 });
 
 describe('MessageList session scoping', () => {
-  it('replaces child-session user prompts with a compact handoff row in the parent thread', async () => {
+  it('hides child-session user prompts in the parent thread', async () => {
     setState('activeSessionId', 'session-1');
     setSessions([
       {
@@ -801,8 +801,8 @@ describe('MessageList session scoping', () => {
 
     expect(container?.textContent).toContain('Root prompt');
     expect(container?.textContent).toContain('Root response');
-    expect(container?.textContent).toContain('Handed off to Explore');
-    expect(container?.querySelectorAll('.chat-subtask-handoff-row')).toHaveLength(1);
+    expect(container?.textContent).not.toContain('Explore Varro codebase structure');
+    expect(container?.textContent).toContain('Subagent result');
   });
 });
 
