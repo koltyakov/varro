@@ -28,6 +28,7 @@ import {
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
   getLatestPlanImplementationMessageId,
+  getVisibleThreadMessages,
   MessageList,
   shouldShowPlanImplementationAction,
 } from './MessageList';
@@ -730,6 +731,58 @@ describe('MessageList empty state', () => {
 });
 
 describe('MessageList session scoping', () => {
+  it('hides child-session user prompts in the parent thread before subagent output arrives', () => {
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Research child',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ]);
+
+    const messages = [
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: {
+          id: 'user-child-1',
+          sessionID: 'child-1',
+          role: 'user',
+          time: { created: 3 },
+          agent: 'explore',
+          model: { providerID: 'openai', modelID: 'gpt-5.4' },
+        },
+        parts: [
+          {
+            id: 'text-child-1',
+            sessionID: 'child-1',
+            messageID: 'user-child-1',
+            type: 'text',
+            text: 'Research worktree internals',
+          },
+        ],
+      },
+    ];
+
+    expect(getVisibleThreadMessages(messages, 'session-1').map((entry) => entry.info.id)).toEqual([
+      'user-root-1',
+    ]);
+    expect(getVisibleThreadMessages(messages, 'child-1').map((entry) => entry.info.id)).toEqual([
+      'user-child-1',
+    ]);
+  });
+
   it('hides child-session user prompts in the parent thread', async () => {
     setState('activeSessionId', 'session-1');
     setSessions([

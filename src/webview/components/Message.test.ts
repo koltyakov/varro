@@ -255,6 +255,24 @@ describe('getAssistantContainerVariant', () => {
     ).toBe('plain');
   });
 
+  it('renders highlighted text with a visible tool call flat during live updates', () => {
+    expect(
+      getAssistantContainerVariant({
+        isUser: false,
+        visibleDiffCount: 0,
+        fileEditStackGroup: null,
+        isSubagent: false,
+        hasStructuredAssistantParts: true,
+        layoutParts: [
+          textPart('text-1', 'Let me explore the codebase and research in parallel.'),
+          toolPart('tool-1', completedToolState({ prompt: 'Inspect the repo' }, 'Done', 'Explore')),
+        ],
+        highlightFinalAnswer: true,
+        hasError: false,
+      })
+    ).toBe('plain');
+  });
+
   it('keeps text-only final answers in the standard assistant card', () => {
     expect(
       getAssistantContainerVariant({
@@ -1079,6 +1097,10 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
+    expect(container?.querySelector('.assistant-turn-content-plain')).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(container?.querySelector('.assistant-turn-content-highlighted')).toBeNull();
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
     expect(container?.querySelector('.tool-invocation-header')).toBeInstanceOf(HTMLButtonElement);
   });

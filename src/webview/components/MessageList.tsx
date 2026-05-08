@@ -186,23 +186,27 @@ function getRenderedMessages(
   return shouldVirtualize ? messages.slice(range.start, range.end) : messages;
 }
 
-function shouldHideChildSubagentUserMessage(
+function shouldHideThreadMessage(
   entry: { info: Message; parts: Part[] },
-  messages: Array<{ info: Message; parts: Part[] }>
+  activeSessionId: string | null
 ) {
+  if (!activeSessionId) return false;
+
+  const activeTreeIds = new Set(getSessionTreeIds(activeSessionId));
+  if (!activeTreeIds.has(entry.info.sessionID)) return true;
+
   if (entry.info.role !== 'user') return false;
+  if (entry.info.sessionID === activeSessionId) return false;
+
   const session = state.sessions.find((item) => item.id === entry.info.sessionID);
-  if (!session?.parentID) return false;
-  return messages.some(
-    (candidate) =>
-      candidate.info.sessionID === entry.info.sessionID &&
-      isAssistantMessage(candidate.info) &&
-      (candidate.info as AssistantMessage).mode === 'subagent'
-  );
+  return !!session?.parentID;
 }
 
-export function getVisibleThreadMessages(messages: Array<{ info: Message; parts: Part[] }>) {
-  return messages.filter((entry) => !shouldHideChildSubagentUserMessage(entry, messages));
+export function getVisibleThreadMessages(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  activeSessionId = state.activeSessionId
+) {
+  return messages.filter((entry) => !shouldHideThreadMessage(entry, activeSessionId));
 }
 
 function getMessageIdSet(messages: Array<{ info: Message }>) {
@@ -348,7 +352,7 @@ export function MessageList() {
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
   const messages = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => getVisibleThreadMessages(state.messages));
+    return untrack(() => getVisibleThreadMessages(state.messages, state.activeSessionId));
   });
   const latestPlanImplementationMessageId = createMemo(() => {
     messageInfoVersion();
