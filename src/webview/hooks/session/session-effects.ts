@@ -1,11 +1,10 @@
-import { createEffect, on, onCleanup, untrack } from 'solid-js';
+import { createEffect, on, onCleanup } from 'solid-js';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 
 type ProviderSelection = { providerID: string; modelID?: string | null };
 
-const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS =
-  DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS * 1000;
+const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS = DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS * 1000;
 const ACTIVE_SESSION_PROVIDER_LIMIT_POLL_INTERVAL_MS = 30_000;
 
 function resolveProviderLimitPollIntervalMs(baseIntervalMs: number, hasActiveSessions: boolean) {
