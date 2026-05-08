@@ -17,6 +17,7 @@ function createCallbacks(): MessageRouterCallbacks {
     ready: vi.fn(() => Promise.resolve()),
     setWebviewFocus: vi.fn(),
     requestContext: vi.fn(),
+    refreshProviders: vi.fn(),
     clearTerminalSelection: vi.fn(),
     runInTerminal: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
@@ -57,6 +58,13 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'context/request' });
     expect(cb.requestContext).toHaveBeenCalledOnce();
+  });
+
+  it('dispatches providers/refresh', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    await router.handleMessage({ type: 'providers/refresh' });
+    expect(cb.refreshProviders).toHaveBeenCalledOnce();
   });
 
   it('dispatches terminal-selection/clear', async () => {

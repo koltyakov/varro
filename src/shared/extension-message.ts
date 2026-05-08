@@ -15,6 +15,7 @@ import {
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'server/status',
   'server/event',
+  'providers/refresh',
   'context/update',
   'terminal-selection/update',
   'files/dropped',
@@ -48,6 +49,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
     case 'command/focus-input':
     case 'command/open-attention-sessions':
     case 'command/abort':
+    case 'providers/refresh':
       return { type };
 
     case 'server/status': {

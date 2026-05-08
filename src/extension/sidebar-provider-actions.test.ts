@@ -118,6 +118,7 @@ describe('createSidebarProviderActions', () => {
     await actions.ready();
     actions.setWebviewFocus(true);
     actions.requestContext();
+    actions.refreshProviders();
     actions.clearTerminalSelection();
     actions.runInTerminal('npm test', 'Tests');
     await actions.exportSession('session-1');
@@ -135,6 +136,7 @@ describe('createSidebarProviderActions', () => {
     expect(deps.handleReadyMessage).toHaveBeenCalledOnce();
     expect(webviewSession.setFocus).toHaveBeenCalledWith(true);
     expect(deps.postContext).toHaveBeenCalledTimes(2);
+    expect(deps.postConfigState).toHaveBeenCalledTimes(1);
     expect(deps.postTerminalSelection).toHaveBeenNthCalledWith(1, {
       text: 'npm test',
       terminalName: 'Terminal 1',

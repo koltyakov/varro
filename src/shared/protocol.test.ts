@@ -13,6 +13,7 @@ describe('protocol conformance', () => {
     const covered: Record<ExtensionMessage['type'], true> = {
       'server/status': true,
       'server/event': true,
+      'providers/refresh': true,
       'context/update': true,
       'terminal-selection/update': true,
       'files/dropped': true,
@@ -36,6 +37,7 @@ describe('protocol conformance', () => {
 
   it('exhaustiveness check on WebviewMessage type discriminators', () => {
     const covered: Record<WebviewMessage['type'], true> = {
+      'providers/refresh': true,
       'context/request': true,
       'webview/focus': true,
       'terminal-selection/clear': true,

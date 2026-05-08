@@ -1,9 +1,9 @@
 import type { ChildProcess } from 'child_process';
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { mkdir, readFile, writeFile } from 'fs/promises';
+import { homedir, tmpdir } from 'os';
+import { join, win32 } from 'path';
 import * as vscode from 'vscode';
 import type { ServerStatus } from '../shared/protocol';
 import { logger } from './logger';
@@ -15,6 +15,20 @@ import {
 } from './server-utils';
 import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
+
+function getOpenCodeConfigPath(
+  env: NodeJS.ProcessEnv = process.env,
+  home = homedir(),
+  platform = process.platform
+) {
+  if (platform === 'win32') {
+    const base = env.APPDATA?.trim() || win32.join(home, 'AppData', 'Roaming');
+    return win32.join(base, 'opencode', 'opencode.json');
+  }
+
+  const base = env.XDG_CONFIG_HOME?.trim() || join(home, '.config');
+  return join(base, 'opencode', 'opencode.json');
+}
 
 export interface OpenCodeCompactionSettings {
   auto: boolean | null;
@@ -274,10 +288,10 @@ export class OpenCodeProcess {
 
   async syncInjectedConfigFile() {
     await mkdir(join(tmpdir(), 'varro-opencode'), { recursive: true });
-    await writeFile(this.injectedConfigPath, this.serializeInjectedConfig(), 'utf-8');
+    await writeFile(this.injectedConfigPath, await this.serializeInjectedConfig(), 'utf-8');
   }
 
-  serializeInjectedConfig() {
+  async serializeInjectedConfig() {
     const compaction = {
       ...(this.compactionSettings.auto !== null ? { auto: this.compactionSettings.auto } : {}),
       ...(this.compactionSettings.reserved !== null
@@ -285,10 +299,31 @@ export class OpenCodeProcess {
         : {}),
     };
     const config = {
+      ...(await this.readBaseConfig()),
       $schema: 'https://opencode.ai/config.json',
       ...(Object.keys(compaction).length > 0 ? { compaction } : {}),
     };
     return `${JSON.stringify(config, null, 2)}\n`;
+  }
+
+  private async readBaseConfig() {
+    const configPath = getOpenCodeConfigPath();
+    try {
+      const raw = await readFile(configPath, 'utf-8');
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        logger.warn(`Ignoring invalid OpenCode config at ${configPath}: expected an object`);
+        return {};
+      }
+      return parsed as Record<string, unknown>;
+    } catch (err) {
+      const nodeErr = err as NodeJS.ErrnoException;
+      if (nodeErr?.code === 'ENOENT') return {};
+      logger.warn(
+        `Failed to read OpenCode config at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return {};
+    }
   }
 
   hasInjectedCompactionOverride() {

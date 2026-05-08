@@ -115,6 +115,7 @@ describe('mount bridge helpers', () => {
         requestOpenAttentionSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
+        refreshProviders: vi.fn(),
         setWorkspaceStatusSummary: vi.fn(),
         setWorkspaceStatuses: vi.fn(),
       },
@@ -160,6 +161,7 @@ describe('mount bridge helpers', () => {
         requestOpenAttentionSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
+        refreshProviders: vi.fn(),
         setWorkspaceStatusSummary: vi.fn(),
         setWorkspaceStatuses: vi.fn(),
       },
@@ -210,6 +212,7 @@ describe('mount bridge helpers', () => {
         requestOpenAttentionSessions: vi.fn(),
         abortSession: vi.fn(),
         refreshMcps: vi.fn(),
+        refreshProviders: vi.fn(),
       },
       {
         type: 'context/update',
@@ -230,6 +233,7 @@ describe('mount bridge helpers', () => {
     const openAttentionSessions = vi.fn();
     const abortSession = vi.fn();
     const refreshMcps = vi.fn();
+    const refreshProviders = vi.fn();
     const addDroppedContextFiles = vi.fn();
     const removeDroppedContextFile = vi.fn();
     const deps = {
@@ -255,6 +259,7 @@ describe('mount bridge helpers', () => {
       requestOpenAttentionSessions: openAttentionSessions,
       abortSession,
       refreshMcps,
+      refreshProviders,
       setWorkspaceStatusSummary: vi.fn(),
       setWorkspaceStatuses: vi.fn(),
     };
@@ -275,6 +280,7 @@ describe('mount bridge helpers', () => {
       type: 'server/event',
       payload: { type: 'mcp.tools.changed', properties: {} },
     });
+    handleExtensionMessageWithDependencies(deps, { type: 'providers/refresh' });
 
     expect(createSession).toHaveBeenCalledTimes(1);
     expect(focusComposer).toHaveBeenCalledTimes(1);
@@ -283,6 +289,7 @@ describe('mount bridge helpers', () => {
     expect(addDroppedContextFiles).toHaveBeenCalledTimes(1);
     expect(removeDroppedContextFile).toHaveBeenCalledWith('/repo/file.ts');
     expect(refreshMcps).toHaveBeenCalledTimes(1);
+    expect(refreshProviders).toHaveBeenCalledTimes(1);
   });
 
   it('binds extension message handling to shared webview state', () => {
@@ -297,6 +304,7 @@ describe('mount bridge helpers', () => {
       createSession: vi.fn(),
       abortSession: vi.fn(),
       refreshMcps: vi.fn(),
+      refreshProviders: vi.fn(),
       applyTheme,
     });
 
@@ -361,6 +369,7 @@ describe('mount bridge helpers', () => {
       requestOpenAttentionSessions: vi.fn(),
       abortSession: vi.fn(),
       refreshMcps: vi.fn(),
+      refreshProviders: vi.fn(),
       setWorkspaceStatusSummary,
       setWorkspaceStatuses,
     };
@@ -403,6 +412,7 @@ describe('mount bridge helpers', () => {
     const setDocumentVisible = vi.fn();
     const postFocusState = vi.fn();
     const recheckSessionStatus = vi.fn();
+    const refreshProviders = vi.fn();
 
     const dispose = registerFocusStateTracking({
       setDocumentVisible,
@@ -410,6 +420,7 @@ describe('mount bridge helpers', () => {
       isLoading: () => true,
       getActiveSessionId: () => 'session-1',
       recheckSessionStatus,
+      refreshProviders,
     });
 
     try {
@@ -424,6 +435,7 @@ describe('mount bridge helpers', () => {
       expect(setDocumentVisible).toHaveBeenCalledWith(true);
       expect(postFocusState).toHaveBeenCalledTimes(3);
       expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+      expect(refreshProviders).toHaveBeenCalledTimes(2);
     } finally {
       dispose();
       Object.defineProperty(document, 'visibilityState', {

@@ -122,6 +122,12 @@ describe('webview message validation', () => {
     });
   });
 
+  it('accepts providers/refresh without payload', () => {
+    expect(parseWebviewMessage({ type: 'providers/refresh' })).toEqual({
+      type: 'providers/refresh',
+    });
+  });
+
   it('accepts session export messages with a valid session id', () => {
     expect(
       parseWebviewMessage({ type: 'session/export', payload: { sessionId: 'session-1' } })

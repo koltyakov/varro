@@ -1,7 +1,20 @@
 import { createEffect, on, onCleanup, untrack } from 'solid-js';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
+import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 
 type ProviderSelection = { providerID: string; modelID?: string | null };
+
+const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS =
+  DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS * 1000;
+const ACTIVE_SESSION_PROVIDER_LIMIT_POLL_INTERVAL_MS = 30_000;
+
+function resolveProviderLimitPollIntervalMs(baseIntervalMs: number, hasActiveSessions: boolean) {
+  if (!hasActiveSessions || baseIntervalMs !== DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS) {
+    return baseIntervalMs;
+  }
+
+  return ACTIVE_SESSION_PROVIDER_LIMIT_POLL_INTERVAL_MS;
+}
 
 export function registerLoadingStatusPollEffect(deps: {
   isLoading(): boolean;
@@ -35,6 +48,7 @@ export function registerProviderLimitRefreshEffect(deps: {
   getServerState(): string;
   areProvidersLoaded(): boolean;
   isDocumentVisible(): boolean;
+  hasActiveSessions(): boolean;
   getActiveProviderSelection(): ProviderSelection | null;
   getProviderLimit(
     providerID: string,
@@ -57,20 +71,23 @@ export function registerProviderLimitRefreshEffect(deps: {
       () => {
         const visible = deps.isDocumentVisible();
         if (deps.getServerState() !== 'running' || !deps.areProvidersLoaded() || !visible)
-          return '';
-        if (deps.getPollIntervalMs() < 0) return '';
+          return null;
+        const pollIntervalMs = deps.getPollIntervalMs();
+        if (pollIntervalMs < 0) return null;
         const active = deps.getActiveProviderSelection();
-        if (!active) return '';
-        return `${active.providerID}\u0000${active.modelID ?? ''}`;
+        if (!active) return null;
+
+        return {
+          providerID: active.providerID,
+          modelID: active.modelID,
+          pollIntervalMs: resolveProviderLimitPollIntervalMs(
+            pollIntervalMs,
+            deps.hasActiveSessions()
+          ),
+        };
       },
-      (key) => {
-        if (!key) return;
-        const active = untrack(() => deps.getActiveProviderSelection());
-        if (!active) return;
-        const existingLimit = untrack(() =>
-          deps.getProviderLimit(active.providerID, active.modelID)
-        );
-        if (existingLimit?.status === 'unsupported') return;
+      (target) => {
+        if (!target) return;
 
         let cancelled = false;
         let inFlight = false;
@@ -78,9 +95,9 @@ export function registerProviderLimitRefreshEffect(deps: {
           if (cancelled || inFlight || !deps.isDocumentVisible()) return;
           inFlight = true;
           try {
-            const limit = await deps.loadProviderLimit(active.providerID, active.modelID);
+            const limit = await deps.loadProviderLimit(target.providerID, target.modelID);
             if (!cancelled) {
-              deps.setProviderLimit(active.providerID, active.modelID, limit);
+              deps.setProviderLimit(target.providerID, target.modelID, limit);
             }
           } catch (err) {
             deps.logError('loadProviderLimit', err);
@@ -90,10 +107,9 @@ export function registerProviderLimitRefreshEffect(deps: {
         };
 
         void refresh();
-        const pollIntervalMs = untrack(() => deps.getPollIntervalMs());
         const timer = window.setInterval(() => {
           void refresh();
-        }, pollIntervalMs);
+        }, target.pollIntervalMs);
 
         onCleanup(() => {
           cancelled = true;

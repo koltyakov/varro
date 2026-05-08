@@ -523,9 +523,9 @@ describe('OpenCodeServer compaction config injection', () => {
 
     await server.start();
 
-    const configText = (
+    const configText = await (
       server as unknown as {
-        serializeInjectedConfig: () => string;
+        serializeInjectedConfig: () => Promise<string>;
       }
     ).serializeInjectedConfig();
     expect(String(configText)).toContain('"auto": false');
@@ -555,9 +555,9 @@ describe('OpenCodeServer compaction config injection', () => {
     await server.updateCompactionSettings({ auto: false, reserved: 4321 });
 
     expect(request).toHaveBeenCalledWith('POST', '/global/dispose');
-    const configText = (
+    const configText = await (
       server as unknown as {
-        serializeInjectedConfig: () => string;
+        serializeInjectedConfig: () => Promise<string>;
       }
     ).serializeInjectedConfig();
     expect(String(configText)).toContain('"auto": false');

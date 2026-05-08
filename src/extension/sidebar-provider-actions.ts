@@ -48,6 +48,9 @@ export function createSidebarProviderActions(
       deps.postContext();
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);
     },
+    refreshProviders: () => {
+      deps.postConfigState();
+    },
     clearTerminalSelection: () => {
       deps.contextProvider.clearTerminalSelection();
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);

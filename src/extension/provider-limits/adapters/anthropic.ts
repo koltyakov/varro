@@ -7,7 +7,11 @@ import type {
   ProviderLimitUnit,
   ProviderLimitWindow,
 } from '../../../shared/protocol';
-import { parseRateLimitResetAt, type ProviderAuthRecord } from '../../util/provider-limit';
+import {
+  parseRateLimitResetAt,
+  type ProviderAuthRecord,
+  type ProviderMetadata,
+} from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 
 const ANTHROPIC_USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
@@ -16,6 +20,8 @@ const ANTHROPIC_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const ANTHROPIC_BETA_HEADER = 'oauth-2025-04-20';
 const ANTHROPIC_USER_AGENT = 'claude-code/2.1.69';
 const ANTHROPIC_STATUSLINE_STALENESS_MS = 5 * 60_000;
+const MERIDIAN_QUOTA_ENDPOINT_PATH = '/v1/usage/quota';
+const HIDDEN_MERIDIAN_WINDOW_IDS = new Set(['seven_day_omelette']);
 
 const ANTHROPIC_QUOTA_DEFS = [
   { id: 'five_hour', label: '5-Hour Limit' },
@@ -24,6 +30,16 @@ const ANTHROPIC_QUOTA_DEFS = [
   { id: 'monthly_limit', label: 'Monthly Limit' },
   { id: 'extra_usage', label: 'Extra Usage' },
 ] as const;
+
+const MERIDIAN_WINDOW_LABELS: Record<string, string> = {
+  five_hour: '5-Hour Limit',
+  seven_day: 'Weekly All-Model',
+  seven_day_opus: 'Weekly Opus',
+  seven_day_sonnet: 'Weekly Sonnet',
+  seven_day_oauth_apps: 'Weekly Apps',
+  seven_day_cowork: 'Weekly Cowork',
+  seven_day_omelette: 'Weekly Omelette',
+};
 
 type AnthropicCredentials = {
   accessToken: string;
@@ -45,8 +61,27 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
       const statuslineStatus = await readAnthropicStatuslineStatus(provider.id, modelID, checkedAt);
       if (statuslineStatus) return statuslineStatus;
 
+      const localProxyBaseUrl = getAnthropicLocalProxyBaseUrl(provider);
+      const localProxyStatus = localProxyBaseUrl
+        ? await readAnthropicLocalProxyStatus(provider.id, modelID, checkedAt, localProxyBaseUrl)
+        : null;
+      if (localProxyStatus?.status) return localProxyStatus.status;
+
       const credentials = await resolveAnthropicCredentials(authStore);
       if (!credentials?.accessToken) {
+        if (localProxyBaseUrl) {
+          return {
+            providerID: provider.id,
+            modelID,
+            status: 'error',
+            source: 'provider',
+            checkedAt,
+            note:
+              localProxyStatus?.fallbackNote ||
+              'Failed to poll the local Claude proxy quota endpoint',
+          };
+        }
+
         return unsupportedProviderStatus(
           provider.id,
           modelID,
@@ -151,6 +186,56 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
   };
 }
 
+async function readAnthropicLocalProxyStatus(
+  providerID: string,
+  modelID: string | null,
+  checkedAt: number,
+  baseUrl: string
+): Promise<{ status: ProviderLimitStatus | null; fallbackNote: string | null }> {
+  try {
+    const response = await fetch(new URL(MERIDIAN_QUOTA_ENDPOINT_PATH, baseUrl), {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Varro/0.1.0',
+      },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) {
+      return {
+        status: null,
+        fallbackNote: `Local Claude proxy quota endpoint returned ${response.status}`,
+      };
+    }
+
+    const payload = (await response.json()) as unknown;
+    const windows = extractMeridianWindows(payload, checkedAt);
+    if (windows.length === 0) {
+      return {
+        status: null,
+        fallbackNote: 'Local Claude proxy quota endpoint did not expose any known quotas',
+      };
+    }
+
+    return {
+      status: {
+        providerID,
+        modelID,
+        status: 'available',
+        source: 'provider',
+        checkedAt,
+        windows,
+        note: 'Read from local Claude proxy quota endpoint',
+      },
+      fallbackNote: null,
+    };
+  } catch {
+    return {
+      status: null,
+      fallbackNote: 'Failed to poll the local Claude proxy quota endpoint',
+    };
+  }
+}
+
 function shouldRefreshAnthropicCredentials(
   responseStatus: number,
   credentials: AnthropicCredentials
@@ -173,6 +258,72 @@ function extractAnthropicWindows(payload: unknown, checkedAt: number): ProviderL
   }
 
   return windows;
+}
+
+function extractMeridianWindows(payload: unknown, checkedAt: number): ProviderLimitWindow[] {
+  const record = asRecord(payload);
+  if (!record) return [];
+
+  const windows: ProviderLimitWindow[] = [];
+  const buckets = Array.isArray(record.buckets) ? record.buckets : [];
+  for (const bucket of buckets) {
+    const window = buildMeridianBucketWindow(asRecord(bucket), checkedAt);
+    if (window) windows.push(window);
+  }
+
+  const extraUsageWindow = buildMeridianExtraUsageWindow(asRecord(record.extraUsage), checkedAt);
+  if (extraUsageWindow) windows.push(extraUsageWindow);
+  return windows;
+}
+
+function buildMeridianBucketWindow(
+  bucket: Record<string, unknown> | null,
+  checkedAt: number
+): ProviderLimitWindow | null {
+  if (!bucket) return null;
+
+  const id = getString(bucket.type);
+  if (!id || HIDDEN_MERIDIAN_WINDOW_IDS.has(id)) return null;
+  const utilization = clampFraction(parseFiniteNumber(bucket.utilization));
+  if (utilization == null) return null;
+
+  const percent = clampPercent(utilization * 100);
+  if (percent == null) return null;
+
+  return {
+    id,
+    label: MERIDIAN_WINDOW_LABELS[id] || toTitleLabel(id),
+    unit: 'unknown',
+    remaining: Math.max(100 - percent, 0),
+    limit: 100,
+    resetAt: parseRateLimitResetAt(bucket.resetsAt, checkedAt),
+    percent,
+  } satisfies ProviderLimitWindow;
+}
+
+function buildMeridianExtraUsageWindow(
+  extraUsage: Record<string, unknown> | null,
+  checkedAt: number
+): ProviderLimitWindow | null {
+  if (!extraUsage) return null;
+  if (extraUsage.isEnabled === false) return null;
+
+  const limit = parseFiniteNumber(extraUsage.monthlyLimit);
+  const used = parseFiniteNumber(extraUsage.usedCredits);
+  if (limit == null || limit <= 0 || used == null) return null;
+
+  const utilization = clampFraction(parseFiniteNumber(extraUsage.utilization));
+  const percent = clampPercent((utilization ?? used / limit) * 100);
+
+  return {
+    id: 'extra_usage',
+    label: 'Extra Usage',
+    unit: 'credits',
+    remaining: Math.max(limit - used, 0),
+    limit,
+    resetAt: parseRateLimitResetAt(extraUsage.resetsAt, checkedAt),
+    ...(percent == null ? {} : { percent }),
+  } satisfies ProviderLimitWindow;
 }
 
 function buildAnthropicWindow(
@@ -232,6 +383,34 @@ async function readAnthropicStatuslineStatus(
   } catch {
     return null;
   }
+}
+
+function getAnthropicLocalProxyBaseUrl(provider: ProviderMetadata) {
+  const optionBaseUrl = asRecord(provider.options)?.baseURL ?? asRecord(provider.options)?.baseUrl;
+  const candidates = [getString(optionBaseUrl)];
+  for (const model of Object.values(provider.models)) {
+    candidates.push(model.api?.url?.trim() || '');
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const url = new URL(candidate);
+      if (isLoopbackHost(url.hostname)) return url.origin;
+    } catch {}
+  }
+
+  return null;
+}
+
+function isLoopbackHost(hostname: string) {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::1' ||
+    hostname === '::'
+  );
 }
 
 function extractAnthropicStatuslineWindows(
@@ -481,6 +660,11 @@ function parsePositiveInteger(value: unknown) {
   return Math.round(parsed);
 }
 
+function clampFraction(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value));
+}
+
 function parseJsonRecord(raw: string) {
   if (!raw.trim()) return null;
   try {
@@ -499,6 +683,15 @@ function parseStatuslinePercent(value: unknown) {
   const percent = parseFiniteNumber(value);
   if (percent == null || percent < 0 || percent > 100) return null;
   return Math.round(percent * 1000) / 1000;
+}
+
+function toTitleLabel(value: string) {
+  return (
+    value
+      .replace(/[_-]+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit'
+  );
 }
 
 function parseStatuslineResetAt(value: unknown, checkedAt: number) {

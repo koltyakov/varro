@@ -16,6 +16,7 @@ export function createMountBridgeOperations(deps: {
   createSession(): void;
   abortSession(): void;
   refreshMcps(): void;
+  refreshProviders(): void;
   applyTheme(theme: WebviewThemeKind): void;
 }) {
   const handleExtensionMessage = (msg: ExtensionMessage) => {
@@ -71,6 +72,7 @@ export function createMountBridgeOperations(deps: {
         requestOpenAttentionSessions: uiStore.requestOpenAttentionSessions,
         abortSession: deps.abortSession,
         refreshMcps: deps.refreshMcps,
+        refreshProviders: deps.refreshProviders,
         setWorkspaceStatusSummary: (summary) =>
           appStore.setState('workspaceStatusSummary', summary),
         setWorkspaceStatuses: (entries) => appStore.setState('workspaceStatuses', entries),
@@ -110,6 +112,7 @@ export function handleExtensionMessageWithDependencies(
     requestOpenAttentionSessions(): void;
     abortSession(): void;
     refreshMcps(): void;
+    refreshProviders(): void;
     setWorkspaceStatusSummary(summary: ReturnType<typeof getWorkspaceStatusEventSummary>): void;
     setWorkspaceStatuses(
       payload: {
@@ -193,6 +196,9 @@ export function handleExtensionMessageWithDependencies(
         deps.refreshMcps();
       }
       break;
+    case 'providers/refresh':
+      deps.refreshProviders();
+      break;
   }
 }
 
@@ -213,11 +219,13 @@ export function registerFocusStateTracking(deps: {
   isLoading(): boolean;
   getActiveSessionId(): string | null;
   recheckSessionStatus(sessionId: string): void;
+  refreshProviders(): void;
 }) {
   const handleVisibilityChange = () => {
     const visible = document.visibilityState === 'visible';
     deps.setDocumentVisible(visible);
     deps.postFocusState();
+    if (visible) deps.refreshProviders();
 
     const sessionId = deps.getActiveSessionId();
     if (visible && deps.isLoading() && sessionId) {
@@ -225,7 +233,10 @@ export function registerFocusStateTracking(deps: {
     }
   };
 
-  const handleFocus = () => deps.postFocusState();
+  const handleFocus = () => {
+    deps.postFocusState();
+    deps.refreshProviders();
+  };
   const handleBlur = () => deps.postFocusState();
 
   document.addEventListener('visibilitychange', handleVisibilityChange);

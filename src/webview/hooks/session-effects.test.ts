@@ -49,6 +49,7 @@ describe('session effect helpers', () => {
         getServerState: () => 'running',
         areProvidersLoaded: () => true,
         isDocumentVisible: () => true,
+        hasActiveSessions: () => false,
         getActiveProviderSelection: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
         getProviderLimit: () => null,
         loadProviderLimit,
@@ -74,7 +75,7 @@ describe('session effect helpers', () => {
     }
   });
 
-  it('does not refresh provider limits when the current model is unsupported', async () => {
+  it('refreshes provider limits even when the current model was previously unsupported', async () => {
     const loadProviderLimit = vi.fn(async () => null);
 
     const dispose = createRoot((cleanup) => {
@@ -82,6 +83,7 @@ describe('session effect helpers', () => {
         getServerState: () => 'running',
         areProvidersLoaded: () => true,
         isDocumentVisible: () => true,
+        hasActiveSessions: () => false,
         getActiveProviderSelection: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
         getProviderLimit: () => ({
           providerID: 'openai',
@@ -101,9 +103,73 @@ describe('session effect helpers', () => {
 
     try {
       await Promise.resolve();
-      expect(loadProviderLimit).not.toHaveBeenCalled();
+      expect(loadProviderLimit).toHaveBeenCalledWith('openai', 'gpt-4o');
     } finally {
       dispose();
+    }
+  });
+
+  it('keeps polling provider limits after an unsupported result', async () => {
+    vi.useFakeTimers();
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+
+    const loadProviderLimit = vi.fn(async () => ({
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet-4',
+      status: 'unsupported' as const,
+      source: 'provider' as const,
+      checkedAt: 1,
+      note: 'Temporary unsupported state',
+    }));
+    let currentLimit: {
+      providerID: string;
+      modelID: string;
+      status: 'unsupported';
+      source: 'provider';
+      checkedAt: number;
+      note: string;
+    } | null = null;
+    const setProviderLimit = vi.fn((_, __, limit) => {
+      currentLimit = limit;
+    });
+
+    const dispose = createRoot((cleanup) => {
+      registerProviderLimitRefreshEffect({
+        getServerState: () => 'running',
+        areProvidersLoaded: () => true,
+        isDocumentVisible: () => true,
+        hasActiveSessions: () => false,
+        getActiveProviderSelection: () => ({ providerID: 'anthropic', modelID: 'claude-sonnet-4' }),
+        getProviderLimit: () => currentLimit,
+        loadProviderLimit,
+        setProviderLimit,
+        getPollIntervalMs: () => 30_000,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(loadProviderLimit).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(loadProviderLimit).toHaveBeenCalledTimes(2);
+      expect(setProviderLimit).toHaveBeenCalledTimes(2);
+    } finally {
+      dispose();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: originalVisibility,
+      });
+      vi.useRealTimers();
     }
   });
 
@@ -123,6 +189,7 @@ describe('session effect helpers', () => {
         getServerState: () => 'running',
         areProvidersLoaded: () => true,
         isDocumentVisible: () => true,
+        hasActiveSessions: () => false,
         getActiveProviderSelection: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
         getProviderLimit: () => null,
         loadProviderLimit,
@@ -163,6 +230,7 @@ describe('session effect helpers', () => {
         getServerState: () => 'running',
         areProvidersLoaded: () => true,
         isDocumentVisible: () => true,
+        hasActiveSessions: () => false,
         getActiveProviderSelection: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
         getProviderLimit: () => null,
         loadProviderLimit,
@@ -208,6 +276,7 @@ describe('session effect helpers', () => {
         getServerState: () => 'running',
         areProvidersLoaded: () => true,
         isDocumentVisible: () => true,
+        hasActiveSessions: () => false,
         getActiveProviderSelection: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
         getProviderLimit: () => null,
         loadProviderLimit,
@@ -223,6 +292,98 @@ describe('session effect helpers', () => {
       await Promise.resolve();
       vi.advanceTimersByTime(300_000);
       expect(loadProviderLimit).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: originalVisibility,
+      });
+      vi.useRealTimers();
+    }
+  });
+
+  it('polls provider limits more often while sessions are active on the default interval', async () => {
+    vi.useFakeTimers();
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+
+    const loadProviderLimit = vi.fn(async () => null);
+
+    const dispose = createRoot((cleanup) => {
+      registerProviderLimitRefreshEffect({
+        getServerState: () => 'running',
+        areProvidersLoaded: () => true,
+        isDocumentVisible: () => true,
+        hasActiveSessions: () => true,
+        getActiveProviderSelection: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+        getProviderLimit: () => null,
+        loadProviderLimit,
+        setProviderLimit: vi.fn(),
+        getPollIntervalMs: () => 120_000,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      loadProviderLimit.mockClear();
+
+      vi.advanceTimersByTime(29_999);
+      expect(loadProviderLimit).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(loadProviderLimit).toHaveBeenCalledWith('openai', 'gpt-4o');
+    } finally {
+      dispose();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: originalVisibility,
+      });
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a custom provider-limit refresh interval even while sessions are active', async () => {
+    vi.useFakeTimers();
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+
+    const loadProviderLimit = vi.fn(async () => null);
+
+    const dispose = createRoot((cleanup) => {
+      registerProviderLimitRefreshEffect({
+        getServerState: () => 'running',
+        areProvidersLoaded: () => true,
+        isDocumentVisible: () => true,
+        hasActiveSessions: () => true,
+        getActiveProviderSelection: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+        getProviderLimit: () => null,
+        loadProviderLimit,
+        setProviderLimit: vi.fn(),
+        getPollIntervalMs: () => 45_000,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      loadProviderLimit.mockClear();
+
+      vi.advanceTimersByTime(44_999);
+      expect(loadProviderLimit).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(loadProviderLimit).toHaveBeenCalledWith('openai', 'gpt-4o');
     } finally {
       dispose();
       Object.defineProperty(document, 'visibilityState', {

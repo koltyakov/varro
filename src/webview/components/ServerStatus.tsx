@@ -136,8 +136,8 @@ export function ServerStatus() {
             <p class="text-[12px] leading-normal text-vscode-muted">
               OpenCode is running, but it does not have any providers configured yet.
               <br />
-              Add one with the provider login command, then restart Varro if models still do not
-              appear.
+              Add one with the provider login command. Varro will refresh the provider list
+              automatically when setup completes.
             </p>
           </div>
           <div class="w-full px-4">

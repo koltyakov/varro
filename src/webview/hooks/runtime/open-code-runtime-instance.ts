@@ -230,6 +230,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         refreshMcps: () => {
           void loadMcps();
         },
+        refreshProviders: () => {
+          void Promise.all([loadProviders(), loadCompatibilityState()]);
+        },
         applyTheme,
       });
 
@@ -257,6 +260,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         getActiveSessionId: () => appStore.state.activeSessionId,
         recheckSessionStatus: (sessionId) => {
           void recheckSessionStatus(sessionId);
+        },
+        refreshProviders: () => {
+          void Promise.all([loadProviders(), loadCompatibilityState()]);
         },
       });
 
@@ -289,6 +295,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       getServerState: () => appStore.state.serverStatus.state,
       areProvidersLoaded: () => appStore.state.providersLoaded,
       isDocumentVisible: documentVisible,
+      hasActiveSessions: () =>
+        Object.values(appStore.state.sessionStatus).some(
+          (status) => status.type === 'busy' || status.type === 'retry'
+        ),
       getActiveProviderSelection,
       getProviderLimit: routingStore.getProviderLimit,
       loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),

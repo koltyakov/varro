@@ -314,7 +314,7 @@ describe('useOpenCode initialization', () => {
     }
   });
 
-  it('skips provider-limit refresh polling after an unsupported response', async () => {
+  it('continues provider-limit refresh polling after an unsupported response', async () => {
     const originalVisibility = document.visibilityState;
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -370,8 +370,9 @@ describe('useOpenCode initialization', () => {
       stateModule.setState('providersLoaded', true);
 
       await vi.waitFor(() => {
-        expect(clientMocks.providerLimit).toHaveBeenCalledTimes(1);
+        expect(clientMocks.providerLimit.mock.calls.length).toBeGreaterThan(0);
       });
+      const callsBeforeVisibilityChange = clientMocks.providerLimit.mock.calls.length;
 
       stateModule.setState('providerLimits', {
         'openai:gpt-4o': {
@@ -387,7 +388,11 @@ describe('useOpenCode initialization', () => {
       document.dispatchEvent(new Event('visibilitychange'));
       await Promise.resolve();
 
-      expect(clientMocks.providerLimit).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => {
+        expect(clientMocks.providerLimit.mock.calls.length).toBeGreaterThan(
+          callsBeforeVisibilityChange
+        );
+      });
     } finally {
       dispose();
       Object.defineProperty(document, 'visibilityState', {

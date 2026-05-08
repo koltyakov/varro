@@ -19,6 +19,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
   switch (type) {
     case 'ready':
     case 'context/request':
+    case 'providers/refresh':
     case 'terminal-selection/clear':
     case 'files/clear':
     case 'files/pick':

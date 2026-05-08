@@ -231,6 +231,7 @@ export type InitialWebviewState = {
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
   | { type: 'server/event'; payload: ServerEvent }
+  | { type: 'providers/refresh' }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }
@@ -257,6 +258,7 @@ export type ExtensionMessage =
 export type WebviewMessage =
   | { type: 'context/request' }
   | { type: 'webview/focus'; payload: { focused: boolean } }
+  | { type: 'providers/refresh' }
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
   | { type: 'session/export'; payload: { sessionId: string } }

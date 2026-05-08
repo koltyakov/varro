@@ -39,6 +39,15 @@ const provider: ProviderMetadata = {
   models: {},
 };
 
+const localProxyProvider: ProviderMetadata = {
+  id: 'anthropic',
+  options: {
+    apiKey: 'x',
+    baseURL: 'http://127.0.0.1:3456',
+  },
+  models: {},
+};
+
 describe('createAnthropicAdapter', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
@@ -112,6 +121,112 @@ describe('createAnthropicAdapter', () => {
           percent: 15.2,
         },
       ],
+    });
+  });
+
+  it('reads quota windows from a local Claude proxy when Anthropic uses a loopback base URL', async () => {
+    vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          buckets: [
+            {
+              type: 'five_hour',
+              utilization: 0.42,
+              resetsAt: 1_766_000_000_000,
+            },
+            {
+              type: 'seven_day_sonnet',
+              utilization: 0.15,
+              resetsAt: 1_766_400_000_000,
+            },
+          ],
+          extraUsage: {
+            isEnabled: true,
+            monthlyLimit: 50,
+            usedCredits: 12.5,
+            utilization: 0.25,
+            currency: 'USD',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    const status = await adapter.fetch({
+      provider: localProxyProvider,
+      authStore: {},
+      modelID: 'claude-sonnet-4',
+      checkedAt: 1_000,
+    });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    expect(String(url)).toBe('http://127.0.0.1:3456/v1/usage/quota');
+    expect(init).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          'User-Agent': 'Varro/0.1.0',
+        }),
+      })
+    );
+    expect(status).toEqual({
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet-4',
+      status: 'available',
+      source: 'provider',
+      checkedAt: 1_000,
+      note: 'Read from local Claude proxy quota endpoint',
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5-Hour Limit',
+          unit: 'unknown',
+          remaining: 58,
+          limit: 100,
+          resetAt: 1_766_000_000_000,
+          percent: 42,
+        },
+        {
+          id: 'seven_day_sonnet',
+          label: 'Weekly Sonnet',
+          unit: 'unknown',
+          remaining: 85,
+          limit: 100,
+          resetAt: 1_766_400_000_000,
+          percent: 15,
+        },
+        {
+          id: 'extra_usage',
+          label: 'Extra Usage',
+          unit: 'credits',
+          remaining: 37.5,
+          limit: 50,
+          resetAt: null,
+          percent: 25,
+        },
+      ],
+    });
+  });
+
+  it('returns a local proxy error when a loopback Anthropic proxy has no quota data and no OAuth credentials', async () => {
+    vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
+    vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 404 }));
+
+    const status = await adapter.fetch({
+      provider: localProxyProvider,
+      authStore: {},
+      modelID: null,
+      checkedAt: 1_000,
+    });
+
+    expect(status).toEqual({
+      providerID: 'anthropic',
+      modelID: null,
+      status: 'error',
+      source: 'provider',
+      checkedAt: 1_000,
+      note: 'Local Claude proxy quota endpoint returned 404',
     });
   });
 
