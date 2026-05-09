@@ -6,6 +6,14 @@ function normalizeVariantName(variantName: string) {
 
 type VariantKind = 'low' | 'medium' | 'high';
 
+export function normalizeModelVariant(
+  modelID: string | null | undefined,
+  variant: string | null | undefined
+) {
+  if (modelID === 'gpt-5.5' && variant === 'minimal') return 'low';
+  return variant || null;
+}
+
 function getVariantKind(variantName: string): VariantKind | null {
   const normalized = normalizeVariantName(variantName);
   if (/\b(minimal|low|light|fast)\b/.test(normalized)) return 'low';
@@ -51,24 +59,34 @@ export function getMatchingVariant(
 
   const targetVariants = getVariantsForModel(target.providerID, target.modelID, providers);
   if (targetVariants.length === 0) return null;
-  if (targetVariants.includes(source.variant)) return source.variant;
+
+  if (shouldPreferLowReasoningByDefault(target.modelID)) {
+    const preferredVariant = getPreferredVariant(target.providerID, target.modelID, providers);
+    if (preferredVariant) return preferredVariant;
+  }
+
+  if (targetVariants.includes(source.variant)) {
+    return normalizeModelVariant(target.modelID, source.variant);
+  }
 
   const sourceKind = getVariantKind(source.variant);
   if (sourceKind) {
     const sameKindVariant = targetVariants.find(
       (variant) => getVariantKind(variant) === sourceKind
     );
-    if (sameKindVariant) return sameKindVariant;
+    if (sameKindVariant) return normalizeModelVariant(target.modelID, sameKindVariant);
   }
 
   const sourceVariants = getVariantsForModel(source.providerID, source.modelID, providers);
   const sourceIndex = sourceVariants.indexOf(source.variant);
   if (sourceIndex >= 0) {
-    if (sourceVariants.length === 1) return targetVariants[0]!;
+    if (sourceVariants.length === 1) {
+      return normalizeModelVariant(target.modelID, targetVariants[0]!);
+    }
     const targetIndex = Math.round(
       (sourceIndex / (sourceVariants.length - 1)) * (targetVariants.length - 1)
     );
-    return targetVariants[targetIndex]!;
+    return normalizeModelVariant(target.modelID, targetVariants[targetIndex]!);
   }
 
   return getPreferredVariant(target.providerID, target.modelID, providers);
@@ -86,26 +104,28 @@ export function getPreferredVariant(
 
   if (shouldPreferLowReasoningByDefault(modelID)) {
     const lowVariant = variants.find((variant) => isLowReasoningVariant(variant));
-    if (lowVariant) return lowVariant;
+    if (lowVariant) return normalizeModelVariant(modelID, lowVariant);
   }
 
   const lastIndex = variants.length - 1;
   const highIndex = variants.findIndex(
     (variant, index) => index < lastIndex && isHighReasoningVariant(variant)
   );
-  if (highIndex >= 0) return variants[highIndex]!;
+  if (highIndex >= 0) return normalizeModelVariant(modelID, variants[highIndex]!);
 
   const preferredIndex = Math.max(0, lastIndex - 1);
   const preferredVariant = variants[preferredIndex]!;
-  if (!isLowReasoningVariant(preferredVariant)) return preferredVariant;
+  if (!isLowReasoningVariant(preferredVariant)) {
+    return normalizeModelVariant(modelID, preferredVariant);
+  }
 
   for (let i = preferredIndex + 1; i < variants.length; i++) {
-    if (!isLowReasoningVariant(variants[i]!)) return variants[i]!;
+    if (!isLowReasoningVariant(variants[i]!)) return normalizeModelVariant(modelID, variants[i]!);
   }
 
   for (let i = 0; i < preferredIndex; i++) {
-    if (!isLowReasoningVariant(variants[i]!)) return variants[i]!;
+    if (!isLowReasoningVariant(variants[i]!)) return normalizeModelVariant(modelID, variants[i]!);
   }
 
-  return preferredVariant;
+  return normalizeModelVariant(modelID, preferredVariant);
 }

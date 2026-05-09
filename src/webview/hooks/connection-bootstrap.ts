@@ -1,4 +1,5 @@
 import type { Message, Part, SessionStatus } from '../types';
+import { normalizeModelVariant } from '../lib/model-variants';
 
 type SessionEntry = { info: Message; parts: Part[] };
 
@@ -39,7 +40,7 @@ export function buildInterruptedSessionContinueBody(args: {
       modelID: args.model.modelID,
     };
     if (args.model.variant) {
-      body.variant = args.model.variant;
+      body.variant = normalizeModelVariant(args.model.modelID, args.model.variant) || undefined;
     }
   }
 

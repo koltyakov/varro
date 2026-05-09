@@ -1,6 +1,7 @@
 import type { DroppedFile } from '../../shared/protocol';
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
+export type ModelVariantSelections = Record<string, string>;
 
 export type SessionSelectedAgents = Record<string, string>;
 export type SessionSelectedModels = Record<string, SelectedModel>;

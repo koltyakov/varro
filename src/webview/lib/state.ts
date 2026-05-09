@@ -19,6 +19,7 @@ import type {
 } from '../types';
 import type {
   ClipboardImage,
+  ModelVariantSelections,
   QueuedMessage,
   SelectedModel,
   SessionSelectedAgents,
@@ -115,6 +116,7 @@ export interface AppState {
   sessionSelectedAgents: SessionSelectedAgents;
   selectedModel: SelectedModel | null;
   sessionSelectedModels: SessionSelectedModels;
+  modelVariantSelections: ModelVariantSelections;
   sessionSelectedMcps: SessionSelectedMcps;
   hiddenProviders: string[];
   hiddenModels: string[];
@@ -274,6 +276,8 @@ export function createAppState(): AppStateInstance {
     selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
     sessionSelectedModels:
       readStored<SessionSelectedModels>(STORAGE_KEYS.sessionSelectedModels) || {},
+    modelVariantSelections:
+      readStored<ModelVariantSelections>(STORAGE_KEYS.modelVariantSelections) || {},
     sessionSelectedMcps: readStored<SessionSelectedMcps>(STORAGE_KEYS.sessionSelectedMcps) || {},
     hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
     hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
@@ -1106,6 +1110,18 @@ export function getSelectedModelForSession(
   return state.sessionSelectedModels[sessionId] || null;
 }
 
+export function getModelVariantSelectionKey(providerID: string, modelID: string) {
+  return `${providerID}:${modelID}`;
+}
+
+export function getStoredVariantForModel(
+  providerID: string | null | undefined,
+  modelID: string | null | undefined
+): string | null {
+  if (!providerID || !modelID) return null;
+  return state.modelVariantSelections[getModelVariantSelectionKey(providerID, modelID)] || null;
+}
+
 export function getSelectedAgentForSession(sessionId: string | null | undefined): string | null {
   if (!sessionId) return null;
   return state.sessionSelectedAgents[sessionId] || null;
@@ -1127,6 +1143,15 @@ export function setSelectedModel(
     setState('selectedModel', model);
   }
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedModel, model);
+
+  if (model?.variant) {
+    const key = getModelVariantSelectionKey(model.providerID, model.modelID);
+    if (state.modelVariantSelections[key] !== model.variant) {
+      const nextSelections = { ...state.modelVariantSelections, [key]: model.variant };
+      setState('modelVariantSelections', nextSelections);
+      writeStored(STORAGE_KEYS.modelVariantSelections, nextSelections);
+    }
+  }
 
   if (sessionId) {
     if (model) {

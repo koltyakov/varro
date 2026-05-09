@@ -37,7 +37,9 @@ test('keeps selected model, agent, MCP, and permission mode after reload', async
     )
     .toMatchObject({
       sessionSelectedAgents: JSON.stringify({ [SESSION_ID]: 'plan' }),
-      sessionSelectedModels: JSON.stringify({ [SESSION_ID]: { providerID: 'z-ai', modelID: 'glm-5.1' } }),
+      sessionSelectedModels: JSON.stringify({
+        [SESSION_ID]: { providerID: 'z-ai', modelID: 'glm-5.1', variant: 'balanced' },
+      }),
       sessionPermissionModes: JSON.stringify({ [SESSION_ID]: 'full' }),
       sessionSelectedMcps: JSON.stringify({ [SESSION_ID]: ['chrome', 'github'] }),
     });

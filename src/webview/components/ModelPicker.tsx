@@ -7,6 +7,7 @@ import {
   modelSupportsVariants,
   modelSupportsVision,
 } from '../lib/model-capabilities';
+import { normalizeModelVariant } from '../lib/model-variants';
 
 interface ModelSelection {
   providerID?: string;
@@ -368,7 +369,9 @@ export function getVariantsForModel(
   const provider = providers.find((p) => p.id === providerID);
   const model = provider?.models[modelID];
   if (!model?.variants) return [];
-  return Object.keys(model.variants);
+  return Array.from(
+    new Set(Object.keys(model.variants).map((variant) => normalizeModelVariant(modelID, variant)))
+  ).filter((variant): variant is string => !!variant);
 }
 
 export { formatThinkingLabel, formatContextLimit };

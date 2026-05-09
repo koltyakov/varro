@@ -46,6 +46,7 @@ vi.mock('../../lib/client', () => ({
 }));
 
 vi.mock('../../lib/state', () => ({
+  getStoredVariantForModel: vi.fn(() => null),
   getVisibleProviders: vi.fn((providers) => providers),
   isSessionAwaitingInput: vi.fn(() => false),
   state: stateMock,

@@ -12,6 +12,7 @@ import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { postMessage } from '../../lib/bridge';
 import { collectSessionTreeIds } from '../../lib/session-tree-index';
+import { normalizeModelVariant } from '../../lib/model-variants';
 import {
   buildIterationPrompt,
   buildRepairSubAgentPrompt,
@@ -270,7 +271,9 @@ async function sendPrompt(childId: string, prompt: string, config: RalphConfig):
   };
   if (config.model) {
     body.model = { providerID: config.model.providerID, modelID: config.model.modelID };
-    if (config.model.variant) body.variant = config.model.variant;
+    if (config.model.variant) {
+      body.variant = normalizeModelVariant(config.model.modelID, config.model.variant) || undefined;
+    }
   }
   if (config.agent) body.agent = config.agent;
   await client.session.sendAsync(childId, body);

@@ -1,7 +1,7 @@
 import { Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { Dynamic, Portal } from 'solid-js/web';
 import { client } from '../../lib/client';
-import { isSessionAwaitingInput, state } from '../../lib/state';
+import { getStoredVariantForModel, isSessionAwaitingInput, state } from '../../lib/state';
 import { deleteSession, selectSession } from '../../hooks/useOpenCode';
 import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
 import type { RalphConfig, RalphSelectedModel } from '../../../shared/ralph';
@@ -105,6 +105,8 @@ export function RalphForm() {
     const variants = availableVariants();
     if (!sel || variants.length === 0) return null;
     if (sel.variant && variants.includes(sel.variant)) return sel.variant;
+    const rememberedVariant = getStoredVariantForModel(sel.providerID, sel.modelID);
+    if (rememberedVariant && variants.includes(rememberedVariant)) return rememberedVariant;
     return getPreferredVariant(sel.providerID, sel.modelID, visibleProviders()) || variants[0];
   });
 

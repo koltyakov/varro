@@ -113,6 +113,7 @@ afterEach(() => {
   setState('allAgents', []);
   setState('providerDefaults', {});
   setState('selectedModel', null);
+  setState('modelVariantSelections', {});
   setState('providerLimits', {});
   setState('sessionStatus', {});
   setState('sessionUsageLimits', {});
@@ -1304,6 +1305,74 @@ describe('ChatInput', () => {
     });
     expect(container?.textContent).not.toContain('Usage limit reached');
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores reasoning selections per model instead of carrying them across models', async () => {
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+          'gpt-5.5': {
+            id: 'gpt-5.5',
+            name: 'GPT-5.5',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-5.4' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5.4', variant: 'medium' });
+    setState('modelVariantSelections', { 'openai:gpt-5.4': 'medium' });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const gpt55Option = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
+    ).find((button) => button.textContent?.includes('GPT-5.5'));
+    gpt55Option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.selectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+      variant: 'low',
+    });
+
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'high' });
+    setState('modelVariantSelections', {
+      'openai:gpt-5.4': 'medium',
+      'openai:gpt-5.5': 'high',
+    });
+
+    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const gpt54Option = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
+    ).find((button) => button.textContent?.includes('GPT-5.4'));
+    gpt54Option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.selectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'medium',
+    });
   });
 
   it('keeps the usage-limit banner visible when a retry notice predates active-session model hydration', () => {

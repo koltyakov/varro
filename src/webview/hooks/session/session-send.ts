@@ -19,7 +19,7 @@ import {
   getContextFileAttachmentSequence,
 } from '../../lib/attachment-order';
 import { modelSupportsVision } from '../../lib/model-capabilities';
-import { getPreferredVariant } from '../../lib/model-variants';
+import { getPreferredVariant, normalizeModelVariant } from '../../lib/model-variants';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
 import type { Provider } from '../../types';
 
@@ -209,7 +209,8 @@ export function buildSessionSendBody(
     };
   }
   if (effectiveModel?.variant) {
-    body.variant = effectiveModel.variant;
+    body.variant =
+      normalizeModelVariant(effectiveModel.modelID, effectiveModel.variant) || undefined;
   } else if (body.model) {
     body.variant =
       getPreferredVariant(body.model.providerID, body.model.modelID, composerState.providers) ||

@@ -50,6 +50,21 @@ describe('getPreferredVariant', () => {
     expect(getPreferredVariant('provider', 'gpt-5.5', providers)).toBe('low');
   });
 
+  it('normalizes legacy GPT-5.5 minimal reasoning to low', () => {
+    const providers = [
+      providerWithVariants(
+        {
+          minimal: {},
+          medium: {},
+          high: {},
+        },
+        'gpt-5.5'
+      ),
+    ];
+
+    expect(getPreferredVariant('provider', 'gpt-5.5', providers)).toBe('low');
+  });
+
   it('prefers high when it is available before the last option', () => {
     const providers = [
       providerWithVariants({
@@ -119,6 +134,70 @@ describe('getPreferredVariant', () => {
 });
 
 describe('getMatchingVariant', () => {
+  it('uses the low default when switching to GPT-5.5 instead of preserving high reasoning', () => {
+    const providers = [
+      {
+        ...providerWithVariants({}),
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+          'gpt-5.5': {
+            id: 'gpt-5.5',
+            name: 'GPT-5.5',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+        },
+      },
+    ];
+
+    expect(
+      getMatchingVariant(
+        { providerID: 'provider', modelID: 'gpt-5.4', variant: 'high' },
+        { providerID: 'provider', modelID: 'gpt-5.5' },
+        providers
+      )
+    ).toBe('low');
+  });
+
+  it('normalizes matching GPT-5.5 minimal reasoning to low', () => {
+    const providers = [
+      {
+        ...providerWithVariants({}),
+        models: {
+          source: {
+            id: 'source',
+            name: 'Source',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+          'gpt-5.5': {
+            id: 'gpt-5.5',
+            name: 'GPT-5.5',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { minimal: {}, medium: {}, high: {} },
+          },
+        },
+      },
+    ];
+
+    expect(
+      getMatchingVariant(
+        { providerID: 'provider', modelID: 'source', variant: 'medium' },
+        { providerID: 'provider', modelID: 'gpt-5.5' },
+        providers
+      )
+    ).toBe('low');
+  });
+
   it('preserves none when the new model also exposes it', () => {
     const providers = [
       {

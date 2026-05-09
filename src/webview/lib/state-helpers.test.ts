@@ -536,6 +536,16 @@ describe('state helpers', () => {
     expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
   });
 
+  it('remembers reasoning variants independently per model', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5.4', variant: 'medium' });
+    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' });
+
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-5.4')).toBe('medium');
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-5.5')).toBe('low');
+  });
+
   it('tracks global and per-session selected agents independently', async () => {
     const stateModule = await loadState();
 

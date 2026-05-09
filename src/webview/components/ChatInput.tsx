@@ -37,6 +37,7 @@ import {
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
   getSessionTreeIds,
+  getStoredVariantForModel,
   setSessionUsageLimit,
   isSessionCompacting,
   providerLimitPollIntervalSeconds,
@@ -72,7 +73,7 @@ import {
   hasProviderLimitWindowWithinThreshold,
   getPrimaryProviderLimitWindow,
 } from '../lib/format';
-import { getMatchingVariant, getPreferredVariant } from '../lib/model-variants';
+import { getPreferredVariant } from '../lib/model-variants';
 import {
   isAssistantMessage,
   getContextWindow,
@@ -1548,10 +1549,20 @@ export function ChatInput() {
   const effectiveVariant = createMemo(() => {
     const variants = availableVariants();
     if (variants.length === 0) return null;
-    return currentModel().variant && variants.includes(currentModel().variant!)
-      ? currentModel().variant
-      : getPreferredVariant(currentModel().providerID, currentModel().modelID, state.providers) ||
-          variants[0];
+    if (currentModel().variant && variants.includes(currentModel().variant!)) {
+      return currentModel().variant;
+    }
+
+    const rememberedVariant = getStoredVariantForModel(
+      currentModel().providerID,
+      currentModel().modelID
+    );
+    if (rememberedVariant && variants.includes(rememberedVariant)) return rememberedVariant;
+
+    return (
+      getPreferredVariant(currentModel().providerID, currentModel().modelID, state.providers) ||
+      variants[0]
+    );
   });
 
   const toolbarFitDependencies = createMemo(() => ({
@@ -1771,15 +1782,8 @@ export function ChatInput() {
               if (sel.providerID && sel.modelID) {
                 const matchedVariant =
                   sel.variant ||
-                  getMatchingVariant(
-                    {
-                      providerID: state.selectedModel?.providerID,
-                      modelID: state.selectedModel?.modelID,
-                      variant: state.selectedModel?.variant,
-                    },
-                    { providerID: sel.providerID, modelID: sel.modelID },
-                    state.providers
-                  ) ||
+                  getStoredVariantForModel(sel.providerID, sel.modelID) ||
+                  getPreferredVariant(sel.providerID, sel.modelID, state.providers) ||
                   undefined;
                 void handleSelectedModelChange({
                   providerID: sel.providerID,
