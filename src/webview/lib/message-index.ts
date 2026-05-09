@@ -2,15 +2,22 @@ import type { Message, Part } from '../types';
 
 type MessageEntry = { info: Message; parts: Part[] };
 
-export function createMessageIndex(onInvalidate?: () => void) {
+export type MessageIndexCallbacks = {
+  /** Called when message-level structure changes (add/remove/replace messages or info). */
+  onInvalidate?: () => void;
+  /** Called when only part-level content changes within existing messages. */
+  onPartChange?: () => void;
+};
+
+export function createMessageIndex(callbacks?: MessageIndexCallbacks | (() => void)) {
+  const onInvalidate = typeof callbacks === 'function' ? callbacks : callbacks?.onInvalidate;
+  const onPartChange =
+    typeof callbacks === 'function' ? callbacks : (callbacks?.onPartChange ?? onInvalidate);
+
   let messageIndexVersion = 0;
   let indexedVersion = -1;
   let messageById: Map<string, number> = new Map();
   let partById: Map<string, { msgIdx: number; partIdx: number }> = new Map();
-
-  function notifyStructureChange() {
-    onInvalidate?.();
-  }
 
   function ensureIndex(msgs: MessageEntry[]) {
     if (indexedVersion === messageIndexVersion) return;
@@ -28,7 +35,16 @@ export function createMessageIndex(onInvalidate?: () => void) {
   return {
     invalidate() {
       messageIndexVersion++;
-      notifyStructureChange();
+      onInvalidate?.();
+    },
+
+    /**
+     * Notify consumers that part contents changed at known locations without
+     * mutating the cached id-to-index maps. Use when an existing part is
+     * replaced in place (same id, same position).
+     */
+    notifyPartContentChange() {
+      onPartChange?.();
     },
 
     ensureIndex,
@@ -40,7 +56,7 @@ export function createMessageIndex(onInvalidate?: () => void) {
     ) {
       ensureIndex(msgs);
       partById.set(partId, location);
-      notifyStructureChange();
+      onPartChange?.();
     },
 
     removePart(
@@ -58,7 +74,7 @@ export function createMessageIndex(onInvalidate?: () => void) {
         }
       }
 
-      notifyStructureChange();
+      onPartChange?.();
     },
 
     findMessageIndex(msgs: MessageEntry[], id: string) {

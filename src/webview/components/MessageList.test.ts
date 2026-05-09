@@ -28,6 +28,7 @@ import {
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
   getLatestPlanImplementationMessageId,
+  getVisibleThreadMessages,
   MessageList,
   shouldShowPlanImplementationAction,
 } from './MessageList';
@@ -371,6 +372,39 @@ describe('getStickyUserMessagePreview', () => {
       )
     ).toBeNull();
   });
+
+  it('skips child-session user prompts that are rendered as compact handoff rows', () => {
+    expect(
+      getStickyUserMessagePreview(
+        [
+          {
+            info: {
+              ...userMessage('user-child-1'),
+              sessionID: 'child-1',
+            },
+            parts: [
+              {
+                id: 'text-child-1',
+                sessionID: 'child-1',
+                messageID: 'user-child-1',
+                type: 'text',
+                text: 'Explore repo structure',
+              },
+            ],
+          },
+          {
+            info: assistantMessage('assistant-child-1', {
+              sessionID: 'child-1',
+              mode: 'subagent',
+            }),
+            parts: [],
+          },
+          { info: assistantMessage('assistant-1'), parts: [] },
+        ],
+        2
+      )
+    ).toBeNull();
+  });
 });
 
 describe('getNextVisibleUserMessageTopMap', () => {
@@ -693,6 +727,135 @@ describe('MessageList empty state', () => {
 
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
+  });
+});
+
+describe('MessageList session scoping', () => {
+  it('hides child-session user prompts in the parent thread before subagent output arrives', () => {
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Research child',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ]);
+
+    const messages = [
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: {
+          id: 'user-child-1',
+          sessionID: 'child-1',
+          role: 'user',
+          time: { created: 3 },
+          agent: 'explore',
+          model: { providerID: 'openai', modelID: 'gpt-5.4' },
+        },
+        parts: [
+          {
+            id: 'text-child-1',
+            sessionID: 'child-1',
+            messageID: 'user-child-1',
+            type: 'text',
+            text: 'Research worktree internals',
+          },
+        ],
+      },
+    ];
+
+    expect(
+      getVisibleThreadMessages(messages, 'session-1').map((messageEntry) => messageEntry.info.id)
+    ).toEqual(['user-root-1']);
+    expect(
+      getVisibleThreadMessages(messages, 'child-1').map((messageEntry) => messageEntry.info.id)
+    ).toEqual(['user-child-1']);
+  });
+
+  it('hides child-session user prompts in the parent thread', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Explore Varro codebase structure',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ]);
+    replaceMessages([
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: assistantMessage('assistant-root-1', { parentID: 'user-root-1' }),
+        parts: [textPart('text-root-2', 'Root response')],
+      },
+      {
+        info: {
+          id: 'user-child-1',
+          sessionID: 'child-1',
+          role: 'user',
+          time: { created: 3 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-5.4' },
+        },
+        parts: [
+          {
+            id: 'text-child-1',
+            sessionID: 'child-1',
+            messageID: 'user-child-1',
+            type: 'text',
+            text: 'Explore Varro codebase structure',
+          },
+        ],
+      },
+      {
+        info: assistantMessage('assistant-child-1', {
+          sessionID: 'child-1',
+          mode: 'subagent',
+          agent: 'explore',
+          parentID: 'assistant-root-1',
+          time: { created: 4, completed: 5 },
+        }),
+        parts: [
+          {
+            id: 'text-child-2',
+            sessionID: 'child-1',
+            messageID: 'assistant-child-1',
+            type: 'text',
+            text: 'Subagent result',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Root prompt');
+    expect(container?.textContent).toContain('Root response');
+    expect(container?.textContent).not.toContain('Explore Varro codebase structure');
+    expect(container?.textContent).toContain('Subagent result');
   });
 });
 
@@ -1323,6 +1486,37 @@ describe('MessageList sticky prompt preview', () => {
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 · ↓ 310 - Agents 2');
+  });
+
+  it('keeps stopped assistant turns out of final answer formatting while preserving the summary', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 11_000 },
+          error: { name: 'aborted', data: { message: 'Aborted' } },
+          tokens: { input: 12, output: 4, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            ...textPart('text-assistant-1', 'Partial response before stop'),
+            messageID: 'assistant-1',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const response = container?.querySelector('[data-msg-id="assistant-1"] .chat-turn-content');
+    expect(response?.className).toContain('assistant-turn-content-plain');
+    expect(response?.className).not.toContain('assistant-turn-content-highlighted');
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 12 · ↓ 4');
   });
 
   it('summarizes in and out tokens for subagent sessions parented to the root session', () => {

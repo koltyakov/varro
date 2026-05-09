@@ -141,7 +141,7 @@ describe('createMessageIndex', () => {
     expect(idx.getIndexedPartLocation('p1')).toEqual({ msgIdx: 0, partIdx: 0 });
   });
 
-  it('appendPart and removePart call onInvalidate', () => {
+  it('appendPart and removePart call onInvalidate (legacy single-callback API)', () => {
     const onInvalidate = vi.fn();
     const idx = createMessageIndex(onInvalidate);
     const msgs = [entry('m1', ['p1'])];
@@ -152,6 +152,39 @@ describe('createMessageIndex', () => {
 
     idx.removePart(msgs, 'p1', { msgIdx: 0, partIdx: 0 });
     expect(onInvalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it('split callbacks: invalidate fires onInvalidate, part mutations fire onPartChange', () => {
+    const onInvalidate = vi.fn();
+    const onPartChange = vi.fn();
+    const idx = createMessageIndex({ onInvalidate, onPartChange });
+    const msgs = [entry('m1', ['p1'])];
+    idx.findPartLocation(msgs, 'p1');
+
+    idx.invalidate();
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
+    expect(onPartChange).toHaveBeenCalledTimes(0);
+
+    idx.appendPart(msgs, 'p2', { msgIdx: 0, partIdx: 1 });
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
+    expect(onPartChange).toHaveBeenCalledTimes(1);
+
+    idx.removePart(msgs, 'p1', { msgIdx: 0, partIdx: 0 });
+    expect(onPartChange).toHaveBeenCalledTimes(2);
+
+    idx.notifyPartContentChange();
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
+    expect(onPartChange).toHaveBeenCalledTimes(3);
+  });
+
+  it('split callbacks: onPartChange falls back to onInvalidate when omitted', () => {
+    const onInvalidate = vi.fn();
+    const idx = createMessageIndex({ onInvalidate });
+    const msgs = [entry('m1', ['p1'])];
+    idx.findPartLocation(msgs, 'p1');
+
+    idx.appendPart(msgs, 'p2', { msgIdx: 0, partIdx: 1 });
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
   });
 
   it('handles empty message array', () => {

@@ -13,6 +13,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
 import type { Message, Part } from '../../types';
+import { getSessionTreeIds, getSessionTreeRootId } from '../../lib/state';
 import {
   createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
@@ -295,10 +296,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       getServerState: () => appStore.state.serverStatus.state,
       areProvidersLoaded: () => appStore.state.providersLoaded,
       isDocumentVisible: documentVisible,
-      hasActiveSessions: () =>
-        Object.values(appStore.state.sessionStatus).some(
-          (status) => status.type === 'busy' || status.type === 'retry'
-        ),
+      isActiveSessionWorking: () => {
+        const activeSessionId = appStore.state.activeSessionId;
+        if (!activeSessionId) return false;
+        const rootId = getSessionTreeRootId(activeSessionId) || activeSessionId;
+        return getSessionTreeIds(rootId).some((sessionId) => {
+          const status = appStore.state.sessionStatus[sessionId];
+          return status?.type === 'busy' || status?.type === 'retry';
+        });
+      },
       getActiveProviderSelection,
       getProviderLimit: routingStore.getProviderLimit,
       loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),

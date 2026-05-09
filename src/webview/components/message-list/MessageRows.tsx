@@ -1,5 +1,6 @@
 import { For, Show, createMemo, onCleanup, onMount } from 'solid-js';
 import { implementPlan, openPlan } from '../../hooks/useOpenCode';
+import { isAbortedAssistantError } from '../../lib/aborted';
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { formatDuration, formatNumber, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
@@ -50,9 +51,17 @@ export function MessageRow(
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
-  const highlightFinalAnswer = () =>
-    props.highlightedAssistantMessageIds?.has(props.msg.info.id) ??
-    props.assistantDialogSummaryMap.has(props.msg.info.id);
+  const highlightFinalAnswer = () => {
+    const info = props.msg.info;
+    if (isAssistantMessage(info) && isAbortedAssistantError(info.error)) {
+      return false;
+    }
+
+    return (
+      props.highlightedAssistantMessageIds?.has(info.id) ??
+      props.assistantDialogSummaryMap.has(info.id)
+    );
+  };
   const streamingPartId = createMemo(() => {
     const partId = state.streamingPartId;
     if (!partId) return null;

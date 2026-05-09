@@ -23,6 +23,15 @@ export function getStickyUserMessagePreview(
     const entry = messages[i];
     if (!entry) continue;
     if (entry.info.role !== 'user') continue;
+    const session = entry.info.sessionID;
+    const isChildSessionPrompt = messages.some(
+      (candidate) =>
+        candidate.info.sessionID === session &&
+        candidate.info.role === 'assistant' &&
+        'mode' in candidate.info &&
+        candidate.info.mode === 'subagent'
+    );
+    if (isChildSessionPrompt) continue;
     const text = getUserMessagePreviewText(entry.parts);
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
     return {
@@ -46,6 +55,16 @@ export function getNextVisibleUserMessageTopMap(
     const entry = messages[index];
     result.set(entry.info.id, nextVisibleUserMessageTop);
     if (entry.info.role !== 'user') continue;
+
+    const session = entry.info.sessionID;
+    const isChildSessionPrompt = messages.some(
+      (candidate) =>
+        candidate.info.sessionID === session &&
+        candidate.info.role === 'assistant' &&
+        'mode' in candidate.info &&
+        candidate.info.mode === 'subagent'
+    );
+    if (isChildSessionPrompt) continue;
 
     const bounds = observedVisibleMessageBounds.get(entry.info.id);
     if (bounds && bounds.bottom > 0) {

@@ -71,7 +71,7 @@ export function getAssistantContainerVariant(params: {
     }
     if (
       params.highlightFinalAnswer &&
-      textPartCount > 1 &&
+      textPartCount >= 1 &&
       (params.hasStructuredAssistantParts || params.isSubagent)
     ) {
       return 'plain';

@@ -2,7 +2,7 @@ import type { DesktopSessionPaneSide, InitialWebviewState } from './protocol';
 
 export const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS = 120;
 export const DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS = -1;
-export const DEFAULT_PROVIDER_LIMIT_THRESHOLD_PERCENT = 40;
+export const DEFAULT_PROVIDER_LIMIT_THRESHOLD_PERCENT = 100;
 
 export type ExtensionConfigState = {
   expandThinkingByDefault: boolean;

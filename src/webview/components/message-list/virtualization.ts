@@ -20,13 +20,52 @@ export function buildVirtualMetrics(args: {
   itemIds: string[];
   measuredHeights: Map<string, number>;
   defaultItemHeight?: number;
+  /**
+   * Optional cached metrics from a previous build. When provided alongside the
+   * itemIds reference that produced it, the rebuild will reuse prefix entries
+   * up to the first divergence between the cached and new itemIds. Pair with
+   * dirtyFromIndex to also short-circuit when an existing item's measured
+   * height changed.
+   */
+  previous?: { metrics: VirtualMetrics; itemIds: string[] };
+  /**
+   * Lower bound (inclusive) of the first item whose measured height is known
+   * to have changed since the cached metrics were produced. Ignored when
+   * previous is missing.
+   */
+  dirtyFromIndex?: number;
 }): VirtualMetrics {
   const itemCount = args.itemIds.length;
   const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
-  const prefix = Array.from<number>({ length: itemCount + 1 });
-  prefix[0] = 0;
 
-  for (let index = 0; index < itemCount; index += 1) {
+  let rebuildFrom = 0;
+  let prefix: number[];
+
+  if (args.previous) {
+    const previousIds = args.previous.itemIds;
+    const previousPrefix = args.previous.metrics.prefix;
+    const upper = Math.min(previousIds.length, itemCount);
+    let commonLen = 0;
+    while (commonLen < upper && previousIds[commonLen] === args.itemIds[commonLen]) {
+      commonLen += 1;
+    }
+    rebuildFrom =
+      typeof args.dirtyFromIndex === 'number'
+        ? Math.max(0, Math.min(commonLen, args.dirtyFromIndex))
+        : commonLen;
+    prefix = Array.from<number>({ length: itemCount + 1 });
+    prefix[0] = 0;
+    const copyUpTo = Math.min(rebuildFrom, previousPrefix.length - 1);
+    for (let index = 1; index <= copyUpTo; index += 1) {
+      prefix[index] = previousPrefix[index];
+    }
+    rebuildFrom = copyUpTo;
+  } else {
+    prefix = Array.from<number>({ length: itemCount + 1 });
+    prefix[0] = 0;
+  }
+
+  for (let index = rebuildFrom; index < itemCount; index += 1) {
     const id = args.itemIds[index];
     prefix[index + 1] = prefix[index] + (args.measuredHeights.get(id) ?? defaultItemHeight);
   }

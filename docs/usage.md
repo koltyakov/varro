@@ -274,7 +274,7 @@ Provider limits:
 - Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity)
 - Default enabled IDs: `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, `openai`
 - `varro.providerLimits.disabled` - disable provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval
-- `varro.providerLimits.thresholdPercent` - show provider-limit UI only when any provider-limit window has this remaining percentage or less; defaults to `40`
+- `varro.providerLimits.thresholdPercent` - show provider-limit UI when any provider-limit window has this remaining percentage less than or equal to the threshold; defaults to `100`
 
 Chat view:
 

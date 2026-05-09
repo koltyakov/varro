@@ -124,6 +124,71 @@ describe('createAnthropicAdapter', () => {
     });
   });
 
+  it('merges fresh statusline windows with richer OAuth windows', async () => {
+    vi.mocked(stat).mockResolvedValue({
+      isFile: () => true,
+      mtimeMs: Date.now(),
+    } as Awaited<ReturnType<typeof stat>>);
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        rate_limits: {
+          five_hour: { used_percentage: 42.5, resets_at: 1_766_000_000 },
+        },
+      })
+    );
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          monthly_limit: {
+            utilization: 70,
+            monthly_limit: 100,
+            used_credits: 70,
+            resets_at: '2026-03-31T23:59:59Z',
+            is_enabled: true,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: { anthropic: { type: 'oauth', access: 'anthropic-auth-store-token' } },
+      modelID: 'claude-sonnet-4',
+      checkedAt: 1_000,
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(status).toEqual({
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet-4',
+      status: 'available',
+      source: 'provider',
+      checkedAt: 1_000,
+      note: 'Read from Anthropic statusline bridge file + Polled Anthropic OAuth usage endpoint',
+      windows: [
+        {
+          id: 'monthly_limit',
+          label: 'Monthly Limit',
+          unit: 'credits',
+          remaining: 30,
+          limit: 100,
+          resetAt: Date.parse('2026-03-31T23:59:59Z'),
+          percent: 70,
+        },
+        {
+          id: 'five_hour',
+          label: '5-Hour Limit',
+          unit: 'unknown',
+          remaining: 57.5,
+          limit: 100,
+          resetAt: 1_766_000_000_000,
+          percent: 42.5,
+        },
+      ],
+    });
+  });
+
   it('reads quota windows from a local Claude proxy when Anthropic uses a loopback base URL', async () => {
     vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
     vi.mocked(fetch).mockResolvedValue(
