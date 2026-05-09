@@ -13,13 +13,46 @@
     "correctness": "error",
     "suspicious": "warn"
   },
-  "rules": {
-    "eslint/eqeqeq": ["error", "always", { "null": "ignore" }],
-    "eslint/no-control-regex": "error",
-    "eslint/no-unused-vars": [
-      "error",
-      {
-        "argsIgnorePattern": "^_",
+    "rules": {
+      "eslint/eqeqeq": ["error", "always", { "null": "ignore" }],
+      "eslint/no-control-regex": "error",
+      "eslint/no-underscore-dangle": [
+        "warn",
+        {
+          "allow": [
+            "__initialTheme",
+            "__initialWebviewState",
+            "__parseMarkdownForTests",
+            "__resetMarkdownCachesForTests",
+            "__resetProviderLimitWindowSelectionsForTests",
+            "__sendToExtension",
+            "__varroPasteText",
+            "__vscodeWebviewState",
+            "_context",
+            "_disposeGeneration",
+            "_lastContextSnapshot",
+            "_lastDiagnosticsSourceKey",
+            "_lastEmittedContextSnapshot",
+            "_managedProcess",
+            "_phase",
+            "_port",
+            "_process",
+            "_processErrorHandler",
+            "_processExitHandler",
+            "_processStderrHandler",
+            "_processStdoutHandler",
+            "_restartTimer",
+            "_startAttemptId",
+            "_startPromise",
+            "_status",
+            "_terminalSelection"
+          ]
+        }
+      ],
+      "eslint/no-unused-vars": [
+        "error",
+        {
+          "argsIgnorePattern": "^_",
         "caughtErrors": "all",
         "caughtErrorsIgnorePattern": "^_",
         "ignoreRestSiblings": true,

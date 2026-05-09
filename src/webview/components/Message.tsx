@@ -24,12 +24,7 @@ import {
 } from './message/AssistantMessageContent';
 import { CompactionDivider } from './message/CompactionDivider';
 import { DiffSummary } from './message/DiffSummary';
-import {
-  UserMessageContent,
-  getUserMessagePreviewText,
-  parseUserMessageContent,
-  type ParsedUserMessageContent,
-} from './message/UserMessageContent';
+import { UserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 
 export {
   calculateAssistantPartVirtualRange,
