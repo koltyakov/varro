@@ -247,11 +247,13 @@ function compareProviderLimitDisplayWindows(a: ProviderLimitWindow, b: ProviderL
 }
 
 function getWindowPeriodPriority(window: ProviderLimitWindow) {
+  const id = window.id.toLowerCase();
   const period = getProviderLimitWindowPeriodLabel(window);
-  if (period === '5h') return 0;
+  const isSpark = id.includes('spark');
+  if (period === '5h') return isSpark ? 3 : 0;
   if (period === 'D') return 1;
-  if (period === 'W') return 2;
-  if (period === 'M') return 3;
+  if (period === 'W') return isSpark ? 4 : 2;
+  if (period === 'M') return 5;
   return 100;
 }
 

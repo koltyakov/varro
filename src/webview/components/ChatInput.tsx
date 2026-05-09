@@ -113,7 +113,7 @@ import type {
   SlashCommand,
 } from './chat-input/CompletionMenu';
 import type { Agent, AssistantMessage, Command, Message, Part, TextPart } from '../types';
-import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
+import type { DroppedFile, ExtensionMessage, ProviderLimitStatus } from '../../shared/protocol';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
 
@@ -293,6 +293,30 @@ export function isToolbarControlCompacted(
     'hide-context',
     'tight',
   ].includes(mode);
+}
+
+function filterCompactProviderLimitForModel(
+  limit: ProviderLimitStatus | null | undefined,
+  modelID: string | null | undefined,
+  modelName: string | null | undefined
+): ProviderLimitStatus | null {
+  if (!limit || limit.status !== 'available') return limit ?? null;
+
+  const isSparkModel = isCodexSparkModelLabel(modelID) || isCodexSparkModelLabel(modelName);
+  const windows = limit.windows.filter((window) => {
+    const isSparkWindow = window.id.toLowerCase().includes('spark');
+    return isSparkModel ? isSparkWindow : !isSparkWindow;
+  });
+
+  return {
+    ...limit,
+    windows,
+  };
+}
+
+function isCodexSparkModelLabel(value: string | null | undefined) {
+  const normalized = value?.toLowerCase() ?? '';
+  return normalized.includes('codex') && normalized.includes('spark');
 }
 
 export function ChatInput() {
@@ -1507,17 +1531,28 @@ export function ChatInput() {
     if (!current.providerID) return null;
     return getProviderLimit(current.providerID, current.modelID);
   });
+  const currentCompactProviderLimit = createMemo(() => {
+    const current = currentModel();
+    return filterCompactProviderLimitForModel(
+      currentProviderLimit(),
+      current.modelID,
+      current.modelName
+    );
+  });
   const showCurrentProviderLimit = createMemo(
     () =>
       showProviderLimits() &&
-      hasProviderLimitWindowWithinThreshold(currentProviderLimit(), providerLimitThresholdPercent())
+      hasProviderLimitWindowWithinThreshold(
+        currentCompactProviderLimit(),
+        providerLimitThresholdPercent()
+      )
   );
 
   const currentProviderLimitTitle = createMemo(() =>
-    showCurrentProviderLimit() ? formatProviderLimitTitle(currentProviderLimit()) : null
+    showCurrentProviderLimit() ? formatProviderLimitTitle(currentCompactProviderLimit()) : null
   );
   const currentProviderLimitBadges = createMemo(() =>
-    showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentProviderLimit()) : []
+    showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentCompactProviderLimit()) : []
   );
   createEffect(() => {
     if (!showCurrentProviderLimit() && showProviderLimitPopup()) {

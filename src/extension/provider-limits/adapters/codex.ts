@@ -18,6 +18,8 @@ const SEVEN_DAY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 const CODEX_WINDOW_LABELS: Record<string, string> = {
   five_hour: '5-Hour Limit',
   seven_day: 'Weekly All-Model',
+  spark_five_hour: '5-Hour Limit (Spark)',
+  spark_seven_day: 'Weekly Limit (Spark)',
   code_review: 'Review Requests',
 };
 
@@ -158,10 +160,12 @@ function extractCodexWindows(payload: unknown, checkedAt: number) {
   const secondaryQuota = buildCodexWindow('seven_day', secondaryWindow, checkedAt);
   if (secondaryQuota) windows.push(secondaryQuota);
 
+  const sparkWindows = extractCodexSparkWindows(record, checkedAt);
+
   const reviewQuota = buildCodexWindow('code_review', reviewWindow, checkedAt);
   if (reviewQuota) windows.push(reviewQuota);
 
-  return windows.toSorted(
+  return [...windows, ...sparkWindows].toSorted(
     (left, right) => codexWindowSortOrder(left.id) - codexWindowSortOrder(right.id)
   );
 }
@@ -185,6 +189,156 @@ function buildCodexWindow(
     resetAt: parseRateLimitResetAt(window.reset_at ?? window.resetAt, checkedAt),
     percent,
   } satisfies ProviderLimitWindow;
+}
+
+function extractCodexSparkWindows(record: Record<string, unknown>, checkedAt: number) {
+  const sparkRecord = findCodexSparkRecord(record);
+  const rateLimit = asRecord(
+    sparkRecord?.rate_limit ??
+      sparkRecord?.rateLimit ??
+      sparkRecord?.rate_limits ??
+      sparkRecord?.rateLimits ??
+      sparkRecord
+  );
+  const primaryWindow = asRecord(rateLimit?.primary_window ?? rateLimit?.primaryWindow);
+  const secondaryWindow = asRecord(rateLimit?.secondary_window ?? rateLimit?.secondaryWindow);
+  const explicitWindows = collectCodexSparkWindows(record, checkedAt);
+  if (explicitWindows.length > 0) return explicitWindows;
+  if (!sparkRecord) return [];
+
+  return dedupeCodexWindows(
+    [
+      buildCodexWindow('spark_five_hour', primaryWindow, checkedAt),
+      buildCodexWindow('spark_seven_day', secondaryWindow, checkedAt),
+    ].filter((window): window is ProviderLimitWindow => window != null)
+  );
+}
+
+function collectCodexSparkWindows(value: unknown, checkedAt: number) {
+  const windows: ProviderLimitWindow[] = [];
+  collectCodexSparkWindowsDeep(value, checkedAt, false, windows, 0);
+  return dedupeCodexWindows(windows);
+}
+
+function collectCodexSparkWindowsDeep(
+  value: unknown,
+  checkedAt: number,
+  inSparkContext: boolean,
+  windows: ProviderLimitWindow[],
+  depth: number
+) {
+  if (depth > 5) return;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectCodexSparkWindowsDeep(item, checkedAt, inSparkContext, windows, depth + 1);
+    }
+    return;
+  }
+
+  const record = asRecord(value);
+  if (!record) return;
+  const label = getString(
+    record.label ?? record.name ?? record.title ?? record.model_id ?? record.modelID ?? record.id
+  );
+  const nextSparkContext = inSparkContext || isCodexSparkModel(label);
+  if (nextSparkContext) {
+    const id = getCodexSparkWindowID(label || getString(record.key));
+    const window = id ? buildCodexWindow(id, record, checkedAt) : null;
+    if (window) windows.push(window);
+  }
+
+  for (const [key, child] of Object.entries(record)) {
+    collectCodexSparkWindowsDeep(
+      child,
+      checkedAt,
+      nextSparkContext || isCodexSparkModel(key),
+      windows,
+      depth + 1
+    );
+  }
+}
+
+function getCodexSparkWindowID(value: string) {
+  const normalized = value.toLowerCase();
+  if (!normalized.includes('spark')) return null;
+  if (normalized.includes('week') || normalized.includes('seven_day')) return 'spark_seven_day';
+  if (normalized.includes('5') || normalized.includes('five') || normalized.includes('hour')) {
+    return 'spark_five_hour';
+  }
+  return null;
+}
+
+function dedupeCodexWindows(windows: ProviderLimitWindow[]) {
+  const byID = new Map<string, ProviderLimitWindow>();
+  for (const window of windows) {
+    if (!byID.has(window.id)) byID.set(window.id, window);
+  }
+  return [...byID.values()];
+}
+
+function findCodexSparkRecord(record: Record<string, unknown>) {
+  const direct = asRecord(
+    record.spark_rate_limit ??
+      record.sparkRateLimit ??
+      record.spark_rate_limits ??
+      record.sparkRateLimits ??
+      record.codex_spark_rate_limit ??
+      record.codexSparkRateLimit ??
+      record.codex_spark_rate_limits ??
+      record.codexSparkRateLimits
+  );
+  if (direct) return direct;
+
+  return findCodexSparkRecordDeep(record, 0);
+}
+
+function findCodexSparkRecordDeep(
+  candidate: unknown,
+  depth: number
+): Record<string, unknown> | null {
+  if (depth > 4) return null;
+
+  if (Array.isArray(candidate)) {
+    for (const item of candidate) {
+      const nested = findCodexSparkRecordDeep(item, depth + 1);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  const record = asRecord(candidate);
+  if (!record) return null;
+
+  for (const [name, childValue] of Object.entries(record)) {
+    if (isCodexSparkModel(getString(childValue))) return normalizeCodexSparkRecord(record);
+
+    const child = asRecord(childValue);
+    if (Array.isArray(childValue)) {
+      const nested = findCodexSparkRecordDeep(childValue, depth + 1);
+      if (nested) return nested;
+    }
+    if (!child) continue;
+    if (isCodexSparkModel(name)) return normalizeCodexSparkRecord(child);
+    const key = getString(child.model ?? child.model_id ?? child.modelID ?? child.slug);
+    if (isCodexSparkModel(key)) return normalizeCodexSparkRecord(child);
+
+    const nested = findCodexSparkRecordDeep(child, depth + 1);
+    if (nested) return nested;
+  }
+
+  return null;
+}
+
+function normalizeCodexSparkRecord(record: Record<string, unknown>) {
+  return (
+    asRecord(record.rate_limit ?? record.rateLimit ?? record.rate_limits ?? record.rateLimits) ??
+    record
+  );
+}
+
+function isCodexSparkModel(modelID: string) {
+  const normalized = modelID.toLowerCase();
+  return normalized.includes('codex') && normalized.includes('spark');
 }
 
 function getCodexPrimaryWindowID(
@@ -214,8 +368,12 @@ function codexWindowSortOrder(id: string) {
       return 0;
     case 'seven_day':
       return 1;
-    case 'code_review':
+    case 'spark_five_hour':
       return 2;
+    case 'spark_seven_day':
+      return 3;
+    case 'code_review':
+      return 4;
     default:
       return 100;
   }

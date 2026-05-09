@@ -344,6 +344,50 @@ describe('format helpers', () => {
     ]);
   });
 
+  it('orders Spark provider limit windows after matching general windows', () => {
+    const limit = availableLimit([
+      {
+        id: 'spark_five_hour',
+        label: '5-Hour Limit (Spark)',
+        unit: 'requests',
+        remaining: 5,
+        limit: 100,
+        resetAt: null,
+      },
+      {
+        id: 'five_hour',
+        label: '5-Hour Limit',
+        unit: 'requests',
+        remaining: 98,
+        limit: 100,
+        resetAt: null,
+      },
+      {
+        id: 'spark_seven_day',
+        label: 'Weekly Limit (Spark)',
+        unit: 'requests',
+        remaining: 2,
+        limit: 100,
+        resetAt: null,
+      },
+      {
+        id: 'seven_day',
+        label: 'Weekly All-Model',
+        unit: 'requests',
+        remaining: 92,
+        limit: 100,
+        resetAt: null,
+      },
+    ]);
+
+    expect(getOrderedProviderLimitWindows(limit).map((window) => window.id)).toEqual([
+      'five_hour',
+      'seven_day',
+      'spark_five_hour',
+      'spark_seven_day',
+    ]);
+  });
+
   it('formats compact provider badges as remaining percent across units', () => {
     expect(
       formatProviderLimitCompact(
