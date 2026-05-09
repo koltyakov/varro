@@ -22,6 +22,7 @@ export async function abortSessionWithDependencies(deps: {
   getSessionStatus(sessionId: string): SessionStatus | undefined;
   getSessionUsageLimit(sessionId: string): unknown;
   markPendingAbortTree(sessionIds: string[]): void;
+  markRunningToolPartsAborted(sessionIds: string[]): void;
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   stopLoading(): void;
   abortRemoteSession(sessionId: string): Promise<unknown>;
@@ -46,6 +47,7 @@ export async function abortSessionWithDependencies(deps: {
   );
 
   deps.markPendingAbortTree(sessionTreeIds);
+  deps.markRunningToolPartsAborted(sessionTreeIds);
   for (const id of sessionTreeIds) {
     deps.setSessionStatusEntry(id, { type: 'idle' });
   }
@@ -176,6 +178,7 @@ type SessionControlDependencies = {
   getSessionStatus(sessionId: string): SessionStatus | undefined;
   getSessionUsageLimit(sessionId: string): unknown;
   markPendingAbortTree(sessionIds: string[]): void;
+  markRunningToolPartsAborted(sessionIds: string[]): void;
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   stopLoading(): void;
   abortRemoteSession(sessionId: string): Promise<unknown>;
@@ -220,6 +223,7 @@ export class SessionControlOperations {
       getSessionStatus: this.deps.getSessionStatus,
       getSessionUsageLimit: this.deps.getSessionUsageLimit,
       markPendingAbortTree: this.deps.markPendingAbortTree,
+      markRunningToolPartsAborted: this.deps.markRunningToolPartsAborted,
       setSessionStatusEntry: this.deps.setSessionStatusEntry,
       stopLoading: this.deps.stopLoading,
       abortRemoteSession: this.deps.abortRemoteSession,

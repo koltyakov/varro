@@ -13,7 +13,12 @@ export async function selectSessionWithStateDependencies(
   deps: {
     getActiveSessionId(): string | null;
     setActiveSessionId(id: string): void;
-    clearPendingAbort(sessionId: string): void;
+    hasPendingAbort(sessionId: string | null | undefined): boolean;
+    shouldIgnorePendingAbortStatus(
+      sessionId: string,
+      status: SessionStatus | null | undefined
+    ): boolean;
+    markRunningToolPartsAborted(sessionIds: string[]): void;
     persistActiveSessionId(id: string): void;
     markSessionSeen(id: string): void;
     clearDraftCurrentDocumentState(): void;
@@ -99,7 +104,12 @@ export async function syncSessionWithStateDependencies(
 type SessionSyncDependencies = {
   getActiveSessionId(): string | null;
   setActiveSessionId(id: string): void;
-  clearPendingAbort(sessionId: string): void;
+  hasPendingAbort(sessionId: string | null | undefined): boolean;
+  shouldIgnorePendingAbortStatus(
+    sessionId: string,
+    status: SessionStatus | null | undefined
+  ): boolean;
+  markRunningToolPartsAborted(sessionIds: string[]): void;
   persistActiveSessionId(id: string): void;
   markSessionSeen(id: string): void;
   clearDraftCurrentDocumentState(): void;
@@ -164,7 +174,9 @@ export class SessionSyncOperations {
       {
         getActiveSessionId: this.deps.getActiveSessionId,
         setActiveSessionId: this.deps.setActiveSessionId,
-        clearPendingAbort: this.deps.clearPendingAbort,
+        hasPendingAbort: this.deps.hasPendingAbort,
+        shouldIgnorePendingAbortStatus: this.deps.shouldIgnorePendingAbortStatus,
+        markRunningToolPartsAborted: this.deps.markRunningToolPartsAborted,
         persistActiveSessionId: this.deps.persistActiveSessionId,
         markSessionSeen: this.deps.markSessionSeen,
         clearDraftCurrentDocumentState: this.deps.clearDraftCurrentDocumentState,

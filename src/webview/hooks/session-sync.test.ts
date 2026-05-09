@@ -53,7 +53,9 @@ describe('session sync helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
-        clearPendingAbort: vi.fn(),
+        hasPendingAbort: () => false,
+        shouldIgnorePendingAbortStatus: () => false,
+        markRunningToolPartsAborted: vi.fn(),
         persistActiveSessionId: vi.fn(),
         markSessionSeen: vi.fn(),
         clearDraftCurrentDocumentState: vi.fn(),
@@ -164,7 +166,9 @@ describe('session sync helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
-        clearPendingAbort: vi.fn(),
+        hasPendingAbort: () => false,
+        shouldIgnorePendingAbortStatus: () => false,
+        markRunningToolPartsAborted: vi.fn(),
         persistActiveSessionId: vi.fn(),
         markSessionSeen: vi.fn(),
         clearDraftCurrentDocumentState: vi.fn(),

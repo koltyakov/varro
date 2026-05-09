@@ -44,7 +44,7 @@ const {
   redoSessionMock: vi.fn(async () => {}),
   undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
-  sendMessageMock: vi.fn(async () => {}),
+  sendMessageMock: vi.fn(async () => true),
 }));
 
 vi.mock('../hooks/useOpenCode', async () => {
@@ -125,6 +125,7 @@ afterEach(() => {
   setState('hiddenModels', []);
   __resetProviderLimitWindowSelectionsForTests();
   sendMessageMock.mockReset();
+  sendMessageMock.mockResolvedValue(true);
   runSlashCommandByNameMock.mockReset();
   runSlashCommandByNameMock.mockResolvedValue(true);
   abortSessionMock.mockReset();
@@ -797,8 +798,25 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
-    expect(sendMessageMock).toHaveBeenCalledWith('Follow up after stopping', { noReply: false });
+    expect(sendMessageMock).toHaveBeenCalledWith('Follow up after stopping', {
+      noReply: false,
+      allowPendingAbort: true,
+    });
     expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('restores composer text when send is blocked', async () => {
+    sendMessageMock.mockResolvedValue(false);
+    setInputText('Still here');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('Still here', { noReply: false });
+    expect(inputText()).toBe('Still here');
   });
 
   it('runs a typed slash command with args on Enter', async () => {

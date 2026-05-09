@@ -6,7 +6,12 @@ type SessionEntry = { info: Message; parts: Part[] };
 type SessionSelectionDeps = {
   getActiveSessionId(): string | null;
   setActiveSessionId(id: string): void;
-  clearPendingAbort(sessionId: string): void;
+  hasPendingAbort(sessionId: string | null | undefined): boolean;
+  shouldIgnorePendingAbortStatus(
+    sessionId: string,
+    status: SessionStatus | null | undefined
+  ): boolean;
+  markRunningToolPartsAborted(sessionIds: string[]): void;
   persistActiveSessionId(id: string): void;
   markSessionSeen(id: string): void;
   clearDraftCurrentDocumentState(): void;
@@ -60,7 +65,6 @@ export async function selectSessionWithDependencies(
   deps.clearDraftCurrentDocumentState();
   deps.resetToolCallExpansionState();
   deps.setActiveSessionId(id);
-  deps.clearPendingAbort(id);
 
   const { persistedAgent, fallbackAgent } = deps.resolvePersistedAgent(id);
   if (persistedAgent) {
@@ -93,6 +97,9 @@ export async function selectSessionWithDependencies(
       deps.markSessionSeen(id);
     }
     deps.setMessagesIncremental(messages);
+    if (deps.hasPendingAbort(id)) {
+      deps.markRunningToolPartsAborted([id]);
+    }
     deps.syncFailedSessionsFromMessages(messages);
     deps.requestMessageListScrollToBottom();
 
@@ -115,9 +122,13 @@ export async function selectSessionWithDependencies(
     const statuses = await deps.loadSessionStatuses();
     if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
 
-    deps.mergeSessionStatuses(statuses);
-    deps.updateUsageLimitState(id, statuses[id], messages);
-    const statusType = statuses[id]?.type;
+    const status = statuses[id];
+    const ignoredPendingAbortStatus = deps.shouldIgnorePendingAbortStatus(id, status);
+    if (!ignoredPendingAbortStatus) {
+      deps.mergeSessionStatuses(statuses);
+      deps.updateUsageLimitState(id, status, messages);
+    }
+    const statusType = ignoredPendingAbortStatus ? 'idle' : status?.type;
     if (statusType === 'busy' || statusType === 'retry') {
       deps.startLoading();
     } else {

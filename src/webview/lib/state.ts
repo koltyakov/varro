@@ -1791,6 +1791,40 @@ export function updateMessagePart(part: Part) {
   );
 }
 
+export function markRunningToolPartsAborted(sessionIds: string[]) {
+  const sessionIdSet = new Set(sessionIds);
+  const end = Date.now();
+  setState(
+    'messages',
+    produce((msgs) => {
+      for (const msg of msgs) {
+        for (let index = 0; index < msg.parts.length; index += 1) {
+          const part = msg.parts[index];
+          if (
+            part?.type !== 'tool' ||
+            !sessionIdSet.has(part.sessionID) ||
+            part.state.status !== 'running'
+          ) {
+            continue;
+          }
+
+          msg.parts[index] = {
+            ...part,
+            state: {
+              status: 'error',
+              input: part.state.input,
+              error: 'Aborted',
+              metadata: { ...part.state.metadata, aborted: true },
+              time: { start: part.state.time.start, end },
+            },
+          };
+          messageIndex.notifyPartContentChange();
+        }
+      }
+    })
+  );
+}
+
 export function getMessageById(id: string) {
   const index = messageIndex.findMessageIndex(state.messages, id);
   return index === -1 ? null : state.messages[index] || null;
