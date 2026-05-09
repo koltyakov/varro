@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
 import type { Provider } from '../types';
 import {
@@ -67,6 +67,10 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('builds payload with unique live selection and explicit same-file context', () => {
     const result = buildSessionSendBody(
       createState({
@@ -340,6 +344,7 @@ describe('session-send helpers', () => {
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         sendAsync,
+        getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
         clearTerminalSelection: vi.fn(),
         clearClipboardImages: vi.fn(),
@@ -361,6 +366,54 @@ describe('session-send helpers', () => {
     expect(sendAsync).toHaveBeenCalledWith('session-2', {
       parts: [{ type: 'text', text: 'hello' }],
     });
+  });
+
+  it('retries message sync when the immediate post-send sync leaves the active chat empty', async () => {
+    vi.useFakeTimers();
+    let messageCount = 0;
+    const syncSessionMessages = vi.fn(async () => {
+      if (syncSessionMessages.mock.calls.length >= 2) messageCount = 2;
+    });
+    const sendPromise = sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        hasPendingAbort: () => false,
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: { parts: [{ type: 'text', text: 'hello' }] },
+          effectiveModel: null,
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync: vi.fn(async () => {}),
+        getMessageCount: () => messageCount,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages,
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading: vi.fn(),
+        showBlockedSendMessage: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'hello'
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await sendPromise;
+
+    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
   });
 
   it('preserves the live composer when replaying a queued attachment snapshot', async () => {
@@ -390,6 +443,7 @@ describe('session-send helpers', () => {
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         sendAsync: vi.fn(async () => {}),
+        getMessageCount: () => 1,
         clearDroppedFiles,
         clearTerminalSelection,
         clearClipboardImages,
@@ -444,6 +498,7 @@ describe('session-send helpers', () => {
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         sendAsync,
+        getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
         clearTerminalSelection: vi.fn(),
         clearClipboardImages: vi.fn(),
@@ -492,6 +547,7 @@ describe('session-send helpers', () => {
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         sendAsync: vi.fn(async () => {}),
+        getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
         clearTerminalSelection: vi.fn(),
         clearClipboardImages: vi.fn(),

@@ -304,6 +304,7 @@ export class SessionSendOperations {
         clearTodos: composerStore.clearTodos,
         clearSessionUsageLimit: (sessionId) => sessionStore.setSessionUsageLimit(sessionId, null),
         sendAsync: this.deps.sendAsync,
+        getMessageCount: () => appStore.state.messages.length,
         clearDroppedFiles: composerStore.clearDroppedFiles,
         clearTerminalSelection: composerStore.clearTerminalSelection,
         clearClipboardImages: composerStore.clearClipboardImages,
@@ -370,6 +371,7 @@ export async function sendMessageWithDependencies(
     clearTodos(): void;
     clearSessionUsageLimit(sessionId: string): void;
     sendAsync(sessionId: string, body: SessionSendBody): Promise<unknown>;
+    getMessageCount(): number;
     clearDroppedFiles(): void;
     clearTerminalSelection(): void;
     clearClipboardImages(): void;
@@ -389,46 +391,55 @@ export async function sendMessageWithDependencies(
     preserveComposer?: boolean;
   }
 ) {
-  let sessionId = deps.getActiveSessionId();
-  if (!sessionId) {
-    const createdId = await deps.createSession(deps.getDefaultPermissionMode());
-    if (!createdId) return false;
-    sessionId = createdId;
-  }
-
-  const currentSessionId = deps.getActiveSessionId();
-  if (currentSessionId && currentSessionId !== sessionId) {
-    sessionId = currentSessionId;
-  }
-
-  if (deps.hasPendingAbort(sessionId) && !options?.allowPendingAbort) {
-    const message =
-      'This session is still stopping after a tool call became stuck. Start a new session before sending another message.';
-    deps.stopLoading();
-    deps.showBlockedSendMessage(sessionId, message);
-    return false;
-  }
-
-  deps.clearPendingAbort(sessionId);
-  await deps.syncSessionMcps(sessionId);
-
-  const sendPayload = deps.buildSendPayload(sessionId, text, options);
-  if (!sendPayload) return false;
-  const { body, effectiveModel } = sendPayload;
-
   deps.requestMessageListScrollToBottom();
   deps.startLoading();
   deps.setError(null);
-  if (effectiveModel) {
-    deps.applyEffectiveModel(effectiveModel, sessionId);
-  }
 
-  deps.resetTodoSync();
-  deps.clearTodos();
-  deps.clearSessionUsageLimit(sessionId);
-
+  let body: SessionSendBody | null = null;
   try {
+    let sessionId = deps.getActiveSessionId();
+    if (!sessionId) {
+      const createdId = await deps.createSession(deps.getDefaultPermissionMode());
+      if (!createdId) {
+        deps.stopLoading();
+        return false;
+      }
+      sessionId = createdId;
+    }
+
+    const currentSessionId = deps.getActiveSessionId();
+    if (currentSessionId && currentSessionId !== sessionId) {
+      sessionId = currentSessionId;
+    }
+
+    if (deps.hasPendingAbort(sessionId) && !options?.allowPendingAbort) {
+      const message =
+        'This session is still stopping after a tool call became stuck. Start a new session before sending another message.';
+      deps.stopLoading();
+      deps.showBlockedSendMessage(sessionId, message);
+      return false;
+    }
+
+    deps.clearPendingAbort(sessionId);
+    await deps.syncSessionMcps(sessionId);
+
+    const sendPayload = deps.buildSendPayload(sessionId, text, options);
+    if (!sendPayload) {
+      deps.stopLoading();
+      return false;
+    }
+    body = sendPayload.body;
+
+    if (sendPayload.effectiveModel) {
+      deps.applyEffectiveModel(sendPayload.effectiveModel, sessionId);
+    }
+
+    deps.resetTodoSync();
+    deps.clearTodos();
+    deps.clearSessionUsageLimit(sessionId);
+
     await deps.sendAsync(sessionId, body);
+    const preSyncMessageCount = deps.getMessageCount();
     if (deps.shouldClearComposerAfterSend()) {
       deps.clearDroppedFiles();
       deps.clearTerminalSelection();
@@ -441,6 +452,9 @@ export async function sendMessageWithDependencies(
       deps.syncSessionMessages(sessionId),
       deps.recheckSessionStatus(sessionId),
     ]);
+    if (deps.getActiveSessionId() === sessionId && deps.getMessageCount() <= preSyncMessageCount) {
+      await retryPostSendMessageSync(deps, sessionId);
+    }
     const failures = syncResults.filter(
       (result): result is PromiseRejectedResult => result.status === 'rejected'
     );
@@ -456,7 +470,7 @@ export async function sendMessageWithDependencies(
   } catch (err) {
     deps.stopLoading();
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
-    if (body.model) {
+    if (body?.model) {
       deps.setError(
         `Failed to send with ${body.model.providerID}/${body.model.modelID}: ${baseMessage}`
       );
@@ -464,6 +478,26 @@ export async function sendMessageWithDependencies(
     }
     deps.setError(baseMessage);
     return false;
+  }
+}
+
+async function retryPostSendMessageSync(
+  deps: {
+    getActiveSessionId(): string | null;
+    getMessageCount(): number;
+    syncSessionMessages(sessionId: string): Promise<void>;
+    logError?(context: string, err: unknown): void;
+  },
+  sessionId: string
+) {
+  for (const delayMs of [250, 750]) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (deps.getActiveSessionId() !== sessionId || deps.getMessageCount() > 0) return;
+    try {
+      await deps.syncSessionMessages(sessionId);
+    } catch (err) {
+      deps.logError?.('postSendMessageSyncRetry', err);
+    }
   }
 }
 

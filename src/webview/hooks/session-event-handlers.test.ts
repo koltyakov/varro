@@ -48,6 +48,7 @@ const {
   state: {
     activeSessionId: null,
     messages: [],
+    sessions: [],
   },
 }));
 
@@ -618,6 +619,132 @@ describe('registerSessionEventHandlers', () => {
     expect(handoffTodosToMessages).toHaveBeenCalledTimes(1);
   });
 
+  it('marks completed inactive assistant messages idle without stopping active loading', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const handoffTodosToMessages = vi.fn().mockReturnValue(true);
+
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-2',
+        setSessionStatusEntry,
+        handoffTodosToMessages,
+      })
+    );
+
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          ...createAssistantEntry({ time: { created: 1, completed: 2 } }).info,
+          sessionID: 'session-1',
+        },
+      },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(handoffTodosToMessages).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('marks partial inactive assistant completion updates idle without stopping active loading', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-2',
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { completed: 2 },
+        },
+      },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('merges partial session title updates and partial completion updates for inactive sessions', () => {
+    const handlers = installHandlers();
+    const upsertSession = vi.fn();
+    const setSessionStatusEntry = vi.fn();
+
+    state.sessions = [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'New Chat',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+      {
+        id: 'session-2',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Active Chat',
+        version: '1',
+        time: { created: 2, updated: 2 },
+      },
+    ];
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-2',
+        upsertSession,
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    handlers.get('session.updated')?.({
+      properties: {
+        info: {
+          id: 'session-1',
+          title: 'Test message in Chat A',
+          time: { updated: 3 },
+        },
+      },
+    });
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { completed: 4 },
+        },
+      },
+    });
+
+    expect(upsertSession).toHaveBeenCalledWith({
+      id: 'session-1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Test message in Chat A',
+      version: '1',
+      time: { created: 1, updated: 3 },
+    });
+    expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
   it('applies child-session tool part updates when they belong to the active session tree', () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
@@ -703,7 +830,12 @@ describe('registerSessionEventHandlers', () => {
       getActiveSessionId: () => 'session-parent',
       isSessionInActiveTree: (sessionId) =>
         sessionId === 'session-parent' || sessionId === 'session-child',
-      getMessages: () => [],
+      getMessages: () => [
+        {
+          info: createAssistantEntry({ id: 'assistant-child-1', sessionID: 'session-child' }).info,
+          parts: [{ id: 'reasoning-1' }],
+        },
+      ],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
       upsertSession: vi.fn(),
       setSessionCompacting: vi.fn(),
@@ -745,6 +877,47 @@ describe('registerSessionEventHandlers', () => {
       'session-child',
       'text'
     );
+  });
+
+  it('resyncs active messages before applying deltas for missing parts', async () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const logError = vi.fn();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [],
+        syncSessionMessages,
+        logError,
+      })
+    );
+
+    applyMessagePartDelta.mockClear();
+
+    handlers.get('message.part.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        partID: 'part-1',
+        delta: 'still working',
+        field: 'text',
+      },
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
+
+    await Promise.resolve();
+
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-1',
+      'part-1',
+      'still working',
+      'session-1',
+      'text'
+    );
+    expect(logError).not.toHaveBeenCalled();
   });
 
   it('re-syncs todos from messages when todo.updated arrives for an active reply', () => {
@@ -949,6 +1122,24 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
 
     expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('resyncs messages on idle when the active chat is empty', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [],
+        shouldResyncSessionAfterIdle: () => true,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('resyncs messages on idle when todo handoff cannot reconcile local state', () => {

@@ -141,6 +141,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     refreshProviderLimit: (providerID, modelID) => refreshProviderLimit(providerID, modelID),
     isDocumentVisible: () => documentVisible(),
     shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
+    syncSession: (sessionId) => syncSession(sessionId),
     syncSessionMessages: (sessionId) => syncSessionMessages(sessionId),
     loadSessionStatuses: () => client.session.status(),
     isActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
@@ -569,8 +570,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         await loadQuestions().catch((err) => logError('loadQuestions', err));
       },
       loadSessionStatuses: async () => client.session.status(),
-      mergeSessionStatuses: (statuses) =>
-        appStore.setState('sessionStatus', (current) => ({ ...current, ...statuses })),
+      mergeSessionStatuses: (statuses) => sessionStore.setSessionStatuses(statuses),
       updateUsageLimitState,
       startLoading: uiStore.startLoading,
       stopLoading: uiStore.stopLoading,

@@ -225,8 +225,8 @@
             "null"
           ],
           "minimum": 0,
-          "default": null,
-          "description": "Reserved token headroom before automatic OpenCode compaction triggers. Leave unset to use OpenCode defaults. Project opencode.json overrides this setting."
+          "default": 4096,
+          "description": "Reserved token headroom before automatic OpenCode compaction triggers. Lower values compact later. Set to null to use OpenCode defaults. Project opencode.json overrides this setting."
         },
         "varro.context.autoAttachFile": {
           "type": "boolean",

@@ -14,6 +14,7 @@ import type {
   Part,
   QuestionRequest,
   Session,
+  SessionEventInfo,
   SessionStatus,
 } from '../../types';
 
@@ -166,6 +167,30 @@ function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] 
   return false;
 }
 
+function mergeSessionEventInfo(info: SessionEventInfo): Session | null {
+  const existing = appStore.state.sessions.find((session) => session.id === info.id);
+  if (existing) {
+    return {
+      ...existing,
+      ...info,
+      time: { ...existing.time, ...info.time },
+    };
+  }
+
+  if (
+    typeof info.projectID === 'string' &&
+    typeof info.directory === 'string' &&
+    typeof info.title === 'string' &&
+    typeof info.version === 'string' &&
+    typeof info.time?.created === 'number' &&
+    typeof info.time.updated === 'number'
+  ) {
+    return info as Session;
+  }
+
+  return null;
+}
+
 export class SessionEventHandlerOperations {
   constructor(private readonly deps: EventHandlerOperationDependencies) {}
 
@@ -217,7 +242,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
     return sessionId === deps.getActiveSessionId();
   };
-  const abortLateChildSession = (info: Session) => {
+  const abortLateChildSession = (info: SessionEventInfo) => {
     if (!info.parentID || !deps.hasPendingAbort(info.parentID)) return;
 
     const alreadyPending = deps.hasPendingAbort(info.id);
@@ -233,9 +258,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.created', (data) => {
-      const info = data.properties?.info as Session | undefined;
+      const info = data.properties?.info as SessionEventInfo | undefined;
       if (info) {
-        deps.upsertSession(info);
+        const session = mergeSessionEventInfo(info);
+        if (session) deps.upsertSession(session);
         abortLateChildSession(info);
       }
     })
@@ -243,10 +269,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.updated', (data) => {
-      const info = data.properties?.info as Session | undefined;
+      const info = data.properties?.info as SessionEventInfo | undefined;
       if (info) {
-        if (!info.time.compacting) deps.setSessionCompacting(info.id, false);
-        deps.upsertSession(info);
+        if (!info.time?.compacting) deps.setSessionCompacting(info.id, false);
+        const session = mergeSessionEventInfo(info);
+        if (session) deps.upsertSession(session);
         abortLateChildSession(info);
       }
     })
@@ -297,7 +324,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
       if (!sid || sid === deps.getActiveSessionId()) uiStore.stopLoading();
       if (sid && sid === deps.getActiveSessionId()) {
-        const shouldResyncActiveMessages = hasActiveAssistantReply(deps.getMessages());
+        const activeMessages = deps.getMessages();
+        const shouldResyncActiveMessages =
+          activeMessages.length === 0 || hasActiveAssistantReply(activeMessages);
         sessionStore.markSessionSeen(sid);
         deps.syncSession(sid).catch(() => {});
         const handedOffTodos = deps.handoffTodosToMessages();
@@ -315,19 +344,32 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.updated', (data) => {
       const info = data.properties?.info;
       const partialMessage = info as
-        | { sessionID?: string; role?: string; error?: AssistantMessage['error'] }
+        | {
+            sessionID?: string;
+            role?: string;
+            error?: AssistantMessage['error'];
+            time?: { completed?: number };
+          }
         | undefined;
       const sessionID = partialMessage?.sessionID;
       if (!sessionID) return;
       const message = isCompleteMessageInfo(info) ? info : null;
       const assistantMessage = message && isAssistantMessage(message) ? message : null;
+      const assistantFinished =
+        partialMessage.role === 'assistant' &&
+        (!!partialMessage.error || !!partialMessage.time?.completed);
+
+      if (assistantFinished) {
+        deps.setSessionStatusEntry(sessionID, { type: 'idle' });
+        if (sessionID === deps.getActiveSessionId()) uiStore.stopLoading();
+      }
 
       if (isSessionInActiveTree(sessionID)) {
         uiStore.markLoadingActivity();
         if (message) {
           sessionStore.upsertMessageInfo(message);
         }
-        if (assistantMessage && (!!assistantMessage.error || !!assistantMessage.time.completed)) {
+        if (assistantMessage && assistantFinished) {
           deps.handoffTodosToMessages();
         }
       }
@@ -378,15 +420,26 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.delta', (data) => {
       const p = data.properties;
       if (!p) return;
-      if (isSessionInActiveTree(p.sessionID as string | undefined)) {
+      const sessionID = p.sessionID as string | undefined;
+      if (isSessionInActiveTree(sessionID)) {
+        const messageID = p.messageID as string;
+        const partID = p.partID as string;
+        const delta = p.delta as string;
+        const field = p.field as string;
         uiStore.markLoadingActivity();
-        sessionStore.applyMessagePartDelta(
-          p.messageID as string,
-          p.partID as string,
-          p.delta as string,
-          p.sessionID as string,
-          p.field as string
-        );
+        const hasPart = deps
+          .getMessages()
+          .some((message) =>
+            message.info.id === messageID && message.parts.some((part) => part.id === partID)
+          );
+        if (!hasPart && sessionID) {
+          deps
+            .syncSessionMessages(sessionID)
+            .then(() => sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field))
+            .catch((err) => deps.logError('syncSessionMessages', err));
+          return;
+        }
+        sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);
       }
     })
   );

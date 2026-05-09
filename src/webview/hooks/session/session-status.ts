@@ -16,6 +16,7 @@ type SessionStatusDependencies = {
   refreshProviderLimit(providerID: string, modelID?: string | null): Promise<void>;
   isDocumentVisible(): boolean;
   shouldResyncSessionAfterIdle(sessionId: string): boolean;
+  syncSession(sessionId: string): Promise<void>;
   syncSessionMessages(sessionId: string): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   isActiveSession(sessionId: string): boolean;
@@ -137,7 +138,9 @@ export class SessionStatusOperations {
         updateUsageLimitState: this.updateUsageLimitState,
         clearPendingAbort: this.clearPendingAbort,
         stopLoading: uiStore.stopLoading,
+        setSessionStatuses: sessionStore.setSessionStatuses,
         shouldResyncSessionAfterIdle: this.deps.shouldResyncSessionAfterIdle,
+        syncSession: this.deps.syncSession,
         syncSessionMessages: this.deps.syncSessionMessages,
         startLoading: uiStore.startLoading,
         isActiveSession: this.deps.isActiveSession,
@@ -292,7 +295,9 @@ export async function recheckSessionStatusWithDependencies(
     updateUsageLimitState(sessionId: string, status: SessionStatus | null | undefined): void;
     clearPendingAbort(sessionId: string | null | undefined): void;
     stopLoading(): void;
+    setSessionStatuses(statuses: Record<string, SessionStatus>): void;
     shouldResyncSessionAfterIdle(sessionId: string): boolean;
+    syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
     startLoading(): void;
     isActiveSession(sessionId: string): boolean;
@@ -305,6 +310,7 @@ export async function recheckSessionStatusWithDependencies(
     const statuses = await deps.loadSessionStatuses();
     const status = statuses[sessionId];
     if (deps.shouldIgnorePendingAbortStatus(sessionId, status)) return;
+    deps.setSessionStatuses({ ...statuses, [sessionId]: status ?? { type: 'idle' } });
 
     const abortedRetry = deps.hasPendingAbort(sessionId);
     if (!(abortedRetry && (!status || status.type === 'idle'))) {
@@ -315,9 +321,11 @@ export async function recheckSessionStatusWithDependencies(
       if (deps.isActiveSession(sessionId)) {
         deps.stopLoading();
       }
+      const syncs: Array<Promise<void>> = [deps.syncSession(sessionId)];
       if (deps.shouldResyncSessionAfterIdle(sessionId)) {
-        await deps.syncSessionMessages(sessionId).catch(() => {});
+        syncs.push(deps.syncSessionMessages(sessionId));
       }
+      await Promise.allSettled(syncs);
       return;
     }
 

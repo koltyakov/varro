@@ -5,8 +5,13 @@ import { ContextProvider } from './context-provider';
 import { registerCommands } from './commands';
 import { logger } from './logger';
 
+const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
+
 function readCompactionSettings(config: vscode.WorkspaceConfiguration) {
-  const rawReserved = config.get<number | null>('chat.autoCompactionReservedTokens', null);
+  const rawReserved = config.get<number | null>(
+    'chat.autoCompactionReservedTokens',
+    DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS
+  );
   return {
     auto: config.get<boolean>('chat.autoCompact', true),
     reserved:

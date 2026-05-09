@@ -208,6 +208,8 @@ describe('session status helpers', () => {
     const updateUsageLimitState = vi.fn();
     const clearPendingAbort = vi.fn();
     const stopLoadingSpy = vi.fn();
+    const setSessionStatuses = vi.fn();
+    const syncSession = vi.fn(async () => {});
     const syncSessionMessages = vi.fn(async () => {});
     const startLoadingSpy = vi.fn();
     const logError = vi.fn();
@@ -221,7 +223,9 @@ describe('session status helpers', () => {
         updateUsageLimitState,
         clearPendingAbort,
         stopLoading: stopLoadingSpy,
+        setSessionStatuses,
         shouldResyncSessionAfterIdle: () => true,
+        syncSession,
         syncSessionMessages,
         startLoading: startLoadingSpy,
         isActiveSession: () => true,
@@ -231,8 +235,10 @@ describe('session status helpers', () => {
     );
 
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(setSessionStatuses).toHaveBeenCalledWith({ 'session-1': { type: 'idle' } });
     expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
     expect(stopLoadingSpy).toHaveBeenCalledTimes(1);
+    expect(syncSession).toHaveBeenCalledWith('session-1');
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(startLoadingSpy).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalled();
@@ -240,6 +246,8 @@ describe('session status helpers', () => {
     updateUsageLimitState.mockClear();
     clearPendingAbort.mockClear();
     stopLoadingSpy.mockClear();
+    setSessionStatuses.mockClear();
+    syncSession.mockClear();
     syncSessionMessages.mockClear();
     startLoadingSpy.mockClear();
 
@@ -254,7 +262,9 @@ describe('session status helpers', () => {
         updateUsageLimitState,
         clearPendingAbort,
         stopLoading: stopLoadingSpy,
+        setSessionStatuses,
         shouldResyncSessionAfterIdle: () => true,
+        syncSession,
         syncSessionMessages,
         startLoading: startLoadingSpy,
         isActiveSession: () => true,
@@ -288,7 +298,9 @@ describe('session status helpers', () => {
         updateUsageLimitState: vi.fn(),
         clearPendingAbort: vi.fn(),
         stopLoading: vi.fn(),
+        setSessionStatuses: vi.fn(),
         shouldResyncSessionAfterIdle: () => false,
+        syncSession: vi.fn(async () => {}),
         syncSessionMessages: vi.fn(async () => {}),
         startLoading: vi.fn(),
         isActiveSession: () => true,
@@ -308,7 +320,9 @@ describe('session status helpers', () => {
         updateUsageLimitState: vi.fn(),
         clearPendingAbort: vi.fn(),
         stopLoading: vi.fn(),
+        setSessionStatuses: vi.fn(),
         shouldResyncSessionAfterIdle: () => false,
+        syncSession: vi.fn(async () => {}),
         syncSessionMessages: vi.fn(async () => {}),
         startLoading: vi.fn(),
         isActiveSession: () => true,
@@ -323,6 +337,7 @@ describe('session status helpers', () => {
   it('creates bound session-status operations from shared state dependencies', async () => {
     const pendingAbortRetryAttempts = new Map<string, number | null>();
     const refreshProviderLimit = vi.fn(async () => {});
+    const syncSession = vi.fn(async () => {});
     const syncSessionMessages = vi.fn(async () => {});
 
     state.sessionStatus = {
@@ -346,6 +361,7 @@ describe('session status helpers', () => {
       refreshProviderLimit,
       isDocumentVisible: () => true,
       shouldResyncSessionAfterIdle: () => true,
+      syncSession,
       syncSessionMessages,
       loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
       isActiveSession: () => true,
@@ -367,12 +383,15 @@ describe('session status helpers', () => {
     await operations.recheckSessionStatus('session-1');
 
     expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(syncSession).toHaveBeenCalledWith('session-1');
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('does not toggle loading for stale inactive-session rechecks', async () => {
     const stopLoadingSpy = vi.fn();
     const startLoadingSpy = vi.fn();
+    const syncSession = vi.fn(async () => {});
+    const syncSessionMessages = vi.fn(async () => {});
 
     await recheckSessionStatusWithDependencies(
       {
@@ -383,8 +402,10 @@ describe('session status helpers', () => {
         updateUsageLimitState: vi.fn(),
         clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
+        setSessionStatuses: vi.fn(),
         shouldResyncSessionAfterIdle: () => false,
-        syncSessionMessages: vi.fn(async () => {}),
+        syncSession,
+        syncSessionMessages,
         startLoading: startLoadingSpy,
         isActiveSession: () => false,
         logError: vi.fn(),
@@ -394,5 +415,33 @@ describe('session status helpers', () => {
 
     expect(stopLoadingSpy).not.toHaveBeenCalled();
     expect(startLoadingSpy).not.toHaveBeenCalled();
+    expect(syncSession).toHaveBeenCalledWith('session-1');
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('replaces stale running statuses with the latest status snapshot during recheck', async () => {
+    const setSessionStatuses = vi.fn();
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-2': { type: 'idle' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: vi.fn(),
+        setSessionStatuses,
+        shouldResyncSessionAfterIdle: () => false,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        startLoading: vi.fn(),
+        isActiveSession: (sessionId) => sessionId === 'session-2',
+        logError: vi.fn(),
+      },
+      'session-2'
+    );
+
+    expect(setSessionStatuses).toHaveBeenCalledWith({ 'session-2': { type: 'idle' } });
   });
 });
