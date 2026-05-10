@@ -210,6 +210,70 @@ describe('session-selection helpers', () => {
     expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps retry sessions loading even when the latest assistant message has an error', async () => {
+    const activeSession = { value: null as string | null };
+    const startLoading = vi.fn();
+    const stopLoading = vi.fn();
+    const failed = assistantMessage('assistant-1');
+    failed.error = { name: 'ProviderError', data: { message: '429 usage limit reached' } };
+
+    await selectSessionWithDependencies(
+      {
+        getActiveSessionId: () => activeSession.value,
+        setActiveSessionId: (id) => {
+          activeSession.value = id;
+        },
+        clearPendingAbort: vi.fn(),
+        persistActiveSessionId: vi.fn(),
+        markSessionSeen: vi.fn(),
+        clearDraftCurrentDocumentState: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
+        applySelectedAgent: vi.fn(),
+        resolvePersistedModel: () => null,
+        resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+        applySelectedModel: vi.fn(),
+        getConnectedMcpNames: () => [],
+        hasSelectedMcps: () => false,
+        setSelectedMcpsForSession: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        loadSession: vi.fn(async () => ({
+          session: {
+            id: 'session-1',
+            projectID: 'project-1',
+            directory: '/repo',
+            title: 'Session 1',
+            version: '1',
+            time: { created: 0, updated: 2 },
+          },
+          messages: [{ info: failed, parts: [] }],
+        })),
+        isCurrentSelectionGeneration: () => true,
+        upsertSession: vi.fn(),
+        setMessagesIncremental: vi.fn(),
+        syncFailedSessionsFromMessages: vi.fn(),
+        requestMessageListScrollToBottom: vi.fn(),
+        deriveSelectedAgentFromMessages: () => null,
+        deriveSelectedModelFromMessages: () => null,
+        syncTodosFromMessages: vi.fn(),
+        loadQuestions: vi.fn(async () => {}),
+        loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'retry' as const } })),
+        mergeSessionStatuses: vi.fn(),
+        updateUsageLimitState: vi.fn(),
+        startLoading,
+        stopLoading,
+        setError: vi.fn(),
+      },
+      { next: () => 1 },
+      'session-1'
+    );
+
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
   it('settles inactive running sessions when synced messages show completion', async () => {
     const setSessionStatusEntry = vi.fn();
     const syncFailedSessionsFromMessages = vi.fn();

@@ -474,6 +474,11 @@ function makeAssistantMessage(
   };
 }
 
+function markAssistantInProgress(message: MessageEntry<AssistantMessage>) {
+  delete message.info.time.completed;
+  delete message.info.finish;
+}
+
 function makeReasoningPart(
   sessionId: string,
   messageId: string,
@@ -1027,6 +1032,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         ]),
       ]
     );
+    markAssistantInProgress(assistant);
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'busy' };
     state.messagesBySessionId[session.id] = [user, assistant];
@@ -1349,6 +1355,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Still working through the requested refactor steps.',
       BASE_TIME - 3_000
     );
+    markAssistantInProgress(assistant);
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'busy' };
     state.messagesBySessionId[session.id] = [user, assistant];

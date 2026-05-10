@@ -1315,9 +1315,12 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     expect(container?.querySelector('.chat-header-completed-badge')).toBeNull();
-    const indicator = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
-      (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'metadata-update'
-    )?.querySelector('.session-item-indicator');
+    const indicator = Array.from(container?.querySelectorAll('.session-item') ?? [])
+      .find(
+        (item) =>
+          item.querySelector('.session-item-title')?.textContent?.trim() === 'metadata-update'
+      )
+      ?.querySelector('.session-item-indicator');
     expect(indicator).toBeNull();
   });
 

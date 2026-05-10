@@ -156,10 +156,7 @@ function mergeFreshSession(existing: Session | undefined, incoming: Session) {
     ...incoming,
     time: { ...existing.time, ...incoming.time },
   };
-  if (
-    !isPlaceholderSessionTitle(existing.title) &&
-    isPlaceholderSessionTitle(incoming.title)
-  ) {
+  if (!isPlaceholderSessionTitle(existing.title) && isPlaceholderSessionTitle(incoming.title)) {
     merged.title = existing.title;
   }
   return merged;

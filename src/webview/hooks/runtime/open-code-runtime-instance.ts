@@ -49,7 +49,10 @@ import {
 } from '../session/session-lifecycle';
 import { SessionManagementOperations } from '../session/session-management';
 import { SessionMcpOperations } from '../session/session-mcp';
-import { SessionSendOperations } from '../session/session-send';
+import {
+  ensureSessionPermissionWithDependencies,
+  SessionSendOperations,
+} from '../session/session-send';
 import { SessionStatusOperations } from '../session/session-status';
 import { resolveMessagesSelectedModel, SessionSyncOperations } from '../session/session-sync';
 import { createTodoSyncOperations, resetTodoSync } from '../todo-sync';
@@ -457,6 +460,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const sessionSendOperations = new SessionSendOperations({
     createSession: (initialPermissionMode) => createSession(undefined, initialPermissionMode),
+    ensureSessionPermission: (sessionId) =>
+      ensureSessionPermissionWithDependencies(
+        {
+          getSession: (id) => appStore.state.sessions.find((session) => session.id === id),
+          buildPermissionRules: (mode) => getSessionPermissionRulesForMode(mode, 'update'),
+          getPermissionMode: permissionsStore.getPermissionModeForSession,
+          updateSessionPermission: (id, input) => client.session.update(id, input),
+          upsertSession,
+          setError: uiStore.setError,
+        },
+        sessionId
+      ),
     clearPendingAbort,
     resetTodoSync,
     syncSessionMcps,

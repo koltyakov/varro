@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
-import type { Provider } from '../types';
+import type { PermissionRule, Provider } from '../types';
 import {
   buildSessionSendBody,
+  ensureSessionPermissionWithDependencies,
   getAttachmentReference,
   getQueuedAttachmentSnapshot,
   retryMessageWithDependencies,
@@ -367,6 +368,125 @@ describe('session-send helpers', () => {
       parts: [{ type: 'text', text: 'hello' }],
     });
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-2', { type: 'busy' });
+  });
+
+  it('bootstraps missing session permissions before sending', async () => {
+    const ensureSessionPermission = vi.fn(async () => true);
+    const sendAsync = vi.fn(async () => {});
+
+    await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        ensureSessionPermission,
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: { parts: [{ type: 'text', text: 'hello' }] },
+          effectiveModel: null,
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync,
+        getMessageCount: () => 1,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'hello'
+    );
+
+    expect(ensureSessionPermission).toHaveBeenCalledWith('session-1');
+    expect(ensureSessionPermission.mock.invocationCallOrder[0]).toBeLessThan(
+      sendAsync.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    );
+  });
+
+  it('does not send when permission bootstrap fails', async () => {
+    const sendAsync = vi.fn(async () => {});
+
+    await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        ensureSessionPermission: vi.fn(async () => false),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: vi.fn(() => ({
+          body: { parts: [{ type: 'text', text: 'hello' }] },
+          effectiveModel: null,
+        })),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync,
+        getMessageCount: () => 1,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'hello'
+    );
+
+    expect(sendAsync).not.toHaveBeenCalled();
+  });
+
+  it('applies default permission rules to sessions that have none', async () => {
+    const updateSessionPermission = vi.fn(
+      async (_sessionId: string, input: { permission: PermissionRule[] }) => ({
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Session',
+        version: '1',
+        time: { created: 1, updated: 1 },
+        permission: input.permission,
+      })
+    );
+    const upsertSession = vi.fn();
+
+    const ok = await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({ permission: undefined }),
+        buildPermissionRules: () => [{ permission: 'bash', pattern: '*', action: 'ask' }],
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession,
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(ok).toBe(true);
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', {
+      permission: [{ permission: 'bash', pattern: '*', action: 'ask' }],
+    });
+    expect(upsertSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-1' }));
   });
 
   it('retries message sync when the immediate post-send sync leaves the active chat empty', async () => {

@@ -357,9 +357,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
     const timer = setTimeout(() => {
       activeMessageSyncTimers.delete(sessionId);
-      deps
-        .syncSessionMessages(sessionId)
-        .catch((err) => deps.logError('syncSessionMessages', err));
+      deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
     }, delayMs);
     activeMessageSyncTimers.set(sessionId, timer);
   };
@@ -421,12 +419,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       .catch((err) => deps.logError('syncSessionMessages', err));
   };
 
-  cleanups.push(
-    () => {
-      for (const timer of activeMessageSyncTimers.values()) clearTimeout(timer);
-      activeMessageSyncTimers.clear();
-    }
-  );
+  cleanups.push(() => {
+    for (const timer of activeMessageSyncTimers.values()) clearTimeout(timer);
+    activeMessageSyncTimers.clear();
+  });
 
   cleanups.push(
     serverEvents.on('session.created', (data) => {
@@ -487,7 +483,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
       if (sessionID === deps.getActiveSessionId()) {
         const statusType = (status as { type: string }).type;
-        if (statusType === 'busy' || statusType === 'retry') {
+        if (statusType === 'retry') {
+          uiStore.startLoading();
+        } else if (statusType === 'busy') {
           if (
             latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt())
           ) {
@@ -655,8 +653,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         uiStore.markLoadingActivity();
         const hasPart = deps
           .getMessages()
-          .some((message) =>
-            message.info.id === messageID && message.parts.some((part) => part.id === partID)
+          .some(
+            (message) =>
+              message.info.id === messageID && message.parts.some((part) => part.id === partID)
           );
         if (!hasPart && sessionID) {
           deps

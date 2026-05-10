@@ -29,10 +29,7 @@ export function shouldHideEmptySessionFromList(
   return !hasEmptySessionKeepReason(session, options);
 }
 
-export function shouldPruneEmptySession(
-  session: Session,
-  options: EmptySessionPruneOptions
-) {
+export function shouldPruneEmptySession(session: Session, options: EmptySessionPruneOptions) {
   if (!isEmptySession(session)) return false;
   if (Date.now() - session.time.updated < EMPTY_SESSION_PRUNE_GRACE_MS) return false;
   return !hasEmptySessionKeepReason(session, options);

@@ -281,6 +281,7 @@ beforeEach(() => {
     parts: [],
   });
   clientMocks.sessionInit.mockResolvedValue(true);
+  clientMocks.sessionUpdate.mockResolvedValue(session());
   clientMocks.sessionUnrevert.mockResolvedValue(session());
   clientMocks.mcpConnect.mockResolvedValue(true);
   clientMocks.mcpDisconnect.mockResolvedValue(true);

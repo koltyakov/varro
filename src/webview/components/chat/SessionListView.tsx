@@ -2,6 +2,7 @@ import {
   getSelectedAgentForSession,
   getSessionTreeIds,
   getSessionTreeRootId,
+  hasSettledLatestAssistantMessage,
   hasActiveUsageLimit,
   isSessionAwaitingInput,
   isSessionCompletedResponseUnread,
@@ -1163,6 +1164,9 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
       if (!isSkippedPlanSession(sessionId, session.time.updated)) {
         planReadyIds.add(sessionId);
       }
+      continue;
+    }
+    if (sessionId === state.activeSessionId && hasSettledLatestAssistantMessage(sessionId)) {
       continue;
     }
     if (!isSessionCompletedResponseUnread(sessionId)) {

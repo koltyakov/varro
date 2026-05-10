@@ -74,57 +74,54 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
   });
 
   createEffect(
-    on(
-      syncTarget,
-      (target) => {
-        if (!target) return;
-        const [runningSessionIdsText = '', activeRunningSessionId = ''] = target.split(
-          RUNNING_SESSION_SYNC_KEY_SEPARATOR,
-          2
-        );
-        const runningSessionIds = runningSessionIdsText
-          .split('\n')
-          .filter((sessionId) => sessionId.length > 0);
-        const messageSyncSessionIds = activeRunningSessionId
-          ? [
-              activeRunningSessionId,
-              ...runningSessionIds.filter((sessionId) => sessionId !== activeRunningSessionId),
-            ]
-          : runningSessionIds;
+    on(syncTarget, (target) => {
+      if (!target) return;
+      const [runningSessionIdsText = '', activeRunningSessionId = ''] = target.split(
+        RUNNING_SESSION_SYNC_KEY_SEPARATOR,
+        2
+      );
+      const runningSessionIds = runningSessionIdsText
+        .split('\n')
+        .filter((sessionId) => sessionId.length > 0);
+      const messageSyncSessionIds = activeRunningSessionId
+        ? [
+            activeRunningSessionId,
+            ...runningSessionIds.filter((sessionId) => sessionId !== activeRunningSessionId),
+          ]
+        : runningSessionIds;
 
-        let cancelled = false;
-        let inFlight = false;
-        const refresh = async () => {
-          if (cancelled || inFlight || !deps.isDocumentVisible()) return;
-          inFlight = true;
-          try {
-            const results: PromiseSettledResult<void>[] = [];
-            results.push(await settleVoid(deps.hydrateSessionStatuses()));
-            results.push(await settleVoid(deps.loadSessions()));
-            results.push(await settleVoid(deps.loadQuestions()));
-            for (const sessionId of messageSyncSessionIds) {
-              results.push(await settleVoid(deps.syncSessionMessages(sessionId)));
-            }
-            for (const result of results) {
-              if (result.status === 'rejected') {
-                deps.logError('runningSessionSync', result.reason);
-              }
-            }
-          } finally {
-            inFlight = false;
+      let cancelled = false;
+      let inFlight = false;
+      const refresh = async () => {
+        if (cancelled || inFlight || !deps.isDocumentVisible()) return;
+        inFlight = true;
+        try {
+          const results: PromiseSettledResult<void>[] = [];
+          results.push(await settleVoid(deps.hydrateSessionStatuses()));
+          results.push(await settleVoid(deps.loadSessions()));
+          results.push(await settleVoid(deps.loadQuestions()));
+          for (const sessionId of messageSyncSessionIds) {
+            results.push(await settleVoid(deps.syncSessionMessages(sessionId)));
           }
-        };
+          for (const result of results) {
+            if (result.status === 'rejected') {
+              deps.logError('runningSessionSync', result.reason);
+            }
+          }
+        } finally {
+          inFlight = false;
+        }
+      };
 
-        const timer = window.setInterval(() => {
-          void refresh();
-        }, RUNNING_SESSION_SYNC_INTERVAL_MS);
+      const timer = window.setInterval(() => {
+        void refresh();
+      }, RUNNING_SESSION_SYNC_INTERVAL_MS);
 
-        onCleanup(() => {
-          cancelled = true;
-          window.clearInterval(timer);
-        });
-      }
-    )
+      onCleanup(() => {
+        cancelled = true;
+        window.clearInterval(timer);
+      });
+    })
   );
 }
 

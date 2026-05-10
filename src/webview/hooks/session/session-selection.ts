@@ -123,9 +123,11 @@ export async function selectSessionWithDependencies(
     deps.mergeSessionStatuses(statuses, { snapshotStartedAt });
     deps.updateUsageLimitState(id, statuses[id], messages);
     const statusType = statuses[id]?.type;
-    if (latestAssistantFinished(messages)) {
+    if (statusType === 'retry') {
+      deps.startLoading();
+    } else if (latestAssistantFinished(messages)) {
       deps.stopLoading();
-    } else if (statusType === 'busy' || statusType === 'retry') {
+    } else if (statusType === 'busy') {
       deps.startLoading();
     } else {
       deps.stopLoading();

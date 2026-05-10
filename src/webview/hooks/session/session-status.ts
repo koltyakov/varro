@@ -354,7 +354,9 @@ export async function recheckSessionStatusWithDependencies(
       return;
     }
 
-    if ((status.type === 'busy' || status.type === 'retry') && deps.isActiveSession(sessionId)) {
+    if (status.type === 'retry' && deps.isActiveSession(sessionId)) {
+      deps.startLoading();
+    } else if (status.type === 'busy' && deps.isActiveSession(sessionId)) {
       if (
         latestAssistantFinishedBeforeLoading(
           deps.getMessages?.() ?? [],

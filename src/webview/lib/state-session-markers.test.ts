@@ -98,10 +98,18 @@ describe('state session markers', () => {
     expect(isSessionUnreadMarker({ 'session-1': 200 }, 'session-1', 201)).toBe(true);
     expect(isSessionUnreadMarker({ 'session-1': 200 }, 'session-1', 200)).toBe(false);
     expect(
-      isSessionCompletedResponseUnreadMarker({ 'session-1': 250 }, { 'session-1': 200 }, 'session-1')
+      isSessionCompletedResponseUnreadMarker(
+        { 'session-1': 250 },
+        { 'session-1': 200 },
+        'session-1'
+      )
     ).toBe(true);
     expect(
-      isSessionCompletedResponseUnreadMarker({ 'session-1': 250 }, { 'session-1': 250 }, 'session-1')
+      isSessionCompletedResponseUnreadMarker(
+        { 'session-1': 250 },
+        { 'session-1': 250 },
+        'session-1'
+      )
     ).toBe(false);
 
     expect(pruneSkippedPlanSessions({ stale: 1, 'session-1': 2 }, new Set(['session-1']))).toEqual({

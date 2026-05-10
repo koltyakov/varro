@@ -1,4 +1,4 @@
-import type { DroppedFile, EditorContext } from '../../../shared/protocol';
+import type { DroppedFile, EditorContext, PermissionMode } from '../../../shared/protocol';
 import {
   formatSelectionReference,
   getSelectionRangesFromEditorContext,
@@ -21,7 +21,7 @@ import {
 import { modelSupportsVision } from '../../lib/model-capabilities';
 import { getPreferredVariant, normalizeModelVariant } from '../../lib/model-variants';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
-import type { Provider, SessionStatus } from '../../types';
+import type { PermissionRule, Provider, Session, SessionStatus } from '../../types';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -57,6 +57,7 @@ export type QueuedAttachmentSnapshot = Pick<
 
 type StateBoundSendDependencies = {
   createSession(initialPermissionMode: 'default' | 'full'): Promise<string | null>;
+  ensureSessionPermission?(sessionId: string): Promise<boolean>;
   clearPendingAbort(sessionId: string): void;
   resetTodoSync(): void;
   syncSessionMcps(sessionId: string): Promise<void>;
@@ -265,11 +266,13 @@ export class SessionSendOperations {
       preserveComposer?: boolean;
     }
   ) => {
+    const ensureSessionPermission = this.deps.ensureSessionPermission;
     await sendMessageWithDependencies(
       {
         getActiveSessionId: () => appStore.state.activeSessionId,
         getDefaultPermissionMode: () => permissionsStore.getPermissionModeForSession(null),
         createSession: this.deps.createSession,
+        ensureSessionPermission,
         clearPendingAbort: this.deps.clearPendingAbort,
         syncSessionMcps: this.deps.syncSessionMcps,
         buildSendPayload: (sessionId, nextText, nextOptions) =>
@@ -348,6 +351,7 @@ export async function sendMessageWithDependencies(
     getActiveSessionId(): string | null;
     getDefaultPermissionMode(): 'default' | 'full';
     createSession(initialPermissionMode: 'default' | 'full'): Promise<string | null>;
+    ensureSessionPermission?(sessionId: string): Promise<boolean>;
     clearPendingAbort(sessionId: string): void;
     syncSessionMcps(sessionId: string): Promise<void>;
     buildSendPayload(
@@ -397,6 +401,8 @@ export async function sendMessageWithDependencies(
   if (currentSessionId && currentSessionId !== sessionId) {
     sessionId = currentSessionId;
   }
+
+  if (deps.ensureSessionPermission && !(await deps.ensureSessionPermission(sessionId))) return;
 
   deps.clearPendingAbort(sessionId);
   await deps.syncSessionMcps(sessionId);
@@ -461,6 +467,34 @@ export async function sendMessageWithDependencies(
       return;
     }
     deps.setError(baseMessage);
+  }
+}
+
+export async function ensureSessionPermissionWithDependencies(
+  deps: {
+    getSession(sessionId: string): Pick<Session, 'permission'> | null | undefined;
+    buildPermissionRules(mode: PermissionMode): PermissionRule[];
+    getPermissionMode(sessionId: string): PermissionMode;
+    updateSessionPermission(
+      sessionId: string,
+      input: { permission: PermissionRule[] }
+    ): Promise<Session>;
+    upsertSession(session: Session): void;
+    setError(message: string): void;
+  },
+  sessionId: string
+): Promise<boolean> {
+  const session = deps.getSession(sessionId);
+  if (Array.isArray(session?.permission) && session.permission.length > 0) return true;
+
+  try {
+    const permission = deps.buildPermissionRules(deps.getPermissionMode(sessionId));
+    const updated = await deps.updateSessionPermission(sessionId, { permission });
+    deps.upsertSession(updated);
+    return true;
+  } catch (err) {
+    deps.setError(err instanceof Error ? err.message : 'Failed to update permissions');
+    return false;
   }
 }
 
