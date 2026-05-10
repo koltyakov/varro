@@ -37,6 +37,7 @@ import {
   setShowSettings,
   setShowSessionPicker,
   setSessionUsageLimit,
+  setMessagesIncremental,
   setState,
   skipPlanSession,
 } from '../lib/state';
@@ -105,6 +106,7 @@ afterEach(() => {
   setState('questions', []);
   setState('permissions', []);
   setState('lastSeenSessions', reconcile({}));
+  setState('completedSessionResponses', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
   setState('sessionSelectedAgents', reconcile({}));
   setState('selectedAgent', null);
@@ -327,6 +329,34 @@ describe('empty session pruning', () => {
     };
 
     expect(shouldAutoDeleteEmptySession(fresh, null, indicators)).toBe(false);
+  });
+
+  it('hides a freshly created empty session from the list without deleting it', async () => {
+    const deleteImmediatelySpy = vi
+      .spyOn(openCodeModule, 'deleteSessionImmediately')
+      .mockResolvedValue(undefined);
+
+    const now = Date.now();
+
+    setState('sessions', [
+      session('new-session', now, {
+        title: 'New chat',
+        time: { created: now, updated: now },
+      }),
+    ]);
+    setState('activeSessionId', 'new-session');
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+    await Promise.resolve();
+    vi.runOnlyPendingTimers();
+    await Promise.resolve();
+
+    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
+    );
+    expect(titles).not.toContain('New chat');
+    expect(deleteImmediatelySpy).not.toHaveBeenCalled();
   });
 
   it('hides inactive empty sessions from the list and deletes them', async () => {
@@ -872,6 +902,7 @@ describe('header status badges', () => {
     setState('failedSessionIds', ['failed-1']);
     setState('questions', [{ id: 'question-1', sessionID: 'attention-1', questions: [] }]);
     setState('lastSeenSessions', { 'plan-1': 0 });
+    setState('completedSessionResponses', { 'completed-1': 50 });
     setState('sessionSelectedAgents', { 'plan-1': 'plan' });
 
     cleanup = render(() => Chat(), container!);
@@ -895,7 +926,7 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
   });
 
-  it('shows only the title in the desktop chat header', () => {
+  it('shows status badges in the desktop chat header', () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', {
@@ -909,14 +940,18 @@ describe('header status badges', () => {
 
     expect(desktopHeader).toBeInstanceOf(HTMLDivElement);
     expect(desktopHeader?.querySelector('.chat-header-title-text')?.textContent).toBe('session-1');
-    expect(desktopActions).toBeNull();
-    expect(desktopHeader?.querySelector('.chat-header-running-badge')).toBeNull();
-    expect(desktopHeader?.querySelector('.chat-header-running-count')).toBeNull();
+    expect(desktopActions).toBeInstanceOf(HTMLDivElement);
+    expect(desktopHeader?.querySelector('.chat-header-running-badge')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(desktopHeader?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
     expect(desktopHeader?.querySelector('.chat-header-failed-badge')).toBeNull();
     expect(desktopHeader?.querySelector('.chat-header-attention-badge')).toBeNull();
     expect(desktopHeader?.querySelector('.chat-header-plan-badge')).toBeNull();
     expect(desktopHeader?.querySelector('.chat-header-completed-badge')).toBeNull();
-    expect(desktopHeader?.querySelector('.chat-header-btn[title="New chat"]')).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-btn[title="New chat"]')).toBeInstanceOf(
+      HTMLButtonElement
+    );
   });
 
   it('shows the active session subagent button beside the title and opens its sub-agent list', async () => {
@@ -998,6 +1033,7 @@ describe('header status badges', () => {
     setState('failedSessionIds', ['failed-1']);
     setState('questions', [{ id: 'question-1', sessionID: 'attention-1', questions: [] }]);
     setState('lastSeenSessions', { 'plan-1': 0 });
+    setState('completedSessionResponses', { 'completed-1': 150 });
     setState('sessionSelectedAgents', { 'plan-1': 'plan' });
 
     cleanup = render(() => Chat(), container!);
@@ -1231,6 +1267,7 @@ describe('header status badges', () => {
     ]);
     setState('activeSessionId', 'active');
     setState('lastSeenSessions', { active: 500, other: 200 });
+    setState('completedSessionResponses', { 'completed-1': 400, 'completed-2': 300 });
 
     cleanup = render(() => Chat(), container!);
 
@@ -1255,6 +1292,7 @@ describe('header status badges', () => {
     setState('sessions', [session('active-completed', 500), session('other', 400)]);
     setState('activeSessionId', 'active-completed');
     setState('lastSeenSessions', { other: 400 });
+    setState('completedSessionResponses', { 'active-completed': 500 });
 
     cleanup = render(() => Chat(), container!);
 
@@ -1267,6 +1305,47 @@ describe('header status badges', () => {
       '.session-item.active .session-item-indicator'
     );
     expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
+  });
+
+  it('does not treat generic unread session updates as completed responses', () => {
+    setState('sessions', [session('active', 500), session('metadata-update', 400)]);
+    setState('activeSessionId', 'active');
+    setState('lastSeenSessions', { active: 500, 'metadata-update': 0 });
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-completed-badge')).toBeNull();
+    const indicator = Array.from(container?.querySelectorAll('.session-item') ?? [])
+      .find(
+        (item) =>
+          item.querySelector('.session-item-title')?.textContent?.trim() === 'metadata-update'
+      )
+      ?.querySelector('.session-item-indicator');
+    expect(indicator).toBeNull();
+  });
+
+  it('shows pending permission indicators before running indicators in the sessions list', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+
+    cleanup = render(() => Chat(), container!);
+
+    const indicator = container?.querySelector('.session-item-indicator');
+    expect(indicator?.classList.contains('is-attention')).toBe(true);
+    expect(indicator?.getAttribute('title')).toBe('Permission request pending');
   });
 
   it('keeps the active session in the sessions picker after returning from chat', async () => {
@@ -2183,6 +2262,36 @@ describe('usage-limit session status precedence', () => {
     expect(hasActiveUsageLimit('session-1')).toBe(false);
     expect(isFailedSession('session-1')).toBe(false);
     expect(isRunningSession('session-1')).toBe(true);
+  });
+
+  it('does not show running or completed indicators after synced active messages have completed', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', {
+      'session-1': { type: 'busy' },
+    });
+    setShowSessionPicker(true);
+
+    setMessagesIncremental([assistantMessageEntry('assistant-1')]);
+
+    cleanup = render(() => Chat(), container!);
+
+    const row = container?.querySelector('.session-item');
+    const indicator = row?.querySelector('.session-item-indicator');
+
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+    expect(isRunningSession('session-1')).toBe(false);
+    expect(indicator).toBeNull();
+  });
+
+  it('does not render the active session status next to the chat header title', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    setMessagesIncremental([assistantMessageEntry('assistant-1')]);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-status-indicator')).toBeNull();
   });
 
   it('does not treat an incomplete Ralph manager session as running', () => {

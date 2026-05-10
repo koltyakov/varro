@@ -1,4 +1,4 @@
-import type { DroppedFile, EditorContext } from '../../../shared/protocol';
+import type { DroppedFile, EditorContext, PermissionMode } from '../../../shared/protocol';
 import {
   formatSelectionReference,
   getSelectionRangesFromEditorContext,
@@ -21,7 +21,7 @@ import {
 import { modelSupportsVision } from '../../lib/model-capabilities';
 import { getPreferredVariant, normalizeModelVariant } from '../../lib/model-variants';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
-import type { Provider } from '../../types';
+import type { PermissionRule, Provider, Session, SessionStatus } from '../../types';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -48,7 +48,7 @@ export type SessionSendBody = {
   variant?: string;
 };
 
-type SendFlowOptions = { noReply?: boolean; allowPendingAbort?: boolean };
+type SendFlowOptions = { noReply?: boolean };
 
 export type QueuedAttachmentSnapshot = Pick<
   QueuedMessage,
@@ -57,7 +57,7 @@ export type QueuedAttachmentSnapshot = Pick<
 
 type StateBoundSendDependencies = {
   createSession(initialPermissionMode: 'default' | 'full'): Promise<string | null>;
-  hasPendingAbort(sessionId: string | null | undefined): boolean;
+  ensureSessionPermission?(sessionId: string): Promise<boolean>;
   clearPendingAbort(sessionId: string): void;
   resetTodoSync(): void;
   syncSessionMcps(sessionId: string): Promise<void>;
@@ -65,7 +65,7 @@ type StateBoundSendDependencies = {
   syncSession(sessionId: string): Promise<void>;
   syncSessionMessages(sessionId: string): Promise<void>;
   recheckSessionStatus(sessionId: string): Promise<void>;
-  showBlockedSendMessage(sessionId: string, message: string): void;
+  setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   continueInterruptedSession(sessionId: string): Promise<void>;
   logError?(context: string, err: unknown): void;
 };
@@ -266,12 +266,13 @@ export class SessionSendOperations {
       preserveComposer?: boolean;
     }
   ) => {
-    return sendMessageWithDependencies(
+    const ensureSessionPermission = this.deps.ensureSessionPermission;
+    await sendMessageWithDependencies(
       {
         getActiveSessionId: () => appStore.state.activeSessionId,
         getDefaultPermissionMode: () => permissionsStore.getPermissionModeForSession(null),
         createSession: this.deps.createSession,
-        hasPendingAbort: this.deps.hasPendingAbort,
+        ensureSessionPermission,
         clearPendingAbort: this.deps.clearPendingAbort,
         syncSessionMcps: this.deps.syncSessionMcps,
         buildSendPayload: (sessionId, nextText, nextOptions) =>
@@ -304,6 +305,7 @@ export class SessionSendOperations {
         clearTodos: composerStore.clearTodos,
         clearSessionUsageLimit: (sessionId) => sessionStore.setSessionUsageLimit(sessionId, null),
         sendAsync: this.deps.sendAsync,
+        getMessageCount: () => appStore.state.messages.length,
         clearDroppedFiles: composerStore.clearDroppedFiles,
         clearTerminalSelection: composerStore.clearTerminalSelection,
         clearClipboardImages: composerStore.clearClipboardImages,
@@ -312,10 +314,8 @@ export class SessionSendOperations {
         syncSession: this.deps.syncSession,
         syncSessionMessages: this.deps.syncSessionMessages,
         recheckSessionStatus: this.deps.recheckSessionStatus,
+        setSessionStatusEntry: this.deps.setSessionStatusEntry,
         stopLoading: uiStore.stopLoading,
-        showBlockedSendMessage: (sessionId, message) => {
-          this.deps.showBlockedSendMessage(sessionId, message);
-        },
         shouldClearComposerAfterSend: () => !options?.preserveComposer,
       },
       text,
@@ -351,7 +351,7 @@ export async function sendMessageWithDependencies(
     getActiveSessionId(): string | null;
     getDefaultPermissionMode(): 'default' | 'full';
     createSession(initialPermissionMode: 'default' | 'full'): Promise<string | null>;
-    hasPendingAbort(sessionId: string | null | undefined): boolean;
+    ensureSessionPermission?(sessionId: string): Promise<boolean>;
     clearPendingAbort(sessionId: string): void;
     syncSessionMcps(sessionId: string): Promise<void>;
     buildSendPayload(
@@ -370,6 +370,7 @@ export async function sendMessageWithDependencies(
     clearTodos(): void;
     clearSessionUsageLimit(sessionId: string): void;
     sendAsync(sessionId: string, body: SessionSendBody): Promise<unknown>;
+    getMessageCount(): number;
     clearDroppedFiles(): void;
     clearTerminalSelection(): void;
     clearClipboardImages(): void;
@@ -378,8 +379,8 @@ export async function sendMessageWithDependencies(
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
     recheckSessionStatus(sessionId: string): Promise<void>;
+    setSessionStatusEntry?(sessionId: string, status: SessionStatus): void;
     stopLoading(): void;
-    showBlockedSendMessage(sessionId: string, message: string): void;
     shouldClearComposerAfterSend(): boolean;
     logError?(context: string, err: unknown): void;
   },
@@ -392,7 +393,7 @@ export async function sendMessageWithDependencies(
   let sessionId = deps.getActiveSessionId();
   if (!sessionId) {
     const createdId = await deps.createSession(deps.getDefaultPermissionMode());
-    if (!createdId) return false;
+    if (!createdId) return;
     sessionId = createdId;
   }
 
@@ -401,22 +402,19 @@ export async function sendMessageWithDependencies(
     sessionId = currentSessionId;
   }
 
-  if (deps.hasPendingAbort(sessionId) && !options?.allowPendingAbort) {
-    const message =
-      'This session is still stopping after a tool call became stuck. Start a new session before sending another message.';
-    deps.stopLoading();
-    deps.showBlockedSendMessage(sessionId, message);
-    return false;
-  }
+  if (deps.ensureSessionPermission && !(await deps.ensureSessionPermission(sessionId))) return;
 
   deps.clearPendingAbort(sessionId);
   await deps.syncSessionMcps(sessionId);
 
   const sendPayload = deps.buildSendPayload(sessionId, text, options);
-  if (!sendPayload) return false;
+  if (!sendPayload) return;
   const { body, effectiveModel } = sendPayload;
 
   deps.requestMessageListScrollToBottom();
+  if (!body.noReply) {
+    deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
+  }
   deps.startLoading();
   deps.setError(null);
   if (effectiveModel) {
@@ -429,6 +427,7 @@ export async function sendMessageWithDependencies(
 
   try {
     await deps.sendAsync(sessionId, body);
+    const preSyncMessageCount = deps.getMessageCount();
     if (deps.shouldClearComposerAfterSend()) {
       deps.clearDroppedFiles();
       deps.clearTerminalSelection();
@@ -441,6 +440,9 @@ export async function sendMessageWithDependencies(
       deps.syncSessionMessages(sessionId),
       deps.recheckSessionStatus(sessionId),
     ]);
+    if (deps.getActiveSessionId() === sessionId && deps.getMessageCount() <= preSyncMessageCount) {
+      await retryPostSendMessageSync(deps, sessionId);
+    }
     const failures = syncResults.filter(
       (result): result is PromiseRejectedResult => result.status === 'rejected'
     );
@@ -452,18 +454,79 @@ export async function sendMessageWithDependencies(
         deps.stopLoading();
       }
     }
-    return true;
   } catch (err) {
+    if (!body.noReply) {
+      deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
+    }
     deps.stopLoading();
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
     if (body.model) {
       deps.setError(
         `Failed to send with ${body.model.providerID}/${body.model.modelID}: ${baseMessage}`
       );
-      return false;
+      return;
     }
     deps.setError(baseMessage);
+  }
+}
+
+export async function ensureSessionPermissionWithDependencies(
+  deps: {
+    getSession(sessionId: string): Pick<Session, 'permission'> | null | undefined;
+    buildPermissionRules(mode: PermissionMode): PermissionRule[];
+    getPermissionMode(sessionId: string): PermissionMode;
+    updateSessionPermission(
+      sessionId: string,
+      input: { permission: PermissionRule[] }
+    ): Promise<Session>;
+    upsertSession(session: Session): void;
+    setError(message: string): void;
+  },
+  sessionId: string
+): Promise<boolean> {
+  const session = deps.getSession(sessionId);
+  const permission = deps.buildPermissionRules(deps.getPermissionMode(sessionId));
+  if (hasPermissionRules(session?.permission, permission)) return true;
+
+  try {
+    const updated = await deps.updateSessionPermission(sessionId, { permission });
+    deps.upsertSession(updated);
+    return true;
+  } catch (err) {
+    deps.setError(err instanceof Error ? err.message : 'Failed to update permissions');
     return false;
+  }
+}
+
+function hasPermissionRules(current: PermissionRule[] | undefined, required: PermissionRule[]) {
+  if (!Array.isArray(current) || current.length === 0) return false;
+  return required.every((requiredRule) =>
+    current.some(
+      (rule) =>
+        rule.permission === requiredRule.permission &&
+        rule.pattern === requiredRule.pattern &&
+        rule.action === requiredRule.action
+    )
+  );
+}
+
+async function retryPostSendMessageSync(
+  deps: {
+    getActiveSessionId(): string | null;
+    getMessageCount(): number;
+    syncSessionMessages(sessionId: string): Promise<void>;
+    logError?(context: string, err: unknown): void;
+  },
+  sessionId: string
+) {
+  for (const delayMs of [250, 750]) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (deps.getActiveSessionId() !== sessionId || deps.getMessageCount() > 0) return;
+    try {
+      await deps.syncSessionMessages(sessionId);
+    } catch (err) {
+      deps.logError?.('postSendMessageSyncRetry', err);
+    }
   }
 }
 

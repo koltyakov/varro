@@ -26,6 +26,7 @@ const SCENARIO_NAMES = [
   'blank',
   'pending-permission',
   'hidden-linked-permission',
+  'missed-permission-event',
   'restored-session',
   'maintenance-reconnect',
   'dispose-during-start',
@@ -96,6 +97,7 @@ type ScenarioState = {
   agents: Agent[];
   questions: QuestionRequest[];
   pendingPermissions: Array<Record<string, unknown>>;
+  initialPendingPermissions?: Array<Record<string, unknown>>;
   recycleBinEntries: RecycleBinEntry[];
   persistedActiveSessionId: string | null;
   requests: RequestLog[];
@@ -150,6 +152,7 @@ const DEFAULT_PERMISSION_RULES = [
   { permission: 'glob', pattern: '*', action: 'allow' },
   { permission: 'grep', pattern: '*', action: 'allow' },
   { permission: 'bash', pattern: '*', action: 'ask' },
+  { permission: 'shell', pattern: '*', action: 'ask' },
   { permission: 'edit', pattern: '*', action: 'ask' },
 ] as const satisfies Session['permission'];
 const TMP_WORKSPACE_FILES: WorkspaceFile[] = [
@@ -472,6 +475,11 @@ function makeAssistantMessage(
       },
     ],
   };
+}
+
+function markAssistantInProgress(message: MessageEntry<AssistantMessage>) {
+  delete message.info.time.completed;
+  delete message.info.finish;
 }
 
 function makeReasoningPart(
@@ -918,6 +926,74 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     return state;
   }
 
+  if (name === 'missed-permission-event') {
+    const session = makeSession(
+      'session-missed-permission-event',
+      'Missed permission event',
+      BASE_TIME - 1_000
+    );
+    const user = makeUserMessage(
+      session.id,
+      'message-missed-permission-user',
+      ['Run npm test.'],
+      BASE_TIME - 6_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-missed-permission-assistant',
+      user.info.id,
+      'Preparing to run the command.',
+      BASE_TIME - 5_000
+    );
+    assistant.parts = [
+      {
+        id: 'tool-missed-permission-1',
+        sessionID: session.id,
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'missed-permission-call-1',
+        tool: 'bash',
+        state: {
+          status: 'running',
+          input: { command: 'npm test' },
+          title: 'Run command',
+          metadata: {},
+          time: { start: BASE_TIME - 5_000 },
+        },
+      },
+    ];
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'busy' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.initialPendingPermissions = [];
+    state.pendingPermissions = [
+      {
+        id: 'permission-missed-event-1',
+        permission: 'bash',
+        sessionID: session.id,
+        title: 'Allow running npm test?',
+        metadata: { command: 'npm test' },
+        tool: { messageID: assistant.info.id, callID: 'missed-permission-call-1' },
+        patterns: ['npm test'],
+        time: { created: BASE_TIME - 4_900 },
+      },
+    ];
+    state.postReadyMessages.push({
+      type: 'server/event',
+      payload: {
+        type: 'session.next.shell.started',
+        properties: {
+          sessionID: session.id,
+          callID: 'missed-permission-call-1',
+          command: 'npm test',
+        },
+      },
+    });
+    state.nextSequence = 26;
+    return state;
+  }
+
   if (name === 'plan-ready') {
     const session = makeSession('session-plan-ready', 'Plan migration rollout', BASE_TIME - 1_000);
     const user = makeUserMessage(
@@ -1027,6 +1103,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         ]),
       ]
     );
+    markAssistantInProgress(assistant);
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'busy' };
     state.messagesBySessionId[session.id] = [user, assistant];
@@ -1349,6 +1426,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Still working through the requested refactor steps.',
       BASE_TIME - 3_000
     );
+    markAssistantInProgress(assistant);
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'busy' };
     state.messagesBySessionId[session.id] = [user, assistant];
@@ -2656,7 +2734,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     droppedFiles: [],
     emptyStateLogoUri: '',
     showStickyUserPrompt: true,
-    pendingPermissions: state.pendingPermissions,
+    pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
     pendingQuestions: [],
     recycleBinEntries: state.recycleBinEntries,
   };
@@ -2755,6 +2833,10 @@ async function handleApiRequest(
 
   if (method === 'GET' && path === '/question') {
     return state.questions;
+  }
+
+  if (method === 'GET' && path === '/permission') {
+    return state.pendingPermissions;
   }
 
   if (method === 'GET' && path === '/file/status') {

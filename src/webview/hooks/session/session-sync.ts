@@ -1,4 +1,5 @@
 import type { SelectedModel } from '../../lib/app-state-types';
+import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import type { Message, Part, Session, SessionStatus } from '../../types';
 import {
@@ -13,12 +14,7 @@ export async function selectSessionWithStateDependencies(
   deps: {
     getActiveSessionId(): string | null;
     setActiveSessionId(id: string): void;
-    hasPendingAbort(sessionId: string | null | undefined): boolean;
-    shouldIgnorePendingAbortStatus(
-      sessionId: string,
-      status: SessionStatus | null | undefined
-    ): boolean;
-    markRunningToolPartsAborted(sessionIds: string[]): void;
+    clearPendingAbort(sessionId: string): void;
     persistActiveSessionId(id: string): void;
     markSessionSeen(id: string): void;
     clearDraftCurrentDocumentState(): void;
@@ -51,7 +47,10 @@ export async function selectSessionWithStateDependencies(
     syncTodosFromMessages(messages: SessionEntry[]): void;
     loadQuestions(): Promise<void>;
     loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
-    mergeSessionStatuses(statuses: Record<string, SessionStatus>): void;
+    mergeSessionStatuses(
+      statuses: Record<string, SessionStatus>,
+      options?: SessionStatusSnapshotOptions
+    ): void;
     updateUsageLimitState(
       sessionId: string,
       status: SessionStatus | null | undefined,
@@ -72,16 +71,19 @@ export async function syncSessionMessagesWithStateDependencies(
   deps: {
     getActiveSessionId(): string | null;
     getSessionStatus(sessionId: string): SessionStatus | null | undefined;
+    loadingStartedAt(): number | null;
     loadSessionMessages(sessionId: string): Promise<SessionEntry[]>;
     updateUsageLimitState(
       sessionId: string,
       status: SessionStatus | null | undefined,
       messages: SessionEntry[]
     ): void;
+    setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
     setMessagesIncremental(
       messages: SessionEntry[],
       options?: { preserveExtraParts?: boolean }
     ): void;
+    stopLoading(): void;
     syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
     handoffTodosToMessages(messages: SessionEntry[]): void;
   },
@@ -104,12 +106,7 @@ export async function syncSessionWithStateDependencies(
 type SessionSyncDependencies = {
   getActiveSessionId(): string | null;
   setActiveSessionId(id: string): void;
-  hasPendingAbort(sessionId: string | null | undefined): boolean;
-  shouldIgnorePendingAbortStatus(
-    sessionId: string,
-    status: SessionStatus | null | undefined
-  ): boolean;
-  markRunningToolPartsAborted(sessionIds: string[]): void;
+  clearPendingAbort(sessionId: string): void;
   persistActiveSessionId(id: string): void;
   markSessionSeen(id: string): void;
   clearDraftCurrentDocumentState(): void;
@@ -142,16 +139,21 @@ type SessionSyncDependencies = {
   syncTodosFromMessages(messages: SessionEntry[]): void;
   loadQuestions(): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
-  mergeSessionStatuses(statuses: Record<string, SessionStatus>): void;
+  mergeSessionStatuses(
+    statuses: Record<string, SessionStatus>,
+    options?: SessionStatusSnapshotOptions
+  ): void;
   updateUsageLimitState(
     sessionId: string,
     status: SessionStatus | null | undefined,
     messages: SessionEntry[]
   ): void;
+  setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   startLoading(): void;
   stopLoading(): void;
   setError(message: string): void;
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
+  loadingStartedAt(): number | null;
   loadSessionMessages(sessionId: string): Promise<SessionEntry[]>;
   handoffTodosToMessages(messages: SessionEntry[]): void;
   loadSessionMetadata(sessionId: string): Promise<Session>;
@@ -174,9 +176,7 @@ export class SessionSyncOperations {
       {
         getActiveSessionId: this.deps.getActiveSessionId,
         setActiveSessionId: this.deps.setActiveSessionId,
-        hasPendingAbort: this.deps.hasPendingAbort,
-        shouldIgnorePendingAbortStatus: this.deps.shouldIgnorePendingAbortStatus,
-        markRunningToolPartsAborted: this.deps.markRunningToolPartsAborted,
+        clearPendingAbort: this.deps.clearPendingAbort,
         persistActiveSessionId: this.deps.persistActiveSessionId,
         markSessionSeen: this.deps.markSessionSeen,
         clearDraftCurrentDocumentState: this.deps.clearDraftCurrentDocumentState,
@@ -220,9 +220,12 @@ export class SessionSyncOperations {
       {
         getActiveSessionId: this.deps.getActiveSessionId,
         getSessionStatus: this.deps.getSessionStatus,
+        loadingStartedAt: this.deps.loadingStartedAt,
         loadSessionMessages: this.deps.loadSessionMessages,
         updateUsageLimitState: this.deps.updateUsageLimitState,
+        setSessionStatusEntry: this.deps.setSessionStatusEntry,
         setMessagesIncremental: this.deps.setMessagesIncremental,
+        stopLoading: this.deps.stopLoading,
         syncFailedSessionsFromMessages: this.deps.syncFailedSessionsFromMessages,
         handoffTodosToMessages: this.deps.handoffTodosToMessages,
       },

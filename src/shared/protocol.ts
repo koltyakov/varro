@@ -197,12 +197,33 @@ export function isServerEventName(value: unknown): value is ServerEventName {
 
 export function parseServerEvent(value: unknown): ServerEvent | null {
   const record = asRecord(value);
-  if (!record || !isServerEventName(record.type)) return null;
+  if (!record) return null;
 
-  const properties = asRecord(record.properties);
+  return (
+    parseServerEventRecord(record) ||
+    parseServerEventRecord(asRecord(record.payload)) ||
+    parseServerEventRecord(asRecord(record.data))
+  );
+}
+
+function parseServerEventRecord(record: Record<string, unknown> | null): ServerEvent | null {
+  if (!record) return null;
+
+  const eventType = isServerEventName(record.type)
+    ? record.type
+    : getSyncServerEventName(record.type, record.name);
+  if (!eventType) return null;
+
+  const properties = asRecord(isServerEventName(record.type) ? record.properties : record.data);
   return properties
-    ? ({ type: record.type, properties } as ServerEvent)
-    : ({ type: record.type } as ServerEvent);
+    ? ({ type: eventType, properties } as ServerEvent)
+    : ({ type: eventType } as ServerEvent);
+}
+
+function getSyncServerEventName(type: unknown, name: unknown): ServerEventName | null {
+  if (type !== 'sync' || typeof name !== 'string') return null;
+  const eventName = name.replace(/\.\d+$/, '');
+  return isServerEventName(eventName) ? eventName : null;
 }
 
 export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contrast-light';

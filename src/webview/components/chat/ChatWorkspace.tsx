@@ -136,7 +136,7 @@ export function ChatWorkspace(props: {
   const mainShell = () => (
     <div class="chat-main-shell">
       <div class="chat-header chat-header-chat-desktop">
-        <div class="chat-header-inner">{activeChatHeader(false, false)}</div>
+        <div class="chat-header-inner">{activeChatHeader(false)}</div>
       </div>
       <div class="chat-main-column-shell">
         <Show

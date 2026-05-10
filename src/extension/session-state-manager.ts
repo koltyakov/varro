@@ -124,7 +124,7 @@ export class SessionStateManager {
     switch (type) {
       case 'session.created':
       case 'session.updated': {
-        this.rememberSessionMetadata(asRecord(props?.info));
+        this.rememberSessionMetadata(asRecord(props?.info), getString(props?.sessionID));
         break;
       }
       case 'session.deleted': {
@@ -203,13 +203,20 @@ export class SessionStateManager {
         break;
       }
       case 'permission.asked': {
-        changed = (props ? this.trackBlockingRequest('permission', props) : false) || changed;
+        const propsRecord = asRecord(props);
+        const requestProps = asRecord(propsRecord?.info) || propsRecord;
+        changed =
+          (requestProps ? this.trackBlockingRequest('permission', requestProps) : false) || changed;
         break;
       }
       case 'permission.replied': {
+        const propsRecord = asRecord(props);
+        const requestProps = asRecord(propsRecord?.info) || propsRecord;
         changed =
           this.clearBlockingRequest(
-            getString(props?.id) || getString(props?.permissionID) || getString(props?.requestID)
+            getString(requestProps?.id) ||
+              getString(requestProps?.permissionID) ||
+              getString(requestProps?.requestID)
           ) || changed;
         break;
       }
@@ -407,8 +414,11 @@ export class SessionStateManager {
       : serializeQuestionRequestProps(props);
   }
 
-  private rememberSessionMetadata(info: Record<string, unknown> | undefined) {
-    const sessionID = getString(info?.id);
+  private rememberSessionMetadata(
+    info: Record<string, unknown> | undefined,
+    fallbackSessionID?: string
+  ) {
+    const sessionID = getString(info?.id) || fallbackSessionID;
     const title = normalizeSessionTitle(getString(info?.title));
     if (sessionID && title) {
       this.sessionTitles.set(sessionID, title);

@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
+import type { Message, Part } from '../types';
 
 const {
   serverEventsOn,
   addPermission,
   clearStreamingState,
+  finishMessageStreaming,
   markSessionSeen,
+  markSessionResponseCompleted,
   removePermission,
   removeMessagePart,
   removeQuestion,
@@ -16,6 +19,7 @@ const {
   setSessionUsageLimit,
   startLoading,
   stopLoading,
+  loadingStartedAt,
   upsertMessageInfo,
   upsertPart,
   upsertQuestion,
@@ -28,7 +32,9 @@ const {
   serverEventsOn: vi.fn(),
   addPermission: vi.fn(),
   clearStreamingState: vi.fn(),
+  finishMessageStreaming: vi.fn(),
   markSessionSeen: vi.fn(),
+  markSessionResponseCompleted: vi.fn(),
   removePermission: vi.fn(),
   removeMessagePart: vi.fn(),
   removeQuestion: vi.fn(),
@@ -38,6 +44,7 @@ const {
   setSessionUsageLimit: vi.fn(),
   startLoading: vi.fn(),
   stopLoading: vi.fn(),
+  loadingStartedAt: vi.fn(() => null as number | null),
   upsertMessageInfo: vi.fn(),
   upsertPart: vi.fn(),
   upsertQuestion: vi.fn(),
@@ -47,7 +54,15 @@ const {
   getPermissionModeForSession: vi.fn(),
   state: {
     activeSessionId: null,
+    completedSessionResponses: {},
+    failedSessionIds: [],
+    lastSeenSessions: {},
     messages: [],
+    permissions: [],
+    questions: [],
+    sessions: [],
+    sessionStatus: {},
+    sessionUsageLimits: {},
   },
 }));
 
@@ -87,7 +102,9 @@ vi.mock('../lib/stores/session-store', async () => {
     sessionStore: {
       ...(actual as { sessionStore: object }).sessionStore,
       clearStreamingState,
+      finishMessageStreaming,
       markSessionSeen,
+      markSessionResponseCompleted,
       removeMessagePart,
       replaceMessages,
       setSessionCompacting: setSessionCompactingStore,
@@ -107,6 +124,7 @@ vi.mock('../lib/stores/ui-store', async () => {
     uiStore: {
       ...(actual as { uiStore: object }).uiStore,
       markLoadingActivity,
+      loadingStartedAt,
       startLoading,
       stopLoading,
     },
@@ -117,6 +135,7 @@ import {
   registerSessionEventHandlers,
   SessionEventHandlerOperations,
 } from './session/session-event-handlers';
+import { setShowSessionPicker } from '../lib/state';
 
 type EventData = { properties?: Record<string, unknown> };
 
@@ -203,6 +222,16 @@ function createUserEntry(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createCompletedAssistantEntry(
+  created: number,
+  completed: number
+): { info: Message; parts: Part[] } {
+  return createAssistantEntry({ time: { created, completed } }) as {
+    info: Message;
+    parts: Part[];
+  };
+}
+
 describe('registerSessionEventHandlers', () => {
   it('restores the permission prompt when auto-approval fails', async () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
@@ -260,7 +289,7 @@ describe('registerSessionEventHandlers', () => {
         expect.objectContaining({
           id: 'perm-1',
           sessionID: 'session-1',
-          title: 'bash',
+          title: 'Run Bash command',
         })
       );
     });
@@ -309,6 +338,32 @@ describe('registerSessionEventHandlers', () => {
     });
 
     expect(removePermission).toHaveBeenCalledWith('perm-1');
+  });
+
+  it('syncs pending permissions after shell progress events in case permission events were missed', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncPendingPermissions = vi.fn().mockResolvedValue(undefined);
+
+    try {
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          syncPendingPermissions,
+        })
+      );
+
+      handlers.get('session.next.shell.started')?.({
+        properties: { sessionID: 'session-1' },
+      });
+
+      expect(syncPendingPermissions).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('binds event handlers to shared state-backed dependencies', async () => {
@@ -381,7 +436,8 @@ describe('registerSessionEventHandlers', () => {
     expect(setState).toHaveBeenCalledWith('sessionStatus', expect.any(Function));
   });
 
-  it('ignores partial message.updated payloads for message state', () => {
+  it('resyncs active messages for partial message.updated payloads', async () => {
+    vi.useFakeTimers();
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(
@@ -397,53 +453,66 @@ describe('registerSessionEventHandlers', () => {
     const applyUsageLimitNotice = vi.fn();
     const clearUsageLimitOnResumedProgress = vi.fn();
     const updateUsageLimitState = vi.fn();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
-    registerSessionEventHandlers({
-      getActiveSessionId: () => 'session-1',
-      getMessages: () => [],
-      handoffTodosToMessages,
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
-      setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress,
-      updateUsageLimitState,
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice,
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
-    });
+    try {
+      registerSessionEventHandlers({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [],
+        handoffTodosToMessages,
+        upsertSession: vi.fn(),
+        setSessionCompacting: vi.fn(),
+        removeDeletedSessionTree: vi.fn(),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        markPendingAbort: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        clearUsageLimitOnResumedProgress,
+        updateUsageLimitState,
+        syncSession: vi.fn().mockResolvedValue(undefined),
+        shouldResyncSessionAfterIdle: () => false,
+        syncSessionMessages,
+        applyUsageLimitNotice,
+        syncTodosFromMessages: vi.fn(),
+        shouldAutoApprovePermissions: () => false,
+        respondPermission: vi.fn().mockResolvedValue(undefined),
+        setDiffs: vi.fn(),
+        abortRemoteSession: vi.fn().mockResolvedValue(true),
+        logError: vi.fn(),
+      });
 
-    upsertMessageInfo.mockClear();
-    markLoadingActivity.mockClear();
+      upsertMessageInfo.mockClear();
+      markLoadingActivity.mockClear();
 
-    handlers.get('message.updated')?.({
-      properties: {
-        info: {
-          sessionID: 'session-1',
-          role: 'assistant',
-          error: { name: 'rate_limit_exceeded', data: { message: '429 usage limit reached' } },
+      handlers.get('message.updated')?.({
+        properties: {
+          info: {
+            sessionID: 'session-1',
+            role: 'assistant',
+            error: { name: 'rate_limit_exceeded', data: { message: '429 usage limit reached' } },
+          },
         },
-      },
-    });
+      });
 
-    expect(handoffTodosToMessages).not.toHaveBeenCalled();
-    expect(applyUsageLimitNotice).toHaveBeenCalledWith(
-      'session-1',
-      expect.objectContaining({
-        source: 'message',
-        sessionID: 'session-1',
-        message: '429 usage limit reached',
-      })
-    );
-    expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
+      expect(handoffTodosToMessages).not.toHaveBeenCalled();
+      expect(applyUsageLimitNotice).toHaveBeenCalledWith(
+        'session-1',
+        expect.objectContaining({
+          source: 'message',
+          sessionID: 'session-1',
+          message: '429 usage limit reached',
+        })
+      );
+      expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
+      expect(upsertMessageInfo).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects malformed user message.updated payloads with parent ids', () => {
@@ -498,7 +567,59 @@ describe('registerSessionEventHandlers', () => {
     expect(setState).not.toHaveBeenCalledWith('messages', expect.any(Function));
   });
 
-  it('ignores partial message.part.updated payloads for message state', () => {
+  it('resyncs completed active assistant messages when local parts are missing', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [],
+        syncSessionMessages,
+      })
+    );
+
+    upsertMessageInfo.mockClear();
+
+    handlers.get('message.updated')?.({
+      properties: {
+        info: createAssistantEntry({ time: { created: 1, completed: 2 } }).info,
+      },
+    });
+
+    expect(upsertMessageInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'assistant-1', sessionID: 'session-1' })
+    );
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('finishes streaming for partial active assistant completion updates', () => {
+    const handlers = installHandlers();
+
+    finishMessageStreaming.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createAssistantEntry() as { info: Message; parts: Part[] }],
+      })
+    );
+
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { completed: 2 },
+        },
+      },
+    });
+
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+  });
+
+  it('resyncs active messages for partial message.part.updated payloads', async () => {
+    vi.useFakeTimers();
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(
@@ -511,40 +632,97 @@ describe('registerSessionEventHandlers', () => {
     });
 
     const syncTodosFromMessages = vi.fn();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
-    registerSessionEventHandlers({
-      getActiveSessionId: () => 'session-1',
-      getMessages: () => [],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
-      setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages,
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
+    try {
+      registerSessionEventHandlers({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [],
+        handoffTodosToMessages: vi.fn().mockReturnValue(true),
+        upsertSession: vi.fn(),
+        setSessionCompacting: vi.fn(),
+        removeDeletedSessionTree: vi.fn(),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        markPendingAbort: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        clearUsageLimitOnResumedProgress: vi.fn(),
+        updateUsageLimitState: vi.fn(),
+        syncSession: vi.fn().mockResolvedValue(undefined),
+        shouldResyncSessionAfterIdle: () => false,
+        syncSessionMessages,
+        applyUsageLimitNotice: vi.fn(),
+        syncTodosFromMessages,
+        shouldAutoApprovePermissions: () => false,
+        respondPermission: vi.fn().mockResolvedValue(undefined),
+        setDiffs: vi.fn(),
+        abortRemoteSession: vi.fn().mockResolvedValue(true),
+        logError: vi.fn(),
+      });
+
+      handlers.get('message.part.updated')?.({
+        properties: {
+          part: {
+            sessionID: 'session-1',
+            type: 'tool',
+          },
+        },
+      });
+
+      expect(syncTodosFromMessages).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resyncs before applying complete part updates when the parent message is missing', async () => {
+    const handlers = installHandlers();
+    const assistantEntry = createAssistantEntry({ id: 'assistant-2' }) as {
+      info: Message;
+      parts: Part[];
+    };
+    let messages: Array<{ info: Message; parts: Part[] }> = [
+      createUserEntry({ id: 'user-2' }) as { info: Message; parts: Part[] },
+    ];
+    const syncSessionMessages = vi.fn(async () => {
+      messages = [...messages, assistantEntry];
     });
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        syncSessionMessages,
+      })
+    );
+
+    upsertPart.mockClear();
 
     handlers.get('message.part.updated')?.({
       properties: {
         part: {
+          id: 'part-1',
           sessionID: 'session-1',
-          type: 'tool',
+          messageID: 'assistant-2',
+          type: 'text',
+          text: 'No action taken.',
         },
       },
     });
 
-    expect(syncTodosFromMessages).not.toHaveBeenCalled();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(upsertPart).not.toHaveBeenCalled();
+
+    await vi.waitFor(() => {
+      expect(upsertPart).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'part-1', messageID: 'assistant-2' })
+      );
+    });
   });
 
   it('applies child-session message updates when they belong to the active session tree', () => {
@@ -615,7 +793,138 @@ describe('registerSessionEventHandlers', () => {
     expect(upsertMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'assistant-child-1', sessionID: 'session-child' })
     );
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-child-1');
     expect(handoffTodosToMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks completed inactive assistant messages idle without stopping active loading', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const handoffTodosToMessages = vi.fn().mockReturnValue(true);
+
+    stopLoading.mockClear();
+    markSessionResponseCompleted.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-2',
+        setSessionStatusEntry,
+        handoffTodosToMessages,
+      })
+    );
+
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          ...createAssistantEntry({ time: { created: 1, completed: 2 } }).info,
+          sessionID: 'session-1',
+        },
+      },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(markSessionResponseCompleted).toHaveBeenCalledWith('session-1', 2);
+    expect(handoffTodosToMessages).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('marks partial inactive assistant completion updates idle without stopping active loading', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    stopLoading.mockClear();
+    markSessionResponseCompleted.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-2',
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { completed: 2 },
+        },
+      },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
+    expect(markSessionResponseCompleted).toHaveBeenCalledWith('session-1', 2);
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('merges partial session title updates and partial completion updates for inactive sessions', () => {
+    const handlers = installHandlers();
+    const upsertSession = vi.fn();
+    const setSessionStatusEntry = vi.fn();
+
+    state.sessions = [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'New Chat',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+      {
+        id: 'session-2',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Active Chat',
+        version: '1',
+        time: { created: 2, updated: 2 },
+      },
+    ];
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-2',
+        upsertSession,
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    handlers.get('session.updated')?.({
+      properties: {
+        info: {
+          id: 'session-1',
+          title: 'Test message in Chat A',
+          time: { updated: 3 },
+        },
+      },
+    });
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { completed: 4 },
+        },
+      },
+    });
+
+    expect(upsertSession).toHaveBeenCalledWith({
+      id: 'session-1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Test message in Chat A',
+      version: '1',
+      time: { created: 1, updated: 3 },
+    });
+    expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 
   it('applies child-session tool part updates when they belong to the active session tree', () => {
@@ -636,7 +945,12 @@ describe('registerSessionEventHandlers', () => {
       getActiveSessionId: () => 'session-parent',
       isSessionInActiveTree: (sessionId) =>
         sessionId === 'session-parent' || sessionId === 'session-child',
-      getMessages: () => [],
+      getMessages: () => [
+        createAssistantEntry({ id: 'assistant-child-1', sessionID: 'session-child' }) as {
+          info: Message;
+          parts: Part[];
+        },
+      ],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
       upsertSession: vi.fn(),
       setSessionCompacting: vi.fn(),
@@ -703,7 +1017,12 @@ describe('registerSessionEventHandlers', () => {
       getActiveSessionId: () => 'session-parent',
       isSessionInActiveTree: (sessionId) =>
         sessionId === 'session-parent' || sessionId === 'session-child',
-      getMessages: () => [],
+      getMessages: () => [
+        {
+          info: createAssistantEntry({ id: 'assistant-child-1', sessionID: 'session-child' }).info,
+          parts: [{ id: 'reasoning-1' }],
+        },
+      ],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
       upsertSession: vi.fn(),
       setSessionCompacting: vi.fn(),
@@ -745,6 +1064,228 @@ describe('registerSessionEventHandlers', () => {
       'session-child',
       'text'
     );
+  });
+
+  it('resyncs active messages before applying deltas for missing parts', async () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const logError = vi.fn();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [],
+        syncSessionMessages,
+        logError,
+      })
+    );
+
+    applyMessagePartDelta.mockClear();
+
+    handlers.get('message.part.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        partID: 'part-1',
+        delta: 'still working',
+        field: 'text',
+      },
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
+
+    await Promise.resolve();
+
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-1',
+      'part-1',
+      'still working',
+      'session-1',
+      'text'
+    );
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('creates and streams reasoning parts from session.next reasoning events', () => {
+    const handlers = installHandlers();
+    state.messages = [createAssistantEntry({ id: 'assistant-2', sessionID: 'session-1' })];
+
+    upsertPart.mockClear();
+    applyMessagePartDelta.mockClear();
+    markLoadingActivity.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => state.messages,
+      })
+    );
+
+    handlers.get('session.next.reasoning.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        reasoningID: 'reason-1',
+        delta: 'Thinking through the change',
+      },
+    });
+
+    expect(markLoadingActivity).toHaveBeenCalledTimes(1);
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'reason-1',
+        sessionID: 'session-1',
+        messageID: 'assistant-2',
+        type: 'reasoning',
+        text: '',
+      })
+    );
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-2',
+      'reason-1',
+      'Thinking through the change',
+      'session-1',
+      'text'
+    );
+  });
+
+  it('syncs messages before applying session.next reasoning when no active assistant is loaded', async () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn(async () => {
+      state.messages = [createAssistantEntry({ id: 'assistant-3', sessionID: 'session-1' })];
+    });
+    state.messages = [
+      createAssistantEntry({
+        id: 'assistant-old',
+        sessionID: 'session-1',
+        time: { created: 1, completed: 2 },
+      }),
+    ];
+
+    upsertPart.mockClear();
+    applyMessagePartDelta.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => state.messages,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.reasoning.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        reasoningID: 'reason-2',
+        delta: 'New thinking',
+      },
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
+
+    await Promise.resolve();
+
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'reason-2', messageID: 'assistant-3', type: 'reasoning' })
+    );
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-3',
+      'reason-2',
+      'New thinking',
+      'session-1',
+      'text'
+    );
+  });
+
+  it('resyncs active messages from session.next text progress events', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const setSessionStatusEntry = vi.fn();
+    const clearUsageLimitOnResumedProgress = vi.fn();
+
+    try {
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          syncSessionMessages,
+          setSessionStatusEntry,
+          clearUsageLimitOnResumedProgress,
+        })
+      );
+
+      markLoadingActivity.mockClear();
+      startLoading.mockClear();
+
+      handlers.get('session.next.text.delta')?.({
+        properties: {
+          sessionID: 'session-1',
+          text: 'streaming response',
+        },
+      });
+
+      expect(markLoadingActivity).toHaveBeenCalledTimes(1);
+      expect(startLoading).toHaveBeenCalledTimes(1);
+      expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+      expect(clearUsageLimitOnResumedProgress).toHaveBeenCalledWith('session-1', { type: 'busy' });
+      expect(syncSessionMessages).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('marks inactive sessions busy from progress events without active message work', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const setSessionStatusEntry = vi.fn();
+    const clearUsageLimitOnResumedProgress = vi.fn();
+
+    markLoadingActivity.mockClear();
+    startLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSessionMessages,
+        setSessionStatusEntry,
+        clearUsageLimitOnResumedProgress,
+      })
+    );
+
+    handlers.get('session.next.text.delta')?.({
+      properties: {
+        sessionID: 'background-session',
+        text: 'streaming response',
+      },
+    });
+    handlers.get('session.next.reasoning.delta')?.({
+      properties: {
+        sessionID: 'reasoning-session',
+        reasoningID: 'reasoning-1',
+        delta: 'thinking',
+      },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenNthCalledWith(1, 'background-session', {
+      type: 'busy',
+    });
+    expect(setSessionStatusEntry).toHaveBeenNthCalledWith(2, 'reasoning-session', {
+      type: 'busy',
+    });
+    expect(clearUsageLimitOnResumedProgress).toHaveBeenNthCalledWith(1, 'background-session', {
+      type: 'busy',
+    });
+    expect(clearUsageLimitOnResumedProgress).toHaveBeenNthCalledWith(2, 'reasoning-session', {
+      type: 'busy',
+    });
+    expect(markLoadingActivity).not.toHaveBeenCalled();
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
   it('re-syncs todos from messages when todo.updated arrives for an active reply', () => {
@@ -887,6 +1428,30 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
+  it('does not mark the active session seen on idle while the session list is open', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const handoffTodosToMessages = vi.fn().mockReturnValue(true);
+
+    markSessionSeen.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        handoffTodosToMessages,
+        setSessionStatusEntry,
+      })
+    );
+
+    setShowSessionPicker(true);
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    setShowSessionPicker(false);
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(markSessionSeen).not.toHaveBeenCalled();
+    expect(handoffTodosToMessages).toHaveBeenCalledTimes(1);
+  });
+
   it('does not resync messages on idle when the active session already looks settled', () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
@@ -951,6 +1516,24 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
+  it('resyncs messages on idle when the active chat is empty', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [],
+        shouldResyncSessionAfterIdle: () => true,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
   it('resyncs messages on idle when todo handoff cannot reconcile local state', () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
@@ -1005,6 +1588,50 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
+  it('keeps loading for a busy follow-up sent after the previous assistant completed', () => {
+    const handlers = installHandlers();
+
+    loadingStartedAt.mockReturnValueOnce(3);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('stops loading for a stale busy status when synced assistant already completed', () => {
+    const handlers = installHandlers();
+
+    loadingStartedAt.mockReturnValueOnce(1);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(startLoading).not.toHaveBeenCalled();
+  });
+
   it('tracks session lifecycle events and active status transitions', () => {
     const handlers = installHandlers();
     const upsertSession = vi.fn();
@@ -1056,6 +1683,53 @@ describe('registerSessionEventHandlers', () => {
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
     expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges sync session updates by sessionID without overwriting existing fields with nulls', () => {
+    const handlers = installHandlers();
+    const upsertSession = vi.fn();
+    const setSessionCompacting = vi.fn();
+
+    state.sessions = [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'New Chat',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+    ];
+    setState.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        upsertSession,
+        setSessionCompacting,
+      })
+    );
+
+    handlers.get('session.updated')?.({
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          title: 'Updated title',
+          version: null,
+          agent: 'plan',
+          time: { created: null, updated: 2 },
+        },
+      },
+    });
+
+    expect(upsertSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'session-1',
+        title: 'Updated title',
+        version: '1',
+        time: { created: 1, updated: 2 },
+      })
+    );
+    expect(setState).toHaveBeenCalledWith('sessionSelectedAgents', 'session-1', 'plan');
   });
 
   it('ignores pending-abort status events before mutating state', () => {

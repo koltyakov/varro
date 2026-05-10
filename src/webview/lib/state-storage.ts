@@ -14,6 +14,7 @@ export const STORAGE_KEYS = {
   hiddenProviders: 'varro.hiddenProviders',
   hiddenModels: 'varro.hiddenModels',
   lastSeenSessions: 'varro.lastSeenSessions',
+  completedSessionResponses: 'varro.completedSessionResponses',
   lastActiveSessionId: 'varro.lastActiveSessionId',
   lastOpenedView: 'varro.lastOpenedView',
   showThinking: 'varro.showThinking',

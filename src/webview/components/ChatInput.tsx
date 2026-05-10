@@ -1018,13 +1018,8 @@ export function ChatInput() {
     const prevError = error();
     setInputText('');
     resetPastedImageIndex();
-    const sent = await sendMessage(text, {
-      noReply: mode === 'steer',
-      ...(mode === 'after-stop' ? { allowPendingAbort: true } : {}),
-    });
-    if (!sent) {
-      setInputText(text);
-    } else if (error() && error() !== prevError) {
+    await sendMessage(text, { noReply: mode === 'steer' });
+    if (error() && error() !== prevError) {
       setInputText(text);
     }
   }
@@ -2276,9 +2271,9 @@ export function ChatInput() {
             handleSend('steer');
             setShowBusyMenu(false);
           }}
-          onStopAndSend={async () => {
-            await abortSession();
-            await handleSend('after-stop');
+          onStopAndSend={() => {
+            abortSession();
+            handleSend();
             setShowBusyMenu(false);
           }}
         />

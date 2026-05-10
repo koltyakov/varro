@@ -6006,7 +6006,8 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   flex-shrink: 0;
 }
 
-.session-item-indicator {
+.session-item-indicator,
+.session-status-indicator {
   position: relative;
   flex-shrink: 0;
   width: 10px;
@@ -6022,31 +6023,36 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   display: inline-block;
 }
 
-.session-item-indicator.is-running {
+.session-item-indicator.is-running,
+.session-status-indicator.is-running {
   border: 1.5px solid color-mix(in srgb, var(--color-vscode-fg) 24%, transparent);
   border-top-color: var(--color-vscode-fg);
   background: transparent;
   animation: spin 0.85s linear infinite;
 }
 
-.session-item-indicator.is-attention {
+.session-item-indicator.is-attention,
+.session-status-indicator.is-attention {
   background: var(--color-vscode-accent);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-accent) 40%, transparent);
   animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
-.session-item-indicator.is-failed {
+.session-item-indicator.is-failed,
+.session-status-indicator.is-failed {
   background: var(--color-vscode-error);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
   animation: pulse-soft 1.2s ease-in-out infinite;
 }
 
-.session-item-indicator.is-completed {
+.session-item-indicator.is-completed,
+.session-status-indicator.is-completed {
   background: var(--color-vscode-success);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-success) 55%, transparent);
 }
 
-.session-item-indicator.is-plan-completed {
+.session-item-indicator.is-plan-completed,
+.session-status-indicator.is-plan-completed {
   background: var(--color-vscode-warning);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-warning) 55%, transparent);
   animation: pulse-soft 1.5s ease-in-out infinite;

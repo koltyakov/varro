@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseExtensionMessage } from './extension-message';
-import type { ExtensionMessage, WebviewMessage } from './protocol';
+import { parseServerEvent, type ExtensionMessage, type WebviewMessage } from './protocol';
 
 /**
  * Compile-time conformance: every ExtensionMessage discriminator must be
@@ -68,5 +68,96 @@ describe('protocol conformance', () => {
       payload: { state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' },
     };
     expect(parseExtensionMessage(msg)).toEqual(msg);
+  });
+
+  it('parses wrapped OpenCode global event payloads', () => {
+    expect(
+      parseServerEvent({
+        directory: '/repo',
+        payload: {
+          id: 'event-1',
+          type: 'session.updated',
+          properties: {
+            sessionID: 'session-1',
+            info: {
+              id: 'session-1',
+              title: 'Implement parser fix',
+            },
+          },
+        },
+      })
+    ).toEqual({
+      type: 'session.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'session-1',
+          title: 'Implement parser fix',
+        },
+      },
+    });
+  });
+
+  it('parses wrapped OpenCode sync event payloads', () => {
+    expect(
+      parseServerEvent({
+        directory: '/repo',
+        payload: {
+          type: 'sync',
+          name: 'session.updated.1',
+          id: 'event-1',
+          seq: 42,
+          aggregateID: 'sessionID',
+          data: {
+            sessionID: 'session-1',
+            info: {
+              id: 'session-1',
+              title: 'Implement sync parser fix',
+            },
+          },
+        },
+      })
+    ).toEqual({
+      type: 'session.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'session-1',
+          title: 'Implement sync parser fix',
+        },
+      },
+    });
+  });
+
+  it('parses direct OpenCode sync events', () => {
+    expect(
+      parseServerEvent({
+        type: 'sync',
+        name: 'message.updated.1',
+        id: 'event-1',
+        seq: 42,
+        aggregateID: 'sessionID',
+        data: {
+          sessionID: 'session-1',
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            role: 'assistant',
+            time: { created: 1, completed: 2 },
+          },
+        },
+      })
+    ).toEqual({
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 1, completed: 2 },
+        },
+      },
+    });
   });
 });

@@ -2,33 +2,50 @@ import type { Session } from '../types';
 
 export const EMPTY_SESSION_PRUNE_GRACE_MS = 5_000;
 
+type EmptySessionStateOptions = {
+  isQueued: (sessionId: string) => boolean;
+  isAwaitingInput: (sessionId: string) => boolean;
+  isRunning: (sessionId: string) => boolean;
+  needsAttention: (sessionId: string) => boolean;
+  isFailed: (sessionId: string) => boolean;
+  isPlanReady: (session: Session) => boolean;
+  preserve?: boolean;
+  statusType?: string;
+};
+
+type EmptySessionPruneOptions = EmptySessionStateOptions & {
+  activeSessionId: string | null;
+};
+
 export function isEmptySession(session: Session) {
   return session.time.created === session.time.updated;
 }
 
-export function shouldPruneEmptySession(
+export function shouldHideEmptySessionFromList(
   session: Session,
-  options: {
-    activeSessionId: string | null;
-    isQueued: (sessionId: string) => boolean;
-    isAwaitingInput: (sessionId: string) => boolean;
-    isRunning: (sessionId: string) => boolean;
-    needsAttention: (sessionId: string) => boolean;
-    isFailed: (sessionId: string) => boolean;
-    isPlanReady: (session: Session) => boolean;
-    preserve?: boolean;
-    statusType?: string;
-  }
+  options: EmptySessionStateOptions
 ) {
   if (!isEmptySession(session)) return false;
+  return !hasEmptySessionKeepReason(session, options);
+}
+
+export function shouldPruneEmptySession(session: Session, options: EmptySessionPruneOptions) {
+  if (!isEmptySession(session)) return false;
   if (Date.now() - session.time.updated < EMPTY_SESSION_PRUNE_GRACE_MS) return false;
-  if (options.preserve) return false;
-  if (session.id === options.activeSessionId) return false;
-  if (options.isQueued(session.id)) return false;
-  if (options.isAwaitingInput(session.id)) return false;
-  if (options.isRunning(session.id)) return false;
-  if (options.needsAttention(session.id)) return false;
-  if (options.isFailed(session.id)) return false;
-  if (options.isPlanReady(session)) return false;
-  return options.statusType !== 'busy' && options.statusType !== 'retry';
+  return !hasEmptySessionKeepReason(session, options);
+}
+
+function hasEmptySessionKeepReason(
+  session: Session,
+  options: EmptySessionStateOptions & { activeSessionId?: string | null }
+) {
+  if (options.preserve) return true;
+  if (session.id === options.activeSessionId) return true;
+  if (options.isQueued(session.id)) return true;
+  if (options.isAwaitingInput(session.id)) return true;
+  if (options.isRunning(session.id)) return true;
+  if (options.needsAttention(session.id)) return true;
+  if (options.isFailed(session.id)) return true;
+  if (options.isPlanReady(session)) return true;
+  return options.statusType === 'busy' || options.statusType === 'retry';
 }

@@ -28,6 +28,8 @@ export default defineConfig({
     target: 'es2022',
   },
   define: {
+    __BUNDLED_DEV__: false,
+    __SERVER_FORWARD_CONSOLE__: false,
     'process.env': {},
   },
 });

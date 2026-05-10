@@ -1,11 +1,14 @@
-import { createEffect, on, onCleanup } from 'solid-js';
+import { createEffect, createMemo, on, onCleanup } from 'solid-js';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
+import type { SessionStatus } from '../../types';
 
 type ProviderSelection = { providerID: string; modelID?: string | null };
 
 const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS = DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS * 1000;
 const ACTIVE_SESSION_PROVIDER_LIMIT_POLL_INTERVAL_MS = 30_000;
+const RUNNING_SESSION_SYNC_INTERVAL_MS = 4_000;
+const RUNNING_SESSION_SYNC_KEY_SEPARATOR = '\u0000';
 
 function resolveProviderLimitPollIntervalMs(
   baseIntervalMs: number,
@@ -44,6 +47,95 @@ export function registerLoadingStatusPollEffect(deps: {
 
     onCleanup(() => clearTimeout(timer));
   });
+}
+
+export function registerVisibleRunningSessionSyncEffect(deps: {
+  getServerState(): string;
+  isDocumentVisible(): boolean;
+  getActiveSessionId(): string | null;
+  getSessionStatuses(): Record<string, SessionStatus>;
+  loadSessions(): Promise<void>;
+  hydrateSessionStatuses(): Promise<void>;
+  loadQuestions(): Promise<void>;
+  loadPendingPermissions?(): Promise<void>;
+  syncSessionMessages(sessionId: string): Promise<void>;
+  logError(context: string, err: unknown): void;
+}) {
+  const syncTarget = createMemo(() => {
+    if (deps.getServerState() !== 'running' || !deps.isDocumentVisible()) return null;
+    const statuses = deps.getSessionStatuses();
+    const runningIds = Object.entries(statuses)
+      .filter(([, status]) => status?.type === 'busy' || status?.type === 'retry')
+      .map(([sessionId]) => sessionId)
+      .toSorted();
+    const activeSessionId = deps.getActiveSessionId();
+    const activeRunningSessionId =
+      activeSessionId && runningIds.includes(activeSessionId) ? activeSessionId : '';
+    return `${runningIds.join('\n')}${RUNNING_SESSION_SYNC_KEY_SEPARATOR}${activeRunningSessionId}`;
+  });
+
+  createEffect(
+    on(syncTarget, (target) => {
+      if (!target) return;
+      const [runningSessionIdsText = '', activeRunningSessionId = ''] = target.split(
+        RUNNING_SESSION_SYNC_KEY_SEPARATOR,
+        2
+      );
+      const runningSessionIds = runningSessionIdsText
+        .split('\n')
+        .filter((sessionId) => sessionId.length > 0);
+      const messageSyncSessionIds = activeRunningSessionId
+        ? [
+            activeRunningSessionId,
+            ...runningSessionIds.filter((sessionId) => sessionId !== activeRunningSessionId),
+          ]
+        : runningSessionIds;
+
+      let cancelled = false;
+      let inFlight = false;
+      const refresh = async () => {
+        if (cancelled || inFlight || !deps.isDocumentVisible()) return;
+        inFlight = true;
+        try {
+          const results: PromiseSettledResult<void>[] = [];
+          results.push(await settleVoid(deps.hydrateSessionStatuses()));
+          results.push(await settleVoid(deps.loadSessions()));
+          results.push(await settleVoid(deps.loadQuestions()));
+          if (deps.loadPendingPermissions) {
+            results.push(await settleVoid(deps.loadPendingPermissions()));
+          }
+          for (const sessionId of messageSyncSessionIds) {
+            results.push(await settleVoid(deps.syncSessionMessages(sessionId)));
+          }
+          for (const result of results) {
+            if (result.status === 'rejected') {
+              deps.logError('runningSessionSync', result.reason);
+            }
+          }
+        } finally {
+          inFlight = false;
+        }
+      };
+
+      const timer = window.setInterval(() => {
+        void refresh();
+      }, RUNNING_SESSION_SYNC_INTERVAL_MS);
+
+      onCleanup(() => {
+        cancelled = true;
+        window.clearInterval(timer);
+      });
+    })
+  );
+}
+
+async function settleVoid(promise: Promise<void>): Promise<PromiseSettledResult<void>> {
+  try {
+    await promise;
+    return { status: 'fulfilled', value: undefined };
+  } catch (reason) {
+    return { status: 'rejected', reason };
+  }
 }
 
 export function registerProviderLimitRefreshEffect(deps: {

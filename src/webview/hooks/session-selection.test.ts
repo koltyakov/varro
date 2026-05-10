@@ -42,9 +42,7 @@ describe('session-selection helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
-        hasPendingAbort: () => false,
-        shouldIgnorePendingAbortStatus: () => false,
-        markRunningToolPartsAborted: vi.fn(),
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId,
         markSessionSeen,
         clearDraftCurrentDocumentState: vi.fn(),
@@ -110,9 +108,7 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-2',
         setActiveSessionId: vi.fn(),
-        hasPendingAbort: () => false,
-        shouldIgnorePendingAbortStatus: () => false,
-        markRunningToolPartsAborted: vi.fn(),
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId,
         markSessionSeen,
         clearDraftCurrentDocumentState: vi.fn(),
@@ -156,14 +152,70 @@ describe('session-selection helpers', () => {
     expect(setError).not.toHaveBeenCalled();
   });
 
-  it('keeps pending-aborted sessions idle when reselected with stale busy snapshots', async () => {
-    const activeSession = { value: 'session-0' as string | null };
-    const markRunningToolPartsAborted = vi.fn();
-    const mergeSessionStatuses = vi.fn();
-    const updateUsageLimitState = vi.fn();
-    const startLoading = vi.fn();
+  it('syncs active-session messages only for the latest generation', async () => {
+    const setMessagesIncremental = vi.fn();
     const stopLoading = vi.fn();
     const messages = [{ info: assistantMessage('assistant-1'), parts: [] }];
+    const currentGeneration = { value: 0 };
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getSessionStatus: () => ({ type: 'idle' }) satisfies SessionStatus,
+        loadingStartedAt: () => null,
+        loadSessionMessages: vi.fn(async () => messages),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setMessagesIncremental,
+        stopLoading,
+        syncFailedSessionsFromMessages: vi.fn(),
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => ++currentGeneration.value,
+        isCurrent: (generation) => generation === currentGeneration.value,
+      },
+      'session-1'
+    );
+
+    expect(setMessagesIncremental).toHaveBeenCalledWith(messages, { preserveExtraParts: true });
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('stops loading when synced active messages show a completed assistant reply', async () => {
+    const stopLoading = vi.fn();
+    const completed = assistantMessage('assistant-1');
+    completed.time.completed = 2;
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        loadingStartedAt: () => null,
+        loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setMessagesIncremental: vi.fn(),
+        stopLoading,
+        syncFailedSessionsFromMessages: vi.fn(),
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      },
+      'session-1'
+    );
+
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps retry sessions loading even when the latest assistant message has an error', async () => {
+    const activeSession = { value: null as string | null };
+    const startLoading = vi.fn();
+    const stopLoading = vi.fn();
+    const failed = assistantMessage('assistant-1');
+    failed.error = { name: 'ProviderError', data: { message: '429 usage limit reached' } };
 
     await selectSessionWithDependencies(
       {
@@ -171,9 +223,7 @@ describe('session-selection helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
-        hasPendingAbort: () => true,
-        shouldIgnorePendingAbortStatus: (_sessionId, status) => status?.type === 'busy',
-        markRunningToolPartsAborted,
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId: vi.fn(),
         markSessionSeen: vi.fn(),
         clearDraftCurrentDocumentState: vi.fn(),
@@ -198,7 +248,7 @@ describe('session-selection helpers', () => {
             version: '1',
             time: { created: 0, updated: 2 },
           },
-          messages,
+          messages: [{ info: failed, parts: [] }],
         })),
         isCurrentSelectionGeneration: () => true,
         upsertSession: vi.fn(),
@@ -209,9 +259,9 @@ describe('session-selection helpers', () => {
         deriveSelectedModelFromMessages: () => null,
         syncTodosFromMessages: vi.fn(),
         loadQuestions: vi.fn(async () => {}),
-        loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'busy' as const } })),
-        mergeSessionStatuses,
-        updateUsageLimitState,
+        loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'retry' as const } })),
+        mergeSessionStatuses: vi.fn(),
+        updateUsageLimitState: vi.fn(),
         startLoading,
         stopLoading,
         setError: vi.fn(),
@@ -220,35 +270,65 @@ describe('session-selection helpers', () => {
       'session-1'
     );
 
-    expect(markRunningToolPartsAborted).toHaveBeenCalledWith(['session-1']);
-    expect(mergeSessionStatuses).not.toHaveBeenCalled();
-    expect(updateUsageLimitState).not.toHaveBeenCalled();
-    expect(startLoading).not.toHaveBeenCalled();
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 
-  it('syncs active-session messages only for the latest generation', async () => {
-    const setMessagesIncremental = vi.fn();
-    const messages = [{ info: assistantMessage('assistant-1'), parts: [] }];
-    const currentGeneration = { value: 0 };
+  it('settles inactive running sessions when synced messages show completion', async () => {
+    const setSessionStatusEntry = vi.fn();
+    const syncFailedSessionsFromMessages = vi.fn();
+    const completed = assistantMessage('assistant-1');
+    completed.time.completed = 2;
 
     await syncSessionMessagesWithDependencies(
       {
-        getActiveSessionId: () => 'session-1',
-        getSessionStatus: () => ({ type: 'idle' }) satisfies SessionStatus,
-        loadSessionMessages: vi.fn(async () => messages),
+        getActiveSessionId: () => 'session-2',
+        getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        loadingStartedAt: () => null,
+        loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
         updateUsageLimitState: vi.fn(),
-        setMessagesIncremental,
-        syncFailedSessionsFromMessages: vi.fn(),
+        setSessionStatusEntry,
+        setMessagesIncremental: vi.fn(),
+        stopLoading: vi.fn(),
+        syncFailedSessionsFromMessages,
         handoffTodosToMessages: vi.fn(),
       },
       {
-        next: () => ++currentGeneration.value,
-        isCurrent: (generation) => generation === currentGeneration.value,
+        next: () => 1,
+        isCurrent: () => true,
       },
       'session-1'
     );
 
-    expect(setMessagesIncremental).toHaveBeenCalledWith(messages, { preserveExtraParts: true });
+    expect(syncFailedSessionsFromMessages).toHaveBeenCalledWith([{ info: completed, parts: [] }]);
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+  });
+
+  it('keeps loading when synced messages predate the current loading turn', async () => {
+    const stopLoading = vi.fn();
+    const completed = assistantMessage('assistant-1');
+    completed.time.completed = 2;
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        loadingStartedAt: () => 3,
+        loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setMessagesIncremental: vi.fn(),
+        stopLoading,
+        syncFailedSessionsFromMessages: vi.fn(),
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      },
+      'session-1'
+    );
+
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 });

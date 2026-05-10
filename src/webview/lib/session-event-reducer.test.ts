@@ -44,6 +44,7 @@ describe('normalizePermissionEvent', () => {
       sessionID: 'session-1',
       permission: 'bash',
       patterns: ['ls', 'pwd'],
+      title: 'Allow running ls?',
       tool: { messageID: 'msg-42', callID: 'call-1' },
       metadata: { origin: 'tool' },
     });
@@ -55,8 +56,41 @@ describe('normalizePermissionEvent', () => {
     expect(out?.messageID).toBe('msg-42');
     expect(out?.callID).toBe('call-1');
     expect(out?.pattern).toEqual(['ls', 'pwd']);
-    expect(out?.title).toBe('bash ls, pwd');
+    expect(out?.title).toBe('Allow running ls?');
     expect(out?.metadata).toEqual({ origin: 'tool' });
+  });
+
+  it('accepts top-level tool linkage fields from live permission events', () => {
+    const out = normalizePermissionEvent({
+      id: 'perm-1',
+      sessionID: 'session-1',
+      permission: 'bash',
+      pattern: 'opencode --version',
+      messageID: 'msg-42',
+      callID: 'call-1',
+    });
+
+    expect(out).not.toBeNull();
+    expect(out?.messageID).toBe('msg-42');
+    expect(out?.callID).toBe('call-1');
+    expect(out?.pattern).toBe('opencode --version');
+    expect(out?.title).toBe('bash opencode --version');
+  });
+
+  it('accepts permission events wrapped in info', () => {
+    const out = normalizePermissionEvent({
+      info: {
+        id: 'perm-1',
+        sessionID: 'session-1',
+        permission: 'bash',
+        title: 'Allow running opencode --version?',
+      },
+    });
+
+    expect(out).not.toBeNull();
+    expect(out?.id).toBe('perm-1');
+    expect(out?.sessionID).toBe('session-1');
+    expect(out?.title).toBe('Allow running opencode --version?');
   });
 
   it('accepts permissionID when the live event omits id', () => {

@@ -53,9 +53,7 @@ describe('session sync helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
-        hasPendingAbort: () => false,
-        shouldIgnorePendingAbortStatus: () => false,
-        markRunningToolPartsAborted: vi.fn(),
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId: vi.fn(),
         markSessionSeen: vi.fn(),
         clearDraftCurrentDocumentState: vi.fn(),
@@ -108,9 +106,12 @@ describe('session sync helpers', () => {
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'idle' }),
+        loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => messages),
         updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
         setMessagesIncremental,
+        stopLoading: vi.fn(),
         syncFailedSessionsFromMessages: vi.fn(),
         handoffTodosToMessages: vi.fn(),
       },
@@ -166,9 +167,7 @@ describe('session sync helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
-        hasPendingAbort: () => false,
-        shouldIgnorePendingAbortStatus: () => false,
-        markRunningToolPartsAborted: vi.fn(),
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId: vi.fn(),
         markSessionSeen: vi.fn(),
         clearDraftCurrentDocumentState: vi.fn(),
@@ -200,10 +199,12 @@ describe('session sync helpers', () => {
         loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'busy' as const } })),
         mergeSessionStatuses: vi.fn(),
         updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
         startLoading: vi.fn(),
         stopLoading: vi.fn(),
         setError: vi.fn(),
         getSessionStatus: () => ({ type: 'idle' }),
+        loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => [
           { info: assistantMessage('assistant-1'), parts: [] },
         ]),

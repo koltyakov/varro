@@ -23,6 +23,7 @@ import { ChatWorkspace } from './chat/ChatWorkspace';
 import { ralphStore } from '../lib/stores/ralph-store';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import {
+  shouldHideEmptySessionFromList,
   isEmptySession as isEmptySessionMetadata,
   shouldPruneEmptySession,
 } from '../lib/empty-session';
@@ -592,8 +593,7 @@ function shouldHideSessionFromList(
     'runningIds' | 'attentionIds' | 'failedIds' | 'planReadyIds'
   >
 ) {
-  return shouldPruneEmptySession(session, {
-    activeSessionId: null,
+  return shouldHideEmptySessionFromList(session, {
     isQueued: (sessionId) => state.queuedMessages.some((item) => item.sessionId === sessionId),
     isAwaitingInput: isSessionAwaitingInput,
     isRunning: (sessionId) => indicators.runningIds.has(sessionId),

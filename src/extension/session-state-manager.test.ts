@@ -105,6 +105,17 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
+  it('remembers sync session metadata when id is only on the event properties', () => {
+    const manager = createManager(() => false);
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { sessionID: 'session-1', info: { title: 'Background update' } },
+    });
+
+    expect(manager.titleFor('session-1')).toBe('Background update');
+  });
+
   it('shows one failure notification when a background session errors', () => {
     const manager = createManager();
 

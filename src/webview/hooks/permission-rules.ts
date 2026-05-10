@@ -7,6 +7,7 @@ const FULL_ACCESS_PERMISSION_NAMES = [
   'grep',
   'list',
   'bash',
+  'shell',
   'task',
   'external_directory',
   'todowrite',

@@ -73,6 +73,14 @@ test('keeps a linked permission visible when its tool row is hidden in chat', as
     });
 });
 
+test('recovers a permission prompt when the live permission event is missed', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=missed-permission-event');
+
+  await expect(page.getByText('Permission Required')).toBeVisible();
+  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.tool-invocation-title')).toHaveCount(0);
+});
+
 test('default permissions end up with a bash permission request for opencode version', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
@@ -119,6 +127,7 @@ test('default permissions end up with a bash permission request for opencode ver
   });
 
   expect(createBody?.permission).toContainEqual({ permission: 'bash', pattern: '*', action: 'ask' });
+  expect(createBody?.permission).toContainEqual({ permission: 'shell', pattern: '*', action: 'ask' });
 
   const promptBody = await getE2EState(page, () => {
     const value = (window as Window & {

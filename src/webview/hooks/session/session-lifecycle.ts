@@ -134,9 +134,40 @@ export function sortSessions(sessions: Session[]) {
   return [...sessions].toSorted((a, b) => b.time.updated - a.time.updated);
 }
 
+function isPlaceholderSessionTitle(title: string | null | undefined) {
+  const normalized = title?.trim().toLowerCase();
+  return !normalized || normalized === 'new chat' || normalized === 'new session';
+}
+
+function mergeFreshSession(existing: Session | undefined, incoming: Session) {
+  if (!existing) return incoming;
+  const existingUpdated = existing.time?.updated ?? 0;
+  const incomingUpdated = incoming.time?.updated ?? 0;
+  if (existingUpdated > incomingUpdated) {
+    if (!isPlaceholderSessionTitle(incoming.title) && isPlaceholderSessionTitle(existing.title)) {
+      return { ...existing, title: incoming.title };
+    }
+    return existing;
+  }
+  if (incomingUpdated > existingUpdated) return incoming;
+
+  const merged = {
+    ...existing,
+    ...incoming,
+    time: { ...existing.time, ...incoming.time },
+  };
+  if (!isPlaceholderSessionTitle(existing.title) && isPlaceholderSessionTitle(incoming.title)) {
+    merged.title = existing.title;
+  }
+  return merged;
+}
+
 export function applySessions(deps: LifecycleDependencies, sessions: Session[]) {
+  const existingById = new Map(deps.getState().sessions.map((session) => [session.id, session]));
   const nextSessions = sortSessions(
-    sessions.filter((session) => isSessionInWorkspace(session, deps.getCurrentWorkspacePath()))
+    sessions
+      .filter((session) => isSessionInWorkspace(session, deps.getCurrentWorkspacePath()))
+      .map((session) => mergeFreshSession(existingById.get(session.id), session))
   );
   batch(() => {
     deps.setSessions(nextSessions);

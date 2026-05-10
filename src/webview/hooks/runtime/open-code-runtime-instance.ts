@@ -10,6 +10,7 @@ import { ralphStore } from '../../lib/stores/ralph-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
+import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
 import type { Message, Part } from '../../types';
@@ -39,6 +40,7 @@ import { SessionControlOperations } from '../session/session-controls';
 import {
   registerLoadingStatusPollEffect,
   registerProviderLimitRefreshEffect,
+  registerVisibleRunningSessionSyncEffect,
 } from '../session/session-effects';
 import { SessionEventHandlerOperations } from '../session/session-event-handlers';
 import {
@@ -48,7 +50,10 @@ import {
 } from '../session/session-lifecycle';
 import { SessionManagementOperations } from '../session/session-management';
 import { SessionMcpOperations } from '../session/session-mcp';
-import { SessionSendOperations } from '../session/session-send';
+import {
+  ensureSessionPermissionWithDependencies,
+  SessionSendOperations,
+} from '../session/session-send';
 import { SessionStatusOperations } from '../session/session-status';
 import { resolveMessagesSelectedModel, SessionSyncOperations } from '../session/session-sync';
 import { createTodoSyncOperations, resetTodoSync } from '../todo-sync';
@@ -70,7 +75,6 @@ export interface OpenCodeRuntime {
     text: string,
     options?: {
       noReply?: boolean;
-      allowPendingAbort?: boolean;
       queuedAttachments?: {
         droppedFiles?: QueuedMessage['droppedFiles'];
         clipboardImages?: QueuedMessage['clipboardImages'];
@@ -78,7 +82,7 @@ export interface OpenCodeRuntime {
       };
       preserveComposer?: boolean;
     }
-  ): Promise<boolean>;
+  ): Promise<void>;
   retryMessage(messageId: string, sessionId?: string | null): Promise<void>;
   implementPlan(prompt: string, sessionId?: string | null): Promise<void>;
   openPlan(markdown: string, sessionId?: string | null): Promise<void>;
@@ -141,9 +145,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     refreshProviderLimit: (providerID, modelID) => refreshProviderLimit(providerID, modelID),
     isDocumentVisible: () => documentVisible(),
     shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
+    syncSession: (sessionId) => syncSession(sessionId),
     syncSessionMessages: (sessionId) => syncSessionMessages(sessionId),
     loadSessionStatuses: () => client.session.status(),
     isActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
+    getMessages: () => appStore.state.messages,
     logError,
   });
 
@@ -202,6 +208,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       sessionStatusOperations,
       sessionSyncOperations,
       sessionApprovalOperations,
+      syncPendingPermissions,
       abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
       logError,
     });
@@ -314,6 +321,19 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       logError,
     });
 
+    registerVisibleRunningSessionSyncEffect({
+      getServerState: () => appStore.state.serverStatus.state,
+      isDocumentVisible: documentVisible,
+      getActiveSessionId: () => appStore.state.activeSessionId,
+      getSessionStatuses: () => appStore.state.sessionStatus,
+      loadSessions,
+      hydrateSessionStatuses,
+      loadQuestions,
+      loadPendingPermissions: syncPendingPermissions,
+      syncSessionMessages,
+      logError,
+    });
+
     return { client };
   }
 
@@ -336,6 +356,23 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function recheckSessionStatus(sessionId: string) {
     await recheckSessionStatusWithState(sessionId);
+  }
+
+  async function syncPendingPermissions() {
+    const pendingPermissions = await client.permission.list();
+    for (const item of pendingPermissions) {
+      const permission = normalizePermissionEvent(item);
+      if (!permission) continue;
+      if (permissionsStore.getPermissionModeForSession(permission.sessionID) === 'full') {
+        await sessionApprovalOperations
+          .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
+          .catch(() => {
+            permissionsStore.addPermission(permission);
+          });
+        continue;
+      }
+      permissionsStore.addPermission(permission);
+    }
   }
 
   function initConnection() {
@@ -443,7 +480,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const sessionSendOperations = new SessionSendOperations({
     createSession: (initialPermissionMode) => createSession(undefined, initialPermissionMode),
-    hasPendingAbort: sessionStatusOperations.hasPendingAbort,
+    ensureSessionPermission: (sessionId) =>
+      ensureSessionPermissionWithDependencies(
+        {
+          getSession: (id) => appStore.state.sessions.find((session) => session.id === id),
+          buildPermissionRules: (mode) => getSessionPermissionRulesForMode(mode, 'update'),
+          getPermissionMode: permissionsStore.getPermissionModeForSession,
+          updateSessionPermission: (id, input) => client.session.update(id, input),
+          upsertSession,
+          setError: uiStore.setError,
+        },
+        sessionId
+      ),
     clearPendingAbort,
     resetTodoSync,
     syncSessionMcps,
@@ -451,7 +499,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSession,
     syncSessionMessages,
     recheckSessionStatus,
-    showBlockedSendMessage,
+    setSessionStatusEntry,
     continueInterruptedSession,
     logError,
   });
@@ -467,51 +515,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     });
   }
 
-  function showBlockedSendMessage(sessionId: string, message: string) {
-    const created = Date.now();
-    const selectedModel =
-      routingStore.resolveSelectedModel(
-        routingStore.getSelectedModelForSession(sessionId) || appStore.state.selectedModel,
-        appStore.state.providers,
-        appStore.state.providerDefaults
-      ) || undefined;
-    const cwd = appStore.state.editorContext.workspacePath || currentWorkspacePath || '';
-    const lastMessage = appStore.state.messages.at(-1)?.info;
-
-    sessionStore.upsertMessage({
-      info: {
-        id: `blocked-send-${created}`,
-        sessionID: sessionId,
-        role: 'assistant',
-        time: { created, completed: created },
-        error: { name: 'Send blocked', data: { message } },
-        parentID: lastMessage?.id || 'blocked-send',
-        modelID: selectedModel?.modelID || '',
-        providerID: selectedModel?.providerID || '',
-        mode: 'default',
-        path: { cwd, root: cwd },
-        cost: 0,
-        tokens: {
-          input: 0,
-          output: 0,
-          reasoning: 0,
-          cache: { read: 0, write: 0 },
-        },
-        variant: selectedModel?.variant,
-      },
-      parts: [],
-    });
-    sessionStore.setSessionFailed(sessionId, true);
-    uiStore.requestMessageListScrollToBottom();
-  }
-
   const sessionSyncOperations = new SessionSyncOperations(
     {
       getActiveSessionId: () => appStore.state.activeSessionId,
       setActiveSessionId: sessionStore.setActiveSessionId,
-      hasPendingAbort: sessionStatusOperations.hasPendingAbort,
-      shouldIgnorePendingAbortStatus: sessionStatusOperations.shouldIgnorePendingAbortStatus,
-      markRunningToolPartsAborted: sessionStore.markRunningToolPartsAborted,
+      clearPendingAbort,
       persistActiveSessionId: sessionStore.persistActiveSessionId,
       markSessionSeen: sessionStore.markSessionSeen,
       clearDraftCurrentDocumentState: composerStore.clearDraftCurrentDocumentState,
@@ -569,13 +577,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         await loadQuestions().catch((err) => logError('loadQuestions', err));
       },
       loadSessionStatuses: async () => client.session.status(),
-      mergeSessionStatuses: (statuses) =>
-        appStore.setState('sessionStatus', (current) => ({ ...current, ...statuses })),
+      mergeSessionStatuses: (statuses, options) =>
+        sessionStore.setSessionStatuses(statuses, options),
       updateUsageLimitState,
+      setSessionStatusEntry,
       startLoading: uiStore.startLoading,
       stopLoading: uiStore.stopLoading,
       setError: uiStore.setError,
       getSessionStatus: (id) => appStore.state.sessionStatus[id],
+      loadingStartedAt: uiStore.loadingStartedAt,
       loadSessionMessages: (id) => client.session.messages(id),
       handoffTodosToMessages,
       loadSessionMetadata: (id) => client.session.get(id),
@@ -589,9 +599,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const sessionControlOperations = new SessionControlOperations({
     getActiveSessionId: () => appStore.state.activeSessionId,
-    sendMessage: async (prompt) => {
-      await sendMessage(prompt);
-    },
+    sendMessage,
     getSessionTreeRootId: sessionStore.getSessionTreeRootId,
     getSessionTreeIds: sessionStore.getSessionTreeIds,
     getSelectedAgentForSession: routingStore.getSelectedAgentForSession,
@@ -599,7 +607,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getSessionStatus: (sessionId) => appStore.state.sessionStatus[sessionId],
     getSessionUsageLimit: (sessionId) => appStore.state.sessionUsageLimits[sessionId],
     markPendingAbortTree,
-    markRunningToolPartsAborted: sessionStore.markRunningToolPartsAborted,
     setSessionStatusEntry,
     stopLoading: uiStore.stopLoading,
     abortRemoteSession: (sessionId) => client.session.abort(sessionId),
@@ -633,9 +640,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     clearSkippedPlanSession: sessionStore.clearSkippedPlanSession,
     applySelectedAgent: (agent, sessionId) =>
       routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
-    sendMessage: async (prompt) => {
-      await sendMessage(prompt);
-    },
+    sendMessage,
     openPlan: (content) => client.varro.openPlan(content),
     createSession: () =>
       createSession(undefined, permissionsStore.getPermissionModeForSession(null)),
@@ -766,7 +771,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     text: string,
     options?: {
       noReply?: boolean;
-      allowPendingAbort?: boolean;
       queuedAttachments?: {
         droppedFiles?: QueuedMessage['droppedFiles'];
         clipboardImages?: QueuedMessage['clipboardImages'];
@@ -775,7 +779,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       preserveComposer?: boolean;
     }
   ) {
-    return sessionSendOperations.sendMessage(text, options);
+    await sessionSendOperations.sendMessage(text, options);
   }
 
   async function retryMessage(messageId: string, sessionId = appStore.state.activeSessionId) {

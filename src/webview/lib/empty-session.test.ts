@@ -3,6 +3,7 @@ import type { Session } from '../types';
 import {
   EMPTY_SESSION_PRUNE_GRACE_MS,
   isEmptySession,
+  shouldHideEmptySessionFromList,
   shouldPruneEmptySession,
 } from './empty-session';
 
@@ -38,6 +39,24 @@ describe('isEmptySession', () => {
 
   it('returns false when created !== updated', () => {
     expect(isEmptySession(makeSession({ time: { created: 1000, updated: 2000 } }))).toBe(false);
+  });
+});
+
+describe('shouldHideEmptySessionFromList', () => {
+  it('returns true for fresh empty sessions', () => {
+    const now = Date.now();
+    const session = makeSession({ time: { created: now, updated: now } });
+    expect(shouldHideEmptySessionFromList(session, makeOptions())).toBe(true);
+  });
+
+  it('returns false for non-empty sessions', () => {
+    const session = makeSession({ time: { created: 1000, updated: 2000 } });
+    expect(shouldHideEmptySessionFromList(session, makeOptions())).toBe(false);
+  });
+
+  it('returns false when preserve is true', () => {
+    const session = makeSession({ time: { created: 1000, updated: 1000 } });
+    expect(shouldHideEmptySessionFromList(session, makeOptions({ preserve: true }))).toBe(false);
   });
 });
 

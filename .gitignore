@@ -3,3 +3,4 @@ dist/
 *.vsix
 tmp/
 .DS_Store
+opencode.json

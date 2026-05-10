@@ -64,10 +64,13 @@ import {
 import { createMessageIndex } from './message-index';
 import {
   getSessionMarkerWorkspaceScope,
+  isSessionCompletedResponseUnreadMarker,
   isSessionUnreadMarker,
   isSkippedPlanSessionMarker,
+  nextCompletedSessionResponses,
   nextSeenSessions,
   nextSkippedPlanSessions,
+  pruneSessionMarkers,
   pruneSkippedPlanSessions,
   readInitialSessionMarkerScope,
   readScopedSessionMarkerState,
@@ -121,6 +124,7 @@ export interface AppState {
   hiddenProviders: string[];
   hiddenModels: string[];
   lastSeenSessions: Record<string, number>;
+  completedSessionResponses: Record<string, number>;
   skippedPlanSessions: Record<string, number>;
   compactingSessionIds: string[];
   queuedMessages: QueuedMessage[];
@@ -239,6 +243,11 @@ export function createAppState(): AppStateInstance {
     STORAGE_KEYS.skippedPlanSessions,
     sessionMarkerWorkspaceScope
   );
+  const initialCompletedSessionResponses = readInitialSessionMarkerScope(
+    sessionMarkerStorage,
+    STORAGE_KEYS.completedSessionResponses,
+    sessionMarkerWorkspaceScope
+  );
 
   const [state, setState] = createStore<AppState>({
     serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
@@ -282,6 +291,7 @@ export function createAppState(): AppStateInstance {
     hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
     hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
     lastSeenSessions: initialLastSeenSessions,
+    completedSessionResponses: initialCompletedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,
     compactingSessionIds: [],
     queuedMessages: [],
@@ -803,6 +813,22 @@ export function markSessionSeen(id: string, updatedAt?: number) {
   );
 }
 
+export function markSessionResponseCompleted(id: string, completedAt?: number) {
+  const nextSessions = nextCompletedSessionResponses(
+    state.completedSessionResponses,
+    id,
+    completedAt
+  );
+  if (!nextSessions) return;
+  setState('completedSessionResponses', id, nextSessions[id]);
+  writeScopedSessionMarkerState(
+    { readStored, writeStored },
+    STORAGE_KEYS.completedSessionResponses,
+    getSessionMarkerWorkspaceScopeValue(),
+    nextSessions
+  );
+}
+
 export function clearSessionSeen(id: string) {
   const nextSessions = removeSessionMarker(state.lastSeenSessions, id);
   if (!nextSessions) return;
@@ -860,6 +886,14 @@ export function isSkippedPlanSession(sessionId: string, updatedAt: number) {
 
 export function isSessionUnread(sessionId: string, updatedAt: number) {
   return isSessionUnreadMarker(state.lastSeenSessions, sessionId, updatedAt);
+}
+
+export function isSessionCompletedResponseUnread(sessionId: string) {
+  return isSessionCompletedResponseUnreadMarker(
+    state.completedSessionResponses,
+    state.lastSeenSessions,
+    sessionId
+  );
 }
 
 export function setSessionCompacting(sessionId: string, compacting: boolean) {
@@ -1392,6 +1426,23 @@ export function setSessions(nextSessions: Session[]) {
       nextMarkers
     );
   }
+  const nextCompletedMarkers = pruneSessionMarkers(state.completedSessionResponses, sessionIds);
+  if (nextCompletedMarkers) {
+    setState(
+      'completedSessionResponses',
+      produce((draft) => {
+        for (const id of Object.keys(draft)) {
+          if (!sessionIds.has(id)) delete draft[id];
+        }
+      })
+    );
+    writeScopedSessionMarkerState(
+      { readStored, writeStored },
+      STORAGE_KEYS.completedSessionResponses,
+      getSessionMarkerWorkspaceScopeValue(),
+      nextCompletedMarkers
+    );
+  }
   sessionTreeIndex.invalidate();
 }
 
@@ -1414,6 +1465,16 @@ export function syncSessionMarkersForWorkspace(workspacePath: string | null | un
       readScopedSessionMarkerState(
         { readStored, writeStored },
         STORAGE_KEYS.skippedPlanSessions,
+        scope
+      )
+    )
+  );
+  setState(
+    'completedSessionResponses',
+    reconcile(
+      readScopedSessionMarkerState(
+        { readStored, writeStored },
+        STORAGE_KEYS.completedSessionResponses,
         scope
       )
     )
@@ -1791,40 +1852,6 @@ export function updateMessagePart(part: Part) {
   );
 }
 
-export function markRunningToolPartsAborted(sessionIds: string[]) {
-  const sessionIdSet = new Set(sessionIds);
-  const end = Date.now();
-  setState(
-    'messages',
-    produce((msgs) => {
-      for (const msg of msgs) {
-        for (let index = 0; index < msg.parts.length; index += 1) {
-          const part = msg.parts[index];
-          if (
-            part?.type !== 'tool' ||
-            !sessionIdSet.has(part.sessionID) ||
-            part.state.status !== 'running'
-          ) {
-            continue;
-          }
-
-          msg.parts[index] = {
-            ...part,
-            state: {
-              status: 'error',
-              input: part.state.input,
-              error: 'Aborted',
-              metadata: { ...part.state.metadata, aborted: true },
-              time: { start: part.state.time.start, end },
-            },
-          };
-          messageIndex.notifyPartContentChange();
-        }
-      }
-    })
-  );
-}
-
 export function getMessageById(id: string) {
   const index = messageIndex.findMessageIndex(state.messages, id);
   return index === -1 ? null : state.messages[index] || null;
@@ -1874,6 +1901,33 @@ export function applyMessagePartDelta(
     text: currentStreamingText + delta,
   });
   streamingDeltaQueue.scheduleFlush();
+}
+
+export function finishMessageStreaming(messageId: string) {
+  flushPendingStreamingDeltas();
+  const partId = state.streamingPartId;
+  if (!partId) return;
+
+  const location = messageIndex.findPartLocation(state.messages, partId);
+  if (!location) return;
+
+  const message = state.messages[location.msgIdx];
+  if (!message || message.info.id !== messageId) return;
+
+  streamingDeltaQueue.reset();
+  batch(() => {
+    setState('messages', location.msgIdx, 'parts', location.partIdx, (currentPart) => {
+      if (currentPart.type !== 'text' && currentPart.type !== 'reasoning') return currentPart;
+      if (currentPart.text === state.streamingText) return currentPart;
+      return {
+        ...currentPart,
+        text: state.streamingText,
+      };
+    });
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+  });
+  messageIndex.notifyPartContentChange();
 }
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
@@ -2093,6 +2147,7 @@ export function replaceMessages(incoming: MessageEntry[]) {
     if (state.streamingText !== '') setState('streamingText', '');
   });
   messageIndex.invalidate();
+  settleRunningSessionStatusesFromMessages(nextMessages);
 }
 
 export function setMessagesIncremental(
@@ -2165,6 +2220,66 @@ export function setMessagesIncremental(
       })
     );
   });
+  settleRunningSessionStatusesFromMessages(incoming);
+}
+
+export function hasSettledLatestAssistantMessage(
+  sessionId: string,
+  messages: MessageEntry[] = state.messages
+) {
+  const latest = getLatestMessageInfoForSession(sessionId, messages);
+  return latest?.role === 'assistant' && (!!latest.error || !!latest.time.completed);
+}
+
+export function hasCompletedLatestAssistantMessage(
+  sessionId: string,
+  messages: MessageEntry[] = state.messages
+) {
+  const latest = getLatestMessageInfoForSession(sessionId, messages);
+  return latest?.role === 'assistant' && !latest.error && !!latest.time.completed;
+}
+
+function settleRunningSessionStatusesFromMessages(messages: MessageEntry[]) {
+  const settledMessages = getSettledLatestAssistantMessages(messages);
+  if (settledMessages.size === 0) return;
+
+  batch(() => {
+    for (const [sessionId, message] of settledMessages) {
+      const status = state.sessionStatus[sessionId];
+      if (status?.type === 'busy' || status?.type === 'retry') {
+        setState('sessionStatus', sessionId, { type: 'idle' });
+      }
+      if (message.error) continue;
+      if (state.activeSessionId === sessionId && !showSessionPicker()) {
+        markSessionSeen(sessionId, message.time.completed);
+      } else {
+        markSessionResponseCompleted(sessionId, message.time.completed);
+      }
+    }
+  });
+}
+
+function getSettledLatestAssistantMessages(messages: MessageEntry[]) {
+  const latestBySession = new Map<string, Message>();
+  for (const entry of messages) {
+    latestBySession.set(entry.info.sessionID, entry.info);
+  }
+
+  const settled = new Map<string, AssistantMessage>();
+  for (const [sessionId, message] of latestBySession) {
+    if (message.role !== 'assistant') continue;
+    if (!message.error && !message.time.completed) continue;
+    settled.set(sessionId, message);
+  }
+  return settled;
+}
+
+function getLatestMessageInfoForSession(sessionId: string, messages: MessageEntry[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const info = messages[index]?.info;
+    if (info?.sessionID === sessionId) return info;
+  }
+  return null;
 }
 
 function mergeMessageEntry(

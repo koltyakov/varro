@@ -262,6 +262,12 @@ export const client = {
       return apiCall('POST', `/question/${requestID}/reject`);
     },
   },
+
+  permission: {
+    async list(): Promise<Array<Record<string, unknown>>> {
+      return getSharedPermissionList();
+    },
+  },
 };
 
 let fileStatusCache: {
@@ -270,6 +276,7 @@ let fileStatusCache: {
 } | null = null;
 let sessionStatusRequest: Promise<Record<string, SessionStatus>> | null = null;
 let questionListRequest: Promise<QuestionRequest[]> | null = null;
+let permissionListRequest: Promise<Array<Record<string, unknown>>> | null = null;
 
 function getCachedFileStatus(): Promise<RepoFileStatus[]> {
   const now = Date.now();
@@ -297,6 +304,15 @@ function getSharedQuestionList(): Promise<QuestionRequest[]> {
     if (questionListRequest === promise) questionListRequest = null;
   });
   questionListRequest = promise;
+  return promise;
+}
+
+function getSharedPermissionList(): Promise<Array<Record<string, unknown>>> {
+  if (permissionListRequest) return permissionListRequest;
+  const promise = apiCall<Array<Record<string, unknown>>>('GET', '/permission').finally(() => {
+    if (permissionListRequest === promise) permissionListRequest = null;
+  });
+  permissionListRequest = promise;
   return promise;
 }
 

@@ -69,6 +69,17 @@ export function nextSeenSessions(
   return { ...current, [sessionId]: seenAt };
 }
 
+export function nextCompletedSessionResponses(
+  current: SessionMarkerMap,
+  sessionId: string,
+  completedAt?: number,
+  now = Date.now()
+) {
+  const completed = Math.max(current[sessionId] ?? 0, completedAt ?? 0, now);
+  if (current[sessionId] === completed) return null;
+  return { ...current, [sessionId]: completed };
+}
+
 export function removeSessionMarker(current: SessionMarkerMap, sessionId: string) {
   if (!(sessionId in current)) return null;
   const next = { ...current };
@@ -106,14 +117,28 @@ export function isSessionUnreadMarker(
   return updatedAt > seen;
 }
 
+export function isSessionCompletedResponseUnreadMarker(
+  completedSessionResponses: SessionMarkerMap,
+  lastSeenSessions: SessionMarkerMap,
+  sessionId: string
+) {
+  const completedAt = completedSessionResponses[sessionId] ?? 0;
+  const seenAt = lastSeenSessions[sessionId] ?? 0;
+  return completedAt > seenAt;
+}
+
 export function pruneSkippedPlanSessions(
   skippedPlanSessions: SessionMarkerMap,
   sessionIds: Set<string>
 ) {
+  return pruneSessionMarkers(skippedPlanSessions, sessionIds);
+}
+
+export function pruneSessionMarkers(markers: SessionMarkerMap, sessionIds: Set<string>) {
   const nextMarkers = Object.fromEntries(
-    Object.entries(skippedPlanSessions).filter(([id]) => sessionIds.has(id))
+    Object.entries(markers).filter(([id]) => sessionIds.has(id))
   );
-  if (Object.keys(nextMarkers).length === Object.keys(skippedPlanSessions).length) return null;
+  if (Object.keys(nextMarkers).length === Object.keys(markers).length) return null;
   return nextMarkers;
 }
 

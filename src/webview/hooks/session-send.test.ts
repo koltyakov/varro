@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
-import type { Provider } from '../types';
+import type { PermissionRule, Provider } from '../types';
 import {
   buildSessionSendBody,
+  ensureSessionPermissionWithDependencies,
   getAttachmentReference,
   getQueuedAttachmentSnapshot,
   retryMessageWithDependencies,
@@ -67,6 +68,10 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('builds payload with unique live selection and explicit same-file context', () => {
     const result = buildSessionSendBody(
       createState({
@@ -319,13 +324,13 @@ describe('session-send helpers', () => {
   it('creates a session when needed and sends the built payload', async () => {
     const sendAsync = vi.fn(async () => {});
     const applyEffectiveModel = vi.fn();
+    const setSessionStatusEntry = vi.fn();
 
     await sendMessageWithDependencies(
       {
         getActiveSessionId: () => null,
         getDefaultPermissionMode: () => 'default',
         createSession: vi.fn(async () => 'session-2'),
-        hasPendingAbort: () => false,
         clearPendingAbort: vi.fn(),
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
@@ -340,6 +345,7 @@ describe('session-send helpers', () => {
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         sendAsync,
+        getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
         clearTerminalSelection: vi.fn(),
         clearClipboardImages: vi.fn(),
@@ -348,8 +354,8 @@ describe('session-send helpers', () => {
         syncSession: vi.fn(async () => {}),
         syncSessionMessages: vi.fn(async () => {}),
         recheckSessionStatus: vi.fn(async () => {}),
+        setSessionStatusEntry,
         stopLoading: vi.fn(),
-        showBlockedSendMessage: vi.fn(),
       },
       'hello'
     );
@@ -361,6 +367,238 @@ describe('session-send helpers', () => {
     expect(sendAsync).toHaveBeenCalledWith('session-2', {
       parts: [{ type: 'text', text: 'hello' }],
     });
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-2', { type: 'busy' });
+  });
+
+  it('bootstraps missing session permissions before sending', async () => {
+    const ensureSessionPermission = vi.fn(async () => true);
+    const sendAsync = vi.fn(async () => {});
+
+    await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        ensureSessionPermission,
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: { parts: [{ type: 'text', text: 'hello' }] },
+          effectiveModel: null,
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync,
+        getMessageCount: () => 1,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'hello'
+    );
+
+    expect(ensureSessionPermission).toHaveBeenCalledWith('session-1');
+    expect(ensureSessionPermission.mock.invocationCallOrder[0]).toBeLessThan(
+      sendAsync.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    );
+  });
+
+  it('does not send when permission bootstrap fails', async () => {
+    const sendAsync = vi.fn(async () => {});
+
+    await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        ensureSessionPermission: vi.fn(async () => false),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: vi.fn(() => ({
+          body: { parts: [{ type: 'text', text: 'hello' }] },
+          effectiveModel: null,
+        })),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync,
+        getMessageCount: () => 1,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'hello'
+    );
+
+    expect(sendAsync).not.toHaveBeenCalled();
+  });
+
+  it('applies default permission rules to sessions that have none', async () => {
+    const updateSessionPermission = vi.fn(
+      async (_sessionId: string, input: { permission: PermissionRule[] }) => ({
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Session',
+        version: '1',
+        time: { created: 1, updated: 1 },
+        permission: input.permission,
+      })
+    );
+    const upsertSession = vi.fn();
+
+    const ok = await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({ permission: undefined }),
+        buildPermissionRules: () => [{ permission: 'bash', pattern: '*', action: 'ask' }],
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession,
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(ok).toBe(true);
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', {
+      permission: [{ permission: 'bash', pattern: '*', action: 'ask' }],
+    });
+    expect(upsertSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-1' }));
+  });
+
+  it('updates sessions missing current permission rules before sending', async () => {
+    const updateSessionPermission = vi.fn(
+      async (_sessionId: string, input: { permission: PermissionRule[] }) => ({
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Session',
+        version: '1',
+        time: { created: 1, updated: 1 },
+        permission: input.permission,
+      })
+    );
+
+    const ok = await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({
+          permission: [{ permission: 'bash', pattern: '*', action: 'ask' }],
+        }),
+        buildPermissionRules: () => [
+          { permission: 'bash', pattern: '*', action: 'ask' },
+          { permission: 'shell', pattern: '*', action: 'ask' },
+        ],
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(ok).toBe(true);
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', {
+      permission: [
+        { permission: 'bash', pattern: '*', action: 'ask' },
+        { permission: 'shell', pattern: '*', action: 'ask' },
+      ],
+    });
+  });
+
+  it('keeps sessions that already have current permission rules', async () => {
+    const updateSessionPermission = vi.fn();
+
+    const ok = await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({
+          permission: [
+            { permission: 'bash', pattern: '*', action: 'ask' },
+            { permission: 'shell', pattern: '*', action: 'ask' },
+          ],
+        }),
+        buildPermissionRules: () => [
+          { permission: 'bash', pattern: '*', action: 'ask' },
+          { permission: 'shell', pattern: '*', action: 'ask' },
+        ],
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(ok).toBe(true);
+    expect(updateSessionPermission).not.toHaveBeenCalled();
+  });
+
+  it('retries message sync when the immediate post-send sync leaves the active chat empty', async () => {
+    vi.useFakeTimers();
+    let messageCount = 0;
+    const syncSessionMessages = vi.fn(async () => {
+      if (syncSessionMessages.mock.calls.length >= 2) messageCount = 2;
+    });
+    const sendPromise = sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: { parts: [{ type: 'text', text: 'hello' }] },
+          effectiveModel: null,
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync: vi.fn(async () => {}),
+        getMessageCount: () => messageCount,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages,
+        recheckSessionStatus: vi.fn(async () => {}),
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'hello'
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await sendPromise;
+
+    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
   });
 
   it('preserves the live composer when replaying a queued attachment snapshot', async () => {
@@ -375,7 +613,6 @@ describe('session-send helpers', () => {
         getActiveSessionId: () => 'session-1',
         getDefaultPermissionMode: () => 'default',
         createSession: vi.fn(async () => 'session-1'),
-        hasPendingAbort: () => false,
         clearPendingAbort: vi.fn(),
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
@@ -390,6 +627,7 @@ describe('session-send helpers', () => {
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         sendAsync: vi.fn(async () => {}),
+        getMessageCount: () => 1,
         clearDroppedFiles,
         clearTerminalSelection,
         clearClipboardImages,
@@ -399,7 +637,6 @@ describe('session-send helpers', () => {
         syncSessionMessages: vi.fn(async () => {}),
         recheckSessionStatus: vi.fn(async () => {}),
         stopLoading: vi.fn(),
-        showBlockedSendMessage: vi.fn(),
         shouldClearComposerAfterSend: () => false,
       },
       'queued',
@@ -418,56 +655,6 @@ describe('session-send helpers', () => {
     expect(postTerminalSelectionClear).not.toHaveBeenCalled();
   });
 
-  it('returns a meaningful error for pending-aborted sessions', async () => {
-    const clearPendingAbort = vi.fn();
-    const showBlockedSendMessage = vi.fn();
-    const stopLoading = vi.fn();
-    const sendAsync = vi.fn(async () => {});
-
-    await sendMessageWithDependencies(
-      {
-        getActiveSessionId: () => 'session-1',
-        getDefaultPermissionMode: () => 'default',
-        createSession: vi.fn(async () => null),
-        hasPendingAbort: (sessionId) => sessionId === 'session-1',
-        clearPendingAbort,
-        syncSessionMcps: vi.fn(async () => {}),
-        buildSendPayload: (sessionId) => ({
-          body: { parts: [{ type: 'text', text: sessionId }] },
-          effectiveModel: null,
-        }),
-        requestMessageListScrollToBottom: vi.fn(),
-        startLoading: vi.fn(),
-        setError: vi.fn(),
-        applyEffectiveModel: vi.fn(),
-        resetTodoSync: vi.fn(),
-        clearTodos: vi.fn(),
-        clearSessionUsageLimit: vi.fn(),
-        sendAsync,
-        clearDroppedFiles: vi.fn(),
-        clearTerminalSelection: vi.fn(),
-        clearClipboardImages: vi.fn(),
-        postFilesClear: vi.fn(),
-        postTerminalSelectionClear: vi.fn(),
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
-        recheckSessionStatus: vi.fn(async () => {}),
-        stopLoading,
-        showBlockedSendMessage,
-        shouldClearComposerAfterSend: () => true,
-      },
-      'follow up'
-    );
-
-    expect(stopLoading).toHaveBeenCalledTimes(1);
-    expect(showBlockedSendMessage).toHaveBeenCalledWith(
-      'session-1',
-      'This session is still stopping after a tool call became stuck. Start a new session before sending another message.'
-    );
-    expect(clearPendingAbort).not.toHaveBeenCalled();
-    expect(sendAsync).not.toHaveBeenCalled();
-  });
-
   it('logs failed post-send syncs and stops loading when all syncs fail', async () => {
     const stopLoading = vi.fn();
     const logError = vi.fn();
@@ -477,7 +664,6 @@ describe('session-send helpers', () => {
         getActiveSessionId: () => 'session-1',
         getDefaultPermissionMode: () => 'default',
         createSession: vi.fn(async () => 'session-1'),
-        hasPendingAbort: () => false,
         clearPendingAbort: vi.fn(),
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
@@ -492,6 +678,7 @@ describe('session-send helpers', () => {
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         sendAsync: vi.fn(async () => {}),
+        getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
         clearTerminalSelection: vi.fn(),
         clearClipboardImages: vi.fn(),
@@ -507,7 +694,6 @@ describe('session-send helpers', () => {
           throw new Error('recheckSessionStatus failed');
         }),
         stopLoading,
-        showBlockedSendMessage: vi.fn(),
         shouldClearComposerAfterSend: () => true,
         logError,
       },

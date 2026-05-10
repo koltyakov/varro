@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   registerLoadingStatusPollEffect,
   registerProviderLimitRefreshEffect,
+  registerVisibleRunningSessionSyncEffect,
 } from './session/session-effects';
 
 describe('session effect helpers', () => {
@@ -27,6 +28,165 @@ describe('session effect helpers', () => {
       await Promise.resolve();
       vi.advanceTimersByTime(8000);
       expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconciles visible running sessions and active messages', async () => {
+    vi.useFakeTimers();
+    const loadSessions = vi.fn(async () => {});
+    const hydrateSessionStatuses = vi.fn(async () => {});
+    const loadQuestions = vi.fn(async () => {});
+    const loadPendingPermissions = vi.fn(async () => {});
+    const syncSessionMessages = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getActiveSessionId: () => 'session-1',
+        getSessionStatuses: () => ({ 'session-1': { type: 'busy' } }),
+        loadSessions,
+        hydrateSessionStatuses,
+        loadQuestions,
+        loadPendingPermissions,
+        syncSessionMessages,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(hydrateSessionStatuses).toHaveBeenCalledTimes(1);
+      expect(loadSessions).toHaveBeenCalledTimes(1);
+      expect(loadQuestions).toHaveBeenCalledTimes(1);
+      expect(loadPendingPermissions).toHaveBeenCalledTimes(1);
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(hydrateSessionStatuses).toHaveBeenCalledTimes(2);
+      expect(loadSessions).toHaveBeenCalledTimes(2);
+      expect(loadQuestions).toHaveBeenCalledTimes(2);
+      expect(loadPendingPermissions).toHaveBeenCalledTimes(2);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('syncs inactive running session messages so stale spinners can settle', async () => {
+    vi.useFakeTimers();
+    const loadSessions = vi.fn(async () => {});
+    const hydrateSessionStatuses = vi.fn(async () => {});
+    const loadQuestions = vi.fn(async () => {});
+    const syncSessionMessages = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getActiveSessionId: () => 'session-1',
+        getSessionStatuses: () => ({
+          'session-1': { type: 'busy' },
+          'session-2': { type: 'busy' },
+        }),
+        loadSessions,
+        hydrateSessionStatuses,
+        loadQuestions,
+        syncSessionMessages,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(4000);
+
+      expect(syncSessionMessages).toHaveBeenNthCalledWith(1, 'session-1');
+      expect(syncSessionMessages).toHaveBeenNthCalledWith(2, 'session-2');
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not restart running-session sync when running ids are unchanged', async () => {
+    vi.useFakeTimers();
+    const [statuses, setStatuses] = createSignal({ 'session-1': { type: 'busy' as const } });
+    const loadSessions = vi.fn(async () => {});
+    const hydrateSessionStatuses = vi.fn(async () => {});
+    const loadQuestions = vi.fn(async () => {});
+    const syncSessionMessages = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getActiveSessionId: () => 'session-1',
+        getSessionStatuses: statuses,
+        loadSessions,
+        hydrateSessionStatuses,
+        loadQuestions,
+        syncSessionMessages,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(hydrateSessionStatuses).toHaveBeenCalledTimes(1);
+
+      setStatuses({ 'session-1': { type: 'busy' } });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(hydrateSessionStatuses).toHaveBeenCalledTimes(1);
+      expect(loadSessions).toHaveBeenCalledTimes(1);
+      expect(syncSessionMessages).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(4000);
+
+      expect(hydrateSessionStatuses).toHaveBeenCalledTimes(2);
+      expect(loadSessions).toHaveBeenCalledTimes(2);
+      expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes visible session state even when no session is marked running', async () => {
+    vi.useFakeTimers();
+    const loadSessions = vi.fn(async () => {});
+    const hydrateSessionStatuses = vi.fn(async () => {});
+    const loadQuestions = vi.fn(async () => {});
+    const syncSessionMessages = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getActiveSessionId: () => 'session-1',
+        getSessionStatuses: () => ({}),
+        loadSessions,
+        hydrateSessionStatuses,
+        loadQuestions,
+        syncSessionMessages,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(hydrateSessionStatuses).toHaveBeenCalledTimes(1);
+      expect(loadSessions).toHaveBeenCalledTimes(1);
+      expect(loadQuestions).toHaveBeenCalledTimes(1);
+      expect(syncSessionMessages).not.toHaveBeenCalled();
     } finally {
       dispose();
       vi.useRealTimers();

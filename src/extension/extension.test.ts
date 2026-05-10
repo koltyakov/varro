@@ -172,6 +172,42 @@ describe('extension activation', () => {
     });
   });
 
+  it('uses a less aggressive reserved token default', async () => {
+    getMock.mockImplementation((key: string, fallback?: unknown) => {
+      switch (key) {
+        case 'server.port':
+          return 4096;
+        case 'server.autoStart':
+          return true;
+        case 'server.command':
+          return '';
+        case 'debug.simulateMissingCli':
+          return false;
+        case 'debug.simulateNoProviders':
+          return false;
+        case 'chat.autoCompact':
+          return true;
+        case 'chat.autoCompactionReservedTokens':
+          return fallback;
+        default:
+          return fallback;
+      }
+    });
+
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    expect(openCodeServerMock).toHaveBeenCalledWith(4096, true, '', false, {
+      auto: true,
+      reserved: 4096,
+    });
+  });
+
   it('registers the sidebar view provider, commands, and activation context', async () => {
     const { activate } = await import('./extension');
     const context = {

@@ -268,6 +268,31 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.markSessionSeen).toHaveBeenCalledWith('session-1', 3);
   });
 
+  it('keeps newer session metadata when an older snapshot arrives later', () => {
+    const newer = session('session-1', '/repo', 10);
+    newer.title = 'Actual task title';
+    const older = session('session-1', '/repo', 5);
+    older.title = 'New Chat';
+    const setup = createDeps({ sessions: [newer] });
+
+    applySessions(setup.deps, [older]);
+
+    expect(setup.current.sessions).toEqual([newer]);
+  });
+
+  it('keeps a title update from an older snapshot when the current title is a placeholder', () => {
+    const existing = session('session-1', '/repo', 10);
+    existing.title = 'New Chat';
+    const olderWithTitle = session('session-1', '/repo', 5);
+    olderWithTitle.title = 'Actual task title';
+    const setup = createDeps({ sessions: [existing] });
+
+    applySessions(setup.deps, [olderWithTitle]);
+
+    expect(setup.current.sessions[0]?.title).toBe('Actual task title');
+    expect(setup.current.sessions[0]?.time.updated).toBe(10);
+  });
+
   it('normalizeProjectPath returns null for null, undefined, and empty string', () => {
     expect(normalizeProjectPath(null)).toBeNull();
     expect(normalizeProjectPath(undefined)).toBeNull();

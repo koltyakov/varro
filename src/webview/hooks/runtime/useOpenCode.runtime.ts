@@ -69,7 +69,6 @@ export async function sendMessage(
   text: string,
   options?: {
     noReply?: boolean;
-    allowPendingAbort?: boolean;
     queuedAttachments?: {
       droppedFiles?: QueuedMessage['droppedFiles'];
       clipboardImages?: QueuedMessage['clipboardImages'];
@@ -78,7 +77,7 @@ export async function sendMessage(
     preserveComposer?: boolean;
   }
 ) {
-  return getCurrentOpenCodeRuntime().sendMessage(text, options);
+  await getCurrentOpenCodeRuntime().sendMessage(text, options);
 }
 
 export async function retryMessage(messageId: string, sessionId?: string | null) {

@@ -100,6 +100,7 @@ test('empties the recycle bin from the grouped sessions view', async ({ page }) 
   await expect(page.locator('.recycle-bin-item')).toHaveCount(1);
   await page.getByLabel('Empty Recycle Bin').click();
   await page.getByRole('button', { name: 'Confirm empty Recycle Bin' }).click();
+  await expect(page.locator('.recycle-bin-item')).toHaveCount(0);
 
   const emptyRequest = await getE2EState(page, () => {
     const value = (window as Window & {
@@ -112,5 +113,4 @@ test('empties the recycle bin from the grouped sessions view', async ({ page }) 
     method: 'DELETE',
     path: '/varro/session-trash',
   });
-  await expect(page.locator('.recycle-bin-item')).toHaveCount(0);
 });

@@ -10,6 +10,7 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(rules.every((rule) => rule.pattern === '*')).toBe(true);
     expect(rules.every((rule) => rule.action === 'allow')).toBe(true);
     expect(rules.some((rule) => rule.permission === 'bash')).toBe(true);
+    expect(rules.some((rule) => rule.permission === 'shell')).toBe(true);
     expect(rules.some((rule) => rule.permission === 'edit')).toBe(true);
     expect(rules.some((rule) => rule.permission === 'skill')).toBe(true);
   });
@@ -26,6 +27,7 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(byPermission.get('lsp')).toMatchObject({ pattern: '*', action: 'allow' });
 
     expect(byPermission.get('bash')).toMatchObject({ pattern: '*', action: 'ask' });
+    expect(byPermission.get('shell')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('edit')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('task')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('question')).toMatchObject({ pattern: '*', action: 'ask' });
