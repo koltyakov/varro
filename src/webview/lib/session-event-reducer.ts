@@ -20,29 +20,44 @@ export function isNormalizedPermission(props: Record<string, unknown>): props is
 }
 
 export function normalizePermissionEvent(props: Record<string, unknown>): Permission | null {
-  if (isNormalizedPermission(props)) return props;
+  const source =
+    props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : props;
+  if (isNormalizedPermission(source)) return source;
   const id =
-    typeof props.id === 'string'
-      ? props.id
-      : typeof props.permissionID === 'string'
-        ? props.permissionID
-        : typeof props.requestID === 'string'
-          ? props.requestID
+    typeof source.id === 'string'
+      ? source.id
+      : typeof source.permissionID === 'string'
+        ? source.permissionID
+        : typeof source.requestID === 'string'
+          ? source.requestID
           : null;
-  const sessionID = typeof props.sessionID === 'string' ? props.sessionID : null;
+  const sessionID = typeof source.sessionID === 'string' ? source.sessionID : null;
   if (!id || !sessionID) return null;
 
-  const tool = (props.tool as { messageID?: string; callID?: string } | undefined) || undefined;
-  const permissionName = typeof props.permission === 'string' ? props.permission : '';
-  const patterns = Array.isArray(props.patterns)
-    ? (props.patterns.filter((p): p is string => typeof p === 'string') as string[])
-    : undefined;
-  const title = [permissionName, patterns ? patterns.join(', ') : ''].filter(Boolean).join(' ');
+  const tool = (source.tool as { messageID?: string; callID?: string } | undefined) || undefined;
+  const permissionName =
+    typeof source.permission === 'string'
+      ? source.permission
+      : typeof source.type === 'string'
+        ? source.type
+        : '';
+  const patternValue = source.patterns ?? source.pattern;
+  const patterns = Array.isArray(patternValue)
+    ? (patternValue.filter((p): p is string => typeof p === 'string') as string[])
+    : typeof patternValue === 'string'
+      ? patternValue
+      : undefined;
+  const title =
+    typeof source.title === 'string' && source.title.trim().length > 0
+      ? source.title
+      : [permissionName, Array.isArray(patterns) ? patterns.join(', ') : patterns]
+          .filter(Boolean)
+          .join(' ') || 'Permission required';
   const createdAt =
-    props.time &&
-    typeof props.time === 'object' &&
-    typeof (props.time as { created?: unknown }).created === 'number'
-      ? (props.time as { created: number }).created
+    source.time &&
+    typeof source.time === 'object' &&
+    typeof (source.time as { created?: unknown }).created === 'number'
+      ? (source.time as { created: number }).created
       : Date.now();
 
   return {
@@ -50,10 +65,20 @@ export function normalizePermissionEvent(props: Record<string, unknown>): Permis
     type: permissionName,
     pattern: patterns,
     sessionID,
-    messageID: typeof tool?.messageID === 'string' ? tool.messageID : '',
-    callID: tool?.callID,
+    messageID:
+      typeof source.messageID === 'string'
+        ? source.messageID
+        : typeof tool?.messageID === 'string'
+          ? tool.messageID
+          : '',
+    callID:
+      typeof source.callID === 'string'
+        ? source.callID
+        : typeof tool?.callID === 'string'
+          ? tool.callID
+          : undefined,
     title,
-    metadata: (props.metadata as { [key: string]: unknown } | undefined) || {},
+    metadata: (source.metadata as { [key: string]: unknown } | undefined) || {},
     time: { created: createdAt },
   };
 }

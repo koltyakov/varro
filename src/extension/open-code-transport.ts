@@ -345,13 +345,16 @@ export class OpenCodeTransport {
     const type = getString(evt?.type);
     const props = asRecord(evt?.properties);
     if (!type) return;
+    const requestProps = asRecord(props?.info) || props;
 
     switch (type) {
       case 'permission.asked':
       case 'question.asked': {
         const requestID =
-          getString(props?.id) || getString(props?.permissionID) || getString(props?.requestID);
-        const sessionID = getString(props?.sessionID);
+          getString(requestProps?.id) ||
+          getString(requestProps?.permissionID) ||
+          getString(requestProps?.requestID);
+        const sessionID = getString(requestProps?.sessionID);
         if (requestID && sessionID) {
           this.pendingAttentionRequests.set(requestID, sessionID);
         }
@@ -361,7 +364,9 @@ export class OpenCodeTransport {
       case 'question.replied':
       case 'question.rejected': {
         const requestID =
-          getString(props?.id) || getString(props?.permissionID) || getString(props?.requestID);
+          getString(requestProps?.id) ||
+          getString(requestProps?.permissionID) ||
+          getString(requestProps?.requestID);
         if (requestID) {
           this.pendingAttentionRequests.delete(requestID);
         }

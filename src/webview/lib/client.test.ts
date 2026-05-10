@@ -91,6 +91,7 @@ describe('client', () => {
     await client.config.workspaceStatus();
     await client.agent.list();
     await client.question.list();
+    await client.permission.list();
     await client.question.reply('question-1', [['Yes'], ['No']]);
     await client.question.reject('question-1');
     await client.varro.resolveWorkspacePath('package.json');
@@ -146,6 +147,7 @@ describe('client', () => {
       ['GET', '/experimental/workspace/status'],
       ['GET', '/agent'],
       ['GET', '/question'],
+      ['GET', '/permission'],
       ['POST', '/question/question-1/reply', { answers: [['Yes'], ['No']] }],
       ['POST', '/question/question-1/reject'],
       ['GET', '/varro/workspace-path/resolve?path=package.json'],

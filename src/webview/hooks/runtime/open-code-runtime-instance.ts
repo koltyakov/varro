@@ -10,6 +10,7 @@ import { ralphStore } from '../../lib/stores/ralph-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
+import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
 import type { Message, Part } from '../../types';
@@ -207,6 +208,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       sessionStatusOperations,
       sessionSyncOperations,
       sessionApprovalOperations,
+      syncPendingPermissions,
       abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
       logError,
     });
@@ -327,6 +329,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       loadSessions,
       hydrateSessionStatuses,
       loadQuestions,
+      loadPendingPermissions: syncPendingPermissions,
       syncSessionMessages,
       logError,
     });
@@ -353,6 +356,23 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function recheckSessionStatus(sessionId: string) {
     await recheckSessionStatusWithState(sessionId);
+  }
+
+  async function syncPendingPermissions() {
+    const pendingPermissions = await client.permission.list();
+    for (const item of pendingPermissions) {
+      const permission = normalizePermissionEvent(item);
+      if (!permission) continue;
+      if (permissionsStore.getPermissionModeForSession(permission.sessionID) === 'full') {
+        await sessionApprovalOperations
+          .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
+          .catch(() => {
+            permissionsStore.addPermission(permission);
+          });
+        continue;
+      }
+      permissionsStore.addPermission(permission);
+    }
   }
 
   function initConnection() {

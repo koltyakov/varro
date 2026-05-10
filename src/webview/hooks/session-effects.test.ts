@@ -39,6 +39,7 @@ describe('session effect helpers', () => {
     const loadSessions = vi.fn(async () => {});
     const hydrateSessionStatuses = vi.fn(async () => {});
     const loadQuestions = vi.fn(async () => {});
+    const loadPendingPermissions = vi.fn(async () => {});
     const syncSessionMessages = vi.fn(async () => {});
 
     const dispose = createRoot((cleanup) => {
@@ -50,6 +51,7 @@ describe('session effect helpers', () => {
         loadSessions,
         hydrateSessionStatuses,
         loadQuestions,
+        loadPendingPermissions,
         syncSessionMessages,
         logError: vi.fn(),
       });
@@ -61,12 +63,14 @@ describe('session effect helpers', () => {
       expect(hydrateSessionStatuses).toHaveBeenCalledTimes(1);
       expect(loadSessions).toHaveBeenCalledTimes(1);
       expect(loadQuestions).toHaveBeenCalledTimes(1);
+      expect(loadPendingPermissions).toHaveBeenCalledTimes(1);
       expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
 
       await vi.advanceTimersByTimeAsync(4000);
       expect(hydrateSessionStatuses).toHaveBeenCalledTimes(2);
       expect(loadSessions).toHaveBeenCalledTimes(2);
       expect(loadQuestions).toHaveBeenCalledTimes(2);
+      expect(loadPendingPermissions).toHaveBeenCalledTimes(2);
     } finally {
       dispose();
       vi.useRealTimers();

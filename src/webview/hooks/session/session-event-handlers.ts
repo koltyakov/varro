@@ -89,7 +89,9 @@ function isCompleteMessagePart(value: unknown): value is Part {
 }
 
 function getPermissionReplyId(props: Record<string, unknown>) {
-  return (props.id || props.permissionID || props.requestID) as string | undefined;
+  const source =
+    props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : props;
+  return (source.id || source.permissionID || source.requestID) as string | undefined;
 }
 
 type EventHandlerDependencies = {
@@ -120,6 +122,7 @@ type EventHandlerDependencies = {
     latestEventPayload?: unknown
   ): void;
   shouldAutoApprovePermissions(sessionId: string): boolean;
+  syncPendingPermissions?(): Promise<void>;
   respondPermission(
     sessionId: string,
     permissionId: string,
@@ -152,6 +155,7 @@ type EventHandlerOperationDependencies = {
   >;
   sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
   sessionApprovalOperations: Pick<EventHandlerDependencies, 'respondPermission'>;
+  syncPendingPermissions?: EventHandlerDependencies['syncPendingPermissions'];
   abortRemoteSession: EventHandlerDependencies['abortRemoteSession'];
   logError: EventHandlerDependencies['logError'];
 };
@@ -333,6 +337,7 @@ export class SessionEventHandlerOperations {
       syncTodosFromMessages: this.deps.todoSyncOperations.syncTodosFromMessages,
       shouldAutoApprovePermissions: (sessionId) =>
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
+      syncPendingPermissions: this.deps.syncPendingPermissions,
       respondPermission: this.deps.sessionApprovalOperations.respondPermission,
       setDiffs: sessionStore.setDiffs,
       abortRemoteSession: this.deps.abortRemoteSession,
@@ -344,6 +349,7 @@ export class SessionEventHandlerOperations {
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
   const activeMessageSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let pendingPermissionSyncTimer: ReturnType<typeof setTimeout> | null = null;
   const isSessionInActiveTree = (sessionId: string | null | undefined) => {
     if (!sessionId) return false;
     if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
@@ -364,6 +370,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const markSessionProgress = (sessionId: string) => {
     deps.setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
+  };
+  const schedulePendingPermissionSync = () => {
+    if (!deps.syncPendingPermissions || pendingPermissionSyncTimer) return;
+    pendingPermissionSyncTimer = setTimeout(() => {
+      pendingPermissionSyncTimer = null;
+      deps.syncPendingPermissions?.().catch((err) => deps.logError('syncPendingPermissions', err));
+    }, ACTIVE_MESSAGE_RESYNC_DELAY_MS);
   };
   const abortLateChildSession = (info: NormalizedSessionEventInfo) => {
     if (!info.parentID || !deps.hasPendingAbort(info.parentID)) return;
@@ -422,6 +435,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(() => {
     for (const timer of activeMessageSyncTimers.values()) clearTimeout(timer);
     activeMessageSyncTimers.clear();
+    if (pendingPermissionSyncTimer) clearTimeout(pendingPermissionSyncTimer);
+    pendingPermissionSyncTimer = null;
   });
 
   cleanups.push(
@@ -691,6 +706,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         const sessionID = p?.sessionID as string | undefined;
         if (!sessionID) return;
         markSessionProgress(sessionID);
+        if (
+          eventName === 'session.next.shell.started' ||
+          eventName === 'session.next.tool.called'
+        ) {
+          schedulePendingPermissionSync();
+        }
 
         if (eventName === 'session.next.agent.switched') {
           const agent = getEventString(p, 'agent');

@@ -211,6 +211,7 @@ export function isAllowedApiRequest(method: string, path: string) {
   if (pathname === '/file/status') return method === 'GET' && noQuery();
   if (pathname === '/agent') return method === 'GET' && noQuery();
   if (pathname === '/question') return method === 'GET' && noQuery();
+  if (pathname === '/permission') return method === 'GET' && noQuery();
   if (pathname === '/session') return (method === 'GET' || method === 'POST') && noQuery();
   if (pathname === '/session/status') return method === 'GET' && noQuery();
   if (pathname === '/experimental/workspace/status') return method === 'GET' && noQuery();

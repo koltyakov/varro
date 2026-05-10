@@ -485,10 +485,10 @@ export async function ensureSessionPermissionWithDependencies(
   sessionId: string
 ): Promise<boolean> {
   const session = deps.getSession(sessionId);
-  if (Array.isArray(session?.permission) && session.permission.length > 0) return true;
+  const permission = deps.buildPermissionRules(deps.getPermissionMode(sessionId));
+  if (hasPermissionRules(session?.permission, permission)) return true;
 
   try {
-    const permission = deps.buildPermissionRules(deps.getPermissionMode(sessionId));
     const updated = await deps.updateSessionPermission(sessionId, { permission });
     deps.upsertSession(updated);
     return true;
@@ -496,6 +496,18 @@ export async function ensureSessionPermissionWithDependencies(
     deps.setError(err instanceof Error ? err.message : 'Failed to update permissions');
     return false;
   }
+}
+
+function hasPermissionRules(current: PermissionRule[] | undefined, required: PermissionRule[]) {
+  if (!Array.isArray(current) || current.length === 0) return false;
+  return required.every((requiredRule) =>
+    current.some(
+      (rule) =>
+        rule.permission === requiredRule.permission &&
+        rule.pattern === requiredRule.pattern &&
+        rule.action === requiredRule.action
+    )
+  );
 }
 
 async function retryPostSendMessageSync(

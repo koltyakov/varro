@@ -289,7 +289,7 @@ describe('registerSessionEventHandlers', () => {
         expect.objectContaining({
           id: 'perm-1',
           sessionID: 'session-1',
-          title: 'bash',
+          title: 'Run Bash command',
         })
       );
     });
@@ -338,6 +338,32 @@ describe('registerSessionEventHandlers', () => {
     });
 
     expect(removePermission).toHaveBeenCalledWith('perm-1');
+  });
+
+  it('syncs pending permissions after shell progress events in case permission events were missed', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncPendingPermissions = vi.fn().mockResolvedValue(undefined);
+
+    try {
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          syncPendingPermissions,
+        })
+      );
+
+      handlers.get('session.next.shell.started')?.({
+        properties: { sessionID: 'session-1' },
+      });
+
+      expect(syncPendingPermissions).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('binds event handlers to shared state-backed dependencies', async () => {

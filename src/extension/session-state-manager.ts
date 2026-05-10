@@ -203,13 +203,20 @@ export class SessionStateManager {
         break;
       }
       case 'permission.asked': {
-        changed = (props ? this.trackBlockingRequest('permission', props) : false) || changed;
+        const propsRecord = asRecord(props);
+        const requestProps = asRecord(propsRecord?.info) || propsRecord;
+        changed =
+          (requestProps ? this.trackBlockingRequest('permission', requestProps) : false) || changed;
         break;
       }
       case 'permission.replied': {
+        const propsRecord = asRecord(props);
+        const requestProps = asRecord(propsRecord?.info) || propsRecord;
         changed =
           this.clearBlockingRequest(
-            getString(props?.id) || getString(props?.permissionID) || getString(props?.requestID)
+            getString(requestProps?.id) ||
+              getString(requestProps?.permissionID) ||
+              getString(requestProps?.requestID)
           ) || changed;
         break;
       }

@@ -489,6 +489,72 @@ describe('session-send helpers', () => {
     expect(upsertSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-1' }));
   });
 
+  it('updates sessions missing current permission rules before sending', async () => {
+    const updateSessionPermission = vi.fn(
+      async (_sessionId: string, input: { permission: PermissionRule[] }) => ({
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Session',
+        version: '1',
+        time: { created: 1, updated: 1 },
+        permission: input.permission,
+      })
+    );
+
+    const ok = await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({
+          permission: [{ permission: 'bash', pattern: '*', action: 'ask' }],
+        }),
+        buildPermissionRules: () => [
+          { permission: 'bash', pattern: '*', action: 'ask' },
+          { permission: 'shell', pattern: '*', action: 'ask' },
+        ],
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(ok).toBe(true);
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', {
+      permission: [
+        { permission: 'bash', pattern: '*', action: 'ask' },
+        { permission: 'shell', pattern: '*', action: 'ask' },
+      ],
+    });
+  });
+
+  it('keeps sessions that already have current permission rules', async () => {
+    const updateSessionPermission = vi.fn();
+
+    const ok = await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({
+          permission: [
+            { permission: 'bash', pattern: '*', action: 'ask' },
+            { permission: 'shell', pattern: '*', action: 'ask' },
+          ],
+        }),
+        buildPermissionRules: () => [
+          { permission: 'bash', pattern: '*', action: 'ask' },
+          { permission: 'shell', pattern: '*', action: 'ask' },
+        ],
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(ok).toBe(true);
+    expect(updateSessionPermission).not.toHaveBeenCalled();
+  });
+
   it('retries message sync when the immediate post-send sync leaves the active chat empty', async () => {
     vi.useFakeTimers();
     let messageCount = 0;

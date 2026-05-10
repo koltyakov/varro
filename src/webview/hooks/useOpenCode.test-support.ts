@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     mcpConnect: vi.fn(),
     mcpDisconnect: vi.fn(),
     questionList: vi.fn(),
+    permissionList: vi.fn(),
     varroOpenPlan: vi.fn(),
     recycleBinList: vi.fn(),
     recycleBinRestore: vi.fn(),
@@ -101,6 +102,9 @@ vi.mock('../lib/client', () => ({
       list: clientMocks.questionList,
       reply: clientMocks.questionReply,
       reject: clientMocks.questionReject,
+    },
+    permission: {
+      list: clientMocks.permissionList,
     },
   },
   serverEvents: {
@@ -259,6 +263,7 @@ beforeEach(() => {
   clientMocks.mcpConnect.mockReset();
   clientMocks.mcpDisconnect.mockReset();
   clientMocks.questionList.mockReset();
+  clientMocks.permissionList.mockReset();
   clientMocks.varroOpenPlan.mockReset();
   clientMocks.recycleBinList.mockReset();
   clientMocks.recycleBinRestore.mockReset();
@@ -276,6 +281,7 @@ beforeEach(() => {
   bridgeMocks.postMessage.mockReset();
   clientMocks.mcpStatus.mockResolvedValue({});
   clientMocks.commandList.mockResolvedValue([]);
+  clientMocks.permissionList.mockResolvedValue([]);
   clientMocks.sessionCommand.mockResolvedValue({
     info: assistantMessage('assistant-command', 'user-1'),
     parts: [],

@@ -57,6 +57,7 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
   loadSessions(): Promise<void>;
   hydrateSessionStatuses(): Promise<void>;
   loadQuestions(): Promise<void>;
+  loadPendingPermissions?(): Promise<void>;
   syncSessionMessages(sessionId: string): Promise<void>;
   logError(context: string, err: unknown): void;
 }) {
@@ -100,6 +101,9 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
           results.push(await settleVoid(deps.hydrateSessionStatuses()));
           results.push(await settleVoid(deps.loadSessions()));
           results.push(await settleVoid(deps.loadQuestions()));
+          if (deps.loadPendingPermissions) {
+            results.push(await settleVoid(deps.loadPendingPermissions()));
+          }
           for (const sessionId of messageSyncSessionIds) {
             results.push(await settleVoid(deps.syncSessionMessages(sessionId)));
           }
