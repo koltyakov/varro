@@ -4,6 +4,7 @@ import {
   getSessionTreeRootId,
   hasActiveUsageLimit,
   isSessionAwaitingInput,
+  isSessionCompletedResponseUnread,
   isSessionUnread,
   isSkippedPlanSession,
   setPersistentShowSessionPicker as setShowSessionPicker,
@@ -29,7 +30,7 @@ import {
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry } from '../../../shared/protocol';
 import { ralphStore } from '../../lib/stores/ralph-store';
-import { shouldPruneEmptySession } from '../../lib/empty-session';
+import { shouldHideEmptySessionFromList } from '../../lib/empty-session';
 
 type SessionGroups = {
   failed: (typeof state.sessions)[number][];
@@ -52,6 +53,13 @@ type SessionIndicatorSets = {
   planReadyIds: Set<string>;
   newlyCompletedIds: Set<string>;
 };
+
+export type SessionStatusIndicatorKind =
+  | 'failed'
+  | 'attention'
+  | 'running'
+  | 'plan-ready'
+  | 'completed';
 
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -118,6 +126,54 @@ export function shouldShowSessionHeaderBadge(
   badgeFilter: SessionListFilter
 ) {
   return activeFilter !== badgeFilter;
+}
+
+export function getSessionStatusIndicatorKind(input: {
+  isFailed: boolean;
+  hasPendingInput: boolean;
+  isRunning: boolean;
+  isPlanReady: boolean;
+  isCompleted: boolean;
+}): SessionStatusIndicatorKind | null {
+  if (input.isFailed) return 'failed';
+  if (input.hasPendingInput) return 'attention';
+  if (input.isRunning) return 'running';
+  if (input.isPlanReady) return 'plan-ready';
+  if (input.isCompleted) return 'completed';
+  return null;
+}
+
+export function getSessionStatusIndicatorClass(kind: SessionStatusIndicatorKind) {
+  switch (kind) {
+    case 'failed':
+      return 'is-failed';
+    case 'attention':
+      return 'is-attention';
+    case 'running':
+      return 'is-running';
+    case 'plan-ready':
+      return 'is-plan-completed';
+    case 'completed':
+      return 'is-completed';
+  }
+}
+
+export function getSessionStatusIndicatorTitle(
+  kind: SessionStatusIndicatorKind,
+  options?: { retrying?: boolean }
+) {
+  switch (kind) {
+    case 'failed':
+      return 'Failed';
+    case 'attention':
+      return 'Attention needed';
+    case 'running':
+      return options?.retrying ? 'Retrying' : 'Running';
+    case 'plan-ready':
+      return 'Plan ready';
+    case 'completed':
+      return 'Completed';
+  }
 }
 
 export function groupSessions(
@@ -364,8 +420,7 @@ export function SessionListView(props: {
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const visibleSessionsForList = createMemo(() => {
     return state.sessions.filter((session) => {
-      return !shouldPruneEmptySession(session, {
-        activeSessionId: null,
+      return !shouldHideEmptySessionFromList(session, {
         isQueued: (sessionId) => state.queuedMessages.some((item) => item.sessionId === sessionId),
         isAwaitingInput: isSessionAwaitingInput,
         isRunning: (sessionId) => sessionIndicators().runningIds.has(sessionId),
@@ -453,6 +508,7 @@ export function SessionListView(props: {
   });
   const searchableSessions = createMemo(() => {
     if (props.subagentParentId || props.sessionFilter) return directSessions();
+    if (defaultSurfacedSessions().length === 0) return overflowOtherSessions();
     return [...surfacedSessions(), ...overflowOtherSessions()];
   });
   const baseVisibleSessions = createMemo(() => {
@@ -864,6 +920,8 @@ function SessionListItem(props: {
   const hasUnreadCompletion = () =>
     props.isNewlyCompleted ||
     (props.isCompletedPlanSession && isSessionUnread(props.session.id, props.session.time.updated));
+  const hasPendingInput = () =>
+    props.hasPermissionRequest || props.hasQuestionRequest || props.needsAttention;
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
   const showsPlanModeTag = () =>
     getSelectedAgentForSession(props.session.id) === 'plan' &&
@@ -879,24 +937,20 @@ function SessionListItem(props: {
     }
     return { files: unique.size, iterations: run.iterations.length };
   };
-  const indicatorClass = () => {
-    if (props.isFailed) return 'is-failed';
-    if (props.isRunning) return 'is-running';
-    if (props.needsAttention) return 'is-attention';
-    if (props.isCompletedPlanSession) return 'is-plan-completed';
-    if (hasUnreadCompletion()) return 'is-completed';
-    return 'is-completed';
-  };
-  const indicatorTitle = () => {
-    if (props.isFailed) return 'Failed';
-    if (props.isRunning) return status()?.type === 'retry' ? 'Retrying' : 'Running';
-    if (props.hasPermissionRequest && props.hasQuestionRequest) return 'Attention needed';
-    if (props.hasPermissionRequest) return 'Permission request pending';
-    if (props.hasQuestionRequest) return 'Attention needed';
-    if (props.needsAttention) return 'Attention needed';
-    if (props.isCompletedPlanSession) return 'Plan ready';
-    if (hasUnreadCompletion()) return 'Completed';
-    return 'Completed';
+  const indicatorKind = () =>
+    getSessionStatusIndicatorKind({
+      isFailed: props.isFailed,
+      hasPendingInput: hasPendingInput(),
+      isRunning: props.isRunning,
+      isPlanReady: props.isCompletedPlanSession,
+      isCompleted: hasUnreadCompletion(),
+    });
+  const indicatorTitle = (kind: SessionStatusIndicatorKind) => {
+    if (kind === 'attention') {
+      if (props.hasPermissionRequest && props.hasQuestionRequest) return 'Attention needed';
+      if (props.hasPermissionRequest) return 'Permission request pending';
+    }
+    return getSessionStatusIndicatorTitle(kind, { retrying: status()?.type === 'retry' });
   };
 
   return (
@@ -912,21 +966,14 @@ function SessionListItem(props: {
           if (!props.embedded) setShowSessionPicker(false);
         }}
       >
-        <Show
-          when={
-            props.isRunning ||
-            props.isFailed ||
-            props.needsAttention ||
-            props.isCompletedPlanSession ||
-            props.isNewlyCompleted
-          }
-          fallback={<span class="session-item-indicator-spacer" />}
-        >
-          <span
-            class={`session-item-indicator ${indicatorClass()}`}
-            title={indicatorTitle()}
-            aria-label={indicatorTitle()}
-          />
+        <Show when={indicatorKind()} fallback={<span class="session-item-indicator-spacer" />}>
+          {(kind) => (
+            <span
+              class={`session-item-indicator session-status-indicator ${getSessionStatusIndicatorClass(kind())}`}
+              title={indicatorTitle(kind())}
+              aria-label={indicatorTitle(kind())}
+            />
+          )}
         </Show>
         <div class="session-item-content">
           <span class="session-item-title">
@@ -1118,7 +1165,7 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
       }
       continue;
     }
-    if (!isSessionUnread(sessionId, session.time.updated)) {
+    if (!isSessionCompletedResponseUnread(sessionId)) {
       continue;
     }
     newlyCompletedIds.add(sessionId);

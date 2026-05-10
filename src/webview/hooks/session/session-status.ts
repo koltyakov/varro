@@ -1,5 +1,6 @@
 import { appStore } from '../../lib/stores/app-store';
 import { sessionStore } from '../../lib/stores/session-store';
+import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
 import { deriveUsageLimitNotice } from '../../lib/usage-limit';
 import type { UsageLimitNotice } from '../../lib/usage-limit';
@@ -20,6 +21,7 @@ type SessionStatusDependencies = {
   syncSessionMessages(sessionId: string): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   isActiveSession(sessionId: string): boolean;
+  getMessages?(): SessionMessageEntry[];
   logError(context: string, err: unknown): void;
 };
 
@@ -143,7 +145,10 @@ export class SessionStatusOperations {
         syncSession: this.deps.syncSession,
         syncSessionMessages: this.deps.syncSessionMessages,
         startLoading: uiStore.startLoading,
+        loadingStartedAt: uiStore.loadingStartedAt,
         isActiveSession: this.deps.isActiveSession,
+        getCurrentSessionStatus: (id) => appStore.state.sessionStatus[id],
+        getMessages: this.deps.getMessages,
         logError: this.deps.logError,
       },
       sessionId
@@ -295,22 +300,32 @@ export async function recheckSessionStatusWithDependencies(
     updateUsageLimitState(sessionId: string, status: SessionStatus | null | undefined): void;
     clearPendingAbort(sessionId: string | null | undefined): void;
     stopLoading(): void;
-    setSessionStatuses(statuses: Record<string, SessionStatus>): void;
+    setSessionStatuses(
+      statuses: Record<string, SessionStatus>,
+      options?: SessionStatusSnapshotOptions
+    ): void;
     shouldResyncSessionAfterIdle(sessionId: string): boolean;
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
     startLoading(): void;
+    loadingStartedAt?(): number | null;
     isActiveSession(sessionId: string): boolean;
+    getCurrentSessionStatus?(sessionId: string): SessionStatus | null | undefined;
+    getMessages?(): SessionMessageEntry[];
     logError(context: string, err: unknown): void;
   },
   sessionId: string
 ) {
   if (!deps.isDocumentVisible()) return;
   try {
+    const snapshotStartedAt = Date.now();
     const statuses = await deps.loadSessionStatuses();
     const status = statuses[sessionId];
     if (deps.shouldIgnorePendingAbortStatus(sessionId, status)) return;
-    deps.setSessionStatuses({ ...statuses, [sessionId]: status ?? { type: 'idle' } });
+    deps.setSessionStatuses(
+      { ...statuses, [sessionId]: status ?? { type: 'idle' } },
+      { snapshotStartedAt }
+    );
 
     const abortedRetry = deps.hasPendingAbort(sessionId);
     if (!(abortedRetry && (!status || status.type === 'idle'))) {
@@ -318,21 +333,78 @@ export async function recheckSessionStatusWithDependencies(
     }
     if (!status || status.type === 'idle') {
       deps.clearPendingAbort(sessionId);
-      if (deps.isActiveSession(sessionId)) {
-        deps.stopLoading();
-      }
       const syncs: Array<Promise<void>> = [deps.syncSession(sessionId)];
       if (deps.shouldResyncSessionAfterIdle(sessionId)) {
         syncs.push(deps.syncSessionMessages(sessionId));
       }
       await Promise.allSettled(syncs);
+      if (deps.isActiveSession(sessionId)) {
+        const messages = deps.getMessages?.() ?? [];
+        const currentStatus = deps.getCurrentSessionStatus?.(sessionId);
+        if (
+          hasUnsettledLatestTurn(messages) ||
+          isRunningSessionStatus(currentStatus) ||
+          latestAssistantFinishedBeforeCurrentLoading(messages, deps.loadingStartedAt?.() ?? null)
+        ) {
+          deps.startLoading();
+        } else {
+          deps.stopLoading();
+        }
+      }
       return;
     }
 
     if ((status.type === 'busy' || status.type === 'retry') && deps.isActiveSession(sessionId)) {
-      deps.startLoading();
+      if (
+        latestAssistantFinishedBeforeLoading(
+          deps.getMessages?.() ?? [],
+          deps.loadingStartedAt?.() ?? null
+        )
+      ) {
+        deps.stopLoading();
+      } else deps.startLoading();
     }
   } catch (err) {
     deps.logError('recheckSessionStatus', err);
   }
+}
+
+function hasUnsettledLatestTurn(messages: SessionMessageEntry[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role === 'user') return true;
+    return !message.error && !message.time.completed;
+  }
+  return false;
+}
+
+function latestAssistantFinishedBeforeLoading(
+  messages: SessionMessageEntry[],
+  loadingStartedAt: number | null
+) {
+  const finishedAt = getLatestAssistantFinishedAt(messages);
+  return finishedAt !== null && (loadingStartedAt === null || loadingStartedAt <= finishedAt);
+}
+
+function latestAssistantFinishedBeforeCurrentLoading(
+  messages: SessionMessageEntry[],
+  loadingStartedAt: number | null
+) {
+  const finishedAt = getLatestAssistantFinishedAt(messages);
+  return finishedAt !== null && loadingStartedAt !== null && loadingStartedAt > finishedAt;
+}
+
+function getLatestAssistantFinishedAt(messages: SessionMessageEntry[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role !== 'assistant') return null;
+    return message.time.completed ?? (message.error ? message.time.created : null);
+  }
+  return null;
+}
+
+function isRunningSessionStatus(status: SessionStatus | null | undefined): boolean {
+  return status?.type === 'busy' || status?.type === 'retry';
 }

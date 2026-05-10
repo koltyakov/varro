@@ -21,7 +21,7 @@ import {
 import { modelSupportsVision } from '../../lib/model-capabilities';
 import { getPreferredVariant, normalizeModelVariant } from '../../lib/model-variants';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
-import type { Provider } from '../../types';
+import type { Provider, SessionStatus } from '../../types';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -64,6 +64,7 @@ type StateBoundSendDependencies = {
   syncSession(sessionId: string): Promise<void>;
   syncSessionMessages(sessionId: string): Promise<void>;
   recheckSessionStatus(sessionId: string): Promise<void>;
+  setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   continueInterruptedSession(sessionId: string): Promise<void>;
   logError?(context: string, err: unknown): void;
 };
@@ -310,6 +311,7 @@ export class SessionSendOperations {
         syncSession: this.deps.syncSession,
         syncSessionMessages: this.deps.syncSessionMessages,
         recheckSessionStatus: this.deps.recheckSessionStatus,
+        setSessionStatusEntry: this.deps.setSessionStatusEntry,
         stopLoading: uiStore.stopLoading,
         shouldClearComposerAfterSend: () => !options?.preserveComposer,
       },
@@ -373,6 +375,7 @@ export async function sendMessageWithDependencies(
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
     recheckSessionStatus(sessionId: string): Promise<void>;
+    setSessionStatusEntry?(sessionId: string, status: SessionStatus): void;
     stopLoading(): void;
     shouldClearComposerAfterSend(): boolean;
     logError?(context: string, err: unknown): void;
@@ -403,6 +406,9 @@ export async function sendMessageWithDependencies(
   const { body, effectiveModel } = sendPayload;
 
   deps.requestMessageListScrollToBottom();
+  if (!body.noReply) {
+    deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
+  }
   deps.startLoading();
   deps.setError(null);
   if (effectiveModel) {
@@ -443,6 +449,9 @@ export async function sendMessageWithDependencies(
       }
     }
   } catch (err) {
+    if (!body.noReply) {
+      deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
+    }
     deps.stopLoading();
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
     if (body.model) {

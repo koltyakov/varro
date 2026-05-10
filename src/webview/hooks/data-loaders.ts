@@ -4,6 +4,7 @@ import { appStore } from '../lib/stores/app-store';
 import { permissionsStore } from '../lib/stores/permissions-store';
 import { routingStore } from '../lib/stores/routing-store';
 import { sessionStore } from '../lib/stores/session-store';
+import type { SessionStatusSnapshotOptions } from '../lib/stores/session-store';
 import type { McpStatus, ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type {
   Agent,
@@ -110,7 +111,10 @@ export function createDataLoaderOperations(deps: {
   listRecycleBin(): Promise<RecycleBinEntry[] | null | undefined>;
   setRecycleBinEntries(entries: RecycleBinEntry[]): void;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
-  setSessionStatuses(statuses: Record<string, SessionStatus>): void;
+  setSessionStatuses(
+    statuses: Record<string, SessionStatus>,
+    options?: SessionStatusSnapshotOptions
+  ): void;
   getSessions(): Session[];
   updateUsageLimitState(
     sessionId: string,
@@ -481,7 +485,10 @@ export async function loadRecycleBinWithDependencies(
 export async function hydrateSessionStatusesWithDependencies(
   deps: {
     loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
-    setSessionStatuses(statuses: Record<string, SessionStatus>): void;
+    setSessionStatuses(
+      statuses: Record<string, SessionStatus>,
+      options?: SessionStatusSnapshotOptions
+    ): void;
     getSessions(): Session[];
     updateUsageLimitState(
       sessionId: string,
@@ -492,8 +499,9 @@ export async function hydrateSessionStatusesWithDependencies(
   logError: Logger
 ) {
   try {
+    const snapshotStartedAt = Date.now();
     const statuses = await deps.loadSessionStatuses();
-    deps.setSessionStatuses(statuses);
+    deps.setSessionStatuses(statuses, { snapshotStartedAt });
     for (const session of deps.getSessions()) {
       deps.updateUsageLimitState(session.id, statuses[session.id], []);
     }

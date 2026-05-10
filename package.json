@@ -44,7 +44,7 @@
     "vscode:install": "rm -f varro-*.vsix && npm run package && code --install-extension varro-*.vsix"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.14.41",
+    "@opencode-ai/sdk": "^1.14.46",
     "dompurify": "^3.4.2",
     "highlight.js": "11.11.1",
     "marked": "18.0.3",

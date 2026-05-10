@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { Session } from '../types';
 import {
   getSessionMarkerWorkspaceScope,
+  isSessionCompletedResponseUnreadMarker,
   isSessionUnreadMarker,
   isSkippedPlanSessionMarker,
+  nextCompletedSessionResponses,
   nextSeenSessions,
   nextSkippedPlanSessions,
   pruneSkippedPlanSessions,
@@ -77,6 +79,10 @@ describe('state session markers', () => {
       'session-1': 150,
     });
     expect(nextSeenSessions({ 'session-1': 150 }, 'session-1', 150, 120)).toBeNull();
+    expect(nextCompletedSessionResponses({ 'session-1': 100 }, 'session-1', 150, 120)).toEqual({
+      'session-1': 150,
+    });
+    expect(nextCompletedSessionResponses({ 'session-1': 150 }, 'session-1', 150, 120)).toBeNull();
 
     expect(removeSessionMarker({ 'session-1': 100, 'session-2': 200 }, 'session-1')).toEqual({
       'session-2': 200,
@@ -91,6 +97,12 @@ describe('state session markers', () => {
     expect(isSkippedPlanSessionMarker({ 'session-1': 300 }, 'session-1', 301)).toBe(false);
     expect(isSessionUnreadMarker({ 'session-1': 200 }, 'session-1', 201)).toBe(true);
     expect(isSessionUnreadMarker({ 'session-1': 200 }, 'session-1', 200)).toBe(false);
+    expect(
+      isSessionCompletedResponseUnreadMarker({ 'session-1': 250 }, { 'session-1': 200 }, 'session-1')
+    ).toBe(true);
+    expect(
+      isSessionCompletedResponseUnreadMarker({ 'session-1': 250 }, { 'session-1': 250 }, 'session-1')
+    ).toBe(false);
 
     expect(pruneSkippedPlanSessions({ stale: 1, 'session-1': 2 }, new Set(['session-1']))).toEqual({
       'session-1': 2,

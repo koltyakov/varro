@@ -402,7 +402,7 @@ export type Model = {
   name: string;
 };
 
-export type SessionEventInfo = Pick<Session, 'id'> & Partial<Session>;
+export type SessionEventInfo = Partial<Session> & { id?: string | null; agent?: string | null };
 
 export type MessageEventInfo =
   | Message
@@ -540,8 +540,8 @@ export type ProviderAuthAuthorization = {
 };
 
 export type ServerEventPropertiesByName = {
-  'session.created': { info: SessionEventInfo };
-  'session.updated': { info: SessionEventInfo };
+  'session.created': { sessionID?: string; info: SessionEventInfo };
+  'session.updated': { sessionID?: string; info: SessionEventInfo };
   'session.deleted': { info: { id: string } };
   'session.status': { sessionID: string; status: SessionStatus };
   'session.idle': { sessionID: string };
@@ -610,9 +610,24 @@ export type ServerEventPropertiesByName = {
   'session.next.text.started': { timestamp?: number; sessionID: string };
   'session.next.text.delta': { timestamp?: number; sessionID: string; text?: string };
   'session.next.text.ended': { timestamp?: number; sessionID: string };
-  'session.next.reasoning.started': { timestamp?: number; sessionID: string };
-  'session.next.reasoning.delta': { timestamp?: number; sessionID: string; text?: string };
-  'session.next.reasoning.ended': { timestamp?: number; sessionID: string };
+  'session.next.reasoning.started': {
+    timestamp?: number;
+    sessionID: string;
+    reasoningID?: string;
+  };
+  'session.next.reasoning.delta': {
+    timestamp?: number;
+    sessionID: string;
+    reasoningID?: string;
+    delta?: string;
+    text?: string;
+  };
+  'session.next.reasoning.ended': {
+    timestamp?: number;
+    sessionID: string;
+    reasoningID?: string;
+    text?: string;
+  };
   'session.next.tool.input.started': { timestamp?: number; sessionID: string; callID?: string };
   'session.next.tool.input.delta': {
     timestamp?: number;

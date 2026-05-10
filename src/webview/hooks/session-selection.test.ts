@@ -154,6 +154,7 @@ describe('session-selection helpers', () => {
 
   it('syncs active-session messages only for the latest generation', async () => {
     const setMessagesIncremental = vi.fn();
+    const stopLoading = vi.fn();
     const messages = [{ info: assistantMessage('assistant-1'), parts: [] }];
     const currentGeneration = { value: 0 };
 
@@ -161,9 +162,12 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'idle' }) satisfies SessionStatus,
+        loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => messages),
         updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
         setMessagesIncremental,
+        stopLoading,
         syncFailedSessionsFromMessages: vi.fn(),
         handoffTodosToMessages: vi.fn(),
       },
@@ -175,5 +179,92 @@ describe('session-selection helpers', () => {
     );
 
     expect(setMessagesIncremental).toHaveBeenCalledWith(messages, { preserveExtraParts: true });
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('stops loading when synced active messages show a completed assistant reply', async () => {
+    const stopLoading = vi.fn();
+    const completed = assistantMessage('assistant-1');
+    completed.time.completed = 2;
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        loadingStartedAt: () => null,
+        loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setMessagesIncremental: vi.fn(),
+        stopLoading,
+        syncFailedSessionsFromMessages: vi.fn(),
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      },
+      'session-1'
+    );
+
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles inactive running sessions when synced messages show completion', async () => {
+    const setSessionStatusEntry = vi.fn();
+    const syncFailedSessionsFromMessages = vi.fn();
+    const completed = assistantMessage('assistant-1');
+    completed.time.completed = 2;
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-2',
+        getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        loadingStartedAt: () => null,
+        loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry,
+        setMessagesIncremental: vi.fn(),
+        stopLoading: vi.fn(),
+        syncFailedSessionsFromMessages,
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      },
+      'session-1'
+    );
+
+    expect(syncFailedSessionsFromMessages).toHaveBeenCalledWith([{ info: completed, parts: [] }]);
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+  });
+
+  it('keeps loading when synced messages predate the current loading turn', async () => {
+    const stopLoading = vi.fn();
+    const completed = assistantMessage('assistant-1');
+    completed.time.completed = 2;
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        loadingStartedAt: () => 3,
+        loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setMessagesIncremental: vi.fn(),
+        stopLoading,
+        syncFailedSessionsFromMessages: vi.fn(),
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      },
+      'session-1'
+    );
+
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ import {
   clearMessages,
   clearClipboardImages,
   clearStreamingState,
+  finishMessageStreaming,
   addPermission,
   getActiveUsageLimitNotice,
   getMessageById,
@@ -175,6 +176,38 @@ describe('state streaming deltas', () => {
     });
     expect(state.streamingPartId).toBe('reason-1');
     expect(state.streamingText).toBe('Thinking carefully now');
+  });
+
+  it('commits and clears streaming text when a message finishes', () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [textPart('text-1', '')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', 'Received.', 'session-1');
+    finishMessageStreaming('message-1');
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      type: 'text',
+      text: 'Received.',
+    });
+    expect(state.streamingPartId).toBeNull();
+    expect(state.streamingText).toBe('');
+  });
+
+  it('does not clear streaming text for a different finished message', async () => {
+    upsertMessage({
+      info: assistantMessage('message-1'),
+      parts: [textPart('text-1', '')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', 'Received.', 'session-1');
+    finishMessageStreaming('message-2');
+    await nextFrame();
+
+    expect(state.streamingPartId).toBe('text-1');
+    expect(state.streamingText).toBe('Received.');
   });
 });
 

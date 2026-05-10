@@ -156,6 +156,36 @@ type EventHandlerOperationDependencies = {
   logError: EventHandlerDependencies['logError'];
 };
 
+type NormalizedSessionEventInfo = SessionEventInfo & { id: string };
+
+const ACTIVE_MESSAGE_RESYNC_DELAY_MS = 100;
+
+const ACTIVE_SESSION_PROGRESS_EVENTS = [
+  'session.next.agent.switched',
+  'session.next.model.switched',
+  'session.next.prompted',
+  'session.next.synthetic',
+  'session.next.shell.started',
+  'session.next.shell.ended',
+  'session.next.step.started',
+  'session.next.step.ended',
+  'session.next.step.failed',
+  'session.next.text.started',
+  'session.next.text.delta',
+  'session.next.text.ended',
+  'session.next.tool.input.started',
+  'session.next.tool.input.delta',
+  'session.next.tool.input.ended',
+  'session.next.tool.called',
+  'session.next.tool.progress',
+  'session.next.tool.success',
+  'session.next.tool.failed',
+  'session.next.retried',
+  'session.next.compaction.started',
+  'session.next.compaction.delta',
+  'session.next.compaction.ended',
+] as const;
+
 function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
@@ -167,7 +197,76 @@ function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] 
   return false;
 }
 
-function mergeSessionEventInfo(info: SessionEventInfo): Session | null {
+function latestAssistantFinishedBeforeLoading(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  loadingStartedAt: number | null
+) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role !== 'assistant') return false;
+    const finishedAt = message.time.completed ?? (message.error ? message.time.created : null);
+    if (finishedAt === null) return false;
+    return loadingStartedAt === null || loadingStartedAt <= finishedAt;
+  }
+
+  return false;
+}
+
+function latestAssistantMessageForSession(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  sessionId: string
+) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.info.sessionID !== sessionId || message.info.role !== 'assistant') {
+      continue;
+    }
+    if (!message.info.error && !message.info.time.completed) return message;
+  }
+  return null;
+}
+
+function getAssistantFinishedMessageId(
+  messages: Array<{ info: Message; parts: Part[] }>,
+  partialMessage: { sessionID?: string; id?: unknown },
+  assistantMessage: AssistantMessage | null
+) {
+  if (assistantMessage) return assistantMessage.id;
+  if (typeof partialMessage.id === 'string' && partialMessage.id) return partialMessage.id;
+  if (!partialMessage.sessionID) return null;
+  return latestAssistantMessageForSession(messages, partialMessage.sessionID)?.info.id ?? null;
+}
+
+function normalizeSessionEventInfo(
+  info: SessionEventInfo | undefined,
+  sessionID?: string
+): NormalizedSessionEventInfo | null {
+  if (!info) return null;
+  const normalized = stripNullishSessionInfo(info);
+  const id = typeof normalized.id === 'string' && normalized.id ? normalized.id : sessionID;
+  return id ? { ...normalized, id } : null;
+}
+
+function stripNullishSessionInfo(info: SessionEventInfo): SessionEventInfo {
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(info)) {
+    if (value === null || value === undefined) continue;
+    if (key === 'time' && value && typeof value === 'object') {
+      const time = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).filter(
+          ([, timeValue]) => timeValue !== null && timeValue !== undefined
+        )
+      );
+      if (Object.keys(time).length > 0) normalized.time = time;
+      continue;
+    }
+    normalized[key] = value;
+  }
+  return normalized as SessionEventInfo;
+}
+
+function mergeSessionEventInfo(info: NormalizedSessionEventInfo): Session | null {
   const existing = appStore.state.sessions.find((session) => session.id === info.id);
   if (existing) {
     return {
@@ -189,6 +288,13 @@ function mergeSessionEventInfo(info: SessionEventInfo): Session | null {
   }
 
   return null;
+}
+
+function syncSessionAgent(info: NormalizedSessionEventInfo) {
+  const agent = (info as { agent?: unknown }).agent;
+  if (typeof agent === 'string' && agent) {
+    appStore.setState('sessionSelectedAgents', info.id, agent);
+  }
 }
 
 export class SessionEventHandlerOperations {
@@ -237,12 +343,31 @@ export class SessionEventHandlerOperations {
 
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
+  const activeMessageSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const isSessionInActiveTree = (sessionId: string | null | undefined) => {
     if (!sessionId) return false;
     if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
     return sessionId === deps.getActiveSessionId();
   };
-  const abortLateChildSession = (info: SessionEventInfo) => {
+  const scheduleActiveMessageSync = (
+    sessionId: string,
+    delayMs = ACTIVE_MESSAGE_RESYNC_DELAY_MS
+  ) => {
+    if (!isSessionInActiveTree(sessionId) || activeMessageSyncTimers.has(sessionId)) return;
+
+    const timer = setTimeout(() => {
+      activeMessageSyncTimers.delete(sessionId);
+      deps
+        .syncSessionMessages(sessionId)
+        .catch((err) => deps.logError('syncSessionMessages', err));
+    }, delayMs);
+    activeMessageSyncTimers.set(sessionId, timer);
+  };
+  const markSessionProgress = (sessionId: string) => {
+    deps.setSessionStatusEntry(sessionId, { type: 'busy' });
+    deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
+  };
+  const abortLateChildSession = (info: NormalizedSessionEventInfo) => {
     if (!info.parentID || !deps.hasPendingAbort(info.parentID)) return;
 
     const alreadyPending = deps.hasPendingAbort(info.id);
@@ -255,11 +380,62 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       deps.logError('abortSession', err);
     });
   };
+  const ensureReasoningPart = (sessionId: string, reasoningId: string) => {
+    const message = latestAssistantMessageForSession(deps.getMessages(), sessionId);
+    if (!message) return null;
+    if (!message.parts.some((part) => part.id === reasoningId)) {
+      sessionStore.upsertPart({
+        id: reasoningId,
+        sessionID: sessionId,
+        messageID: message.info.id,
+        type: 'reasoning',
+        text: '',
+      } as Part);
+    }
+    return message.info.id;
+  };
+  const withReasoningMessage = (
+    sessionId: string,
+    reasoningId: string,
+    apply: (messageID: string) => void
+  ) => {
+    const messageID = ensureReasoningPart(sessionId, reasoningId);
+    if (messageID) {
+      apply(messageID);
+      return;
+    }
+    void deps
+      .syncSessionMessages(sessionId)
+      .then(() => {
+        const syncedMessageID = ensureReasoningPart(sessionId, reasoningId);
+        if (syncedMessageID) apply(syncedMessageID);
+      })
+      .catch((err) => deps.logError('syncSessionMessages', err));
+  };
+  const syncMessagePartsIfMissing = (message: AssistantMessage) => {
+    const localMessage = deps.getMessages().find((entry) => entry.info.id === message.id);
+    if (localMessage && localMessage.parts.length > 0) return;
+
+    void deps
+      .syncSessionMessages(message.sessionID)
+      .catch((err) => deps.logError('syncSessionMessages', err));
+  };
+
+  cleanups.push(
+    () => {
+      for (const timer of activeMessageSyncTimers.values()) clearTimeout(timer);
+      activeMessageSyncTimers.clear();
+    }
+  );
 
   cleanups.push(
     serverEvents.on('session.created', (data) => {
-      const info = data.properties?.info as SessionEventInfo | undefined;
+      const info = normalizeSessionEventInfo(
+        data.properties?.info as SessionEventInfo | undefined,
+        data.properties?.sessionID as string | undefined
+      );
       if (info) {
+        syncSessionAgent(info);
         const session = mergeSessionEventInfo(info);
         if (session) deps.upsertSession(session);
         abortLateChildSession(info);
@@ -269,8 +445,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.updated', (data) => {
-      const info = data.properties?.info as SessionEventInfo | undefined;
+      const info = normalizeSessionEventInfo(
+        data.properties?.info as SessionEventInfo | undefined,
+        data.properties?.sessionID as string | undefined
+      );
       if (info) {
+        syncSessionAgent(info);
         if (!info.time?.compacting) deps.setSessionCompacting(info.id, false);
         const session = mergeSessionEventInfo(info);
         if (session) deps.upsertSession(session);
@@ -303,11 +483,19 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
       if (status.type === 'idle') {
         deps.clearPendingAbort(sessionID);
+        deps.syncSession(sessionID).catch(() => {});
       }
       if (sessionID === deps.getActiveSessionId()) {
         const statusType = (status as { type: string }).type;
-        if (statusType === 'busy' || statusType === 'retry') uiStore.startLoading();
-        else uiStore.stopLoading();
+        if (statusType === 'busy' || statusType === 'retry') {
+          if (
+            latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt())
+          ) {
+            uiStore.stopLoading();
+          } else uiStore.startLoading();
+        } else {
+          uiStore.stopLoading();
+        }
       }
     })
   );
@@ -323,12 +511,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         deps.updateUsageLimitState(sid, { type: 'idle' });
       }
       if (!sid || sid === deps.getActiveSessionId()) uiStore.stopLoading();
+      if (sid) deps.syncSession(sid).catch(() => {});
       if (sid && sid === deps.getActiveSessionId()) {
         const activeMessages = deps.getMessages();
         const shouldResyncActiveMessages =
           activeMessages.length === 0 || hasActiveAssistantReply(activeMessages);
-        sessionStore.markSessionSeen(sid);
-        deps.syncSession(sid).catch(() => {});
+        if (!uiStore.showSessionPicker()) sessionStore.markSessionSeen(sid);
         const handedOffTodos = deps.handoffTodosToMessages();
         if (
           (shouldResyncActiveMessages || !handedOffTodos) &&
@@ -358,9 +546,21 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const assistantFinished =
         partialMessage.role === 'assistant' &&
         (!!partialMessage.error || !!partialMessage.time?.completed);
+      const assistantCompleted =
+        partialMessage.role === 'assistant' &&
+        !partialMessage.error &&
+        !!partialMessage.time?.completed;
+      const agent = (partialMessage as { agent?: unknown }).agent;
+      if (typeof agent === 'string' && agent) {
+        appStore.setState('sessionSelectedAgents', sessionID, agent);
+      }
 
       if (assistantFinished) {
         deps.setSessionStatusEntry(sessionID, { type: 'idle' });
+        if (assistantCompleted) {
+          sessionStore.markSessionResponseCompleted(sessionID, partialMessage.time?.completed);
+        }
+        deps.syncSession(sessionID).catch(() => {});
         if (sessionID === deps.getActiveSessionId()) uiStore.stopLoading();
       }
 
@@ -368,9 +568,20 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         uiStore.markLoadingActivity();
         if (message) {
           sessionStore.upsertMessageInfo(message);
+        } else {
+          scheduleActiveMessageSync(sessionID);
         }
-        if (assistantMessage && assistantFinished) {
-          deps.handoffTodosToMessages();
+        if (assistantFinished) {
+          const messageId = getAssistantFinishedMessageId(
+            deps.getMessages(),
+            partialMessage,
+            assistantMessage
+          );
+          if (messageId) sessionStore.finishMessageStreaming(messageId);
+          if (assistantMessage) {
+            syncMessagePartsIfMissing(assistantMessage);
+            deps.handoffTodosToMessages();
+          }
         }
       }
       if (partialMessage?.role === 'assistant') {
@@ -405,14 +616,29 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (partialPart?.sessionID && partialPart.type === 'compaction') {
         sessionStore.setSessionCompacting(partialPart.sessionID, false);
       }
-      if (isSessionInActiveTree(partialPart?.sessionID)) {
-        uiStore.markLoadingActivity();
-        if (!isCompleteMessagePart(rawPart)) return;
-        sessionStore.upsertPart(rawPart);
-        if (rawPart.type === 'tool') {
-          deps.syncTodosFromMessages();
-        }
+      if (!isSessionInActiveTree(partialPart?.sessionID)) return;
+
+      uiStore.markLoadingActivity();
+      if (!isCompleteMessagePart(rawPart)) {
+        scheduleActiveMessageSync(partialPart!.sessionID!);
+        return;
       }
+
+      const applyPart = () => {
+        if (!isSessionInActiveTree(rawPart.sessionID)) return;
+        sessionStore.upsertPart(rawPart);
+        if (rawPart.type === 'tool') deps.syncTodosFromMessages();
+      };
+
+      if (!deps.getMessages().some((message) => message.info.id === rawPart.messageID)) {
+        void deps
+          .syncSessionMessages(rawPart.sessionID)
+          .then(applyPart)
+          .catch((err) => deps.logError('syncSessionMessages', err));
+        return;
+      }
+
+      applyPart();
     })
   );
 
@@ -435,12 +661,87 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (!hasPart && sessionID) {
           deps
             .syncSessionMessages(sessionID)
-            .then(() => sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field))
+            .then(() =>
+              sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field)
+            )
             .catch((err) => deps.logError('syncSessionMessages', err));
           return;
         }
         sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);
       }
+    })
+  );
+
+  cleanups.push(
+    serverEvents.on('session.next.reasoning.started', (data) => {
+      const p = data.properties;
+      const sessionID = p?.sessionID as string | undefined;
+      const reasoningID = getEventString(p, 'reasoningID');
+      if (!sessionID) return;
+      markSessionProgress(sessionID);
+      if (!reasoningID || !isSessionInActiveTree(sessionID)) return;
+      uiStore.markLoadingActivity();
+      withReasoningMessage(sessionID, reasoningID, () => {});
+    })
+  );
+
+  for (const eventName of ACTIVE_SESSION_PROGRESS_EVENTS) {
+    cleanups.push(
+      serverEvents.on(eventName, (data) => {
+        const p = data.properties;
+        const sessionID = p?.sessionID as string | undefined;
+        if (!sessionID) return;
+        markSessionProgress(sessionID);
+
+        if (eventName === 'session.next.agent.switched') {
+          const agent = getEventString(p, 'agent');
+          if (agent) appStore.setState('sessionSelectedAgents', sessionID, agent);
+        }
+
+        if (!isSessionInActiveTree(sessionID)) return;
+        uiStore.markLoadingActivity();
+        if (sessionID === deps.getActiveSessionId()) uiStore.startLoading();
+        scheduleActiveMessageSync(sessionID);
+      })
+    );
+  }
+
+  cleanups.push(
+    serverEvents.on('session.next.reasoning.delta', (data) => {
+      const p = data.properties;
+      const sessionID = p?.sessionID as string | undefined;
+      const reasoningID = getEventString(p, 'reasoningID');
+      const delta = getEventString(p, 'delta') || getEventString(p, 'text');
+      if (!sessionID) return;
+      markSessionProgress(sessionID);
+      if (!reasoningID || !delta || !isSessionInActiveTree(sessionID)) return;
+      uiStore.markLoadingActivity();
+      withReasoningMessage(sessionID, reasoningID, (messageID) => {
+        sessionStore.applyMessagePartDelta(messageID, reasoningID, delta, sessionID, 'text');
+      });
+    })
+  );
+
+  cleanups.push(
+    serverEvents.on('session.next.reasoning.ended', (data) => {
+      const p = data.properties;
+      const sessionID = p?.sessionID as string | undefined;
+      const reasoningID = getEventString(p, 'reasoningID');
+      if (!sessionID) return;
+      markSessionProgress(sessionID);
+      if (!reasoningID || !isSessionInActiveTree(sessionID)) return;
+      uiStore.markLoadingActivity();
+      const text = getEventString(p, 'text');
+      withReasoningMessage(sessionID, reasoningID, (messageID) => {
+        if (!text) return;
+        sessionStore.upsertPart({
+          id: reasoningID,
+          sessionID,
+          messageID,
+          type: 'reasoning',
+          text,
+        } as Part);
+      });
     })
   );
 
@@ -553,4 +854,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   );
 
   return cleanups;
+}
+
+function getEventString(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const item = (value as Record<string, unknown>)[key];
+  return typeof item === 'string' ? item : undefined;
 }

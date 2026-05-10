@@ -124,7 +124,7 @@ export class SessionStateManager {
     switch (type) {
       case 'session.created':
       case 'session.updated': {
-        this.rememberSessionMetadata(asRecord(props?.info));
+        this.rememberSessionMetadata(asRecord(props?.info), getString(props?.sessionID));
         break;
       }
       case 'session.deleted': {
@@ -407,8 +407,11 @@ export class SessionStateManager {
       : serializeQuestionRequestProps(props);
   }
 
-  private rememberSessionMetadata(info: Record<string, unknown> | undefined) {
-    const sessionID = getString(info?.id);
+  private rememberSessionMetadata(
+    info: Record<string, unknown> | undefined,
+    fallbackSessionID?: string
+  ) {
+    const sessionID = getString(info?.id) || fallbackSessionID;
     const title = normalizeSessionTitle(getString(info?.title));
     if (sessionID && title) {
       this.sessionTitles.set(sessionID, title);

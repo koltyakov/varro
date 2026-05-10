@@ -39,6 +39,7 @@ import { SessionControlOperations } from '../session/session-controls';
 import {
   registerLoadingStatusPollEffect,
   registerProviderLimitRefreshEffect,
+  registerVisibleRunningSessionSyncEffect,
 } from '../session/session-effects';
 import { SessionEventHandlerOperations } from '../session/session-event-handlers';
 import {
@@ -144,6 +145,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSessionMessages: (sessionId) => syncSessionMessages(sessionId),
     loadSessionStatuses: () => client.session.status(),
     isActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
+    getMessages: () => appStore.state.messages,
     logError,
   });
 
@@ -314,6 +316,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       logError,
     });
 
+    registerVisibleRunningSessionSyncEffect({
+      getServerState: () => appStore.state.serverStatus.state,
+      isDocumentVisible: documentVisible,
+      getActiveSessionId: () => appStore.state.activeSessionId,
+      getSessionStatuses: () => appStore.state.sessionStatus,
+      loadSessions,
+      hydrateSessionStatuses,
+      loadQuestions,
+      syncSessionMessages,
+      logError,
+    });
+
     return { client };
   }
 
@@ -450,6 +464,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSession,
     syncSessionMessages,
     recheckSessionStatus,
+    setSessionStatusEntry,
     continueInterruptedSession,
     logError,
   });
@@ -527,12 +542,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         await loadQuestions().catch((err) => logError('loadQuestions', err));
       },
       loadSessionStatuses: async () => client.session.status(),
-      mergeSessionStatuses: (statuses) => sessionStore.setSessionStatuses(statuses),
+      mergeSessionStatuses: (statuses, options) =>
+        sessionStore.setSessionStatuses(statuses, options),
       updateUsageLimitState,
+      setSessionStatusEntry,
       startLoading: uiStore.startLoading,
       stopLoading: uiStore.stopLoading,
       setError: uiStore.setError,
       getSessionStatus: (id) => appStore.state.sessionStatus[id],
+      loadingStartedAt: uiStore.loadingStartedAt,
       loadSessionMessages: (id) => client.session.messages(id),
       handoffTodosToMessages,
       loadSessionMetadata: (id) => client.session.get(id),

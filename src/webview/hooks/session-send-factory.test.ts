@@ -115,6 +115,7 @@ describe('SessionSendOperations', () => {
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
       recheckSessionStatus: vi.fn(async () => {}),
+      setSessionStatusEntry: vi.fn(),
       continueInterruptedSession: vi.fn(async () => {}),
     });
 
@@ -151,6 +152,7 @@ describe('SessionSendOperations', () => {
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
       recheckSessionStatus: vi.fn(async () => {}),
+      setSessionStatusEntry: vi.fn(),
       continueInterruptedSession,
     });
 

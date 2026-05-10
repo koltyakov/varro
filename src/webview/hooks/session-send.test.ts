@@ -323,6 +323,7 @@ describe('session-send helpers', () => {
   it('creates a session when needed and sends the built payload', async () => {
     const sendAsync = vi.fn(async () => {});
     const applyEffectiveModel = vi.fn();
+    const setSessionStatusEntry = vi.fn();
 
     await sendMessageWithDependencies(
       {
@@ -352,6 +353,7 @@ describe('session-send helpers', () => {
         syncSession: vi.fn(async () => {}),
         syncSessionMessages: vi.fn(async () => {}),
         recheckSessionStatus: vi.fn(async () => {}),
+        setSessionStatusEntry,
         stopLoading: vi.fn(),
       },
       'hello'
@@ -364,6 +366,7 @@ describe('session-send helpers', () => {
     expect(sendAsync).toHaveBeenCalledWith('session-2', {
       parts: [{ type: 'text', text: 'hello' }],
     });
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-2', { type: 'busy' });
   });
 
   it('retries message sync when the immediate post-send sync leaves the active chat empty', async () => {

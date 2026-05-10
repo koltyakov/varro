@@ -157,7 +157,9 @@ describe('data loaders', () => {
       logError
     );
 
-    expect(setSessionStatuses).toHaveBeenCalledWith(statuses);
+    expect(setSessionStatuses).toHaveBeenCalledWith(statuses, {
+      snapshotStartedAt: expect.any(Number),
+    });
     expect(updateUsageLimitState).toHaveBeenNthCalledWith(
       1,
       'session-1',
@@ -358,7 +360,10 @@ describe('data loaders', () => {
       'gpt-5',
       expect.objectContaining({ status: 'unsupported' })
     );
-    expect(setSessionStatuses).toHaveBeenCalledWith({ 'session-1': { type: 'idle' } });
+    expect(setSessionStatuses).toHaveBeenCalledWith(
+      { 'session-1': { type: 'idle' } },
+      { snapshotStartedAt: expect.any(Number) }
+    );
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' }, []);
     expect(logError).not.toHaveBeenCalled();
   });

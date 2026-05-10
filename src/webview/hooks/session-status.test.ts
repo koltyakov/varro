@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
-import type { SessionStatus } from '../types';
+import type { Message, SessionStatus } from '../types';
 
 const { setSessionUsageLimitState, setState, startLoading, stopLoading, state } = vi.hoisted(
   () => ({
@@ -28,6 +28,38 @@ vi.mock('../lib/state', async () => {
     state,
   };
 });
+
+function completedAssistantMessage(): Message {
+  return {
+    id: 'assistant-1',
+    sessionID: 'session-1',
+    role: 'assistant',
+    time: { created: 1, completed: 2 },
+    parentID: 'user-1',
+    modelID: 'gpt-4o',
+    providerID: 'openai',
+    mode: 'default',
+    path: { cwd: '/repo', root: '/repo' },
+    cost: 0,
+    tokens: {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    },
+  };
+}
+
+function userMessage(): Message {
+  return {
+    id: 'user-1',
+    sessionID: 'session-1',
+    role: 'user',
+    time: { created: 1 },
+    agent: 'build',
+    model: { providerID: 'openai', modelID: 'gpt-4o' },
+  };
+}
 
 import {
   applyUsageLimitNoticeWithDependencies,
@@ -235,7 +267,10 @@ describe('session status helpers', () => {
     );
 
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
-    expect(setSessionStatuses).toHaveBeenCalledWith({ 'session-1': { type: 'idle' } });
+    expect(setSessionStatuses).toHaveBeenCalledWith(
+      { 'session-1': { type: 'idle' } },
+      { snapshotStartedAt: expect.any(Number) }
+    );
     expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
     expect(stopLoadingSpy).toHaveBeenCalledTimes(1);
     expect(syncSession).toHaveBeenCalledWith('session-1');
@@ -379,6 +414,7 @@ describe('session status helpers', () => {
 
     setSessionUsageLimitState.mockClear();
     stopLoading.mockClear();
+    state.sessionStatus = { 'session-1': { type: 'idle' } };
 
     await operations.recheckSessionStatus('session-1');
 
@@ -419,6 +455,67 @@ describe('session status helpers', () => {
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
+  it('keeps active loading when an idle recheck still has an unsettled latest turn', async () => {
+    const stopLoadingSpy = vi.fn();
+    const startLoadingSpy = vi.fn();
+    const messages = [{ info: userMessage(), parts: [] }];
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: stopLoadingSpy,
+        setSessionStatuses: vi.fn(),
+        shouldResyncSessionAfterIdle: () => true,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        startLoading: startLoadingSpy,
+        isActiveSession: () => true,
+        getMessages: () => messages,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(startLoadingSpy).toHaveBeenCalledTimes(1);
+    expect(stopLoadingSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps active loading when an idle recheck only sees the previous completed reply', async () => {
+    const stopLoadingSpy = vi.fn();
+    const startLoadingSpy = vi.fn();
+    const messages = [{ info: completedAssistantMessage(), parts: [] }];
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: stopLoadingSpy,
+        setSessionStatuses: vi.fn(),
+        shouldResyncSessionAfterIdle: () => true,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        startLoading: startLoadingSpy,
+        loadingStartedAt: () => 3,
+        isActiveSession: () => true,
+        getMessages: () => messages,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(startLoadingSpy).toHaveBeenCalledTimes(1);
+    expect(stopLoadingSpy).not.toHaveBeenCalled();
+  });
+
   it('replaces stale running statuses with the latest status snapshot during recheck', async () => {
     const setSessionStatuses = vi.fn();
 
@@ -442,6 +539,68 @@ describe('session status helpers', () => {
       'session-2'
     );
 
-    expect(setSessionStatuses).toHaveBeenCalledWith({ 'session-2': { type: 'idle' } });
+    expect(setSessionStatuses).toHaveBeenCalledWith(
+      { 'session-2': { type: 'idle' } },
+      { snapshotStartedAt: expect.any(Number) }
+    );
+  });
+
+  it('does not restart loading from stale busy status when messages are complete', async () => {
+    const stopLoadingSpy = vi.fn();
+    const startLoadingSpy = vi.fn();
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: stopLoadingSpy,
+        setSessionStatuses: vi.fn(),
+        shouldResyncSessionAfterIdle: () => false,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        startLoading: startLoadingSpy,
+        isActiveSession: () => true,
+        getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(stopLoadingSpy).toHaveBeenCalledTimes(1);
+    expect(startLoadingSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps loading from a busy recheck when completion predates the current loading turn', async () => {
+    const stopLoadingSpy = vi.fn();
+    const startLoadingSpy = vi.fn();
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: stopLoadingSpy,
+        setSessionStatuses: vi.fn(),
+        shouldResyncSessionAfterIdle: () => false,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        startLoading: startLoadingSpy,
+        loadingStartedAt: () => 3,
+        isActiveSession: () => true,
+        getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(startLoadingSpy).toHaveBeenCalledTimes(1);
+    expect(stopLoadingSpy).not.toHaveBeenCalled();
   });
 });
