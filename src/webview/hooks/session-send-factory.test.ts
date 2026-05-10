@@ -108,7 +108,6 @@ describe('SessionSendOperations', () => {
     const resetTodoSync = vi.fn();
     const operations = new SessionSendOperations({
       createSession: vi.fn(async () => 'session-2'),
-      hasPendingAbort: vi.fn(() => false),
       clearPendingAbort: vi.fn(),
       resetTodoSync,
       syncSessionMcps: vi.fn(async () => {}),
@@ -116,7 +115,6 @@ describe('SessionSendOperations', () => {
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
       recheckSessionStatus: vi.fn(async () => {}),
-      showBlockedSendMessage: vi.fn(),
       continueInterruptedSession: vi.fn(async () => {}),
     });
 
@@ -146,7 +144,6 @@ describe('SessionSendOperations', () => {
     const continueInterruptedSession = vi.fn(async () => {});
     const operations = new SessionSendOperations({
       createSession: vi.fn(async () => 'session-2'),
-      hasPendingAbort: vi.fn(() => false),
       clearPendingAbort: vi.fn(),
       resetTodoSync: vi.fn(),
       syncSessionMcps: vi.fn(async () => {}),
@@ -154,7 +151,6 @@ describe('SessionSendOperations', () => {
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
       recheckSessionStatus: vi.fn(async () => {}),
-      showBlockedSendMessage: vi.fn(),
       continueInterruptedSession,
     });
 

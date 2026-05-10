@@ -18,7 +18,7 @@ function createRuntimeMock(label: string) {
       restoreSession: vi.fn().mockResolvedValue(undefined),
       deleteSessionPermanently: vi.fn().mockResolvedValue(undefined),
       emptyRecycleBin: vi.fn().mockResolvedValue(undefined),
-      sendMessage: vi.fn().mockResolvedValue(true),
+      sendMessage: vi.fn().mockResolvedValue(undefined),
       retryMessage: vi.fn().mockResolvedValue(undefined),
       implementPlan: vi.fn().mockResolvedValue(undefined),
       openPlan: vi.fn().mockResolvedValue(undefined),
@@ -157,7 +157,6 @@ describe('useOpenCode.runtime', () => {
             preserveComposer: true,
           },
         ],
-        result: true,
       },
       {
         invoke: () => module.retryMessage('message-1', 'session-1'),

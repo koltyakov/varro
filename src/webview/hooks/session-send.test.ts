@@ -329,7 +329,6 @@ describe('session-send helpers', () => {
         getActiveSessionId: () => null,
         getDefaultPermissionMode: () => 'default',
         createSession: vi.fn(async () => 'session-2'),
-        hasPendingAbort: () => false,
         clearPendingAbort: vi.fn(),
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
@@ -354,7 +353,6 @@ describe('session-send helpers', () => {
         syncSessionMessages: vi.fn(async () => {}),
         recheckSessionStatus: vi.fn(async () => {}),
         stopLoading: vi.fn(),
-        showBlockedSendMessage: vi.fn(),
       },
       'hello'
     );
@@ -379,7 +377,6 @@ describe('session-send helpers', () => {
         getActiveSessionId: () => 'session-1',
         getDefaultPermissionMode: () => 'default',
         createSession: vi.fn(async () => 'session-1'),
-        hasPendingAbort: () => false,
         clearPendingAbort: vi.fn(),
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
@@ -404,7 +401,6 @@ describe('session-send helpers', () => {
         syncSessionMessages,
         recheckSessionStatus: vi.fn(async () => {}),
         stopLoading: vi.fn(),
-        showBlockedSendMessage: vi.fn(),
         shouldClearComposerAfterSend: () => true,
       },
       'hello'
@@ -428,7 +424,6 @@ describe('session-send helpers', () => {
         getActiveSessionId: () => 'session-1',
         getDefaultPermissionMode: () => 'default',
         createSession: vi.fn(async () => 'session-1'),
-        hasPendingAbort: () => false,
         clearPendingAbort: vi.fn(),
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
@@ -453,7 +448,6 @@ describe('session-send helpers', () => {
         syncSessionMessages: vi.fn(async () => {}),
         recheckSessionStatus: vi.fn(async () => {}),
         stopLoading: vi.fn(),
-        showBlockedSendMessage: vi.fn(),
         shouldClearComposerAfterSend: () => false,
       },
       'queued',
@@ -472,57 +466,6 @@ describe('session-send helpers', () => {
     expect(postTerminalSelectionClear).not.toHaveBeenCalled();
   });
 
-  it('returns a meaningful error for pending-aborted sessions', async () => {
-    const clearPendingAbort = vi.fn();
-    const showBlockedSendMessage = vi.fn();
-    const stopLoading = vi.fn();
-    const sendAsync = vi.fn(async () => {});
-
-    await sendMessageWithDependencies(
-      {
-        getActiveSessionId: () => 'session-1',
-        getDefaultPermissionMode: () => 'default',
-        createSession: vi.fn(async () => null),
-        hasPendingAbort: (sessionId) => sessionId === 'session-1',
-        clearPendingAbort,
-        syncSessionMcps: vi.fn(async () => {}),
-        buildSendPayload: (sessionId) => ({
-          body: { parts: [{ type: 'text', text: sessionId }] },
-          effectiveModel: null,
-        }),
-        requestMessageListScrollToBottom: vi.fn(),
-        startLoading: vi.fn(),
-        setError: vi.fn(),
-        applyEffectiveModel: vi.fn(),
-        resetTodoSync: vi.fn(),
-        clearTodos: vi.fn(),
-        clearSessionUsageLimit: vi.fn(),
-        sendAsync,
-        getMessageCount: () => 1,
-        clearDroppedFiles: vi.fn(),
-        clearTerminalSelection: vi.fn(),
-        clearClipboardImages: vi.fn(),
-        postFilesClear: vi.fn(),
-        postTerminalSelectionClear: vi.fn(),
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
-        recheckSessionStatus: vi.fn(async () => {}),
-        stopLoading,
-        showBlockedSendMessage,
-        shouldClearComposerAfterSend: () => true,
-      },
-      'follow up'
-    );
-
-    expect(stopLoading).toHaveBeenCalledTimes(1);
-    expect(showBlockedSendMessage).toHaveBeenCalledWith(
-      'session-1',
-      'This session is still stopping after a tool call became stuck. Start a new session before sending another message.'
-    );
-    expect(clearPendingAbort).not.toHaveBeenCalled();
-    expect(sendAsync).not.toHaveBeenCalled();
-  });
-
   it('logs failed post-send syncs and stops loading when all syncs fail', async () => {
     const stopLoading = vi.fn();
     const logError = vi.fn();
@@ -532,7 +475,6 @@ describe('session-send helpers', () => {
         getActiveSessionId: () => 'session-1',
         getDefaultPermissionMode: () => 'default',
         createSession: vi.fn(async () => 'session-1'),
-        hasPendingAbort: () => false,
         clearPendingAbort: vi.fn(),
         syncSessionMcps: vi.fn(async () => {}),
         buildSendPayload: () => ({
@@ -563,7 +505,6 @@ describe('session-send helpers', () => {
           throw new Error('recheckSessionStatus failed');
         }),
         stopLoading,
-        showBlockedSendMessage: vi.fn(),
         shouldClearComposerAfterSend: () => true,
         logError,
       },

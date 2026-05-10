@@ -990,61 +990,6 @@ describe('state helpers', () => {
     expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({ id: 'tool-1' });
   });
 
-  it('marks running tool parts aborted for stopped session trees', async () => {
-    const stateModule = await loadState();
-
-    stateModule.setMessagesIncremental([
-      {
-        info: assistantMessage('message-1', 'session-1', 10),
-        parts: [
-          {
-            id: 'tool-1',
-            sessionID: 'session-1',
-            messageID: 'message-1',
-            type: 'tool',
-            callID: 'call-1',
-            tool: 'bash',
-            state: {
-              status: 'running',
-              input: { command: 'sleep 60' },
-              title: 'Run sleep',
-              metadata: { cwd: '/repo' },
-              time: { start: 1 },
-            },
-          },
-          {
-            id: 'tool-2',
-            sessionID: 'other-session',
-            messageID: 'message-1',
-            type: 'tool',
-            callID: 'call-2',
-            tool: 'bash',
-            state: {
-              status: 'running',
-              input: { command: 'pwd' },
-              time: { start: 2 },
-            },
-          },
-        ],
-      },
-    ]);
-
-    stateModule.markRunningToolPartsAborted(['session-1']);
-
-    expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
-      state: {
-        status: 'error',
-        input: { command: 'sleep 60' },
-        error: 'Aborted',
-        metadata: { cwd: '/repo', aborted: true },
-        time: expect.objectContaining({ start: 1 }),
-      },
-    });
-    expect(stateModule.state.messages[0]?.parts[1]).toMatchObject({
-      state: { status: 'running' },
-    });
-  });
-
   it('reads desktop session pane side from initial webview state', async () => {
     (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
       theme: 'dark',

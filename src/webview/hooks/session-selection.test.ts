@@ -42,9 +42,7 @@ describe('session-selection helpers', () => {
         setActiveSessionId: (id) => {
           activeSession.value = id;
         },
-        hasPendingAbort: () => false,
-        shouldIgnorePendingAbortStatus: () => false,
-        markRunningToolPartsAborted: vi.fn(),
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId,
         markSessionSeen,
         clearDraftCurrentDocumentState: vi.fn(),
@@ -110,9 +108,7 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-2',
         setActiveSessionId: vi.fn(),
-        hasPendingAbort: () => false,
-        shouldIgnorePendingAbortStatus: () => false,
-        markRunningToolPartsAborted: vi.fn(),
+        clearPendingAbort: vi.fn(),
         persistActiveSessionId,
         markSessionSeen,
         clearDraftCurrentDocumentState: vi.fn(),
@@ -154,77 +150,6 @@ describe('session-selection helpers', () => {
     expect(persistActiveSessionId).not.toHaveBeenCalled();
     expect(markSessionSeen).not.toHaveBeenCalled();
     expect(setError).not.toHaveBeenCalled();
-  });
-
-  it('keeps pending-aborted sessions idle when reselected with stale busy snapshots', async () => {
-    const activeSession = { value: 'session-0' as string | null };
-    const markRunningToolPartsAborted = vi.fn();
-    const mergeSessionStatuses = vi.fn();
-    const updateUsageLimitState = vi.fn();
-    const startLoading = vi.fn();
-    const stopLoading = vi.fn();
-    const messages = [{ info: assistantMessage('assistant-1'), parts: [] }];
-
-    await selectSessionWithDependencies(
-      {
-        getActiveSessionId: () => activeSession.value,
-        setActiveSessionId: (id) => {
-          activeSession.value = id;
-        },
-        hasPendingAbort: () => true,
-        shouldIgnorePendingAbortStatus: (_sessionId, status) => status?.type === 'busy',
-        markRunningToolPartsAborted,
-        persistActiveSessionId: vi.fn(),
-        markSessionSeen: vi.fn(),
-        clearDraftCurrentDocumentState: vi.fn(),
-        resetToolCallExpansionState: vi.fn(),
-        resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
-        applySelectedAgent: vi.fn(),
-        resolvePersistedModel: () => null,
-        resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
-        applySelectedModel: vi.fn(),
-        getConnectedMcpNames: () => [],
-        hasSelectedMcps: () => false,
-        setSelectedMcpsForSession: vi.fn(),
-        syncSessionMcps: vi.fn(async () => {}),
-        resetTodoSync: vi.fn(),
-        clearMessages: vi.fn(),
-        loadSession: vi.fn(async () => ({
-          session: {
-            id: 'session-1',
-            projectID: 'project-1',
-            directory: '/repo',
-            title: 'Session 1',
-            version: '1',
-            time: { created: 0, updated: 2 },
-          },
-          messages,
-        })),
-        isCurrentSelectionGeneration: () => true,
-        upsertSession: vi.fn(),
-        setMessagesIncremental: vi.fn(),
-        syncFailedSessionsFromMessages: vi.fn(),
-        requestMessageListScrollToBottom: vi.fn(),
-        deriveSelectedAgentFromMessages: () => null,
-        deriveSelectedModelFromMessages: () => null,
-        syncTodosFromMessages: vi.fn(),
-        loadQuestions: vi.fn(async () => {}),
-        loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'busy' as const } })),
-        mergeSessionStatuses,
-        updateUsageLimitState,
-        startLoading,
-        stopLoading,
-        setError: vi.fn(),
-      },
-      { next: () => 1 },
-      'session-1'
-    );
-
-    expect(markRunningToolPartsAborted).toHaveBeenCalledWith(['session-1']);
-    expect(mergeSessionStatuses).not.toHaveBeenCalled();
-    expect(updateUsageLimitState).not.toHaveBeenCalled();
-    expect(startLoading).not.toHaveBeenCalled();
-    expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 
   it('syncs active-session messages only for the latest generation', async () => {
