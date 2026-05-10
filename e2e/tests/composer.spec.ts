@@ -80,7 +80,7 @@ test('removes queued follow-up messages before sending them', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Send as Steer' })).toHaveCount(0);
 });
 
-test('refreshes todos from the final assistant message after stale todo events', async ({ page }) => {
+test('refreshes todos from native todo update events', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-completion');
 
   const todoButton = page.getByRole('button', { name: /Todos/i });
@@ -114,8 +114,8 @@ test('refreshes todos from the final assistant message after stale todo events',
     );
   });
 
-  await expect(todoButton).toContainText('1/1');
-  await expect(page.locator('.todo-block-item.status-completed')).toContainText(
+  await expect(todoButton).toContainText('0/1');
+  await expect(page.locator('.todo-block-item.status-in_progress')).toContainText(
     'Patch stale incremental message equivalence and add regression coverage'
   );
 
@@ -124,28 +124,19 @@ test('refreshes todos from the final assistant message after stale todo events',
       {
         type: 'server/event',
         payload: {
-          type: 'message.updated',
+          type: 'todo.updated',
           properties: {
-            info: {
-              id: 'message-todo-completion-assistant',
-              sessionID: 'session-todo-completion',
-              role: 'assistant',
-              time: { created: 0, completed: 1 },
-              parentID: 'message-todo-completion-user',
-              modelID: 'gpt-5-mini',
-              providerID: 'copilot',
-              mode: 'primary',
-              agent: 'build',
-              path: { cwd: '/workspace/varro', root: '/workspace/varro' },
-              summary: false,
-              cost: 0,
-              tokens: {
-                input: 32,
-                output: 64,
-                reasoning: 0,
-                cache: { read: 0, write: 0 },
+            sessionID: 'session-todo-completion',
+            todos: [
+              {
+                id: 'todo-1',
+                content: 'Patch stale incremental message equivalence and add regression coverage',
+                status: 'completed',
+                priority: 'high',
               },
-              finish: 'stop',
+            ],
+            info: {
+              sessionID: 'session-todo-completion',
             },
           },
         },

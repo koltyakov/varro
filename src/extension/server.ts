@@ -13,6 +13,21 @@ import { getServerPathEntries } from './util/server-path';
 
 export type { OpenCodeCompactionSettings };
 
+function isSuccessfulUpgradeResult(value: unknown): value is { success: true; version: string } {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    (value as { success?: unknown }).success === true &&
+    typeof (value as { version?: unknown }).version === 'string'
+  );
+}
+
+function getUpgradeErrorMessage(value: unknown) {
+  if (!value || typeof value !== 'object') return '';
+  const error = (value as { error?: unknown }).error;
+  return typeof error === 'string' ? error : '';
+}
+
 export class OpenCodeServer extends EventEmitter {
   private static readonly START_DISPOSED_MESSAGE = 'Server start was cancelled';
 
@@ -518,9 +533,30 @@ export class OpenCodeServer extends EventEmitter {
   private async maybeSuggestCliUpdate(installedCliVersion: string | null) {
     await this.processManager.maybeSuggestCliUpdate(installedCliVersion, {
       readLatestCliVersion: () => this.readLatestCliVersion(),
+      upgradeRunningServer: (targetVersion) => this.upgradeRunningServer(targetVersion),
       getWorkspaceCwd: () => this.getWorkspaceCwd(),
       prepareForWindowsCliUpgrade: () => this.prepareForWindowsCliUpgrade(),
     });
+  }
+
+  private async upgradeRunningServer(targetVersion: string) {
+    if (this._status.state !== 'running') return false;
+    try {
+      const result = await this.request('POST', '/global/upgrade', { target: targetVersion });
+      if (isSuccessfulUpgradeResult(result)) {
+        logger.info(`Requested OpenCode upgrade to ${result.version} through the running server`);
+        return true;
+      }
+      logger.warn(
+        `OpenCode server upgrade failed: ${getUpgradeErrorMessage(result) || 'unknown error'}`
+      );
+      return false;
+    } catch (err) {
+      logger.warn(
+        `OpenCode server upgrade unavailable, falling back to CLI upgrade: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return false;
+    }
   }
 
   private async prepareForWindowsCliUpgrade() {

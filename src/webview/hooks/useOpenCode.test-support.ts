@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     sessionDelete: vi.fn(),
     sessionGet: vi.fn(),
     sessionMessages: vi.fn(),
+    sessionTodos: vi.fn(),
     sessionSendAsync: vi.fn(),
     sessionCommand: vi.fn(),
     sessionInit: vi.fn(),
@@ -66,6 +67,7 @@ vi.mock('../lib/client', () => ({
       delete: clientMocks.sessionDelete,
       get: clientMocks.sessionGet,
       messages: clientMocks.sessionMessages,
+      todos: clientMocks.sessionTodos,
       sendAsync: clientMocks.sessionSendAsync,
       command: clientMocks.sessionCommand,
       init: clientMocks.sessionInit,
@@ -249,6 +251,7 @@ beforeEach(() => {
   clientMocks.sessionDelete.mockReset();
   clientMocks.sessionGet.mockReset();
   clientMocks.sessionMessages.mockReset();
+  clientMocks.sessionTodos.mockReset();
   clientMocks.sessionSendAsync.mockReset();
   clientMocks.sessionCommand.mockReset();
   clientMocks.sessionInit.mockReset();
@@ -282,6 +285,7 @@ beforeEach(() => {
   clientMocks.mcpStatus.mockResolvedValue({});
   clientMocks.commandList.mockResolvedValue([]);
   clientMocks.permissionList.mockResolvedValue([]);
+  clientMocks.sessionTodos.mockRejectedValue(new Error('404 Not Found'));
   clientMocks.sessionCommand.mockResolvedValue({
     info: assistantMessage('assistant-command', 'user-1'),
     parts: [],

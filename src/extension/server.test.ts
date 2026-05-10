@@ -489,7 +489,7 @@ describe('OpenCodeServer event stream', () => {
 });
 
 describe('OpenCodeServer compaction config injection', () => {
-  it('injects OPENCODE_CONFIG for managed server startup', async () => {
+  it('injects OPENCODE_CONFIG_CONTENT for managed server startup', async () => {
     const server = new OpenCodeServer(4096, true, 'opencode', false, {
       auto: false,
       reserved: 1234,
@@ -534,7 +534,8 @@ describe('OpenCodeServer compaction config injection', () => {
     const spawnCall = spawnMock.mock.calls[0];
     expect(spawnCall).toBeTruthy();
     const options = spawnCall?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
-    expect(options?.env?.OPENCODE_CONFIG).toContain('varro-opencode');
+    expect(options?.env?.OPENCODE_CONFIG_CONTENT).toBe(configText);
+    expect(options?.env?.OPENCODE_CONFIG).toBeUndefined();
   });
 
   it('reapplies changed settings by disposing OpenCode instances', async () => {
@@ -764,6 +765,27 @@ describe('OpenCodeServer maintenance', () => {
     expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
   });
 
+  it('uses the running server upgrade endpoint when the notification action is selected', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const request = vi.fn().mockResolvedValue({ success: true, version: '1.14.22' });
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+      request: typeof request;
+    };
+
+    api.readLatestCliVersion = readLatestCliVersion;
+    api.request = request;
+    setRunning(server);
+    vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
+
+    expect(request).toHaveBeenCalledWith('POST', '/global/upgrade', { target: '1.14.22' });
+    expect(vscodeMock.window.createTerminal).not.toHaveBeenCalled();
+  });
+
   it('can auto-update the CLI in background when enabled', async () => {
     const server = new OpenCodeServer(4096, false);
     const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
@@ -800,6 +822,77 @@ describe('OpenCodeServer maintenance', () => {
     await flushMicrotasks();
 
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(['upgrade']),
+      expect.any(Object)
+    );
+  });
+
+  it('auto-updates through the running server upgrade endpoint when available', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const request = vi.fn().mockResolvedValue({ success: true, version: '1.14.22' });
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+      request: typeof request;
+    };
+
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    api.readLatestCliVersion = readLatestCliVersion;
+    api.request = request;
+    setRunning(server);
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
+
+    expect(request).toHaveBeenCalledWith('POST', '/global/upgrade', { target: '1.14.22' });
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('falls back to background CLI upgrade when the server upgrade endpoint is unavailable', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    const request = vi.fn().mockRejectedValue(new Error('404 Not Found'));
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+      request: typeof request;
+    };
+
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    api.readLatestCliVersion = readLatestCliVersion;
+    api.request = request;
+    setRunning(server);
+    spawnMock.mockImplementation((_command, _args) => {
+      let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+      const proc = {
+        stdout: { on: vi.fn(), off: vi.fn() },
+        stderr: { on: vi.fn(), off: vi.fn() },
+        once: vi.fn((event: string, listener: typeof exitHandler) => {
+          if (event === 'exit') {
+            exitHandler = listener;
+          }
+        }),
+        removeAllListeners: vi.fn(),
+        kill: vi.fn(),
+        exitCode: null,
+        signalCode: null,
+      };
+      queueMicrotask(() => {
+        exitHandler?.(0, null);
+      });
+      return proc as never;
+    });
+
+    await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
+
+    expect(request).toHaveBeenCalledWith('POST', '/global/upgrade', { target: '1.14.22' });
     expect(spawnMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.arrayContaining(['upgrade']),
@@ -857,9 +950,11 @@ describe('OpenCodeServer maintenance', () => {
         off: (event: string, listener: () => void) => void;
       } | null;
       managedProcess: boolean;
+      request: ReturnType<typeof vi.fn>;
     };
 
     api.readLatestCliVersion = readLatestCliVersion;
+    api.request = vi.fn().mockRejectedValue(new Error('404 Not Found'));
     api.process = {
       kill,
       exitCode: 0,
@@ -874,9 +969,10 @@ describe('OpenCodeServer maintenance', () => {
 
     await maybeSuggestCliUpdate(server, '1.14.20');
     await flushMicrotasks();
+    await flushMicrotasks();
 
     expect(kill).not.toHaveBeenCalled();
-    expect(statuses).toContainEqual({ state: 'stopped' });
+    expect(statuses.some((status) => status.state === 'stopped')).toBe(true);
     expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
   });
 });

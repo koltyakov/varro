@@ -212,6 +212,9 @@ export function isAllowedApiRequest(method: string, path: string) {
   if (pathname === '/agent') return method === 'GET' && noQuery();
   if (pathname === '/question') return method === 'GET' && noQuery();
   if (pathname === '/permission') return method === 'GET' && noQuery();
+  if (segments[0] === 'permission' && segments.length === 3) {
+    return method === 'POST' && noQuery() && segments[2] === 'reply';
+  }
   if (pathname === '/session') return (method === 'GET' || method === 'POST') && noQuery();
   if (pathname === '/session/status') return method === 'GET' && noQuery();
   if (pathname === '/experimental/workspace/status') return method === 'GET' && noQuery();
@@ -287,6 +290,7 @@ export function isAllowedApiRequest(method: string, path: string) {
   if (segments.length === 3) {
     if (segments[2] === 'diff') return method === 'GET' && hasOnlyQuery('messageID');
     if (segments[2] === 'message') return method === 'GET' && noQuery();
+    if (segments[2] === 'todo') return method === 'GET' && noQuery();
     return (
       method === 'POST' &&
       noQuery() &&
@@ -294,9 +298,6 @@ export function isAllowedApiRequest(method: string, path: string) {
         segments[2]
       )
     );
-  }
-  if (segments.length === 4 && segments[2] === 'permissions') {
-    return method === 'POST' && noQuery();
   }
   return false;
 }

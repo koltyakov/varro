@@ -12,6 +12,7 @@ import type {
   RepoFileStatus,
   QuestionRequest,
   PermissionRule,
+  Todo,
 } from '../types';
 import type {
   McpStatus,
@@ -89,6 +90,9 @@ export const client = {
     async messages(id: string): Promise<Array<{ info: Message; parts: Part[] }>> {
       return apiCall('GET', `/session/${id}/message`);
     },
+    async todos(id: string): Promise<Todo[]> {
+      return apiCall('GET', `/session/${id}/todo`);
+    },
     async sendAsync(
       id: string,
       body: {
@@ -109,12 +113,12 @@ export const client = {
       await apiCall('POST', `/session/${id}/prompt_async`, body);
     },
     async respondPermission(
-      sessionId: string,
+      _sessionId: string,
       permissionId: string,
       response: 'once' | 'always' | 'reject'
     ): Promise<boolean> {
-      return apiCall('POST', `/session/${sessionId}/permissions/${permissionId}`, {
-        response,
+      return apiCall('POST', `/permission/${permissionId}/reply`, {
+        reply: response,
       });
     },
     async revert(id: string, messageID: string): Promise<boolean> {

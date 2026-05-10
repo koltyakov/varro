@@ -12,6 +12,44 @@ import {
 const clientMocks = getClientMocks();
 
 describe('useOpenCode todo synchronization', () => {
+  it('loads persisted todos from the native session todo endpoint', async () => {
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'idle' } });
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([{ info: userMessage('user-1'), parts: [] }]);
+    clientMocks.sessionTodos.mockResolvedValue([
+      { content: 'Native persisted todo', status: 'in_progress', priority: 'high' },
+    ]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      await hookModule.selectSession('session-1');
+
+      expect(clientMocks.sessionTodos).toHaveBeenCalledWith('session-1');
+      expect(stateModule.state.todos).toEqual([
+        {
+          id: 'Native persisted todo',
+          content: 'Native persisted todo',
+          status: 'in_progress',
+          priority: 'high',
+        },
+      ]);
+    } finally {
+      dispose();
+    }
+  });
+
   it('rebuilds todos from refreshed messages after stale todo events', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {

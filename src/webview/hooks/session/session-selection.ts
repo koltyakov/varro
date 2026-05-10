@@ -37,7 +37,7 @@ type SessionSelectionDeps = {
   requestMessageListScrollToBottom(): void;
   deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
   deriveSelectedModelFromMessages(messages: SessionEntry[]): SelectedModel | null;
-  syncTodosFromMessages(messages: SessionEntry[]): void;
+  syncTodosForSession(sessionId: string, messages: SessionEntry[]): Promise<void>;
   loadQuestions(): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   mergeSessionStatuses(
@@ -112,7 +112,8 @@ export async function selectSessionWithDependencies(
       deps.applySelectedModel(inferredModel, id);
     }
 
-    deps.syncTodosFromMessages(messages);
+    await deps.syncTodosForSession(id, messages);
+    if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
     await deps.loadQuestions();
     if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
 

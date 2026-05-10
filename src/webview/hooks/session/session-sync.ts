@@ -44,7 +44,7 @@ export async function selectSessionWithStateDependencies(
     requestMessageListScrollToBottom(): void;
     deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
     deriveSelectedModelFromMessages(messages: SessionEntry[]): SelectedModel | null;
-    syncTodosFromMessages(messages: SessionEntry[]): void;
+    syncTodosForSession(sessionId: string, messages: SessionEntry[]): Promise<void>;
     loadQuestions(): Promise<void>;
     loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
     mergeSessionStatuses(
@@ -136,7 +136,7 @@ type SessionSyncDependencies = {
   requestMessageListScrollToBottom(): void;
   deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
   deriveSelectedModelFromMessages(messages: SessionEntry[]): SelectedModel | null;
-  syncTodosFromMessages(messages: SessionEntry[]): void;
+  syncTodosForSession(sessionId: string, messages: SessionEntry[]): Promise<void>;
   loadQuestions(): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   mergeSessionStatuses(
@@ -200,7 +200,7 @@ export class SessionSyncOperations {
         requestMessageListScrollToBottom: this.deps.requestMessageListScrollToBottom,
         deriveSelectedAgentFromMessages: this.deps.deriveSelectedAgentFromMessages,
         deriveSelectedModelFromMessages: this.deps.deriveSelectedModelFromMessages,
-        syncTodosFromMessages: this.deps.syncTodosFromMessages,
+        syncTodosForSession: this.deps.syncTodosForSession,
         loadQuestions: this.deps.loadQuestions,
         loadSessionStatuses: this.deps.loadSessionStatuses,
         mergeSessionStatuses: this.deps.mergeSessionStatuses,

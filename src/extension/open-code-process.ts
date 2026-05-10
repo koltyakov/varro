@@ -1,8 +1,8 @@
 import type { ChildProcess } from 'child_process';
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
-import { mkdir, readFile, writeFile } from 'fs/promises';
-import { homedir, tmpdir } from 'os';
+import { readFile } from 'fs/promises';
+import { homedir } from 'os';
 import { join, win32 } from 'path';
 import * as vscode from 'vscode';
 import type { ServerStatus } from '../shared/protocol';
@@ -66,6 +66,7 @@ interface MaintenanceCallbacks {
 
 interface MaybeSuggestCliUpdateCallbacks {
   readLatestCliVersion: () => Promise<string | null>;
+  upgradeRunningServer: (targetVersion: string) => Promise<boolean>;
   getWorkspaceCwd: () => string | undefined;
   prepareForWindowsCliUpgrade: () => Promise<void>;
 }
@@ -133,7 +134,7 @@ export class OpenCodeProcess {
     | null = null;
   private _processErrorHandler: ((err: Error) => void) | null = null;
   private compactionSettings: OpenCodeCompactionSettings;
-  private readonly injectedConfigPath: string;
+  private injectedConfigContent = '{}\n';
 
   constructor(
     port: number,
@@ -148,7 +149,6 @@ export class OpenCodeProcess {
     this.command = command?.trim() || '';
     this.simulateMissingCli = simulateMissingCli;
     this.compactionSettings = normalizeCompactionSettings(compactionSettings);
-    this.injectedConfigPath = join(tmpdir(), 'varro-opencode', `server-${port}.json`);
   }
 
   get port(): number {
@@ -287,8 +287,7 @@ export class OpenCodeProcess {
   }
 
   async syncInjectedConfigFile() {
-    await mkdir(join(tmpdir(), 'varro-opencode'), { recursive: true });
-    await writeFile(this.injectedConfigPath, await this.serializeInjectedConfig(), 'utf-8');
+    this.injectedConfigContent = await this.serializeInjectedConfig();
   }
 
   async serializeInjectedConfig() {
@@ -563,7 +562,7 @@ export class OpenCodeProcess {
         return;
       }
       try {
-        await this.runBackgroundCliUpgrade(installedCliVersion, latestCliVersion);
+        await this.runBackgroundCliUpgrade(installedCliVersion, latestCliVersion, callbacks);
         this.lastSuggestedCliVersion = latestCliVersion;
         return;
       } catch (err) {
@@ -585,10 +584,8 @@ export class OpenCodeProcess {
       .showInformationMessage(message, OpenCodeProcess.CLI_UPGRADE_ACTION)
       .then(async (action) => {
         if (action === OpenCodeProcess.CLI_UPGRADE_ACTION) {
-          if (process.platform === 'win32') {
-            await callbacks.prepareForWindowsCliUpgrade();
-          }
-          this.runInTerminal(upgradeCommand, 'OpenCode Upgrade', callbacks);
+          if (await callbacks.upgradeRunningServer(latestCliVersion)) return;
+          await this.runTerminalCliUpgrade(callbacks);
         }
       });
   }
@@ -632,12 +629,29 @@ export class OpenCodeProcess {
     return vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', false);
   }
 
-  private async runBackgroundCliUpgrade(installedCliVersion: string, latestCliVersion: string) {
+  private async runBackgroundCliUpgrade(
+    installedCliVersion: string,
+    latestCliVersion: string,
+    callbacks: MaybeSuggestCliUpdateCallbacks
+  ) {
     logger.info(
       `Automatically updating OpenCode CLI from ${installedCliVersion} to ${latestCliVersion} in background`
     );
+    if (await callbacks.upgradeRunningServer(latestCliVersion)) {
+      logger.info(
+        `Updated OpenCode CLI to ${latestCliVersion} through the running OpenCode server`
+      );
+      return;
+    }
     await this.runCliCommand(['upgrade'], OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS);
     logger.info(`Updated OpenCode CLI to ${latestCliVersion} in background`);
+  }
+
+  private async runTerminalCliUpgrade(callbacks: MaybeSuggestCliUpdateCallbacks) {
+    if (process.platform === 'win32') {
+      await callbacks.prepareForWindowsCliUpgrade();
+    }
+    this.runInTerminal(OpenCodeProcess.CLI_UPGRADE_COMMAND, 'OpenCode Upgrade', callbacks);
   }
 
   resolveCommand(): string {
@@ -669,10 +683,12 @@ export class OpenCodeProcess {
   }
 
   private buildServerEnv(): NodeJS.ProcessEnv {
-    return {
-      ...buildServerEnv(),
-      OPENCODE_CONFIG: this.injectedConfigPath,
-    };
+    const env = buildServerEnv();
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === 'opencode_config') delete env[key];
+    }
+    env.OPENCODE_CONFIG_CONTENT = this.injectedConfigContent;
+    return env;
   }
 
   private async runCliCommand(

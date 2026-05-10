@@ -67,6 +67,7 @@ describe('client', () => {
     await client.session.diff('session-1', 'message-1');
     await client.session.status();
     await client.session.messages('session-1');
+    await client.session.todos('session-1');
     await client.session.sendAsync('session-1', {
       parts: [{ type: 'text', text: 'Hello' }],
       model: { providerID: 'openai', modelID: 'gpt-4.1' },
@@ -115,6 +116,7 @@ describe('client', () => {
       ['GET', '/session/session-1/diff?messageID=message-1'],
       ['GET', '/session/status'],
       ['GET', '/session/session-1/message'],
+      ['GET', '/session/session-1/todo'],
       [
         'POST',
         '/session/session-1/prompt_async',
@@ -126,7 +128,7 @@ describe('client', () => {
           variant: 'high',
         },
       ],
-      ['POST', '/session/session-1/permissions/perm-1', { response: 'always' }],
+      ['POST', '/permission/perm-1/reply', { reply: 'always' }],
       ['POST', '/session/session-1/revert', { messageID: 'message-1' }],
       ['POST', '/session/session-1/unrevert'],
       ['POST', '/session/session-1/summarize', { providerID: 'openai', modelID: 'gpt-4.1' }],

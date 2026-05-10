@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
 import type { AssistantMessage, Part, Todo, UserMessage } from '../types';
@@ -8,6 +8,7 @@ const { setState, state } = vi.hoisted(() => ({
   state: {
     todos: [] as Todo[],
     messages: [] as Array<{ info: UserMessage | AssistantMessage; parts: Part[] }>,
+    activeSessionId: 'session-1' as string | null,
     sessionStatus: {} as Record<string, { type: 'idle' | 'busy' | 'retry'; attempt?: number }>,
   },
 }));
@@ -29,6 +30,14 @@ import {
   mergeTodoEventAdvance,
   syncTodosFromMessages,
 } from './todo-sync';
+
+beforeEach(() => {
+  setState.mockClear();
+  state.todos = [];
+  state.messages = [];
+  state.activeSessionId = 'session-1';
+  state.sessionStatus = {};
+});
 
 function userMessage(id: string): UserMessage {
   return {
@@ -169,6 +178,33 @@ describe('todo-sync', () => {
     ]);
   });
 
+  it('uses native todo events after the native endpoint is available', async () => {
+    const messages = [
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [
+          todoToolPart([
+            { id: 'todo-1', content: 'message', status: 'pending', priority: 'medium' },
+          ]),
+        ],
+      },
+    ];
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => []),
+    });
+
+    await operations.syncTodosForSession('session-1', messages);
+    setState.mockClear();
+    operations.syncTodosFromMessages(messages, {
+      todos: [{ content: 'native', status: 'completed', priority: 'high' }],
+    });
+
+    expect(setState).toHaveBeenCalledWith('todos', [
+      { id: 'native', content: 'native', status: 'completed', priority: 'high' },
+    ]);
+  });
+
   it('uses matching todo.updated payloads to advance stale message todo status', () => {
     const messageTodos = [
       { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
@@ -231,6 +267,44 @@ describe('todo-sync', () => {
 
     operations.resetTodoSync();
     expect(setState).toHaveBeenCalledWith('todos', []);
+  });
+
+  it('loads native session todos and falls back to message parsing on older servers', async () => {
+    const messages = [
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [
+          todoToolPart([
+            { id: 'todo-1', content: 'fallback', status: 'pending', priority: 'medium' },
+          ]),
+        ],
+      },
+    ];
+    const nativeOperations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => [
+        { content: 'native', status: 'completed', priority: 'high' },
+      ]),
+    });
+
+    await nativeOperations.syncTodosForSession('session-1', messages);
+
+    expect(setState).toHaveBeenCalledWith('todos', [
+      { id: 'native', content: 'native', status: 'completed', priority: 'high' },
+    ]);
+
+    setState.mockClear();
+    const fallbackOperations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => {
+        throw new Error('404 Not Found');
+      }),
+    });
+
+    await fallbackOperations.syncTodosForSession('session-1', messages);
+
+    expect(setState).toHaveBeenCalledWith('todos', [
+      { id: 'todo-1', content: 'fallback', status: 'pending', priority: 'medium' },
+    ]);
   });
 
   it('hands off stale todos once the session is idle even without completion markers', () => {

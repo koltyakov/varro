@@ -131,7 +131,7 @@ describe('state perf guards', () => {
     }
   });
 
-  it('removes grouped permissions with a single reactive flush', async () => {
+  it('removes a selected grouped permission with a single reactive flush', async () => {
     setState('permissions', [
       createPermission('perm-1', [
         { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1' },
@@ -153,7 +153,6 @@ describe('state perf guards', () => {
 
       await respondPermissionWithDependencies(
         {
-          getPermissions: () => state.permissions,
           respondPermission: async () => {},
           removePermission,
           setError: () => {},
@@ -165,7 +164,8 @@ describe('state perf guards', () => {
       await settlePerfEffects();
 
       expect(flushCount).toBe(2);
-      expect(state.permissions).toEqual([]);
+      expect(state.permissions).toHaveLength(1);
+      expect(state.permissions[0]?.id).toBe('perm-2');
     } finally {
       dispose();
     }

@@ -858,7 +858,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('todo.updated', (data) => {
       const p = data.properties;
       if (isSessionInActiveTree(p?.sessionID as string | undefined)) {
-        if (!hasActiveAssistantReply(deps.getMessages())) return;
         deps.syncTodosFromMessages(undefined, p);
       }
     })

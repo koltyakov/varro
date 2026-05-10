@@ -13,6 +13,7 @@ import type {
   QuestionRequest,
   Session,
   SessionStatus,
+  Todo,
 } from '../../src/webview/types';
 
 type MessageEntry<TMessage extends Message = Message> = { info: TMessage; parts: Part[] };
@@ -2720,6 +2721,61 @@ function getSession(state: ScenarioState, id: string) {
   return session;
 }
 
+function getSessionTodos(state: ScenarioState, id: string): Todo[] {
+  const messages = state.messagesBySessionId[id] || [];
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex];
+    if (message.info.role !== 'assistant') continue;
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex];
+      if (part.type !== 'tool' || !part.tool.toLowerCase().includes('todo')) continue;
+      const stateRecord = asRecord(part.state);
+      const todos = extractTodoPayload(stateRecord.input) || extractTodoPayload(stateRecord.metadata);
+      if (todos) return todos;
+      if (typeof stateRecord.output === 'string') {
+        try {
+          const outputTodos = extractTodoPayload(JSON.parse(stateRecord.output));
+          if (outputTodos) return outputTodos;
+        } catch {}
+      }
+    }
+  }
+  return [];
+}
+
+function extractTodoPayload(value: unknown): Todo[] | null {
+  if (Array.isArray(value)) {
+    return value.map(normalizeTodo).filter((todo): todo is Todo => Boolean(todo));
+  }
+  const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  if (!record) return null;
+  return extractTodoPayload(record.todos) || extractTodoPayload(record.items) || null;
+}
+
+function normalizeTodo(value: unknown): Todo | null {
+  const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  if (!record) return null;
+  const content = typeof record.content === 'string' ? record.content : '';
+  if (!content) return null;
+  return {
+    content,
+    status: typeof record.status === 'string' ? record.status : 'pending',
+    priority: typeof record.priority === 'string' ? record.priority : 'medium',
+    id: typeof record.id === 'string' || typeof record.id === 'number' ? String(record.id) : content,
+  };
+}
+
+function isCoveredPermission(source: Record<string, unknown>, candidate: Record<string, unknown>) {
+  return (
+    source.sessionID === candidate.sessionID &&
+    source.permission === candidate.permission &&
+    source.title === candidate.title &&
+    JSON.stringify(source.patterns || source.pattern || null) ===
+      JSON.stringify(candidate.patterns || candidate.pattern || null) &&
+    JSON.stringify(source.metadata || null) === JSON.stringify(candidate.metadata || null)
+  );
+}
+
 function buildInitialState(state: ScenarioState): InitialWebviewState {
   return {
     theme: THEME,
@@ -3004,6 +3060,11 @@ async function handleApiRequest(
     return state.messagesBySessionId[sessionId] || [];
   }
 
+  const todoMatch = path.match(/^\/session\/([^/]+)\/todo$/);
+  if (todoMatch && method === 'GET') {
+    return getSessionTodos(state, decodeURIComponent(todoMatch[1]));
+  }
+
   const diffMatch = path.match(/^\/session\/([^/]+)\/diff$/);
   if (diffMatch && method === 'GET') {
     return [];
@@ -3165,6 +3226,38 @@ async function handleApiRequest(
     }
     state.permissionResponses.push({ sessionId, permissionId, response });
     state.pendingPermissions = state.pendingPermissions.filter((item) => item.id !== permissionId);
+    return true;
+  }
+
+  const permissionReplyMatch = path.match(/^\/permission\/([^/]+)\/reply$/);
+  if (permissionReplyMatch && method === 'POST') {
+    const permissionId = decodeURIComponent(permissionReplyMatch[1]);
+    const payload = asRecord(body);
+    const response = payload.reply;
+    if (response !== 'once' && response !== 'always' && response !== 'reject') {
+      throw new Error('Invalid permission response');
+    }
+    const source = state.pendingPermissions.find((item) => item.id === permissionId);
+    const sessionId = typeof source?.sessionID === 'string' ? source.sessionID : '';
+    const coveredIds =
+      source && response !== 'once'
+        ? state.pendingPermissions
+            .filter((item) => isCoveredPermission(source, item))
+            .map((item) => String(item.id))
+        : [permissionId];
+    state.permissionResponses.push({ sessionId, permissionId, response });
+    state.pendingPermissions = state.pendingPermissions.filter(
+      (item) => !coveredIds.includes(String(item.id))
+    );
+    for (const id of coveredIds) {
+      dispatchToWebview({
+        type: 'server/event',
+        payload: {
+          type: 'permission.replied',
+          properties: { permissionID: id, sessionID: sessionId },
+        },
+      });
+    }
     return true;
   }
 

@@ -9,9 +9,11 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=msg-1')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/session/abc/todo')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/unrevert')).toBe(true);
     expect(isAllowedApiRequest('POST', '/question/request-1/reply')).toBe(true);
     expect(isAllowedApiRequest('GET', '/permission')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/permission/request-1/reply')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/provider-limit?providerID=openai')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/workspace-file?path=package.json')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/workspace-path/resolve?path=package.json')).toBe(
@@ -53,6 +55,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/delete')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/varro/session-trash/session-1/restore')).toBe(false);
     expect(isAllowedApiRequest('GET', '/provider/openai/oauth/authorize')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session/session-1/permissions/perm-1')).toBe(false);
   });
 
   it('rejects unsafe extension-host actions from malformed messages', () => {

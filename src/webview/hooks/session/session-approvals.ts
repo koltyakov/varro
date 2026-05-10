@@ -4,25 +4,8 @@ import type { Permission, QuestionRequest, Session } from '../../types';
 
 type PermissionResponse = 'once' | 'always' | 'reject';
 
-function getPermissionGroupMembers(
-  permissions: Permission[],
-  sessionId: string,
-  permissionId: string
-) {
-  const permission = permissions.find(
-    (item) =>
-      item.id === permissionId ||
-      item.duplicateIDs?.includes(permissionId) ||
-      item.groupMembers?.some((member) => member.id === permissionId)
-  );
-  return permission?.groupMembers?.length
-    ? permission.groupMembers
-    : [{ id: permissionId, sessionID: sessionId }];
-}
-
 export async function respondPermissionWithDependencies(
   deps: {
-    getPermissions(): Permission[];
     respondPermission(
       sessionId: string,
       permissionId: string,
@@ -37,13 +20,8 @@ export async function respondPermissionWithDependencies(
   options?: { rethrow?: boolean }
 ) {
   try {
-    const groupMembers = getPermissionGroupMembers(deps.getPermissions(), sessionId, permissionId);
-    await Promise.all(
-      groupMembers.map((member) => deps.respondPermission(member.sessionID, member.id, response))
-    );
-    batch(() => {
-      groupMembers.forEach((member) => deps.removePermission(member.id));
-    });
+    await deps.respondPermission(sessionId, permissionId, response);
+    deps.removePermission(permissionId);
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to respond to permission');
     if (options?.rethrow) {
@@ -154,7 +132,6 @@ export function getQuestionById(questions: QuestionRequest[], requestId: string)
 }
 
 type SessionApprovalDependencies = {
-  getPermissions(): Permission[];
   respondRemotePermission(
     sessionId: string,
     permissionId: string,
@@ -189,7 +166,6 @@ export class SessionApprovalOperations {
   ) => {
     await respondPermissionWithDependencies(
       {
-        getPermissions: this.deps.getPermissions,
         respondPermission: this.deps.respondRemotePermission,
         removePermission: this.deps.removePermission,
         setError: this.deps.setError,

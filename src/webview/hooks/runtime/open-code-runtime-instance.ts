@@ -135,9 +135,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     document.visibilityState === 'visible'
   );
 
-  const todoSyncOperations = createTodoSyncOperations();
+  const todoSyncOperations = createTodoSyncOperations({
+    loadSessionTodos: (sessionId) => client.session.todos(sessionId),
+  });
 
-  const { syncTodosFromMessages, handoffTodosToMessages } = todoSyncOperations;
+  const { syncTodosForSession, syncTodosFromMessages, handoffTodosToMessages } = todoSyncOperations;
 
   const sessionStatusOperations = new SessionStatusOperations({
     pendingAbortRetryAttempts,
@@ -572,7 +574,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           appStore.state.providerDefaults,
           deriveSelectedModelFromMessages
         ),
-      syncTodosFromMessages,
+      syncTodosForSession,
       loadQuestions: async () => {
         await loadQuestions().catch((err) => logError('loadQuestions', err));
       },
@@ -659,7 +661,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   });
 
   const sessionApprovalOperations = new SessionApprovalOperations({
-    getPermissions: () => appStore.state.permissions,
     respondRemotePermission: (sessionId, permissionId, response) =>
       client.session.respondPermission(sessionId, permissionId, response),
     removePermission: permissionsStore.removePermission,

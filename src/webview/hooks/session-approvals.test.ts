@@ -53,20 +53,12 @@ function question(id: string): QuestionRequest {
 }
 
 describe('session-approvals helpers', () => {
-  it('responds to grouped permissions and removes all members', async () => {
+  it('responds to the selected permission and lets OpenCode clear covered prompts', async () => {
     const removePermission = vi.fn();
     const respondPermission = vi.fn(async () => {});
 
     await respondPermissionWithDependencies(
       {
-        getPermissions: () => [
-          permission('perm-1', 'session-1', {
-            groupMembers: [
-              { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1' },
-              { id: 'perm-2', sessionID: 'session-2', messageID: 'message-2' },
-            ],
-          }),
-        ],
         respondPermission,
         removePermission,
         setError: vi.fn(),
@@ -76,29 +68,9 @@ describe('session-approvals helpers', () => {
       'always'
     );
 
-    expect(respondPermission).toHaveBeenCalledTimes(2);
+    expect(respondPermission).toHaveBeenCalledTimes(1);
+    expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'always');
     expect(removePermission).toHaveBeenCalledWith('perm-1');
-    expect(removePermission).toHaveBeenCalledWith('perm-2');
-  });
-
-  it('falls back to the requested permission when only a duplicate id matches', async () => {
-    const removePermission = vi.fn();
-    const respondPermission = vi.fn(async () => {});
-
-    await respondPermissionWithDependencies(
-      {
-        getPermissions: () => [permission('perm-1', 'session-1', { duplicateIDs: ['perm-2'] })],
-        respondPermission,
-        removePermission,
-        setError: vi.fn(),
-      },
-      'session-2',
-      'perm-2',
-      'once'
-    );
-
-    expect(respondPermission).toHaveBeenCalledWith('session-2', 'perm-2', 'once');
-    expect(removePermission).toHaveBeenCalledWith('perm-2');
   });
 
   it('sets a fallback error and rethrows when permission responses fail', async () => {
@@ -107,7 +79,6 @@ describe('session-approvals helpers', () => {
     await expect(
       respondPermissionWithDependencies(
         {
-          getPermissions: () => [permission('perm-1')],
           respondPermission: vi.fn(async () => {
             throw 'permission failed';
           }),
@@ -360,7 +331,6 @@ describe('session-approvals helpers', () => {
     const updateSessionPermission = vi.fn(async () => session('session-1'));
 
     const operations = new SessionApprovalOperations({
-      getPermissions: () => [permission('perm-1')],
       respondRemotePermission,
       removePermission: vi.fn(),
       setError: vi.fn(),

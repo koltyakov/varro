@@ -1959,7 +1959,11 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-other', diff: [{ ...diff, file: 'src/other.ts' }] },
     });
 
-    expect(syncTodosFromMessages).not.toHaveBeenCalled();
+    expect(syncTodosFromMessages).toHaveBeenCalledTimes(1);
+    expect(syncTodosFromMessages).toHaveBeenCalledWith(undefined, {
+      sessionID: 'session-child',
+      todos: [],
+    });
     expect(setDiffs).toHaveBeenCalledTimes(1);
     expect(setDiffs).toHaveBeenCalledWith([diff]);
   });

@@ -144,7 +144,7 @@ test('default permissions end up with a bash permission request for opencode ver
   });
 });
 
-test('groups duplicate permission prompts into a single prompt with a count', async ({ page }) => {
+test('keeps a grouped permission prompt visible after a one-time approval', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=grouped-permissions');
 
   await expect(page.getByText('Permission Required')).toBeVisible();
@@ -153,7 +153,8 @@ test('groups duplicate permission prompts into a single prompt with a count', as
 
   await page.getByRole('button', { name: 'Once' }).click();
 
-  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-count')).toHaveCount(0);
   await expect
     .poll(() =>
       getE2EState(page, () => {
@@ -168,10 +169,7 @@ test('groups duplicate permission prompts into a single prompt with a count', as
         }));
       })
     )
-    .toEqual([
-      { permissionId: 'permission-group-1', response: 'once' },
-      { permissionId: 'permission-group-2', response: 'once' },
-    ]);
+    .toEqual([{ permissionId: 'permission-group-1', response: 'once' }]);
 });
 
 test('keeps grouped permission prompts bundled when rejecting them', async ({ page }) => {
@@ -195,8 +193,5 @@ test('keeps grouped permission prompts bundled when rejecting them', async ({ pa
         }));
       })
     )
-    .toEqual([
-      { permissionId: 'permission-group-1', response: 'reject' },
-      { permissionId: 'permission-group-2', response: 'reject' },
-    ]);
+    .toEqual([{ permissionId: 'permission-group-1', response: 'reject' }]);
 });

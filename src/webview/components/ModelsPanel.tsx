@@ -291,13 +291,13 @@ function ProviderSection(props: {
   routing: OpenCodeModelRouting;
   onOpenContextMenu: (menu: ModelContextMenuState) => void;
 }) {
-  const [expanded, setExpanded] = createSignal(true);
-
   const allModels = () =>
     Object.values(props.provider.models).sort((a, b) => a.name.localeCompare(b.name));
 
   const enabledCount = () =>
     props.models.filter((m) => isModelVisible(props.provider.id, m.id)).length;
+
+  const [expanded, setExpanded] = createSignal(enabledCount() > 0);
 
   const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;
   const someEnabled = () => enabledCount() > 0 && !allEnabled();

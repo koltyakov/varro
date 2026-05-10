@@ -110,6 +110,8 @@ beforeEach(() => {
       model: { providerID: 'openai', modelID: 'gpt-5-mini' },
     },
   ]);
+  setState('hiddenProviders', []);
+  setState('hiddenModels', []);
 });
 
 afterEach(() => {
@@ -120,6 +122,8 @@ afterEach(() => {
   setState('providers', []);
   setState('agents', []);
   setState('allAgents', []);
+  setState('hiddenProviders', []);
+  setState('hiddenModels', []);
   if (originalResizeObserver) {
     globalThis.ResizeObserver = originalResizeObserver;
   }
@@ -196,5 +200,18 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Workspaces: ws-1 (connected)');
+  });
+
+  it('collapses providers with no enabled models', async () => {
+    setState('hiddenProviders', ['openai']);
+
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('OpenAI0/2');
+    expect(container?.querySelector('.settings-chevron')?.classList.contains('expanded')).toBe(
+      false
+    );
+    expect(container?.querySelector('.settings-model-row')).toBeNull();
   });
 });
