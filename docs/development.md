@@ -4,8 +4,8 @@ This document covers source setup, packaging, and debugging for the Varro VS Cod
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 20 or newer
-- [VS Code](https://code.visualstudio.com/) 1.91 or newer
+- [Node.js](https://nodejs.org/) 20.19+, 22.12+, or 24+
+- [VS Code](https://code.visualstudio.com/) 1.96 or newer
 - [OpenCode CLI](https://opencode.ai) installed globally
 
 ```sh
@@ -109,9 +109,7 @@ To rebuild while developing and open the webview preview:
 npm run dev
 ```
 
-This starts the extension watcher, the webview bundle watcher, and serves `preview.html` in Vite so you can inspect style changes immediately in the browser.
-
-This script relies on shell backgrounding. If your shell does not keep all three processes running, start `npm run watch:extension`, `npm run watch:webview`, and `npm run preview:webview` in separate terminals.
+This uses `npx concurrently` to start the extension watcher, the webview bundle watcher, and `preview.html` in Vite so you can inspect style changes immediately in the browser. If you prefer not to use `npx concurrently`, start `npm run watch:extension`, `npm run watch:webview`, and `npm run preview:webview` in separate terminals.
 
 Reload the Extension Development Host window after extension changes.
 
@@ -270,7 +268,7 @@ The webview filters sessions to the current workspace path. This matters when th
 
 While a session is running:
 
-- plain text follow-ups are queued instead of being sent immediately
+- follow-ups are queued instead of being sent immediately, including any files, images, or terminal selection attached to the queued message
 - `Ctrl+Enter` or `Cmd+Enter` sends a steering message with `noReply`
 - queued prompts are dispatched automatically once the active session becomes idle
 
@@ -280,11 +278,11 @@ The session UI also distinguishes running, attention-needed, failed, completed, 
 
 Varro exposes `/varro/provider-limit` under the `/varro/*` extension-host API namespace.
 
-The implementation in `src/extension/sidebar-provider.ts` and `src/extension/util/provider-limit.ts` tries these sources in order:
+The implementation in `src/extension/provider-limit-service.ts` and `src/extension/provider-limits/` tries these sources in order:
 
-1. Provider or model metadata already returned by OpenCode
-2. `/experimental/console` metadata from OpenCode
-3. A direct provider metadata probe for supported providers such as OpenAI and GitHub Copilot
+1. Enabled provider-limit adapters, including direct provider or local metadata probes for supported providers
+2. Provider or model metadata already returned by OpenCode
+3. `/experimental/console` metadata from OpenCode
 
 Results are cached briefly in the extension host before being shown in the composer toolbar.
 
@@ -380,6 +378,6 @@ docs/
 | `npm run fmt` | Format `src/` with oxfmt |
 | `npm run test` | Run the Vitest suite |
 | `npm run test:coverage` | Run tests with coverage output |
-| `npm run typecheck` | Run TypeScript checks for extension and webview |
+| `npm run typecheck` | Run TypeScript checks for extension, webview, and e2e code |
 | `npm run package` | Build and create a VSIX package |
 | `npm run vscode:install` | Package and install the VSIX into local VS Code |

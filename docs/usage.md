@@ -40,7 +40,6 @@ Varro can include more than the text in the composer.
 - Workspace path, sent as `[Working directory: ...]`
 - Active file, when `varro.context.autoAttachFile` is enabled
 - Current selection, when `varro.context.autoAttachSelection` is enabled
-- Diagnostics from the active file
 - Selected terminal text
 - Explicitly attached files or folders
 - Explicit line ranges attached from the editor selection command
@@ -56,7 +55,7 @@ Use any of these flows to add more context.
 
 - Right-click a file or folder in Explorer and choose `Varro: Add to Context`.
 - With an editor selection, use the editor context menu entry that also appears as `Varro: Add to Context`.
-- Select terminal text and run `Varro: Add Terminal Selection to Context`.
+- Select terminal text and choose `Varro: Add to Context` from the terminal context menu.
 - Drag files or folders into the composer.
 - Use the composer attachment flow from `/attach`.
 - Paste an image into the composer.
@@ -67,7 +66,7 @@ Use any of these flows to add more context.
 
 - `Enter` sends the message.
 - `Shift+Enter` inserts a newline.
-- While a session is running, plain `Enter` queues a follow-up message if you only typed text.
+- While a session is running, plain `Enter` queues a follow-up message, including any attached files, images, or terminal selection.
 - While a session is running, `Ctrl+Enter` or `Cmd+Enter` sends a steering message with `noReply` enabled.
 - While a session is running, the send menu also exposes `Add to Queue`, `Steer with Message`, and `Stop and Send`.
 - `ArrowUp` and `ArrowDown` can step through previous user prompts when the composer is empty.
@@ -77,6 +76,7 @@ Use any of these flows to add more context.
 Current built-in slash commands include:
 
 - `/new` or `/clear` starts a new chat session
+- `/skills` browses skill commands loaded from OpenCode
 - `/sessions` or `/resume` opens the session list
 - `/models` opens the model picker
 - `/mcps` or `/mcp` opens the MCP picker for the current session
@@ -91,7 +91,7 @@ Current built-in slash commands include:
 - `/ralph` starts a Ralph loop from a plan or spec document
 - `/abort` or `/stop` stops the current run
 
-Custom OpenCode commands loaded from your local config also appear in the same completion list.
+Custom OpenCode commands loaded from your local config also appear in the same completion list. Skill-sourced commands are browsed through `/skills` instead of being mixed into the main slash-command list.
 
 Some commands only appear when they apply. For example, `/init` only appears in blank sessions and `/abort` only appears while a session is active.
 
@@ -122,7 +122,7 @@ If VS Code reloads while a session was running, Varro reconnects to those sessio
 - A Ralph run creates a manager session with a dedicated dashboard plus one child session per iteration.
 - After each iteration settles, the Ralph manager sends a separate verification turn and expects lines like `<name>: PASS`, `<name>: FAIL - <cause>`, or `<name>: SKIPPED - <reason>`.
 - If verification fails, Ralph can spawn up to two repair sub-agents for that iteration before the loop moves on.
-- Ralph can pause, resume, or stop from the dashboard. It stops automatically when the plan starts with `DONE`, after consecutive passing iterations against a clean checklist, or when the iteration cap is reached. If the cap is reached with unchecked plan items or failed verification, the run stays marked as failed.
+- Ralph can pause, resume, or stop from the dashboard. It stops automatically when the plan starts with `DONE`, after consecutive passing iterations against a clean checklist, or when the iteration cap is reached. If the cap is reached with unchecked plan items or failed verification, the run is marked `incomplete` and can be continued with a higher limit.
 - Sessions that finished with the `plan` agent surface as `Plan ready` in the session list.
 - The latest plan response can be opened as a saved markdown plan document.
 - The latest plan response can also be handed off to the build flow so Varro continues with implementation instead of revising the plan.
@@ -253,7 +253,7 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - `Varro: Restart Server`
 - `Varro: Add to Context` from Explorer, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the editor is focused
 - `Varro: Add to Context` from the editor selection context menu
-- `Varro: Add Terminal Selection to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused
+- `Varro: Add to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused
 
 ## Settings
 
@@ -262,6 +262,7 @@ Server:
 - `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it
 - `varro.server.port` - port used for the local OpenCode server (default `4096`)
 - `varro.server.command` - optional path to the OpenCode CLI executable
+- `varro.server.autoUpdate` - run OpenCode CLI updates in the background when Varro detects a newer version; failed background updates fall back to the normal upgrade prompt
 
 Context:
 
@@ -273,7 +274,7 @@ Provider limits:
 - `varro.providerLimits.enabledAdapters` - allowlist of provider-limit adapters Varro may poll
 - Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity)
 - Default enabled IDs: `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, `openai`
-- `varro.providerLimits.disabled` - disable provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval
+- `varro.providerLimits.disabled` - disable provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval, with active sessions refreshed every `30` seconds when the default interval is in use
 - `varro.providerLimits.thresholdPercent` - show provider-limit UI when any provider-limit window has this remaining percentage less than or equal to the threshold; defaults to `100`
 
 Chat view:
@@ -281,8 +282,10 @@ Chat view:
 - `varro.chat.expandThinkingByDefault` - expand reasoning/thinking blocks by default
 - `varro.chat.showStickyUserPrompt` - show a sticky preview of the latest user prompt while scrolling long assistant responses
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`
+- `varro.chat.autoCompact` - enable automatic OpenCode session compaction when context is full unless project `opencode.json` overrides it
+- `varro.chat.autoCompactionReservedTokens` - reserved token headroom before automatic compaction triggers; set to `null` to use OpenCode defaults
 
-There are also hidden debug settings used in development builds:
+There are also deprecated debug-only settings used in development builds:
 
 - `varro.debug.simulateMissingCli`
 - `varro.debug.simulateNoProviders`

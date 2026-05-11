@@ -7,7 +7,7 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
 ## Highlights
 
 - Native OpenCode chat in a dedicated VS Code sidebar view
-- Live context from the active file, selection, diagnostics, terminal selection, Explorer, drag and drop, `@` mentions, and pasted images
+- Live context from the active file, selection, terminal selection, Explorer, drag and drop, `@` mentions, and pasted images
 - Workspace-scoped sessions with running, attention-needed, failed, completed, and plan-ready states
 - Inline permission prompts, follow-up questions, todo tracking, diff summaries, and usage-limit notices
 - Agent, model, reasoning variant, and MCP selection from your local OpenCode setup
@@ -17,8 +17,8 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
 
 ## Requirements
 
-- [VS Code](https://code.visualstudio.com/) 1.91 or newer
-- [Node.js](https://nodejs.org/) 20 or newer
+- [VS Code](https://code.visualstudio.com/) 1.96 or newer
+- [Node.js](https://nodejs.org/) 20.19+, 22.12+, or 24+
 - The OpenCode CLI installed (if the CLI is not on your `PATH`, set `varro.server.command` to the executable path in VS Code Settings)
 
 ## Quick Start
@@ -43,11 +43,11 @@ Varro is a native VS Code sidebar for [OpenCode](https://opencode.ai). It keeps 
 6. Start prompting. Varro automatically includes the active file and current selection by default.
 7. Add more context when needed:
    - Right-click a file or folder in Explorer and choose `Varro: Add to Context`
-   - Select terminal text and run `Varro: Add Terminal Selection to Context`
+   - Select terminal text and choose `Varro: Add to Context`
    - Drag files or folders into the chat
    - Paste an image into the input box
    - Type `@` to search workspace files or mention an agent
-8. Use slash commands such as `/models`, `/mcps`, `/attach`, `/review`, `/ralph`, `/sessions`, `/export`, and `/settings`. In a blank session, `/init` asks OpenCode to create or improve `AGENTS.md` for the current project.
+8. Use slash commands such as `/models`, `/mcps`, `/attach`, `/skills`, `/review`, `/ralph`, `/sessions`, `/export`, and `/settings`. In a blank session, `/init` asks OpenCode to create or improve `AGENTS.md` for the current project.
 9. Approve or reject tool permissions and answer follow-up questions directly in the chat panel. If the sidebar is hidden, Varro can surface waiting or completed work in notifications and the status bar.
 
 ## Documentation
