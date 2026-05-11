@@ -1,4 +1,5 @@
 import type { PermissionMode, RecycleBinEntry } from '../../../shared/protocol';
+import type { SelectedModel } from '../../lib/app-state-types';
 import type { PermissionRule, Session, SessionStatus } from '../../types';
 
 type SessionManagementDependencies = {
@@ -14,9 +15,9 @@ type SessionManagementDependencies = {
   setSessionUsageLimit(sessionId: string, notice: null): void;
   persistActiveSessionId(sessionId: string): void;
   markSessionSeen(sessionId: string): void;
-  getPersistedSelectedModel(): { providerID: string; modelID: string; variant?: string } | null;
+  getDefaultSelectedModel(): SelectedModel | null;
   setSelectedModel(
-    model: { providerID: string; modelID: string; variant?: string } | null,
+    model: SelectedModel | null,
     options?: { sessionId?: string | null; persistGlobal?: boolean }
   ): void;
   resolveDefaultAgent(): string | null;
@@ -70,7 +71,7 @@ export class SessionManagementOperations {
         setSessionUsageLimit: this.deps.setSessionUsageLimit,
         persistActiveSessionId: this.deps.persistActiveSessionId,
         markSessionSeen: this.deps.markSessionSeen,
-        getPersistedSelectedModel: this.deps.getPersistedSelectedModel,
+        getDefaultSelectedModel: this.deps.getDefaultSelectedModel,
         setSelectedModel: this.deps.setSelectedModel,
         resolveDefaultAgent: this.deps.resolveDefaultAgent,
         setSelectedAgent: this.deps.setSelectedAgent,
@@ -156,9 +157,9 @@ export async function createSessionWithDependencies(
     setSessionUsageLimit(sessionId: string, notice: null): void;
     persistActiveSessionId(sessionId: string): void;
     markSessionSeen(sessionId: string): void;
-    getPersistedSelectedModel(): { providerID: string; modelID: string; variant?: string } | null;
+    getDefaultSelectedModel(): SelectedModel | null;
     setSelectedModel(
-      model: { providerID: string; modelID: string; variant?: string } | null,
+      model: SelectedModel | null,
       options?: { sessionId?: string | null; persistGlobal?: boolean }
     ): void;
     resolveDefaultAgent(): string | null;
@@ -199,7 +200,7 @@ export async function createSessionWithDependencies(
     deps.persistActiveSessionId(session.id);
     deps.markSessionSeen(session.id);
 
-    const defaultModel = deps.getPersistedSelectedModel();
+    const defaultModel = deps.getDefaultSelectedModel();
     if (defaultModel) {
       deps.setSelectedModel(defaultModel, { sessionId: session.id, persistGlobal: false });
     }

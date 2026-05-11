@@ -692,7 +692,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setSessionUsageLimit: sessionStore.setSessionUsageLimit,
     persistActiveSessionId: sessionStore.persistActiveSessionId,
     markSessionSeen: sessionStore.markSessionSeen,
-    getPersistedSelectedModel: routingStore.getPersistedSelectedModel,
+    getDefaultSelectedModel: () => appStore.state.selectedModel,
     setSelectedModel: routingStore.setSelectedModel,
     resolveDefaultAgent: () =>
       getBuildAgentNameFromState() ||
