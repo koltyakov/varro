@@ -1,4 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import anthropicIcon from '../assets/provider-icons/anthropic.svg';
+import deepseekIcon from '../assets/provider-icons/deepseek.svg';
+import geminiIcon from '../assets/provider-icons/gemini.svg';
+import githubCopilotIcon from '../assets/provider-icons/copilot.svg';
+import kimiIcon from '../assets/provider-icons/kimi.svg';
+import opencodeIcon from '../assets/provider-icons/opencode.svg';
+import openaiIcon from '../assets/provider-icons/openai.svg';
+import openrouterIcon from '../assets/provider-icons/openrouter.svg';
+import qwenIcon from '../assets/provider-icons/qwen.svg';
+import xaiIcon from '../assets/provider-icons/xai.svg';
+import zaiIcon from '../assets/provider-icons/zai.svg';
 import { getProviderIcon } from './provider-icons';
 
 describe('getProviderIcon', () => {
@@ -18,37 +29,22 @@ describe('getProviderIcon', () => {
     expect(getProviderIcon('unknown-provider')).toBeNull();
   });
 
-  it('returns an icon for openai', () => {
-    expect(getProviderIcon('openai')).toBeTruthy();
-  });
-
   it.each([
-    'anthropic',
-    'openrouter',
-    'gemini',
-    'google',
-    'deepseek',
-    'xai',
-    'github-copilot',
-    'zai',
-    'zai-coding-plan',
-    'opencode',
-    'opencode-go',
-    'qwen',
-    'kimi',
-  ])('returns a truthy icon for known provider "%s"', (provider) => {
-    expect(getProviderIcon(provider)).toBeTruthy();
-  });
-
-  it('returns the same icon for google and gemini', () => {
-    expect(getProviderIcon('google')).toBe(getProviderIcon('gemini'));
-  });
-
-  it('returns the same icon for zai and zai-coding-plan', () => {
-    expect(getProviderIcon('zai')).toBe(getProviderIcon('zai-coding-plan'));
-  });
-
-  it('returns the same icon for opencode and opencode-go', () => {
-    expect(getProviderIcon('opencode')).toBe(getProviderIcon('opencode-go'));
+    ['openai', openaiIcon],
+    ['anthropic', anthropicIcon],
+    ['openrouter', openrouterIcon],
+    ['gemini', geminiIcon],
+    ['google', geminiIcon],
+    ['deepseek', deepseekIcon],
+    ['xai', xaiIcon],
+    ['github-copilot', githubCopilotIcon],
+    ['zai', zaiIcon],
+    ['zai-coding-plan', zaiIcon],
+    ['opencode', opencodeIcon],
+    ['opencode-go', opencodeIcon],
+    ['qwen', qwenIcon],
+    ['kimi', kimiIcon],
+  ])('maps provider "%s" to the expected icon asset', (provider, icon) => {
+    expect(getProviderIcon(provider)).toBe(icon);
   });
 });

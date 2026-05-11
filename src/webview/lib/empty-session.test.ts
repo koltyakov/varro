@@ -143,7 +143,26 @@ describe('shouldPruneEmptySession', () => {
     expect(shouldPruneEmptySession(session, makeOptions())).toBe(true);
   });
 
-  it('exports the grace period constant', () => {
-    expect(EMPTY_SESSION_PRUNE_GRACE_MS).toBe(5_000);
+  it('prunes empty sessions at the grace period boundary', () => {
+    const now = 10_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    const fresh = makeSession({
+      time: {
+        created: now - EMPTY_SESSION_PRUNE_GRACE_MS + 1,
+        updated: now - EMPTY_SESSION_PRUNE_GRACE_MS + 1,
+      },
+    });
+    const stale = makeSession({
+      time: {
+        created: now - EMPTY_SESSION_PRUNE_GRACE_MS,
+        updated: now - EMPTY_SESSION_PRUNE_GRACE_MS,
+      },
+    });
+
+    expect(shouldPruneEmptySession(fresh, makeOptions())).toBe(false);
+    expect(shouldPruneEmptySession(stale, makeOptions())).toBe(true);
+
+    vi.restoreAllMocks();
   });
 });

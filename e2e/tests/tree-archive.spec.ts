@@ -1,29 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
-test('archiving a parent session cascades delete to all child sessions', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
-
-  const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
-  await parentRow.hover();
-  await parentRow.getByTitle('Archive').click();
-
-  const deleteRequest = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ method: string; path: string }> };
-    }).__varroE2E;
-    return (
-      value?.requests.find(
-        (request) => request.method === 'DELETE' && request.path === '/session/session-parent'
-      ) || null
-    );
-  });
-
-  expect(deleteRequest).toMatchObject({ method: 'DELETE', path: '/session/session-parent' });
-
-  await expect(page.locator('.session-item-title')).not.toContainText(['Parent orchestration']);
-});
-
 test('recycle bin entry shows sub-agent count after archiving parent', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
 
@@ -56,7 +33,10 @@ test('restoring a parent session from recycle bin also restores children', async
 
   await restoredParent.hover();
   await page.getByRole('button', { name: 'Show 2 sub-agent sessions' }).click();
-  await expect(page.locator('.session-item-title')).toContainText(['Update tests', 'Inspect API routes']);
+  await expect(page.locator('.session-item-title')).toContainText([
+    'Update tests',
+    'Inspect API routes',
+  ]);
 });
 
 test('permanently deleting a parent from recycle bin removes the entire tree', async ({ page }) => {
@@ -74,9 +54,11 @@ test('permanently deleting a parent from recycle bin removes the entire tree', a
   await expect(page.locator('.recycle-bin-item')).toHaveCount(0);
 
   const deleteRequest = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ method: string; path: string }> };
-    }).__varroE2E;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ method: string; path: string }> };
+      }
+    ).__varroE2E;
     return (
       value?.requests.find(
         (request) =>

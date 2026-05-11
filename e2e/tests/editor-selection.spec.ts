@@ -61,9 +61,11 @@ test('prompt body includes selection reference from active editor', async ({ pag
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+          }
+        ).__varroE2E;
         const promptReq = value?.requests.find(
           (req) => req.method === 'POST' && req.path.includes('prompt_async')
         );
@@ -76,6 +78,52 @@ test('prompt body includes selection reference from active editor', async ({ pag
             typeof part.text === 'string' &&
             part.text.includes('context-files.ts') &&
             part.text.includes('lines 42-58')
+        );
+      })
+    )
+    .toBe(true);
+});
+
+test('prompt body includes terminal selection context', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
+
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'terminal-selection/update',
+        payload: { terminalName: 'zsh', text: 'npm test -- --runInBand' },
+      },
+      '*'
+    );
+  });
+
+  await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'zsh' })).toBeVisible();
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.click();
+  await composer.fill('Explain the terminal output');
+  await page.keyboard.press('Enter');
+
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+          }
+        ).__varroE2E;
+        const promptReq = value?.requests.find(
+          (req) => req.method === 'POST' && req.path.includes('prompt_async')
+        );
+        if (!promptReq?.body || typeof promptReq.body !== 'object') return false;
+        const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
+        return !!body.parts?.some(
+          (part) =>
+            part.type === 'text' &&
+            typeof part.text === 'string' &&
+            part.text.includes('[Selection from terminal zsh]') &&
+            part.text.includes('npm test -- --runInBand')
         );
       })
     )

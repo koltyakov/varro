@@ -1,25 +1,19 @@
 import { expect, test } from '@playwright/test';
 
-test('exhausted provider limit shows error chip in toolbar', async ({ page }) => {
+test('exhausted provider limit shows retry context and a descriptive toolbar chip', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
+  await expect(page.locator('.chat-usage-limit-message')).toBeVisible();
   const chip = page.locator('.toolbar-limit-chip');
   const badge = chip.locator('.toolbar-limit-chip-badge');
   await expect(chip).toBeVisible();
   await expect(badge).toHaveClass(/\berror\b/);
   await expect(chip).toContainText('0%');
-});
-
-test('exhausted provider limit chip has descriptive title', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=usage-limit');
-
-  const chip = page.locator('.toolbar-limit-chip');
-  await expect(chip).toBeVisible();
-  const title = await chip.getAttribute('title');
-  expect(title).toBeTruthy();
-  expect(title).toContain('Messages');
-  expect(title).toContain('0');
-  expect(title).toContain('40');
+  await expect(chip).toHaveAttribute('title', /Messages/);
+  await expect(chip).toHaveAttribute('title', /0/);
+  await expect(chip).toHaveAttribute('title', /40/);
 });
 
 test('provider limit chip is absent for scenarios without a rate-limited provider', async ({
@@ -34,18 +28,9 @@ test('provider limit chip is absent for scenarios without a rate-limited provide
   await expect(page.locator('.toolbar-limit-chip')).toHaveCount(0);
 });
 
-test('retry session status shows provider limit context alongside error', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=usage-limit');
-
-  await expect(page.locator('.chat-usage-limit-message')).toBeVisible();
-
-  const chip = page.locator('.toolbar-limit-chip');
-  const badge = chip.locator('.toolbar-limit-chip-badge');
-  await expect(chip).toBeVisible();
-  await expect(badge).toHaveClass(/\berror\b/);
-});
-
-test('narrow toolbar compacts provider limit before leaving controls overflowed', async ({ page }) => {
+test('narrow toolbar compacts provider limit before leaving controls overflowed', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 348, height: 260 });
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 

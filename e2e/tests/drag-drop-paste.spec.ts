@@ -44,6 +44,38 @@ test('displays files received from files/dropped in the attachment strip', async
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'lib' })).toBeVisible();
 });
 
+test('removes only the host-removed file from the attachment strip', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
+
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'files/dropped',
+        payload: [
+          { path: '/workspace/varro/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
+          { path: '/workspace/varro/src/b.ts', relativePath: 'src/b.ts', type: 'file' },
+        ],
+      },
+      '*'
+    );
+  });
+
+  await expect(page.locator('.chat-attachment-chip')).toHaveCount(2);
+
+  await page.evaluate(() => {
+    window.postMessage(
+      { type: 'files/removed', payload: { path: '/workspace/varro/src/a.ts' } },
+      '*'
+    );
+  });
+
+  await expect(page.locator('.chat-attachment-chip')).toHaveCount(1);
+  await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'b.ts' })).toBeVisible();
+  await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'a.ts' })).toHaveCount(0);
+});
+
 test('includes dropped file references in the prompt body', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
@@ -70,9 +102,11 @@ test('includes dropped file references in the prompt body', async ({ page }) => 
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+          }
+        ).__varroE2E;
         const promptReq = value?.requests.find(
           (req) => req.method === 'POST' && req.path.includes('prompt_async')
         );
@@ -86,6 +120,60 @@ test('includes dropped file references in the prompt body', async ({ page }) => 
       })
     )
     .toBe(true);
+});
+
+test('pastes an image, sends it as a file part, and clears the chip', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByText('GPT-4.1', { exact: true }).click();
+  await expect(page.getByTitle('OpenAI / GPT-4.1')).toBeVisible();
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.click();
+  await composer.evaluate((node) => {
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'clipboard.png', {
+      type: 'image/png',
+    });
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', { value: dataTransfer });
+    node.dispatchEvent(event);
+  });
+
+  await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toBeVisible();
+
+  await composer.fill('Describe this pasted image');
+  await page.keyboard.press('Enter');
+
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+          }
+        ).__varroE2E;
+        const promptReq = value?.requests.find(
+          (req) => req.method === 'POST' && req.path.includes('prompt_async')
+        );
+        if (!promptReq?.body || typeof promptReq.body !== 'object') return false;
+        const body = promptReq.body as {
+          parts?: Array<{ type: string; filename?: string; mime?: string; url?: string }>;
+        };
+        return !!body.parts?.some(
+          (part) =>
+            part.type === 'file' &&
+            part.filename === 'Image' &&
+            part.mime === 'image/png' &&
+            typeof part.url === 'string' &&
+            part.url.startsWith('data:image/png;base64,')
+        );
+      })
+    )
+    .toBe(true);
+  await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toHaveCount(0);
 });
 
 test('removes individual dropped files via the chip remove button', async ({ page }) => {
