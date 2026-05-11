@@ -133,6 +133,7 @@ export const SERVER_EVENT_NAMES = [
   'session.updated',
   'session.deleted',
   'session.status',
+  'session.error',
   'session.idle',
   'session.diff',
   'message.updated',

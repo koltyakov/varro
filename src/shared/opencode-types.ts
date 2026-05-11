@@ -79,14 +79,16 @@ export type FilePart = {
   url: string;
   source?: {
     text: { value: string; start: number; end: number };
-    type: 'file' | 'symbol';
-    path: string;
+    type: 'file' | 'symbol' | 'resource';
+    path?: string;
     range?: {
       start: { line: number; character: number };
       end: { line: number; character: number };
     };
     name?: string;
     kind?: number;
+    clientName?: string;
+    uri?: string;
   };
 };
 
@@ -215,6 +217,7 @@ export type CompactionPart = {
   type: 'compaction';
   auto: boolean;
   overflow?: boolean;
+  tail_start_id?: string;
 };
 
 export type Part =
@@ -271,7 +274,20 @@ export type Command = {
 
 export type SessionStatus =
   | { type: 'idle' }
-  | { type: 'retry'; attempt: number; message: string; next: number }
+  | {
+      type: 'retry';
+      attempt: number;
+      message: string;
+      action?: {
+        reason: string;
+        provider: string;
+        title: string;
+        message: string;
+        label: string;
+        link?: string;
+      };
+      next: number;
+    }
   | { type: 'busy' };
 
 export type FileDiff = {
@@ -485,6 +501,11 @@ export type SessionDiffProperties = {
   diff: FileDiff[];
 };
 
+export type SessionErrorProperties = {
+  sessionID?: string;
+  error?: AssistantMessage['error'];
+};
+
 export type TodoUpdatedProperties = {
   sessionID: string;
   todos: unknown;
@@ -544,6 +565,7 @@ export type ServerEventPropertiesByName = {
   'session.updated': { sessionID?: string; info: SessionEventInfo };
   'session.deleted': { info: { id: string } };
   'session.status': { sessionID: string; status: SessionStatus };
+  'session.error': SessionErrorProperties;
   'session.idle': { sessionID: string };
   'session.diff': SessionDiffProperties;
   'message.updated': { info: MessageEventInfo };

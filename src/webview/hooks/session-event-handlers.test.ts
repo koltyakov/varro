@@ -366,6 +366,31 @@ describe('registerSessionEventHandlers', () => {
     }
   });
 
+  it('marks session.error events failed and stops active loading', () => {
+    const handlers = installHandlers();
+    const deps = createDefaultDeps({ getActiveSessionId: () => 'session-1' });
+
+    setSessionFailed.mockClear();
+    setSessionUsageLimit.mockClear();
+    stopLoading.mockClear();
+    registerSessionEventHandlers(deps);
+
+    handlers.get('session.error')?.({
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'UnknownError', data: { message: 'Command failed' } },
+      },
+    });
+
+    expect(deps.setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(deps.clearPendingAbort).toHaveBeenCalledWith('session-1');
+    expect(setSessionFailed).toHaveBeenCalledWith('session-1', true);
+    expect(setSessionUsageLimit).toHaveBeenCalledWith('session-1', null);
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(deps.syncSession).toHaveBeenCalledWith('session-1');
+    expect(deps.syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
   it('binds event handlers to shared state-backed dependencies', async () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {

@@ -1307,6 +1307,21 @@ describe('header status badges', () => {
     expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
   });
 
+  it('keeps the active completed session indicator when its messages are loaded', () => {
+    setState('sessions', [session('session-1', 500), session('other', 400)]);
+    setState('activeSessionId', 'session-1');
+    setState('lastSeenSessions', { other: 400 });
+    setState('completedSessionResponses', { 'session-1': 500 });
+    setState('messages', [assistantMessageEntry('assistant-1')]);
+
+    cleanup = render(() => Chat(), container!);
+
+    const activeIndicator = container?.querySelector(
+      '.session-item.active .session-item-indicator'
+    );
+    expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
+  });
+
   it('does not treat generic unread session updates as completed responses', () => {
     setState('sessions', [session('active', 500), session('metadata-update', 400)]);
     setState('activeSessionId', 'active');
@@ -2264,7 +2279,7 @@ describe('usage-limit session status precedence', () => {
     expect(isRunningSession('session-1')).toBe(true);
   });
 
-  it('does not show running or completed indicators after synced active messages have completed', () => {
+  it('shows completed indicators after synced active messages have completed', () => {
     setState('sessions', [session('session-1', 500)]);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', {
@@ -2281,7 +2296,7 @@ describe('usage-limit session status precedence', () => {
 
     expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
     expect(isRunningSession('session-1')).toBe(false);
-    expect(indicator).toBeNull();
+    expect(indicator?.classList.contains('is-completed')).toBe(true);
   });
 
   it('does not render the active session status next to the chat header title', () => {

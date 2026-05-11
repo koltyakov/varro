@@ -164,6 +164,12 @@ export class SessionStateManager {
         }
         break;
       }
+      case 'session.error': {
+        const sessionID = getString(props?.sessionID);
+        if (!sessionID) break;
+        changed = this.markSessionFailed(sessionID, asRecord(props?.error)) || changed;
+        break;
+      }
       case 'message.updated': {
         const info = asRecord(props?.info);
         const sessionID = getString(info?.sessionID);
@@ -179,24 +185,7 @@ export class SessionStateManager {
 
         const error = asRecord(info?.error);
         if (error) {
-          if (
-            isAbortedAssistantError({
-              name: getString(error.name) || '',
-              data: asRecord(error.data)
-                ? { message: getString(asRecord(error.data)?.message) }
-                : undefined,
-            })
-          ) {
-            changed = this.failedSessions.delete(sessionID) || changed;
-            break;
-          }
-          const wasFailed = this.failedSessions.has(sessionID);
-          this.failedSessions.add(sessionID);
-          this.completedSessions.delete(sessionID);
-          if (!wasFailed) {
-            this.showFailureNotification(sessionID, describeFailure(error));
-          }
-          changed = !wasFailed || changed;
+          changed = this.markSessionFailed(sessionID, error) || changed;
         } else {
           changed = this.failedSessions.delete(sessionID) || changed;
         }
@@ -492,6 +481,21 @@ export class SessionStateManager {
     return false;
   }
 
+  private markSessionFailed(
+    sessionID: string,
+    error: Record<string, unknown> | undefined
+  ): boolean {
+    if (error && isAbortedErrorRecord(error)) return this.failedSessions.delete(sessionID);
+
+    const wasFailed = this.failedSessions.has(sessionID);
+    this.failedSessions.add(sessionID);
+    this.completedSessions.delete(sessionID);
+    if (!wasFailed) {
+      this.showFailureNotification(sessionID, error ? describeFailure(error) : undefined);
+    }
+    return !wasFailed;
+  }
+
   private showBlockingNotification(
     kind: PendingAttentionKind,
     sessionID: string,
@@ -562,6 +566,14 @@ export function describePermissionRequest(props: Record<string, unknown>): strin
 function describeFailure(error: Record<string, unknown>): string | undefined {
   const detail = asRecord(error.data);
   return getString(detail?.message) || getString(error.name);
+}
+
+function isAbortedErrorRecord(error: Record<string, unknown>): boolean {
+  const data = asRecord(error.data);
+  return isAbortedAssistantError({
+    name: getString(error.name) || '',
+    data: data ? { message: getString(data.message) } : undefined,
+  });
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

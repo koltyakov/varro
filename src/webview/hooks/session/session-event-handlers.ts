@@ -371,6 +371,31 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     deps.setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
   };
+  const markSessionError = (sessionId: string, error: AssistantMessage['error'] | undefined) => {
+    deps.setSessionStatusEntry(sessionId, { type: 'idle' });
+    deps.clearPendingAbort(sessionId);
+    if (error && isAbortedAssistantError(error)) {
+      sessionStore.setSessionFailed(sessionId, false);
+      sessionStore.setSessionUsageLimit(sessionId, null);
+    } else {
+      sessionStore.setSessionFailed(sessionId, true);
+      const notice = parseUsageLimitNotice(error?.data?.message || error?.name);
+      if (notice) {
+        deps.applyUsageLimitNotice(sessionId, {
+          ...notice,
+          source: 'message',
+          sessionID: sessionId,
+        });
+      } else {
+        sessionStore.setSessionUsageLimit(sessionId, null);
+      }
+    }
+    if (sessionId === deps.getActiveSessionId()) uiStore.stopLoading();
+    deps.syncSession(sessionId).catch(() => {});
+    if (isSessionInActiveTree(sessionId)) {
+      deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
+    }
+  };
   const schedulePendingPermissionSync = () => {
     if (!deps.syncPendingPermissions || pendingPermissionSyncTimer) return;
     pendingPermissionSyncTimer = setTimeout(() => {
@@ -538,6 +563,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           deps.syncSessionMessages(sid).catch(() => {});
         }
       }
+    })
+  );
+
+  cleanups.push(
+    serverEvents.on('session.error', (data) => {
+      const sessionID = data.properties?.sessionID as string | undefined;
+      if (!sessionID) return;
+      markSessionError(sessionID, data.properties?.error as AssistantMessage['error'] | undefined);
     })
   );
 

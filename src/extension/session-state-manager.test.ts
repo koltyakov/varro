@@ -152,6 +152,35 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
+  it('uses session.error events for background failure notifications', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Build release' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'UnknownError', data: { message: 'Command failed' } },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'UnknownError', data: { message: 'Command failed' } },
+      },
+    });
+
+    expect(vscodeMock.window.showErrorMessage).toHaveBeenCalledTimes(1);
+    expect(vscodeMock.window.showErrorMessage).toHaveBeenCalledWith(
+      'Varro hit an error for "Build release": Command failed',
+      'Open Chat'
+    );
+  });
+
   it('does not show a failure notification for aborted assistant messages', () => {
     const manager = createManager();
 

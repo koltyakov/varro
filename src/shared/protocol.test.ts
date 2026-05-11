@@ -160,4 +160,22 @@ describe('protocol conformance', () => {
       },
     });
   });
+
+  it('parses OpenCode session.error events', () => {
+    expect(
+      parseServerEvent({
+        type: 'session.error',
+        properties: {
+          sessionID: 'session-1',
+          error: { name: 'UnknownError', data: { message: 'Command failed' } },
+        },
+      })
+    ).toEqual({
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'UnknownError', data: { message: 'Command failed' } },
+      },
+    });
+  });
 });
