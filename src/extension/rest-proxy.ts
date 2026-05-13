@@ -67,7 +67,7 @@ export function scopeOpenCodeRequest(baseUrl: string, path: string, directory?: 
 
 export function getOpenCodeDirectoryHeaders(directory?: string): Record<string, string> {
   if (!directory) return {};
-  return { 'x-opencode-directory': encodeURIComponent(directory) };
+  return { 'x-opencode-directory': directory };
 }
 
 function normalizeOpenCodeDirectory(directory: string | undefined) {

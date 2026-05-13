@@ -567,6 +567,18 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   );
 
   cleanups.push(
+    serverEvents.on('session.compacted', (data) => {
+      const sid = data.properties?.sessionID as string | undefined;
+      if (!sid) return;
+      sessionStore.setSessionCompacting(sid, false);
+      deps.syncSession(sid).catch(() => {});
+      if (isSessionInActiveTree(sid)) {
+        deps.syncSessionMessages(sid).catch((err) => deps.logError('syncSessionMessages', err));
+      }
+    })
+  );
+
+  cleanups.push(
     serverEvents.on('session.error', (data) => {
       const sessionID = data.properties?.sessionID as string | undefined;
       if (!sessionID) return;
