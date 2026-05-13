@@ -25,6 +25,54 @@ const buildAgent = (name: string): Agent => ({
   tools: {},
 });
 
+type DataLoaderDependencies = Parameters<typeof createDataLoaderOperations>[0];
+
+function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): DataLoaderDependencies {
+  return {
+    listMcpStatus: async () => ({}),
+    setMcpStatus: vi.fn(),
+    getActiveSessionId: () => null,
+    getSelectedMcpsForSession: () => null,
+    setSelectedMcpsForSession: vi.fn(),
+    listQuestions: async () => [],
+    setQuestions: vi.fn(),
+    listAgents: async () => [],
+    getSelectedAgent: () => null,
+    getSelectedAgentForSession: () => null,
+    getPersistedSelectedAgent: () => null,
+    setAllAgents: vi.fn(),
+    setPrimaryAgents: vi.fn(),
+    setSelectedAgent: vi.fn(),
+    listCommands: async () => [],
+    setCommands: vi.fn(),
+    listProviders: async () => ({ providers: [], default: {} }),
+    setProvidersLoaded: vi.fn(),
+    setProviders: vi.fn(),
+    setProviderDefaults: vi.fn(),
+    getSelectedModel: () => null,
+    setSelectedModel: vi.fn(),
+    loadProviderLimit: async () => ({
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: 1,
+      note: 'Unsupported',
+    }),
+    setProviderLimit: vi.fn(),
+    listSessions: async () => [],
+    applySessions: vi.fn(),
+    listRecycleBin: async () => [],
+    setRecycleBinEntries: vi.fn(),
+    loadSessionStatuses: async () => ({}),
+    setSessionStatuses: vi.fn(),
+    getSessions: () => [],
+    updateUsageLimitState: vi.fn(),
+    logError: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe('data loaders', () => {
   it('defaults the toolbar agent to build when no session is active', async () => {
     const setAllAgents = vi.fn();
@@ -365,6 +413,57 @@ describe('data loaders', () => {
       { snapshotStartedAt: expect.any(Number) }
     );
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' }, []);
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('requires confirmation before applying an empty session snapshot over existing sessions', async () => {
+    const applySessions = vi.fn();
+    const logError = vi.fn();
+    const currentSessions = [session('session-1')];
+
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => [],
+        applySessions,
+        getSessions: () => currentSessions,
+        logError,
+      })
+    );
+
+    await operations.loadSessions();
+    expect(applySessions).not.toHaveBeenCalled();
+
+    await operations.loadSessions();
+    expect(applySessions).toHaveBeenCalledWith([]);
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('resets empty session snapshot confirmation after a non-empty snapshot', async () => {
+    const applySessions = vi.fn();
+    const logError = vi.fn();
+    const currentSessions = [session('session-1')];
+    const listedSessions = [session('session-1')];
+    const listSessions = vi
+      .fn<() => Promise<Session[]>>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(listedSessions)
+      .mockResolvedValueOnce([]);
+
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions,
+        applySessions,
+        getSessions: () => currentSessions,
+        logError,
+      })
+    );
+
+    await operations.loadSessions();
+    await operations.loadSessions();
+    await operations.loadSessions();
+
+    expect(applySessions).toHaveBeenCalledTimes(1);
+    expect(applySessions).toHaveBeenCalledWith(listedSessions);
     expect(logError).not.toHaveBeenCalled();
   });
 });

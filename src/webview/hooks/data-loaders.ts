@@ -19,6 +19,7 @@ import type {
 import { reconcileLoadedAgents, reconcileLoadedProviders } from './routing-state';
 
 type Logger = (context: string, err: unknown) => void;
+const EMPTY_SESSION_SNAPSHOT_CONFIRMATIONS = 2;
 
 export function createStateBoundDataLoaderOperations(deps: {
   applySessions(sessions: Session[]): void;
@@ -123,6 +124,23 @@ export function createDataLoaderOperations(deps: {
   ): void;
   logError: Logger;
 }) {
+  let emptySessionSnapshotCount = 0;
+
+  const shouldApplySessionsSnapshot = (sessions: Session[]) => {
+    if (sessions.length > 0 || deps.getSessions().length === 0) {
+      emptySessionSnapshotCount = 0;
+      return true;
+    }
+
+    emptySessionSnapshotCount += 1;
+    if (emptySessionSnapshotCount < EMPTY_SESSION_SNAPSHOT_CONFIRMATIONS) {
+      return false;
+    }
+
+    emptySessionSnapshotCount = 0;
+    return true;
+  };
+
   const loadMcps = async () => {
     await loadMcpsWithDependencies(
       {
@@ -225,6 +243,7 @@ export function createDataLoaderOperations(deps: {
     await loadSessionsWithDependencies(
       {
         listSessions: deps.listSessions,
+        shouldApplySessionsSnapshot,
         applySessions: deps.applySessions,
       },
       deps.logError
@@ -452,6 +471,7 @@ export async function refreshProviderLimitWithDependencies(
 export async function loadSessionsWithDependencies(
   deps: {
     listSessions(): Promise<Session[]>;
+    shouldApplySessionsSnapshot?(sessions: Session[]): boolean;
     applySessions(sessions: Session[]): void;
   },
   logError: Logger
@@ -461,6 +481,7 @@ export async function loadSessionsWithDependencies(
     // Session reads are intentionally broad. Workspace filtering belongs in
     // applySessions(), not the transport/backend layer, to avoid platform-
     // specific path formatting mismatches from hiding valid sessions.
+    if (deps.shouldApplySessionsSnapshot?.(sessions) === false) return;
     deps.applySessions(sessions);
   } catch (err) {
     logError('loadSessions', err);
