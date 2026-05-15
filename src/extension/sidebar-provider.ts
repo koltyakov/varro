@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { statSync } from 'fs';
 import { basename, dirname } from 'path';
 import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
@@ -43,9 +44,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly droppedFilesService: DroppedFilesService;
   private readonly configDisposable: vscode.Disposable;
   private readonly windowStateDisposable: vscode.Disposable;
-  private readonly providerConfigWatcher: vscode.FileSystemWatcher;
-  private readonly providerAuthWatcher: vscode.FileSystemWatcher;
+  private providerConfigWatcher: vscode.FileSystemWatcher | null = null;
+  private providerAuthWatcher: vscode.FileSystemWatcher | null = null;
   private providerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private providerFilesSignature = this.readProviderFilesSignature();
   private readonly contextProvider: ContextProvider;
 
   get view() {
@@ -158,6 +160,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         webviewSession: {
           setFocus: (focused) => this.webviewSession.setFocus(focused),
         },
+        setProviderWatchActive: (active) => this.setProviderWatchActive(active),
         contextFilesState: this.contextFilesState,
         sessionExportService: this.sessionExportService,
         restProxy: this.restProxy,
@@ -178,8 +181,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
       this.updateStatusBarItem();
     });
-    this.providerConfigWatcher = this.createProviderFileWatcher(getOpenCodeConfigPath());
-    this.providerAuthWatcher = this.createProviderFileWatcher(getOpenCodeAuthFilePath());
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('varro.providerLimits.enabledAdapters')) {
         this.providerLimitService.clearCache();
@@ -256,8 +257,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.serverEventBridge.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();
-    this.providerConfigWatcher.dispose();
-    this.providerAuthWatcher.dispose();
+    this.disposeProviderFileWatchers();
     this.fileSearch.dispose();
     await this.droppedFilesService.dispose();
   }
@@ -270,6 +270,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     watcher.onDidChange(() => this.scheduleProviderRefresh());
     watcher.onDidDelete(() => this.scheduleProviderRefresh());
     return watcher;
+  }
+
+  private setProviderWatchActive(active: boolean) {
+    if (active) {
+      if (this.providerConfigWatcher || this.providerAuthWatcher) return;
+      this.providerConfigWatcher = this.createProviderFileWatcher(getOpenCodeConfigPath());
+      this.providerAuthWatcher = this.createProviderFileWatcher(getOpenCodeAuthFilePath());
+      if (this.providerFilesSignature !== this.readProviderFilesSignature()) {
+        void this.refreshProviderState();
+      } else {
+        this.post({ type: 'providers/refresh' });
+      }
+      return;
+    }
+
+    this.disposeProviderFileWatchers();
+  }
+
+  private disposeProviderFileWatchers() {
+    if (this.providerRefreshTimer) {
+      clearTimeout(this.providerRefreshTimer);
+      this.providerRefreshTimer = null;
+    }
+    this.providerConfigWatcher?.dispose();
+    this.providerAuthWatcher?.dispose();
+    this.providerConfigWatcher = null;
+    this.providerAuthWatcher = null;
   }
 
   private scheduleProviderRefresh() {
@@ -287,7 +314,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         await this.server.restart();
       } catch {}
     }
+    this.providerFilesSignature = this.readProviderFilesSignature();
     this.post({ type: 'providers/refresh' });
+  }
+
+  private readProviderFilesSignature() {
+    return [getOpenCodeConfigPath(), getOpenCodeAuthFilePath()]
+      .map((path) => {
+        try {
+          const stat = statSync(path);
+          return `${path}:${stat.mtimeMs}:${stat.size}`;
+        } catch {
+          return `${path}:missing`;
+        }
+      })
+      .join('|');
   }
 
   private async handleReadyMessage() {

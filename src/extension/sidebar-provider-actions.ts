@@ -18,6 +18,7 @@ export interface SidebarProviderActionDeps {
   webviewSession: {
     setFocus(focused: boolean): void;
   };
+  setProviderWatchActive(active: boolean): void;
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
   restProxy: RestProxy;
@@ -43,6 +44,9 @@ export function createSidebarProviderActions(
     ready: () => deps.handleReadyMessage(),
     setWebviewFocus: (focused) => {
       deps.webviewSession.setFocus(focused);
+    },
+    setProviderWatchActive: (active) => {
+      deps.setProviderWatchActive(active);
     },
     requestContext: () => {
       deps.postContext();

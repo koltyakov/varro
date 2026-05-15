@@ -16,6 +16,7 @@ function createCallbacks(): MessageRouterCallbacks {
   return {
     ready: vi.fn(() => Promise.resolve()),
     setWebviewFocus: vi.fn(),
+    setProviderWatchActive: vi.fn(),
     requestContext: vi.fn(),
     refreshProviders: vi.fn(),
     clearTerminalSelection: vi.fn(),
@@ -51,6 +52,13 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'webview/focus', payload: { focused: true } });
     expect(cb.setWebviewFocus).toHaveBeenCalledWith(true);
+  });
+
+  it('dispatches providers/watch', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    await router.handleMessage({ type: 'providers/watch', payload: { active: true } });
+    expect(cb.setProviderWatchActive).toHaveBeenCalledWith(true);
   });
 
   it('dispatches context/request', async () => {

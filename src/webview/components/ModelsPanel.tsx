@@ -16,6 +16,7 @@ import {
 } from '../lib/model-capabilities';
 import { openProviderSetup } from '../lib/provider-setup';
 import { client } from '../lib/client';
+import { postMessage } from '../lib/bridge';
 import { refreshRoutingState } from '../hooks/useOpenCode';
 import type { OpenCodeModelRouting } from '../types';
 
@@ -29,6 +30,14 @@ type ModelContextMenuState = {
 };
 
 export function ModelsPanel() {
+  onMount(() => {
+    postMessage({ type: 'providers/watch', payload: { active: true } });
+    void refreshRoutingState();
+    onCleanup(() => {
+      postMessage({ type: 'providers/watch', payload: { active: false } });
+    });
+  });
+
   const [query, setQuery] = createSignal('');
   const [routing, setRouting] = createSignal<OpenCodeModelRouting>(createEmptyRouting());
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);

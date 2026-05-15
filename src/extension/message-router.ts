@@ -13,6 +13,7 @@ type OpenPathPayload = Extract<WebviewMessage, { type: 'vscode/open' }>['payload
 export interface MessageRouterCallbacks {
   ready(): Promise<void>;
   setWebviewFocus(focused: boolean): void;
+  setProviderWatchActive(active: boolean): void;
   requestContext(): void;
   refreshProviders(): void;
   clearTerminalSelection(): void;
@@ -45,6 +46,9 @@ export class MessageRouter {
           break;
         case 'webview/focus':
           this.handleWebviewFocusMessage(msg);
+          break;
+        case 'providers/watch':
+          this.handleProvidersWatchMessage(msg);
           break;
         case 'context/request':
           this.handleContextRequestMessage();
@@ -114,6 +118,10 @@ export class MessageRouter {
 
   private handleWebviewFocusMessage(msg: Extract<WebviewMessage, { type: 'webview/focus' }>) {
     this.callbacks.setWebviewFocus(msg.payload.focused);
+  }
+
+  private handleProvidersWatchMessage(msg: Extract<WebviewMessage, { type: 'providers/watch' }>) {
+    this.callbacks.setProviderWatchActive(msg.payload.active);
   }
 
   private handleContextRequestMessage() {

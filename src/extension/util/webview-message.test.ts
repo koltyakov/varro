@@ -132,6 +132,13 @@ describe('webview message validation', () => {
     });
   });
 
+  it('accepts providers/watch with active state', () => {
+    expect(parseWebviewMessage({ type: 'providers/watch', payload: { active: true } })).toEqual({
+      type: 'providers/watch',
+      payload: { active: true },
+    });
+  });
+
   it('accepts session export messages with a valid session id', () => {
     expect(
       parseWebviewMessage({ type: 'session/export', payload: { sessionId: 'session-1' } })
@@ -145,6 +152,7 @@ describe('webview message validation', () => {
 
   it('rejects malformed payloads for typed messages', () => {
     expect(parseWebviewMessage({ type: 'webview/focus', payload: { focused: 'yes' } })).toBeNull();
+    expect(parseWebviewMessage({ type: 'providers/watch', payload: { active: 'yes' } })).toBeNull();
 
     expect(
       parseWebviewMessage({

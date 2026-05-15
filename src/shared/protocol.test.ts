@@ -40,6 +40,7 @@ describe('protocol conformance', () => {
       'providers/refresh': true,
       'context/request': true,
       'webview/focus': true,
+      'providers/watch': true,
       'terminal-selection/clear': true,
       'terminal/run': true,
       'session/export': true,

@@ -73,6 +73,7 @@ function createActionFixture() {
     sessionExportService:
       sessionExportService as unknown as SidebarProviderActionDeps['sessionExportService'],
     restProxy: restProxy as unknown as SidebarProviderActionDeps['restProxy'],
+    setProviderWatchActive: vi.fn(),
     postContext: vi.fn(),
     postTerminalSelection: vi.fn(),
     postConfigState: vi.fn(),
@@ -117,6 +118,7 @@ describe('createSidebarProviderActions', () => {
 
     await actions.ready();
     actions.setWebviewFocus(true);
+    actions.setProviderWatchActive(true);
     actions.requestContext();
     actions.refreshProviders();
     actions.clearTerminalSelection();
@@ -135,6 +137,7 @@ describe('createSidebarProviderActions', () => {
 
     expect(deps.handleReadyMessage).toHaveBeenCalledOnce();
     expect(webviewSession.setFocus).toHaveBeenCalledWith(true);
+    expect(deps.setProviderWatchActive).toHaveBeenCalledWith(true);
     expect(deps.postContext).toHaveBeenCalledTimes(2);
     expect(deps.postConfigState).toHaveBeenCalledTimes(1);
     expect(deps.postTerminalSelection).toHaveBeenNthCalledWith(1, {

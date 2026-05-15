@@ -44,6 +44,13 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         : null;
     }
 
+    case 'providers/watch': {
+      const payload = asRecord(message?.payload);
+      return typeof payload?.active === 'boolean'
+        ? { type, payload: { active: payload.active } }
+        : null;
+    }
+
     case 'terminal/run': {
       const payload = asRecord(message?.payload);
       const command = getBoundedString(payload?.command, 200);

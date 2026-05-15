@@ -281,6 +281,7 @@ export type ExtensionMessage =
 export type WebviewMessage =
   | { type: 'context/request' }
   | { type: 'webview/focus'; payload: { focused: boolean } }
+  | { type: 'providers/watch'; payload: { active: boolean } }
   | { type: 'providers/refresh' }
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
