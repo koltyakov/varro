@@ -174,6 +174,7 @@ describe('session-approvals helpers', () => {
     const saveProjectPermissionMode = vi.fn();
     const upsertSession = vi.fn();
     const autoApprovePermissionsForSession = vi.fn(async () => {});
+    const syncPendingPermissions = vi.fn(async () => {});
 
     await updatePermissionModeForSessionWithDependencies(
       {
@@ -187,6 +188,7 @@ describe('session-approvals helpers', () => {
         setError: vi.fn(),
         getPermissionsForSession: () => [permission('perm-1')],
         autoApprovePermissionsForSession,
+        syncPendingPermissions,
       },
       'full',
       [{ permission: 'bash', pattern: '*', action: 'allow' }],
@@ -198,6 +200,7 @@ describe('session-approvals helpers', () => {
     expect(saveProjectPermissionMode).toHaveBeenCalledWith('full');
     expect(upsertSession).toHaveBeenCalledWith(session('session-1'));
     expect(autoApprovePermissionsForSession).toHaveBeenCalledWith([permission('perm-1')]);
+    expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
   });
 
   it('rolls permission mode changes back when the remote update fails', async () => {

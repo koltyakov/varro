@@ -677,6 +677,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     upsertSession,
     getPermissionsForSession: (sessionId) =>
       appStore.state.permissions.filter((permission) => permission.sessionID === sessionId),
+    syncPendingPermissions,
   });
 
   const sessionManagementOperations = new SessionManagementOperations({

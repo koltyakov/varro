@@ -16,7 +16,7 @@ import {
 import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 
-function getOpenCodeConfigPath(
+export function getOpenCodeConfigPath(
   env: NodeJS.ProcessEnv = process.env,
   home = homedir(),
   platform = process.platform
