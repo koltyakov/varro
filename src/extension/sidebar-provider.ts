@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { basename, dirname } from 'path';
 import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
@@ -262,7 +263,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private createProviderFileWatcher(path: string) {
-    const watcher = vscode.workspace.createFileSystemWatcher(path);
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(dirname(path)), basename(path))
+    );
     watcher.onDidCreate(() => this.scheduleProviderRefresh());
     watcher.onDidChange(() => this.scheduleProviderRefresh());
     watcher.onDidDelete(() => this.scheduleProviderRefresh());
@@ -281,10 +284,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.providerLimitService.clearCache();
     if (this.server.status.state === 'running') {
       try {
-        await this.server.request('POST', '/global/dispose');
-      } catch {
-        // Older OpenCode servers may not expose this cache invalidation endpoint.
-      }
+        await this.server.restart();
+      } catch {}
     }
     this.post({ type: 'providers/refresh' });
   }

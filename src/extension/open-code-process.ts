@@ -92,6 +92,139 @@ interface LaunchCallbacks {
   onError: (err: Error) => void;
 }
 
+type CommandResult = {
+  stdout: string;
+  stderr: string;
+  code: number | null;
+};
+
+const PROCESS_COMMAND_TIMEOUT_MS = 2000;
+const PROCESS_STOP_TIMEOUT_MS = 5000;
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parsePids(text: string) {
+  const pids = new Set<number>();
+  for (const match of text.matchAll(/\b\d+\b/g)) {
+    const pid = Number.parseInt(match[0], 10);
+    if (Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid) {
+      pids.add(pid);
+    }
+  }
+  return [...pids];
+}
+
+function isOpenCodeCommand(command: string) {
+  return command.toLowerCase().includes('opencode');
+}
+
+function runProcess(
+  command: string,
+  args: string[],
+  timeoutMs = PROCESS_COMMAND_TIMEOUT_MS
+): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let proc: ChildProcess | null = null;
+
+    const finish = (result: CommandResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(result);
+    };
+
+    timer = setTimeout(() => {
+      proc?.kill();
+      finish({ stdout, stderr, code: null });
+    }, timeoutMs);
+
+    try {
+      proc = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    } catch (err) {
+      finish({ stdout: '', stderr: err instanceof Error ? err.message : String(err), code: null });
+      return;
+    }
+
+    proc.stdout?.on('data', (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
+    proc.on('error', (err) => finish({ stdout, stderr: err.message, code: null }));
+    proc.on('close', (code) => finish({ stdout, stderr, code }));
+  });
+}
+
+async function findListeningPids(port: number) {
+  if (process.platform === 'win32') {
+    const script = `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`;
+    const result = await runProcess('powershell.exe', ['-NoProfile', '-Command', script]);
+    return parsePids(result.stdout);
+  }
+
+  const result = await runProcess('lsof', ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN']);
+  return parsePids(result.stdout);
+}
+
+async function readProcessCommand(pid: number) {
+  if (process.platform === 'win32') {
+    const script = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`;
+    return (await runProcess('powershell.exe', ['-NoProfile', '-Command', script])).stdout.trim();
+  }
+
+  return (await runProcess('ps', ['-p', String(pid), '-o', 'command='])).stdout.trim();
+}
+
+async function findOpenCodeListenerPids(port: number) {
+  const pids = await findListeningPids(port);
+  const matches: number[] = [];
+  for (const pid of pids) {
+    const command = await readProcessCommand(pid);
+    if (isOpenCodeCommand(command)) matches.push(pid);
+  }
+  return matches;
+}
+
+async function waitForPortListenersToExit(port: number, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await findListeningPids(port)).length === 0) return true;
+    await delay(100);
+  }
+  return (await findListeningPids(port)).length === 0;
+}
+
+async function stopOpenCodeListenerOnPort(port: number) {
+  const pids = await findOpenCodeListenerPids(port);
+  if (pids.length === 0) return false;
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ESRCH') throw err;
+    }
+  }
+
+  if (await waitForPortListenersToExit(port, PROCESS_STOP_TIMEOUT_MS)) return true;
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ESRCH') throw err;
+    }
+  }
+  return true;
+}
+
 export class OpenCodeProcess {
   static readonly MISSING_CLI_MESSAGE =
     'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
@@ -420,6 +553,32 @@ export class OpenCodeProcess {
     if (!exited && proc.exitCode === null && proc.signalCode === null) {
       proc.kill('SIGKILL');
     }
+  }
+
+  async stopServerForRestart() {
+    this.clearRestartTimer();
+    const ports = [...new Set([this._port, this.originalPort])];
+    if (this._process && this._managedProcess) {
+      await this.stopManagedProcessForRestart();
+    } else if (this._process) {
+      this.detachProcessListeners(this._process);
+      this._process = null;
+      this._managedProcess = false;
+    }
+
+    for (const port of ports) {
+      try {
+        await stopOpenCodeListenerOnPort(port);
+      } catch (err) {
+        logger.warn(
+          `Failed to stop OpenCode listener on port ${port}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+
+    this._port = this.originalPort;
+    this.portFallbackAttempts = 0;
+    this.portInUseDetected = false;
   }
 
   async disposeProcess(options: { stopProcess: boolean }) {

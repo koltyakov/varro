@@ -60,6 +60,12 @@ const mocks = vi.hoisted(() => ({
     ThemeColor: class ThemeColor {
       constructor(public readonly value: string) {}
     },
+    RelativePattern: class RelativePattern {
+      constructor(
+        public readonly base: unknown,
+        public readonly pattern: string
+      ) {}
+    },
     ColorThemeKind: {
       Light: 1,
       Dark: 2,
