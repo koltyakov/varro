@@ -597,6 +597,23 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
+  async restart(): Promise<string> {
+    if (this.lifecycle.beginManagedRestart() === null) return this.start();
+    try {
+      this.clearRestartTimer();
+      this.stopMaintenanceLoop();
+      this.cancelPollHealth();
+      this.stopEventStream();
+      this.transport.clearPendingAttentionRequests();
+      this.transport.abortRequests();
+      await this.processManager.stopServerForRestart();
+      this.setStatus({ state: 'stopped' });
+      return await this.start();
+    } finally {
+      this.lifecycle.finishManagedRestart();
+    }
+  }
+
   private async disposeResources(options: { stopProcess: boolean }) {
     this.lifecycle.beginDispose();
     this.clearRestartTimer();

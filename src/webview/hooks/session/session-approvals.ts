@@ -96,6 +96,7 @@ export async function updatePermissionModeForSessionWithDependencies(
     setError(message: string): void;
     getPermissionsForSession(sessionId: string): Permission[];
     autoApprovePermissionsForSession(permissions: Permission[]): Promise<void>;
+    syncPendingPermissions?(): Promise<void>;
   },
   mode: PermissionMode,
   permissionRules: Session['permission'],
@@ -125,6 +126,7 @@ export async function updatePermissionModeForSessionWithDependencies(
 
   if (mode !== 'full') return;
   await deps.autoApprovePermissionsForSession(deps.getPermissionsForSession(sessionId));
+  await deps.syncPendingPermissions?.();
 }
 
 export function getQuestionById(questions: QuestionRequest[], requestId: string) {
@@ -153,6 +155,7 @@ type SessionApprovalDependencies = {
   ): Promise<Session>;
   upsertSession(session: Session): void;
   getPermissionsForSession(sessionId: string): Permission[];
+  syncPendingPermissions?(): Promise<void>;
 };
 
 export class SessionApprovalOperations {
@@ -226,6 +229,7 @@ export class SessionApprovalOperations {
         setError: this.deps.setError,
         getPermissionsForSession: this.deps.getPermissionsForSession,
         autoApprovePermissionsForSession: this.autoApprovePermissionsForSession,
+        syncPendingPermissions: this.deps.syncPendingPermissions,
       },
       mode,
       permissionRules,

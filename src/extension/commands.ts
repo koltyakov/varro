@@ -48,8 +48,8 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.server.restart', async () => {
       try {
-        await server.dispose();
-        const url = await server.start();
+        const url = await server.restart();
+        sidebar.post({ type: 'providers/refresh' });
         logger.info(`OpenCode server restarted at ${url}`);
       } catch (err) {
         const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;

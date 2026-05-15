@@ -1710,6 +1710,28 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 
+  it('syncs session state when OpenCode reports compaction completion', () => {
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    setSessionCompactingStore.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        syncSession,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.compacted')?.({ properties: { sessionID: 'session-1' } });
+
+    expect(setSessionCompactingStore).toHaveBeenCalledWith('session-1', false);
+    expect(syncSession).toHaveBeenCalledWith('session-1');
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
   it('merges sync session updates by sessionID without overwriting existing fields with nulls', () => {
     const handlers = installHandlers();
     const upsertSession = vi.fn();

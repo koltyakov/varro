@@ -242,8 +242,11 @@ export type PermissionRule = {
 
 export type Session = {
   id: string;
+  slug?: string;
   projectID: string;
+  workspaceID?: string;
   directory: string;
+  path?: string;
   parentID?: string;
   summary?: {
     additions: number;
@@ -251,12 +254,21 @@ export type Session = {
     files: number;
     diffs?: FileDiff[];
   };
+  cost?: number;
+  tokens?: {
+    input: number;
+    output: number;
+    reasoning: number;
+    cache: { read: number; write: number };
+  };
   share?: {
     url: string;
   };
   title: string;
+  agent?: string;
+  model?: { id: string; providerID: string; variant?: string };
   version: string;
-  time: { created: number; updated: number; compacting?: number };
+  time: { created: number; updated: number; compacting?: number; archived?: number };
   permission?: PermissionRule[];
   revert?: { messageID: string; partID?: string; snapshot?: string; diff?: string };
 };
@@ -358,6 +370,46 @@ export type Todo = {
   id: string;
 };
 
+export type ModelCapabilities = {
+  temperature?: boolean;
+  reasoning?: boolean;
+  vision?: boolean;
+  attachment?: boolean;
+  toolcall: boolean;
+  input?: {
+    text: boolean;
+    audio: boolean;
+    image: boolean;
+    video: boolean;
+    pdf: boolean;
+  };
+  output?: {
+    text: boolean;
+    audio: boolean;
+    image: boolean;
+    video: boolean;
+    pdf: boolean;
+  };
+  interleaved?: boolean | { field: 'reasoning_content' | 'reasoning_details' };
+};
+
+export type ModelCost = {
+  input: number;
+  output: number;
+  cache?: { read: number; write: number };
+  tiers?: Array<{
+    input: number;
+    output: number;
+    cache: { read: number; write: number };
+    tier: { type: 'context'; size: number };
+  }>;
+  experimentalOver200K?: {
+    input: number;
+    output: number;
+    cache: { read: number; write: number };
+  };
+};
+
 export type Agent = {
   name: string;
   description?: string;
@@ -379,34 +431,29 @@ export type Provider = {
   id: string;
   name: string;
   source: 'env' | 'config' | 'custom' | 'api';
+  env?: string[];
+  key?: string;
+  options?: { [key: string]: unknown };
   models: {
     [key: string]: {
       id: string;
+      providerID?: string;
+      api?: { id: string; url: string; npm: string };
       name: string;
-      capabilities: {
-        reasoning?: boolean;
-        vision?: boolean;
-        toolcall: boolean;
-      };
-      cost: {
-        input: number;
-        output: number;
-        cache?: { read: number; write: number };
-      };
+      family?: string;
+      capabilities: ModelCapabilities;
+      cost: ModelCost;
       limit?: {
         context: number;
         input?: number;
         output: number;
       };
+      status?: 'alpha' | 'beta' | 'deprecated' | 'active';
+      options?: { [key: string]: unknown };
+      headers?: { [key: string]: string };
+      release_date?: string;
       variants?: {
-        [key: string]: {
-          reasoningEffort?: string;
-          reasoningSummary?: string;
-          effort?: string;
-          thinking?: { type?: string; budgetTokens?: number };
-          include?: string[];
-          [key: string]: unknown;
-        };
+        [key: string]: { [key: string]: unknown };
       };
     };
   };
@@ -518,6 +565,29 @@ export type WorkspaceStatusEntry = {
   status: WorkspaceConnectionState;
 };
 
+export type ToolOutputContent =
+  | { type: 'text'; text: string }
+  | { type: 'file'; uri: string; mime: string; name?: string };
+
+export type SessionNextProviderResult = {
+  executed: boolean;
+  metadata?: { [key: string]: unknown };
+};
+
+export type SessionNextUnknownError = {
+  type?: string;
+  message?: string;
+};
+
+export type SessionNextRetryError = {
+  message: string;
+  statusCode?: number;
+  isRetryable?: boolean;
+  responseHeaders?: { [key: string]: string };
+  responseBody?: string;
+  metadata?: { [key: string]: string };
+};
+
 export type ProviderAuthPromptText = {
   type: 'text';
   key: string;
@@ -567,6 +637,7 @@ export type ServerEventPropertiesByName = {
   'session.status': { sessionID: string; status: SessionStatus };
   'session.error': SessionErrorProperties;
   'session.idle': { sessionID: string };
+  'session.compacted': { sessionID: string };
   'session.diff': SessionDiffProperties;
   'message.updated': { info: MessageEventInfo };
   'message.part.updated': MessagePartUpdatedProperties;
@@ -630,8 +701,13 @@ export type ServerEventPropertiesByName = {
     error?: { type?: string; message?: string };
   };
   'session.next.text.started': { timestamp?: number; sessionID: string };
-  'session.next.text.delta': { timestamp?: number; sessionID: string; text?: string };
-  'session.next.text.ended': { timestamp?: number; sessionID: string };
+  'session.next.text.delta': {
+    timestamp?: number;
+    sessionID: string;
+    delta?: string;
+    text?: string;
+  };
+  'session.next.text.ended': { timestamp?: number; sessionID: string; text?: string };
   'session.next.reasoning.started': {
     timestamp?: number;
     sessionID: string;
@@ -650,41 +726,74 @@ export type ServerEventPropertiesByName = {
     reasoningID?: string;
     text?: string;
   };
-  'session.next.tool.input.started': { timestamp?: number; sessionID: string; callID?: string };
+  'session.next.tool.input.started': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    name?: string;
+  };
   'session.next.tool.input.delta': {
     timestamp?: number;
     sessionID: string;
     callID?: string;
+    delta?: string;
     input?: string;
   };
-  'session.next.tool.input.ended': { timestamp?: number; sessionID: string; callID?: string };
+  'session.next.tool.input.ended': {
+    timestamp?: number;
+    sessionID: string;
+    callID?: string;
+    text?: string;
+  };
   'session.next.tool.called': {
     timestamp?: number;
     sessionID: string;
     callID?: string;
     tool?: string;
     title?: string;
+    input?: Record<string, unknown>;
+    provider?: SessionNextProviderResult;
   };
   'session.next.tool.progress': {
     timestamp?: number;
     sessionID: string;
     callID?: string;
     progress?: string;
+    structured?: Record<string, unknown>;
+    content?: ToolOutputContent[];
   };
   'session.next.tool.success': {
     timestamp?: number;
     sessionID: string;
     callID?: string;
     output?: string;
+    structured?: Record<string, unknown>;
+    content?: ToolOutputContent[];
+    provider?: SessionNextProviderResult;
   };
   'session.next.tool.failed': {
     timestamp?: number;
     sessionID: string;
     callID?: string;
-    error?: string;
+    error?: string | SessionNextUnknownError;
+    provider?: SessionNextProviderResult;
   };
-  'session.next.retried': { timestamp?: number; sessionID: string; attempt?: number };
-  'session.next.compaction.started': { timestamp?: number; sessionID: string };
+  'session.next.retried': {
+    timestamp?: number;
+    sessionID: string;
+    attempt?: number;
+    error?: SessionNextRetryError;
+  };
+  'session.next.compaction.started': {
+    timestamp?: number;
+    sessionID: string;
+    reason?: 'auto' | 'manual';
+  };
   'session.next.compaction.delta': { timestamp?: number; sessionID: string; text?: string };
-  'session.next.compaction.ended': { timestamp?: number; sessionID: string };
+  'session.next.compaction.ended': {
+    timestamp?: number;
+    sessionID: string;
+    text?: string;
+    include?: string;
+  };
 };

@@ -177,15 +177,15 @@ describe('getOpenCodeDirectoryHeaders', () => {
     expect(getOpenCodeDirectoryHeaders(undefined)).toEqual({});
   });
 
-  it('returns encoded directory header', () => {
+  it('returns raw directory header', () => {
     expect(getOpenCodeDirectoryHeaders('/some/path')).toEqual({
-      'x-opencode-directory': encodeURIComponent('/some/path'),
+      'x-opencode-directory': '/some/path',
     });
   });
 
-  it('encodes normalized Windows directory headers', () => {
+  it('returns raw normalized Windows directory headers', () => {
     expect(getOpenCodeDirectoryHeaders('C:\\Users\\Andrew\\Projects\\Varro')).toEqual({
-      'x-opencode-directory': 'C%3A%5CUsers%5CAndrew%5CProjects%5CVarro',
+      'x-opencode-directory': 'C:\\Users\\Andrew\\Projects\\Varro',
     });
   });
 });

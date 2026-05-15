@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
+import { basename, dirname } from 'path';
 import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { FileSearchService } from './file-search-service';
 import { HostPersistence } from './host-persistence';
 import { MessageRouter } from './message-router';
+import { getOpenCodeConfigPath } from './open-code-process';
 import { readExtensionConfigState } from './provider-limit-config';
 import { ProviderLimitService } from './provider-limit-service';
 import { RestProxy } from './rest-proxy';
@@ -17,6 +19,7 @@ import { createSidebarProviderActions } from './sidebar-provider-actions';
 import { SidebarProviderBridge } from './sidebar-provider-bridge';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import { SidebarProviderRuntime } from './sidebar-provider-runtime';
+import { getOpenCodeAuthFilePath } from './util/provider-limit';
 import { WebviewSession } from './webview-session';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -40,6 +43,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly droppedFilesService: DroppedFilesService;
   private readonly configDisposable: vscode.Disposable;
   private readonly windowStateDisposable: vscode.Disposable;
+  private readonly providerConfigWatcher: vscode.FileSystemWatcher;
+  private readonly providerAuthWatcher: vscode.FileSystemWatcher;
+  private providerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly contextProvider: ContextProvider;
 
   get view() {
@@ -70,7 +76,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     extensionUri: vscode.Uri,
     workspaceState: vscode.Memento,
     contextProvider: ContextProvider,
-    server: OpenCodeServer,
+    private readonly server: OpenCodeServer,
     private readonly simulateNoProviders = false
   ) {
     this.contextProvider = contextProvider;
@@ -172,6 +178,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
       this.updateStatusBarItem();
     });
+    this.providerConfigWatcher = this.createProviderFileWatcher(getOpenCodeConfigPath());
+    this.providerAuthWatcher = this.createProviderFileWatcher(getOpenCodeAuthFilePath());
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('varro.providerLimits.enabledAdapters')) {
         this.providerLimitService.clearCache();
@@ -240,12 +248,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose() {
+    if (this.providerRefreshTimer) {
+      clearTimeout(this.providerRefreshTimer);
+      this.providerRefreshTimer = null;
+    }
     await this.webviewSession.dispose();
     await this.serverEventBridge.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();
+    this.providerConfigWatcher.dispose();
+    this.providerAuthWatcher.dispose();
     this.fileSearch.dispose();
     await this.droppedFilesService.dispose();
+  }
+
+  private createProviderFileWatcher(path: string) {
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(dirname(path)), basename(path))
+    );
+    watcher.onDidCreate(() => this.scheduleProviderRefresh());
+    watcher.onDidChange(() => this.scheduleProviderRefresh());
+    watcher.onDidDelete(() => this.scheduleProviderRefresh());
+    return watcher;
+  }
+
+  private scheduleProviderRefresh() {
+    if (this.providerRefreshTimer) clearTimeout(this.providerRefreshTimer);
+    this.providerRefreshTimer = setTimeout(() => {
+      this.providerRefreshTimer = null;
+      void this.refreshProviderState();
+    }, 250);
+  }
+
+  private async refreshProviderState() {
+    this.providerLimitService.clearCache();
+    if (this.server.status.state === 'running') {
+      try {
+        await this.server.restart();
+      } catch {}
+    }
+    this.post({ type: 'providers/refresh' });
   }
 
   private async handleReadyMessage() {
