@@ -118,8 +118,8 @@
   );
   --color-vscode-chat-input-toolbar-surface: color-mix(
     in srgb,
-    var(--color-vscode-input-bg) 78%,
-    black 22%
+    var(--color-vscode-input-bg) 84%,
+    black 16%
   );
   --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-border) 28%, transparent);
   --color-vscode-border-default: color-mix(in srgb, var(--color-vscode-border) 50%, transparent);
