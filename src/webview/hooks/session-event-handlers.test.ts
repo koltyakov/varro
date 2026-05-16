@@ -1223,7 +1223,7 @@ describe('registerSessionEventHandlers', () => {
     );
   });
 
-  it('resyncs active messages from session.next text progress events', async () => {
+  it('marks progress without resyncing active messages from session.next text progress events', async () => {
     vi.useFakeTimers();
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
@@ -1258,7 +1258,7 @@ describe('registerSessionEventHandlers', () => {
 
       await vi.advanceTimersByTimeAsync(100);
 
-      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+      expect(syncSessionMessages).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

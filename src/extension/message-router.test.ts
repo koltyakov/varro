@@ -206,6 +206,7 @@ describe('MessageRouter', () => {
       expandThinkingByDefault: true,
       showStickyUserPrompt: false,
       desktopSessionPaneSide: 'right' as const,
+      defaultPermissionMode: 'full' as const,
     };
     await router.handleMessage({ type: 'config/update', payload });
     expect(cb.updateConfig).toHaveBeenCalledWith(payload);

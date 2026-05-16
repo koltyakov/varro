@@ -13,7 +13,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
-import type { Message, Part } from '../../types';
+import type { Message, Part, Session } from '../../types';
 import { getSessionTreeIds, getSessionTreeRootId } from '../../lib/state';
 import {
   createConnectionBootstrapOperations,
@@ -120,6 +120,34 @@ function logError(context: string, err: unknown) {
 
 function isCurrentGeneration(current: number, expected: number) {
   return current === expected;
+}
+
+type SessionEntry = { info: Message; parts: Part[] };
+
+function isNotFoundError(err: unknown) {
+  return err instanceof Error && /^404\b/.test(err.message);
+}
+
+async function loadSessionWithMessages(sessionId: string): Promise<{
+  session: Session;
+  messages: SessionEntry[];
+}> {
+  const session = await client.session.get(sessionId);
+  try {
+    return { session, messages: await client.session.messages(sessionId) };
+  } catch (err) {
+    if (isNotFoundError(err)) return { session, messages: [] };
+    throw err;
+  }
+}
+
+async function loadSessionMessagesAllowingEmpty(sessionId: string): Promise<SessionEntry[]> {
+  try {
+    return await client.session.messages(sessionId);
+  } catch (err) {
+    if (isNotFoundError(err)) return [];
+    throw err;
+  }
 }
 
 export function createOpenCodeRuntime(): OpenCodeRuntime {
@@ -460,7 +488,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       appStore.state.questions.some((item) => item.sessionID === sessionId),
     hasPendingPermission: (sessionId) =>
       appStore.state.permissions.some((item) => item.sessionID === sessionId),
-    loadSessionMessages: (sessionId) => client.session.messages(sessionId),
+    loadSessionMessages: loadSessionMessagesAllowingEmpty,
     logError,
     syncSessionMcps,
     resolveModel: (id) =>
@@ -553,13 +581,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       syncSessionMcps,
       resetTodoSync,
       clearMessages: sessionStore.clearMessages,
-      loadSession: async (sessionId) => {
-        const [session, messages] = await Promise.all([
-          client.session.get(sessionId),
-          client.session.messages(sessionId),
-        ]);
-        return { session, messages };
-      },
+      loadSession: loadSessionWithMessages,
       isCurrentSelectionGeneration: (generation) =>
         isCurrentGeneration(generation, sessionSelectionGeneration),
       upsertSession,
@@ -588,7 +610,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       setError: uiStore.setError,
       getSessionStatus: (id) => appStore.state.sessionStatus[id],
       loadingStartedAt: uiStore.loadingStartedAt,
-      loadSessionMessages: (id) => client.session.messages(id),
+      loadSessionMessages: loadSessionMessagesAllowingEmpty,
       handoffTodosToMessages,
       loadSessionMetadata: (id) => client.session.get(id),
     },

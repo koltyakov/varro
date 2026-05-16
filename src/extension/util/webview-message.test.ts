@@ -177,6 +177,7 @@ describe('webview message validation', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: true,
           desktopSessionPaneSide: 'bottom',
+          defaultPermissionMode: 'full',
         },
       })
     ).toBeNull();

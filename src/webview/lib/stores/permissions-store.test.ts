@@ -50,8 +50,12 @@ describe('permissionsStore', () => {
 
     permissionsStore.setPermissionModeForSession(null, 'default');
     expect(draftPermissionMode()).toBe('default');
-    expect(window.localStorage.getItem(STORAGE_KEYS.draftPermissionMode)).toBeNull();
-    expect(window.localStorage.getItem(STORAGE_KEYS.projectPermissionModes)).toBe('{}');
+    expect(window.localStorage.getItem(STORAGE_KEYS.draftPermissionMode)).toBe(
+      JSON.stringify('default')
+    );
+    expect(
+      JSON.parse(window.localStorage.getItem(STORAGE_KEYS.projectPermissionModes) || '{}')
+    ).toEqual({ '/workspace': 'default' });
 
     permissionsStore.setPermissionModeForSession('session-1', 'full');
     expect(permissionsStore.getPermissionModeForSession('session-1')).toBe('full');

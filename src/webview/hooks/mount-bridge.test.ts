@@ -18,6 +18,7 @@ const {
   setExpandThinkingByDefaultPreference,
   setShowStickyUserPromptPreference,
   setDesktopSessionPaneSide,
+  setDefaultPermissionModePreference,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
   setWorkspaceStatusSummary,
@@ -37,6 +38,7 @@ const {
   setExpandThinkingByDefaultPreference: vi.fn(),
   setShowStickyUserPromptPreference: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
+  setDefaultPermissionModePreference: vi.fn(),
   setProviderLimitPollIntervalSeconds: vi.fn(),
   setProviderLimitThresholdPercent: vi.fn(),
   setWorkspaceStatusSummary: vi.fn(),
@@ -65,6 +67,7 @@ vi.mock('../lib/state', async () => {
     setExpandThinkingByDefaultPreference,
     setShowStickyUserPromptPreference,
     setDesktopSessionPaneSide,
+    setDefaultPermissionModePreference,
     setProviderLimitPollIntervalSeconds,
     setProviderLimitThresholdPercent,
   };
@@ -322,6 +325,7 @@ describe('mount bridge helpers', () => {
         expandThinkingByDefault: true,
         showStickyUserPrompt: true,
         desktopSessionPaneSide: 'right',
+        defaultPermissionMode: 'full',
         providerLimitPollIntervalSeconds: 90,
         providerLimitsDisabled: false,
         providerLimitThresholdPercent: 25,
@@ -338,6 +342,7 @@ describe('mount bridge helpers', () => {
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
     expect(setProviderLimitPollIntervalSeconds).toHaveBeenCalledWith(90);
     expect(setProviderLimitThresholdPercent).toHaveBeenCalledWith(25);
+    expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
   });
 
   it('routes workspace status events into shared workspace state', () => {

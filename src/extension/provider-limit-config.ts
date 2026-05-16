@@ -45,9 +45,14 @@ export function readExtensionConfigState(
     expandThinkingByDefault: config.get<boolean>('chat.expandThinkingByDefault') ?? false,
     showStickyUserPrompt: config.get<boolean>('chat.showStickyUserPrompt', true),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
+    defaultPermissionMode: readDefaultPermissionMode(config),
     providerLimitPollIntervalSeconds: providerLimitConfig.pollIntervalSeconds,
     providerLimitThresholdPercent: providerLimitConfig.thresholdPercent,
   };
+}
+
+function readDefaultPermissionMode(config: vscode.WorkspaceConfiguration) {
+  return config.get<unknown>('chat.defaultPermissionMode') === 'full' ? 'full' : 'default';
 }
 
 function isNonEmptyString(value: unknown): value is string {

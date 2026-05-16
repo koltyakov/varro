@@ -128,6 +128,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
       expandThinkingByDefault: false,
       showStickyUserPrompt: true,
       desktopSessionPaneSide: 'left' as const,
+      defaultPermissionMode: 'default' as const,
       providerLimitPollIntervalSeconds: 120,
       providerLimitThresholdPercent: 40,
       providerLimitsDisabled: false,

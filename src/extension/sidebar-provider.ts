@@ -189,6 +189,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
         event.affectsConfiguration('varro.chat.showStickyUserPrompt') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
+        event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
         event.affectsConfiguration('varro.providerLimits.disabled') ||
         event.affectsConfiguration('varro.providerLimits.thresholdPercent') ||
         event.affectsConfiguration('varro.providerLimits.pollIntervalSeconds')

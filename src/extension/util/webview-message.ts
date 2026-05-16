@@ -1,4 +1,4 @@
-import type { DesktopSessionPaneSide, WebviewMessage } from '../../shared/protocol';
+import type { DesktopSessionPaneSide, PermissionMode, WebviewMessage } from '../../shared/protocol';
 
 const MAX_PATH_LENGTH = 4096;
 const MAX_QUERY_LENGTH = 2048;
@@ -137,15 +137,18 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'config/update': {
       const payload = asRecord(message?.payload);
       const desktopSessionPaneSide = getDesktopSessionPaneSide(payload?.desktopSessionPaneSide);
+      const defaultPermissionMode = getPermissionMode(payload?.defaultPermissionMode);
       return typeof payload?.expandThinkingByDefault === 'boolean' &&
         typeof payload?.showStickyUserPrompt === 'boolean' &&
-        desktopSessionPaneSide
+        desktopSessionPaneSide &&
+        defaultPermissionMode
         ? {
             type,
             payload: {
               expandThinkingByDefault: payload.expandThinkingByDefault,
               showStickyUserPrompt: payload.showStickyUserPrompt,
               desktopSessionPaneSide,
+              defaultPermissionMode,
             },
           }
         : null;
@@ -354,4 +357,8 @@ function getSafeInteger(value: unknown) {
 
 function getDesktopSessionPaneSide(value: unknown): DesktopSessionPaneSide | null {
   return value === 'left' || value === 'right' ? value : null;
+}
+
+function getPermissionMode(value: unknown): PermissionMode | null {
+  return value === 'default' || value === 'full' ? value : null;
 }

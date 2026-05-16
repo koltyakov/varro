@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.17.5",
+  "version": "0.17.6",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -213,6 +213,15 @@
           ],
           "default": "right",
           "markdownDescription": "Choose which side shows the sessions pane on large screens in the Varro chat view."
+        },
+        "varro.chat.defaultPermissionMode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "full"
+          ],
+          "default": "default",
+          "markdownDescription": "Permission mode selected by default when no project or global Varro permission-mode selection has been saved."
         },
         "varro.chat.autoCompact": {
           "type": "boolean",

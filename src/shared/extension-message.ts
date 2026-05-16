@@ -4,6 +4,7 @@ import {
   type DroppedFile,
   type EditorContext,
   type ExtensionMessage,
+  type PermissionMode,
   type ServerStatus,
   type WebviewThemeKind,
 } from './protocol';
@@ -119,7 +120,8 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
         !payload ||
         typeof payload.expandThinkingByDefault !== 'boolean' ||
         typeof payload.showStickyUserPrompt !== 'boolean' ||
-        !isDesktopSessionPaneSide(payload.desktopSessionPaneSide)
+        !isDesktopSessionPaneSide(payload.desktopSessionPaneSide) ||
+        !isPermissionMode(payload.defaultPermissionMode)
       ) {
         return null;
       }
@@ -129,6 +131,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
           expandThinkingByDefault: payload.expandThinkingByDefault,
           showStickyUserPrompt: payload.showStickyUserPrompt,
           desktopSessionPaneSide: payload.desktopSessionPaneSide,
+          defaultPermissionMode: payload.defaultPermissionMode,
           ...(typeof payload.providerLimitPollIntervalSeconds === 'number' &&
           Number.isFinite(payload.providerLimitPollIntervalSeconds)
             ? {
@@ -196,6 +199,10 @@ function isServerStatus(value: Record<string, unknown> | null): value is ServerS
 
 function isDesktopSessionPaneSide(value: unknown): value is DesktopSessionPaneSide {
   return value === 'left' || value === 'right';
+}
+
+function isPermissionMode(value: unknown): value is PermissionMode {
+  return value === 'default' || value === 'full';
 }
 
 function isWebviewThemeKind(value: unknown): value is WebviewThemeKind {

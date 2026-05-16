@@ -152,6 +152,75 @@ describe('session-selection helpers', () => {
     expect(setError).not.toHaveBeenCalled();
   });
 
+  it('does not report loaded messages as failed when follow-up startup sync fails', async () => {
+    const activeSession = { value: null as string | null };
+    const setMessagesIncremental = vi.fn();
+    const setError = vi.fn();
+    const messages = [{ info: assistantMessage('assistant-1'), parts: [] }];
+
+    await selectSessionWithDependencies(
+      {
+        getActiveSessionId: () => activeSession.value,
+        setActiveSessionId: (id) => {
+          activeSession.value = id;
+        },
+        clearPendingAbort: vi.fn(),
+        persistActiveSessionId: vi.fn(),
+        markSessionSeen: vi.fn(),
+        clearDraftCurrentDocumentState: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
+        applySelectedAgent: vi.fn(),
+        resolvePersistedModel: () => null,
+        resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+        applySelectedModel: vi.fn(),
+        getConnectedMcpNames: () => [],
+        hasSelectedMcps: () => false,
+        setSelectedMcpsForSession: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        loadSession: vi.fn(async () => ({
+          session: {
+            id: 'session-1',
+            projectID: 'project-1',
+            directory: '/repo',
+            title: 'Session 1',
+            version: '1',
+            time: { created: 0, updated: 2 },
+          },
+          messages,
+        })),
+        isCurrentSelectionGeneration: () => true,
+        upsertSession: vi.fn(),
+        setMessagesIncremental,
+        syncFailedSessionsFromMessages: vi.fn(),
+        requestMessageListScrollToBottom: vi.fn(),
+        deriveSelectedAgentFromMessages: () => null,
+        deriveSelectedModelFromMessages: () => null,
+        syncTodosForSession: vi.fn(async () => {
+          throw new Error('todos unavailable');
+        }),
+        loadQuestions: vi.fn(async () => {
+          throw new Error('questions unavailable');
+        }),
+        loadSessionStatuses: vi.fn(async () => {
+          throw new Error('statuses unavailable');
+        }),
+        mergeSessionStatuses: vi.fn(),
+        updateUsageLimitState: vi.fn(),
+        startLoading: vi.fn(),
+        stopLoading: vi.fn(),
+        setError,
+      },
+      { next: () => 1 },
+      'session-1'
+    );
+
+    expect(setMessagesIncremental).toHaveBeenCalledWith(messages);
+    expect(setError).not.toHaveBeenCalled();
+  });
+
   it('syncs active-session messages only for the latest generation', async () => {
     const setMessagesIncremental = vi.fn();
     const stopLoading = vi.fn();

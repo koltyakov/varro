@@ -190,6 +190,12 @@ const ACTIVE_SESSION_PROGRESS_EVENTS = [
   'session.next.compaction.ended',
 ] as const;
 
+const ACTIVE_TEXT_PROGRESS_EVENTS = new Set<string>([
+  'session.next.text.started',
+  'session.next.text.delta',
+  'session.next.text.ended',
+]);
+
 function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
@@ -766,7 +772,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (!isSessionInActiveTree(sessionID)) return;
         uiStore.markLoadingActivity();
         if (sessionID === deps.getActiveSessionId()) uiStore.startLoading();
-        scheduleActiveMessageSync(sessionID);
+        if (!ACTIVE_TEXT_PROGRESS_EVENTS.has(eventName)) {
+          scheduleActiveMessageSync(sessionID);
+        }
       })
     );
   }

@@ -51,6 +51,7 @@ export class WebviewSession {
         expandThinkingByDefault: boolean;
         showStickyUserPrompt: boolean;
         desktopSessionPaneSide: 'left' | 'right';
+        defaultPermissionMode: 'default' | 'full';
         providerLimitPollIntervalSeconds: number;
         providerLimitThresholdPercent: number;
         providerLimitsDisabled?: boolean;
@@ -210,6 +211,7 @@ export class WebviewSession {
       expandThinkingByDefault: config.expandThinkingByDefault,
       showStickyUserPrompt: config.showStickyUserPrompt,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
+      defaultPermissionMode: config.defaultPermissionMode,
       providerLimitPollIntervalSeconds: config.providerLimitPollIntervalSeconds,
       providerLimitThresholdPercent: config.providerLimitThresholdPercent,
       providerLimitsDisabled:

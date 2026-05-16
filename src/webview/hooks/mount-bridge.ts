@@ -1,6 +1,7 @@
 import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
 import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
+import { permissionsStore } from '../lib/stores/permissions-store';
 import { sessionStore } from '../lib/stores/session-store';
 import { uiStore } from '../lib/stores/ui-store';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
@@ -37,6 +38,7 @@ export function createMountBridgeOperations(deps: {
           uiStore.setExpandThinkingByDefaultPreference(payload.expandThinkingByDefault);
           uiStore.setShowStickyUserPromptPreference(payload.showStickyUserPrompt);
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
+          permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
           if (payload.providerLimitThresholdPercent !== undefined) {
             uiStore.setProviderLimitThresholdPercent(payload.providerLimitThresholdPercent);
           }

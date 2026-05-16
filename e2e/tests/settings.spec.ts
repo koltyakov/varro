@@ -97,6 +97,7 @@ test('sticky prompt preference changes via config/update', async ({ page }) => {
           expandThinkingByDefault: false,
           showStickyUserPrompt: false,
           desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'default',
         },
       },
       '*'

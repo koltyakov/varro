@@ -43,6 +43,7 @@ describe('useOpenCode permission and config flows', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
+          defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: 90,
           providerLimitsDisabled: false,
           providerLimitThresholdPercent: 25,
@@ -88,6 +89,7 @@ describe('useOpenCode permission and config flows', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
+          defaultPermissionMode: 'default',
           providerLimitsDisabled: true,
         },
       });
@@ -129,6 +131,7 @@ describe('useOpenCode permission and config flows', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
+          defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: -1,
         },
       });
@@ -170,6 +173,7 @@ describe('useOpenCode permission and config flows', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
+          defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: -1,
         },
       });
@@ -181,6 +185,7 @@ describe('useOpenCode permission and config flows', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
+          defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: 120,
         },
       });

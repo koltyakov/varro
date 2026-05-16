@@ -213,6 +213,8 @@ export interface AppStateInstance {
   setMessageStructureVersion: Setter<number>;
   messageInfoVersion: Accessor<number>;
   setMessageInfoVersion: Setter<number>;
+  defaultPermissionMode: Accessor<PermissionMode>;
+  setDefaultPermissionMode: Setter<PermissionMode>;
   draftPermissionMode: Accessor<PermissionMode>;
   setDraftPermissionMode: Setter<PermissionMode>;
   theme: Accessor<WebviewThemeKind>;
@@ -345,8 +347,11 @@ export function createAppState(): AppStateInstance {
   });
   const permissionWorkspace: string | null =
     initialWebviewState.editorContext?.workspacePath ?? null;
+  const [defaultPermissionMode, setDefaultPermissionMode] = createSignal<PermissionMode>(
+    initialWebviewState.defaultPermissionMode === 'full' ? 'full' : 'default'
+  );
   const [draftPermissionMode, setDraftPermissionMode] = createSignal<PermissionMode>(
-    resolveInitialDraftMode(permissionWorkspace)
+    resolveInitialDraftMode(permissionWorkspace, defaultPermissionMode())
   );
   const [theme, setTheme] = createSignal<WebviewThemeKind>(
     initialWebviewState.theme ||
@@ -397,6 +402,8 @@ export function createAppState(): AppStateInstance {
     setMessageStructureVersion,
     messageInfoVersion,
     setMessageInfoVersion,
+    defaultPermissionMode,
+    setDefaultPermissionMode,
     draftPermissionMode,
     setDraftPermissionMode,
     theme,
@@ -472,6 +479,8 @@ export const messageStructureVersion = defaultAppState.messageStructureVersion;
 export const setMessageStructureVersion = defaultAppState.setMessageStructureVersion;
 export const messageInfoVersion = defaultAppState.messageInfoVersion;
 export const setMessageInfoVersion = defaultAppState.setMessageInfoVersion;
+export const defaultPermissionMode = defaultAppState.defaultPermissionMode;
+export const setDefaultPermissionModeSignal = defaultAppState.setDefaultPermissionMode;
 export const draftPermissionMode = defaultAppState.draftPermissionMode;
 export const setDraftPermissionMode = defaultAppState.setDraftPermissionMode;
 export const theme = defaultAppState.theme;
@@ -504,6 +513,7 @@ export function resetDefaultAppState() {
   setMessageListScrollRequestKey(next.messageListScrollRequestKey());
   setMessageStructureVersion(next.messageStructureVersion());
   setMessageInfoVersion(next.messageInfoVersion());
+  setDefaultPermissionModeSignal(next.defaultPermissionMode());
   setDraftPermissionMode(next.draftPermissionMode());
   setTheme(next.theme());
   defaultAppState.sessionMarkerWorkspaceScope = next.sessionMarkerWorkspaceScope;
@@ -1048,13 +1058,33 @@ function readDesktopSessionPaneSide(
   return initialWebviewState.desktopSessionPaneSide === 'right' ? 'right' : 'left';
 }
 
-function resolveInitialDraftMode(permissionWorkspace: string | null): PermissionMode {
+function resolveInitialDraftMode(
+  permissionWorkspace: string | null,
+  fallbackMode: PermissionMode
+): PermissionMode {
   if (permissionWorkspace) {
     const modes =
       readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
-    if (modes[permissionWorkspace]) return modes[permissionWorkspace];
+    if (Object.hasOwn(modes, permissionWorkspace)) return modes[permissionWorkspace];
   }
-  return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || 'default';
+  return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || fallbackMode;
+}
+
+function resolveProjectDraftModeForCurrentWorkspace(fallbackMode = defaultPermissionMode()) {
+  const permissionWorkspace = getPermissionWorkspaceValue();
+  if (!permissionWorkspace) return fallbackMode;
+  const modes =
+    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+  return Object.hasOwn(modes, permissionWorkspace) ? modes[permissionWorkspace] : fallbackMode;
+}
+
+function hasPersistedDraftPermissionMode(permissionWorkspace: string | null): boolean {
+  if (permissionWorkspace) {
+    const modes =
+      readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+    if (Object.hasOwn(modes, permissionWorkspace)) return true;
+  }
+  return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) !== null;
 }
 
 export function setCurrentDocumentEnabled(
@@ -1111,7 +1141,7 @@ export function setPermissionModeForSession(
   if (!sessionId) {
     setDraftPermissionMode(mode);
     saveProjectPermissionMode(mode);
-    writeStored(STORAGE_KEYS.draftPermissionMode, mode === 'default' ? null : mode);
+    writeStored(STORAGE_KEYS.draftPermissionMode, mode);
     return;
   }
 
@@ -1239,22 +1269,14 @@ export function clearSelectedMcpsForSession(sessionId: string) {
 }
 
 export function resetDraftPermissionMode() {
-  const modes =
-    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
-  const permissionWorkspace = getPermissionWorkspaceValue();
-  const projectMode = permissionWorkspace && modes[permissionWorkspace];
-  setDraftPermissionMode(projectMode || 'default');
+  setDraftPermissionMode(resolveProjectDraftModeForCurrentWorkspace());
   writeStored(STORAGE_KEYS.draftPermissionMode, null);
 }
 
 export function syncDraftPermissionForWorkspace(workspacePath: string | null) {
   const permissionWorkspace = workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '') || null;
   setPermissionWorkspaceValue(permissionWorkspace);
-  const modes =
-    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
-  const mode =
-    permissionWorkspace && modes[permissionWorkspace] ? modes[permissionWorkspace] : 'default';
-  setDraftPermissionMode(mode);
+  setDraftPermissionMode(resolveProjectDraftModeForCurrentWorkspace());
 }
 
 export function saveProjectPermissionMode(mode: PermissionMode) {
@@ -1262,12 +1284,15 @@ export function saveProjectPermissionMode(mode: PermissionMode) {
   if (!permissionWorkspace) return;
   const modes =
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
-  if (mode === 'default') {
-    delete modes[permissionWorkspace];
-  } else {
-    modes[permissionWorkspace] = mode;
-  }
+  modes[permissionWorkspace] = mode;
   writeStored(STORAGE_KEYS.projectPermissionModes, modes);
+}
+
+export function setDefaultPermissionModePreference(mode: PermissionMode) {
+  setDefaultPermissionModeSignal(mode);
+  if (!hasPersistedDraftPermissionMode(getPermissionWorkspaceValue())) {
+    setDraftPermissionMode(mode);
+  }
 }
 
 export function addContextFile(file: DroppedFile) {

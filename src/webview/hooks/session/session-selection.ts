@@ -87,55 +87,60 @@ export async function selectSessionWithDependencies(
   deps.clearMessages();
   await deps.syncSessionMcps(id);
 
+  let loaded: { session: Session; messages: SessionEntry[] };
   try {
-    const { session, messages } = await deps.loadSession(id);
-    if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
-
-    deps.upsertSession(session);
-    deps.persistActiveSessionId(id);
-    if (options?.markSeen ?? true) {
-      deps.markSessionSeen(id);
-    }
-    deps.setMessagesIncremental(messages);
-    deps.syncFailedSessionsFromMessages(messages);
-    deps.requestMessageListScrollToBottom();
-
-    if (!persistedAgent) {
-      const inferredAgent = deps.deriveSelectedAgentFromMessages(messages);
-      if (inferredAgent) {
-        deps.applySelectedAgent(inferredAgent, id);
-      }
-    }
-
-    const inferredModel = deps.deriveSelectedModelFromMessages(messages);
-    if (inferredModel) {
-      deps.applySelectedModel(inferredModel, id);
-    }
-
-    await deps.syncTodosForSession(id, messages);
-    if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
-    await deps.loadQuestions();
-    if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
-
-    const snapshotStartedAt = Date.now();
-    const statuses = await deps.loadSessionStatuses();
-    if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
-
-    deps.mergeSessionStatuses(statuses, { snapshotStartedAt });
-    deps.updateUsageLimitState(id, statuses[id], messages);
-    const statusType = statuses[id]?.type;
-    if (statusType === 'retry') {
-      deps.startLoading();
-    } else if (latestAssistantFinished(messages)) {
-      deps.stopLoading();
-    } else if (statusType === 'busy') {
-      deps.startLoading();
-    } else {
-      deps.stopLoading();
-    }
+    loaded = await deps.loadSession(id);
   } catch {
     if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
     deps.setError('Failed to load messages');
+    return;
+  }
+
+  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+
+  const { session, messages } = loaded;
+  deps.upsertSession(session);
+  deps.persistActiveSessionId(id);
+  if (options?.markSeen ?? true) {
+    deps.markSessionSeen(id);
+  }
+  deps.setMessagesIncremental(messages);
+  deps.syncFailedSessionsFromMessages(messages);
+  deps.requestMessageListScrollToBottom();
+
+  if (!persistedAgent) {
+    const inferredAgent = deps.deriveSelectedAgentFromMessages(messages);
+    if (inferredAgent) {
+      deps.applySelectedAgent(inferredAgent, id);
+    }
+  }
+
+  const inferredModel = deps.deriveSelectedModelFromMessages(messages);
+  if (inferredModel) {
+    deps.applySelectedModel(inferredModel, id);
+  }
+
+  await deps.syncTodosForSession(id, messages).catch(() => {});
+  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+  await deps.loadQuestions().catch(() => {});
+  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+
+  const snapshotStartedAt = Date.now();
+  const statuses = await deps.loadSessionStatuses().catch(() => null);
+  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+  if (!statuses) return;
+
+  deps.mergeSessionStatuses(statuses, { snapshotStartedAt });
+  deps.updateUsageLimitState(id, statuses[id], messages);
+  const statusType = statuses[id]?.type;
+  if (statusType === 'retry') {
+    deps.startLoading();
+  } else if (latestAssistantFinished(messages)) {
+    deps.stopLoading();
+  } else if (statusType === 'busy') {
+    deps.startLoading();
+  } else {
+    deps.stopLoading();
   }
 }
 

@@ -242,6 +242,7 @@ export type InitialWebviewState = {
   expandThinkingByDefault?: boolean;
   showStickyUserPrompt?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
+  defaultPermissionMode?: PermissionMode;
   providerLimitPollIntervalSeconds?: number;
   providerLimitThresholdPercent?: number;
   providerLimitsDisabled?: boolean;

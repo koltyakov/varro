@@ -311,6 +311,26 @@ describe('state helpers', () => {
     expect(window.localStorage.getItem('varro.draftPermissionMode')).toBeNull();
   });
 
+  it('uses configured default permission mode only without a persisted selection', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      defaultPermissionMode: 'full',
+    };
+
+    const stateModule = await loadState();
+
+    expect(stateModule.draftPermissionMode()).toBe('full');
+
+    stateModule.setPermissionModeForSession(null, 'default');
+    expect(stateModule.draftPermissionMode()).toBe('default');
+    expect(window.localStorage.getItem('varro.draftPermissionMode')).toBe(
+      JSON.stringify('default')
+    );
+
+    stateModule.setDefaultPermissionModePreference('full');
+
+    expect(stateModule.draftPermissionMode()).toBe('default');
+  });
+
   it('inherits a parent session permission mode for child sessions', async () => {
     const stateModule = await loadState();
 

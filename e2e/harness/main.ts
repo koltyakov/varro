@@ -2790,6 +2790,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     droppedFiles: [],
     emptyStateLogoUri: '',
     showStickyUserPrompt: true,
+    defaultPermissionMode: 'default',
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
     pendingQuestions: [],
     recycleBinEntries: state.recycleBinEntries,

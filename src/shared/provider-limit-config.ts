@@ -1,4 +1,4 @@
-import type { DesktopSessionPaneSide, InitialWebviewState } from './protocol';
+import type { DesktopSessionPaneSide, InitialWebviewState, PermissionMode } from './protocol';
 
 export const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS = 120;
 export const DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS = -1;
@@ -8,13 +8,17 @@ export type ExtensionConfigState = {
   expandThinkingByDefault: boolean;
   showStickyUserPrompt: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
+  defaultPermissionMode: PermissionMode;
   providerLimitPollIntervalSeconds: number;
   providerLimitThresholdPercent: number;
 };
 
 export type WebviewConfigUpdatePayload = Pick<
   ExtensionConfigState,
-  'expandThinkingByDefault' | 'showStickyUserPrompt' | 'desktopSessionPaneSide'
+  | 'expandThinkingByDefault'
+  | 'showStickyUserPrompt'
+  | 'desktopSessionPaneSide'
+  | 'defaultPermissionMode'
 >;
 
 export function resolveProviderLimitPollIntervalSeconds(disabled: boolean) {

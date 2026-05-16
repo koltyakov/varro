@@ -334,6 +334,7 @@ describe('parseExtensionMessage', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: false,
           desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'full',
           providerLimitPollIntervalSeconds: 120,
           providerLimitsDisabled: false,
           providerLimitThresholdPercent: 35,
@@ -345,6 +346,7 @@ describe('parseExtensionMessage', () => {
         expandThinkingByDefault: true,
         showStickyUserPrompt: false,
         desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'full',
         providerLimitPollIntervalSeconds: 120,
         providerLimitsDisabled: false,
         providerLimitThresholdPercent: 35,
@@ -367,6 +369,7 @@ describe('parseExtensionMessage', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: false,
           desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'default',
           providerLimitsDisabled: true,
         },
       })
@@ -376,6 +379,7 @@ describe('parseExtensionMessage', () => {
         expandThinkingByDefault: true,
         showStickyUserPrompt: false,
         desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'default',
         providerLimitsDisabled: true,
       },
     });
@@ -389,6 +393,7 @@ describe('parseExtensionMessage', () => {
           expandThinkingByDefault: true,
           showStickyUserPrompt: false,
           desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: -1,
         },
       })
@@ -398,6 +403,7 @@ describe('parseExtensionMessage', () => {
         expandThinkingByDefault: true,
         showStickyUserPrompt: false,
         desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'default',
         providerLimitPollIntervalSeconds: -1,
         providerLimitsDisabled: true,
       },

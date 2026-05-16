@@ -111,6 +111,13 @@ export function createSidebarProviderActions(
           payload.desktopSessionPaneSide as 'left' | 'right',
           vscode.ConfigurationTarget.Global
         );
+      await vscode.workspace
+        .getConfiguration('varro')
+        .update(
+          'chat.defaultPermissionMode',
+          payload.defaultPermissionMode as 'default' | 'full',
+          vscode.ConfigurationTarget.Global
+        );
       deps.postConfigState();
     },
     handleApiRequest: (payload) => deps.restProxy.handleRequest(payload),
