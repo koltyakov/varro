@@ -26,6 +26,7 @@ import {
   setState,
   state,
   syncFailedSessionsFromMessages,
+  setMessagesIncremental,
   upsertMessage,
 } from './state';
 
@@ -68,6 +69,23 @@ function textPart(id: string, text: string): Part {
     messageID: 'message-1',
     type: 'text',
     text,
+  };
+}
+
+function toolPart(id: string): Part {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'tool',
+    callID: 'call-1',
+    tool: 'bash',
+    state: {
+      status: 'running',
+      input: { command: 'pwd' },
+      title: 'Run pwd',
+      time: { start: 0 },
+    },
   };
 }
 
@@ -208,6 +226,86 @@ describe('state streaming deltas', () => {
 
     expect(state.streamingPartId).toBe('text-1');
     expect(state.streamingText).toBe('Received.');
+  });
+
+  it('keeps active streaming text across incremental message refreshes', async () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [textPart('text-1', '')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', 'Partial answer', 'session-1');
+    await nextFrame();
+
+    setMessagesIncremental(
+      [
+        {
+          info: assistantMessage(),
+          parts: [textPart('text-1', ''), toolPart('tool-1')],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      type: 'text',
+      text: 'Partial answer',
+    });
+    expect(state.messages[0]?.parts[1]).toMatchObject({ id: 'tool-1', type: 'tool' });
+    expect(state.streamingPartId).toBeNull();
+    expect(state.streamingText).toBe('');
+  });
+
+  it('flushes pending streaming text before incremental message refreshes', () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [textPart('text-1', '')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', 'Queued answer', 'session-1');
+    setMessagesIncremental(
+      [
+        {
+          info: assistantMessage(),
+          parts: [textPart('text-1', ''), toolPart('tool-1')],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      type: 'text',
+      text: 'Queued answer',
+    });
+    expect(state.streamingPartId).toBeNull();
+    expect(state.streamingText).toBe('');
+  });
+
+  it('keeps newer snapshot text when clearing streaming state', async () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [textPart('text-1', 'Partial')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', ' answer', 'session-1');
+    await nextFrame();
+
+    setMessagesIncremental([
+      {
+        info: assistantMessage(),
+        parts: [textPart('text-1', 'Partial answer complete')],
+      },
+    ]);
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      type: 'text',
+      text: 'Partial answer complete',
+    });
+    expect(state.streamingPartId).toBeNull();
+    expect(state.streamingText).toBe('');
   });
 });
 

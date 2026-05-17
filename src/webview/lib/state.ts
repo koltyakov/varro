@@ -2163,8 +2163,13 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
   ]);
 }
 
+type StreamingTextSnapshot = { partId: string; text: string } | null;
+
 export function replaceMessages(incoming: MessageEntry[]) {
+  flushPendingStreamingDeltas();
+  const streamingSnapshot = getStreamingTextSnapshot();
   const nextMessages = cloneMessageEntries(incoming);
+  materializeStreamingText(nextMessages, streamingSnapshot);
   streamingDeltaQueue.reset();
   batch(() => {
     setState('messages', nextMessages);
@@ -2179,7 +2184,9 @@ export function setMessagesIncremental(
   incoming: MessageEntry[],
   options?: { preserveExtraParts?: boolean }
 ) {
+  flushPendingStreamingDeltas();
   const current = state.messages;
+  const streamingSnapshot = getStreamingTextSnapshot();
   if (current === incoming) return;
   if (current.length === 0 || incoming.length === 0) {
     replaceMessages(incoming);
@@ -2213,12 +2220,13 @@ export function setMessagesIncremental(
           if (
             currentEntry &&
             areMessageEntriesEquivalent(currentEntry, next) &&
-            !hasExtraMessagePartsToPreserve(currentEntry, next, options)
+            !hasExtraMessagePartsToPreserve(currentEntry, next, options) &&
+            !hasStreamingTextToMaterialize(currentEntry, next, options, streamingSnapshot)
           ) {
             continue;
           }
 
-          const nextEntry = mergeMessageEntry(currentEntry, next, options);
+          const nextEntry = mergeMessageEntry(currentEntry, next, options, streamingSnapshot);
           if (i < sharedPrefixLength) {
             if (!areMessageEntriesEquivalent(currentEntry, nextEntry)) {
               msgs[i] = nextEntry;
@@ -2310,10 +2318,12 @@ function getLatestMessageInfoForSession(sessionId: string, messages: MessageEntr
 function mergeMessageEntry(
   current: MessageEntry | undefined,
   incoming: MessageEntry,
-  options?: { preserveExtraParts?: boolean }
+  options?: { preserveExtraParts?: boolean },
+  streamingSnapshot?: StreamingTextSnapshot
 ) {
   const next = cloneValue(incoming);
   if (!current || !options?.preserveExtraParts || current.parts.length === 0) {
+    materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
     return next;
   }
 
@@ -2324,7 +2334,78 @@ function mergeMessageEntry(
     }
   }
 
+  materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
   return next;
+}
+
+function getStreamingTextSnapshot(): StreamingTextSnapshot {
+  return state.streamingPartId
+    ? { partId: state.streamingPartId, text: state.streamingText }
+    : null;
+}
+
+function materializeStreamingText(
+  entries: MessageEntry[],
+  streamingSnapshot: StreamingTextSnapshot
+) {
+  if (!streamingSnapshot) return;
+  for (const entry of entries) {
+    materializeStreamingTextInEntry(entry, streamingSnapshot);
+  }
+}
+
+function materializeStreamingTextInEntry(
+  entry: MessageEntry,
+  streamingSnapshot: StreamingTextSnapshot
+) {
+  if (!streamingSnapshot) return;
+  for (let index = 0; index < entry.parts.length; index += 1) {
+    const part = entry.parts[index];
+    if (part.id !== streamingSnapshot.partId) continue;
+    if (!isStreamingTextPart(part)) return;
+    if (!shouldUseStreamingText(part.text, streamingSnapshot.text)) return;
+    if (part.text !== streamingSnapshot.text) {
+      entry.parts[index] = { ...part, text: streamingSnapshot.text };
+    }
+    return;
+  }
+}
+
+function hasStreamingTextToMaterialize(
+  current: MessageEntry | undefined,
+  incoming: MessageEntry,
+  options: { preserveExtraParts?: boolean } | undefined,
+  streamingSnapshot: StreamingTextSnapshot
+) {
+  if (!streamingSnapshot) return false;
+
+  const incomingPart = incoming.parts.find((part) => part.id === streamingSnapshot.partId);
+  if (incomingPart) {
+    return (
+      isStreamingTextPart(incomingPart) &&
+      incomingPart.text !== streamingSnapshot.text &&
+      shouldUseStreamingText(incomingPart.text, streamingSnapshot.text)
+    );
+  }
+
+  if (!current || !options?.preserveExtraParts) return false;
+  const currentPart = current.parts.find((part) => part.id === streamingSnapshot.partId);
+  return (
+    !!currentPart &&
+    isStreamingTextPart(currentPart) &&
+    currentPart.text !== streamingSnapshot.text &&
+    shouldUseStreamingText(currentPart.text, streamingSnapshot.text)
+  );
+}
+
+function isStreamingTextPart(part: Part): part is Extract<Part, { type: 'text' | 'reasoning' }> {
+  return part.type === 'text' || part.type === 'reasoning';
+}
+
+function shouldUseStreamingText(currentText: string, streamingText: string) {
+  if (currentText === streamingText) return true;
+  if (!streamingText) return false;
+  return streamingText.startsWith(currentText);
 }
 
 function hasExtraMessagePartsToPreserve(
