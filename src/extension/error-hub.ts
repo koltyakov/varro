@@ -85,7 +85,7 @@ export class ErrorHub {
 
   /**
    * Pre-built report for the common "CLI missing" case, with an action
-   * that opens the install docs.
+   * that opens the OpenCode site.
    */
   reportCliMissing(message: string): void {
     this.report({
@@ -94,7 +94,7 @@ export class ErrorHub {
       actions: [
         {
           title: 'Install instructions',
-          run: () => vscode.env.openExternal(vscode.Uri.parse('https://opencode.ai/docs/install/')),
+          run: () => vscode.env.openExternal(vscode.Uri.parse('https://opencode.ai/')),
         },
         {
           title: 'Show logs',

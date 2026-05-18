@@ -137,16 +137,16 @@ describe('ErrorHub', () => {
     expect(vscodeMock.window.showErrorMessage).toHaveBeenCalledTimes(2);
   });
 
-  it('opens install docs and shows logs from the CLI missing shortcut actions', async () => {
+  it('opens the OpenCode site and shows logs from the CLI missing shortcut actions', async () => {
     const hub = new ErrorHub();
 
     vscodeMock.window.showErrorMessage.mockResolvedValueOnce('Install instructions');
     hub.reportCliMissing('CLI not found');
 
     await vi.waitFor(() => {
-      expect(vscodeMock.Uri.parse).toHaveBeenCalledWith('https://opencode.ai/docs/install/');
+      expect(vscodeMock.Uri.parse).toHaveBeenCalledWith('https://opencode.ai/');
       expect(vscodeMock.env.openExternal).toHaveBeenCalledWith({
-        value: 'https://opencode.ai/docs/install/',
+        value: 'https://opencode.ai/',
       });
     });
 
