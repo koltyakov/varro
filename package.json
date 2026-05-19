@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.17.8",
+  "version": "0.17.9",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -44,29 +44,29 @@
     "vscode:install": "rm -f varro-*.vsix && npm run package && code --install-extension varro-*.vsix"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.14.46",
+    "@opencode-ai/sdk": "^1.15.5",
     "dompurify": "^3.4.2",
     "highlight.js": "11.11.1",
     "marked": "18.0.3",
-    "solid-js": "1.9.12"
+    "solid-js": "1.9.13"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "4.3.0",
-    "@types/node": "25.6.2",
+    "@types/node": "25.9.0",
     "@types/vscode": "1.96.0",
-    "@vitest/coverage-v8": "4.1.5",
+    "@vitest/coverage-v8": "4.1.6",
     "@vscode/vsce": "3.9.1",
     "esbuild": "0.28.0",
     "jsdom": "29.1.1",
-    "oxfmt": "0.48.0",
-    "oxlint": "1.63.0",
+    "oxfmt": "0.50.0",
+    "oxlint": "1.65.0",
     "postcss": "8.5.14",
     "tailwindcss": "4.3.0",
     "typescript": "6.0.3",
-    "vite": "8.0.11",
+    "vite": "8.0.13",
     "vite-plugin-solid": "2.11.12",
-    "vitest": "4.1.5"
+    "vitest": "4.1.6"
   },
   "overrides": {
     "fast-uri": "3.1.2"
