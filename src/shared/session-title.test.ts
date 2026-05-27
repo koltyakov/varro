@@ -8,6 +8,12 @@ describe('normalizeSessionTitle', () => {
     expect(normalizeSessionTitle('New session - 2026-04-22T17:00:10Z')).toBe('New Chat');
   });
 
+  it('collapses generated timestamped child-session titles', () => {
+    expect(normalizeSessionTitle('Child session - 2026-05-27T10:00:00.000Z')).toBe('New Chat');
+    expect(normalizeSessionTitle('Child session - 2026-04-22T17:00:10+05:30')).toBe('New Chat');
+    expect(normalizeSessionTitle('Child session - 2026-04-22T17:00:10Z')).toBe('New Chat');
+  });
+
   it('renames the legacy empty-session title', () => {
     expect(normalizeSessionTitle('New session')).toBe('New Chat');
     expect(normalizeSessionTitle(' New session ')).toBe('New Chat');

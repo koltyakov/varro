@@ -1,4 +1,5 @@
 import { apiCall, onMessage, postMessage } from './bridge';
+import { validateFileDiffs } from './validate-diffs';
 import type {
   Session,
   Message,
@@ -82,7 +83,7 @@ export const client = {
     },
     async diff(id: string, messageID?: string): Promise<FileDiff[]> {
       const query = messageID ? `?messageID=${messageID}` : '';
-      return apiCall('GET', `/session/${id}/diff${query}`);
+      return apiCall('GET', `/session/${id}/diff${query}`).then(validateFileDiffs);
     },
     async status(): Promise<Record<string, SessionStatus>> {
       return getSharedSessionStatus();

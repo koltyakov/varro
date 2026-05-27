@@ -3,6 +3,7 @@ import { serverEvents } from '../../lib/client';
 import { isAssistantMessage } from '../../lib/message-metrics';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { parseUsageLimitNotice, type UsageLimitNotice } from '../../lib/usage-limit';
+import { validateFileDiffs } from '../../lib/validate-diffs';
 import { appStore } from '../../lib/stores/app-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import { sessionStore } from '../../lib/stores/session-store';
@@ -941,7 +942,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('session.diff', (data) => {
       const p = data.properties;
       if (isSessionInActiveTree(p?.sessionID as string | undefined)) {
-        deps.setDiffs((p?.diff as FileDiff[]) || []);
+        deps.setDiffs(validateFileDiffs(p?.diff));
       }
     })
   );

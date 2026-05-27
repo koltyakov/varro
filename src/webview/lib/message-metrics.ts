@@ -1,4 +1,5 @@
 import type { AssistantMessage, FileDiff, Message, Part, Provider, StepFinishPart } from '../types';
+import { validateFileDiffs } from './validate-diffs';
 
 export type TokenUsage = {
   total: number;
@@ -103,6 +104,6 @@ export function getStepFinishParts(parts: Part[]): StepFinishPart[] {
 }
 
 export function getTaskDiffs(message: Message, fallback: FileDiff[] | undefined): FileDiff[] {
-  if (message.role === 'user') return message.summary?.diffs || [];
+  if (message.role === 'user') return validateFileDiffs(message.summary?.diffs);
   return fallback || [];
 }

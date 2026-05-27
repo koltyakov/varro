@@ -8,6 +8,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [solid(), tailwindcss()],
+  optimizeDeps: {
+    entries: ['preview.html', 'e2e/harness/index.html'],
+  },
   build: {
     lib: {
       entry: resolve(__dirname, 'src/webview/index.tsx'),
