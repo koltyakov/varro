@@ -117,8 +117,39 @@ describe('usage limit helpers', () => {
     expect(parseUsageLimitNotice('server error 500')).toBeNull();
   });
 
+  it('detects "usage exceeded" pattern (FreeUsageLimitError)', () => {
+    const notice = parseUsageLimitNotice('Free usage exceeded, subscribe to Go');
+    expect(notice).not.toBeNull();
+    expect(notice?.statusCode).toBe(429);
+    expect(notice?.unit).toBe('messages');
+  });
+
+  it('detects "exhausted" pattern (messages exhausted)', () => {
+    const notice = parseUsageLimitNotice('messages exhausted');
+    expect(notice).not.toBeNull();
+    expect(notice?.statusCode).toBe(429);
+    expect(notice?.unit).toBe('messages');
+  });
+
+  it('detects "exhausted" pattern (quota exhausted)', () => {
+    const notice = parseUsageLimitNotice('quota exhausted');
+    expect(notice).not.toBeNull();
+    expect(notice?.unit).toBe('credits');
+  });
+
+  it('does not false-positive on "exhausted" as substring', () => {
+    expect(parseUsageLimitNotice('I am exhaustedly typing')).toBeNull();
+  });
+
   it('detects "too many requests" pattern', () => {
     const notice = parseUsageLimitNotice('too many requests, slow down');
+    expect(notice).not.toBeNull();
+    expect(notice?.statusCode).toBe(429);
+    expect(notice?.unit).toBe('requests');
+  });
+
+  it('detects "rate increased too quickly" pattern (Anthropic API)', () => {
+    const notice = parseUsageLimitNotice('rate increased too quickly, please slow down');
     expect(notice).not.toBeNull();
     expect(notice?.statusCode).toBe(429);
     expect(notice?.unit).toBe('requests');
@@ -166,6 +197,36 @@ describe('usage limit helpers', () => {
   it('extracts retryAt from "retry in 1h"', () => {
     const before = Date.now();
     const notice = parseUsageLimitNotice('429 retry in 1h');
+    expect(notice?.retryAt).toBeGreaterThanOrEqual(before + 3_600_000);
+  });
+
+  it('extracts retryAt from "try again in 20s" (OpenAI-style phrasing)', () => {
+    const before = Date.now();
+    const notice = parseUsageLimitNotice('429 Rate limit reached. Please try again in 20s.');
+    expect(notice?.retryAt).toBeGreaterThanOrEqual(before + 20_000);
+  });
+
+  it('extracts retryAt from "retry after 30 seconds" (full unit word)', () => {
+    const before = Date.now();
+    const notice = parseUsageLimitNotice('429 retry after 30 seconds');
+    expect(notice?.retryAt).toBeGreaterThanOrEqual(before + 30_000);
+  });
+
+  it('extracts retryAt from "try again in 2 minutes"', () => {
+    const before = Date.now();
+    const notice = parseUsageLimitNotice('429 try again in 2 minutes');
+    expect(notice?.retryAt).toBeGreaterThanOrEqual(before + 2 * 60_000);
+  });
+
+  it('extracts retryAt from "retrying after 500 milliseconds"', () => {
+    const before = Date.now();
+    const notice = parseUsageLimitNotice('429 retrying after 500 milliseconds');
+    expect(notice?.retryAt).toBeGreaterThanOrEqual(before + 500);
+  });
+
+  it('extracts retryAt from "try again in 1 hour"', () => {
+    const before = Date.now();
+    const notice = parseUsageLimitNotice('too many requests, try again in 1 hour');
     expect(notice?.retryAt).toBeGreaterThanOrEqual(before + 3_600_000);
   });
 
@@ -423,6 +484,91 @@ describe('usage limit helpers', () => {
     });
     expect(limit?.providerID).toBe('usage-limit');
   });
+
+  // -- JSON structured error body detection --
+
+  it('detects Anthropic structured error: { type: "error", error: { type: "too_many_requests" } }', () => {
+    const body = JSON.stringify({
+      type: 'error',
+      error: { type: 'too_many_requests', message: 'Too many requests, please slow down' },
+    });
+    const notice = parseUsageLimitNotice(body);
+    expect(notice).not.toBeNull();
+    expect(notice?.statusCode).toBe(429);
+    expect(notice?.message).toBe('Too many requests, please slow down');
+    expect(notice?.unit).toBe('requests');
+  });
+
+  it('detects structured error with rate_limit code', () => {
+    const body = JSON.stringify({
+      type: 'error',
+      error: {
+        code: 'account_rate_limit_exceeded',
+        message: 'Rate limit exceeded for this account',
+      },
+    });
+    const notice = parseUsageLimitNotice(body);
+    expect(notice).not.toBeNull();
+    expect(notice?.message).toBe('Rate limit exceeded for this account');
+    expect(notice?.unit).toBe('requests');
+  });
+
+  it('detects structured error with exhausted code', () => {
+    const body = JSON.stringify({
+      code: 'resources_exhausted',
+      message: 'All resources exhausted',
+    });
+    const notice = parseUsageLimitNotice(body);
+    expect(notice).not.toBeNull();
+    expect(notice?.unit).toBe('unknown');
+  });
+
+  it('detects structured error with unavailable code', () => {
+    const body = JSON.stringify({
+      code: 'model_unavailable',
+      message: 'Model is temporarily unavailable',
+    });
+    const notice = parseUsageLimitNotice(body);
+    expect(notice).not.toBeNull();
+  });
+
+  it('returns null for JSON that does not match any structured error pattern', () => {
+    const body = JSON.stringify({ type: 'error', error: { type: 'invalid_request' } });
+    expect(parseUsageLimitNotice(body)).toBeNull();
+  });
+
+  it('returns null for JSON arrays and primitives', () => {
+    expect(parseUsageLimitNotice('[1,2,3]')).toBeNull();
+    expect(parseUsageLimitNotice('"just a string"')).toBeNull();
+  });
+
+  it('uses error.message for display and falls back to json.message', () => {
+    const withErrorMsg = JSON.stringify({
+      type: 'error',
+      error: { type: 'too_many_requests', message: 'Slow down' },
+    });
+    expect(parseUsageLimitNotice(withErrorMsg)?.message).toBe('Slow down');
+
+    const withTopMsg = JSON.stringify({
+      type: 'error',
+      message: 'Top-level message',
+      error: { type: 'too_many_requests' },
+    });
+    expect(parseUsageLimitNotice(withTopMsg)?.message).toBe('Top-level message');
+  });
+
+  it('falls back to "Rate limited" when no message field exists', () => {
+    const body = JSON.stringify({ code: 'resources_exhausted' });
+    expect(parseUsageLimitNotice(body)?.message).toBe('Rate limited');
+  });
+
+  it('detects "overloaded" text pattern', () => {
+    const notice = parseUsageLimitNotice('Server is overloaded, please retry');
+    expect(notice).not.toBeNull();
+    expect(notice?.statusCode).toBe(429);
+  });
+
+  // -- createUsageLimitProviderLimit --
 
   it('creates a synthetic exhausted provider limit for usage-limit banners', () => {
     const limit = createUsageLimitProviderLimit({

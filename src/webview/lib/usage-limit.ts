@@ -20,13 +20,23 @@ export function parseUsageLimitNotice(
   const normalizedMessage = message?.trim();
   if (!normalizedMessage) return null;
 
+  if (normalizedMessage.startsWith('{')) {
+    const jsonNotice = parseJsonErrorBody(normalizedMessage, options);
+    if (jsonNotice) return jsonNotice;
+  }
+
   const normalized = normalizedMessage.toLowerCase();
-  const isLimitError =
+  const isTextLimitError =
     /(^|\b)429(\b|$)/.test(normalized) ||
     normalized.includes('usage limit') ||
+    normalized.includes('usage exceeded') ||
     normalized.includes('rate limit') ||
-    normalized.includes('too many requests');
-  if (!isLimitError) return null;
+    normalized.includes('too many requests') ||
+    normalized.includes('rate increased too quickly') ||
+    normalized.includes('overloaded') ||
+    /\bexhausted\b/.test(normalized);
+
+  if (!isTextLimitError) return null;
 
   return {
     source: 'message',
@@ -127,10 +137,11 @@ function inferUsageLimitUnit(message: string): ProviderLimitUnit {
   const normalized = message.toLowerCase();
   if (normalized.includes('message')) return 'messages';
   if (normalized.includes('request')) return 'requests';
-  if (normalized.includes('rate limit')) return 'requests';
+  if (normalized.includes('rate limit') || normalized.includes('rate increased')) return 'requests';
   if (normalized.includes('token')) return 'tokens';
   if (normalized.includes('credit') || normalized.includes('quota')) return 'credits';
-  if (normalized.includes('usage limit')) return 'messages';
+  if (normalized.includes('usage limit') || normalized.includes('usage exceeded'))
+    return 'messages';
   return 'unknown';
 }
 
@@ -142,14 +153,23 @@ function extractRetryAttempt(message: string) {
 }
 
 function extractRetryAt(message: string) {
-  const match = message.match(/retry(?:ing)?\s+in\s+(\d+(?:\.\d+)?)\s*(ms|s|m|h)\b/i);
+  const match = message.match(
+    /(?:retry(?:ing)?|try\s+again)\s+(?:in|after)\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|seconds?|m|minutes?|h|hours?)\b/i
+  );
   if (!match) return null;
 
   const amount = Number(match[1]);
   if (!Number.isFinite(amount)) return null;
 
-  const unit = match[2].toLowerCase();
-  const multiplier = unit === 'ms' ? 1 : unit === 's' ? 1000 : unit === 'm' ? 60_000 : 3_600_000;
+  const unitStr = match[2].toLowerCase();
+  const multiplier =
+    unitStr === 'ms' || unitStr.startsWith('millisecond')
+      ? 1
+      : unitStr === 's' || unitStr.startsWith('second')
+        ? 1000
+        : unitStr === 'm' || unitStr.startsWith('minute')
+          ? 60_000
+          : 3_600_000;
   return Date.now() + Math.round(amount * multiplier);
 }
 
@@ -167,4 +187,45 @@ function getUsageLimitLabel(unit: ProviderLimitUnit) {
   if (unit === 'tokens') return 'Tokens';
   if (unit === 'credits') return 'Credits';
   return 'Limit';
+}
+
+function parseJsonErrorBody(
+  message: string,
+  options?: { retryAt?: number | null; attempt?: number | null }
+): UsageLimitNotice | null {
+  let json: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(message);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    json = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const error = json.error as Record<string, unknown> | undefined;
+  const code = typeof json.code === 'string' ? json.code : '';
+
+  const isStructuredLimit =
+    (json.type === 'error' && error?.type === 'too_many_requests') ||
+    (json.type === 'error' &&
+      typeof error?.code === 'string' &&
+      error.code.includes('rate_limit')) ||
+    code.includes('exhausted') ||
+    code.includes('unavailable');
+
+  if (!isStructuredLimit) return null;
+
+  const displayMessage =
+    (typeof error?.message === 'string' && error.message) ||
+    (typeof json.message === 'string' && json.message) ||
+    'Rate limited';
+
+  return {
+    source: 'message',
+    statusCode: 429,
+    message: displayMessage,
+    unit: inferUsageLimitUnit(displayMessage),
+    retryAt: normalizeRetryAt(options?.retryAt) ?? extractRetryAt(displayMessage),
+    attempt: options?.attempt ?? extractRetryAttempt(displayMessage),
+  };
 }
