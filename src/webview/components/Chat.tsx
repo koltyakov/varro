@@ -55,6 +55,22 @@ const RECONNECT_BANNER_MIN_VISIBLE_MS = 4000;
 const CHAT_VIEW_ENTER_DURATION_MS = 180;
 const EMPTY_SESSION_DELETE_DELAY_MS = 0;
 
+function isDesktopSessionPaneRight() {
+  return desktopSessionPaneSide() === 'right';
+}
+
+function activateExistingBlankSession() {
+  batch(() => {
+    resetToolCallExpansionState();
+    clearMessages();
+    setError(null);
+    setShowSettings(false);
+    setShowModelPicker(false);
+    setShowSessionPicker(false);
+    stopLoading();
+  });
+}
+
 export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
@@ -62,7 +78,6 @@ export function Chat() {
   const [isCreatingSessionFromPicker, setIsCreatingSessionFromPicker] = createSignal(false);
   const [isEnteringChatView, setIsEnteringChatView] = createSignal(false);
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
-  const isDesktopSessionPaneRight = () => desktopSessionPaneSide() === 'right';
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const visibleSessions = createMemo(() => {
     const indicators = sessionIndicators();
@@ -364,18 +379,6 @@ export function Chat() {
   const clearSessionListView = () => {
     setSessionFilter(null);
     setSubagentParentId(null);
-  };
-
-  const activateExistingBlankSession = () => {
-    batch(() => {
-      resetToolCallExpansionState();
-      clearMessages();
-      setError(null);
-      setShowSettings(false);
-      setShowModelPicker(false);
-      setShowSessionPicker(false);
-      stopLoading();
-    });
   };
 
   const createSessionFromPicker = async () => {

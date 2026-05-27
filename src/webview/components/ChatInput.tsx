@@ -7,7 +7,6 @@ import {
   nextPastedImageIndex,
   setNextPastedImageIndex,
   resetPastedImageIndex,
-  isLoading,
   hasActiveQuestion,
   hasActivePermission,
   setSelectedAgent,
@@ -36,6 +35,7 @@ import {
   providerLimitThresholdPercent,
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
+  isActiveSessionWorking,
   getSessionTreeIds,
   getStoredVariantForModel,
   setSessionUsageLimit,
@@ -319,6 +319,43 @@ function isCodexSparkModelLabel(value: string | null | undefined) {
   return normalized.includes('codex') && normalized.includes('spark');
 }
 
+function composerFiles() {
+  return state.droppedFiles;
+}
+
+function composerClipboardImages() {
+  return state.clipboardImages;
+}
+
+function composerSelection() {
+  return state.editorContext.selection;
+}
+
+function composerTerminalSelection() {
+  return state.terminalSelection;
+}
+
+function composerActiveFile() {
+  return state.editorContext.activeFile;
+}
+
+function activeContextEnabled() {
+  return getCurrentDocumentEnabled(state.activeSessionId);
+}
+
+async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
+  removeQueuedMessage(item.id);
+  await sendMessage(item.text, {
+    noReply: true,
+    queuedAttachments: {
+      droppedFiles: item.droppedFiles,
+      clipboardImages: item.clipboardImages,
+      terminalSelection: item.terminalSelection,
+    },
+    preserveComposer: true,
+  });
+}
+
 export function ChatInput() {
   let richEditorRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
@@ -386,13 +423,10 @@ export function ChatInput() {
   let toolbarFitRaf = 0;
   let toolbarFitRequestId = 0;
 
-  const files = () => state.droppedFiles;
-  const clipboardImages = () => state.clipboardImages;
-  const selection = () => state.editorContext.selection;
-  const terminalSelection = () => state.terminalSelection;
-  const activeFile = () => state.editorContext.activeFile;
-  const explicitContextForActiveFile = () => hasExplicitContextForPath(files(), activeFile()?.path);
-  const hasContext = () => !!activeFile() || !!selection() || !!terminalSelection();
+  const explicitContextForActiveFile = () =>
+    hasExplicitContextForPath(composerFiles(), composerActiveFile()?.path);
+  const hasContext = () =>
+    !!composerActiveFile() || !!composerSelection() || !!composerTerminalSelection();
 
   const currentModel = createMemo(() => {
     const selected = resolveSelectedModel(
@@ -468,13 +502,11 @@ export function ChatInput() {
   });
 
   const hasMentions = () => visibleFiles().length > 0 || visibleClipboardImages().length > 0;
-  const activeContextEnabled = () => getCurrentDocumentEnabled(state.activeSessionId);
-
   const inlineChips = createMemo((): RichComposerChip[] => {
     const chips: RichComposerChip[] = [];
     const text = inputText();
 
-    for (const file of files()) {
+    for (const file of composerFiles()) {
       const label = getLeafPathName(file.relativePath || file.path);
       const marker = `@${file.relativePath || file.path}`;
       if (text.includes(marker)) {
@@ -494,7 +526,7 @@ export function ChatInput() {
       }
     }
 
-    for (const image of clipboardImages()) {
+    for (const image of composerClipboardImages()) {
       const marker = `[${image.filename}]`;
       if (text.includes(marker)) {
         chips.push({
@@ -527,7 +559,7 @@ export function ChatInput() {
   const inlineChipIds = createMemo(() => new Set(inlineChips().map((c) => c.id)));
 
   const visibleFiles = createMemo(() =>
-    files()
+    composerFiles()
       .filter((f) => !inlineChipIds().has(`file:${f.path}`))
       .map((file) => ({
         ...file,
@@ -535,7 +567,7 @@ export function ChatInput() {
       }))
   );
   const visibleClipboardImages = createMemo(() =>
-    clipboardImages()
+    composerClipboardImages()
       .filter((img) => !inlineChipIds().has(`img:${img.id}`))
       .map((image) => ({
         ...image,
@@ -545,8 +577,8 @@ export function ChatInput() {
   );
 
   const activeContext = createMemo(() => {
-    const file = activeFile();
-    const selectedLines = getSelectionRangesFromEditorContext(selection());
+    const file = composerActiveFile();
+    const selectedLines = getSelectionRangesFromEditorContext(composerSelection());
     if (!file) return null;
     if (explicitContextForActiveFile() && selectedLines.length === 0) return null;
     const displayPath = getLeafPathName(file.relativePath || file.path);
@@ -583,10 +615,11 @@ export function ChatInput() {
   const skillCommands = createMemo(() =>
     state.commands.filter((command) => command.source === 'skill')
   );
+  const isComposerBusy = createMemo(() => isActiveSessionWorking());
 
   const slashCommands = createMemo(() =>
     getSlashCommands({
-      isBusy: isLoading(),
+      isBusy: isComposerBusy(),
       canUndo: !!state.activeSessionId && state.messages.some((m) => m.info.role === 'assistant'),
       canRedo:
         !!state.activeSessionId &&
@@ -839,7 +872,7 @@ export function ChatInput() {
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      if ((e.ctrlKey || e.metaKey) && isLoading()) {
+      if ((e.ctrlKey || e.metaKey) && isComposerBusy()) {
         handleSend('steer');
       } else {
         handleSend();
@@ -984,7 +1017,7 @@ export function ChatInput() {
     if (
       mode !== 'steer' &&
       mode !== 'after-stop' &&
-      isLoading() &&
+      isComposerBusy() &&
       !hasActiveQuestion() &&
       !hasActivePermission() &&
       state.activeSessionId &&
@@ -1024,23 +1057,10 @@ export function ChatInput() {
     }
   }
 
-  async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
-    removeQueuedMessage(item.id);
-    await sendMessage(item.text, {
-      noReply: true,
-      queuedAttachments: {
-        droppedFiles: item.droppedFiles,
-        clipboardImages: item.clipboardImages,
-        terminalSelection: item.terminalSelection,
-      },
-      preserveComposer: true,
-    });
-  }
-
   let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
   createEffect(() => {
     const sessionId = state.activeSessionId;
-    const loading = isLoading();
+    const loading = isComposerBusy();
     const activeQuestion = hasActiveQuestion();
     const activePermission = hasActivePermission();
     const hasQueued = state.queuedMessages.some((item) => item.sessionId === sessionId);
@@ -1051,7 +1071,7 @@ export function ChatInput() {
     if (!sessionId || loading || activeQuestion || activePermission || !hasQueued) return;
     queueDispatchTimer = setTimeout(() => {
       queueDispatchTimer = 0;
-      if (isLoading() || hasActiveQuestion() || hasActivePermission()) return;
+      if (isComposerBusy() || hasActiveQuestion() || hasActivePermission()) return;
       const sid = state.activeSessionId;
       if (!sid) return;
       const next = state.queuedMessages.find((item) => item.sessionId === sid);
@@ -1500,12 +1520,12 @@ export function ChatInput() {
       hasSendableClipboardImages() ||
       !!state.terminalSelection);
   const isBusyWithoutInterruption = createMemo(
-    () => isLoading() && !hasActiveQuestion() && !hasActivePermission()
+    () => isComposerBusy() && !hasActiveQuestion() && !hasActivePermission()
   );
   const showBusySendControls = createMemo(() => isBusyWithoutInterruption() && canSend());
 
   const clipboardImagesDisabled = () =>
-    clipboardImages().length > 0 && !currentModelSupportsVision();
+    composerClipboardImages().length > 0 && !currentModelSupportsVision();
 
   const contextUsage = createMemo(() => {
     const best = getLatestAssistantMessageInfoWithTokens(state.messages);
@@ -1611,7 +1631,7 @@ export function ChatInput() {
       .join('|'),
     variant: effectiveVariant(),
     hasContextUsage: !!contextUsage(),
-    loading: isLoading(),
+    loading: isComposerBusy(),
     hasQuestion: hasActiveQuestion(),
     hasPermission: hasActivePermission(),
     showBusySendControls: showBusySendControls(),
@@ -1796,7 +1816,7 @@ export function ChatInput() {
         <UsageLimitBanner
           message={visibleUsageLimit()!.message}
           meta={describeUsageLimit(activeUsageLimitWindow(), visibleUsageLimit()?.attempt ?? null)}
-          showStopRetrying={isLoading() && !hasActiveQuestion() && !hasActivePermission()}
+          showStopRetrying={isComposerBusy() && !hasActiveQuestion() && !hasActivePermission()}
           onStopRetrying={() => abortSession()}
           onSwitchProvider={() => {
             closePopups();
@@ -1869,7 +1889,7 @@ export function ChatInput() {
               activeContext={activeContext()}
               activeContextEnabled={activeContextEnabled()}
               activeContextTitle={activeContextTitle()}
-              terminalSelection={terminalSelection()}
+              terminalSelection={composerTerminalSelection()}
               files={visibleFiles()}
               clipboardImages={visibleClipboardImages()}
               clipboardImagesDisabled={clipboardImagesDisabled()}
@@ -1890,7 +1910,7 @@ export function ChatInput() {
             placeholder={
               hasActiveQuestion() || hasActivePermission()
                 ? 'Respond to the prompt above to continue...'
-                : isLoading()
+                : isComposerBusy()
                   ? 'Queue a follow-up or steer'
                   : 'Describe what to build'
             }
@@ -2078,7 +2098,7 @@ export function ChatInput() {
             }}
             showContextPopup={showContextPopup()}
             sessionTokens={sessionTokens()}
-            contextCompactDisabled={isLoading() || isSessionCompacting()}
+            contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
             onToggleContextPopup={() => {
               const next = !showContextPopup();
               closePopups(next ? 'context' : undefined);
@@ -2233,7 +2253,7 @@ export function ChatInput() {
           }}
           showContextPopup={showContextPopup()}
           sessionTokens={sessionTokens()}
-          contextCompactDisabled={isLoading() || isSessionCompacting()}
+          contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
           onToggleContextPopup={() => {
             const next = !showContextPopup();
             closePopups(next ? 'context' : undefined);

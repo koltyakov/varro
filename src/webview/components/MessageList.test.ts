@@ -156,10 +156,13 @@ function assistantMessage(
     agent?: string;
     error?: AssistantMessage['error'];
     mode?: string;
+    modelID?: string;
     parentID?: string;
+    providerID?: string;
     sessionID?: string;
     time?: AssistantMessage['time'];
     tokens?: AssistantMessage['tokens'];
+    variant?: string;
   }
 ): AssistantMessage {
   return {
@@ -168,8 +171,8 @@ function assistantMessage(
     role: 'assistant',
     time: options?.time ?? { created: 1, completed: 2 },
     parentID: options?.parentID ?? 'parent-1',
-    modelID: 'gpt-5.4',
-    providerID: 'openai',
+    modelID: options?.modelID ?? 'gpt-5.4',
+    providerID: options?.providerID ?? 'openai',
     mode: options?.mode ?? 'default',
     agent: options?.agent,
     error: options?.error,
@@ -181,6 +184,7 @@ function assistantMessage(
       reasoning: 0,
       cache: { read: 0, write: 0 },
     },
+    variant: options?.variant,
   };
 }
 
@@ -783,7 +787,56 @@ describe('MessageList session scoping', () => {
     ).toEqual(['user-child-1']);
   });
 
-  it('hides child-session user prompts in the parent thread', async () => {
+  it('hides child-session assistant output in the parent thread filter', () => {
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Research child',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ]);
+
+    const messages = [
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: assistantMessage('assistant-child-1', {
+          sessionID: 'child-1',
+          mode: 'subagent',
+          parentID: 'assistant-root-1',
+        }),
+        parts: [
+          {
+            id: 'text-child-1',
+            sessionID: 'child-1',
+            messageID: 'assistant-child-1',
+            type: 'text',
+            text: 'Streaming child output',
+          },
+        ],
+      },
+    ];
+
+    expect(
+      getVisibleThreadMessages(messages, 'session-1').map((messageEntry) => messageEntry.info.id)
+    ).toEqual(['user-root-1']);
+    expect(
+      getVisibleThreadMessages(messages, 'child-1').map((messageEntry) => messageEntry.info.id)
+    ).toEqual(['assistant-child-1']);
+  });
+
+  it('hides child-session messages in the parent thread', async () => {
     setState('activeSessionId', 'session-1');
     setSessions([
       {
@@ -855,6 +908,175 @@ describe('MessageList session scoping', () => {
     expect(container?.textContent).toContain('Root prompt');
     expect(container?.textContent).toContain('Root response');
     expect(container?.textContent).not.toContain('Explore Varro codebase structure');
+    expect(container?.textContent).not.toContain('Subagent result');
+  });
+
+  it('does not let hidden child-session models create parent-thread switch markers', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { reasoning: true, toolcall: true, attachment: true },
+            cost: { input: 0, output: 0 },
+            variants: { medium: {}, high: {} },
+          },
+        },
+      },
+    ]);
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Explore Varro codebase structure',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ]);
+    replaceMessages([
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: assistantMessage('assistant-root-1', { parentID: 'user-root-1', variant: 'high' }),
+        parts: [textPart('text-root-2', 'Root response')],
+      },
+      {
+        info: assistantMessage('assistant-child-1', {
+          sessionID: 'child-1',
+          parentID: 'assistant-root-1',
+          variant: 'medium',
+        }),
+        parts: [textPart('text-child-1', 'Hidden child response')],
+      },
+      {
+        info: assistantMessage('assistant-root-2', { parentID: 'user-root-1', variant: 'high' }),
+        parts: [textPart('text-root-3', 'Continuing root response')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Root response');
+    expect(container?.textContent).toContain('Continuing root response');
+    expect(container?.textContent).not.toContain('Hidden child response');
+    expect(container?.textContent).not.toContain('Switched to High');
+  });
+
+  it('keeps child-session streaming text out of the parent thread', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Explore Varro codebase structure',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ]);
+    replaceMessages([
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: assistantMessage('assistant-child-1', {
+          sessionID: 'child-1',
+          mode: 'subagent',
+          agent: 'explore',
+          parentID: 'assistant-root-1',
+          time: { created: 4 },
+        }),
+        parts: [
+          {
+            id: 'text-child-1',
+            sessionID: 'child-1',
+            messageID: 'assistant-child-1',
+            type: 'text',
+            text: 'Partial subagent result',
+          },
+        ],
+      },
+    ]);
+    setState('streamingPartId', 'text-child-1');
+    setState('streamingText', 'Partial subagent result that should stay hidden');
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Root prompt');
+    expect(container?.textContent).not.toContain('Partial subagent result');
+    expect(container?.textContent).not.toContain('should stay hidden');
+  });
+
+  it('shows child-session assistant messages when the child session is active', async () => {
+    setState('activeSessionId', 'child-1');
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Explore Varro codebase structure',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ]);
+    replaceMessages([
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: assistantMessage('assistant-child-1', {
+          sessionID: 'child-1',
+          mode: 'subagent',
+          agent: 'explore',
+          parentID: 'assistant-root-1',
+          time: { created: 4, completed: 5 },
+        }),
+        parts: [
+          {
+            id: 'text-child-1',
+            sessionID: 'child-1',
+            messageID: 'assistant-child-1',
+            type: 'text',
+            text: 'Subagent result',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('Root prompt');
     expect(container?.textContent).toContain('Subagent result');
   });
 });
@@ -1384,6 +1606,40 @@ describe('MessageList sticky prompt preview', () => {
     });
   });
 
+  it('suppresses only the trailing assistant summary while a turn is still active', () => {
+    const messages = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt 1')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 3_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+      {
+        info: { ...userMessage('user-2'), time: { created: 4_000 } },
+        parts: [textPart('text-2', 'Prompt 2')],
+      },
+      {
+        info: assistantMessage('assistant-2', {
+          time: { created: 5_000, completed: 6_000 },
+          tokens: { input: 200, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+    ];
+
+    const summaries = getAssistantDialogSummaryMap(messages, undefined, {
+      suppressTrailingSummary: true,
+    });
+
+    expect(summaries.has('assistant-1')).toBe(true);
+    expect(summaries.has('assistant-2')).toBe(false);
+  });
+
   it('keeps highlighted assistant card styling stable when virtualization hides the summary row', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 
@@ -1894,7 +2150,37 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
   });
 
-  it('hides the loading row while visible text is streaming', async () => {
+  it('shows the loading row while the active session status is busy', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(false);
+  });
+
+  it('keeps the loading row while the visible assistant reply is incomplete', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: assistantMessage('message-1', { time: { created: 1 } }), parts: [] }]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    stopLoading();
+    await Promise.resolve();
+    vi.advanceTimersByTime(600);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(false);
+  });
+
+  it('reserves the loading row while visible text is streaming', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Drafting')] },
@@ -1906,7 +2192,112 @@ describe('MessageList loading row', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(true);
+    expect(row?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('does not immediately re-show the loading row during short visible-stream gaps', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Drafting')] },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+
+    setState('streamingPartId', 'text-1');
+    setState('streamingText', 'Drafting');
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(true);
+
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+    await Promise.resolve();
+    vi.advanceTimersByTime(179);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(true);
+
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(false);
+  });
+
+  it('keeps the loading row reserved across brief inactive gaps', async () => {
+    setState('activeSessionId', 'session-1');
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+
+    stopLoading();
+    await Promise.resolve();
+    vi.advanceTimersByTime(599);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(true);
+
+    startLoading(601);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(false);
+  });
+
+  it('waits until loading settles before showing the trailing worked summary', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 11_000 },
+          tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-1', 'Interim update')],
+      },
+    ]);
+    startLoading(11_000);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('Worked for');
+
+    stopLoading();
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('Worked for');
+
+    vi.advanceTimersByTime(240);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 · ↓ 7');
   });
 });
 
@@ -2676,6 +3067,77 @@ describe('MessageList auto-scroll', () => {
 
     expect(assignedScrollTops.at(-1)).toBe(800);
     expect(scrollTopValue).toBe(760);
+    animationFrames.restore();
+  });
+
+  it('keeps following new messages after an explicit scroll request from a recent wheel scroll', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let trackHeight = 1200;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    const assignedScrollTops: number[] = [];
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+    scrollTopValue = 400;
+    list?.dispatchEvent(new Event('scroll'));
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    animationFrames.flush();
+    animationFrames.flush();
+
+    trackHeight = 1600;
+    scrollHeightValue = 1600;
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Follow-up response')] },
+    ]);
+    await Promise.resolve();
+    animationFrames.flush();
+
+    expect(assignedScrollTops.at(-1)).toBe(1200);
+    expect(scrollTopValue).toBe(1200);
     animationFrames.restore();
   });
 

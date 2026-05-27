@@ -11,16 +11,18 @@ export function resetTodoSync() {
   appStore.setState('todos', []);
 }
 
+function setStateTodos(todos: Todo[]) {
+  appStore.setState('todos', todos);
+}
+
 export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   let nativeTodosEnabled = false;
-
-  const setTodos = (todos: Todo[]) => appStore.setState('todos', todos);
 
   const applyNativeTodos = (raw: unknown) => {
     const todos = extractTodos(raw);
     if (!todos) return false;
     nativeTodosEnabled = true;
-    setTodos(todos);
+    setStateTodos(todos);
     return true;
   };
 
@@ -30,7 +32,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   ) => {
     if (nativeTodosEnabled && applyNativeTodos(latestEventPayload)) return;
     if (nativeTodosEnabled) return;
-    syncTodosFromMessages(setTodos, messages, latestEventPayload);
+    syncTodosFromMessages(setStateTodos, messages, latestEventPayload);
   };
 
   const syncTodosForSessionWithState = async (
@@ -45,7 +47,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     try {
       const todos = extractTodos(await deps.loadSessionTodos(sessionId)) ?? [];
       nativeTodosEnabled = true;
-      if (appStore.state.activeSessionId === sessionId) setTodos(todos);
+      if (appStore.state.activeSessionId === sessionId) setStateTodos(todos);
     } catch {
       nativeTodosEnabled = false;
       syncTodosFromMessagesWithState(messages);
@@ -54,7 +56,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
 
   const handoffTodosToMessagesWithState = (messages: SessionEntry[] = appStore.state.messages) => {
     if (nativeTodosEnabled) return true;
-    const handedOff = handoffTodosToMessages(appStore.state.todos, setTodos, messages);
+    const handedOff = handoffTodosToMessages(appStore.state.todos, setStateTodos, messages);
     return handedOff;
   };
 

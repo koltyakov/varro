@@ -1067,12 +1067,15 @@ function formatDurationFromNow(timestamp: number, now: number): string {
   return formatSessionAge(now + Math.max(0, timestamp - now), now);
 }
 
+function rootSessionId(sessionId: string) {
+  return getSessionTreeRootId(sessionId) || sessionId;
+}
+
 export function deriveSessionIndicators(sessions: typeof state.sessions): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
   const ralphChildToManager = new Map<string, string>();
   const ralphManagerManualStopIds = new Set<string>();
-  const rootSessionId = (sessionId: string) => getSessionTreeRootId(sessionId) || sessionId;
   const childSessionIdsByParent = new Map<string, string[]>();
   const permissionIds = new Set<string>();
   for (const permission of state.permissions) {

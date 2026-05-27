@@ -927,6 +927,27 @@ export function isSessionCompacting() {
   return !!state.sessions.find((session) => session.id === sid)?.time.compacting;
 }
 
+export function isSessionStatusWorking(status: SessionStatus | null | undefined) {
+  return status?.type === 'busy' || status?.type === 'retry';
+}
+
+export function isSessionTreeStatusWorking(
+  sessionId: string | null | undefined,
+  statuses: Record<string, SessionStatus | undefined> = state.sessionStatus
+) {
+  if (!sessionId) return false;
+
+  const rootId = getSessionTreeRootId(sessionId) || sessionId;
+  const sessionIds = new Set(getSessionTreeIds(rootId));
+  return [...sessionIds].some((candidateSessionId) =>
+    isSessionStatusWorking(statuses[candidateSessionId])
+  );
+}
+
+export function isActiveSessionWorking() {
+  return isLoading() || isSessionCompacting() || isSessionTreeStatusWorking(state.activeSessionId);
+}
+
 export function toggleThinking() {
   const next = !showThinking();
   setShowThinkingPreference(next);

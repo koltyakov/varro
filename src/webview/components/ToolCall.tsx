@@ -151,6 +151,22 @@ function isDirectoryOutput(toolState: ToolPart['state']): boolean {
   return /<type>\s*directory\s*<\/type>/i.test(output) || /<entries>/i.test(output);
 }
 
+function openFileChangePath(path: string) {
+  return (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
+  };
+}
+
+function formatFileChangeDisplayName(path: string | undefined) {
+  return path ? formatDisplayPath(path, appState.editorContext.workspacePath) : '';
+}
+
+function openGenericToolFile(path: string) {
+  postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
+}
+
 export function ToolCall(props: {
   part: ToolPart;
   questionRequest?: QuestionRequest | null;
@@ -470,15 +486,6 @@ function FileChangeCard(props: {
     return null;
   };
 
-  const openPath = (path: string) => (e: Event) => {
-    e.preventDefault();
-    e.stopPropagation();
-    postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
-  };
-
-  const displayName = (path: string | undefined) =>
-    path ? formatDisplayPath(path, appState.editorContext.workspacePath) : '';
-
   return (
     <div class="chat-tool-invocation-part file-change-card">
       <div class="file-change-card-header">
@@ -496,23 +503,27 @@ function FileChangeCard(props: {
               <a
                 href="#"
                 class="file-path-link file-edit-path-link"
-                onClick={openPath(change().fromPath || change().path)}
+                onClick={openFileChangePath(change().fromPath || change().path)}
               >
-                {displayName(change().fromPath || change().path)}
+                {formatFileChangeDisplayName(change().fromPath || change().path)}
               </a>
               <span class="file-edit-move-arrow">→</span>
               <a
                 href="#"
                 class="file-path-link file-edit-path-link"
-                onClick={openPath(change().toPath || change().path)}
+                onClick={openFileChangePath(change().toPath || change().path)}
               >
-                {displayName(change().toPath || change().path)}
+                {formatFileChangeDisplayName(change().toPath || change().path)}
               </a>
             </span>
           }
         >
-          <a href="#" class="file-path-link file-edit-path-link" onClick={openPath(change().path)}>
-            {displayName(change().path)}
+          <a
+            href="#"
+            class="file-path-link file-edit-path-link"
+            onClick={openFileChangePath(change().path)}
+          >
+            {formatFileChangeDisplayName(change().path)}
           </a>
         </Show>
         <Show when={isCompleted() && diffStats()}>
@@ -553,9 +564,6 @@ function GenericToolCall(props: {
   truncatedOutput: string;
   lightweight?: boolean;
 }) {
-  const openFile = (path: string) => {
-    postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
-  };
   const toolName = () => normalizeToolName(props.tool.tool);
   const isAborted = () => isAbortedToolError(props.state);
   const isBash = () => toolName() === 'bash';
@@ -630,7 +638,7 @@ function GenericToolCall(props: {
                 class="file-path-link"
                 onClick={(e) => {
                   e.preventDefault();
-                  openFile(p.text);
+                  openGenericToolFile(p.text);
                 }}
               >
                 {formatDisplayPath(p.text, appState.editorContext.workspacePath)}
@@ -662,7 +670,7 @@ function GenericToolCall(props: {
                                 class="file-path-link tool-input-value"
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  openFile(String(value));
+                                  openGenericToolFile(String(value));
                                 }}
                               >
                                 {formatDisplayPath(
@@ -683,7 +691,7 @@ function GenericToolCall(props: {
                 <StructuredToolCard
                   inputEntries={props.inputEntries}
                   result={structuredResult()}
-                  onOpenPath={openFile}
+                  onOpenPath={openGenericToolFile}
                 />
               </Show>
             }

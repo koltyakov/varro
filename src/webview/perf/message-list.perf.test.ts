@@ -12,16 +12,22 @@ const { messageRowPassCounts } = vi.hoisted(() => ({
 vi.mock('../components/message-list/MessageRows', async () => {
   const { createRenderEffect } = await import('solid-js');
 
+  function countMessagePass(message: { info: Message; parts: Part[] }) {
+    messageRowPassCounts.set(message.info.id, (messageRowPassCounts.get(message.info.id) ?? 0) + 1);
+  }
+
   return {
     MessageRows(props: { messages: Array<{ info: Message; parts: Part[] }> }) {
       createRenderEffect(() => {
         for (const message of props.messages) {
-          messageRowPassCounts.set(
-            message.info.id,
-            (messageRowPassCounts.get(message.info.id) ?? 0) + 1
-          );
+          countMessagePass(message);
         }
       });
+
+      return null;
+    },
+    MessageRow(props: { msg: { info: Message; parts: Part[] } }) {
+      createRenderEffect(() => countMessagePass(props.msg));
 
       return null;
     },

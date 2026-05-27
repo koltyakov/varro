@@ -150,6 +150,61 @@ async function loadSessionMessagesAllowingEmpty(sessionId: string): Promise<Sess
   }
 }
 
+function applyTheme(nextTheme: WebviewThemeKind) {
+  applyWebviewTheme(nextTheme);
+}
+
+function getUsageLimitNoticeContext(
+  sessionID: string,
+  messages: Array<{ info: Message; parts: Part[] }> = appStore.state.messages
+) {
+  return getUsageLimitNoticeContextForState({
+    sessionId: sessionID,
+    messages,
+    selectedModelForSession: routingStore.getSelectedModelForSession(sessionID),
+    providers: appStore.state.providers,
+    providerDefaults: appStore.state.providerDefaults,
+    fallbackSelectedModel: appStore.state.selectedModel,
+  });
+}
+
+function getDefaultPrimaryAgentNameFromState() {
+  return getDefaultPrimaryAgentName(appStore.state.agents);
+}
+
+function getBuildAgentNameFromState() {
+  return getBuildAgentName(appStore.state.agents);
+}
+
+function postFocusState() {
+  postFocusStateWithDependencies({
+    sendMessage: postMessage,
+    isVisible: () => document.visibilityState === 'visible',
+    hasFocus: () => document.hasFocus(),
+  });
+}
+
+function getActiveProviderSelection() {
+  return getActiveProviderSelectionForState({
+    activeSessionId: appStore.state.activeSessionId,
+    selectedModel: appStore.state.selectedModel,
+    providers: appStore.state.providers,
+    providerDefaults: appStore.state.providerDefaults,
+    getActiveRalphModel: (sessionId) => {
+      const managerSessionId = ralphStore.isRalphSession(sessionId)
+        ? sessionId
+        : ralphStore.findManagerSessionIdForChild(sessionId);
+      const model = managerSessionId ? ralphStore.getRun(managerSessionId)?.config.model : null;
+      if (!model?.providerID) return null;
+      return { providerID: model.providerID, modelID: model.modelID };
+    },
+  });
+}
+
+async function deleteSessionImmediately(id: string) {
+  await client.varro.session.deleteImmediately(id);
+}
+
 export function createOpenCodeRuntime(): OpenCodeRuntime {
   let initialized = false;
   let initializing = false;
@@ -202,32 +257,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const { applySessions, clearDeletedSessionState, hideDeletedSessionTree, upsertSession } =
     sessionLifecycleOperations;
-
-  function applyTheme(nextTheme: WebviewThemeKind) {
-    applyWebviewTheme(nextTheme);
-  }
-
-  function getUsageLimitNoticeContext(
-    sessionID: string,
-    messages: Array<{ info: Message; parts: Part[] }> = appStore.state.messages
-  ) {
-    return getUsageLimitNoticeContextForState({
-      sessionId: sessionID,
-      messages,
-      selectedModelForSession: routingStore.getSelectedModelForSession(sessionID),
-      providers: appStore.state.providers,
-      providerDefaults: appStore.state.providerDefaults,
-      fallbackSelectedModel: appStore.state.selectedModel,
-    });
-  }
-
-  function getDefaultPrimaryAgentNameFromState() {
-    return getDefaultPrimaryAgentName(appStore.state.agents);
-  }
-
-  function getBuildAgentNameFromState() {
-    return getBuildAgentName(appStore.state.agents);
-  }
 
   function ensureSessionEventHandlersRegistered() {
     if (eventHandlerCleanups.length > 0) return;
@@ -282,13 +311,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       });
 
       postMessage({ type: 'ready' });
-
-      const postFocusState = () =>
-        postFocusStateWithDependencies({
-          sendMessage: postMessage,
-          isVisible: () => document.visibilityState === 'visible',
-          hasFocus: () => document.hasFocus(),
-        });
 
       postFocusState();
 
@@ -365,23 +387,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     });
 
     return { client };
-  }
-
-  function getActiveProviderSelection() {
-    return getActiveProviderSelectionForState({
-      activeSessionId: appStore.state.activeSessionId,
-      selectedModel: appStore.state.selectedModel,
-      providers: appStore.state.providers,
-      providerDefaults: appStore.state.providerDefaults,
-      getActiveRalphModel: (sessionId) => {
-        const managerSessionId = ralphStore.isRalphSession(sessionId)
-          ? sessionId
-          : ralphStore.findManagerSessionIdForChild(sessionId);
-        const model = managerSessionId ? ralphStore.getRun(managerSessionId)?.config.model : null;
-        if (!model?.providerID) return null;
-        return { providerID: model.providerID, modelID: model.modelID };
-      },
-    });
   }
 
   async function recheckSessionStatus(sessionId: string) {
@@ -773,10 +778,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function deleteSession(id: string) {
     await sessionManagementOperations.deleteSession(id);
-  }
-
-  async function deleteSessionImmediately(id: string) {
-    await client.varro.session.deleteImmediately(id);
   }
 
   async function restoreSession(rootID: string) {

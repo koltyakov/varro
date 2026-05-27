@@ -1635,6 +1635,72 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
+  it('keeps active parent loading when a child session is still working', () => {
+    const handlers = installHandlers();
+
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-parent',
+        isSessionInActiveTree: (sessionId) =>
+          sessionId === 'session-parent' || sessionId === 'session-child',
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-child', status: { type: 'busy' } },
+    });
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          ...createAssistantEntry({
+            id: 'assistant-parent-1',
+            sessionID: 'session-parent',
+            time: { created: 1, completed: 2 },
+          }).info,
+        },
+      },
+    });
+
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('stops active parent loading when the last working child session becomes idle', () => {
+    const handlers = installHandlers();
+
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-parent',
+        isSessionInActiveTree: (sessionId) =>
+          sessionId === 'session-parent' || sessionId === 'session-child',
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-child', status: { type: 'busy' } },
+    });
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
+          ...createAssistantEntry({
+            id: 'assistant-parent-1',
+            sessionID: 'session-parent',
+            time: { created: 1, completed: 2 },
+          }).info,
+        },
+      },
+    });
+
+    expect(stopLoading).not.toHaveBeenCalled();
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-child' } });
+
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
   it('stops loading for a stale busy status when synced assistant already completed', () => {
     const handlers = installHandlers();
 

@@ -23,6 +23,7 @@ import {
   messageListScrollRequestKey,
   getChildRunsByParentId,
   getActiveUsageLimitNotice,
+  isActiveSessionWorking,
   getSessionTreeRootId,
   getSessionTreeIds,
   messageStructureVersion,
@@ -71,7 +72,7 @@ import {
   restoreExpansionScrollAnchor as restoreExpansionScrollAnchorFromState,
   type ExpansionScrollAnchor,
 } from './message-list/scrolling';
-import { MessageRows, type AssistantDialogSummaryInfo } from './message-list/MessageRows';
+import type { AssistantDialogSummaryInfo } from './message-list/MessageRows';
 import { VirtualizedContent } from './message-list/VirtualizedContent';
 
 export {
@@ -194,8 +195,6 @@ function shouldHideThreadMessage(
 
   const activeTreeIds = new Set(getSessionTreeIds(activeSessionId));
   if (!activeTreeIds.has(entry.info.sessionID)) return true;
-
-  if (entry.info.role !== 'user') return false;
   if (entry.info.sessionID === activeSessionId) return false;
 
   const session = state.sessions.find((item) => item.id === entry.info.sessionID);
@@ -270,6 +269,9 @@ const VIRTUALIZE_THRESHOLD = 50;
 
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
+const LOADING_ROW_REAPPEAR_DELAY_MS = 180;
+const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
+const TRAILING_SUMMARY_SETTLE_DELAY_MS = 240;
 
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -332,7 +334,10 @@ export function MessageList() {
     createSignal<StickyUserMessagePreview | null>(null);
   const [stickyPreviewScrollTop, setStickyPreviewScrollTop] = createSignal(0);
   const [stickyPreviewViewportHeight, setStickyPreviewViewportHeight] = createSignal(0);
+  const [reserveLoadingRow, setReserveLoadingRow] = createSignal(false);
+  const [showLoadingRow, setShowLoadingRow] = createSignal(false);
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
+  const activeSessionWorking = createMemo(() => isActiveSessionWorking());
   const shouldShowStarterLogo = createMemo(() => {
     if (state.messages.length > 0) return false;
 
@@ -361,7 +366,7 @@ export function MessageList() {
   const streamingPart = createMemo(() => {
     const streamingPartId = state.streamingPartId;
     messageStructureVersion();
-    return untrack(() => findStreamingPart(state.messages, streamingPartId));
+    return untrack(() => findStreamingPart(messages(), streamingPartId));
   });
   const streamingTextLength = createMemo(() => state.streamingText.length);
   const visibleBlockingStreamingPart = createMemo(() => {
@@ -454,6 +459,28 @@ export function MessageList() {
   let cachedVirtualMetrics: VirtualMetrics | null = null;
   let cachedVirtualMetricsItemIds: string[] | null = null;
   let dirtyVirtualMetricsFromIndex = Number.POSITIVE_INFINITY;
+  let loadingRowReappearTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let loadingRowReserveReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let trailingSummarySettleTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let loadingRowHiddenByVisibleStream = false;
+
+  function clearLoadingRowReappearTimer() {
+    if (!loadingRowReappearTimer) return;
+    clearTimeout(loadingRowReappearTimer);
+    loadingRowReappearTimer = 0;
+  }
+
+  function clearLoadingRowReserveReleaseTimer() {
+    if (!loadingRowReserveReleaseTimer) return;
+    clearTimeout(loadingRowReserveReleaseTimer);
+    loadingRowReserveReleaseTimer = 0;
+  }
+
+  function clearTrailingSummarySettleTimer() {
+    if (!trailingSummarySettleTimer) return;
+    clearTimeout(trailingSummarySettleTimer);
+    trailingSummarySettleTimer = 0;
+  }
 
   function markVirtualMetricsDirty(messageId: string) {
     if (dirtyVirtualMetricsFromIndex === 0) return;
@@ -498,6 +525,67 @@ export function MessageList() {
     if (pruneMeasuredHeights(measuredHeights, messageIds())) {
       setMeasurementVersion((version) => version + 1);
     }
+  });
+
+  const hasIncompleteVisibleAssistantReply = createMemo(() => {
+    messageInfoVersion();
+    return messages().some(
+      (entry) => isAssistantMessage(entry.info) && !entry.info.time.completed && !entry.info.error
+    );
+  });
+
+  const loadingRowEligible = createMemo(
+    () =>
+      (activeSessionWorking() || hasIncompleteVisibleAssistantReply()) &&
+      !hasActiveQuestion() &&
+      !hasActivePermission() &&
+      !activeUsageLimit()
+  );
+
+  const shouldShowLoadingRow = createMemo(
+    () => loadingRowEligible() && !visibleBlockingStreamingPart()
+  );
+
+  createEffect(() => {
+    const eligible = loadingRowEligible();
+    const blockedByVisibleStream = eligible && visibleBlockingStreamingPart();
+    const shouldShow = shouldShowLoadingRow();
+    const isReserved = reserveLoadingRow();
+    const isShowing = showLoadingRow();
+
+    if (!eligible) {
+      clearLoadingRowReappearTimer();
+      loadingRowHiddenByVisibleStream = false;
+      if (isShowing) setShowLoadingRow(false);
+      if (!isReserved || loadingRowReserveReleaseTimer) return;
+      loadingRowReserveReleaseTimer = setTimeout(() => {
+        loadingRowReserveReleaseTimer = 0;
+        if (!loadingRowEligible()) setReserveLoadingRow(false);
+      }, LOADING_ROW_RESERVE_RELEASE_DELAY_MS);
+      return;
+    }
+
+    clearLoadingRowReserveReleaseTimer();
+    if (!isReserved) setReserveLoadingRow(true);
+
+    if (blockedByVisibleStream) {
+      clearLoadingRowReappearTimer();
+      loadingRowHiddenByVisibleStream = true;
+      if (isShowing) setShowLoadingRow(false);
+      return;
+    }
+
+    if (!shouldShow || isShowing || loadingRowReappearTimer) return;
+
+    if (!loadingRowHiddenByVisibleStream) {
+      setShowLoadingRow(true);
+      return;
+    }
+
+    loadingRowReappearTimer = setTimeout(() => {
+      loadingRowReappearTimer = 0;
+      if (shouldShowLoadingRow()) setShowLoadingRow(true);
+    }, LOADING_ROW_REAPPEAR_DELAY_MS);
   });
 
   const virtualMetrics = createMemo(() => {
@@ -571,6 +659,24 @@ export function MessageList() {
   const activeSessionRootId = createMemo(
     () => getSessionTreeRootId(state.activeSessionId) || state.activeSessionId
   );
+  const [trailingSummarySettled, setTrailingSummarySettled] = createSignal(true);
+
+  createEffect(() => {
+    clearTrailingSummarySettleTimer();
+
+    if (activeSessionWorking()) {
+      if (trailingSummarySettled()) setTrailingSummarySettled(false);
+      return;
+    }
+
+    if (trailingSummarySettled()) return;
+
+    trailingSummarySettleTimer = setTimeout(() => {
+      trailingSummarySettleTimer = 0;
+      if (!activeSessionWorking()) setTrailingSummarySettled(true);
+    }, TRAILING_SUMMARY_SETTLE_DELAY_MS);
+  });
+
   const questionRequestsByToolCall = createMemo(() =>
     buildQuestionRequestLookup(state.questions, activeSessionRootId())
   );
@@ -790,7 +896,7 @@ export function MessageList() {
     }
 
     const capturedAutoScroll = autoScroll();
-    if (capturedAutoScroll) {
+    if (capturedAutoScroll || userScrollRecentlyActive()) {
       setMeasurementVersion((version) => version + 1);
       return;
     }
@@ -1287,6 +1393,9 @@ export function MessageList() {
       measuredRowObserver = null;
       clearObservedVisibleMessages();
       if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
+      clearLoadingRowReappearTimer();
+      clearLoadingRowReserveReleaseTimer();
+      clearTrailingSummarySettleTimer();
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       cancelScheduledMeasurement();
       activeFollowLoopSessionId = null;
@@ -1446,6 +1555,9 @@ export function MessageList() {
 
     pendingScrollToBottomRequest = true;
     followModeLocked = true;
+    lastWheelAt = Number.NEGATIVE_INFINITY;
+    lastUserScrollAt = Number.NEGATIVE_INFINITY;
+    lastWheelUpAt = Number.NEGATIVE_INFINITY;
     setAutoScroll(true);
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
@@ -1482,12 +1594,13 @@ export function MessageList() {
   const modelChangeMap = createMemo(() => {
     messageInfoVersion();
     const providerMap = new Map(state.providers.map((p) => [p.id, p]));
+    const messagesSnapshot = messages();
     return untrack(() => {
       const result = new Map<string, string>();
       let prevProvider: string | undefined;
       let prevModel: string | undefined;
       let prevVariant: string | undefined;
-      for (const msg of state.messages) {
+      for (const msg of messagesSnapshot) {
         if (!isAssistantMessage(msg.info)) continue;
         const cur = msg.info as AssistantMessage;
         if (cur.mode === 'subagent') continue;
@@ -1545,11 +1658,38 @@ export function MessageList() {
 
   const assistantDialogSummaryMap = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => getAssistantDialogSummaryMap(state.messages, renderedMessageIds()));
+    const activeStatusType = state.activeSessionId
+      ? state.sessionStatus[state.activeSessionId]?.type
+      : undefined;
+    const suppressTrailingSummary =
+      activeSessionWorking() ||
+      activeStatusType === 'busy' ||
+      activeStatusType === 'retry' ||
+      !trailingSummarySettled();
+    return untrack(() =>
+      getAssistantDialogSummaryMap(state.messages, renderedMessageIds(), {
+        suppressTrailingSummary,
+      })
+    );
   });
   const highlightedAssistantMessageIds = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => new Set(getAssistantDialogSummaryMap(state.messages).keys()));
+    const activeStatusType = state.activeSessionId
+      ? state.sessionStatus[state.activeSessionId]?.type
+      : undefined;
+    const suppressTrailingSummary =
+      activeSessionWorking() ||
+      activeStatusType === 'busy' ||
+      activeStatusType === 'retry' ||
+      !trailingSummarySettled();
+    return untrack(
+      () =>
+        new Set(
+          getAssistantDialogSummaryMap(state.messages, undefined, {
+            suppressTrailingSummary,
+          }).keys()
+        )
+    );
   });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
 
@@ -1587,66 +1727,33 @@ export function MessageList() {
               </Show>
             }
           >
-            <Show
-              when={shouldVirtualize()}
-              fallback={
-                <MessageRows
-                  messages={messages()}
-                  modelChangeMap={modelChangeMap()}
-                  lastAssistantID={lastAssistantID()}
-                  outerListVirtualized={false}
-                  previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
-                  fileEditStackGroupMap={assistantStackGroupMap()}
-                  assistantDialogSummaryMap={assistantDialogSummaryMap()}
-                  highlightedAssistantMessageIds={highlightedAssistantMessageIds()}
-                  hasBuildAgent={hasBuildAgent()}
-                  latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
-                  observeMeasuredRow={observeMeasuredRow}
-                  isPlanningAssistantMessage={isPlanningAssistantMessage}
-                  questionRequestForTool={getQuestionRequestForTool}
-                  permissionMatchForTool={getPermissionMatchForTool}
-                  shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
-                  buildPlanImplementationPrompt={buildPlanImplementationPrompt}
-                  buildPlanDocumentContent={buildPlanDocumentContent}
-                />
-              }
-            >
-              <VirtualizedContent
-                messages={messages()}
-                modelChangeMap={modelChangeMap()}
-                lastAssistantID={lastAssistantID()}
-                outerListVirtualized
-                previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
-                fileEditStackGroupMap={assistantStackGroupMap()}
-                assistantDialogSummaryMap={assistantDialogSummaryMap()}
-                highlightedAssistantMessageIds={highlightedAssistantMessageIds()}
-                hasBuildAgent={hasBuildAgent()}
-                latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
-                visibleRange={visibleRange()}
-                observeMeasuredRow={observeMeasuredRow}
-                isPlanningAssistantMessage={isPlanningAssistantMessage}
-                questionRequestForTool={getQuestionRequestForTool}
-                permissionMatchForTool={getPermissionMatchForTool}
-                shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
-                buildPlanImplementationPrompt={buildPlanImplementationPrompt}
-                buildPlanDocumentContent={buildPlanDocumentContent}
-              />
-            </Show>
+            <VirtualizedContent
+              messages={messages()}
+              modelChangeMap={modelChangeMap()}
+              lastAssistantID={lastAssistantID()}
+              outerListVirtualized={shouldVirtualize()}
+              previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
+              fileEditStackGroupMap={assistantStackGroupMap()}
+              assistantDialogSummaryMap={assistantDialogSummaryMap()}
+              highlightedAssistantMessageIds={highlightedAssistantMessageIds()}
+              hasBuildAgent={hasBuildAgent()}
+              latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+              visibleRange={visibleRange()}
+              observeMeasuredRow={observeMeasuredRow}
+              isPlanningAssistantMessage={isPlanningAssistantMessage}
+              questionRequestForTool={getQuestionRequestForTool}
+              permissionMatchForTool={getPermissionMatchForTool}
+              shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
+              buildPlanImplementationPrompt={buildPlanImplementationPrompt}
+              buildPlanDocumentContent={buildPlanDocumentContent}
+            />
           </Show>
           <PendingActionRows
             questions={standaloneQuestions()}
             permissions={standalonePermissions()}
           />
-          <Show
-            when={
-              (isLoading() || isSessionCompacting()) &&
-              !hasActiveQuestion() &&
-              !hasActivePermission() &&
-              !visibleBlockingStreamingPart() &&
-              !activeUsageLimit()
-            }
-          >
-            <LoadingRow compacting={isSessionCompacting()} />
+          <Show when={reserveLoadingRow()}>
+            <LoadingRow compacting={isSessionCompacting()} visible={showLoadingRow()} />
           </Show>
         </div>
       </div>
@@ -1657,7 +1764,8 @@ export function MessageList() {
 
 export function getAssistantDialogSummaryMap(
   messages: Array<{ info: Message; parts: Part[] }>,
-  targetMessageIds?: ReadonlySet<string>
+  targetMessageIds?: ReadonlySet<string>,
+  options?: { suppressTrailingSummary?: boolean }
 ) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
   let childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> | null =
@@ -1667,7 +1775,7 @@ export function getAssistantDialogSummaryMap(
   let currentSubagentHandoffCount = 0;
   let currentUserRequestCreated: number | null = null;
 
-  const flush = () => {
+  const flush = (args?: { trailing?: boolean }) => {
     if (currentMessages.length === 0) {
       currentMessages = [];
       currentPrimaryMessageIds = [];
@@ -1678,6 +1786,14 @@ export function getAssistantDialogSummaryMap(
 
     const lastMessage = currentMessages[currentMessages.length - 1];
     if (!lastMessage?.time.completed) {
+      currentMessages = [];
+      currentPrimaryMessageIds = [];
+      currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
+      return;
+    }
+
+    if (args?.trailing && options?.suppressTrailingSummary) {
       currentMessages = [];
       currentPrimaryMessageIds = [];
       currentSubagentHandoffCount = 0;
@@ -1747,7 +1863,7 @@ export function getAssistantDialogSummaryMap(
     }
   }
 
-  flush();
+  flush({ trailing: true });
   return result;
 }
 
@@ -1802,7 +1918,7 @@ function countAssistantDialogChildRuns(
   return count;
 }
 
-function LoadingRow(props: { compacting: boolean }) {
+function LoadingRow(props: { compacting: boolean; visible: boolean }) {
   const [now, setNow] = createSignal(Date.now());
   const STALE_TOTAL_THRESHOLD_MS = 90_000;
   const STALE_INACTIVITY_THRESHOLD_MS = 60_000;
@@ -1853,7 +1969,12 @@ function LoadingRow(props: { compacting: boolean }) {
   };
 
   return (
-    <div class="interactive-item-container interactive-response interactive-loading-row">
+    <div
+      class={`interactive-item-container interactive-response interactive-loading-row${
+        props.visible ? '' : ' is-reserved'
+      }`}
+      aria-hidden={props.visible ? undefined : true}
+    >
       <div
         class={`loading-indicator ${isStale() ? 'stale' : ''} ${props.compacting ? 'is-compacting' : ''}`}
       >

@@ -88,6 +88,10 @@ function isCompleteMessagePart(value: unknown): value is Part {
   );
 }
 
+function isWorkingStatus(status: SessionStatus | null | undefined) {
+  return status?.type === 'busy' || status?.type === 'retry';
+}
+
 function getPermissionReplyId(props: Record<string, unknown>) {
   const source =
     props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : props;
@@ -355,12 +359,20 @@ export class SessionEventHandlerOperations {
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
   const activeMessageSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const workingSessionIds = new Set<string>();
   let pendingPermissionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  const setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
+    if (isWorkingStatus(status)) workingSessionIds.add(sessionId);
+    else workingSessionIds.delete(sessionId);
+    deps.setSessionStatusEntry(sessionId, status);
+  };
   const isSessionInActiveTree = (sessionId: string | null | undefined) => {
     if (!sessionId) return false;
     if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
     return sessionId === deps.getActiveSessionId();
   };
+  const isActiveTreeWorking = () =>
+    [...workingSessionIds].some((sessionId) => isSessionInActiveTree(sessionId));
   const scheduleActiveMessageSync = (
     sessionId: string,
     delayMs = ACTIVE_MESSAGE_RESYNC_DELAY_MS
@@ -374,11 +386,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     activeMessageSyncTimers.set(sessionId, timer);
   };
   const markSessionProgress = (sessionId: string) => {
-    deps.setSessionStatusEntry(sessionId, { type: 'busy' });
+    setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
   };
   const markSessionError = (sessionId: string, error: AssistantMessage['error'] | undefined) => {
-    deps.setSessionStatusEntry(sessionId, { type: 'idle' });
+    setSessionStatusEntry(sessionId, { type: 'idle' });
     deps.clearPendingAbort(sessionId);
     if (error && isAbortedAssistantError(error)) {
       sessionStore.setSessionFailed(sessionId, false);
@@ -396,7 +408,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         sessionStore.setSessionUsageLimit(sessionId, null);
       }
     }
-    if (sessionId === deps.getActiveSessionId()) uiStore.stopLoading();
+    if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) uiStore.stopLoading();
     deps.syncSession(sessionId).catch(() => {});
     if (isSessionInActiveTree(sessionId)) {
       deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
@@ -414,7 +426,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
     const alreadyPending = deps.hasPendingAbort(info.id);
     deps.markPendingAbort(info.id);
-    deps.setSessionStatusEntry(info.id, { type: 'idle' });
+    setSessionStatusEntry(info.id, { type: 'idle' });
     if (alreadyPending) return;
 
     void deps.abortRemoteSession(info.id).catch((err) => {
@@ -516,7 +528,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const status = props.status as SessionStatus;
       if (deps.shouldIgnorePendingAbortStatus(sessionID, status)) return;
       const abortedRetry = deps.hasPendingAbort(sessionID);
-      deps.setSessionStatusEntry(sessionID, status);
+      setSessionStatusEntry(sessionID, status);
       if (status.type === 'busy') {
         deps.clearUsageLimitOnResumedProgress(sessionID, status);
       }
@@ -538,7 +550,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
             uiStore.stopLoading();
           } else uiStore.startLoading();
         } else {
-          uiStore.stopLoading();
+          if (isActiveTreeWorking()) uiStore.startLoading();
+          else uiStore.stopLoading();
         }
       }
     })
@@ -550,11 +563,16 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const abortedRetry = deps.hasPendingAbort(sid);
       deps.clearPendingAbort(sid);
       if (sid) sessionStore.setSessionCompacting(sid, false);
-      if (sid) deps.setSessionStatusEntry(sid, { type: 'idle' });
+      if (sid) setSessionStatusEntry(sid, { type: 'idle' });
       if (sid && !abortedRetry) {
         deps.updateUsageLimitState(sid, { type: 'idle' });
       }
-      if (!sid || sid === deps.getActiveSessionId()) uiStore.stopLoading();
+      if (!sid || sid === deps.getActiveSessionId()) {
+        if (isActiveTreeWorking()) uiStore.startLoading();
+        else uiStore.stopLoading();
+      } else if (isSessionInActiveTree(sid) && !isActiveTreeWorking()) {
+        uiStore.stopLoading();
+      }
       if (sid) deps.syncSession(sid).catch(() => {});
       if (sid && sid === deps.getActiveSessionId()) {
         const activeMessages = deps.getMessages();
@@ -620,15 +638,17 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
 
       if (assistantFinished) {
-        deps.setSessionStatusEntry(sessionID, { type: 'idle' });
+        setSessionStatusEntry(sessionID, { type: 'idle' });
         if (assistantCompleted) {
           sessionStore.markSessionResponseCompleted(sessionID, partialMessage.time?.completed);
         }
         deps.syncSession(sessionID).catch(() => {});
-        if (sessionID === deps.getActiveSessionId()) uiStore.stopLoading();
+        if (sessionID === deps.getActiveSessionId() && !isActiveTreeWorking())
+          uiStore.stopLoading();
       }
 
       if (isSessionInActiveTree(sessionID)) {
+        if (!assistantFinished) markSessionProgress(sessionID);
         uiStore.markLoadingActivity();
         if (message) {
           sessionStore.upsertMessageInfo(message);
@@ -711,29 +731,30 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if (!p) return;
       const sessionID = p.sessionID as string | undefined;
-      if (isSessionInActiveTree(sessionID)) {
-        const messageID = p.messageID as string;
-        const partID = p.partID as string;
-        const delta = p.delta as string;
-        const field = p.field as string;
-        uiStore.markLoadingActivity();
-        const hasPart = deps
-          .getMessages()
-          .some(
-            (message) =>
-              message.info.id === messageID && message.parts.some((part) => part.id === partID)
-          );
-        if (!hasPart && sessionID) {
-          deps
-            .syncSessionMessages(sessionID)
-            .then(() =>
-              sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field)
-            )
-            .catch((err) => deps.logError('syncSessionMessages', err));
-          return;
-        }
-        sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);
+      if (!sessionID || !isSessionInActiveTree(sessionID)) return;
+
+      const messageID = p.messageID as string;
+      const partID = p.partID as string;
+      const delta = p.delta as string;
+      const field = p.field as string;
+      markSessionProgress(sessionID);
+      uiStore.markLoadingActivity();
+      const hasPart = deps
+        .getMessages()
+        .some(
+          (message) =>
+            message.info.id === messageID && message.parts.some((part) => part.id === partID)
+        );
+      if (!hasPart) {
+        deps
+          .syncSessionMessages(sessionID)
+          .then(() =>
+            sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field)
+          )
+          .catch((err) => deps.logError('syncSessionMessages', err));
+        return;
       }
+      sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);
     })
   );
 

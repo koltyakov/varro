@@ -21,6 +21,10 @@ export function AppRoot() {
   );
 }
 
+function renderErrorFallback(err: Error) {
+  return <ErrorFallback err={err} />;
+}
+
 export function App() {
   useOpenCode();
   const appState = useAppState();
@@ -35,7 +39,7 @@ export function App() {
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
-      <ErrorBoundary fallback={(err) => <ErrorFallback err={err} />}>
+      <ErrorBoundary fallback={renderErrorFallback}>
         <Show when={showChat()} fallback={<ServerStatus />}>
           <Chat />
         </Show>

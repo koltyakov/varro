@@ -9,6 +9,11 @@ import { RalphDashboard } from '../ralph/RalphDashboard';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { state } from '../../lib/state';
 
+function activeRalphSessionId() {
+  const id = state.activeSessionId;
+  return id && ralphStore.isRalphSession(id) ? id : null;
+}
+
 export function ChatWorkspace(props: {
   isEnteringChatView: boolean;
   shouldRenderWorkspace: boolean;
@@ -127,11 +132,6 @@ export function ChatWorkspace(props: {
       />
     </aside>
   );
-
-  const activeRalphSessionId = () => {
-    const id = state.activeSessionId;
-    return id && ralphStore.isRalphSession(id) ? id : null;
-  };
 
   const mainShell = () => (
     <div class="chat-main-shell">

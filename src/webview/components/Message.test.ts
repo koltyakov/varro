@@ -273,6 +273,24 @@ describe('getAssistantContainerVariant', () => {
     ).toBe('plain');
   });
 
+  it('does not wrap highlighted structured-only turns in an assistant card', () => {
+    expect(
+      getAssistantContainerVariant({
+        isUser: false,
+        visibleDiffCount: 0,
+        fileEditStackGroup: null,
+        isSubagent: false,
+        hasStructuredAssistantParts: true,
+        layoutParts: [
+          toolPart('tool-1', completedToolState({ filePath: 'a.ts' }, 'Done', 'Read')),
+          toolPart('tool-2', completedToolState({ filePath: 'b.ts' }, 'Done', 'Read')),
+        ],
+        highlightFinalAnswer: true,
+        hasError: false,
+      })
+    ).toBe('plain');
+  });
+
   it('keeps text-only final answers in the standard assistant card', () => {
     expect(
       getAssistantContainerVariant({

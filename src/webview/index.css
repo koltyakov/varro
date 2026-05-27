@@ -516,6 +516,7 @@ body.vscode-high-contrast-light .interactive-session {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-anchor: none;
   scrollbar-gutter: stable;
   overscroll-behavior-y: contain;
   padding: 0 0 8px 0;
@@ -4862,8 +4863,20 @@ kbd {
 }
 
 .interactive-loading-row {
+  height: 34px;
+  box-sizing: border-box;
   padding-top: 2px;
+  overflow: hidden;
   overflow-anchor: none;
+}
+
+.interactive-loading-row .loading-indicator {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.interactive-loading-row.is-reserved .loading-indicator {
+  visibility: hidden;
 }
 
 .user-message-text {

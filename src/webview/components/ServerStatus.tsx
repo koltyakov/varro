@@ -3,6 +3,10 @@ import { postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
 import { useAppState } from '../lib/app-state-context';
 
+function openExternal(url: string) {
+  postMessage({ type: 'vscode/open-external', payload: { url } });
+}
+
 export function ServerStatus() {
   const appState = useAppState();
   const status = () => appState.state.serverStatus;
@@ -15,9 +19,6 @@ export function ServerStatus() {
     return currentStatus.state === 'error' ? currentStatus.message.trim() : '';
   };
   const isMissingCliError = () => serverErrorMessage().includes('OpenCode CLI not found');
-  const openExternal = (url: string) => {
-    postMessage({ type: 'vscode/open-external', payload: { url } });
-  };
 
   return (
     <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center">

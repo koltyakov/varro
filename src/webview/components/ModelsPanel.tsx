@@ -29,6 +29,24 @@ type ModelContextMenuState = {
   modelID: string;
 };
 
+function routableAgents() {
+  return state.allAgents.filter((agent) => agent.mode === 'subagent');
+}
+
+async function loadCompatibilityState() {
+  try {
+    setState('providerAuthMethods', await client.config.providerAuth());
+  } catch {
+    setState('providerAuthMethods', {});
+  }
+
+  try {
+    setState('workspaceStatuses', await client.config.workspaceStatus());
+  } catch {
+    setState('workspaceStatuses', []);
+  }
+}
+
 export function ModelsPanel() {
   onMount(() => {
     postMessage({ type: 'providers/watch', payload: { active: true } });
@@ -47,8 +65,6 @@ export function ModelsPanel() {
   const workspaceStatusText = createMemo(() =>
     state.workspaceStatuses.map((entry) => `${entry.workspaceID} (${entry.status})`).join(', ')
   );
-
-  const routableAgents = () => state.allAgents.filter((agent) => agent.mode === 'subagent');
 
   const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
 
@@ -90,20 +106,6 @@ export function ModelsPanel() {
       setRouting(normalizeModelRouting(await client.varro.openCodeConfig()));
     } catch {
       setRouting(createEmptyRouting());
-    }
-  }
-
-  async function loadCompatibilityState() {
-    try {
-      setState('providerAuthMethods', await client.config.providerAuth());
-    } catch {
-      setState('providerAuthMethods', {});
-    }
-
-    try {
-      setState('workspaceStatuses', await client.config.workspaceStatus());
-    } catch {
-      setState('workspaceStatuses', []);
     }
   }
 

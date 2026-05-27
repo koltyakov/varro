@@ -57,6 +57,12 @@ export function getAssistantContainerVariant(params: {
   const textPartCount = parts.filter((part) => part.type === 'text').length;
   const hasReasoningPart = parts.some((part) => part.type === 'reasoning');
 
+  if (params.highlightFinalAnswer && textPartCount === 0) {
+    return parts.length === 1 && parts[0].type === 'tool' && !isFileEditPart(parts[0])
+      ? 'bare'
+      : 'plain';
+  }
+
   if (params.highlightFinalAnswer && textPartCount >= 1 && hasReasoningPart) {
     return 'plain';
   }

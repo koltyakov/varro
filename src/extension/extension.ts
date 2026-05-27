@@ -25,6 +25,14 @@ let server: OpenCodeServer | null = null;
 let contextProvider: ContextProvider | null = null;
 let sidebarProvider: SidebarProvider | null = null;
 
+async function disposeSafe(fn: () => PromiseLike<void> | void, label: string) {
+  try {
+    await fn();
+  } catch (err) {
+    logger.error(`Error during ${label}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
 
@@ -74,14 +82,6 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
-  const disposeSafe = async (fn: () => PromiseLike<void> | void, label: string) => {
-    try {
-      await fn();
-    } catch (err) {
-      logger.error(`Error during ${label}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
   await disposeSafe(() => sidebarProvider?.dispose(), 'sidebarProvider dispose');
   await disposeSafe(() => contextProvider?.dispose(), 'contextProvider dispose');
   await disposeSafe(() => server?.disconnect(), 'server disconnect');

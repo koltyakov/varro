@@ -239,6 +239,50 @@ describe('ChatInput', () => {
     }).not.toThrow();
   });
 
+  it('uses the busy placeholder while a child session is still working', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Research child',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ] satisfies Session[]);
+    setState('sessionStatus', {
+      'session-1': { type: 'idle' },
+      'child-1': { type: 'busy' },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.rich-composer')?.getAttribute('data-placeholder')).toBe(
+      'Queue a follow-up or steer'
+    );
+
+    setState('sessionStatus', {
+      'session-1': { type: 'idle' },
+      'child-1': { type: 'idle' },
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.rich-composer')?.getAttribute('data-placeholder')).toBe(
+      'Describe what to build'
+    );
+  });
+
   it('hides provider-limit UI when polling is disabled', () => {
     setProviderLimitPollIntervalSeconds(-1);
     setState('providers', [

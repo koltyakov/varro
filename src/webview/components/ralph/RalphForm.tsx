@@ -65,6 +65,14 @@ export function shouldDeletePreviousBlankSession(
   );
 }
 
+function visibleProviders() {
+  return state.providers;
+}
+
+function close() {
+  ralphStore.setShowRalphForm(false);
+}
+
 export function RalphForm() {
   const [planPath, setPlanPath] = createSignal('');
   const [iterations, setIterations] = createSignal(DEFAULT_ITERATIONS);
@@ -77,8 +85,6 @@ export function RalphForm() {
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
   const [modelPickerBoundaryRef, setModelPickerBoundaryRef] = createSignal<HTMLDivElement>();
-
-  const visibleProviders = () => state.providers;
 
   const currentModelInfo = createMemo(() => {
     const sel = model();
@@ -120,10 +126,6 @@ export function RalphForm() {
     }
     return visible;
   });
-
-  function close() {
-    ralphStore.setShowRalphForm(false);
-  }
 
   async function pickPlanPath() {
     if (isPickingPlan()) return;

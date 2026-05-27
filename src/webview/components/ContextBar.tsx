@@ -17,12 +17,27 @@ import { postMessage } from '../lib/bridge';
 import { DocumentIcon } from './DocumentIcon';
 import { FolderIcon } from './FolderIcon';
 
+function files() {
+  return state.droppedFiles;
+}
+
+function clipboardImages() {
+  return state.clipboardImages;
+}
+
+function selection() {
+  return state.editorContext.selection;
+}
+
+function terminalSelection() {
+  return state.terminalSelection;
+}
+
+function activeFile() {
+  return state.editorContext.activeFile;
+}
+
 export function ContextBar() {
-  const files = () => state.droppedFiles;
-  const clipboardImages = () => state.clipboardImages;
-  const selection = () => state.editorContext.selection;
-  const terminalSelection = () => state.terminalSelection;
-  const activeFile = () => state.editorContext.activeFile;
   const explicitContextForActiveFile = () => hasExplicitContextForPath(files(), activeFile()?.path);
   const hasContext = () =>
     files().length > 0 ||
