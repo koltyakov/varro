@@ -63,9 +63,11 @@ describe('message metrics helpers', () => {
     expect(formatDuration(9_500)).toBe('10s');
     expect(formatDuration(15_000)).toBe('15s');
     expect(formatDuration(125_000)).toBe('2m 5s');
-    expect(formatDuration(7_200_000)).toBe('2h 0m');
+    expect(formatDuration(60_000)).toBe('1m');
+    expect(formatDuration(7_200_000)).toBe('2h');
+    expect(formatDuration(3_660_000)).toBe('1h 1m');
     expect(formatDuration(90_000_000)).toBe('1d 1h');
-    expect(formatDuration(172_800_000)).toBe('2d 0h');
+    expect(formatDuration(172_800_000)).toBe('2d');
   });
 
   it('formats cost values', () => {
