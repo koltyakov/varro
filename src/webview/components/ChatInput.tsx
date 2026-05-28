@@ -173,7 +173,9 @@ export function getLatestAssistantMessageInfo(
 ): AssistantMessage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const info = messages[index]?.info;
-    if (info && isAssistantMessage(info)) return info;
+    if (!info || !isAssistantMessage(info)) continue;
+    if (info.mode === 'subagent') continue;
+    return info;
   }
   return null;
 }
@@ -184,6 +186,7 @@ export function getLatestAssistantMessageInfoWithTokens(
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const info = messages[index]?.info;
     if (!info || !isAssistantMessage(info)) continue;
+    if (info.mode === 'subagent') continue;
     if ((info.tokens.input || 0) + (info.tokens.output || 0) > 0) return info;
   }
   return null;

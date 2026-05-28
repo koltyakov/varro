@@ -88,6 +88,16 @@ describe('ChatInput perf helpers', () => {
     expect(readCount).toBe(2);
   });
 
+  it('skips subagent messages when finding latest assistant', () => {
+    const entries = [
+      { info: assistantMessage('primary', { input: 10, output: 5 }) },
+      { info: { ...assistantMessage('subagent-1', { input: 20, output: 10 }), mode: 'subagent' } },
+    ];
+
+    expect(getLatestAssistantMessageInfo(entries)?.id).toBe('primary');
+    expect(getLatestAssistantMessageInfoWithTokens(entries)?.id).toBe('primary');
+  });
+
   it('sums assistant tokens directly from message entries', () => {
     expect(
       sumAssistantTokensFromMessageEntries([
