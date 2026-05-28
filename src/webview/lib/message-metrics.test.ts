@@ -59,7 +59,8 @@ describe('message metrics helpers', () => {
     expect(formatNumber(1_234.4)).toBe('1,234');
     expect(formatDuration(undefined)).toBe('');
     expect(formatDuration(500)).toBe('500ms');
-    expect(formatDuration(9_500)).toBe('9.5s');
+    expect(formatDuration(1_500)).toBe('2s');
+    expect(formatDuration(9_500)).toBe('10s');
     expect(formatDuration(15_000)).toBe('15s');
     expect(formatDuration(125_000)).toBe('2m 5s');
     expect(formatDuration(7_200_000)).toBe('2h 0m');

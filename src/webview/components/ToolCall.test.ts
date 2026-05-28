@@ -968,7 +968,7 @@ describe('FileChangeCard', () => {
     expect(links.map((link) => link.textContent)).toEqual(['src/old.ts', 'src/new.ts']);
     expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+2');
     expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-1');
-    expect(container?.querySelector('.file-edit-duration')?.textContent).toBe('1.5s');
+    expect(container?.querySelector('.file-edit-duration')?.textContent).toBe('2s');
 
     links[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     links[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

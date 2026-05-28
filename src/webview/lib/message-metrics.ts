@@ -30,10 +30,7 @@ export function formatDuration(ms: number | undefined): string {
   if (!ms || ms < 0) return '';
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) {
-    const s = ms / 1000;
-    if (ms >= 10_000) return `${s.toFixed(0)}s`;
-    const formatted = s.toFixed(1);
-    return `${formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted}s`;
+    return `${Math.round(ms / 1000)}s`;
   }
 
   const totalSeconds = Math.round(ms / 1000);
