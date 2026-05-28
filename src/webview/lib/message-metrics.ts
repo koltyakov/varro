@@ -29,7 +29,12 @@ export function formatNumber(value: number | undefined): string {
 export function formatDuration(ms: number | undefined): string {
   if (!ms || ms < 0) return '';
   if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(ms >= 10_000 ? 0 : 1)}s`;
+  if (ms < 60_000) {
+    const s = ms / 1000;
+    if (ms >= 10_000) return `${s.toFixed(0)}s`;
+    const formatted = s.toFixed(1);
+    return `${formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted}s`;
+  }
 
   const totalSeconds = Math.round(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -37,7 +42,20 @@ export function formatDuration(ms: number | undefined): string {
   if (minutes < 60) return `${minutes}m ${seconds}s`;
 
   const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+export function formatCost(cost: number | undefined): string {
+  if (!cost) return '';
+  if (cost < 0.01) return '<$0.01';
+  return `$${cost.toFixed(2)}`;
+}
+
+export function sumSessionCost(messages: AssistantMessage[]): number {
+  return messages.reduce((sum, msg) => sum + msg.cost, 0);
 }
 
 export function sumAssistantTokens(messages: AssistantMessage[]): TokenUsage {

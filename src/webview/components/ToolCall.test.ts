@@ -193,7 +193,7 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('17.6s');
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('18s');
   });
 
   it('renders a collapsed path preview as an open-file link', () => {

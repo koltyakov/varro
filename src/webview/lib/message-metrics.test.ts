@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AssistantMessage, FileDiff, Message, Part, Provider } from '../types';
 import {
   getAssistantDiffRequest,
+  formatCost,
   formatDuration,
   formatNumber,
   getAssistantDuration,
@@ -11,6 +12,7 @@ import {
   getTaskDiffs,
   isAssistantMessage,
   sumAssistantTokens,
+  sumSessionCost,
 } from './message-metrics';
 
 function assistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
@@ -60,6 +62,26 @@ describe('message metrics helpers', () => {
     expect(formatDuration(15_000)).toBe('15s');
     expect(formatDuration(125_000)).toBe('2m 5s');
     expect(formatDuration(7_200_000)).toBe('2h 0m');
+    expect(formatDuration(90_000_000)).toBe('1d 1h');
+    expect(formatDuration(172_800_000)).toBe('2d 0h');
+  });
+
+  it('formats cost values', () => {
+    expect(formatCost(undefined)).toBe('');
+    expect(formatCost(0)).toBe('');
+    expect(formatCost(0.001)).toBe('<$0.01');
+    expect(formatCost(0.05)).toBe('$0.05');
+    expect(formatCost(1.5)).toBe('$1.50');
+    expect(formatCost(12.345)).toBe('$12.35');
+  });
+
+  it('sums session cost across assistant messages', () => {
+    const messages = [
+      assistantMessage({ cost: 0.5 }),
+      assistantMessage({ id: 'assistant-2', cost: 1.25 }),
+    ];
+    expect(sumSessionCost(messages)).toBeCloseTo(1.75);
+    expect(sumSessionCost([])).toBe(0);
   });
 
   it('computes assistant token totals with and without explicit totals', () => {

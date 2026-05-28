@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import type { RalphIteration, RalphVerificationVerdict } from '../../../shared/ralph';
 import { selectSession } from '../../hooks/useOpenCode';
+import { formatDuration } from '../../lib/message-metrics';
 import { getRalphIterationLiveIssue } from './ralph-live-issue';
 
 // Shared ticker so any in-progress iteration card refreshes its displayed
@@ -132,15 +133,6 @@ function shortenVerdictLabel(name: string): string {
       .slice(0, 4);
   const single = parts[0] ?? name;
   return single.length <= 6 ? single : single.slice(0, 6);
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return `${minutes}m${remainder > 0 ? ` ${remainder}s` : ''}`;
 }
 
 function formatTokens(n: number): string {

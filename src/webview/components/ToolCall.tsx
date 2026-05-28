@@ -4,6 +4,7 @@ import { postMessage } from '../lib/bridge';
 import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
+import { formatDuration } from '../lib/message-metrics';
 import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
@@ -857,12 +858,6 @@ function parseDurationTokenMs(token: string): number | null {
     default:
       return null;
   }
-}
-
-function formatDuration(ms: number): string {
-  if (ms <= 0) return '';
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function formatPreviewValue(key: string, value: string): string {
