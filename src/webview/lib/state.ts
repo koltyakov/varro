@@ -1780,6 +1780,19 @@ function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
     for (const item of deltas) {
       const location = appState.messageIndex.findPartLocation(appState.state.messages, item.partId);
       if (location) {
+        const currentPart = appState.state.messages[location.msgIdx]?.parts[location.partIdx];
+        if (
+          item.partId !== latest.partId &&
+          currentPart?.type === 'text' &&
+          currentPart.text !== item.text &&
+          shouldUseStreamingText(currentPart.text, item.text)
+        ) {
+          appState.setState('messages', location.msgIdx, 'parts', location.partIdx, {
+            ...currentPart,
+            text: item.text,
+          });
+          committedPreviousStreamingPart = true;
+        }
         continue;
       }
 
@@ -1854,27 +1867,28 @@ export function upsertMessageInfo(info: Message) {
 
 export function upsertPart(part: Part) {
   flushPendingStreamingDeltas();
-  const msgId = (part as { messageID: string }).messageID;
+  const nextPart = materializeStreamingTextInPart(part, getStreamingTextSnapshot());
+  const msgId = (nextPart as { messageID: string }).messageID;
   batch(() => {
     setState(
       'messages',
       produce((msgs) => {
         const idx = messageIndex.findMessageIndex(msgs, msgId);
         if (idx === -1) return;
-        const location = messageIndex.findPartLocation(msgs, part.id);
+        const location = messageIndex.findPartLocation(msgs, nextPart.id);
         if (location && location.msgIdx === idx) {
-          msgs[idx].parts[location.partIdx] = part;
+          msgs[idx].parts[location.partIdx] = nextPart;
           return;
         }
 
-        msgs[idx].parts.push(part);
-        messageIndex.appendPart(msgs, part.id, {
+        msgs[idx].parts.push(nextPart);
+        messageIndex.appendPart(msgs, nextPart.id, {
           msgIdx: idx,
           partIdx: msgs[idx].parts.length - 1,
         });
       })
     );
-    if (state.streamingPartId === part.id) {
+    if (state.streamingPartId === nextPart.id) {
       setState('streamingPartId', null);
       setState('streamingText', '');
     }
@@ -2383,13 +2397,21 @@ function materializeStreamingTextInEntry(
   for (let index = 0; index < entry.parts.length; index += 1) {
     const part = entry.parts[index];
     if (part.id !== streamingSnapshot.partId) continue;
-    if (!isStreamingTextPart(part)) return;
-    if (!shouldUseStreamingText(part.text, streamingSnapshot.text)) return;
-    if (part.text !== streamingSnapshot.text) {
-      entry.parts[index] = { ...part, text: streamingSnapshot.text };
-    }
+    const nextPart = materializeStreamingTextInPart(part, streamingSnapshot);
+    if (nextPart !== part) entry.parts[index] = nextPart;
     return;
   }
+}
+
+function materializeStreamingTextInPart(
+  part: Part,
+  streamingSnapshot: StreamingTextSnapshot
+): Part {
+  if (!streamingSnapshot || part.id !== streamingSnapshot.partId) return part;
+  if (!isStreamingTextPart(part)) return part;
+  if (!shouldUseStreamingText(part.text, streamingSnapshot.text)) return part;
+  if (part.text === streamingSnapshot.text) return part;
+  return { ...part, text: streamingSnapshot.text };
 }
 
 function hasStreamingTextToMaterialize(

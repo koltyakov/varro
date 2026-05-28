@@ -56,7 +56,11 @@ import {
   shouldShowStickyUserMessagePreview,
   type StickyUserMessagePreview,
 } from './message-list/sticky-preview';
-import { findStreamingPart, hasVisibleBlockingStreamingPart } from './message-list/streaming';
+import {
+  findStreamingPart,
+  hasCommittedVisibleTextAsLastPart,
+  hasVisibleBlockingStreamingPart,
+} from './message-list/streaming';
 import {
   buildVirtualMetrics,
   calculateVirtualRangeFromMetrics,
@@ -373,6 +377,14 @@ export function MessageList() {
     const streamingText = state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
   });
+  const committedTextBlocksReappear = createMemo(() => {
+    messageStructureVersion();
+    const currentStreamingPartId = state.streamingPartId;
+    const currentLoadingStartedAt = loadingStartedAt();
+    return untrack(() =>
+      hasCommittedVisibleTextAsLastPart(messages(), currentStreamingPartId, currentLoadingStartedAt)
+    );
+  });
   const messageIndexById = createMemo(() => {
     messageInfoVersion();
     return untrack(() => {
@@ -543,7 +555,7 @@ export function MessageList() {
   );
 
   const shouldShowLoadingRow = createMemo(
-    () => loadingRowEligible() && !visibleBlockingStreamingPart()
+    () => loadingRowEligible() && !visibleBlockingStreamingPart() && !committedTextBlocksReappear()
   );
 
   createEffect(() => {

@@ -2198,10 +2198,75 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('keeps the loading row reserved after final visible text completes while loading settles', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Final answer')] },
+    ]);
+    setState('streamingPartId', 'text-1');
+    setState('streamingText', 'Final answer');
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(true);
+
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+    await Promise.resolve();
+    vi.advanceTimersByTime(180);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(true);
+    expect(row?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('shows the loading row for a new prompt after the previous assistant completed', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [] },
+      { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Final answer')] },
+      { info: userMessage('user-2'), parts: [] },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(false);
+  });
+
+  it('keeps stale busy status hidden after the final assistant text completed', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Final answer')] },
+    ]);
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(true);
+    expect(row?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('does not immediately re-show the loading row during short visible-stream gaps', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
-      { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Drafting')] },
+      {
+        info: assistantMessage('message-1'),
+        parts: [textPart('text-1', '[Working directory: /workspace]')],
+      },
     ]);
     startLoading(1);
 

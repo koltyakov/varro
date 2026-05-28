@@ -1132,6 +1132,84 @@ describe('registerSessionEventHandlers', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it('queues missing-part deltas and replays them in event order after sync', async () => {
+    const handlers = installHandlers();
+    let resolveSync: (() => void) | undefined;
+    const syncSessionMessages = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSync = resolve;
+        })
+    );
+    const messages = [
+      {
+        info: createAssistantEntry({ id: 'assistant-1', sessionID: 'session-1' }).info,
+        parts: [] as Part[],
+      },
+    ];
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        syncSessionMessages,
+      })
+    );
+
+    applyMessagePartDelta.mockClear();
+
+    handlers.get('message.part.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        partID: 'part-1',
+        delta: 'first ',
+        field: 'text',
+      },
+    });
+    messages[0]!.parts = [
+      {
+        id: 'part-1',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: 'text',
+        text: '',
+      } as Part,
+    ];
+    handlers.get('message.part.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        partID: 'part-1',
+        delta: 'second',
+        field: 'text',
+      },
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledTimes(1);
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
+
+    resolveSync?.();
+    await Promise.resolve();
+
+    expect(applyMessagePartDelta).toHaveBeenNthCalledWith(
+      1,
+      'assistant-1',
+      'part-1',
+      'first ',
+      'session-1',
+      'text'
+    );
+    expect(applyMessagePartDelta).toHaveBeenNthCalledWith(
+      2,
+      'assistant-1',
+      'part-1',
+      'second',
+      'session-1',
+      'text'
+    );
+  });
+
   it('creates and streams reasoning parts from session.next reasoning events', () => {
     const handlers = installHandlers();
     state.messages = [createAssistantEntry({ id: 'assistant-2', sessionID: 'session-1' })];
@@ -1262,6 +1340,36 @@ describe('registerSessionEventHandlers', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('ignores stale active progress events after the assistant already completed', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const clearUsageLimitOnResumedProgress = vi.fn();
+
+    loadingStartedAt.mockReturnValue(null);
+    markLoadingActivity.mockClear();
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+        setSessionStatusEntry,
+        clearUsageLimitOnResumedProgress,
+      })
+    );
+
+    handlers.get('session.next.text.ended')?.({
+      properties: { sessionID: 'session-1' },
+    });
+
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
+    expect(markLoadingActivity).not.toHaveBeenCalled();
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 
   it('marks inactive sessions busy from progress events without active message work', () => {

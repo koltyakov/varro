@@ -93,6 +93,10 @@ function isWorkingStatus(status: SessionStatus | null | undefined) {
   return status?.type === 'busy' || status?.type === 'retry';
 }
 
+function getPartDeltaQueueKey(messageID: string, partID: string) {
+  return `${messageID}\u0000${partID}`;
+}
+
 function getPermissionReplyId(props: Record<string, unknown>) {
   const source =
     props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : props;
@@ -361,6 +365,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
   const activeMessageSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const workingSessionIds = new Set<string>();
+  const pendingMissingPartDeltas = new Map<
+    string,
+    {
+      sessionID: string;
+      deltas: Array<{ messageID: string; partID: string; delta: string; field: string }>;
+      syncing: boolean;
+    }
+  >();
   let pendingPermissionSyncTimer: ReturnType<typeof setTimeout> | null = null;
   const setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
     if (isWorkingStatus(status)) workingSessionIds.add(sessionId);
@@ -374,6 +386,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const isActiveTreeWorking = () =>
     [...workingSessionIds].some((sessionId) => isSessionInActiveTree(sessionId));
+  const isStaleProgressAfterFinishedAssistant = (sessionId: string) =>
+    isSessionInActiveTree(sessionId) &&
+    latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt());
   const scheduleActiveMessageSync = (
     sessionId: string,
     delayMs = ACTIVE_MESSAGE_RESYNC_DELAY_MS
@@ -475,10 +490,56 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       .syncSessionMessages(message.sessionID)
       .catch((err) => deps.logError('syncSessionMessages', err));
   };
+  const hasMessagePart = (messageID: string, partID: string) =>
+    deps
+      .getMessages()
+      .some(
+        (message) =>
+          message.info.id === messageID && message.parts.some((part) => part.id === partID)
+      );
+  const queueMissingPartDelta = (
+    sessionID: string,
+    messageID: string,
+    partID: string,
+    delta: string,
+    field: string
+  ) => {
+    const key = getPartDeltaQueueKey(messageID, partID);
+    const existing = pendingMissingPartDeltas.get(key);
+    const pending = existing || { sessionID, deltas: [], syncing: false };
+    pending.sessionID = sessionID;
+    pending.deltas.push({ messageID, partID, delta, field });
+    pendingMissingPartDeltas.set(key, pending);
+
+    if (pending.syncing) return;
+
+    pending.syncing = true;
+    void deps
+      .syncSessionMessages(sessionID)
+      .then(() => {
+        const queued = pendingMissingPartDeltas.get(key);
+        if (!queued) return;
+        pendingMissingPartDeltas.delete(key);
+        for (const item of queued.deltas) {
+          sessionStore.applyMessagePartDelta(
+            item.messageID,
+            item.partID,
+            item.delta,
+            queued.sessionID,
+            item.field
+          );
+        }
+      })
+      .catch((err) => {
+        pendingMissingPartDeltas.delete(key);
+        deps.logError('syncSessionMessages', err);
+      });
+  };
 
   cleanups.push(() => {
     for (const timer of activeMessageSyncTimers.values()) clearTimeout(timer);
     activeMessageSyncTimers.clear();
+    pendingMissingPartDeltas.clear();
     if (pendingPermissionSyncTimer) clearTimeout(pendingPermissionSyncTimer);
     pendingPermissionSyncTimer = null;
   });
@@ -740,19 +801,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const field = p.field as string;
       markSessionProgress(sessionID);
       uiStore.markLoadingActivity();
-      const hasPart = deps
-        .getMessages()
-        .some(
-          (message) =>
-            message.info.id === messageID && message.parts.some((part) => part.id === partID)
-        );
-      if (!hasPart) {
-        deps
-          .syncSessionMessages(sessionID)
-          .then(() =>
-            sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field)
-          )
-          .catch((err) => deps.logError('syncSessionMessages', err));
+      if (
+        pendingMissingPartDeltas.has(getPartDeltaQueueKey(messageID, partID)) ||
+        !hasMessagePart(messageID, partID)
+      ) {
+        queueMissingPartDelta(sessionID, messageID, partID, delta, field);
         return;
       }
       sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);
@@ -778,6 +831,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         const p = data.properties;
         const sessionID = p?.sessionID as string | undefined;
         if (!sessionID) return;
+        if (
+          !eventName.startsWith('session.next.compaction.') &&
+          isStaleProgressAfterFinishedAssistant(sessionID)
+        ) {
+          if (sessionID === deps.getActiveSessionId() && !isActiveTreeWorking()) {
+            uiStore.stopLoading();
+          }
+          return;
+        }
         markSessionProgress(sessionID);
         if (
           eventName === 'session.next.shell.started' ||

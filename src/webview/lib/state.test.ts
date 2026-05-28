@@ -28,6 +28,7 @@ import {
   syncFailedSessionsFromMessages,
   setMessagesIncremental,
   upsertMessage,
+  upsertPart,
 } from './state';
 
 function assistantMessage(id = 'message-1', sessionID = 'session-1'): AssistantMessage {
@@ -147,6 +148,26 @@ describe('state streaming deltas', () => {
     });
   });
 
+  it('keeps active streaming text when a stale finalized part update arrives', async () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [textPart('text-1', '')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', 'Visible response', 'session-1');
+    await nextFrame();
+
+    upsertPart(textPart('text-1', ''));
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      type: 'text',
+      text: 'Visible response',
+    });
+    expect(state.streamingPartId).toBeNull();
+    expect(state.streamingText).toBe('');
+  });
+
   it('commits the previous streaming part text when another part becomes active later', async () => {
     upsertMessage({
       info: assistantMessage(),
@@ -194,6 +215,25 @@ describe('state streaming deltas', () => {
     });
     expect(state.streamingPartId).toBe('reason-1');
     expect(state.streamingText).toBe('Thinking carefully now');
+  });
+
+  it('commits text deltas that are superseded by thinking in the same frame', async () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [textPart('text-1', ''), reasoningPart('')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', 'Visible response', 'session-1');
+    applyMessagePartDelta('message-1', 'reason-1', 'Thinking now', 'session-1');
+    await nextFrame();
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      type: 'text',
+      text: 'Visible response',
+    });
+    expect(state.streamingPartId).toBe('reason-1');
+    expect(state.streamingText).toBe('Thinking now');
   });
 
   it('commits and clears streaming text when a message finishes', () => {
