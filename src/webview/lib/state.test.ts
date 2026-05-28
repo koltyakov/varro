@@ -347,6 +347,51 @@ describe('state streaming deltas', () => {
     expect(state.streamingPartId).toBeNull();
     expect(state.streamingText).toBe('');
   });
+
+  it('preserves longer current tool execution timing across incremental refreshes', () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [
+        {
+          ...toolPart('tool-1'),
+          state: {
+            status: 'completed',
+            input: { command: 'rtk npm run test' },
+            output: '',
+            title: 'Runs Vitest unit test suite',
+            metadata: {},
+            time: { start: 1_000, end: 12_380 },
+          },
+        },
+      ],
+    });
+
+    setMessagesIncremental([
+      {
+        info: assistantMessage(),
+        parts: [
+          {
+            ...toolPart('tool-1'),
+            state: {
+              status: 'completed',
+              input: { command: 'rtk npm run test' },
+              output: '',
+              title: 'Runs Vitest unit test suite',
+              metadata: {},
+              time: { start: 10_000, end: 10_005 },
+            },
+          },
+        ],
+      },
+    ]);
+
+    const updatedPart = state.messages[0]?.parts[0];
+    if (!updatedPart || updatedPart.type !== 'tool') throw new Error('Expected a tool part');
+
+    expect(updatedPart.state).toMatchObject({
+      time: { start: 1_000, end: 12_380 },
+    });
+  });
 });
 
 describe('permission deduping', () => {

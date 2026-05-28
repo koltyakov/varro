@@ -2357,6 +2357,7 @@ function mergeMessageEntry(
   streamingSnapshot?: StreamingTextSnapshot
 ) {
   const next = cloneValue(incoming);
+  preserveLongerToolExecutionTimes(current, next);
   if (!current || !options?.preserveExtraParts || current.parts.length === 0) {
     materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
     return next;
@@ -2371,6 +2372,52 @@ function mergeMessageEntry(
 
   materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
   return next;
+}
+
+function preserveLongerToolExecutionTimes(current: MessageEntry | undefined, next: MessageEntry) {
+  if (!current?.parts.length) return;
+
+  const currentToolParts = new Map<string, Extract<Part, { type: 'tool' }>>();
+  for (const part of current.parts) {
+    if (part.type === 'tool') currentToolParts.set(part.id, part);
+  }
+  if (currentToolParts.size === 0) return;
+
+  for (let index = 0; index < next.parts.length; index += 1) {
+    const incomingPart = next.parts[index];
+    if (incomingPart.type !== 'tool') continue;
+    const currentPart = currentToolParts.get(incomingPart.id);
+    if (!currentPart || currentPart.callID !== incomingPart.callID) continue;
+
+    const currentDuration = getToolStateDurationMs(currentPart.state);
+    const incomingDuration = getToolStateDurationMs(incomingPart.state);
+    if (
+      currentDuration === null ||
+      incomingDuration === null ||
+      currentDuration <= incomingDuration
+    ) {
+      continue;
+    }
+    if (currentPart.state.status === 'completed' && incomingPart.state.status === 'completed') {
+      next.parts[index] = {
+        ...incomingPart,
+        state: { ...incomingPart.state, time: currentPart.state.time },
+      };
+      continue;
+    }
+
+    if (currentPart.state.status === 'error' && incomingPart.state.status === 'error') {
+      next.parts[index] = {
+        ...incomingPart,
+        state: { ...incomingPart.state, time: currentPart.state.time },
+      };
+    }
+  }
+}
+
+function getToolStateDurationMs(toolState: Extract<Part, { type: 'tool' }>['state']) {
+  if (toolState.status !== 'completed' && toolState.status !== 'error') return null;
+  return Math.max(0, toolState.time.end - toolState.time.start);
 }
 
 function getStreamingTextSnapshot(): StreamingTextSnapshot {

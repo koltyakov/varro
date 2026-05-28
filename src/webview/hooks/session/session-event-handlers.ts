@@ -97,6 +97,13 @@ function getPartDeltaQueueKey(messageID: string, partID: string) {
   return `${messageID}\u0000${partID}`;
 }
 
+const getToolExecutionKey = (sessionId: string, callId: string) => `${sessionId}\u0000${callId}`;
+
+const getEventTimestamp = (props: Record<string, unknown>) => {
+  const timestamp = props.timestamp;
+  return typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : Date.now();
+};
+
 function getPermissionReplyId(props: Record<string, unknown>) {
   const source =
     props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : props;
@@ -204,6 +211,8 @@ const ACTIVE_TEXT_PROGRESS_EVENTS = new Set<string>([
   'session.next.text.delta',
   'session.next.text.ended',
 ]);
+
+type ToolExecutionTime = { start?: number; end?: number };
 
 function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -373,6 +382,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       syncing: boolean;
     }
   >();
+  const toolExecutionTimes = new Map<string, ToolExecutionTime>();
   let pendingPermissionSyncTimer: ReturnType<typeof setTimeout> | null = null;
   const setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
     if (isWorkingStatus(status)) workingSessionIds.add(sessionId);
@@ -404,6 +414,62 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const markSessionProgress = (sessionId: string) => {
     setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
+  };
+  const recordToolExecutionTime = (eventName: string, props: Record<string, unknown>) => {
+    const sessionId = typeof props.sessionID === 'string' ? props.sessionID : null;
+    const callId = typeof props.callID === 'string' ? props.callID : null;
+    if (!sessionId || !callId) return null;
+
+    const key = getToolExecutionKey(sessionId, callId);
+    const existing = toolExecutionTimes.get(key) || {};
+    const timestamp = getEventTimestamp(props);
+    if (eventName === 'session.next.tool.called' || eventName === 'session.next.shell.started') {
+      toolExecutionTimes.set(key, { ...existing, start: timestamp });
+      return { sessionId, callId, ended: false };
+    }
+    if (
+      eventName === 'session.next.tool.success' ||
+      eventName === 'session.next.tool.failed' ||
+      eventName === 'session.next.shell.ended'
+    ) {
+      toolExecutionTimes.set(key, { ...existing, end: timestamp });
+      return { sessionId, callId, ended: true };
+    }
+
+    return null;
+  };
+  const applyToolExecutionTime = (part: Part): Part => {
+    if (part.type !== 'tool') return part;
+    const timing = toolExecutionTimes.get(getToolExecutionKey(part.sessionID, part.callID));
+    if (!timing?.start) return part;
+
+    const state = part.state;
+    if (state.status === 'running') {
+      return { ...part, state: { ...state, time: { ...state.time, start: timing.start } } };
+    }
+    if (
+      (state.status === 'completed' || state.status === 'error') &&
+      timing.end !== undefined &&
+      timing.end >= timing.start
+    ) {
+      return {
+        ...part,
+        state: { ...state, time: { ...state.time, start: timing.start, end: timing.end } },
+      };
+    }
+
+    return part;
+  };
+  const updateExistingToolPartExecutionTime = (sessionId: string, callId: string) => {
+    for (const message of deps.getMessages()) {
+      for (const part of message.parts) {
+        if (part.type !== 'tool' || part.sessionID !== sessionId || part.callID !== callId)
+          continue;
+        const nextPart = applyToolExecutionTime(part);
+        if (nextPart !== part) sessionStore.upsertPart(nextPart);
+        return;
+      }
+    }
   };
   const markSessionError = (sessionId: string, error: AssistantMessage['error'] | undefined) => {
     setSessionStatusEntry(sessionId, { type: 'idle' });
@@ -772,7 +838,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
       const applyPart = () => {
         if (!isSessionInActiveTree(rawPart.sessionID)) return;
-        sessionStore.upsertPart(rawPart);
+        sessionStore.upsertPart(applyToolExecutionTime(rawPart));
         if (rawPart.type === 'tool') deps.syncTodosFromMessages();
       };
 
@@ -829,8 +895,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     cleanups.push(
       serverEvents.on(eventName, (data) => {
         const p = data.properties;
-        const sessionID = p?.sessionID as string | undefined;
+        if (!p) return;
+        const sessionID = p.sessionID as string | undefined;
         if (!sessionID) return;
+        const toolTimingUpdate = recordToolExecutionTime(eventName, p);
+        if (toolTimingUpdate?.ended) {
+          updateExistingToolPartExecutionTime(toolTimingUpdate.sessionId, toolTimingUpdate.callId);
+        }
         if (
           !eventName.startsWith('session.next.compaction.') &&
           isStaleProgressAfterFinishedAssistant(sessionID)

@@ -17,6 +17,7 @@ export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
 const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch']);
+const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
 type ToolPreview = { text: string; key: string };
 
 export function getToolCallExpansionKey(part: ToolPart) {
@@ -87,6 +88,11 @@ export function shouldShowToolPreview(title: string, preview: ToolPreview | null
   if (normalizedTitle === normalizedPreview) return false;
   if (normalizedTitle.endsWith(`: ${normalizedPreview}`)) return false;
   return true;
+}
+
+function formatVisibleToolDuration(ms: number | null | undefined) {
+  if (ms === null || ms === undefined || ms < MIN_VISIBLE_TOOL_DURATION_MS) return null;
+  return formatDuration(ms) || null;
 }
 
 function parseIntLike(value: unknown): number | null {
@@ -399,6 +405,12 @@ function ReadToolCard(props: {
       return formatDisplayPath(props.filePath, appState.editorContext.workspacePath);
     return getLeafPathName(formatDisplayPath(props.filePath, appState.editorContext.workspacePath));
   };
+  const completedDurationLabel = () =>
+    isCompleted()
+      ? formatVisibleToolDuration(
+          (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
+        )
+      : null;
 
   return (
     <div class="chat-tool-invocation-part file-read-card">
@@ -421,11 +433,9 @@ function ReadToolCard(props: {
         <Show when={isDirectory() && !isCurrentDirectory()}>
           <span class="file-read-meta">directory</span>
         </Show>
-        <Show when={isCompleted()}>
+        <Show when={completedDurationLabel()}>
           <span class="tool-invocation-duration file-read-duration">
-            {formatDuration(
-              (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
-            )}
+            {completedDurationLabel()}
           </span>
         </Show>
         <Show when={isRunning()}>
@@ -486,6 +496,12 @@ function FileChangeCard(props: {
     }
     return null;
   };
+  const completedDurationLabel = () =>
+    isCompleted()
+      ? formatVisibleToolDuration(
+          (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
+        )
+      : null;
 
   return (
     <div class="chat-tool-invocation-part file-change-card">
@@ -541,11 +557,9 @@ function FileChangeCard(props: {
             {isAborted() ? 'aborted' : 'failed'}
           </span>
         </Show>
-        <Show when={isCompleted()}>
+        <Show when={completedDurationLabel()}>
           <span class="tool-invocation-duration file-edit-duration">
-            {formatDuration(
-              (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
-            )}
+            {completedDurationLabel()}
           </span>
         </Show>
       </div>
@@ -602,8 +616,10 @@ function GenericToolCall(props: {
   };
   const completedDurationMs = () => {
     if (props.state.status !== 'completed') return null;
-    return getDisplayedCompletedToolDurationMs(props.tool.tool, props.state as ToolStateCompleted);
+    const state = props.state as ToolStateCompleted;
+    return Math.max(0, state.time.end - state.time.start);
   };
+  const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
 
   const bodyId = createUniqueId();
   return (
@@ -617,8 +633,8 @@ function GenericToolCall(props: {
       >
         <span class={`tool-status-dot ${props.statusClass}`} />
         <span class="tool-invocation-title">{props.title}</span>
-        <Show when={props.state.status === 'completed'}>
-          <span class="tool-invocation-duration">{formatDuration(completedDurationMs() || 0)}</span>
+        <Show when={completedDurationLabel()}>
+          <span class="tool-invocation-duration">{completedDurationLabel()}</span>
         </Show>
         <Show when={taskRetryStatus()}>
           {(retry) => <span class="tool-invocation-retry-label">retrying #{retry().attempt}</span>}
@@ -806,73 +822,6 @@ function StructuredToolCard(props: {
       </Show>
     </div>
   );
-}
-
-function getDisplayedCompletedToolDurationMs(toolName: string, state: ToolStateCompleted): number {
-  const recordedDurationMs = Math.max(0, state.time.end - state.time.start);
-  const reportedDurationMs =
-    normalizeToolName(toolName) === 'bash'
-      ? extractCommandReportedDurationMs(state.output || '')
-      : null;
-
-  if (
-    reportedDurationMs !== null &&
-    reportedDurationMs >= 1000 &&
-    reportedDurationMs > Math.max(recordedDurationMs * 10, 250)
-  ) {
-    return reportedDurationMs;
-  }
-
-  return recordedDurationMs;
-}
-
-function extractCommandReportedDurationMs(output: string): number | null {
-  const lines = output.split(/\r?\n/).toReversed();
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    const summaryMatch = trimmed.match(
-      /^(?:\d+\s+)?(?:passed|failed|skipped|todo|flaky|timed out)(?:[\s,].*)?\(([\d.]+(?:ms|s|m|h))\)$/i
-    );
-    if (summaryMatch) {
-      return parseDurationTokenMs(summaryMatch[1]);
-    }
-
-    const doneMatch = trimmed.match(/\bDone in\s+([\d.]+(?:ms|s|m|h))\.?$/i);
-    if (doneMatch) {
-      return parseDurationTokenMs(doneMatch[1]);
-    }
-
-    const durationMatch = trimmed.match(/^Duration\s+([\d.]+(?:ms|s|m|h))$/i);
-    if (durationMatch) {
-      return parseDurationTokenMs(durationMatch[1]);
-    }
-  }
-
-  return null;
-}
-
-function parseDurationTokenMs(token: string): number | null {
-  const match = token.trim().match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/i);
-  if (!match) return null;
-
-  const value = Number.parseFloat(match[1]);
-  if (!Number.isFinite(value)) return null;
-
-  switch (match[2].toLowerCase()) {
-    case 'ms':
-      return Math.round(value);
-    case 's':
-      return Math.round(value * 1000);
-    case 'm':
-      return Math.round(value * 60 * 1000);
-    case 'h':
-      return Math.round(value * 60 * 60 * 1000);
-    default:
-      return null;
-  }
 }
 
 function formatPreviewValue(key: string, value: string): string {

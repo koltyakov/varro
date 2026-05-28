@@ -750,6 +750,99 @@ describe('registerSessionEventHandlers', () => {
     });
   });
 
+  it('uses tool execution event timestamps when applying completed tool parts', () => {
+    const handlers = installHandlers();
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+      })
+    );
+
+    upsertPart.mockClear();
+
+    handlers.get('session.next.shell.started')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 1_000 },
+    });
+    handlers.get('session.next.shell.ended')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 12_380 },
+    });
+    handlers.get('message.part.updated')?.({
+      properties: {
+        part: {
+          id: 'tool-1',
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          type: 'tool',
+          callID: 'call-1',
+          tool: 'bash',
+          state: {
+            status: 'completed',
+            input: { command: 'rtk npm run test' },
+            output: '> vitest run\nDuration 11.38s\n',
+            title: 'Runs Vitest unit test suite',
+            metadata: {},
+            time: { start: 10_000, end: 10_005 },
+          },
+        },
+      },
+    });
+
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'tool-1',
+        state: expect.objectContaining({ time: { start: 1_000, end: 12_380 } }),
+      })
+    );
+  });
+
+  it('updates existing completed tool parts when execution end events arrive later', () => {
+    const handlers = installHandlers();
+    const toolPart: Part = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: {
+        status: 'completed',
+        input: { command: 'rtk npm run test' },
+        output: '> vitest run\nDuration 11.38s\n',
+        title: 'Runs Vitest unit test suite',
+        metadata: {},
+        time: { start: 10_000, end: 10_005 },
+      },
+    };
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    assistantEntry.parts = [toolPart];
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+      })
+    );
+
+    upsertPart.mockClear();
+
+    handlers.get('session.next.shell.started')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 1_000 },
+    });
+    handlers.get('session.next.shell.ended')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 12_380 },
+    });
+
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'tool-1',
+        state: expect.objectContaining({ time: { start: 1_000, end: 12_380 } }),
+      })
+    );
+  });
+
   it('applies child-session message updates when they belong to the active session tree', () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {

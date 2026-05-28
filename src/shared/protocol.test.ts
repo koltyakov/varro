@@ -162,6 +162,30 @@ describe('protocol conformance', () => {
     });
   });
 
+  it('parses direct OpenCode events with data payloads', () => {
+    expect(
+      parseServerEvent({
+        type: 'session.updated',
+        data: {
+          sessionID: 'session-1',
+          info: {
+            id: 'session-1',
+            title: 'Fix chat titles',
+          },
+        },
+      })
+    ).toEqual({
+      type: 'session.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'session-1',
+          title: 'Fix chat titles',
+        },
+      },
+    });
+  });
+
   it('parses OpenCode session.error events', () => {
     expect(
       parseServerEvent({

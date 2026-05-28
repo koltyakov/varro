@@ -173,28 +173,20 @@ describe('ToolCall', () => {
     );
   });
 
-  it('falls back to the reported bash duration when persisted timestamps are implausibly short', () => {
+  it('hides completed generic tool durations under one second', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
       messageID: 'message-1',
       type: 'tool',
       callID: 'call-1',
-      tool: 'bash',
-      state: {
-        status: 'completed',
-        input: { command: 'rtk npm run test:e2e 2>&1 | tail -30' },
-        output:
-          '1 failed\n  [chromium] > e2e/tests/composer.spec.ts:229:5 > upward scroll\n  148 passed (17.6s)\n',
-        title: 'Run full e2e test suite',
-        metadata: {},
-        time: { start: 1778052631591, end: 1778052631596 },
-      },
+      tool: 'grep',
+      state: completedState({ pattern: 'ToolCall' }, 'Search: ToolCall'),
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('18s');
+    expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
   });
 
   it('renders a collapsed path preview as an open-file link', () => {
@@ -784,6 +776,22 @@ describe('ToolCall', () => {
       type: 'vscode/open',
       payload: { path: '/repo/src/main.ts', kind: 'file' },
     });
+  });
+
+  it('hides completed file-read durations under one second', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'read',
+      state: completedState({ file_path: '/repo/src/main.ts' }, 'Read main.ts'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-read-duration')).toBeNull();
   });
 
   it('renders directory and current-directory read states distinctly', () => {

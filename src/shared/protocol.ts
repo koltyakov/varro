@@ -216,7 +216,9 @@ function parseServerEventRecord(record: Record<string, unknown> | null): ServerE
     : getSyncServerEventName(record.type, record.name);
   if (!eventType) return null;
 
-  const properties = asRecord(isServerEventName(record.type) ? record.properties : record.data);
+  const properties = asRecord(
+    isServerEventName(record.type) ? (record.properties ?? record.data) : record.data
+  );
   return properties
     ? ({ type: eventType, properties } as ServerEvent)
     : ({ type: eventType } as ServerEvent);
