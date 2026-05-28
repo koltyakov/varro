@@ -1416,6 +1416,23 @@ describe('Message assistant final answer rendering', () => {
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
   });
 
+  it('shows friendly label for MessageOutputLengthError (no data.message)', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('message-3'),
+            error: { name: 'MessageOutputLengthError' },
+          },
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+        }),
+      container!
+    );
+
+    const errorText = container?.querySelector('.assistant-message-flow-item-error');
+    expect(errorText?.textContent).toContain('Output length exceeded');
+  });
+
   it('does not render a retry action for aborted assistant errors', async () => {
     const { setState } = await import('../lib/state');
     const assistant = {

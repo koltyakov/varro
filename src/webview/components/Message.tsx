@@ -1,6 +1,6 @@
 import { Show, createMemo, createResource } from 'solid-js';
 import { retryMessage } from '../hooks/useOpenCode';
-import { isAbortedAssistantError } from '../lib/aborted';
+import { friendlyErrorName, isAbortedAssistantError } from '../lib/aborted';
 import { client } from '../lib/client';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
@@ -57,8 +57,7 @@ export function Message(props: {
     if (isAbortedAssistantError(error)) return null;
     const message = error?.data?.message?.trim();
     if (message) return message;
-    const name = error?.name?.trim();
-    return name || null;
+    return friendlyErrorName(error?.name);
   });
   const canRetryAssistant = createMemo(() => {
     const error = assistant()?.error;

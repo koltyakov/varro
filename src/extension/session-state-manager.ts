@@ -4,7 +4,7 @@ import type { ExtensionMessage, ServerEvent } from '../shared/protocol';
 import type { PermissionEventProperties, QuestionRequest } from '../shared/opencode-types';
 import { normalizeSessionTitle } from '../shared/session-title';
 import { logger } from './logger';
-import { isAbortedAssistantError } from '../webview/lib/aborted';
+import { friendlyErrorName, isAbortedAssistantError } from '../webview/lib/aborted';
 
 export type PendingAttentionKind = 'permission' | 'question';
 
@@ -565,7 +565,7 @@ export function describePermissionRequest(props: Record<string, unknown>): strin
 
 function describeFailure(error: Record<string, unknown>): string | undefined {
   const detail = asRecord(error.data);
-  return getString(detail?.message) || getString(error.name);
+  return getString(detail?.message) || friendlyErrorName(getString(error.name)) || undefined;
 }
 
 function isAbortedErrorRecord(error: Record<string, unknown>): boolean {

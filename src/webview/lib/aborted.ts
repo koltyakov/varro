@@ -1,5 +1,18 @@
 import type { AssistantMessage, ToolStateError } from '../types';
 
+const FRIENDLY_ERROR_NAMES: Record<string, string> = {
+  MessageOutputLengthError: 'Output length exceeded',
+  ContextOverflowError: 'Context window overflow',
+  ProviderAuthError: 'Provider authentication failed',
+  StructuredOutputError: 'Structured output failed',
+};
+
+export function friendlyErrorName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  return FRIENDLY_ERROR_NAMES[trimmed] ?? trimmed;
+}
+
 function normalizeAbortText(value: string | null | undefined) {
   return value?.trim().toLowerCase() || '';
 }

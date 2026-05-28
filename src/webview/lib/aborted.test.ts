@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { isAbortedAssistantError, isAbortedToolError } from './aborted';
+import { friendlyErrorName, isAbortedAssistantError, isAbortedToolError } from './aborted';
+
+describe('friendlyErrorName', () => {
+  it('maps known opencode error names to human-readable labels', () => {
+    expect(friendlyErrorName('MessageOutputLengthError')).toBe('Output length exceeded');
+    expect(friendlyErrorName('ContextOverflowError')).toBe('Context window overflow');
+    expect(friendlyErrorName('ProviderAuthError')).toBe('Provider authentication failed');
+    expect(friendlyErrorName('StructuredOutputError')).toBe('Structured output failed');
+  });
+
+  it('passes through unknown error names unchanged', () => {
+    expect(friendlyErrorName('APIError')).toBe('APIError');
+    expect(friendlyErrorName('SomeNewError')).toBe('SomeNewError');
+  });
+
+  it('trims whitespace', () => {
+    expect(friendlyErrorName('  MessageOutputLengthError  ')).toBe('Output length exceeded');
+  });
+
+  it('returns null for empty or missing input', () => {
+    expect(friendlyErrorName(null)).toBeNull();
+    expect(friendlyErrorName(undefined)).toBeNull();
+    expect(friendlyErrorName('')).toBeNull();
+    expect(friendlyErrorName('   ')).toBeNull();
+  });
+});
 
 describe('isAbortedAssistantError', () => {
   it('detects legacy "aborted" error name', () => {
