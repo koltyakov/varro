@@ -37,6 +37,7 @@ afterEach(() => {
   setExpandThinkingByDefaultPreference(false);
   setState('permissions', []);
   setState('questions', []);
+  setState('sessionStatus', {});
   resetToolCallExpansionState();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
@@ -316,6 +317,74 @@ describe('ToolCall', () => {
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
 
     expect(container?.querySelectorAll('.tool-status-dot')).toHaveLength(1);
+    expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
+      'Running...'
+    );
+  });
+
+  it('shows retry status when subagent session is retrying', () => {
+    setState('sessionStatus', {
+      'subagent-session-1': {
+        type: 'retry' as const,
+        attempt: 2,
+        message: 'rate limit exceeded',
+        next: Date.now() + 5000,
+      },
+    });
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          prompt: 'Do something',
+        },
+        title: 'Working',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const retryLabel = container?.querySelector('.tool-invocation-retry-label');
+    expect(retryLabel?.textContent).toContain('retrying #2');
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    const runningDiv = container?.querySelector('.tool-invocation-running');
+    expect(runningDiv?.textContent).toContain('Retrying (attempt #2)');
+    expect(runningDiv?.textContent).toContain('rate limit exceeded');
+  });
+
+  it('shows Running when task has no retry status', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          prompt: 'Do something',
+        },
+        title: 'Working',
+        metadata: { sessionId: 'subagent-session-no-retry' },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-retry-label')).toBeNull();
+
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
       'Running...'
     );

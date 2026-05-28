@@ -570,6 +570,14 @@ function GenericToolCall(props: {
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
   const isStructuredTool = () => isStructuredToolName(props.tool.tool);
+  const taskRetryStatus = () => {
+    if (!isTask() || props.state.status !== 'running') return null;
+    const meta = props.state.metadata as Record<string, unknown> | undefined;
+    const sessionId = typeof meta?.sessionId === 'string' ? meta.sessionId : null;
+    if (!sessionId) return null;
+    const status = appState.sessionStatus[sessionId];
+    return status?.type === 'retry' ? status : null;
+  };
   const bashCommand = () => {
     const command = props.state.input?.command;
     return typeof command === 'string'
@@ -611,6 +619,9 @@ function GenericToolCall(props: {
         <span class="tool-invocation-title">{props.title}</span>
         <Show when={props.state.status === 'completed'}>
           <span class="tool-invocation-duration">{formatDuration(completedDurationMs() || 0)}</span>
+        </Show>
+        <Show when={taskRetryStatus()}>
+          {(retry) => <span class="tool-invocation-retry-label">retrying #{retry().attempt}</span>}
         </Show>
         <Show when={props.state.status === 'error'}>
           <span class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}`}>
@@ -731,7 +742,11 @@ function GenericToolCall(props: {
             </div>
           </Show>
           <Show when={props.state.status === 'running'}>
-            <div class="tool-invocation-running">Running...</div>
+            <div class="tool-invocation-running">
+              <Show when={taskRetryStatus()} fallback="Running...">
+                {(retry) => `Retrying (attempt #${retry().attempt})… ${retry().message}`}
+              </Show>
+            </div>
           </Show>
         </div>
       </Show>
