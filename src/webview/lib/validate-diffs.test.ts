@@ -44,7 +44,25 @@ describe('validateFileDiffs', () => {
     expect(result).toEqual([validDiff]);
   });
 
-  it('returns empty array for non-array input', () => {
+  it('wraps a single diff object', () => {
+    expect(validateFileDiffs(validDiff)).toEqual([validDiff]);
+  });
+
+  it('reads keyed diff objects', () => {
+    expect(validateFileDiffs({ first: validDiff })).toEqual([validDiff]);
+  });
+
+  it('filters invalid keyed diff object entries', () => {
+    expect(
+      validateFileDiffs({
+        first: validDiff,
+        missingFile: { additions: 1, deletions: 0 },
+        invalidFile: { file: 42, additions: 1, deletions: 0 },
+      })
+    ).toEqual([validDiff]);
+  });
+
+  it('returns empty array for unsupported input', () => {
     expect(validateFileDiffs(null)).toEqual([]);
     expect(validateFileDiffs(undefined)).toEqual([]);
     expect(validateFileDiffs('string')).toEqual([]);
