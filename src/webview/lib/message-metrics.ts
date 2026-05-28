@@ -125,3 +125,17 @@ export function getTaskDiffs(message: Message, fallback: FileDiff[] | undefined)
   if (message.role === 'user') return validateFileDiffs(message.summary?.diffs);
   return fallback || [];
 }
+
+export function formatRelativeAge(timestamp: number, now: number): string {
+  const totalMinutes = Math.max(0, Math.floor((now - timestamp) / 60_000));
+
+  if (totalMinutes < 1) return 'now';
+
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor(totalMinutes / 60);
+
+  if (days >= 7) return `${Math.floor(days / 7)}w`;
+  if (days > 0) return `${days}d`;
+  if (hours > 0) return `${hours}h`;
+  return `${totalMinutes}m`;
+}

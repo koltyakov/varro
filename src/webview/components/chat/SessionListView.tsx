@@ -31,6 +31,7 @@ import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry } from '../../../shared/protocol';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { shouldHideEmptySessionFromList } from '../../lib/empty-session';
+import { formatRelativeAge } from '../../lib/message-metrics';
 
 type SessionGroups = {
   failed: (typeof state.sessions)[number][];
@@ -862,7 +863,7 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
         <div class="session-item-content">
           <span class="session-item-title">{title() || 'Untitled'}</span>
           <span class="session-item-meta">
-            Deleted {formatSessionAge(props.entry.deletedAt, props.now())} ago
+            Deleted {formatRelativeAge(props.entry.deletedAt, props.now())} ago
             <Show when={childCount() > 0}>
               {' '}
               · {childCount()} sub-agent{childCount() === 1 ? '' : 's'}
@@ -1043,28 +1044,15 @@ function SessionListItem(props: {
           class="session-item-age"
           title={new Date(props.session.time.updated).toLocaleString()}
         >
-          {formatSessionAge(props.session.time.updated, props.now())}
+          {formatRelativeAge(props.session.time.updated, props.now())}
         </span>
       </div>
     </div>
   );
 }
 
-function formatSessionAge(timestamp: number, now: number): string {
-  const totalMinutes = Math.max(0, Math.floor((now - timestamp) / 60_000));
-
-  if (totalMinutes < 1) return '0m';
-
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor(totalMinutes / 60);
-
-  if (days > 0) return `${days}d`;
-  if (hours > 0) return `${hours}h`;
-  return `${totalMinutes}m`;
-}
-
 function formatDurationFromNow(timestamp: number, now: number): string {
-  return formatSessionAge(now + Math.max(0, timestamp - now), now);
+  return formatRelativeAge(now + Math.max(0, timestamp - now), now);
 }
 
 function rootSessionId(sessionId: string) {

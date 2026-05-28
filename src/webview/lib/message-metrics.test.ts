@@ -5,6 +5,7 @@ import {
   formatCost,
   formatDuration,
   formatNumber,
+  formatRelativeAge,
   getAssistantDuration,
   getAssistantTotalTokens,
   getContextWindow,
@@ -200,5 +201,25 @@ describe('message metrics helpers', () => {
       )
     ).toEqual(diffs);
     expect(getTaskDiffs(assistantMessage(), diffs)).toEqual(diffs);
+  });
+
+  it('formats relative age across all thresholds', () => {
+    const now = 1_000_000_000;
+    expect(formatRelativeAge(now, now)).toBe('now');
+    expect(formatRelativeAge(now - 30_000, now)).toBe('now');
+    expect(formatRelativeAge(now - 5 * 60_000, now)).toBe('5m');
+    expect(formatRelativeAge(now - 59 * 60_000, now)).toBe('59m');
+    expect(formatRelativeAge(now - 3 * 3_600_000, now)).toBe('3h');
+    expect(formatRelativeAge(now - 23 * 3_600_000, now)).toBe('23h');
+    expect(formatRelativeAge(now - 2 * 86_400_000, now)).toBe('2d');
+    expect(formatRelativeAge(now - 6 * 86_400_000, now)).toBe('6d');
+    expect(formatRelativeAge(now - 7 * 86_400_000, now)).toBe('1w');
+    expect(formatRelativeAge(now - 14 * 86_400_000, now)).toBe('2w');
+    expect(formatRelativeAge(now - 30 * 86_400_000, now)).toBe('4w');
+  });
+
+  it('clamps future timestamps to now in relative age', () => {
+    const now = 1_000_000_000;
+    expect(formatRelativeAge(now + 60_000, now)).toBe('now');
   });
 });
