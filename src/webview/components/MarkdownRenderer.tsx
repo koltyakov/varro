@@ -1,5 +1,6 @@
 import { createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import DOMPurify from 'dompurify';
+import { writeClipboard } from '../lib/write-clipboard';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import c from 'highlight.js/lib/languages/c';
@@ -1081,7 +1082,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
         btn.dataset.copyText ? decodeCopyPayload(btn.dataset.copyText) : (code.textContent ?? '')
       );
       if (!copyText) return;
-      navigator.clipboard.writeText(copyText).catch(() => {});
+      writeClipboard(copyText);
       btn.innerHTML = checkSvg;
       const tid = setTimeout(() => {
         copyTimeouts.delete(tid);
