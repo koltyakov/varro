@@ -16,9 +16,19 @@ describe('path display helpers', () => {
     expect(normalizePath('')).toBe('');
   });
 
+  it('canonicalizes root and windows drive roots', () => {
+    expect(normalizePath('/')).toBe('/');
+    expect(normalizePath('//')).toBe('/');
+    expect(normalizePath('///')).toBe('/');
+    expect(normalizePath('C:')).toBe('C:/');
+    expect(normalizePath('C:\\')).toBe('C:/');
+    expect(normalizePath('c:/')).toBe('c:/');
+  });
+
   it('detects absolute paths on unix and windows', () => {
     expect(isAbsolutePath('/repo/file.ts')).toBe(true);
     expect(isAbsolutePath('C:\\repo\\file.ts')).toBe(true);
+    expect(isAbsolutePath('C:\\')).toBe(true);
     expect(isAbsolutePath('src/file.ts')).toBe(false);
   });
 
@@ -56,6 +66,7 @@ describe('path display helpers', () => {
     expect(isSamePath('/repo/src/index.ts/', '/repo/src/index.ts')).toBe(true);
     expect(isSamePath('C:\\repo\\src\\index.ts', 'C:/repo/src/index.ts')).toBe(true);
     expect(isSamePath('C:\\Repo\\src\\index.ts', 'c:/repo/src/index.ts')).toBe(true);
+    expect(isSamePath('C:\\', 'c:\\')).toBe(true);
     expect(isSamePath('/repo/src/index.ts', '/repo/src/other.ts')).toBe(false);
     expect(isSamePath('/repo/src/index.ts', null)).toBe(false);
   });

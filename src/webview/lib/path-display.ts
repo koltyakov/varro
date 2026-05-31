@@ -2,7 +2,9 @@ export function normalizePath(value: string) {
   if (!value) return value;
   const normalized = value.replace(/\\/g, '/');
   const trimmed = normalized.replace(/\/+$/, '');
-  return trimmed || normalized;
+  if (!trimmed) return normalized.startsWith('/') ? '/' : normalized;
+  if (/^[A-Za-z]:$/.test(trimmed)) return `${trimmed}/`;
+  return trimmed;
 }
 
 function trimTrailingSlashes(value: string) {
