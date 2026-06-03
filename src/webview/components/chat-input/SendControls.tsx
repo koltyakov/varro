@@ -2,8 +2,11 @@ import { Show } from 'solid-js';
 
 function SendIcon(props: { size: number }) {
   return (
-    <svg width={props.size} height={props.size} viewBox="0 0 16 16" fill="currentColor">
-      <path d="M8 2.5L3.5 7H6v6.5h4V7h2.5L8 2.5z" />
+    <svg width={props.size} height={props.size} viewBox="0 0 32 32" fill="currentColor">
+      <polygon
+        points="15.707,3.293 14.293,4.707 24.586,15 4,15 4,17 24.586,17 14.293,27.293 15.707,28.707 28.414,16"
+        transform="rotate(-90 16 16)"
+      />
     </svg>
   );
 }
@@ -39,21 +42,16 @@ export function SendControls(props: {
         </button>
         <button
           ref={props.busyToggleRef}
-          class="send-mode-chevron"
+          class="send-mode-options"
           onClick={props.onToggleBusyMenu}
           title="More send options"
         >
-          <svg
-            width="8"
-            height="8"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M4 10l4-4 4 4" />
+          <svg width="12" height="12" viewBox="0 0 15 15" fill="currentColor" aria-hidden="true">
+            <path
+              fill-rule="evenodd"
+              clip-rule="evenodd"
+              d="M8.625 2.5C8.625 3.12132 8.12132 3.625 7.5 3.625C6.87868 3.625 6.375 3.12132 6.375 2.5C6.375 1.87868 6.87868 1.375 7.5 1.375C8.12132 1.375 8.625 1.87868 8.625 2.5ZM8.625 7.5C8.625 8.12132 8.12132 8.625 7.5 8.625C6.87868 8.625 6.375 8.12132 6.375 7.5C6.375 6.87868 6.87868 6.375 7.5 6.375C8.12132 6.375 8.625 6.87868 8.625 7.5ZM7.5 13.625C8.12132 13.625 8.625 13.1213 8.625 12.5C8.625 11.8787 8.12132 11.375 7.5 11.375C6.87868 11.375 6.375 11.8787 6.375 12.5C6.375 13.1213 6.87868 13.625 7.5 13.625Z"
+            />
           </svg>
         </button>
       </div>

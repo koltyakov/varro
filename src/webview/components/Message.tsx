@@ -213,9 +213,7 @@ export function Message(props: {
                 errorAction={assistantErrorAction()}
                 highlightFinalAnswer={props.highlightFinalAnswer}
                 highlightPlanningAnswer={props.highlightPlanningAnswer}
-                suppressHighlightedCardMetaParts={
-                  !!props.highlightFinalAnswer && assistantContainerVariant() !== 'plain'
-                }
+                suppressHighlightedCardMetaParts={!!props.highlightFinalAnswer}
                 isLastAssistant={props.isLastAssistant}
                 nearViewport={props.nearViewport}
                 outerListVirtualized={props.outerListVirtualized}

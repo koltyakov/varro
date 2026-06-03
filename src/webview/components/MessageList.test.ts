@@ -1640,7 +1640,7 @@ describe('MessageList sticky prompt preview', () => {
     expect(summaries.has('assistant-2')).toBe(false);
   });
 
-  it('keeps highlighted assistant card styling stable when virtualization hides the summary row', async () => {
+  it('keeps final assistant answers plain when virtualization hides the summary row', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 
     setState('activeSessionId', 'session-1');
@@ -1687,8 +1687,8 @@ describe('MessageList sticky prompt preview', () => {
     const finalResponse = container?.querySelector(
       '[data-msg-id="assistant-59"] .chat-turn-content'
     );
-    expect(finalResponse?.className).toContain('assistant-turn-content-highlighted');
-    expect(finalResponse?.className).not.toContain('assistant-turn-content-plain');
+    expect(finalResponse?.className).toContain('assistant-turn-content-plain');
+    expect(finalResponse?.className).not.toContain('assistant-turn-content-highlighted');
 
     animationFrames.restore();
   });

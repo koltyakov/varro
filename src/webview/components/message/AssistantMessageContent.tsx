@@ -83,17 +83,23 @@ export function getAssistantContainerVariant(params: {
   hasError: boolean;
 }): 'bare' | 'plain' | false {
   if (params.isUser) return false;
-  if (params.visibleDiffCount > 0) return false;
-  if (params.fileEditStackGroup) return false;
   if (params.hasError) return 'plain';
+
+  const parts = params.layoutParts;
+  const textPartCount = parts.filter((part) => part.type === 'text').length;
+  const hasReasoningPart = parts.some((part) => part.type === 'reasoning');
+
+  if (params.highlightFinalAnswer && textPartCount >= 1) {
+    return 'plain';
+  }
+
+  if (params.visibleDiffCount > 0) return 'plain';
+  if (params.fileEditStackGroup) return false;
   if (!params.highlightFinalAnswer) {
     return 'plain';
   }
 
-  const parts = params.layoutParts;
   if (parts.length === 0) return false;
-  const textPartCount = parts.filter((part) => part.type === 'text').length;
-  const hasReasoningPart = parts.some((part) => part.type === 'reasoning');
 
   if (params.highlightFinalAnswer && textPartCount === 0) {
     return parts.length === 1 && parts[0].type === 'tool' && !isFileEditPart(parts[0])

@@ -860,9 +860,8 @@ body.vscode-high-contrast-light .interactive-session {
   }
 }
 
-/* Multi-part turns: the final answer item gets the same left-anchored gradient
-   as the single-part card path, so both cases read identically and neither
-   reflows on finalize. */
+/* Final answer items keep the same left-anchored rail in plain turns, so they
+   never need a filled rounded wrapper when a streaming turn finalizes. */
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-final {
   --assistant-rail-color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
   position: relative;
@@ -2830,7 +2829,7 @@ body.vscode-light
   width: 24px;
 }
 
-.chat-input-toolbars.compact-tight .send-mode-chevron {
+.chat-input-toolbars.compact-tight .send-mode-options {
   width: 16px;
   height: 26px;
 }
@@ -2945,7 +2944,7 @@ body.vscode-light
   width: 26px;
 }
 
-.send-mode-chevron {
+.send-mode-options {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2962,7 +2961,7 @@ body.vscode-light
   -webkit-user-select: none;
 }
 
-.send-mode-chevron:hover {
+.send-mode-options:hover {
   background: var(--color-vscode-button-hover);
 }
 
@@ -7111,7 +7110,7 @@ body.vscode-high-contrast
   :is(
     .toolbar-picker,
     .chat-send-button.enabled,
-    .send-mode-chevron,
+    .send-mode-options,
     .question-btn,
     .chat-stop-button,
     .question-option,
@@ -7121,7 +7120,7 @@ body.vscode-high-contrast-light
   :is(
     .toolbar-picker,
     .chat-send-button.enabled,
-    .send-mode-chevron,
+    .send-mode-options,
     .question-btn,
     .chat-stop-button,
     .question-option,

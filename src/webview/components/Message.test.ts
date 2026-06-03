@@ -235,7 +235,7 @@ describe('getAssistantContainerVariant', () => {
     ).toBe('plain');
   });
 
-  it('keeps planning final answers in the standard assistant card variant', () => {
+  it('renders planning final answers plain', () => {
     expect(
       getAssistantContainerVariant({
         isUser: false,
@@ -247,10 +247,10 @@ describe('getAssistantContainerVariant', () => {
         highlightFinalAnswer: true,
         hasError: false,
       })
-    ).toBe(false);
+    ).toBe('plain');
   });
 
-  it('renders mixed structured and final text messages flat so only the final text can be carded', () => {
+  it('renders mixed structured and final text messages plain', () => {
     expect(
       getAssistantContainerVariant({
         isUser: false,
@@ -305,7 +305,7 @@ describe('getAssistantContainerVariant', () => {
     ).toBe('plain');
   });
 
-  it('keeps text-only final answers in the standard assistant card', () => {
+  it('renders text-only final answers plain', () => {
     expect(
       getAssistantContainerVariant({
         isUser: false,
@@ -317,7 +317,22 @@ describe('getAssistantContainerVariant', () => {
         highlightFinalAnswer: true,
         hasError: false,
       })
-    ).toBe(false);
+    ).toBe('plain');
+  });
+
+  it('keeps diff-bearing assistant responses plain before final highlighting', () => {
+    expect(
+      getAssistantContainerVariant({
+        isUser: false,
+        visibleDiffCount: 2,
+        fileEditStackGroup: null,
+        isSubagent: false,
+        hasStructuredAssistantParts: false,
+        layoutParts: [textPart('text-1', 'Final answer with changed files.')],
+        highlightFinalAnswer: false,
+        hasError: false,
+      })
+    ).toBe('plain');
   });
 
   it('renders errored assistant turns plain even without a final answer', () => {
