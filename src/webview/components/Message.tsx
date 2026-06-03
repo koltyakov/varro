@@ -5,6 +5,7 @@ import { client } from '../lib/client';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
+import { openProviderSetup } from '../lib/provider-setup';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import type {
   AssistantMessage,
@@ -25,6 +26,8 @@ import {
 import { CompactionDivider } from './message/CompactionDivider';
 import { DiffSummary } from './message/DiffSummary';
 import { UserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
+
+const AUTH_INVALIDATED_RE = /authentication token has been invalidated|try signing in again/i;
 
 export {
   calculateAssistantPartVirtualRange,
@@ -62,6 +65,23 @@ export function Message(props: {
   const canRetryAssistant = createMemo(() => {
     const error = assistant()?.error;
     return !!error && !isAbortedAssistantError(error);
+  });
+  const shouldConnectProvider = createMemo(() => {
+    const error = assistant()?.error;
+    if (!error || isAbortedAssistantError(error)) return false;
+    if (error.name !== 'ProviderAuthError') return false;
+    return AUTH_INVALIDATED_RE.test(error.data?.message || '');
+  });
+  const assistantErrorAction = createMemo(() => {
+    if (!(props.isLastAssistant ?? false) || !canRetryAssistant()) return undefined;
+    if (shouldConnectProvider()) {
+      return { label: 'Connect provider', run: openProviderSetup };
+    }
+
+    return {
+      label: 'Retry',
+      run: () => void retryMessage(assistant()!.id, assistant()!.sessionID),
+    };
   });
   const isSubagent = () => assistant()?.mode === 'subagent';
   const normalizedParts = createMemo(() =>
@@ -190,11 +210,7 @@ export function Message(props: {
                 info={assistant() as AssistantMessage}
                 parts={visibleAssistantParts()}
                 errorMessage={assistantErrorMessage()}
-                onRetry={
-                  (props.isLastAssistant ?? false) && canRetryAssistant()
-                    ? () => void retryMessage(assistant()!.id, assistant()!.sessionID)
-                    : undefined
-                }
+                errorAction={assistantErrorAction()}
                 highlightFinalAnswer={props.highlightFinalAnswer}
                 highlightPlanningAnswer={props.highlightPlanningAnswer}
                 suppressHighlightedCardMetaParts={

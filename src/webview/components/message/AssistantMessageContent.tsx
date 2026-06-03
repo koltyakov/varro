@@ -208,6 +208,7 @@ export function AssistantMessageContent(props: {
   info: AssistantMessage;
   parts: Part[];
   errorMessage?: string | null;
+  errorAction?: { label: string; run: () => void } | undefined;
   onRetry?: (() => void) | undefined;
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
@@ -548,15 +549,15 @@ export function AssistantMessageContent(props: {
       <Show when={props.errorMessage}>
         <div class="assistant-message-flow-item assistant-message-flow-item-error rendered-markdown">
           <p>{props.errorMessage!}</p>
-          <Show when={props.onRetry}>
+          <Show when={props.errorAction || props.onRetry}>
             <div class="assistant-message-flow-item-error-actions">
               <button
                 type="button"
                 class="assistant-dialog-summary-action assistant-dialog-summary-action-implement assistant-message-flow-item-error-action"
                 disabled={isLoading()}
-                onClick={() => props.onRetry?.()}
+                onClick={() => (props.errorAction ? props.errorAction.run() : props.onRetry?.())}
               >
-                Retry
+                {props.errorAction?.label || 'Retry'}
               </button>
             </div>
           </Show>

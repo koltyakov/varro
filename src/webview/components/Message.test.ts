@@ -15,9 +15,14 @@ import {
 import { resetToolCallExpansionState } from './ToolCall';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
+const openProviderSetupMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../hooks/useOpenCode', () => ({
   retryMessage: retryMessageMock,
+}));
+
+vi.mock('../lib/provider-setup', () => ({
+  openProviderSetup: openProviderSetupMock,
 }));
 
 let container: HTMLDivElement | null = null;
@@ -47,6 +52,7 @@ afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
   document.body.classList.remove('chat-image-preview-open');
   retryMessageMock.mockReset();
+  openProviderSetupMock.mockReset();
   resetToolCallExpansionState();
 });
 
@@ -1414,6 +1420,46 @@ describe('Message assistant final answer rendering', () => {
     (retryButton as HTMLButtonElement).click();
 
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
+  });
+
+  it('renders a connect provider action for invalidated provider auth errors', async () => {
+    const { setState } = await import('../lib/state');
+    const assistant = {
+      ...assistantMessage('message-3'),
+      error: {
+        name: 'ProviderAuthError',
+        data: {
+          message: 'Your authentication token has been invalidated. Please try signing in again.',
+        },
+      },
+    };
+
+    setState('messages', [
+      {
+        info: assistant,
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+      },
+    ]);
+
+    cleanup = render(
+      () =>
+        Message({
+          info: assistant,
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+          isLastAssistant: true,
+        }),
+      container!
+    );
+
+    const connectButton = container?.querySelector('.assistant-message-flow-item-error-action');
+
+    expect(connectButton).toBeInstanceOf(HTMLButtonElement);
+    expect(connectButton?.textContent).toContain('Connect provider');
+
+    (connectButton as HTMLButtonElement).click();
+
+    expect(openProviderSetupMock).toHaveBeenCalledTimes(1);
+    expect(retryMessageMock).not.toHaveBeenCalled();
   });
 
   it('shows friendly label for MessageOutputLengthError (no data.message)', () => {
