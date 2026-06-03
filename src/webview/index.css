@@ -309,14 +309,9 @@ body.vscode-light
   border-color: color-mix(in srgb, var(--color-vscode-fg) 7%, var(--color-vscode-sidebar));
 }
 
-body.vscode-light .assistant-turn-content.assistant-turn-content-highlighted {
-  background: color-mix(in srgb, var(--color-vscode-accent) 8%, var(--color-vscode-widget-bg));
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 18%, var(--color-vscode-border));
-}
-
+body.vscode-light .assistant-turn-content.assistant-turn-content-highlighted,
 body.vscode-light .assistant-turn-content.assistant-turn-content-planning {
-  background: color-mix(in srgb, var(--color-vscode-warning) 2%, var(--color-vscode-widget-bg));
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 7%, var(--color-vscode-border));
+  border: none;
   box-shadow: none;
 }
 
@@ -777,24 +772,36 @@ body.vscode-high-contrast-light .interactive-session {
   box-shadow: var(--chat-shadow-card);
 }
 
-.assistant-turn-content.assistant-turn-content-highlighted {
-  background: color-mix(
-    in srgb,
-    var(--color-vscode-accent) 4%,
-    var(--color-vscode-surface-subtle-alt)
-  );
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 26%, var(--color-vscode-border));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
+/* Final answers are distinguished by a flat left rail drawn in the existing
+   horizontal gutter, not a filled rounded card. The rail is absolutely
+   positioned so it never reflows content when a streaming turn resolves to
+   "final" (during streaming the turn is plain/flush; finalizing only paints
+   the rail into the gutter). Planning vs ordinary differ only by rail color,
+   with equal visual weight. */
+.assistant-turn-content.assistant-turn-content-highlighted,
+.assistant-turn-content.assistant-turn-content-planning {
+  --assistant-rail-color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .assistant-turn-content.assistant-turn-content-planning {
-  background: color-mix(
-    in srgb,
-    var(--color-vscode-warning) 1.5%,
-    var(--color-vscode-surface-subtle-alt)
-  );
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 8%, var(--color-vscode-border));
-  box-shadow: none;
+  --assistant-rail-color: color-mix(in srgb, var(--color-vscode-warning) 75%, transparent);
+}
+
+.assistant-turn-content.assistant-turn-content-highlighted::before,
+.assistant-turn-content.assistant-turn-content-planning::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--chat-horizontal-padding));
+  width: 1px;
+  background: var(--assistant-rail-color);
+  pointer-events: none;
 }
 
 .assistant-turn-content.assistant-turn-content-bare {
@@ -841,55 +848,45 @@ body.vscode-high-contrast-light .interactive-session {
 
 .assistant-read-mode-toggle-shell {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 0;
+  right: 0;
   z-index: 2;
   pointer-events: none;
 }
 
 @media (min-width: 721px) {
   .assistant-read-mode-toggle-shell {
-    top: 8px;
+    top: 0;
   }
 }
 
+/* Multi-part turns: the final answer item gets the same left-anchored gradient
+   as the single-part card path, so both cases read identically and neither
+   reflows on finalize. */
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-final {
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 12%, var(--color-vscode-border));
-  background: color-mix(
-    in srgb,
-    var(--color-vscode-accent) 2%,
-    var(--color-vscode-surface-subtle-alt)
-  );
+  --assistant-rail-color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
+  position: relative;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
 }
 
 .assistant-turn-content.assistant-turn-content-plain
   .assistant-message-flow-item-final.assistant-message-flow-item-final-planning {
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 8%, var(--color-vscode-border));
-  background: color-mix(
-    in srgb,
-    var(--color-vscode-warning) 1.5%,
-    var(--color-vscode-surface-subtle-alt)
-  );
-  box-shadow: none;
+  --assistant-rail-color: color-mix(in srgb, var(--color-vscode-warning) 75%, transparent);
 }
 
-body.vscode-light
-  .assistant-turn-content.assistant-turn-content-plain
-  .assistant-message-flow-item-final {
-  background: color-mix(in srgb, var(--color-vscode-accent) 3%, var(--color-vscode-widget-bg));
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 9%, var(--color-vscode-border));
-  box-shadow: none;
-}
-
-body.vscode-light
-  .assistant-turn-content.assistant-turn-content-plain
-  .assistant-message-flow-item-final.assistant-message-flow-item-final-planning {
-  background: color-mix(in srgb, var(--color-vscode-warning) 2%, var(--color-vscode-widget-bg));
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 7%, var(--color-vscode-border));
-  box-shadow: none;
+.assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-final::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--chat-horizontal-padding));
+  width: 1px;
+  background: var(--assistant-rail-color);
+  pointer-events: none;
 }
 
 .assistant-message-flow-item-final > .rendered-markdown > :first-child {

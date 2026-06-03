@@ -29,6 +29,44 @@ const COMPACTION_BOUNDARY_RE =
 const ASSISTANT_PART_VIRTUALIZE_THRESHOLD = 40;
 const ASSISTANT_PART_DEFAULT_ITEM_HEIGHT = 120;
 const ASSISTANT_PART_OVERSCAN = 3;
+const [readModeShiftPressed, setReadModeShiftPressed] = createSignal(false);
+let readModeShiftListenerCount = 0;
+
+function handleReadModeShiftKeydown(event: KeyboardEvent) {
+  if (event.key === 'Shift') setReadModeShiftPressed(true);
+}
+
+function handleReadModeShiftKeyup(event: KeyboardEvent) {
+  if (event.key === 'Shift') setReadModeShiftPressed(false);
+}
+
+function handleReadModeShiftMousemove(event: MouseEvent) {
+  setReadModeShiftPressed(event.shiftKey);
+}
+
+function handleReadModeShiftBlur() {
+  setReadModeShiftPressed(false);
+}
+
+function retainReadModeShiftListener() {
+  if (readModeShiftListenerCount === 0) {
+    window.addEventListener('keydown', handleReadModeShiftKeydown);
+    window.addEventListener('keyup', handleReadModeShiftKeyup);
+    window.addEventListener('mousemove', handleReadModeShiftMousemove);
+    window.addEventListener('blur', handleReadModeShiftBlur);
+  }
+  readModeShiftListenerCount += 1;
+
+  return () => {
+    readModeShiftListenerCount -= 1;
+    if (readModeShiftListenerCount > 0) return;
+    window.removeEventListener('keydown', handleReadModeShiftKeydown);
+    window.removeEventListener('keyup', handleReadModeShiftKeyup);
+    window.removeEventListener('mousemove', handleReadModeShiftMousemove);
+    window.removeEventListener('blur', handleReadModeShiftBlur);
+    setReadModeShiftPressed(false);
+  };
+}
 
 export function stripCompactionBoundaryMarkdown(text: string) {
   return text.replace(COMPACTION_BOUNDARY_RE, '').trim();
@@ -259,6 +297,10 @@ export function AssistantMessageContent(props: {
     return props.textForPart(part) ?? part.text;
   });
   const showReadModeToggle = createMemo(() => shouldShowReadModeToggle(finalTextContent()));
+
+  createEffect(() => {
+    onCleanup(retainReadModeShiftListener());
+  });
 
   createEffect(() => {
     if (!readModeOpen()) return;
@@ -498,7 +540,10 @@ export function AssistantMessageContent(props: {
       >
         <Show
           when={
-            item.part.type === 'text' && item.part.id === finalTextPartId() && showReadModeToggle()
+            item.part.type === 'text' &&
+            item.part.id === finalTextPartId() &&
+            showReadModeToggle() &&
+            readModeShiftPressed()
           }
         >
           <div class="assistant-read-mode-toggle-shell">

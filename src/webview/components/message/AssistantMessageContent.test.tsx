@@ -155,6 +155,14 @@ function createManyTextParts(count: number): Part[] {
   );
 }
 
+function pressShift() {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' }));
+}
+
+function releaseShift() {
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift' }));
+}
+
 describe('deduplicateFileEdits', () => {
   it('keeps only the last file edit in each consecutive duplicate run', () => {
     const initial = textPart('text-1', 'Status update');
@@ -172,7 +180,7 @@ describe('deduplicateFileEdits', () => {
 });
 
 describe('AssistantMessageContent', () => {
-  it('filters highlighted-card meta text using effective text and opens read mode for the final answer', async () => {
+  it('filters highlighted-card meta text using effective text and opens read mode for the final answer while Shift is pressed', async () => {
     const filteredPart = textPart('text-1', 'Visible before text rewrite');
     const finalPart = textPart(
       'text-2',
@@ -201,6 +209,10 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(1);
     expect(container?.querySelector('[data-part-id="text-1"]')).toBeNull();
 
+    expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
+
+    pressShift();
+
     const toggle = container?.querySelector('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
 
@@ -225,6 +237,9 @@ describe('AssistantMessageContent', () => {
     });
 
     expect(document.body.classList.contains('chat-read-mode-open')).toBe(false);
+
+    releaseShift();
+    expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
   });
 
   it('groups consecutive file edits into a single stack container', () => {

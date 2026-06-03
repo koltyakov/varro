@@ -7,8 +7,11 @@ test('opens read mode for long assistant answers and preserves rendered content'
   await expect(page.locator('.chat-header-title-text').first()).toHaveText('Rendered message actions');
   await expect(page.getByRole('link', { name: 'release notes' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy code' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open read mode' })).toHaveCount(0);
 
+  await page.keyboard.down('Shift');
   await page.getByRole('button', { name: 'Open read mode' }).click();
+  await page.keyboard.up('Shift');
 
   const dialog = page.getByRole('dialog', { name: 'Read mode' });
   await expect(dialog).toBeVisible();
@@ -23,7 +26,10 @@ test('opens read mode for long assistant answers and preserves rendered content'
 test('closes read mode with escape', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
 
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Rendered message actions');
+  await page.keyboard.down('Shift');
   await page.getByRole('button', { name: 'Open read mode' }).click();
+  await page.keyboard.up('Shift');
   const dialog = page.getByRole('dialog', { name: 'Read mode' });
   await expect(dialog).toBeVisible();
 

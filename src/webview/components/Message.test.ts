@@ -77,6 +77,14 @@ function reasoningPart(id: string, text: string): Part {
   };
 }
 
+function pressShift() {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' }));
+}
+
+function releaseShift() {
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift' }));
+}
+
 function compactionPart(id: string, options?: { auto?: boolean; overflow?: boolean }): Part {
   return {
     id,
@@ -981,7 +989,7 @@ describe('Message assistant final answer rendering', () => {
     host.remove();
   });
 
-  it('shows the read mode toggle for large final answers', () => {
+  it('shows the read mode toggle for large final answers only while Shift is pressed', () => {
     cleanup = render(
       () =>
         Message({
@@ -1008,8 +1016,15 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
+    expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
+
+    pressShift();
+
     const toggle = container?.querySelector('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
+
+    releaseShift();
+    expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
   });
 
   it('hides the read mode toggle for short final answers', () => {
@@ -1056,6 +1071,8 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+
+    pressShift();
 
     const toggle = container?.querySelector('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
