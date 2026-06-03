@@ -110,7 +110,7 @@ describe('SidebarProviderBridge', () => {
     });
   });
 
-  it('loads and caches built webview assets when rendering html', async () => {
+  it('reloads built webview assets when rendering html', async () => {
     const extensionUri = { fsPath: '/extension' };
     const bridge = new SidebarProviderBridge(extensionUri as never);
     const view = createView({ cspSource: 'csp-source' });
@@ -118,10 +118,11 @@ describe('SidebarProviderBridge', () => {
     const nextState = { ...initialState, theme: 'light' } satisfies InitialWebviewState;
 
     bridge.setView(view as never);
-    mocks.readFile.mockImplementation((path: string) => {
-      if (path.endsWith('webview.js')) return Promise.resolve('console.log("ready")');
-      return Promise.resolve('body { color: red; }');
-    });
+    mocks.readFile
+      .mockImplementationOnce(() => Promise.resolve('console.log("first")'))
+      .mockImplementationOnce(() => Promise.resolve('body { color: red; }'))
+      .mockImplementationOnce(() => Promise.resolve('console.log("second")'))
+      .mockImplementationOnce(() => Promise.resolve('body { color: blue; }'));
     mocks.renderWebviewHtml
       .mockReturnValueOnce('<html>first</html>')
       .mockReturnValueOnce('<html>second</html>');
@@ -129,14 +130,14 @@ describe('SidebarProviderBridge', () => {
     await expect(bridge.renderHtml(initialState)).resolves.toBe('<html>first</html>');
     await expect(bridge.renderHtml(nextState)).resolves.toBe('<html>second</html>');
 
-    expect(mocks.readFile).toHaveBeenCalledTimes(2);
+    expect(mocks.readFile).toHaveBeenCalledTimes(4);
     expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(1, 'csp-source', initialState, {
-      scriptContent: 'console.log("ready")',
+      scriptContent: 'console.log("first")',
       cssContent: 'body { color: red; }',
     });
     expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(2, 'csp-source', nextState, {
-      scriptContent: 'console.log("ready")',
-      cssContent: 'body { color: red; }',
+      scriptContent: 'console.log("second")',
+      cssContent: 'body { color: blue; }',
     });
     expect(mocks.warn).not.toHaveBeenCalled();
   });

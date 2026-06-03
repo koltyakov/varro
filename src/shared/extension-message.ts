@@ -202,7 +202,7 @@ function isDesktopSessionPaneSide(value: unknown): value is DesktopSessionPaneSi
 }
 
 function isPermissionMode(value: unknown): value is PermissionMode {
-  return value === 'default' || value === 'full';
+  return value === 'default' || value === 'auto' || value === 'full';
 }
 
 function isWebviewThemeKind(value: unknown): value is WebviewThemeKind {

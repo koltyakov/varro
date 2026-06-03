@@ -385,6 +385,28 @@ describe('parseExtensionMessage', () => {
     });
   });
 
+  it('parses auto permission mode in config/update', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: {
+          expandThinkingByDefault: true,
+          showStickyUserPrompt: false,
+          desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'auto',
+        },
+      })
+    ).toEqual({
+      type: 'config/update',
+      payload: {
+        expandThinkingByDefault: true,
+        showStickyUserPrompt: false,
+        desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'auto',
+      },
+    });
+  });
+
   it('maps legacy disabled provider-limit polling payloads to the boolean flag', () => {
     expect(
       parseExtensionMessage({

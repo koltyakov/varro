@@ -2693,7 +2693,11 @@ body.vscode-light
 }
 
 .permission-mode-icon.full {
-  color: var(--color-vscode-warning);
+  color: var(--vscode-charts-yellow, #facc15);
+}
+
+.permission-mode-icon.auto {
+  color: var(--vscode-charts-blue, #3794ff);
 }
 
 .toolbar-popover {

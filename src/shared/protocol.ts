@@ -33,7 +33,19 @@ export interface DroppedFile {
   attachmentSequence?: number;
 }
 
-export type PermissionMode = 'default' | 'full';
+export type PermissionMode = 'default' | 'auto' | 'full';
+
+export type AutoApproveJudgeDecision = 'allow' | 'ask';
+
+export type AutoApproveJudgeRequest = {
+  permission: Record<string, unknown>;
+  model?: { providerID: string; modelID: string; variant?: string };
+};
+
+export type AutoApproveJudgeResponse = {
+  decision: AutoApproveJudgeDecision;
+  reason?: string;
+};
 
 export type ProviderLimitUnit = 'requests' | 'tokens' | 'messages' | 'credits' | 'usd' | 'unknown';
 

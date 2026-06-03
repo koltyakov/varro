@@ -33,12 +33,21 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(byPermission.get('question')).toMatchObject({ pattern: '*', action: 'ask' });
   });
 
+  it('uses default approval rules for auto mode', () => {
+    expect(getSessionPermissionRulesForMode('auto', 'create')).toEqual(
+      getSessionPermissionRulesForMode('default', 'create')
+    );
+  });
+
   it('returns the same rules for create and update targets', () => {
     expect(getSessionPermissionRulesForMode('default', 'update')).toEqual(
       getSessionPermissionRulesForMode('default', 'create')
     );
     expect(getSessionPermissionRulesForMode('full', 'update')).toEqual(
       getSessionPermissionRulesForMode('full', 'create')
+    );
+    expect(getSessionPermissionRulesForMode('auto', 'update')).toEqual(
+      getSessionPermissionRulesForMode('auto', 'create')
     );
   });
 });

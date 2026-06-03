@@ -2,8 +2,8 @@ import * as vscode from 'vscode';
 import type { ExtensionMessage, ServerEvent, ServerStatus } from '../shared/protocol';
 import { parseServerEvent } from '../shared/protocol';
 import type { OpenCodeServer } from './server';
+import type { HiddenSessionManager } from './hidden-session-manager';
 import type { SessionStateManager } from './session-state-manager';
-import type { SessionTrashManager } from './session-trash-manager';
 import { getSessionIdsForEvent } from './sidebar-provider-utils';
 
 type PostMessage = (message: ExtensionMessage) => void;
@@ -17,7 +17,7 @@ export class ServerEventBridge {
   constructor(
     private readonly server: Pick<OpenCodeServer, 'on' | 'off'>,
     private readonly sessionState: Pick<SessionStateManager, 'handleServerEvent' | 'persist'>,
-    private readonly sessionTrash: Pick<SessionTrashManager, 'isHidden'>,
+    private readonly hiddenSessions: Pick<HiddenSessionManager, 'isHidden' | 'observeEvent'>,
     private readonly providerLimitService: {
       shouldClearCache(previousStatus: ServerStatus, nextStatus: ServerStatus): boolean;
       clearCache(): void;
@@ -54,7 +54,9 @@ export class ServerEventBridge {
 
     this.serverEventHandler = (event: unknown) => {
       const parsed = parseServerEvent(event);
-      if (!parsed || this.shouldSuppress(parsed)) return;
+      if (!parsed) return;
+      this.hiddenSessions.observeEvent?.(parsed);
+      if (this.shouldSuppress(parsed)) return;
       this.sessionState.handleServerEvent(parsed);
       this.post({ type: 'server/event', payload: parsed });
     };
@@ -74,6 +76,8 @@ export class ServerEventBridge {
   }
 
   private shouldSuppress(event: ServerEvent) {
-    return getSessionIdsForEvent(event).some((sessionID) => this.sessionTrash.isHidden(sessionID));
+    return getSessionIdsForEvent(event).some((sessionID) =>
+      this.hiddenSessions.isHidden(sessionID)
+    );
   }
 }

@@ -1,5 +1,5 @@
 import { createSignal, onCleanup, onMount } from 'solid-js';
-import type { ExtensionMessage, WebviewThemeKind } from '../../../shared/protocol';
+import type { ExtensionMessage, PermissionMode, WebviewThemeKind } from '../../../shared/protocol';
 import { onMessage, postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
 import type { QueuedMessage } from '../../lib/app-state-types';
@@ -13,7 +13,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
-import type { Message, Part, Session } from '../../types';
+import type { Message, Part, Permission, Session } from '../../types';
 import { getSessionTreeIds, getSessionTreeRootId } from '../../lib/state';
 import {
   createConnectionBootstrapOperations,
@@ -65,7 +65,7 @@ export interface OpenCodeRuntime {
   continueInterruptedSession(sessionId: string): Promise<void>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: { markSeen?: boolean }): Promise<void>;
-  createSession(title?: string, initialPermissionMode?: 'default' | 'full'): Promise<string | null>;
+  createSession(title?: string, initialPermissionMode?: PermissionMode): Promise<string | null>;
   deleteSession(id: string): Promise<void>;
   deleteSessionImmediately(id: string): Promise<void>;
   restoreSession(rootID: string): Promise<void>;
@@ -100,10 +100,7 @@ export interface OpenCodeRuntime {
     options?: { rethrow?: boolean }
   ): Promise<void>;
   respondQuestion(requestID: string, answers: Array<Array<string>>): Promise<void>;
-  updatePermissionModeForSession(
-    mode: 'default' | 'full',
-    sessionId?: string | null
-  ): Promise<void>;
+  updatePermissionModeForSession(mode: PermissionMode, sessionId?: string | null): Promise<void>;
   rejectQuestion(requestID: string): Promise<void>;
 }
 
@@ -199,6 +196,14 @@ function getActiveProviderSelection() {
       return { providerID: model.providerID, modelID: model.modelID };
     },
   });
+}
+
+function resolvePermissionJudgeModel(sessionId: string) {
+  return routingStore.resolveSelectedModel(
+    routingStore.getSelectedModelForSession(sessionId) || appStore.state.selectedModel,
+    appStore.state.providers,
+    appStore.state.providerDefaults
+  );
 }
 
 async function deleteSessionImmediately(id: string) {
@@ -398,7 +403,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     for (const item of pendingPermissions) {
       const permission = normalizePermissionEvent(item);
       if (!permission) continue;
-      if (permissionsStore.getPermissionModeForSession(permission.sessionID) === 'full') {
+      const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
+      if (mode === 'full') {
         await sessionApprovalOperations
           .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
           .catch(() => {
@@ -406,8 +412,36 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           });
         continue;
       }
+      if (mode === 'auto') {
+        await judgeAndRespondPermission(permission);
+        continue;
+      }
       permissionsStore.addPermission(permission);
     }
+  }
+
+  async function judgeAndRespondPermission(permission: Permission) {
+    try {
+      const model = resolvePermissionJudgeModel(permission.sessionID);
+      const response = await client.varro.judgePermission({
+        permission,
+        ...(model ? { model } : {}),
+      });
+      if (response.decision === 'allow') {
+        await sessionApprovalOperations.respondPermission(
+          permission.sessionID,
+          permission.id,
+          'once',
+          {
+            rethrow: true,
+          }
+        );
+        return;
+      }
+    } catch (err) {
+      logError('autoApproveJudge', err);
+    }
+    permissionsStore.addPermission(permission);
   }
 
   function initConnection() {
@@ -861,7 +895,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function updatePermissionModeForSession(
-    mode: 'default' | 'full',
+    mode: PermissionMode,
     sessionId = appStore.state.activeSessionId
   ) {
     await sessionApprovalOperations.updatePermissionModeForSession(

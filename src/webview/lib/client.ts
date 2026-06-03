@@ -16,6 +16,8 @@ import type {
   Todo,
 } from '../types';
 import type {
+  AutoApproveJudgeRequest,
+  AutoApproveJudgeResponse,
   McpStatus,
   ProviderLimitStatus,
   RecycleBinEntry,
@@ -209,6 +211,9 @@ export const client = {
       agentName?: string;
     }): Promise<OpenCodeModelRouting> {
       return apiCall('POST', '/varro/opencode-config/model-routing', body);
+    },
+    async judgePermission(body: AutoApproveJudgeRequest): Promise<AutoApproveJudgeResponse> {
+      return apiCall('POST', '/varro/permission/judge', body);
     },
     recycleBin: {
       async list(): Promise<RecycleBinEntry[]> {

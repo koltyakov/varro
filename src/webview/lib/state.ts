@@ -348,7 +348,9 @@ export function createAppState(): AppStateInstance {
   const permissionWorkspace: string | null =
     initialWebviewState.editorContext?.workspacePath ?? null;
   const [defaultPermissionMode, setDefaultPermissionMode] = createSignal<PermissionMode>(
-    initialWebviewState.defaultPermissionMode === 'full' ? 'full' : 'default'
+    isPermissionMode(initialWebviewState.defaultPermissionMode)
+      ? initialWebviewState.defaultPermissionMode
+      : 'default'
   );
   const [draftPermissionMode, setDraftPermissionMode] = createSignal<PermissionMode>(
     resolveInitialDraftMode(permissionWorkspace, defaultPermissionMode())
@@ -1086,9 +1088,13 @@ function resolveInitialDraftMode(
   if (permissionWorkspace) {
     const modes =
       readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
-    if (Object.hasOwn(modes, permissionWorkspace)) return modes[permissionWorkspace];
+    const projectMode = modes[permissionWorkspace];
+    if (Object.hasOwn(modes, permissionWorkspace) && isPermissionMode(projectMode)) {
+      return projectMode;
+    }
   }
-  return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) || fallbackMode;
+  const storedMode = readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode);
+  return isPermissionMode(storedMode) ? storedMode : fallbackMode;
 }
 
 function resolveProjectDraftModeForCurrentWorkspace(fallbackMode = defaultPermissionMode()) {
@@ -1096,7 +1102,14 @@ function resolveProjectDraftModeForCurrentWorkspace(fallbackMode = defaultPermis
   if (!permissionWorkspace) return fallbackMode;
   const modes =
     readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
-  return Object.hasOwn(modes, permissionWorkspace) ? modes[permissionWorkspace] : fallbackMode;
+  const projectMode = modes[permissionWorkspace];
+  return Object.hasOwn(modes, permissionWorkspace) && isPermissionMode(projectMode)
+    ? projectMode
+    : fallbackMode;
+}
+
+function isPermissionMode(value: unknown): value is PermissionMode {
+  return value === 'default' || value === 'auto' || value === 'full';
 }
 
 function hasPersistedDraftPermissionMode(permissionWorkspace: string | null): boolean {

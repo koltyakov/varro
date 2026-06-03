@@ -1,5 +1,12 @@
 import * as vscode from 'vscode';
-import type { OpenCodeModelRouting, ServerStatus, WebviewMessage } from '../shared/protocol';
+import type {
+  AutoApproveJudgeRequest,
+  OpenCodeModelRouting,
+  ServerStatus,
+  WebviewMessage,
+} from '../shared/protocol';
+import type { AutoApproveJudge } from './auto-approve-judge';
+import type { HiddenSessionManager } from './hidden-session-manager';
 import { isAllowedApiRequest } from './util/webview-message';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
@@ -100,6 +107,14 @@ export interface RestProxyCallbacks {
     | 'moveToTrash'
     | 'restore'
   >;
+  hiddenSessions: Pick<
+    HiddenSessionManager,
+    | 'filterVisibleSessionRequests'
+    | 'filterVisibleSessionStatuses'
+    | 'filterVisibleSessions'
+    | 'isHidden'
+  >;
+  autoApproveJudge: Pick<AutoApproveJudge, 'judge'>;
   simulateNoProviders: boolean;
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
@@ -178,6 +193,17 @@ export class RestProxy {
         await this.callbacks.ensureServerStarted();
       }
       await this.callbacks.cleanupExpiredRecycleBin();
+
+      const judgePermissionRequest = this.parseJudgePermissionRequest(
+        method,
+        payload.path,
+        payload.body
+      );
+      if (judgePermissionRequest) {
+        const data = await this.callbacks.autoApproveJudge.judge(judgePermissionRequest);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
 
       const providerLimitRequest = this.parseProviderLimitRequest(method, payload.path);
       if (providerLimitRequest) {
@@ -267,13 +293,15 @@ export class RestProxy {
     const match = url.pathname.match(/^\/session\/([^/]+)/);
     if (!match) return null;
     const sessionID = decodeURIComponent(match[1]);
-    return this.callbacks.sessionTrash.isHidden(sessionID) ? sessionID : null;
+    return this.isHiddenSession(sessionID) ? sessionID : null;
   }
 
   private filterApiResponse(method: string, path: string, data: unknown) {
     const url = new URL(path, 'http://localhost');
     if (method === 'GET' && url.pathname === '/session' && Array.isArray(data)) {
-      return this.callbacks.sessionTrash.filterVisibleSessions(data as Array<{ id: string }>);
+      return this.callbacks.sessionTrash.filterVisibleSessions(
+        this.callbacks.hiddenSessions.filterVisibleSessions(data as Array<{ id: string }>)
+      );
     }
     if (
       method === 'GET' &&
@@ -289,15 +317,31 @@ export class RestProxy {
       typeof data === 'object'
     ) {
       return this.callbacks.sessionTrash.filterVisibleSessionStatuses(
-        data as Record<string, unknown>
+        this.callbacks.hiddenSessions.filterVisibleSessionStatuses(data as Record<string, unknown>)
       );
     }
     if (method === 'GET' && url.pathname === '/question' && Array.isArray(data)) {
       return this.callbacks.sessionTrash.filterVisibleSessionRequests(
-        data as Array<{ sessionID: string }>
+        this.callbacks.hiddenSessions.filterVisibleSessionRequests(
+          data as Array<{ sessionID: string }>
+        )
+      );
+    }
+    if (method === 'GET' && url.pathname === '/permission' && Array.isArray(data)) {
+      return this.callbacks.sessionTrash.filterVisibleSessionRequests(
+        this.callbacks.hiddenSessions.filterVisibleSessionRequests(
+          data as Array<{ sessionID: string }>
+        )
       );
     }
     return data;
+  }
+
+  private isHiddenSession(sessionID: string | null | undefined) {
+    return (
+      this.callbacks.sessionTrash.isHidden(sessionID) ||
+      this.callbacks.hiddenSessions.isHidden(sessionID)
+    );
   }
 
   private sanitizeSessionMessages(pathname: string, data: unknown[]) {
@@ -537,6 +581,34 @@ export class RestProxy {
     }
 
     throw new Error('Unsupported model routing target');
+  }
+
+  private parseJudgePermissionRequest(
+    method: string,
+    path: string,
+    body: unknown
+  ): AutoApproveJudgeRequest | null {
+    if (method !== 'POST' || path !== '/varro/permission/judge') return null;
+    const payload = asRecord(body);
+    const permission = asRecord(payload?.permission);
+    if (!permission) throw new Error('Permission context is required');
+
+    const rawModel = asRecord(payload?.model);
+    const providerID = typeof rawModel?.providerID === 'string' ? rawModel.providerID.trim() : '';
+    const modelID = typeof rawModel?.modelID === 'string' ? rawModel.modelID.trim() : '';
+    const variant = typeof rawModel?.variant === 'string' ? rawModel.variant.trim() : '';
+    return {
+      permission,
+      ...(providerID && modelID
+        ? {
+            model: {
+              providerID,
+              modelID,
+              ...(variant ? { variant } : {}),
+            },
+          }
+        : {}),
+    };
   }
 
   private getOpenCodeConfigUri() {

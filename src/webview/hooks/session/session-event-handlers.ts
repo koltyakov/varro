@@ -13,6 +13,7 @@ import type {
   FileDiff,
   Message,
   Part,
+  Permission,
   QuestionRequest,
   Session,
   SessionEventInfo,
@@ -138,6 +139,8 @@ type EventHandlerDependencies = {
     latestEventPayload?: unknown
   ): void;
   shouldAutoApprovePermissions(sessionId: string): boolean;
+  shouldAutoJudgePermissions?(sessionId: string): boolean;
+  judgePermission?(permission: Permission): Promise<void>;
   syncPendingPermissions?(): Promise<void>;
   respondPermission(
     sessionId: string,
@@ -170,7 +173,10 @@ type EventHandlerOperationDependencies = {
     | 'applyUsageLimitNotice'
   >;
   sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
-  sessionApprovalOperations: Pick<EventHandlerDependencies, 'respondPermission'>;
+  sessionApprovalOperations: Pick<
+    EventHandlerDependencies,
+    'respondPermission' | 'judgePermission'
+  >;
   syncPendingPermissions?: EventHandlerDependencies['syncPendingPermissions'];
   abortRemoteSession: EventHandlerDependencies['abortRemoteSession'];
   logError: EventHandlerDependencies['logError'];
@@ -361,6 +367,9 @@ export class SessionEventHandlerOperations {
       syncTodosFromMessages: this.deps.todoSyncOperations.syncTodosFromMessages,
       shouldAutoApprovePermissions: (sessionId) =>
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
+      shouldAutoJudgePermissions: (sessionId) =>
+        permissionsStore.getPermissionModeForSession(sessionId) === 'auto',
+      judgePermission: this.deps.sessionApprovalOperations.judgePermission,
       syncPendingPermissions: this.deps.syncPendingPermissions,
       respondPermission: this.deps.sessionApprovalOperations.respondPermission,
       setDiffs: sessionStore.setDiffs,
@@ -374,6 +383,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
   const activeMessageSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const workingSessionIds = new Set<string>();
+  const autoJudgingPermissionIds = new Set<string>();
   const pendingMissingPartDeltas = new Map<
     string,
     {
@@ -1012,6 +1022,20 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
         .catch(() => {
           permissionsStore.addPermission(permission);
+        });
+      return;
+    }
+    if (deps.shouldAutoJudgePermissions?.(permission.sessionID) && deps.judgePermission) {
+      if (autoJudgingPermissionIds.has(permission.id)) return;
+      autoJudgingPermissionIds.add(permission.id);
+      void deps
+        .judgePermission(permission)
+        .catch((err) => {
+          deps.logError('autoApproveJudge', err);
+          permissionsStore.addPermission(permission);
+        })
+        .finally(() => {
+          autoJudgingPermissionIds.delete(permission.id);
         });
       return;
     }

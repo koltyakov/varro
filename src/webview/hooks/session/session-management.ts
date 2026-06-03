@@ -211,8 +211,8 @@ export async function createSessionWithDependencies(
     }
 
     deps.setSelectedMcpsForSession(session.id, deps.getConnectedMcpNames());
-    if (initialPermissionMode === 'full') {
-      deps.setPermissionModeForSession(session.id, 'full');
+    if (initialPermissionMode !== 'default') {
+      deps.setPermissionModeForSession(session.id, initialPermissionMode);
     }
 
     deps.resetDraftPermissionMode();

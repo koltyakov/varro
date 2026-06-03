@@ -233,6 +233,64 @@ function createCompletedAssistantEntry(
 }
 
 describe('registerSessionEventHandlers', () => {
+  it('judges auto-approve permissions without showing a prompt', async () => {
+    addPermission.mockClear();
+    const handlers = installHandlers();
+    const judgePermission = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        shouldAutoJudgePermissions: () => true,
+        judgePermission,
+      })
+    );
+
+    const payload = {
+      id: 'perm-auto',
+      sessionID: 'session-1',
+      permission: 'bash',
+      title: 'Run git status',
+    };
+    handlers.get('permission.asked')?.({ properties: payload });
+    handlers.get('permission.updated')?.({ properties: payload });
+
+    await vi.waitFor(() => {
+      expect(judgePermission).toHaveBeenCalledOnce();
+      expect(judgePermission).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'perm-auto', sessionID: 'session-1', type: 'bash' })
+      );
+    });
+    expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-auto' }));
+  });
+
+  it('shows auto-approve permissions when judging fails', async () => {
+    addPermission.mockClear();
+    const handlers = installHandlers();
+    const judgePermission = vi.fn().mockRejectedValue(new Error('judge failed'));
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        shouldAutoJudgePermissions: () => true,
+        judgePermission,
+      })
+    );
+
+    handlers.get('permission.asked')?.({
+      properties: {
+        id: 'perm-auto-failed',
+        sessionID: 'session-1',
+        permission: 'bash',
+        title: 'Run git status',
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(addPermission).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'perm-auto-failed', sessionID: 'session-1' })
+      );
+    });
+  });
+
   it('restores the permission prompt when auto-approval fails', async () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {

@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     questionList: vi.fn(),
     permissionList: vi.fn(),
     varroOpenPlan: vi.fn(),
+    varroJudgePermission: vi.fn(),
     recycleBinList: vi.fn(),
     recycleBinRestore: vi.fn(),
     recycleBinDelete: vi.fn(),
@@ -88,6 +89,7 @@ vi.mock('../lib/client', () => ({
     },
     varro: {
       openPlan: clientMocks.varroOpenPlan,
+      judgePermission: clientMocks.varroJudgePermission,
       recycleBin: {
         list: clientMocks.recycleBinList,
         restore: clientMocks.recycleBinRestore,
@@ -268,6 +270,7 @@ beforeEach(() => {
   clientMocks.questionList.mockReset();
   clientMocks.permissionList.mockReset();
   clientMocks.varroOpenPlan.mockReset();
+  clientMocks.varroJudgePermission.mockReset();
   clientMocks.recycleBinList.mockReset();
   clientMocks.recycleBinRestore.mockReset();
   clientMocks.recycleBinDelete.mockReset();
@@ -296,6 +299,7 @@ beforeEach(() => {
   clientMocks.mcpConnect.mockResolvedValue(true);
   clientMocks.mcpDisconnect.mockResolvedValue(true);
   clientMocks.varroOpenPlan.mockResolvedValue({ path: '/tmp/plan.md' });
+  clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'test' });
   clientMocks.recycleBinList.mockResolvedValue([]);
   clientMocks.recycleBinRestore.mockResolvedValue(true);
   clientMocks.recycleBinDelete.mockResolvedValue(true);

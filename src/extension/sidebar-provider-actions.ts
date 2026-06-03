@@ -115,7 +115,7 @@ export function createSidebarProviderActions(
         .getConfiguration('varro')
         .update(
           'chat.defaultPermissionMode',
-          payload.defaultPermissionMode as 'default' | 'full',
+          payload.defaultPermissionMode,
           vscode.ConfigurationTarget.Global
         );
       deps.postConfigState();

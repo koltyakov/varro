@@ -544,7 +544,7 @@ describe('client', () => {
     ]);
   });
 
-  it('forwards readWorkspaceFile, saveModelRouting, and openCodeConfig calls', async () => {
+  it('forwards readWorkspaceFile, saveModelRouting, openCodeConfig, and judge calls', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue({});
 
@@ -555,6 +555,10 @@ describe('client', () => {
       modelID: 'gpt-4.1',
     });
     await client.varro.openCodeConfig();
+    await client.varro.judgePermission({
+      permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+      model: { providerID: 'openai', modelID: 'gpt-4.1' },
+    });
 
     expect(bridgeMocks.apiCall.mock.calls).toEqual([
       ['GET', '/varro/workspace-file?path=src%2Fapp.ts'],
@@ -568,6 +572,14 @@ describe('client', () => {
         },
       ],
       ['GET', '/varro/opencode-config'],
+      [
+        'POST',
+        '/varro/permission/judge',
+        {
+          permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+          model: { providerID: 'openai', modelID: 'gpt-4.1' },
+        },
+      ],
     ]);
   });
 

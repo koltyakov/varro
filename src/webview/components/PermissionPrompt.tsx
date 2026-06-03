@@ -1,6 +1,7 @@
 import { Show, createSignal } from 'solid-js';
 import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
+import { permissionsStore } from '../lib/stores/permissions-store';
 
 function formatMetadataValue(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -13,12 +14,17 @@ export function PermissionPrompt(props: { permission: Permission }) {
   const [responding, setResponding] = createSignal(false);
   const duplicateCount = () =>
     props.permission.groupMembers?.length || props.permission.duplicateIDs?.length || 0;
+  const isAutoMode = () => permissionsStore.getPermissionModeForSession(sessionId()) === 'auto';
 
   const handleRespond = async (response: 'once' | 'always' | 'reject') => {
     if (responding()) return;
     setResponding(true);
     try {
-      await respondPermission(sessionId(), props.permission.id, response);
+      await respondPermission(
+        sessionId(),
+        props.permission.id,
+        isAutoMode() && response === 'always' ? 'once' : response
+      );
     } finally {
       setResponding(false);
     }
@@ -33,8 +39,14 @@ export function PermissionPrompt(props: { permission: Permission }) {
   return (
     <div class="chat-tool-invocation-part permission-prompt animate-fade-in">
       <div class="permission-prompt-header">
-        <svg class="permission-prompt-icon" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 1L2.5 3v4c0 3.4 2.3 6.5 5.5 7.5 3.2-1 5.5-4.1 5.5-7.5V3L8 1zm4 6c0 2.8-1.8 5.2-4 6.2C5.8 12.2 4 9.8 4 7V4l4-1.5L12 4v3z" />
+        <svg class="permission-prompt-icon" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M13.1469 21.1972L14.8163 20.0286C19.1794 16.9744 21.3182 11.6252 20.2636 6.40484C20.212 6.14963 20.0447 5.93295 19.8108 5.8186L12 2L4.18923 5.8186C3.95533 5.93295 3.78795 6.14963 3.7364 6.40484C2.68177 11.6252 4.82058 16.9744 9.18369 20.0286L10.8531 21.1972C11.5417 21.6792 12.4583 21.6792 13.1469 21.1972Z"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
         </svg>
         <span class="permission-prompt-label">Permission Required</span>
         <Show when={duplicateCount() > 1}>
@@ -64,19 +76,21 @@ export function PermissionPrompt(props: { permission: Permission }) {
           Reject
         </button>
         <button
-          class="question-btn question-btn-secondary"
+          class={`question-btn ${isAutoMode() ? 'question-btn-primary' : 'question-btn-secondary'}`}
           disabled={responding()}
           onClick={() => handleRespond('once')}
         >
-          Once
+          {isAutoMode() ? 'Allow' : 'Once'}
         </button>
-        <button
-          class="question-btn question-btn-primary"
-          disabled={responding()}
-          onClick={() => handleRespond('always')}
-        >
-          Always
-        </button>
+        <Show when={!isAutoMode()}>
+          <button
+            class="question-btn question-btn-primary"
+            disabled={responding()}
+            onClick={() => handleRespond('always')}
+          >
+            Always
+          </button>
+        </Show>
       </div>
     </div>
   );

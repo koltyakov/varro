@@ -1,4 +1,5 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
+import type { PermissionMode } from '../../../shared/protocol';
 import type { QueuedMessage } from '../../lib/app-state-types';
 
 let currentOpenCodeRuntime = createOpenCodeRuntime();
@@ -41,7 +42,7 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
   await getCurrentOpenCodeRuntime().selectSession(id, options);
 }
 
-export async function createSession(title?: string, initialPermissionMode?: 'default' | 'full') {
+export async function createSession(title?: string, initialPermissionMode?: PermissionMode) {
   return getCurrentOpenCodeRuntime().createSession(title, initialPermissionMode);
 }
 
@@ -134,7 +135,7 @@ export async function respondQuestion(requestID: string, answers: Array<Array<st
 }
 
 export async function updatePermissionModeForSession(
-  mode: 'default' | 'full',
+  mode: PermissionMode,
   sessionId?: string | null
 ) {
   await getCurrentOpenCodeRuntime().updatePermissionModeForSession(mode, sessionId);

@@ -6,7 +6,6 @@ import { logger } from './logger';
 import { renderWebviewHtml, type WebviewAssetContent } from './webview-html';
 
 export class SidebarProviderBridge {
-  private webviewAssets: WebviewAssetContent | null = null;
   private view?: vscode.WebviewView;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
@@ -47,8 +46,6 @@ export class SidebarProviderBridge {
   }
 
   private async loadWebviewAssets(): Promise<WebviewAssetContent> {
-    if (this.webviewAssets) return this.webviewAssets;
-
     const distDir = resolve(this.extensionUri.fsPath, 'dist', 'webview');
     const [scriptResult, cssResult] = await Promise.allSettled([
       readFile(join(distDir, 'webview.js'), 'utf-8'),
@@ -63,7 +60,6 @@ export class SidebarProviderBridge {
       return { scriptContent, cssContent };
     }
 
-    this.webviewAssets = { scriptContent, cssContent };
-    return this.webviewAssets;
+    return { scriptContent, cssContent };
   }
 }

@@ -1,3 +1,4 @@
+import type { PermissionMode } from '../../shared/protocol';
 import type { PermissionRule } from '../types';
 
 const FULL_ACCESS_PERMISSION_NAMES = [
@@ -39,7 +40,7 @@ const DEFAULT_PERMISSION_RULES: PermissionRule[] = FULL_ACCESS_PERMISSION_NAMES.
 );
 
 export function getSessionPermissionRulesForMode(
-  mode: 'default' | 'full',
+  mode: PermissionMode,
   _target: 'create' | 'update'
 ): PermissionRule[] {
   if (mode === 'full') return FULL_ACCESS_PERMISSION_RULES;

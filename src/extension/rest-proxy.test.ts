@@ -66,6 +66,15 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       moveToTrash: vi.fn(() => Promise.resolve(null)),
       restore: vi.fn(() => Promise.resolve(null)),
     },
+    hiddenSessions: {
+      filterVisibleSessionRequests: vi.fn(<T>(arr: T[]) => arr) as never,
+      filterVisibleSessions: vi.fn(<T>(arr: T[]) => arr) as never,
+      filterVisibleSessionStatuses: vi.fn(<T>(obj: Record<string, T>) => obj) as never,
+      isHidden: vi.fn(() => false),
+    },
+    autoApproveJudge: {
+      judge: vi.fn(() => Promise.resolve({ decision: 'ask' as const, reason: 'test' })),
+    },
     simulateNoProviders: false,
     getRequestGeneration: vi.fn(() => 1),
     getStatus: vi.fn(() => ({ state: 'running' as const, url: 'http://127.0.0.1:4096' })),
@@ -340,6 +349,30 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 8, data: limitStatus });
   });
 
+  it('routes auto-approve judge requests after server startup', async () => {
+    const judgeResult = { decision: 'allow' as const, reason: 'safe' };
+    const { proxy, callbacks } = createProxy({
+      getStatus: vi.fn(() => ({ state: 'stopped' as const })),
+      autoApproveJudge: {
+        judge: vi.fn(() => Promise.resolve(judgeResult)),
+      },
+    });
+
+    await proxy.handleRequest(
+      makePayload(81, 'POST', '/varro/permission/judge', {
+        permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+        model: { providerID: 'openai', modelID: 'gpt-4.1' },
+      })
+    );
+
+    expect(callbacks.ensureServerStarted).toHaveBeenCalledOnce();
+    expect(callbacks.autoApproveJudge.judge).toHaveBeenCalledWith({
+      permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+      model: { providerID: 'openai', modelID: 'gpt-4.1' },
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 81, data: judgeResult });
+  });
+
   it('simulates no providers when flag is set', async () => {
     const { proxy, callbacks } = createProxy({ simulateNoProviders: true });
     await proxy.handleRequest(makePayload(9, 'GET', '/config/providers'));
@@ -359,6 +392,20 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(10, 'GET', '/session/hidden-id'));
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 10,
+      error: '404 Session not found',
+    });
+  });
+
+  it('returns 404 error for extension-hidden sessions', async () => {
+    const { proxy, callbacks } = createProxy({
+      hiddenSessions: {
+        ...createCallbacks().hiddenSessions,
+        isHidden: vi.fn(() => true),
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(101, 'GET', '/session/hidden-id'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 101,
       error: '404 Session not found',
     });
   });

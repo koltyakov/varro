@@ -71,6 +71,44 @@ describe('session management helpers', () => {
     expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-2', ['docs']);
   });
 
+  it('persists non-default permission mode for new sessions', async () => {
+    const setPermissionModeForSession = vi.fn();
+
+    const result = await createSessionWithDependencies(
+      {
+        getActiveSessionId: () => null,
+        createRemoteSession: vi.fn(async () => session('session-auto')),
+        buildCreatePermission: () => [{ permission: 'bash', pattern: '*', action: 'ask' }],
+        upsertSession: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        setActiveSessionId: vi.fn(),
+        clearDraftCurrentDocumentState: vi.fn(),
+        adoptDraftCurrentDocumentState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setSessionUsageLimit: vi.fn(),
+        persistActiveSessionId: vi.fn(),
+        markSessionSeen: vi.fn(),
+        getDefaultSelectedModel: () => null,
+        setSelectedModel: vi.fn(),
+        resolveDefaultAgent: () => null,
+        setSelectedAgent: vi.fn(),
+        getConnectedMcpNames: () => [],
+        setSelectedMcpsForSession: vi.fn(),
+        setPermissionModeForSession,
+        resetDraftPermissionMode: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      undefined,
+      'auto'
+    );
+
+    expect(result).toBe('session-auto');
+    expect(setPermissionModeForSession).toHaveBeenCalledWith('session-auto', 'auto');
+  });
+
   it('deletes a session and selects the next visible session when needed', async () => {
     const selectSession = vi.fn(async () => {});
 

@@ -40,10 +40,19 @@ export function PermissionModePicker(props: {
 }) {
   const options: Array<{ mode: PermissionMode; label: string }> = [
     { mode: 'default', label: 'Default' },
+    { mode: 'auto', label: 'Auto approve' },
     { mode: 'full', label: 'Full access' },
   ];
-  const title = () => (props.mode === 'full' ? 'Full access permissions' : 'Default permissions');
-  const buttonLabel = () => (props.mode === 'full' ? 'Full access' : 'Default');
+  const title = () => {
+    if (props.mode === 'full') return 'Full access permissions';
+    if (props.mode === 'auto') return 'Auto-approve permissions';
+    return 'Default permissions';
+  };
+  const buttonLabel = () => {
+    if (props.mode === 'full') return 'Full access';
+    if (props.mode === 'auto') return 'Auto approve';
+    return 'Default';
+  };
   let popupEl: HTMLDivElement | undefined;
 
   createEffect(() => {

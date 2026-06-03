@@ -79,17 +79,36 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.getAttribute('aria-label')).toBe('Default permissions');
     expect(buttonRef).toBe(toggleButton);
     expect(popoverRef).toBe(container?.querySelector('.toolbar-popover'));
-    expect(options).toHaveLength(2);
+    expect(options).toHaveLength(3);
     expect(options[0]?.className).toContain('selected');
     expect(options[1]?.className).not.toContain('selected');
 
     toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    options[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    options[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     popoverRef?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(onToggle).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenCalledWith('full');
     expect(parentClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the auto-approve title when selected', () => {
+    cleanup = render(
+      () => (
+        <PermissionModePicker
+          mode="auto"
+          showPicker={false}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
+
+    expect(toggleButton?.title).toBe('Auto-approve permissions');
+    expect(toggleButton?.getAttribute('aria-label')).toBe('Auto-approve permissions');
   });
 
   it('uses the full-access title when the permission picker is closed', () => {
@@ -129,7 +148,7 @@ describe('ToolbarPickers', () => {
     const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
 
     expect(toggleButton?.className).not.toContain('icon-only');
-    expect(toggleButton?.textContent).toContain('Default approvals');
+    expect(toggleButton?.textContent).toContain('Default');
   });
 
   it('renders the agent picker state and forwards hover and selection', () => {

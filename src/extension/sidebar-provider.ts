@@ -2,9 +2,11 @@ import * as vscode from 'vscode';
 import { statSync } from 'fs';
 import { basename, dirname } from 'path';
 import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
+import { AutoApproveJudge } from './auto-approve-judge';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { FileSearchService } from './file-search-service';
+import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
 import { MessageRouter } from './message-router';
 import { getOpenCodeConfigPath } from './open-code-process';
@@ -32,6 +34,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly fileSearch: FileSearchService;
   private readonly sessionState: SessionStateManager;
   private readonly sessionTrash: SessionTrashManager;
+  private readonly hiddenSessions: HiddenSessionManager;
+  private readonly autoApproveJudge: AutoApproveJudge;
   private readonly messageRouter: MessageRouter;
   private readonly restProxy: RestProxy;
   public readonly sessionExportService: SessionExportService;
@@ -88,6 +92,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.providerLimitService = new ProviderLimitService(server);
     this.bridge = new SidebarProviderBridge(extensionUri);
     this.sessionTrash = new SessionTrashManager(persistence);
+    this.hiddenSessions = new HiddenSessionManager();
+    this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions);
     this.sessionState = new SessionStateManager(
       persistence,
       {
@@ -109,7 +115,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.serverEventBridge = new ServerEventBridge(
       server,
       this.sessionState,
-      this.sessionTrash,
+      {
+        isHidden: (sessionID) =>
+          this.sessionTrash.isHidden(sessionID) || this.hiddenSessions.isHidden(sessionID),
+        observeEvent: (event) => this.hiddenSessions.observeEvent(event),
+      },
       this.providerLimitService,
       (message) => this.post(message),
       () => this.updateStatusBarItem()
@@ -119,6 +129,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.bridge,
       this.sessionState,
       this.sessionTrash,
+      this.hiddenSessions,
       contextProvider,
       this.contextFilesState,
       {
@@ -145,6 +156,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       providerLimitService: this.providerLimitService,
       sessionState: this.sessionState,
       sessionTrash: this.sessionTrash,
+      hiddenSessions: this.hiddenSessions,
+      autoApproveJudge: this.autoApproveJudge,
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => this.webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
@@ -438,6 +451,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const pendingRequests = [...this.sessionState.pending.values()].filter(
       (request) =>
         !this.sessionTrash.isHidden(request.sessionID) &&
+        !this.hiddenSessions.isHidden(request.sessionID) &&
         this.sessionState.isSessionInWorkspace(
           request.sessionID,
           this.contextProvider.context.workspacePath
@@ -464,6 +478,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const completedSessions = [...this.sessionState.completed].filter(
       (sessionID) =>
         !this.sessionTrash.isHidden(sessionID) &&
+        !this.hiddenSessions.isHidden(sessionID) &&
         this.sessionState.isSessionInWorkspace(
           sessionID,
           this.contextProvider.context.workspacePath

@@ -56,7 +56,7 @@ export type QueuedAttachmentSnapshot = Pick<
 >;
 
 type StateBoundSendDependencies = {
-  createSession(initialPermissionMode: 'default' | 'full'): Promise<string | null>;
+  createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
   ensureSessionPermission?(sessionId: string): Promise<boolean>;
   clearPendingAbort(sessionId: string): void;
   resetTodoSync(): void;
@@ -349,8 +349,8 @@ export class SessionSendOperations {
 export async function sendMessageWithDependencies(
   deps: {
     getActiveSessionId(): string | null;
-    getDefaultPermissionMode(): 'default' | 'full';
-    createSession(initialPermissionMode: 'default' | 'full'): Promise<string | null>;
+    getDefaultPermissionMode(): PermissionMode;
+    createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
     ensureSessionPermission?(sessionId: string): Promise<boolean>;
     clearPendingAbort(sessionId: string): void;
     syncSessionMcps(sessionId: string): Promise<void>;

@@ -21,6 +21,7 @@ vi.mock('vscode', () => vscodeMock);
 vi.mock('./logger', () => ({ logger: loggerMock }));
 
 import type { InitialWebviewState, ServerStatus } from '../shared/protocol';
+import type { BlockingRequestSnapshot } from './session-state-manager';
 import { WebviewSession } from './webview-session';
 
 const RUNNING_STATUS: ServerStatus = { state: 'running', url: 'http://127.0.0.1:4096' };
@@ -94,7 +95,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
 
   const sessionState = {
     clearCompleted: vi.fn(),
-    consumeBlockingRequests: vi.fn(() => Promise.resolve([])),
+    consumeBlockingRequests: vi.fn(() => Promise.resolve([] as BlockingRequestSnapshot[])),
     consumeInterruptedSessions: vi.fn(() => Promise.resolve([])),
     replayBlockingRequests: vi.fn(),
     restoreBlockingRequests: vi.fn(),
@@ -102,8 +103,13 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
 
   const sessionTrash = {
     hiddenSessionIds: vi.fn(() => new Set<string>()),
-    isHidden: vi.fn(() => false),
+    isHidden: vi.fn((_sessionID?: string | null) => false),
     list: vi.fn(),
+  };
+
+  const hiddenSessions = {
+    hiddenSessionIds: vi.fn(() => new Set<string>()),
+    isHidden: vi.fn((_sessionID?: string | null) => false),
   };
 
   const contextProvider = {
@@ -147,12 +153,13 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     bridge as never,
     sessionState as never,
     sessionTrash as never,
+    hiddenSessions as never,
     contextProvider as never,
     contextFilesState as never,
     deps
   );
 
-  return { session, bridge, sessionState, sessionTrash, contextFilesState, deps };
+  return { session, bridge, sessionState, sessionTrash, hiddenSessions, contextFilesState, deps };
 }
 
 describe('WebviewSession', () => {
@@ -232,6 +239,42 @@ describe('WebviewSession', () => {
     );
   });
 
+  it('omits hidden judge blocking requests from the initial webview state', async () => {
+    const { session, bridge, sessionState, hiddenSessions } = createSession();
+    const view = createWebviewView(true);
+    hiddenSessions.isHidden.mockImplementation((sessionID) => sessionID === 'hidden-session');
+    sessionState.consumeBlockingRequests.mockResolvedValue([
+      {
+        id: 'perm-hidden',
+        sessionID: 'hidden-session',
+        kind: 'permission',
+        props: { id: 'perm-hidden', sessionID: 'hidden-session' },
+      },
+      {
+        id: 'question-hidden',
+        sessionID: 'hidden-session',
+        kind: 'question',
+        props: { id: 'question-hidden', sessionID: 'hidden-session' },
+      },
+      {
+        id: 'perm-visible',
+        sessionID: 'visible-session',
+        kind: 'permission',
+        props: { id: 'perm-visible', sessionID: 'visible-session' },
+      },
+    ] satisfies BlockingRequestSnapshot[]);
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingPermissions: [{ id: 'perm-visible', sessionID: 'visible-session' }],
+        pendingQuestions: [],
+      })
+    );
+  });
+
   it('forwards valid webview messages and logs invalid ones', async () => {
     const { session, deps } = createSession();
     const view = createWebviewView(true);
@@ -247,14 +290,17 @@ describe('WebviewSession', () => {
   });
 
   it('replays boot state and clears interrupted sessions when the webview becomes ready', async () => {
-    const { session, bridge, sessionState, sessionTrash, contextFilesState } = createSession();
+    const { session, bridge, sessionState, sessionTrash, hiddenSessions, contextFilesState } =
+      createSession();
     const view = createWebviewView(true);
     const hiddenSessionIds = new Set(['session-hidden']);
+    const hiddenJudgeSessionIds = new Set(['session-judge']);
 
     contextFilesState.postContextFiles.mockImplementation((post) => {
       post({ type: 'files/update', payload: [] });
     });
     sessionTrash.hiddenSessionIds.mockReturnValue(hiddenSessionIds);
+    hiddenSessions.hiddenSessionIds.mockReturnValue(hiddenJudgeSessionIds);
 
     await session.resolve(view as never);
     await flushMicrotasks();
@@ -275,7 +321,7 @@ describe('WebviewSession', () => {
     expect(contextFilesState.postContextFiles).toHaveBeenCalledOnce();
     expect(sessionState.replayBlockingRequests).toHaveBeenCalledWith(
       expect.any(Function),
-      hiddenSessionIds,
+      new Set(['session-hidden', 'session-judge']),
       {
         previousRequests: session.blockingRequestsForWebview,
         clearResolvedEmbedded: true,

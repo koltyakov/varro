@@ -254,6 +254,9 @@ export function isAllowedApiRequest(method: string, path: string) {
   if (pathname === '/varro/opencode-config/model-routing') {
     return method === 'POST' && noQuery();
   }
+  if (pathname === '/varro/permission/judge') {
+    return method === 'POST' && noQuery();
+  }
   if (segments[0] === 'varro' && segments[1] === 'session' && segments.length === 4) {
     return method === 'DELETE' && noQuery() && segments[3] === 'delete';
   }
@@ -360,5 +363,5 @@ function getDesktopSessionPaneSide(value: unknown): DesktopSessionPaneSide | nul
 }
 
 function getPermissionMode(value: unknown): PermissionMode | null {
-  return value === 'default' || value === 'full' ? value : null;
+  return value === 'default' || value === 'auto' || value === 'full' ? value : null;
 }

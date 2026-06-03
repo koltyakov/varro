@@ -5,13 +5,19 @@ import type {
   SessionStateManager,
 } from './session-state-manager';
 import type { ContextProvider } from './context-provider';
+import type { HiddenSessionManager } from './hidden-session-manager';
 import type { SidebarProviderBridge } from './sidebar-provider-bridge';
 import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import type { SessionTrashManager } from './session-trash-manager';
 import { logger } from './logger';
 import { parseWebviewMessage } from './util/webview-message';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../shared/provider-limit-config';
-import type { InitialWebviewState, ServerStatus, WebviewMessage } from '../shared/protocol';
+import type {
+  InitialWebviewState,
+  PermissionMode,
+  ServerStatus,
+  WebviewMessage,
+} from '../shared/protocol';
 
 export class WebviewSession {
   public interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
@@ -39,6 +45,7 @@ export class WebviewSession {
       SessionTrashManager,
       'hiddenSessionIds' | 'isHidden' | 'list'
     >,
+    private readonly hiddenSessions: Pick<HiddenSessionManager, 'hiddenSessionIds' | 'isHidden'>,
     private readonly contextProvider: Pick<ContextProvider, 'context' | 'terminalSelection'>,
     private readonly contextFilesState: Pick<
       SidebarProviderContextFiles,
@@ -51,7 +58,7 @@ export class WebviewSession {
         expandThinkingByDefault: boolean;
         showStickyUserPrompt: boolean;
         desktopSessionPaneSide: 'left' | 'right';
-        defaultPermissionMode: 'default' | 'full';
+        defaultPermissionMode: PermissionMode;
         providerLimitPollIntervalSeconds: number;
         providerLimitThresholdPercent: number;
         providerLimitsDisabled?: boolean;
@@ -219,13 +226,17 @@ export class WebviewSession {
       interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')
-        .filter((item) => !this.sessionTrash.isHidden(item.sessionID))
+        .filter((item) => !this.isHiddenSession(item.sessionID))
         .map((item) => item.props),
       pendingQuestions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'question')
-        .filter((item) => !this.sessionTrash.isHidden(item.sessionID))
+        .filter((item) => !this.isHiddenSession(item.sessionID))
         .map((item) => item.props),
     };
+  }
+
+  private isHiddenSession(sessionID: string) {
+    return this.sessionTrash.isHidden(sessionID) || this.hiddenSessions.isHidden(sessionID);
   }
 
   private postBootMessages(status: ServerStatus, options?: { clearResolvedEmbedded?: boolean }) {
@@ -243,7 +254,7 @@ export class WebviewSession {
     this.bridge.post({ type: 'theme/update', payload: { theme: this.deps.currentTheme() } });
     this.sessionState.replayBlockingRequests(
       this.bridge.post.bind(this.bridge),
-      this.sessionTrash.hiddenSessionIds(),
+      new Set([...this.sessionTrash.hiddenSessionIds(), ...this.hiddenSessions.hiddenSessionIds()]),
       {
         previousRequests: this.blockingRequestsForWebview,
         clearResolvedEmbedded: options?.clearResolvedEmbedded,

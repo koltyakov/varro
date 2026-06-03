@@ -124,9 +124,14 @@ export async function updatePermissionModeForSessionWithDependencies(
     return;
   }
 
-  if (mode !== 'full') return;
-  await deps.autoApprovePermissionsForSession(deps.getPermissionsForSession(sessionId));
-  await deps.syncPendingPermissions?.();
+  if (mode === 'full') {
+    await deps.autoApprovePermissionsForSession(deps.getPermissionsForSession(sessionId));
+    await deps.syncPendingPermissions?.();
+    return;
+  }
+  if (mode === 'auto') {
+    await deps.syncPendingPermissions?.();
+  }
 }
 
 export function getQuestionById(questions: QuestionRequest[], requestId: string) {

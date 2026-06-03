@@ -294,6 +294,35 @@ describe('session-approvals helpers', () => {
     expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
   });
 
+  it('syncs pending permissions when switching to auto mode', async () => {
+    const autoApprovePermissionsForSession = vi.fn(async () => {});
+    const getPermissionsForSession = vi.fn(() => [permission('perm-1')]);
+    const syncPendingPermissions = vi.fn(async () => {});
+
+    await updatePermissionModeForSessionWithDependencies(
+      {
+        getPermissionModeForSession: () => 'default',
+        getDraftPermissionMode: () => 'default',
+        setPermissionModeForSession: vi.fn(),
+        setDraftPermissionMode: vi.fn(),
+        saveProjectPermissionMode: vi.fn(),
+        updateSessionPermission: vi.fn(async () => session('session-1')),
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+        getPermissionsForSession,
+        autoApprovePermissionsForSession,
+        syncPendingPermissions,
+      },
+      'auto',
+      [{ permission: 'bash', pattern: '*', action: 'ask' }],
+      'session-1'
+    );
+
+    expect(getPermissionsForSession).not.toHaveBeenCalled();
+    expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
+    expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
+  });
+
   it('uses the generic update error for non-Error failures', async () => {
     const setError = vi.fn();
 

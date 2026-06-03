@@ -52,7 +52,8 @@ export function readExtensionConfigState(
 }
 
 function readDefaultPermissionMode(config: vscode.WorkspaceConfiguration) {
-  return config.get<unknown>('chat.defaultPermissionMode') === 'full' ? 'full' : 'default';
+  const value = config.get<unknown>('chat.defaultPermissionMode');
+  return value === 'full' || value === 'auto' ? value : 'default';
 }
 
 function isNonEmptyString(value: unknown): value is string {
