@@ -1,5 +1,10 @@
 import { createSignal, onCleanup, onMount } from 'solid-js';
-import type { ExtensionMessage, PermissionMode, WebviewThemeKind } from '../../../shared/protocol';
+import type {
+  AutoApproveJudgeReference,
+  ExtensionMessage,
+  PermissionMode,
+  WebviewThemeKind,
+} from '../../../shared/protocol';
 import { onMessage, postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
 import type { QueuedMessage } from '../../lib/app-state-types';
@@ -217,6 +222,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let currentWorkspacePath: string | null = null;
   let connectionGeneration = 0;
   let sessionSelectionGeneration = 0;
+  let approvedPermissionReferences: AutoApproveJudgeReference[] = [];
   let sessionSyncGeneration = 0;
   const pendingAbortRetryAttempts = new Map<string, number | null>();
   const [documentVisible, setDocumentVisible] = createSignal(
@@ -425,6 +431,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       const model = resolvePermissionJudgeModel(permission.sessionID);
       const response = await client.varro.judgePermission({
         permission,
+        approvedReferences: approvedPermissionReferences,
         ...(model ? { model } : {}),
       });
       if (response.decision === 'allow') {
@@ -887,7 +894,27 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
   ) {
+    const permission = appStore.state.permissions.find((item) => item.id === permissionId);
     await sessionApprovalOperations.respondPermission(sessionId, permissionId, response, options);
+    if (permission && response !== 'reject' && !options?.rethrow) {
+      recordApprovedPermissionReference(permission, response);
+    }
+  }
+
+  function recordApprovedPermissionReference(
+    permission: Permission,
+    response: AutoApproveJudgeReference['response']
+  ) {
+    approvedPermissionReferences = [
+      ...approvedPermissionReferences,
+      {
+        type: permission.type,
+        title: permission.title,
+        response,
+        ...(permission.pattern !== undefined ? { pattern: permission.pattern } : {}),
+        ...(permission.metadata ? { metadata: permission.metadata } : {}),
+      },
+    ].slice(-20);
   }
 
   async function respondQuestion(requestID: string, answers: Array<Array<string>>) {

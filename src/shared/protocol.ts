@@ -37,9 +37,18 @@ export type PermissionMode = 'default' | 'auto' | 'full';
 
 export type AutoApproveJudgeDecision = 'allow' | 'ask';
 
+export type AutoApproveJudgeReference = {
+  type: string;
+  title: string;
+  response: 'once' | 'always';
+  pattern?: string | string[];
+  metadata?: Record<string, unknown>;
+};
+
 export type AutoApproveJudgeRequest = {
   permission: Record<string, unknown>;
   model?: { providerID: string; modelID: string; variant?: string };
+  approvedReferences?: AutoApproveJudgeReference[];
 };
 
 export type AutoApproveJudgeResponse = {

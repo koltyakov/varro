@@ -116,18 +116,27 @@ test('default permissions end up with a bash permission request for opencode ver
     )
     .toBeTruthy();
 
-  const createBody = await getE2EState(page, () => {
+  const permissionUpdateBody = await getE2EState(page, () => {
     const value = (window as Window & {
       __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
     }).__varroE2E;
-    return value?.requests.find((request) => request.method === 'POST' && request.path === '/session')
-      ?.body as
+    return value?.requests.find(
+      (request) => request.method === 'PATCH' && /^\/session\/[^/]+$/.test(request.path)
+    )?.body as
       | { permission?: Array<{ permission: string; action: string; pattern: string }> }
       | undefined;
   });
 
-  expect(createBody?.permission).toContainEqual({ permission: 'bash', pattern: '*', action: 'ask' });
-  expect(createBody?.permission).toContainEqual({ permission: 'shell', pattern: '*', action: 'ask' });
+  expect(permissionUpdateBody?.permission).toContainEqual({
+    permission: 'bash',
+    pattern: '*',
+    action: 'ask',
+  });
+  expect(permissionUpdateBody?.permission).toContainEqual({
+    permission: 'shell',
+    pattern: '*',
+    action: 'ask',
+  });
 
   const promptBody = await getE2EState(page, () => {
     const value = (window as Window & {

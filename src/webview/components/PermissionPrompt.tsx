@@ -1,7 +1,6 @@
 import { Show, createSignal } from 'solid-js';
 import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
-import { permissionsStore } from '../lib/stores/permissions-store';
 
 function formatMetadataValue(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -14,17 +13,12 @@ export function PermissionPrompt(props: { permission: Permission }) {
   const [responding, setResponding] = createSignal(false);
   const duplicateCount = () =>
     props.permission.groupMembers?.length || props.permission.duplicateIDs?.length || 0;
-  const isAutoMode = () => permissionsStore.getPermissionModeForSession(sessionId()) === 'auto';
 
   const handleRespond = async (response: 'once' | 'always' | 'reject') => {
     if (responding()) return;
     setResponding(true);
     try {
-      await respondPermission(
-        sessionId(),
-        props.permission.id,
-        isAutoMode() && response === 'always' ? 'once' : response
-      );
+      await respondPermission(sessionId(), props.permission.id, response);
     } finally {
       setResponding(false);
     }
@@ -76,21 +70,19 @@ export function PermissionPrompt(props: { permission: Permission }) {
           Reject
         </button>
         <button
-          class={`question-btn ${isAutoMode() ? 'question-btn-primary' : 'question-btn-secondary'}`}
+          class="question-btn question-btn-secondary"
           disabled={responding()}
           onClick={() => handleRespond('once')}
         >
-          {isAutoMode() ? 'Allow' : 'Once'}
+          Once
         </button>
-        <Show when={!isAutoMode()}>
-          <button
-            class="question-btn question-btn-primary"
-            disabled={responding()}
-            onClick={() => handleRespond('always')}
-          >
-            Always
-          </button>
-        </Show>
+        <button
+          class="question-btn question-btn-primary"
+          disabled={responding()}
+          onClick={() => handleRespond('always')}
+        >
+          Always
+        </button>
       </div>
     </div>
   );

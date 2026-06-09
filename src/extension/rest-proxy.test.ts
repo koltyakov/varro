@@ -362,6 +362,7 @@ describe('RestProxy handleRequest', () => {
       makePayload(81, 'POST', '/varro/permission/judge', {
         permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
         model: { providerID: 'openai', modelID: 'gpt-4.1' },
+        approvedReferences: [{ type: 'bash', title: 'bash git status', response: 'once' }],
       })
     );
 
@@ -369,6 +370,7 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.autoApproveJudge.judge).toHaveBeenCalledWith({
       permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
       model: { providerID: 'openai', modelID: 'gpt-4.1' },
+      approvedReferences: [{ type: 'bash', title: 'bash git status', response: 'once' }],
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 81, data: judgeResult });
   });

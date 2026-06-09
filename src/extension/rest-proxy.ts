@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type {
+  AutoApproveJudgeReference,
   AutoApproveJudgeRequest,
   OpenCodeModelRouting,
   ServerStatus,
@@ -608,6 +609,7 @@ export class RestProxy {
             },
           }
         : {}),
+      approvedReferences: parseApprovedPermissionReferences(payload?.approvedReferences),
     };
   }
 
@@ -743,4 +745,33 @@ export class RestProxy {
     await vscode.window.showTextDocument(document, { preview: false });
     return { path: fileUri.fsPath };
   }
+}
+
+function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeReference[] {
+  if (!Array.isArray(value)) return [];
+  const references: AutoApproveJudgeReference[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) continue;
+    const type = typeof record.type === 'string' ? record.type.trim() : '';
+    const title = typeof record.title === 'string' ? record.title.trim() : '';
+    const response =
+      record.response === 'always' ? 'always' : record.response === 'once' ? 'once' : null;
+    if (!type || !title || !response) continue;
+    const patternValue = record.pattern;
+    const pattern = Array.isArray(patternValue)
+      ? patternValue.filter((entry): entry is string => typeof entry === 'string')
+      : typeof patternValue === 'string'
+        ? patternValue
+        : undefined;
+    const metadata = asRecord(record.metadata);
+    references.push({
+      type,
+      title,
+      response,
+      ...(pattern !== undefined ? { pattern } : {}),
+      ...(metadata ? { metadata } : {}),
+    });
+  }
+  return references.slice(-20);
 }

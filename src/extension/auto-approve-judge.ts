@@ -1,5 +1,9 @@
 import { isAbsolute, relative, resolve } from 'path';
-import type { AutoApproveJudgeRequest, AutoApproveJudgeResponse } from '../shared/protocol';
+import type {
+  AutoApproveJudgeReference,
+  AutoApproveJudgeRequest,
+  AutoApproveJudgeResponse,
+} from '../shared/protocol';
 import type { PermissionRule } from '../shared/opencode-types';
 import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
@@ -34,6 +38,15 @@ const DENY_ALL_PERMISSION_RULES: PermissionRule[] = DENY_ALL_PERMISSION_NAMES.ma
   pattern: '*',
   action: 'deny',
 }));
+const SAFE_GIT_INSPECTION_COMMANDS = new Set([
+  'diff',
+  'log',
+  'ls-files',
+  'rev-parse',
+  'show',
+  'status',
+]);
+const SAFE_GIT_BRANCH_FLAGS = new Set(['--show-current', '--list', '-a', '-r', '-v', '-vv']);
 
 export class AutoApproveJudge {
   constructor(
@@ -50,19 +63,19 @@ export class AutoApproveJudge {
     const localDecision = this.judgeLocally(permission);
     if (localDecision) return localDecision;
 
-    return this.withTimeout(this.runJudge(permission, request.model), JUDGE_TIMEOUT_MS).catch(
-      (err) => {
-        logger.warn(
-          `Auto-approve judge failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-        return { decision: 'ask', reason: 'Judge failed; asking user.' };
-      }
-    );
+    return this.withTimeout(
+      this.runJudge(permission, request.model, request.approvedReferences || []),
+      JUDGE_TIMEOUT_MS
+    ).catch((err) => {
+      logger.warn(`Auto-approve judge failed: ${err instanceof Error ? err.message : String(err)}`);
+      return { decision: 'ask', reason: 'Judge failed; asking user.' };
+    });
   }
 
   private async runJudge(
     permission: NormalizedJudgePermission,
-    fallbackModel: AutoApproveJudgeRequest['model']
+    fallbackModel: AutoApproveJudgeRequest['model'],
+    approvedReferences: AutoApproveJudgeReference[]
   ): Promise<AutoApproveJudgeResponse> {
     const title = `${JUDGE_TITLE_PREFIX}: ${permission.id}`;
     this.hiddenSessions.registerPendingTitle(title);
@@ -87,7 +100,7 @@ export class AutoApproveJudge {
           parts: [
             {
               type: 'text',
-              text: buildJudgeUserPrompt(permission),
+              text: buildJudgeUserPrompt(permission, approvedReferences),
             },
           ],
           format: judgeOutputFormat(),
@@ -277,11 +290,45 @@ function isSafeLocalBashPermission(permission: NormalizedJudgePermission) {
   if (permission.type !== 'bash' && permission.type !== 'shell') return false;
   const command = extractCommand(permission);
   if (!command) return false;
-  if (/[;&|`<>\r\n]|\$\(/.test(command)) return false;
+  if (/[;|`<>\r\n]|\$\(/.test(command)) return false;
+  const commands = splitSafeCommandSequence(command);
+  if (!commands) return false;
+  return commands.every(isSafeLocalCommandSegment);
+}
+
+function splitSafeCommandSequence(command: string) {
+  if (command.includes('&') && !/(?:^|[^&])&&(?:[^&]|$)/.test(command)) return null;
+  const commands = command
+    .split(/\s+&&\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (commands.length === 0) return null;
+  if (commands.some((part) => part.includes('&'))) return null;
+  return commands;
+}
+
+function isSafeLocalCommandSegment(command: string) {
   return (
     /^(?:rtk\s+)?npm\s+run\s+[\w:.-]+(?:\s|$)/.test(command) ||
-    /^\S+(?:\s+(?:--version|-v|version))\s*$/.test(command)
+    isSafeGitInspectionCommand(command) ||
+    /^(?:rtk\s+)?(?:pwd|date|uname|whoami)\s*$/.test(command) ||
+    /^(?:rtk\s+)?(?:which\s+\S+|command\s+-v\s+\S+)\s*$/.test(command) ||
+    /^(?:rtk\s+)?\S+(?:\s+(?:--version|-v|version))\s*$/.test(command)
   );
+}
+
+function isSafeGitInspectionCommand(command: string) {
+  const match = command.match(/^(?:rtk\s+)?git(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+))?\s+(\S+)(.*)$/);
+  if (!match) return false;
+  const subcommand = match[1];
+  const args = match[2].trim();
+  if (/\s--(?:output|ext-diff)\b/.test(` ${args}`)) return false;
+  if (SAFE_GIT_INSPECTION_COMMANDS.has(subcommand)) return true;
+  if (subcommand !== 'branch') return false;
+  if (!args) return true;
+  return args
+    .split(/\s+/)
+    .every((arg) => SAFE_GIT_BRANCH_FLAGS.has(arg) || /^--sort=\S+$/.test(arg));
 }
 
 function extractCommand(permission: NormalizedJudgePermission) {
@@ -305,14 +352,25 @@ function buildJudgeSystemPrompt() {
     'You are a conservative permission gate for an AI coding assistant.',
     'Decide whether a pending tool call can run without asking the user.',
     'Return allow when the action is clearly non-destructive and expected for coding work, such as checking versions, inspecting local state, or running local npm scripts/tests/builds.',
-    'Prefer allow for simple local read-only commands unless they have destructive flags, shell chaining, unclear paths, or side effects outside the workspace.',
+    'Prefer allow for simple local read-only commands unless they have destructive flags, unclear paths, or side effects outside the workspace.',
+    'Use prior manual approvals as examples of what this user considers acceptable, but do not approve a new request solely because a superficially similar request was approved.',
     'Return ask for destructive commands, secrets/auth changes, network publishing, package installs with scripts, git push/commit/tag/rebase/reset, file deletion, broad chmod/chown, external directory access, unclear intent, or missing details.',
     'Do not use tools. Output only the requested JSON decision.',
   ].join('\n');
 }
 
-function buildJudgeUserPrompt(permission: NormalizedJudgePermission) {
-  return `Judge this permission request.\n${JSON.stringify(permission, null, 2)}`;
+function buildJudgeUserPrompt(
+  permission: NormalizedJudgePermission,
+  approvedReferences: AutoApproveJudgeReference[]
+) {
+  return `Judge this permission request.\n${JSON.stringify(
+    {
+      permission,
+      priorManualApprovals: approvedReferences,
+    },
+    null,
+    2
+  )}`;
 }
 
 function judgeOutputFormat() {

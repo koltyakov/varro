@@ -101,6 +101,37 @@ describe('AutoApproveJudge', () => {
         sessionID: 'session-1',
         title: 'bash opencode --version',
       },
+      {
+        id: 'perm-git-status',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'bash rtk git status --short',
+      },
+      {
+        id: 'perm-git-status-log',
+        type: 'bash',
+        sessionID: 'session-1',
+        title:
+          'bash rtk git -C "tmp/opencode" status --short && rtk git -C "tmp/opencode" log --oneline -10',
+      },
+      {
+        id: 'perm-git-diff',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'bash rtk git diff -- src/extension/auto-approve-judge.ts',
+      },
+      {
+        id: 'perm-git-rev-parse-branch',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'bash git rev-parse --show-toplevel && git branch --show-current',
+      },
+      {
+        id: 'perm-pwd-which',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'bash pwd && command -v npm',
+      },
     ];
 
     for (const permission of permissions) {
@@ -140,6 +171,62 @@ describe('AutoApproveJudge', () => {
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
+  it('does not locally allow chained git commands with unsafe segments', async () => {
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        return { info: { structured_output: { decision: 'ask', reason: 'Needs user review.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => '/repo' } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-unsafe-git-chain',
+          type: 'bash',
+          sessionID: 'session-1',
+          title: 'bash rtk git status --short && rtk git reset --hard',
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it('does not locally allow git inspection commands with write-capable flags', async () => {
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        return { info: { structured_output: { decision: 'ask', reason: 'Needs user review.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => '/repo' } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-git-output',
+          type: 'bash',
+          sessionID: 'session-1',
+          title: 'bash rtk git diff --output=/tmp/diff.patch',
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
   it('asks without calling OpenCode when permission context is incomplete', async () => {
     const request = vi.fn();
     const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
@@ -170,7 +257,7 @@ describe('AutoApproveJudge', () => {
       if (method === 'GET' && path === '/config') return { small_model: 'openai/gpt-5-mini' };
       if (method === 'POST' && path === '/session/judge-session-1/message') {
         return {
-          info: { structured_output: { decision: 'allow', reason: 'Read-only git status.' } },
+          info: { structured_output: { decision: 'allow', reason: 'Read-only git remote.' } },
           parts: [],
           body,
         };
@@ -185,12 +272,13 @@ describe('AutoApproveJudge', () => {
         id: 'perm-1',
         type: 'bash',
         sessionID: 'session-1',
-        title: 'Run command: git status --short',
+        title: 'Run command: git remote -v',
       },
       model: { providerID: 'openai', modelID: 'gpt-5' },
+      approvedReferences: [{ type: 'bash', title: 'bash git status --short', response: 'once' }],
     });
 
-    expect(result).toEqual({ decision: 'allow', reason: 'Read-only git status.' });
+    expect(result).toEqual({ decision: 'allow', reason: 'Read-only git remote.' });
     expect(hiddenSessions.isHidden('judge-session-1')).toBe(true);
     expect(request).toHaveBeenCalledWith('POST', '/session', {
       title: 'Varro permission judge: perm-1',
@@ -202,6 +290,11 @@ describe('AutoApproveJudge', () => {
       expect.objectContaining({
         model: { providerID: 'openai', modelID: 'gpt-5-mini' },
         format: expect.objectContaining({ type: 'json_schema' }),
+        parts: [
+          expect.objectContaining({
+            text: expect.stringContaining('bash git status --short'),
+          }),
+        ],
       })
     );
     expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
