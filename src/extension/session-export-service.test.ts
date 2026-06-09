@@ -1,3 +1,4 @@
+import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -126,11 +127,9 @@ describe('SessionExportService', () => {
 
     const exportPromise = service.exportSession('session-1');
 
+    const tempFilePath = join('/tmp/varro-opencode-export-123', 'session-export.json');
     await vi.waitFor(() => {
-      expect(mocks.open).toHaveBeenCalledWith(
-        '/tmp/varro-opencode-export-123/session-export.json',
-        'w'
-      );
+      expect(mocks.open).toHaveBeenCalledWith(tempFilePath, 'w');
     });
     spawnResult.handlers.close(0, null);
     await exportPromise;
@@ -144,10 +143,7 @@ describe('SessionExportService', () => {
         windowsHide: true,
       })
     );
-    expect(mocks.readFile).toHaveBeenCalledWith(
-      '/tmp/varro-opencode-export-123/session-export.json',
-      'utf-8'
-    );
+    expect(mocks.readFile).toHaveBeenCalledWith(tempFilePath, 'utf-8');
     expect(mocks.openTextDocument).toHaveBeenCalledWith({
       language: 'json',
       content: '{"id":"session-1"}',

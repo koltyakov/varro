@@ -1,5 +1,5 @@
 import { access, stat } from 'fs/promises';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loggerMock = vi.hoisted(() => ({
@@ -55,11 +55,13 @@ describe('DroppedFilesService', () => {
     expect(files[0]?.relativePath).toBe('secret.txt');
 
     const droppedPath = files[0]!.path;
-    expect(droppedPath).toMatch(/\/varro-drops\/drop-[^/]+\/.+-secret\.txt$/);
+    expect(droppedPath).toMatch(/[\\/]varro-drops[\\/]drop-[^\\/]+[\\/].+-secret\.txt$/);
 
     const droppedStat = await stat(droppedPath);
     expect(droppedStat.isFile()).toBe(true);
-    expect(droppedStat.mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(droppedStat.mode & 0o777).toBe(0o600);
+    }
   });
 
   it('removes the temp drop directory on dispose', async () => {
@@ -103,16 +105,18 @@ describe('DroppedFilesService', () => {
 
     const alphaFolder = { name: 'alpha', uri: { fsPath: '/repo/alpha' } };
     const betaFolder = { name: 'beta', uri: { fsPath: '/repo/beta' } };
+    const notePath = join('/repo/beta', 'src/note.txt');
     vscodeMock.workspace.workspaceFolders = [alphaFolder, betaFolder];
     vscodeMock.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
-      if (uri.fsPath === '/repo/beta/src/note.txt') {
+      if (uri.fsPath === notePath) {
         return { type: 0 };
       }
       throw new Error(`Missing path: ${uri.fsPath}`);
     });
     vscodeMock.workspace.getWorkspaceFolder.mockImplementation((uri: { fsPath: string }) => {
-      if (uri.fsPath.startsWith('/repo/alpha')) return alphaFolder;
-      if (uri.fsPath.startsWith('/repo/beta')) return betaFolder;
+      const fsPath = uri.fsPath.replace(/\\/g, '/');
+      if (fsPath.startsWith('/repo/alpha')) return alphaFolder;
+      if (fsPath.startsWith('/repo/beta')) return betaFolder;
       return undefined;
     });
     vscodeMock.workspace.asRelativePath.mockReturnValue('src/note.txt');
@@ -121,7 +125,7 @@ describe('DroppedFilesService', () => {
 
     expect(files).toEqual([
       {
-        path: '/repo/beta/src/note.txt',
+        path: notePath,
         relativePath: 'beta/src/note.txt',
         type: 'file',
       },

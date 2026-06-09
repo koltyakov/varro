@@ -1,9 +1,9 @@
 import { createHash } from 'crypto';
 import { homedir } from 'os';
-import { join as defaultJoin, win32 } from 'path';
+import { posix, win32 } from 'path';
 
 function getJoin(platform = process.platform) {
-  return platform === 'win32' ? win32.join : defaultJoin;
+  return platform === 'win32' ? win32.join : posix.join;
 }
 
 export function normalizePlanMarkdown(content: string) {

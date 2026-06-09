@@ -3,7 +3,9 @@ import solid from 'vite-plugin-solid';
 import { resolve } from 'path';
 
 export default defineConfig({
-  plugins: [solid()],
+  // hot: false keeps vite-plugin-solid from injecting the /@solid-refresh virtual
+  // module, which vite-node cannot resolve as a file URL on Windows.
+  plugins: [solid({ hot: false })],
   resolve: {
     alias: {
       vscode: resolve(__dirname, 'src/test/vscode.ts'),

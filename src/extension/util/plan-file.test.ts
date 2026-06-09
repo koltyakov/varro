@@ -15,12 +15,16 @@ describe('plan file helpers', () => {
 
   it('resolves the config directory from XDG config home', () => {
     expect(
-      getOpenCodeConfigDir({ XDG_CONFIG_HOME: '/tmp/config' } as NodeJS.ProcessEnv, '/Users/test')
+      getOpenCodeConfigDir(
+        { XDG_CONFIG_HOME: '/tmp/config' } as NodeJS.ProcessEnv,
+        '/Users/test',
+        'linux'
+      )
     ).toBe('/tmp/config');
   });
 
   it('falls back to the standard config directory on non-Windows platforms', () => {
-    expect(getOpenCodePlansDirectory({} as NodeJS.ProcessEnv, '/Users/test')).toBe(
+    expect(getOpenCodePlansDirectory({} as NodeJS.ProcessEnv, '/Users/test', 'linux')).toBe(
       '/Users/test/.config/opencode/plans'
     );
   });
@@ -45,7 +49,7 @@ describe('plan file helpers', () => {
   it('builds the full plan file path from the content hash', () => {
     const content = '# Plan\n\n1. Ship it';
 
-    expect(getPlanFilePath(content, {} as NodeJS.ProcessEnv, '/Users/test')).toBe(
+    expect(getPlanFilePath(content, {} as NodeJS.ProcessEnv, '/Users/test', 'linux')).toBe(
       `/Users/test/.config/opencode/plans/${getPlanFileName(content)}`
     );
   });

@@ -514,18 +514,18 @@ describe('createAnthropicAdapter', () => {
       })
     );
     expect(writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude\/\.credentials\.json\..*\.tmp$/),
+      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
       expect.stringContaining('anthropic-refreshed-access-token'),
       { encoding: 'utf-8', mode: 0o600 }
     );
     expect(writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude\/\.credentials\.json\..*\.tmp$/),
+      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
       expect.stringContaining('anthropic-refreshed-refresh-token'),
       { encoding: 'utf-8', mode: 0o600 }
     );
     expect(rename).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude\/\.credentials\.json\..*\.tmp$/),
-      expect.stringMatching(/\.claude\/\.credentials\.json$/)
+      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
+      expect.stringMatching(/\.claude[\\/]\.credentials\.json$/)
     );
     expect(status).toEqual({
       providerID: 'anthropic',
@@ -587,7 +587,7 @@ describe('createAnthropicAdapter', () => {
 
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude\/\.credentials\.json\..*\.tmp$/),
+      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
       expect.stringContaining('anthropic-refreshed-access-token'),
       { encoding: 'utf-8', mode: 0o600 }
     );

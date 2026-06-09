@@ -1,3 +1,4 @@
+import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   buildProviderLimitProbe,
@@ -13,12 +14,12 @@ describe('provider limit helpers', () => {
   it('resolves the OpenCode auth path from XDG data home', () => {
     expect(
       getOpenCodeAuthFilePath({ XDG_DATA_HOME: '/tmp/data' } as NodeJS.ProcessEnv, '/Users/test')
-    ).toBe('/tmp/data/opencode/auth.json');
+    ).toBe(join('/tmp/data', 'opencode', 'auth.json'));
   });
 
   it('falls back to the standard local share data dir', () => {
     expect(getOpenCodeAuthFilePath({} as NodeJS.ProcessEnv, '/Users/test')).toBe(
-      '/Users/test/.local/share/opencode/auth.json'
+      join('/Users/test', '.local', 'share', 'opencode', 'auth.json')
     );
   });
 

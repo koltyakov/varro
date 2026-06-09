@@ -163,6 +163,8 @@ function maybeSuggestCliUpdate(server: OpenCodeServer, installedCliVersion: stri
   ).maybeSuggestCliUpdate(installedCliVersion);
 }
 
+const originalPlatform = process.platform;
+
 function stubPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, 'platform', {
     value: platform,
@@ -189,6 +191,7 @@ afterEach(async () => {
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  stubPlatform(originalPlatform);
 });
 
 describe('OpenCodeServer event stream', () => {
@@ -787,6 +790,9 @@ describe('OpenCodeServer maintenance', () => {
   });
 
   it('can auto-update the CLI in background when enabled', async () => {
+    // Background auto-update is disabled on win32, so pin a POSIX platform.
+    stubPlatform('linux');
+
     const server = new OpenCodeServer(4096, false);
     const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
     const api = server as unknown as {
@@ -830,6 +836,8 @@ describe('OpenCodeServer maintenance', () => {
   });
 
   it('auto-updates through the running server upgrade endpoint when available', async () => {
+    stubPlatform('linux');
+
     const server = new OpenCodeServer(4096, false);
     const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
     const request = vi.fn().mockResolvedValue({ success: true, version: '1.14.22' });
@@ -854,6 +862,8 @@ describe('OpenCodeServer maintenance', () => {
   });
 
   it('falls back to background CLI upgrade when the server upgrade endpoint is unavailable', async () => {
+    stubPlatform('linux');
+
     const server = new OpenCodeServer(4096, false);
     const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
     const request = vi.fn().mockRejectedValue(new Error('404 Not Found'));
