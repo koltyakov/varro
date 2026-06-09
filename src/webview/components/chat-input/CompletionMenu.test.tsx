@@ -123,12 +123,7 @@ describe('CompletionMenu', () => {
     const [items, setItems] = createSignal<CompletionItem[]>([slashItem, agentItem]);
 
     cleanup = render(
-      () =>
-        CompletionMenu({
-          items: items(),
-          selectedIndex: 0,
-          onSelect,
-        }),
+      () => <CompletionMenu items={items()} selectedIndex={0} onSelect={onSelect} />,
       container!
     );
 
@@ -167,12 +162,13 @@ describe('CompletionMenu', () => {
     const [selectedIndex, setSelectedIndex] = createSignal(1);
 
     cleanup = render(
-      () =>
-        CompletionMenu({
-          items: [slashItem, fileItem],
-          selectedIndex: selectedIndex(),
-          onSelect: vi.fn(),
-        }),
+      () => (
+        <CompletionMenu
+          items={[slashItem, fileItem]}
+          selectedIndex={selectedIndex()}
+          onSelect={vi.fn()}
+        />
+      ),
       container!
     );
 

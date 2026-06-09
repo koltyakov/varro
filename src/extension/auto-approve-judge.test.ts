@@ -75,6 +75,56 @@ describe('AutoApproveJudge', () => {
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
+  it('does not locally allow relative edit paths that escape the workspace', async () => {
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        return { info: { structured_output: { decision: 'ask', reason: 'Needs user review.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => '/repo' } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-traversal',
+          type: 'edit',
+          sessionID: 'session-1',
+          title: 'edit src/../../etc/passwd',
+          metadata: { relativePath: 'src/../../etc/passwd' },
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it('still locally allows relative edit paths that stay inside the workspace', async () => {
+    const request = vi.fn();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => '/repo' } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-nested',
+          type: 'edit',
+          sessionID: 'session-1',
+          title: 'edit src/app.ts',
+          metadata: { relativePath: 'src/features/../app.ts' },
+        },
+      })
+    ).resolves.toEqual({ decision: 'allow', reason: 'Workspace file edit.' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('allows safe local bash commands without creating a judge session', async () => {
     const request = vi.fn();
     const judge = new AutoApproveJudge(

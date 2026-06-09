@@ -50,9 +50,15 @@ describe('BusySendMenu', () => {
     const onSteer = vi.fn();
     const onStopAndSend = vi.fn();
     const outerClick = vi.fn();
-    container?.addEventListener('click', outerClick);
 
-    cleanup = render(() => BusySendMenu({ onQueue, onSteer, onStopAndSend }), container!);
+    cleanup = render(
+      () => (
+        <div onClick={outerClick}>
+          <BusySendMenu onQueue={onQueue} onSteer={onSteer} onStopAndSend={onStopAndSend} />
+        </div>
+      ),
+      container!
+    );
 
     const buttons = container?.querySelectorAll<HTMLButtonElement>('button');
     expect(buttons).toHaveLength(3);

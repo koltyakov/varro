@@ -11,15 +11,15 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
       reportsDirectory: './tmp/coverage',
       thresholds: {
-        statements: 70,
-        branches: 60,
-        functions: 75,
-        lines: 75,
+        statements: 80,
+        branches: 71,
+        functions: 82,
+        lines: 83,
       },
     },
   },

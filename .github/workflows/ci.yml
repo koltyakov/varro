@@ -37,13 +37,39 @@ jobs:
         run: npm run lint:check
 
       - name: Test
-        run: npm test
+        run: npm run test:coverage
 
       - name: Build
         run: npm run build
 
       - name: Package
         run: npm pack
+
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use pinned npm
+        shell: bash
+        run: npm install -g npm@$(node -p "require('./package.json').volta.npm")
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
 
   e2e:
     runs-on: ubuntu-latest

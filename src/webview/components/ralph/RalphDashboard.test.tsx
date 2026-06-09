@@ -27,6 +27,9 @@ vi.mock('../../lib/state', () => ({
     get failedSessionIds() {
       return currentFailedSessionIds;
     },
+    get sessionUsageLimits() {
+      return currentUsageLimits;
+    },
   },
 }));
 
@@ -214,15 +217,17 @@ describe('RalphDashboard', () => {
     expect(container?.querySelector('.ralph-dashboard-meta')?.textContent).toContain(
       'Iterations: 3 / 5'
     );
-    expect(container?.querySelector('.ralph-dashboard-meta')?.textContent).toContain(
-      'Model: openai/gpt-5 (Low)'
+    expect(container?.querySelector('.ralph-dashboard-meta-label')?.textContent).toBe('Model:');
+    expect(container?.querySelector('.ralph-dashboard-meta-value')?.textContent).toBe(
+      'openai/gpt-5 (Low)'
     );
     expect(container?.querySelector('.ralph-dashboard-meta')?.textContent).toContain(
       'Agent: builder'
     );
-    expect(container?.querySelector('.ralph-dashboard-provider-limits')?.textContent).toContain(
-      'Limits: D 8%'
+    expect(container?.querySelector('.ralph-dashboard-provider-limits-label')?.textContent).toBe(
+      'Limits:'
     );
+    expect(container?.querySelector('.ralph-dashboard-provider-limit')?.textContent).toBe('D 8%');
     expect(
       container?.querySelector('.ralph-dashboard-provider-limits')?.getAttribute('title')
     ).toContain('Daily: 8 / 100 left');
@@ -363,9 +368,7 @@ describe('RalphDashboard', () => {
     getProviderLimitMock.mockImplementation(() => liveLimit());
 
     renderDashboard();
-    expect(container?.querySelector('.ralph-dashboard-provider-limits')?.textContent).toContain(
-      'Limits: D 8%'
-    );
+    expect(container?.querySelector('.ralph-dashboard-provider-limit')?.textContent).toBe('D 8%');
 
     setLiveLimit(
       providerLimit({
@@ -384,9 +387,7 @@ describe('RalphDashboard', () => {
     );
     await Promise.resolve();
 
-    expect(container?.querySelector('.ralph-dashboard-provider-limits')?.textContent).toContain(
-      'Limits: D 37%'
-    );
+    expect(container?.querySelector('.ralph-dashboard-provider-limit')?.textContent).toBe('D 37%');
   });
 
   it('shows the incomplete continue branch', () => {
@@ -401,11 +402,11 @@ describe('RalphDashboard', () => {
     renderDashboard();
 
     const continueButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Add 5 runs & continue"]'
+      'button.ralph-dashboard-btn-continue'
     );
 
     expect(continueButton).toBeInstanceOf(HTMLButtonElement);
-    expect(continueButton?.className).toContain('ralph-dashboard-btn-continue');
+    expect(continueButton?.getAttribute('aria-label')).toBe('Add 5 runs & continue');
     expect(continueButton?.querySelector('svg')).toBeInstanceOf(SVGElement);
     expect(continueButton?.getAttribute('title')).toBe(
       'Increase the iteration limit by 5 and continue the Ralph loop.'
@@ -415,8 +416,8 @@ describe('RalphDashboard', () => {
     expect(container?.querySelector('.ralph-dashboard-stop-reason')?.textContent).toBe(
       'iteration limit · verification gap'
     );
-    expect(container?.querySelector('.ralph-dashboard-meta')?.textContent).toContain(
-      'Model: anthropic/claude (Very High)'
+    expect(container?.querySelector('.ralph-dashboard-meta-value')?.textContent).toBe(
+      'anthropic/claude (Very High)'
     );
 
     continueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
