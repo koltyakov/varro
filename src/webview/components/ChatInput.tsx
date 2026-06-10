@@ -1,4 +1,13 @@
-import { Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import {
+  Show,
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  untrack,
+} from 'solid-js';
 import {
   state,
   inputText,
@@ -41,6 +50,8 @@ import {
   setSessionUsageLimit,
   isSessionCompacting,
   providerLimitPollIntervalSeconds,
+  replaceClipboardImages,
+  replaceContextFiles,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
@@ -100,6 +111,12 @@ import {
   parseSelectionReference,
 } from '../../shared/context-files';
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
+import {
+  createComposerHistory,
+  getComposerHistoryAction,
+  type ComposerHistoryAction,
+  type ComposerSnapshot,
+} from '../lib/composer-history';
 import { TodoList } from './TodoList';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
@@ -410,6 +427,15 @@ export function ChatInput() {
     if (except !== 'providerLimit') setShowProviderLimitPopup(false);
     if (except !== 'busy') setShowBusyMenu(false);
   };
+  const anyComposerPopupOpen = () =>
+    showAgentPicker() ||
+    showVariantPicker() ||
+    showModelPicker() ||
+    showMcpPicker() ||
+    showPermissionModePicker() ||
+    showContextPopup() ||
+    showProviderLimitPopup() ||
+    showBusyMenu();
 
   const [isFocused, setIsFocused] = createSignal(false);
   const [historyIndex, setHistoryIndex] = createSignal<number | null>(null);
@@ -425,6 +451,48 @@ export function ChatInput() {
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let toolbarFitRaf = 0;
   let toolbarFitRequestId = 0;
+
+  function captureComposerSnapshot(): ComposerSnapshot {
+    return {
+      text: inputText(),
+      caret: caretPosition(),
+      files: state.droppedFiles.map((file) => ({ ...file })),
+      images: state.clipboardImages.map((image) => ({ ...image })),
+    };
+  }
+
+  const composerHistory = createComposerHistory();
+  let applyingComposerHistory = false;
+  composerHistory.reset(untrack(captureComposerSnapshot));
+
+  function applyComposerHistoryAction(action: ComposerHistoryAction) {
+    const snapshot = action === 'undo' ? composerHistory.undo() : composerHistory.redo();
+    if (!snapshot) return;
+
+    const removedFilePaths = state.droppedFiles
+      .filter((file) => !snapshot.files.some((item) => item.path === file.path))
+      .map((file) => file.path);
+
+    applyingComposerHistory = true;
+    try {
+      batch(() => {
+        setHistoryIndex(null);
+        setHistoryDraft('');
+        setInputText(snapshot.text);
+        setCaretPosition(snapshot.caret);
+        replaceContextFiles(snapshot.files);
+        replaceClipboardImages(snapshot.images);
+        setCompletionIndex(0);
+        setSuppressCompletion(false);
+      });
+    } finally {
+      applyingComposerHistory = false;
+    }
+
+    for (const path of removedFilePaths) {
+      postMessage({ type: 'files/remove', payload: { path } });
+    }
+  }
 
   const explicitContextForActiveFile = () =>
     hasExplicitContextForPath(composerFiles(), composerActiveFile()?.path);
@@ -794,6 +862,15 @@ export function ChatInput() {
   });
 
   function handleKeydown(e: KeyboardEvent) {
+    const historyAction = getComposerHistoryAction(e);
+    if (historyAction) {
+      // Always swallow the shortcut so native contenteditable undo never
+      // fires against the programmatically managed editor DOM.
+      e.preventDefault();
+      if (!e.isComposing) applyComposerHistoryAction(historyAction);
+      return;
+    }
+
     const showingCompletions = composerCompletions().length > 0 && !suppressCompletion();
 
     if (showAgentPicker() && !e.altKey && !e.ctrlKey && !e.metaKey) {
@@ -868,6 +945,19 @@ export function ChatInput() {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         if (navigateMessageHistory(e.key === 'ArrowUp' ? -1 : 1)) {
           e.preventDefault();
+          return;
+        }
+      }
+
+      if (e.key === 'Escape') {
+        if (anyComposerPopupOpen()) {
+          e.preventDefault();
+          closePopups();
+          return;
+        }
+        if (isBusyWithoutInterruption()) {
+          e.preventDefault();
+          void abortSession();
           return;
         }
       }
@@ -1476,6 +1566,13 @@ export function ChatInput() {
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
+    composerHistory.reset(untrack(captureComposerSnapshot));
+  });
+
+  createEffect(() => {
+    const snapshot = captureComposerSnapshot();
+    if (applyingComposerHistory) return;
+    composerHistory.record(snapshot);
   });
 
   createEffect(() => {
@@ -1934,6 +2031,7 @@ export function ChatInput() {
               setSuppressCompletion(false);
             }}
             onKeyDown={handleKeydown}
+            onHistory={applyComposerHistoryAction}
             onPaste={handlePaste}
             onFocus={() => {
               setIsFocused(true);

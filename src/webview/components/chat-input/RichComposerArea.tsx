@@ -36,6 +36,7 @@ export function RichComposerArea(props: {
   onSelect: (cursorOffset: number) => void;
   onSelectCompletion: (item: CompletionItem) => void;
   onRemoveChip?: (chipId: string) => void;
+  onHistory?: (action: 'undo' | 'redo') => void;
 }) {
   let editorEl: HTMLDivElement | undefined;
   let isComposing = false;
@@ -287,6 +288,15 @@ export function RichComposerArea(props: {
         aria-placeholder={props.placeholder}
         data-placeholder={props.placeholder}
         onInput={handleInput}
+        onBeforeInput={(e) => {
+          // The editor DOM is rebuilt programmatically, so the browser's
+          // native undo stack is unreliable; route history edits (context
+          // menu / Edit menu undo) to the composer history instead.
+          if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
+            e.preventDefault();
+            props.onHistory?.(e.inputType === 'historyUndo' ? 'undo' : 'redo');
+          }
+        }}
         onKeyDown={(e) => props.onKeyDown(e)}
         onPaste={handlePaste}
         onCopy={handleCopy}

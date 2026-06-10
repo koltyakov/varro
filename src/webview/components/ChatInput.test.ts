@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { reconcile } from 'solid-js/store';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus } from '../../shared/protocol';
 import type { Session } from '../types';
@@ -27,6 +28,8 @@ import {
   setShowModelPicker,
   setState,
   setInputText,
+  addContextFile,
+  removeContextFile,
 } from '../lib/state';
 import { client } from '../lib/client';
 import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-limit-selection';
@@ -115,7 +118,7 @@ afterEach(() => {
   setState('selectedModel', null);
   setState('modelVariantSelections', {});
   setState('providerLimits', {});
-  setState('sessionStatus', {});
+  setState('sessionStatus', reconcile({}));
   setState('sessionUsageLimits', {});
   setState('clipboardImages', []);
   setState('droppedFiles', []);
@@ -1997,5 +2000,90 @@ describe('getMentionInsertionTrailingSpace', () => {
     expect(getMentionInsertionTrailingSpace('@helper', 'x')).toBe(' ');
     expect(getMentionInsertionTrailingSpace('@helper', ' ')).toBe('');
     expect(getMentionInsertionTrailingSpace('@helper', '\n')).toBe('');
+  });
+});
+
+function pressKey(editor: HTMLDivElement | null | undefined, init: KeyboardEventInit) {
+  editor?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+}
+
+describe('ChatInput composer history hotkeys', () => {
+  it('undoes and redoes composer text edits with the keyboard', async () => {
+    cleanup = render(() => ChatInput(), container!);
+    setInputText('hello');
+    setInputText('hello world');
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    pressKey(editor, { key: 'z', metaKey: true });
+    expect(inputText()).toBe('hello');
+
+    pressKey(editor, { key: 'z', ctrlKey: true });
+    expect(inputText()).toBe('');
+
+    pressKey(editor, { key: 'z', metaKey: true, shiftKey: true });
+    expect(inputText()).toBe('hello');
+
+    pressKey(editor, { key: 'y', ctrlKey: true });
+    expect(inputText()).toBe('hello world');
+  });
+
+  it('restores composer text after pasted content is undone', async () => {
+    cleanup = render(() => ChatInput(), container!);
+    setInputText('draft');
+    setInputText('draft pasted block of text');
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    pressKey(editor, { key: 'z', metaKey: true });
+    expect(inputText()).toBe('draft');
+
+    pressKey(editor, { key: 'z', metaKey: true, shiftKey: true });
+    expect(inputText()).toBe('draft pasted block of text');
+  });
+
+  it('undoes and redoes attachment changes', async () => {
+    cleanup = render(() => ChatInput(), container!);
+
+    addContextFile({ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' });
+    expect(state.droppedFiles.map((file) => file.path)).toEqual(['/repo/src/a.ts']);
+
+    removeContextFile('/repo/src/a.ts');
+    expect(state.droppedFiles).toEqual([]);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    pressKey(editor, { key: 'z', metaKey: true });
+    expect(state.droppedFiles.map((file) => file.path)).toEqual(['/repo/src/a.ts']);
+
+    pressKey(editor, { key: 'z', metaKey: true });
+    expect(state.droppedFiles).toEqual([]);
+
+    pressKey(editor, { key: 'z', metaKey: true, shiftKey: true });
+    expect(state.droppedFiles.map((file) => file.path)).toEqual(['/repo/src/a.ts']);
+  });
+
+  it('stops the running session on Escape', async () => {
+    setState('activeSessionId', 'session-1');
+    setIsLoading(true);
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not stop anything on Escape while idle', async () => {
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(abortSessionMock).not.toHaveBeenCalled();
   });
 });

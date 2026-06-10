@@ -1384,6 +1384,24 @@ export function clearContextFiles() {
   setState('droppedFiles', []);
 }
 
+export function replaceContextFiles(files: DroppedFile[]) {
+  clearContextFileAttachmentSequences();
+  seedContextFileAttachmentSequences(files);
+  setState(
+    'droppedFiles',
+    files.map((file) => ({ ...file }))
+  );
+}
+
+export function replaceClipboardImages(images: ClipboardImage[]) {
+  clearClipboardImageAttachmentSequences();
+  seedClipboardImageAttachmentSequences(images);
+  setState(
+    'clipboardImages',
+    images.map((image) => ({ ...image }))
+  );
+}
+
 export function addClipboardImage(image: ClipboardImage) {
   if (image.size > MAX_CLIPBOARD_IMAGE_SIZE) return false;
 
