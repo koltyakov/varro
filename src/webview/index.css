@@ -5102,7 +5102,7 @@ kbd {
   row-gap: 10px;
   max-height: min(320px, 45vh);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior-y: auto;
   margin-right: -9px;
   padding-right: 9px;
 }
