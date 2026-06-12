@@ -711,6 +711,30 @@ describe('MessageList empty state', () => {
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-empty-logo')).toBeInstanceOf(HTMLImageElement);
+    const hints = container?.querySelectorAll('.chat-empty-hint');
+    expect(hints?.length).toBe(3);
+    expect(container?.querySelector('.chat-empty-hints')?.textContent).toContain('add files');
+  });
+
+  it('omits the logo image when no logo URI is available but keeps the hints', () => {
+    setState('emptyStateLogoUri', '');
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Blank session',
+        version: '1',
+        time: { created: 100, updated: 100 },
+      },
+    ]);
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => MessageList(), container!);
+
+    expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.chat-empty-logo')).toBeNull();
+    expect(container?.querySelectorAll('.chat-empty-hint')).toHaveLength(3);
   });
 
   it('does not show the starter logo while switching to an existing chat with no loaded messages yet', () => {
@@ -3284,6 +3308,65 @@ describe('MessageList auto-scroll', () => {
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterNearBottomScroll + 1);
     expect(assignedScrollTops.at(-1)).toBe(800);
     expect(scrollTopValue).toBe(800);
+    animationFrames.restore();
+  });
+
+  it('shows the jump-to-latest button after scrolling away and returns to bottom on click', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const trackHeight = 1200;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    const scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+    expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
+
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+    scrollTopValue = 200;
+    list?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    const button = container?.querySelector('.jump-to-latest-button') as HTMLButtonElement | null;
+    expect(button).toBeInstanceOf(HTMLButtonElement);
+
+    button?.click();
+    await Promise.resolve();
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(800);
+    expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
     animationFrames.restore();
   });
 });

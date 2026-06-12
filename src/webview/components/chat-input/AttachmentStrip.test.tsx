@@ -227,6 +227,45 @@ describe('AttachmentStrip', () => {
     expect(enabledImageChip?.getAttribute('data-title')).toBe('diagram.png');
   });
 
+  it('opens files and previews images when their chips are clicked', () => {
+    const renderResult = renderAttachmentStrip({
+      files: [createDroppedFile()],
+      clipboardImages: [createClipboardImage()],
+      onOpenFile: vi.fn(),
+      onPreviewImage: vi.fn(),
+    });
+
+    const fileChip = getChip('example.ts');
+    const imageChip = getChip('diagram.png');
+
+    expect(fileChip?.getAttribute('data-clickable')).toBe('true');
+    expect(imageChip?.getAttribute('data-clickable')).toBe('true');
+
+    fileChip
+      ?.querySelector('.attachment-chip-mock-click')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    imageChip
+      ?.querySelector('.attachment-chip-mock-click')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(renderResult.onOpenFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/workspace/src/example.ts' })
+    );
+    expect(renderResult.onPreviewImage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'image-1' })
+    );
+  });
+
+  it('keeps file and image chips non-clickable without open/preview handlers', () => {
+    renderAttachmentStrip({
+      files: [createDroppedFile()],
+      clipboardImages: [createClipboardImage()],
+    });
+
+    expect(getChip('example.ts')?.getAttribute('data-clickable')).toBe('false');
+    expect(getChip('diagram.png')?.getAttribute('data-clickable')).toBe('false');
+  });
+
   it('renders files and images in attachment sequence order', () => {
     renderAttachmentStrip({
       files: [

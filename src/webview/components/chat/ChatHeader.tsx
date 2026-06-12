@@ -24,7 +24,6 @@ export function SessionPickerHeader(props: {
   completedCount: number;
   runningCount: number;
   showNewChatButton?: boolean;
-  createSessionDisabled?: boolean;
   onClearFilter: () => void;
   onOpenFailedSessions: () => void;
   onOpenAttentionSessions: () => void;
@@ -88,12 +87,7 @@ export function SessionPickerHeader(props: {
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
         </Show>
         <Show when={props.showNewChatButton}>
-          <button
-            class="chat-header-btn"
-            disabled={props.createSessionDisabled}
-            onClick={props.onCreateSession}
-            title="New chat"
-          >
+          <button class="chat-header-btn" onClick={props.onCreateSession} title="New chat">
             <svg viewBox="0 0 16 16" fill="currentColor">
               <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
             </svg>

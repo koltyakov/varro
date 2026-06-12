@@ -43,6 +43,7 @@ function renderComposer(props: {
   cursorOffset: number;
   chips: RichComposerChip[];
   onInput?: (text: string, cursorOffset: number) => void;
+  onChipClick?: (chipId: string) => void;
   onRemoveChip?: (chipId: string) => void;
 }) {
   cleanup = render(
@@ -66,6 +67,7 @@ function renderComposer(props: {
         onKeyUp: () => {},
         onSelect: () => {},
         onSelectCompletion: () => {},
+        onChipClick: props.onChipClick,
         onRemoveChip: props.onRemoveChip,
       }),
     container!
@@ -330,5 +332,48 @@ describe('RichComposerArea', () => {
     expect(iconPath?.getAttribute('d')).toBe(
       'M1.75 3h3.1c.31 0 .6.14.79.38l.86 1.12h7.75c.41 0 .75.34.75.75V6H1V3.75C1 3.34 1.34 3 1.75 3zM1 7h14v4.25c0 .97-.78 1.75-1.75 1.75H2.75A1.75 1.75 0 011 11.25V7z'
     );
+  });
+
+  it('reports the chip id through onChipClick when an inline chip is clicked', async () => {
+    const onChipClick = vi.fn();
+    const chip: RichComposerChip = {
+      id: 'file:/workspace/src/app.ts',
+      type: 'mention-file',
+      label: 'app.ts',
+      icon: 'file',
+      textMarker: '@src/app.ts',
+    };
+
+    renderComposer({
+      value: '@src/app.ts',
+      cursorOffset: 0,
+      chips: [chip],
+      onChipClick,
+    });
+
+    await flushAsyncWork();
+
+    const label = container?.querySelector<HTMLElement>('.inline-chip .inline-chip-label');
+    label?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(onChipClick).toHaveBeenCalledWith('file:/workspace/src/app.ts');
+  });
+
+  it('does not call onChipClick for clicks on plain composer text', async () => {
+    const onChipClick = vi.fn();
+
+    renderComposer({
+      value: 'hello world',
+      cursorOffset: 0,
+      chips: [],
+      onChipClick,
+    });
+
+    await flushAsyncWork();
+
+    const editor = container?.querySelector<HTMLElement>('[contenteditable]');
+    editor?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(onChipClick).not.toHaveBeenCalled();
   });
 });

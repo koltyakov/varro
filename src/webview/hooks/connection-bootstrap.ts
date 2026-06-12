@@ -198,6 +198,14 @@ async function restoreStartupView(
     return;
   }
 
+  if (
+    lastOpenedView?.type === 'new-session' &&
+    (deps.now?.() ?? Date.now()) - lastOpenedView.timestamp < STARTUP_VIEW_RESTORE_WINDOW_MS
+  ) {
+    deps.setShowSessionPicker(false);
+    return;
+  }
+
   const onlyPrimarySessionId = deps.getOnlyPrimarySessionId();
   if (sessionCount === 1 && onlyPrimarySessionId && deps.hasSession(onlyPrimarySessionId)) {
     deps.setShowSessionPicker(false);

@@ -42,7 +42,6 @@ export function ChatWorkspace(props: {
   sessionSidebarPlanReadyCount: number;
   sessionSidebarCompletedCount: number;
   sessionSidebarRunningCount: number;
-  isCreatingSessionFromPicker: boolean;
   activeTitle: string;
   activeSubagentRootId: string | null;
   activeSubagentLabel: string;
@@ -82,7 +81,6 @@ export function ChatWorkspace(props: {
         useSidebarCounts ? props.sessionSidebarRunningCount : props.runningSessionsCount
       }
       showNewChatButton
-      createSessionDisabled={props.isCreatingSessionFromPicker}
       onClearFilter={props.onClearSessionListView}
       onOpenFailedSessions={props.onOpenFailedSessions}
       onOpenAttentionSessions={props.onOpenAttentionSessions}

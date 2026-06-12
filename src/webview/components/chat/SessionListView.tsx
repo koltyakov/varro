@@ -30,7 +30,7 @@ import {
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry } from '../../../shared/protocol';
 import { ralphStore } from '../../lib/stores/ralph-store';
-import { shouldHideEmptySessionFromList } from '../../lib/empty-session';
+import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatRelativeAge } from '../../lib/message-metrics';
 
 type SessionGroups = {
@@ -1151,7 +1151,9 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     }
     const selectedAgent = getSelectedAgentForSession(sessionId);
     if (selectedAgent === 'plan') {
-      if (!isSkippedPlanSession(sessionId, session.time.updated)) {
+      // An empty session cannot contain a plan; the plan agent may have been
+      // registered for it merely by selecting the session in the list.
+      if (!isEmptySession(session) && !isSkippedPlanSession(sessionId, session.time.updated)) {
         planReadyIds.add(sessionId);
       }
       continue;

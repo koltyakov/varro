@@ -7,6 +7,7 @@ export function AttachmentChip(props: {
   detail?: string | null;
   disabled?: boolean;
   icon?: 'file' | 'folder' | 'image' | 'terminal';
+  toggle?: boolean;
   onClick?: () => void;
   onRemove?: () => void;
   title?: string;
@@ -23,7 +24,9 @@ export function AttachmentChip(props: {
       class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}${props.onClick ? ' clickable' : ''}`}
       title={props.title}
       aria-disabled={props.disabled ? 'true' : undefined}
-      aria-pressed={props.onClick ? (!props.disabled ? 'true' : 'false') : undefined}
+      aria-pressed={
+        props.onClick && props.toggle ? (!props.disabled ? 'true' : 'false') : undefined
+      }
       role={props.onClick ? 'button' : undefined}
       tabIndex={props.onClick ? 0 : undefined}
       onClick={() => props.onClick?.()}

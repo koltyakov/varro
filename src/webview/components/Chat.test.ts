@@ -1084,14 +1084,10 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-filter-chip')).toBeNull();
   });
 
-  it('switches to the chat view immediately while a new session is creating', async () => {
-    let resolveCreateSession: ((value: string | null) => void) | undefined;
-    const createSessionSpy = vi.spyOn(openCodeModule, 'createSession').mockImplementation(
-      () =>
-        new Promise<string | null>((resolve) => {
-          resolveCreateSession = resolve;
-        })
-    );
+  it('switches to a draft chat view without creating a session', async () => {
+    const createSessionSpy = vi
+      .spyOn(openCodeModule, 'createSession')
+      .mockResolvedValue('new-session');
 
     setState('sessions', [session('active', 500)]);
     setState('activeSessionId', 'active');
@@ -1107,7 +1103,8 @@ describe('header status badges', () => {
     newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
-    expect(createSessionSpy).toHaveBeenCalledTimes(1);
+    expect(createSessionSpy).not.toHaveBeenCalled();
+    expect(state.activeSessionId).toBeNull();
     expect(
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
     ).toBeNull();
@@ -1115,12 +1112,6 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header .chat-header-title-text')?.textContent).toBe(
       'New Chat'
     );
-
-    resolveCreateSession?.('new-session');
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('reuses an untouched active session instead of creating another from chat view', async () => {
@@ -1222,14 +1213,6 @@ describe('header status badges', () => {
   });
 
   it('adds a brief chat view transition class after the new chat opens', async () => {
-    let resolveCreateSession: ((value: string | null) => void) | undefined;
-    vi.spyOn(openCodeModule, 'createSession').mockImplementation(
-      () =>
-        new Promise<string | null>((resolve) => {
-          resolveCreateSession = resolve;
-        })
-    );
-
     setState('sessions', [session('active', 500)]);
     setState('activeSessionId', 'active');
     setShowSessionPicker(true);
@@ -1245,10 +1228,6 @@ describe('header status badges', () => {
     expect(
       container?.querySelector('.interactive-session')?.classList.contains('chat-view-entering')
     ).toBe(true);
-
-    resolveCreateSession?.('new-session');
-    await Promise.resolve();
-    await Promise.resolve();
 
     vi.advanceTimersByTime(180);
     await Promise.resolve();
@@ -1461,6 +1440,18 @@ describe('header status badges', () => {
     const indicators = deriveSessionIndicators(state.sessions);
     expect(indicators.planReadyIds.has('plan-1')).toBe(true);
     expect(indicators.newlyCompletedIds.has('plan-1')).toBe(false);
+  });
+
+  it('does not mark an empty session with the plan agent as plan ready', () => {
+    setState('sessions', [
+      session('plan-blank', 200, { time: { created: 200, updated: 200 } }),
+      session('plan-done', 100),
+    ]);
+    setState('sessionSelectedAgents', { 'plan-blank': 'plan', 'plan-done': 'plan' });
+
+    const indicators = deriveSessionIndicators(state.sessions);
+    expect(indicators.planReadyIds.has('plan-blank')).toBe(false);
+    expect(indicators.planReadyIds.has('plan-done')).toBe(true);
   });
 
   it('keeps seen plan sessions in the plan-ready session group', () => {

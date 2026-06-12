@@ -8,6 +8,7 @@ import {
   onMount,
   untrack,
 } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import {
   state,
   inputText,
@@ -54,6 +55,7 @@ import {
   replaceContextFiles,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
+import { startNewChatDraft } from '../lib/new-chat-draft';
 import { client } from '../lib/client';
 import { openProviderSetup } from '../lib/provider-setup';
 import {
@@ -61,7 +63,6 @@ import {
   sendMessage,
   abortSession,
   continueInterruptedSession,
-  createSession,
   compactSession,
   initSession,
   redoSession,
@@ -118,6 +119,7 @@ import {
   type ComposerSnapshot,
 } from '../lib/composer-history';
 import { TodoList } from './TodoList';
+import { ImagePreviewOverlay, createImagePreviewEffect, type PreviewImage } from './ImagePreview';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import { RichComposerArea, type RichComposerChip } from './chat-input/RichComposerArea';
@@ -373,6 +375,13 @@ async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
       terminalSelection: item.terminalSelection,
     },
     preserveComposer: true,
+  });
+}
+
+function openContextFileInEditor(file: DroppedFile) {
+  postMessage({
+    type: 'vscode/open',
+    payload: { path: file.path, kind: file.type, line: file.lineRanges?.[0]?.startLine },
   });
 }
 
@@ -645,6 +654,33 @@ export function ChatInput() {
         attachmentSequence:
           image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
       }))
+  );
+
+  const [previewImageId, setPreviewImageId] = createSignal<string | null>(null);
+  const previewImageIndex = createMemo(() => {
+    const id = previewImageId();
+    if (!id) return -1;
+    return composerClipboardImages().findIndex((image) => image.id === id);
+  });
+  const previewImage = (): PreviewImage | null => {
+    const image = composerClipboardImages()[previewImageIndex()];
+    if (!image) return null;
+    return { url: image.url, alt: image.filename, title: image.filename, mime: image.mime };
+  };
+  const stepImagePreview = (delta: number) => {
+    const images = composerClipboardImages();
+    const index = previewImageIndex();
+    if (images.length <= 1 || index < 0) return;
+    setPreviewImageId(images[(index + delta + images.length) % images.length]!.id);
+  };
+  createImagePreviewEffect(
+    () => previewImage() !== null,
+    () => setPreviewImageId(null),
+    {
+      canNavigate: () => composerClipboardImages().length > 1,
+      onPrevious: () => stepImagePreview(-1),
+      onNext: () => stepImagePreview(1),
+    }
   );
 
   const activeContext = createMemo(() => {
@@ -2000,6 +2036,8 @@ export function ChatInput() {
                 postMessage({ type: 'files/remove', payload: { path } });
               }}
               onRemoveClipboardImage={removeClipboardImage}
+              onOpenFile={openContextFileInEditor}
+              onPreviewImage={(image) => setPreviewImageId(image.id)}
             />
           </Show>
 
@@ -2056,6 +2094,18 @@ export function ChatInput() {
               } else if (chipId.startsWith('img:')) {
                 const id = chipId.slice(4);
                 removeClipboardImage(id);
+              }
+            }}
+            onChipClick={(chipId) => {
+              if (chipId.startsWith('file:')) {
+                const path = chipId.slice(5);
+                const file = composerFiles().find((f) => f.path === path);
+                if (file) openContextFileInEditor(file);
+              } else if (chipId.startsWith('img:')) {
+                const id = chipId.slice(4);
+                if (composerClipboardImages().some((image) => image.id === id)) {
+                  setPreviewImageId(id);
+                }
               }
             }}
             onSelectCompletion={(item) => {
@@ -2399,6 +2449,20 @@ export function ChatInput() {
           }}
         />
       </div>
+
+      <Show when={previewImage()}>
+        <Portal>
+          <ImagePreviewOverlay
+            image={previewImage()}
+            onClose={() => setPreviewImageId(null)}
+            onPrevious={() => stepImagePreview(-1)}
+            onNext={() => stepImagePreview(1)}
+            showNavigation={composerClipboardImages().length > 1}
+            position={previewImageIndex() + 1}
+            total={composerClipboardImages().length}
+          />
+        </Portal>
+      </Show>
     </div>
   );
 }
@@ -2595,7 +2659,7 @@ export function getSlashCommands(props: {
       aliases: ['clear'],
       description: 'Start a new chat session',
       action: () => {
-        createSession();
+        startNewChatDraft();
       },
     },
     {

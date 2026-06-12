@@ -32,6 +32,8 @@ export function AttachmentStrip(props: {
   onClearTerminalSelection: () => void;
   onRemoveFile: (path: string) => void;
   onRemoveClipboardImage: (id: string) => void;
+  onOpenFile?: (file: DroppedFile) => void;
+  onPreviewImage?: (image: ClipboardImage) => void;
 }) {
   const orderedAttachments = (): AttachmentStripItem[] =>
     [
@@ -56,6 +58,7 @@ export function AttachmentStrip(props: {
                 detail={item.value.lineRange}
                 disabled={!props.activeContextEnabled}
                 title={props.activeContextTitle || item.value.filename}
+                toggle
                 onClick={props.onToggleActiveContext}
               />
             );
@@ -85,6 +88,7 @@ export function AttachmentStrip(props: {
                     ? `${item.value.relativePath || item.value.path} ${lineRange}`
                     : item.value.relativePath || item.value.path
                 }
+                onClick={props.onOpenFile ? () => props.onOpenFile?.(item.value) : undefined}
                 onRemove={() => props.onRemoveFile(item.value.path)}
               />
             );
@@ -100,6 +104,7 @@ export function AttachmentStrip(props: {
                   ? `${item.value.filename} · Current model doesn't support vision, so this image will not be sent`
                   : item.value.filename
               }
+              onClick={props.onPreviewImage ? () => props.onPreviewImage?.(item.value) : undefined}
               onRemove={() => props.onRemoveClipboardImage(item.value.id)}
             />
           );

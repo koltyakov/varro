@@ -21,6 +21,7 @@ import {
   loadingStartedAt,
   loadingLastActivityAt,
   messageListScrollRequestKey,
+  requestMessageListScrollToBottom,
   getChildRunsByParentId,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
@@ -1704,6 +1705,7 @@ export function MessageList() {
     );
   });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
+  const showJumpToLatest = createMemo(() => !autoScroll() && messages().length > 0);
 
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
@@ -1728,13 +1730,27 @@ export function MessageList() {
             fallback={
               <Show when={shouldShowStarterLogo()}>
                 <div class="chat-empty-state">
-                  <img
-                    class="chat-empty-logo"
-                    src={state.emptyStateLogoUri}
-                    alt=""
-                    aria-hidden="true"
-                    draggable="false"
-                  />
+                  <Show when={state.emptyStateLogoUri}>
+                    <img
+                      class="chat-empty-logo"
+                      src={state.emptyStateLogoUri}
+                      alt=""
+                      aria-hidden="true"
+                      draggable="false"
+                    />
+                  </Show>
+                  <div class="chat-empty-hints">
+                    <span class="chat-empty-hint">
+                      <kbd>@</kbd> add files and agents
+                    </span>
+                    <span class="chat-empty-hint">
+                      <kbd>/</kbd> run commands
+                    </span>
+                    <span class="chat-empty-hint">
+                      <kbd>Shift</kbd>
+                      <kbd>Enter</kbd> new line
+                    </span>
+                  </div>
                 </div>
               </Show>
             }
@@ -1770,6 +1786,25 @@ export function MessageList() {
         </div>
       </div>
       <ChatContentBottomFade />
+      <Show when={showJumpToLatest()}>
+        <button
+          type="button"
+          class="jump-to-latest-button"
+          aria-label="Scroll to latest message"
+          title="Scroll to latest message"
+          onClick={() => requestMessageListScrollToBottom()}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+            <path
+              d="M3.5 6.5 8 11l4.5-4.5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </Show>
     </div>
   );
 }

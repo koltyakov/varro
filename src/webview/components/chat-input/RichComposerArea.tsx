@@ -35,6 +35,7 @@ export function RichComposerArea(props: {
   onKeyUp: (cursorOffset: number) => void;
   onSelect: (cursorOffset: number) => void;
   onSelectCompletion: (item: CompletionItem) => void;
+  onChipClick?: (chipId: string) => void;
   onRemoveChip?: (chipId: string) => void;
   onHistory?: (action: 'undo' | 'redo') => void;
 }) {
@@ -86,6 +87,7 @@ export function RichComposerArea(props: {
     span.className = `inline-chip${chip.disabled ? ' disabled' : ''}`;
     span.contentEditable = 'false';
     span.dataset.chipId = chip.id;
+    span.dataset.chipType = chip.type;
     span.dataset.chipMarker = chip.textMarker;
     span.setAttribute('title', chip.title || chip.label);
 
@@ -302,7 +304,13 @@ export function RichComposerArea(props: {
         onCopy={handleCopy}
         onFocus={() => props.onFocus()}
         onBlur={() => props.onBlur()}
-        onClick={() => props.onClick(getCursorOffset())}
+        onClick={(e) => {
+          const chipEl = (e.target as HTMLElement).closest?.('[data-chip-id]');
+          if (chipEl instanceof HTMLElement && chipEl.dataset.chipId) {
+            props.onChipClick?.(chipEl.dataset.chipId);
+          }
+          props.onClick(getCursorOffset());
+        }}
         onKeyUp={() => props.onKeyUp(getCursorOffset())}
         onCompositionStart={() => {
           isComposing = true;

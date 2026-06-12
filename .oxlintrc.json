@@ -26,6 +26,7 @@
             "__resetMarkdownCachesForTests",
             "__resetProviderLimitWindowSelectionsForTests",
             "__sendToExtension",
+            "__varroE2E",
             "__varroPasteText",
             "__vscodeWebviewState",
             "_context",

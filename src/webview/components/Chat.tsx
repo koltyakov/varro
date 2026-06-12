@@ -1,27 +1,19 @@
 import {
   desktopSessionPaneSide,
   state,
-  setState,
   showSessionPicker,
   setPersistentShowSessionPicker as setShowSessionPicker,
   showSettings,
-  setShowSettings,
   openAttentionSessionsKey,
   isSessionAwaitingInput,
   getSessionTreeRootId,
-  persistActiveSessionId,
-  clearMessages,
-  stopLoading,
-  setError,
-  setShowModelPicker,
-  setIsLoading,
 } from '../lib/state';
-import { batch, createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
-import { selectSession, createSession, deleteSessionImmediately } from '../hooks/useOpenCode';
+import { createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
+import { selectSession, deleteSessionImmediately } from '../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { ChatWorkspace } from './chat/ChatWorkspace';
 import { ralphStore } from '../lib/stores/ralph-store';
-import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
+import { getDiscardableActiveBlankSessionId, startNewChatDraft } from '../lib/new-chat-draft';
 import {
   shouldHideEmptySessionFromList,
   isEmptySession as isEmptySessionMetadata,
@@ -59,23 +51,10 @@ function isDesktopSessionPaneRight() {
   return desktopSessionPaneSide() === 'right';
 }
 
-function activateExistingBlankSession() {
-  batch(() => {
-    resetToolCallExpansionState();
-    clearMessages();
-    setError(null);
-    setShowSettings(false);
-    setShowModelPicker(false);
-    setShowSessionPicker(false);
-    stopLoading();
-  });
-}
-
 export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
-  const [isCreatingSessionFromPicker, setIsCreatingSessionFromPicker] = createSignal(false);
   const [isEnteringChatView, setIsEnteringChatView] = createSignal(false);
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
@@ -200,17 +179,6 @@ export function Chat() {
     }
     pendingEmptySessionDeleteTimers.clear();
   });
-
-  const getDiscardableActiveBlankSessionId = () => {
-    const sessionId = state.activeSessionId;
-    if (!sessionId || state.messages.length > 0) return false;
-    const session = sessionsById().get(sessionId);
-    if (!session || !isEmptySessionMetadata(session)) return false;
-    if (state.queuedMessages.some((item) => item.sessionId === sessionId)) return false;
-    if (isSessionAwaitingInput(sessionId)) return false;
-    const statusType = state.sessionStatus[sessionId]?.type;
-    return statusType !== 'busy' && statusType !== 'retry' ? sessionId : false;
-  };
 
   const activeTitle = () => {
     if (!state.activeSessionId) return 'New Chat';
@@ -381,43 +349,6 @@ export function Chat() {
     setSubagentParentId(null);
   };
 
-  const createSessionFromPicker = async () => {
-    if (isCreatingSessionFromPicker()) return;
-
-    setIsCreatingSessionFromPicker(true);
-    try {
-      const discardableActiveBlankSessionId = getDiscardableActiveBlankSessionId();
-      if (discardableActiveBlankSessionId) {
-        activateExistingBlankSession();
-        return;
-      }
-
-      batch(() => {
-        resetToolCallExpansionState();
-        clearMessages();
-        setState('activeSessionId', null);
-        persistActiveSessionId(null);
-        setError(null);
-        setShowSettings(false);
-        setShowModelPicker(false);
-        setIsLoading(true);
-        setShowSessionPicker(false);
-      });
-
-      const createdId = await createSession();
-      if (!createdId) stopLoading();
-    } finally {
-      setIsCreatingSessionFromPicker(false);
-    }
-  };
-  const createSessionFromChat = async () => {
-    const discardableActiveBlankSessionId = getDiscardableActiveBlankSessionId();
-    if (discardableActiveBlankSessionId) {
-      activateExistingBlankSession();
-      return;
-    }
-    await createSession();
-  };
   const activeSubagentParent = createMemo(() => {
     const parentId = subagentParentId();
     if (!parentId) return null;
@@ -469,7 +400,6 @@ export function Chat() {
       sessionSidebarPlanReadyCount={sessionSidebarPlanReadyCount()}
       sessionSidebarCompletedCount={sessionSidebarCompletedCount()}
       sessionSidebarRunningCount={sessionSidebarRunningCount()}
-      isCreatingSessionFromPicker={isCreatingSessionFromPicker()}
       activeTitle={activeTitle()}
       activeSubagentRootId={activeSubagentCount() > 0 ? activeRootSessionId() : null}
       activeSubagentLabel={activeSubagentLabel()}
@@ -483,12 +413,8 @@ export function Chat() {
       onOpenPlanReadySessions={openPlanReadySessions}
       onOpenCompletedSessions={openCompletedSessions}
       onOpenRunningSessions={openRunningSessions}
-      onCreateSessionFromPicker={() => {
-        void createSessionFromPicker();
-      }}
-      onCreateSession={() => {
-        void createSessionFromChat();
-      }}
+      onCreateSessionFromPicker={startNewChatDraft}
+      onCreateSession={startNewChatDraft}
     />
   );
 }

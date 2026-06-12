@@ -20,6 +20,7 @@ import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state
 import { applyWebviewTheme } from '../../lib/theme';
 import type { Message, Part, Permission, Session } from '../../types';
 import { getSessionTreeIds, getSessionTreeRootId } from '../../lib/state';
+import { startNewChatDraft } from '../../lib/new-chat-draft';
 import {
   createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
@@ -301,7 +302,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         },
         isInitialized: () => initialized,
         createSession: () => {
-          void createSession();
+          startNewChatDraft();
         },
         abortSession: () => {
           void abortSession();

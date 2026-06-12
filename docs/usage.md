@@ -247,6 +247,7 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - Context compaction markers when OpenCode summarizes a session
 - Usage-limit banners when a run is retrying against provider limits
 - A transport banner when the OpenCode event stream is reconnecting and live updates may lag temporarily
+- A jump-to-latest button when you scroll away from the bottom of the chat; clicking it returns to the newest message and re-enables auto-follow
 
 ## VS Code Commands And Keybindings
 

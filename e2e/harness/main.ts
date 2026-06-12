@@ -2788,7 +2788,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     },
     terminalSelection: null,
     droppedFiles: [],
-    emptyStateLogoUri: '',
+    emptyStateLogoUri: '/assets/icon.png',
     showStickyUserPrompt: true,
     defaultPermissionMode: 'default',
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,

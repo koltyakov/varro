@@ -350,6 +350,38 @@ describe('connection-bootstrap helpers', () => {
     expect(selectSession).toHaveBeenCalledWith('session-1');
   });
 
+  it('keeps the new chat draft open when that was the recent startup view', async () => {
+    const setShowSessionPicker = vi.fn();
+    const selectSession = vi.fn(async () => {});
+
+    await initConnectionWithDependencies(
+      {
+        health: vi.fn(async () => {}),
+        loadInitialData: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => null,
+        getPersistedLastOpenedView: () => ({ type: 'new-session', timestamp: 1_000_000 }),
+        getSessionCount: () => 1,
+        getOnlyPrimarySessionId: () => 'session-1',
+        hasSession: () => true,
+        selectSession,
+        setShowSessionPicker,
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized: vi.fn(),
+        setError: vi.fn(),
+        now: () => 1_000_000 + 1_000,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(setShowSessionPicker).toHaveBeenCalledWith(false);
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
   it('opens the sessions list when that was the recent startup fallback', async () => {
     const setShowSessionPicker = vi.fn();
     const selectSession = vi.fn(async () => {});
