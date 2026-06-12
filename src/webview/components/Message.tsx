@@ -2,10 +2,12 @@ import { Show, createMemo, createResource } from 'solid-js';
 import { retryMessage } from '../hooks/useOpenCode';
 import { friendlyErrorName, isAbortedAssistantError } from '../lib/aborted';
 import { client } from '../lib/client';
+import { editingMessageId, startEditingMessage } from '../lib/message-edit-state';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
 import { openProviderSetup } from '../lib/provider-setup';
+import { isActiveSessionWorking, state } from '../lib/state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import type {
   AssistantMessage,
@@ -25,7 +27,12 @@ import {
 } from './message/AssistantMessageContent';
 import { CompactionDivider } from './message/CompactionDivider';
 import { DiffSummary } from './message/DiffSummary';
-import { UserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
+import {
+  UserMessageContent,
+  getUserMessageEditContext,
+  getUserMessageEditText,
+  parseUserMessageContent,
+} from './message/UserMessageContent';
 
 const AUTH_INVALIDATED_RE = /authentication token has been invalidated|try signing in again/i;
 
@@ -34,7 +41,12 @@ export {
   getAssistantContainerVariant,
   stripCompactionBoundaryMarkdown,
 } from './message/AssistantMessageContent';
-export { getUserMessagePreviewText, parseUserMessageContent } from './message/UserMessageContent';
+export {
+  getUserMessageEditText,
+  getUserMessageEditContext,
+  getUserMessagePreviewText,
+  parseUserMessageContent,
+} from './message/UserMessageContent';
 export type { AssistantFileEditStackGroup } from './message/AssistantMessageContent';
 export type { ParsedUserMessageContent } from './message/UserMessageContent';
 
@@ -183,6 +195,26 @@ export function Message(props: {
       parsed.fileParts.length > 0
     );
   });
+  const isEditingUserMessage = () => isUser() && editingMessageId() === props.info.id;
+  const canEditUserMessage = () =>
+    isUser() &&
+    hasUserContent() &&
+    props.info.sessionID === state.activeSessionId &&
+    !isActiveSessionWorking() &&
+    getUserMessageEditText(normalizedParts()).trim().length > 0;
+  const handleUserCardClick = (event: MouseEvent) => {
+    if (!canEditUserMessage() || isEditingUserMessage()) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('button, a, textarea')) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return;
+    startEditingMessage(
+      props.info.id,
+      props.info.sessionID,
+      getUserMessageEditText(normalizedParts()),
+      getUserMessageEditContext(normalizedParts())
+    );
+  };
 
   return (
     <Show when={shouldRender()}>
@@ -200,7 +232,11 @@ export function Message(props: {
               props.fileEditStackGroup
                 ? `assistant-turn-file-edit-group-${props.fileEditStackGroup}`
                 : ''
-            }`}
+            }${canEditUserMessage() && !isEditingUserMessage() ? ' user-message-card-editable' : ''}`}
+            onClick={handleUserCardClick}
+            title={
+              canEditUserMessage() && !isEditingUserMessage() ? 'Click to edit message' : undefined
+            }
           >
             <Show when={isUser() && hasUserContent()}>
               <UserMessageContent parts={normalizedParts()} />

@@ -34,7 +34,8 @@ import {
 } from '../lib/state';
 import { isAssistantMessage, sumAssistantTokens } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
-import { type AssistantFileEditStackGroup } from './Message';
+import { getUserMessageEditText, type AssistantFileEditStackGroup } from './Message';
+import { editingMessage, startEditingMessage } from '../lib/message-edit-state';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
@@ -277,6 +278,9 @@ const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 const LOADING_ROW_REAPPEAR_DELAY_MS = 180;
 const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
 const TRAILING_SUMMARY_SETTLE_DELAY_MS = 240;
+// Only offer "jump to latest" when at least this much content is hidden
+// below the viewport; a barely-scrolled list doesn't need the button.
+const JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX = 240;
 
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -629,6 +633,20 @@ export function MessageList() {
 
   const visibleRange = createMemo(() => {
     const msgs = messages();
+    const editing = editingMessage();
+    if (editing) {
+      const editedIndex = msgs.findIndex((entry) => entry.info.id === editing.messageId);
+      if (editedIndex >= 0) {
+        return {
+          start: 0,
+          end: msgs.length,
+          topPad: 0,
+          bottomPad: 0,
+          coreStart: 0,
+          coreEnd: msgs.length,
+        };
+      }
+    }
     if (!shouldVirtualize() || msgs.length === 0) {
       return {
         start: 0,
@@ -1236,11 +1254,35 @@ export function MessageList() {
     }
   }
 
+  function getEditMaxScrollTop(top: number) {
+    if (!containerRef) return null;
+    const editing = editingMessage();
+    if (!editing) return null;
+    const row = [...containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+      (element) => element.dataset.msgId === editing.messageId
+    );
+    if (!row) return null;
+
+    const containerRect = containerRef.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    return Math.max(0, top + rowRect.top - containerRect.top);
+  }
+
+  function clampEditScrollTop(top: number) {
+    if (!containerRef) return top;
+    const maxScrollTop = getEditMaxScrollTop(top);
+    if (maxScrollTop !== null && top > maxScrollTop + 1) {
+      containerRef.scrollTop = maxScrollTop;
+      return maxScrollTop;
+    }
+    return top;
+  }
+
   function onScroll() {
     if (!containerRef) return;
     const autoScrollEnabled = autoScroll();
     const now = performance.now();
-    const top = containerRef.scrollTop;
+    const top = clampEditScrollTop(containerRef.scrollTop);
     const currentViewportHeight = containerRef.clientHeight;
     const distance = distanceFromBottom();
     const bottomTargetStable = Math.abs(bottomScrollTop() - lastAutoScrolledBottomScrollTop) <= 1;
@@ -1297,6 +1339,16 @@ export function MessageList() {
 
   function onWheel(event: WheelEvent) {
     lastWheelAt = performance.now();
+    if (containerRef && event.deltaY > 0.5) {
+      const top = containerRef.scrollTop;
+      const maxScrollTop = getEditMaxScrollTop(top);
+      if (maxScrollTop !== null && top + event.deltaY >= maxScrollTop - 1) {
+        containerRef.scrollTop = maxScrollTop;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    }
     if (initialScrollRafId) {
       cancelAnimationFrame(initialScrollRafId);
       initialScrollRafId = 0;
@@ -1705,13 +1757,63 @@ export function MessageList() {
     );
   });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
-  const showJumpToLatest = createMemo(() => !autoScroll() && messages().length > 0);
+  const showJumpToLatest = createMemo(() => {
+    if (autoScroll() || messages().length === 0) return false;
+    if (editingMessage()) return false;
+    // Reactive triggers for the DOM-based distance read below; measurement
+    // version covers content growing below the viewport without scrolling.
+    scrollTop();
+    viewportHeight();
+    measurementVersion();
+    return distanceFromBottom() > JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX;
+  });
+
+  function scrollMessageIntoView(preview: StickyUserMessagePreview) {
+    if (!containerRef) return;
+    const row = [...containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+      (element) => element.dataset.msgId === preview.id
+    );
+    if (row) {
+      row.scrollIntoView({ block: 'start' });
+      return;
+    }
+    if (shouldVirtualize()) {
+      containerRef.scrollTop = virtualMetrics().prefix[preview.index] ?? 0;
+    }
+  }
+
+  function handleStickyPreviewEdit(preview: StickyUserMessagePreview) {
+    if (activeSessionWorking()) return;
+    const entry =
+      messages()[preview.index]?.info.id === preview.id
+        ? messages()[preview.index]
+        : messages().find((candidate) => candidate.info.id === preview.id);
+    if (!entry || entry.info.role !== 'user') return;
+    if (entry.info.sessionID !== state.activeSessionId) return;
+    const editText = getUserMessageEditText(entry.parts);
+    if (!editText.trim()) return;
+    setAutoScroll(false);
+    scrollMessageIntoView(preview);
+    startEditingMessage(entry.info.id, entry.info.sessionID, editText);
+  }
+
+  function handleStickyPreviewClick(preview: StickyUserMessagePreview) {
+    if (activeSessionWorking()) {
+      scrollMessageIntoView(preview);
+      return;
+    }
+
+    handleStickyPreviewEdit(preview);
+  }
+
+  const stickyPreviewTitle = () =>
+    activeSessionWorking() ? 'Click to scroll to message' : 'Click to edit message';
 
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
       <div
         ref={containerRef}
-        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}`}
+        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${editingMessage() ? ' editing-message' : ''}`}
         role="log"
         aria-live="polite"
         aria-label="Chat messages"
@@ -1720,10 +1822,16 @@ export function MessageList() {
       >
         <div
           ref={trackRef}
-          class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}`}
+          class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}`}
         >
           <Show when={showStickyUserPrompt() && stickyUserMessagePreview()}>
-            {(preview) => <StickyUserMessagePreviewCard preview={preview()} />}
+            {(preview) => (
+              <StickyUserMessagePreviewCard
+                preview={preview()}
+                title={stickyPreviewTitle()}
+                onClick={handleStickyPreviewClick}
+              />
+            )}
           </Show>
           <Show
             when={state.messages.length > 0}
@@ -1776,11 +1884,13 @@ export function MessageList() {
               buildPlanDocumentContent={buildPlanDocumentContent}
             />
           </Show>
-          <PendingActionRows
-            questions={standaloneQuestions()}
-            permissions={standalonePermissions()}
-          />
-          <Show when={reserveLoadingRow()}>
+          <Show when={!editingMessage()}>
+            <PendingActionRows
+              questions={standaloneQuestions()}
+              permissions={standalonePermissions()}
+            />
+          </Show>
+          <Show when={reserveLoadingRow() && !editingMessage()}>
             <LoadingRow compacting={isSessionCompacting()} visible={showLoadingRow()} />
           </Show>
         </div>

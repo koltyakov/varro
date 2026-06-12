@@ -95,6 +95,47 @@ export async function undoSessionWithDependencies(deps: {
   }
 }
 
+export async function editMessageWithDependencies(
+  deps: {
+    getActiveSessionId(): string | null;
+    getMessages(): Array<{ info: Message }>;
+    isSessionWorking(sessionId: string): boolean;
+    abortSession(): Promise<void>;
+    startLoading(): void;
+    revertSession(sessionId: string, messageId: string): Promise<unknown>;
+    syncSession(sessionId: string): Promise<void>;
+    syncSessionMessages(sessionId: string): Promise<void>;
+    sendEditedMessage(text: string): Promise<void>;
+    stopLoading(): void;
+    setError(message: string): void;
+  },
+  messageId: string,
+  text: string
+) {
+  const sessionId = deps.getActiveSessionId();
+  if (!sessionId || !text.trim()) return;
+
+  const target = deps
+    .getMessages()
+    .find((entry) => entry.info.role === 'user' && entry.info.id === messageId);
+  if (!target || target.info.sessionID !== sessionId) return;
+
+  try {
+    deps.startLoading();
+    if (deps.isSessionWorking(sessionId)) {
+      await deps.abortSession();
+    }
+    await deps.revertSession(sessionId, messageId);
+    await Promise.all([deps.syncSession(sessionId), deps.syncSessionMessages(sessionId)]);
+  } catch (err) {
+    deps.stopLoading();
+    deps.setError(err instanceof Error ? err.message : 'Failed to edit message');
+    return;
+  }
+
+  await deps.sendEditedMessage(text);
+}
+
 export async function redoSessionWithDependencies(deps: {
   getActiveSessionId(): string | null;
   startLoading(): void;
@@ -188,6 +229,8 @@ type SessionControlDependencies = {
   syncSession(sessionId: string): Promise<void>;
   syncSessionMessages(sessionId: string): Promise<void>;
   setError(message: string): void;
+  isSessionWorking(sessionId: string): boolean;
+  sendEditedMessage(text: string): Promise<void>;
   unrevertSession(sessionId: string): Promise<Session>;
   upsertSession(session: Session): void;
   clearPendingAbort(sessionId: string): void;
@@ -240,6 +283,26 @@ export class SessionControlOperations {
       stopLoading: this.deps.stopLoading,
       setError: this.deps.setError,
     });
+  };
+
+  readonly editMessage = async (messageId: string, text: string) => {
+    await editMessageWithDependencies(
+      {
+        getActiveSessionId: this.deps.getActiveSessionId,
+        getMessages: this.deps.getMessages,
+        isSessionWorking: this.deps.isSessionWorking,
+        abortSession: this.abortSession,
+        startLoading: this.deps.startLoading,
+        revertSession: this.deps.revertSession,
+        syncSession: this.deps.syncSession,
+        syncSessionMessages: this.deps.syncSessionMessages,
+        sendEditedMessage: this.deps.sendEditedMessage,
+        stopLoading: this.deps.stopLoading,
+        setError: this.deps.setError,
+      },
+      messageId,
+      text
+    );
   };
 
   readonly redoSession = async () => {

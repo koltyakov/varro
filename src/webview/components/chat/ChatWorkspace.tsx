@@ -1,4 +1,5 @@
-import { Show } from 'solid-js';
+import { Show, createSignal } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { MessageList } from '../MessageList';
 import { ChatInput } from '../ChatInput';
 import { ModelsPanel } from '../ModelsPanel';
@@ -6,12 +7,38 @@ import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionListFilter } from './SessionListView';
 import { RalphDashboard } from '../ralph/RalphDashboard';
+import { inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { state } from '../../lib/state';
 
 function activeRalphSessionId() {
   const id = state.activeSessionId;
   return id && ralphStore.isRalphSession(id) ? id : null;
+}
+
+// Hosts the single live ChatInput. While a message is being edited the
+// composer DOM relocates into the edited message row (the Portal moves the
+// existing nodes — component state is preserved); otherwise it sits in the
+// bottom slot.
+function ComposerHost() {
+  const [bottomMount, setBottomMount] = createSignal<HTMLElement | null>(null);
+  const mountTarget = () => inlineEditMount() ?? bottomMount();
+
+  return (
+    <>
+      <div class="composer-bottom-slot" ref={setBottomMount} />
+      <Show when={!!mountTarget()}>
+        <Portal
+          mount={mountTarget()!}
+          ref={(el) => {
+            el.style.display = 'contents';
+          }}
+        >
+          <ChatInput />
+        </Portal>
+      </Show>
+    </>
+  );
 }
 
 export function ChatWorkspace(props: {
@@ -142,7 +169,7 @@ export function ChatWorkspace(props: {
           fallback={
             <>
               <MessageList />
-              <ChatInput />
+              <ComposerHost />
             </>
           }
         >

@@ -20,6 +20,7 @@ function createRuntimeMock(label: string) {
       emptyRecycleBin: vi.fn().mockResolvedValue(undefined),
       sendMessage: vi.fn().mockResolvedValue(undefined),
       retryMessage: vi.fn().mockResolvedValue(undefined),
+      editMessage: vi.fn().mockResolvedValue(undefined),
       implementPlan: vi.fn().mockResolvedValue(undefined),
       openPlan: vi.fn().mockResolvedValue(undefined),
       abortSession: vi.fn().mockResolvedValue(undefined),
@@ -162,6 +163,11 @@ describe('useOpenCode.runtime', () => {
         invoke: () => module.retryMessage('message-1', 'session-1'),
         mock: installed.runtime.retryMessage,
         args: ['message-1', 'session-1'],
+      },
+      {
+        invoke: () => module.editMessage('message-1', 'updated prompt'),
+        mock: installed.runtime.editMessage,
+        args: ['message-1', 'updated prompt'],
       },
       {
         invoke: () => module.implementPlan('Implement the next step', 'session-1'),

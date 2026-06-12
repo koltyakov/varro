@@ -6,6 +6,7 @@ import {
   normalizePath,
 } from '../../lib/path-display';
 import { postMessage } from '../../lib/bridge';
+import type { MessageEditContext } from '../../lib/message-edit-state';
 import { state } from '../../lib/state';
 import type { FilePart, Part, TextPart } from '../../types';
 import {
@@ -27,7 +28,7 @@ export type MessageAttachment =
       filename: string;
       lineRanges: Array<{ startLine: number; endLine: number }>;
     }
-  | { type: 'terminal-selection'; terminalName: string }
+  | { type: 'terminal-selection'; terminalName: string; text?: string }
   | { type: 'file-reference'; path: string; isDirectory: boolean };
 
 type UserMessageSegment =
@@ -151,18 +152,21 @@ function parseUserMessageText(text: string): {
       const terminalMatch = trimmedLine.match(/^\[Selection from terminal (.+?)\]/);
       if (terminalMatch) {
         flushTextBuffer();
-        attachments.push({
-          type: 'terminal-selection',
-          terminalName: terminalMatch[1],
-        });
+        let terminalText = '';
 
         if (lines[index + 1]?.trim().startsWith('```')) {
           index += 2;
           while (index < lines.length) {
             if (lines[index].trim() === '```') break;
+            terminalText += `${terminalText ? '\n' : ''}${lines[index]}`;
             index += 1;
           }
         }
+        attachments.push({
+          type: 'terminal-selection',
+          terminalName: terminalMatch[1],
+          text: terminalText || undefined,
+        });
         continue;
       }
 
@@ -230,6 +234,71 @@ function parseUserMessageAttachmentLine(line: string): MessageAttachment | null 
 function hasEmbeddedMentionReference(line: string): boolean {
   const match = line.match(/(^|[\s(])@([^\s@)]+?\/?)(?=$|[\s),.:;!?])/);
   return (match?.index ?? -1) > 0;
+}
+
+export function getUserMessageEditText(parts: Part[]): string {
+  const texts: string[] = [];
+
+  for (const part of parts) {
+    if (part.type !== 'text') continue;
+    const text = (part as TextPart).text;
+    if (!text) continue;
+
+    // Skip context parts the composer re-adds automatically on send.
+    const trimmed = text.trim();
+    if (
+      trimmed.startsWith('[Working directory:') ||
+      trimmed.startsWith('[Active file:') ||
+      trimmed.startsWith('[Selection from ')
+    ) {
+      continue;
+    }
+
+    texts.push(text);
+  }
+
+  return texts.join('\n');
+}
+
+export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
+  const parsed = parseUserMessageContent(parts);
+  const files = parsed.attachments.flatMap((attachment) => {
+    if (attachment.type === 'terminal-selection') return [];
+
+    const path = attachment.type === 'file-selection' ? attachment.filename : attachment.path;
+    return [
+      {
+        path,
+        relativePath: path,
+        type:
+          attachment.type === 'file-reference' && attachment.isDirectory
+            ? ('directory' as const)
+            : ('file' as const),
+        lineRanges: attachment.type === 'file-selection' ? attachment.lineRanges : undefined,
+      },
+    ];
+  });
+  const images = parsed.fileParts
+    .filter((part) => part.mime.startsWith('image/'))
+    .map((part, index) => ({
+      id: part.id || `edited-image-${index + 1}`,
+      url: part.url,
+      mime: part.mime,
+      filename: part.filename || `image-${index + 1}`,
+      size: 0,
+    }));
+  const terminalAttachment = parsed.attachments.find(
+    (attachment) => attachment.type === 'terminal-selection' && attachment.text
+  );
+
+  return {
+    files,
+    images,
+    terminalSelection:
+      terminalAttachment?.type === 'terminal-selection' && terminalAttachment.text
+        ? { terminalName: terminalAttachment.terminalName, text: terminalAttachment.text }
+        : null,
+  };
 }
 
 export function getUserMessagePreviewText(parts: Part[]): string {

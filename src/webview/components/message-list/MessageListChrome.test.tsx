@@ -55,6 +55,54 @@ describe('MessageListChrome', () => {
     expect(container?.querySelector('.latest-user-message-sticky-bottom-fade')).not.toBeNull();
   });
 
+  it('invokes onEdit with the preview when the sticky card is clicked', () => {
+    const onEdit = vi.fn();
+    const preview = { id: 'msg-1', index: 3, text: 'Summarize the latest failing test output.' };
+    cleanup = render(
+      () => <StickyUserMessagePreviewCard preview={preview} onEdit={onEdit} />,
+      container!
+    );
+
+    const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    expect(card?.classList.contains('latest-user-message-sticky-clickable')).toBe(true);
+    expect(card?.getAttribute('title')).toBe('Click to edit message');
+
+    card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onEdit).toHaveBeenCalledWith(preview);
+  });
+
+  it('invokes the generic click handler with a custom title', () => {
+    const onClick = vi.fn();
+    const preview = { id: 'msg-1', index: 3, text: 'Summarize the latest failing test output.' };
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={preview}
+          title="Click to scroll to message"
+          onClick={onClick}
+        />
+      ),
+      container!
+    );
+
+    const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    expect(card?.classList.contains('latest-user-message-sticky-clickable')).toBe(true);
+    expect(card?.getAttribute('title')).toBe('Click to scroll to message');
+
+    card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onClick).toHaveBeenCalledWith(preview);
+  });
+
+  it('is not clickable without an onEdit handler', () => {
+    cleanup = render(
+      () => <StickyUserMessagePreviewCard preview={{ id: 'msg-1', index: 3, text: 'A prompt.' }} />,
+      container!
+    );
+
+    const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    expect(card?.classList.contains('latest-user-message-sticky-clickable')).toBe(false);
+  });
+
   it('renders the chat content bottom fade shell with hidden semantics', () => {
     cleanup = render(() => <ChatContentBottomFade />, container!);
 

@@ -3,11 +3,14 @@ import { render } from 'solid-js/web';
 import { createSignal } from 'solid-js';
 import type { FilePart, Part, ToolPart } from '../types';
 import { client } from '../lib/client';
-import { setExpandThinkingByDefault } from '../lib/state';
+import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
+import { setExpandThinkingByDefault, setState as setAppState } from '../lib/state';
 import {
   Message,
   calculateAssistantPartVirtualRange,
   getAssistantContainerVariant,
+  getUserMessageEditContext,
+  getUserMessageEditText,
   getUserMessagePreviewText,
   parseUserMessageContent,
   stripCompactionBoundaryMarkdown,
@@ -864,6 +867,162 @@ describe('Message user rendering', () => {
       'text/plain',
       "Check @broserbridge/bbx and @handlers.js if it's aligned @README.md - don't do anything this is template test"
     );
+  });
+});
+
+describe('getUserMessageEditText', () => {
+  it('keeps prompt text and standalone file references while skipping context parts', () => {
+    const editText = getUserMessageEditText([
+      textPart('text-1', 'fix the failing test'),
+      textPart('text-2', '[Working directory: /repo]'),
+      textPart('text-3', '[Active file: src/index.ts]'),
+      textPart('text-4', '[Selection from src/index.ts:1-3]'),
+      textPart('text-5', 'src/utils/helper.ts'),
+    ]);
+
+    expect(editText).toBe('fix the failing test\nsrc/utils/helper.ts');
+  });
+
+  it('skips terminal selection blocks and non-text parts', () => {
+    const editText = getUserMessageEditText([
+      textPart('text-1', '[Selection from terminal zsh]\n```text\nnpm test\n```'),
+      imageFilePart('file-1', 'screenshot.png'),
+      textPart('text-2', 'why does this fail?'),
+    ]);
+
+    expect(editText).toBe('why does this fail?');
+  });
+});
+
+describe('getUserMessageEditContext', () => {
+  it('restores added files, terminal selections, and images', () => {
+    const context = getUserMessageEditContext([
+      textPart('text-1', 'src/app.ts'),
+      textPart('text-2', '[Selection from src/main.ts lines 2-4]'),
+      textPart('text-3', '[Selection from terminal zsh]\n```text\nnpm test\n```'),
+      {
+        id: 'file-image-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'file',
+        mime: 'image/png',
+        filename: 'screenshot.png',
+        url: 'blob:image-1',
+      },
+    ]);
+
+    expect(context).toEqual({
+      files: [
+        { path: 'src/app.ts', relativePath: 'src/app.ts', type: 'file', lineRanges: undefined },
+        {
+          path: 'src/main.ts',
+          relativePath: 'src/main.ts',
+          type: 'file',
+          lineRanges: [{ startLine: 2, endLine: 4 }],
+        },
+      ],
+      images: [
+        {
+          id: 'file-image-1',
+          url: 'blob:image-1',
+          mime: 'image/png',
+          filename: 'screenshot.png',
+          size: 0,
+        },
+      ],
+      terminalSelection: { terminalName: 'zsh', text: 'npm test' },
+    });
+  });
+});
+
+describe('Message user editing', () => {
+  function renderEditableUserMessage(messageId = 'message-edit') {
+    setAppState('activeSessionId', 'session-1');
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage(messageId),
+          parts: [
+            {
+              id: 'text-edit',
+              sessionID: 'session-1',
+              messageID: messageId,
+              type: 'text',
+              text: 'original prompt',
+            },
+            {
+              id: 'text-edit-cwd',
+              sessionID: 'session-1',
+              messageID: messageId,
+              type: 'text',
+              text: '[Working directory: /repo]',
+            },
+          ],
+        }),
+      container!
+    );
+  }
+
+  afterEach(() => {
+    setAppState('activeSessionId', null);
+    setAppState('sessionStatus', {});
+    resetMessageEditState();
+  });
+
+  it('starts a composer edit with the message text on click and highlights the target', () => {
+    renderEditableUserMessage();
+
+    window.getSelection()?.removeAllRanges();
+    const card = container?.querySelector<HTMLElement>('.user-message-card');
+    expect(card?.classList.contains('user-message-card-editable')).toBe(true);
+
+    card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(editingMessage()).toEqual({
+      messageId: 'message-edit',
+      sessionId: 'session-1',
+      text: 'original prompt',
+      context: { files: [], images: [], terminalSelection: null },
+    });
+    expect(card?.classList.contains('user-message-card-editable')).toBe(false);
+    expect(container?.textContent).toContain('original prompt');
+  });
+
+  it('does not offer editing when the message belongs to another session', () => {
+    setAppState('activeSessionId', 'session-2');
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-other-session'),
+          parts: [
+            {
+              id: 'text-other-session',
+              sessionID: 'session-1',
+              messageID: 'message-other-session',
+              type: 'text',
+              text: 'original prompt',
+            },
+          ],
+        }),
+      container!
+    );
+
+    const card = container?.querySelector<HTMLElement>('.user-message-card');
+    expect(card?.classList.contains('user-message-card-editable')).toBe(false);
+
+    card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(editingMessage()).toBeNull();
+  });
+
+  it('does not offer editing while the active session is working', () => {
+    setAppState('sessionStatus', { 'session-1': { type: 'busy' } });
+    renderEditableUserMessage();
+
+    const card = container?.querySelector<HTMLElement>('.user-message-card');
+    expect(card?.classList.contains('user-message-card-editable')).toBe(false);
+
+    card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(editingMessage()).toBeNull();
   });
 });
 

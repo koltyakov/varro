@@ -90,6 +90,7 @@ export interface OpenCodeRuntime {
     }
   ): Promise<void>;
   retryMessage(messageId: string, sessionId?: string | null): Promise<void>;
+  editMessage(messageId: string, text: string): Promise<void>;
   implementPlan(prompt: string, sessionId?: string | null): Promise<void>;
   openPlan(markdown: string, sessionId?: string | null): Promise<void>;
   abortSession(): Promise<void>;
@@ -690,6 +691,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSession,
     syncSessionMessages,
     setError: uiStore.setError,
+    isSessionWorking: (sessionId) => {
+      const rootId = sessionStore.getSessionTreeRootId(sessionId) || sessionId;
+      return sessionStore.getSessionTreeIds(rootId).some((id) => {
+        const status = appStore.state.sessionStatus[id];
+        return status?.type === 'busy' || status?.type === 'retry';
+      });
+    },
+    sendEditedMessage: (text) => sendMessage(text),
     unrevertSession: (sessionId) => client.session.unrevert(sessionId),
     upsertSession,
     clearPendingAbort,
@@ -853,6 +862,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await sessionSendOperations.retryMessage(messageId, sessionId);
   }
 
+  async function editMessage(messageId: string, text: string) {
+    await sessionControlOperations.editMessage(messageId, text);
+  }
+
   async function implementPlan(prompt: string, sessionId = appStore.state.activeSessionId) {
     await sessionActionOperations.implementPlan(prompt, sessionId);
   }
@@ -952,6 +965,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     emptyRecycleBin,
     sendMessage,
     retryMessage,
+    editMessage,
     implementPlan,
     openPlan,
     abortSession,

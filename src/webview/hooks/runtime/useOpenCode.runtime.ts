@@ -85,6 +85,10 @@ export async function retryMessage(messageId: string, sessionId?: string | null)
   await getCurrentOpenCodeRuntime().retryMessage(messageId, sessionId);
 }
 
+export async function editMessage(messageId: string, text: string) {
+  await getCurrentOpenCodeRuntime().editMessage(messageId, text);
+}
+
 export async function implementPlan(prompt: string, sessionId?: string | null) {
   await getCurrentOpenCodeRuntime().implementPlan(prompt, sessionId);
 }

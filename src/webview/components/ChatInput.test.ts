@@ -32,6 +32,7 @@ import {
   removeContextFile,
 } from '../lib/state';
 import { client } from '../lib/client';
+import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-limit-selection';
 
 const {
@@ -126,6 +127,7 @@ afterEach(() => {
   setState('queuedMessages', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  resetMessageEditState();
   __resetProviderLimitWindowSelectionsForTests();
   sendMessageMock.mockReset();
   runSlashCommandByNameMock.mockReset();
@@ -801,6 +803,69 @@ describe('ChatInput', () => {
     const meta = container?.querySelector('.chat-queue-meta');
     expect(meta?.textContent).toContain('2');
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
+  });
+
+  it('restores edited message context and restores draft context on cancel', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('draft prompt');
+    setState('droppedFiles', [{ path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' }]);
+    setState('clipboardImages', [
+      { id: 'draft-img', url: 'blob:draft', mime: 'image/png', filename: 'draft.png', size: 10 },
+    ]);
+    setState('terminalSelection', { text: 'pwd', terminalName: 'draft-terminal' });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    startEditingMessage('message-1', 'session-1', 'edited prompt', {
+      files: [{ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' }],
+      images: [
+        { id: 'edit-img', url: 'blob:edit', mime: 'image/png', filename: 'edit.png', size: 0 },
+      ],
+      terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+    });
+    await Promise.resolve();
+
+    expect(inputText()).toBe('edited prompt');
+    expect(state.droppedFiles).toEqual([
+      { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },
+    ]);
+    expect(state.clipboardImages).toEqual([
+      { id: 'edit-img', url: 'blob:edit', mime: 'image/png', filename: 'edit.png', size: 0 },
+    ]);
+    expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(inputText()).toBe('draft prompt');
+    expect(state.droppedFiles).toEqual([
+      { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
+    ]);
+    expect(state.clipboardImages).toEqual([
+      { id: 'draft-img', url: 'blob:draft', mime: 'image/png', filename: 'draft.png', size: 10 },
+    ]);
+    expect(state.terminalSelection).toEqual({ text: 'pwd', terminalName: 'draft-terminal' });
+  });
+
+  it('does not keep edited message text in the composer after remounting into another session', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('draft prompt');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    startEditingMessage('message-1', 'session-1', 'edited prompt');
+    await Promise.resolve();
+
+    expect(inputText()).toBe('edited prompt');
+
+    cleanup?.();
+    cleanup = undefined;
+    setState('activeSessionId', 'session-2');
+    cleanup = render(() => ChatInput(), container!);
+    await Promise.resolve();
+
+    expect(inputText()).toBe('draft prompt');
   });
 
   it('shows only the stop button while loading with nothing sendable', () => {

@@ -64,6 +64,7 @@ import {
   abortSession,
   continueInterruptedSession,
   compactSession,
+  editMessage,
   initSession,
   redoSession,
   undoSession,
@@ -71,6 +72,13 @@ import {
   runSlashCommandByName,
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
+import {
+  editingMessage,
+  getMessageEditDraftBackup,
+  resetMessageEditState,
+  setMessageEditDraftBackup,
+  type MessageEditContext,
+} from '../lib/message-edit-state';
 import { ModelPicker, getVariantsForModel } from './ModelPicker';
 import { McpPicker } from './McpPicker';
 import { ralphStore } from '../lib/stores/ralph-store';
@@ -383,6 +391,24 @@ function openContextFileInEditor(file: DroppedFile) {
     type: 'vscode/open',
     payload: { path: file.path, kind: file.type, line: file.lineRanges?.[0]?.startLine },
   });
+}
+
+function captureEditDraftBackup(): MessageEditContext & { text: string } {
+  return {
+    text: inputText(),
+    files: state.droppedFiles.map((file) => ({ ...file })),
+    images: state.clipboardImages.map((image) => ({ ...image })),
+    terminalSelection: state.terminalSelection ? { ...state.terminalSelection } : null,
+  };
+}
+
+function applyEditContext(context: MessageEditContext) {
+  replaceContextFiles(context.files);
+  replaceClipboardImages(context.images);
+  setState(
+    'terminalSelection',
+    context.terminalSelection ? { ...context.terminalSelection } : null
+  );
 }
 
 export function ChatInput() {
@@ -991,6 +1017,11 @@ export function ChatInput() {
           closePopups();
           return;
         }
+        if (editingMessage()) {
+          e.preventDefault();
+          cancelMessageEdit();
+          return;
+        }
         if (isBusyWithoutInterruption()) {
           e.preventDefault();
           void abortSession();
@@ -1001,7 +1032,7 @@ export function ChatInput() {
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      if ((e.ctrlKey || e.metaKey) && isComposerBusy()) {
+      if ((e.ctrlKey || e.metaKey) && isComposerBusy() && !editingMessage()) {
         handleSend('steer');
       } else {
         handleSend();
@@ -1137,6 +1168,30 @@ export function ChatInput() {
       queuedAttachments.droppedFiles?.length ||
       queuedAttachments.clipboardImages?.length ||
       queuedAttachments.terminalSelection;
+
+    const editing = editingMessage();
+    if (editing) {
+      if (!sendableText.trim()) return;
+      const editTargetExists = state.messages.some(
+        (entry) => entry.info.role === 'user' && entry.info.id === editing.messageId
+      );
+      setHistoryIndex(null);
+      setHistoryDraft('');
+      setCompletionIndex(0);
+      const prevError = error();
+      setInputText('');
+      resetPastedImageIndex();
+      resetMessageEditState();
+      if (editTargetExists) {
+        await editMessage(editing.messageId, text);
+      } else {
+        await sendMessage(text);
+      }
+      if (error() && error() !== prevError) {
+        setInputText(text);
+      }
+      return;
+    }
 
     if (mode !== 'queue' && !hasQueuedAttachments) {
       const ranSlashCommand = await runSlashCommand(text);
@@ -1630,6 +1685,50 @@ export function ChatInput() {
     });
   });
 
+  // Message editing reuses this composer: entering edit mode stashes the
+  // current draft, loads the message text/context, and focuses the editor.
+  let activeEditMessageId: string | null = null;
+
+  createEffect(() => {
+    const editing = editingMessage();
+    if (!editing) {
+      activeEditMessageId = null;
+      return;
+    }
+    if (editing.messageId === activeEditMessageId) return;
+    if (activeEditMessageId === null && !getMessageEditDraftBackup()) {
+      setMessageEditDraftBackup(untrack(captureEditDraftBackup));
+    }
+    activeEditMessageId = editing.messageId;
+    applyEditContext(editing.context);
+    setComposerValue(editing.text);
+    queueMicrotask(() => {
+      if (richEditorRef) {
+        richEditorRef.focus();
+        setIsFocused(true);
+      }
+    });
+  });
+
+  function cancelMessageEdit() {
+    if (!untrack(editingMessage)) return;
+    const draft = getMessageEditDraftBackup();
+    resetMessageEditState();
+    if (draft) {
+      applyEditContext(draft);
+      setComposerValue(draft.text);
+    } else {
+      setComposerValue('');
+    }
+  }
+
+  createEffect(() => {
+    const editing = editingMessage();
+    if (editing && state.activeSessionId !== editing.sessionId) {
+      cancelMessageEdit();
+    }
+  });
+
   function currentModelSupportsVision() {
     const current = currentModel();
     if (!current.providerID || !current.modelID) return true;
@@ -1658,7 +1757,9 @@ export function ChatInput() {
   const isBusyWithoutInterruption = createMemo(
     () => isComposerBusy() && !hasActiveQuestion() && !hasActivePermission()
   );
-  const showBusySendControls = createMemo(() => isBusyWithoutInterruption() && canSend());
+  const showBusySendControls = createMemo(
+    () => isBusyWithoutInterruption() && canSend() && !editingMessage()
+  );
 
   const clipboardImagesDisabled = () =>
     composerClipboardImages().length > 0 && !currentModelSupportsVision();
@@ -1931,12 +2032,14 @@ export function ChatInput() {
   });
 
   return (
-    <div class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}`}>
+    <div
+      class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}${editingMessage() ? ' editing-message' : ''}`}
+    >
       <Show when={isDraggingOver()}>
         <DropOverlay />
       </Show>
 
-      <Show when={queuedForSession().length > 0}>
+      <Show when={queuedForSession().length > 0 && !editingMessage()}>
         <QueuedMessages
           items={queuedForSession()}
           onSendAsSteer={sendQueuedAsSteer}
@@ -1944,8 +2047,32 @@ export function ChatInput() {
         />
       </Show>
 
-      <Show when={state.todos.length > 0 && !showModelPicker()}>
+      <Show when={state.todos.length > 0 && !showModelPicker() && !editingMessage()}>
         <TodoList />
+      </Show>
+
+      <Show when={editingMessage()}>
+        <div class="composer-edit-banner">
+          <svg
+            class="composer-edit-banner-icon"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            width="12"
+            height="12"
+            aria-hidden="true"
+          >
+            <path d="M13.23 1q-.36 0-.7.15a1.8 1.8 0 0 0-.58.39L3.52 9.97a.5.5 0 0 0-.13.22l-1.37 4.18a.5.5 0 0 0 .63.63l4.18-1.37a.5.5 0 0 0 .22-.13l8.43-8.43q.25-.25.39-.58a1.81 1.81 0 0 0-.39-1.98L14.51 1.54a1.8 1.8 0 0 0-.58-.39 1.8 1.8 0 0 0-.7-.15zm-.32 1.07a.8.8 0 0 1 .64 0q.15.06.26.18l.97.97a.81.81 0 0 1 0 1.16l-.97.97-2.13-2.13.97-.97a.8.8 0 0 1 .26-.18zM10.97 4.93l2.13 2.13-6.6 6.6-2.85.94.94-2.86z" />
+          </svg>
+          <span class="composer-edit-banner-label">Editing message</span>
+          <button
+            type="button"
+            class="composer-edit-banner-cancel"
+            title="Cancel editing (Esc)"
+            onClick={() => cancelMessageEdit()}
+          >
+            Cancel
+          </button>
+        </div>
       </Show>
 
       <Show when={visibleUsageLimit()}>
@@ -2046,11 +2173,13 @@ export function ChatInput() {
               richEditorRef = el;
             }}
             placeholder={
-              hasActiveQuestion() || hasActivePermission()
-                ? 'Respond to the prompt above to continue...'
-                : isComposerBusy()
-                  ? 'Queue a follow-up or steer'
-                  : 'Describe what to build'
+              editingMessage()
+                ? 'Edit your message'
+                : hasActiveQuestion() || hasActivePermission()
+                  ? 'Respond to the prompt above to continue...'
+                  : isComposerBusy()
+                    ? 'Queue a follow-up or steer'
+                    : 'Describe what to build'
             }
             value={inputText()}
             cursorOffset={caretPosition()}
@@ -2298,7 +2427,7 @@ export function ChatInput() {
         <ChatInputMetaToolbar
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
-          showPermissionControl={true}
+          showPermissionControl={!editingMessage()}
           permissionButtonRef={(el) => {
             permissionPickerRef = el;
           }}
@@ -2351,7 +2480,7 @@ export function ChatInput() {
             closePopups(next ? 'model' : undefined);
             setShowModelPicker(next);
           }}
-          providerLimitBadges={currentProviderLimitBadges()}
+          providerLimitBadges={editingMessage() ? [] : currentProviderLimitBadges()}
           providerLimitTitle={currentProviderLimitTitle()}
           providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
           showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
@@ -2395,7 +2524,7 @@ export function ChatInput() {
             setShowVariantPicker(false);
           }}
           contextUsage={contextUsage()}
-          showContextControl={!!contextUsage()}
+          showContextControl={!!contextUsage() && !editingMessage()}
           contextButtonRef={(el) => {
             contextButtonRef = el;
           }}

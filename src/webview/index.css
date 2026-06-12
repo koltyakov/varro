@@ -803,6 +803,97 @@ body.vscode-high-contrast-light .interactive-session {
   box-shadow: var(--chat-shadow-card);
 }
 
+.user-message-card-editable {
+  cursor: pointer;
+}
+
+.user-message-card-editable:hover {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 50%, transparent);
+}
+
+.composer-edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 35%, var(--color-vscode-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-accent) 8%, var(--color-vscode-surface-softer));
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+}
+
+.composer-edit-banner-icon {
+  flex-shrink: 0;
+  color: var(--color-vscode-accent);
+}
+
+.composer-edit-banner-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-edit-banner-cancel {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.composer-edit-banner-cancel:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
+}
+
+/* Slot wrappers for the relocating composer. The bottom slot is layout
+   transparent so ChatInput keeps its normal place in the column shell. */
+.composer-bottom-slot {
+  display: contents;
+}
+
+.inline-edit-composer-slot {
+  width: 100%;
+}
+
+/* Inline, the message row's track already provides horizontal padding. */
+.interactive-session .inline-edit-composer-slot .interactive-input-part {
+  margin: 0;
+  padding: 2px 0 0;
+}
+
+.interactive-session
+  .inline-edit-composer-slot
+  .interactive-input-part.editing-message
+  .rich-composer {
+  max-height: max(200px, calc(100dvh - 162px));
+}
+
+/* Everything below the edited message is abandoned when the edit is sent. */
+.interactive-item-container.interactive-item-edit-abandoned {
+  opacity: 0.35;
+  filter: blur(1.2px) grayscale(0.4);
+  pointer-events: none;
+  user-select: none;
+  transition:
+    opacity 0.18s ease,
+    filter 0.18s ease;
+}
+
+.latest-user-message-sticky-clickable {
+  cursor: pointer;
+}
+
+.latest-user-message-sticky-clickable:hover {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 50%, transparent);
+}
+
 .assistant-turn-content {
   position: relative;
   width: 100%;

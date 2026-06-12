@@ -7,6 +7,7 @@ export {
   deleteSession,
   deleteSessionImmediately,
   deleteSessionPermanently,
+  editMessage,
   emptyRecycleBin,
   implementPlan,
   initSession,

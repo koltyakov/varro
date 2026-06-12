@@ -1,6 +1,11 @@
 import { For, Show, createMemo, onCleanup, onMount } from 'solid-js';
 import { implementPlan, openPlan } from '../../hooks/useOpenCode';
 import { isAbortedAssistantError } from '../../lib/aborted';
+import {
+  editingMessage,
+  registerInlineEditMount,
+  unregisterInlineEditMount,
+} from '../../lib/message-edit-state';
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { formatDuration, formatNumber, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
@@ -44,11 +49,43 @@ export function MessageRows(
   return <For each={props.messages}>{(msg) => <MessageRow msg={msg} {...props} />}</For>;
 }
 
+// Mount point for the relocated composer while this row's message is edited.
+function InlineEditComposerSlot() {
+  let slotRef: HTMLDivElement | undefined;
+
+  onMount(() => {
+    if (slotRef) registerInlineEditMount(slotRef);
+  });
+  onCleanup(() => {
+    if (slotRef) unregisterInlineEditMount(slotRef);
+  });
+
+  return (
+    <div
+      ref={(el) => {
+        slotRef = el;
+      }}
+      class="inline-edit-composer-slot"
+    />
+  );
+}
+
 export function MessageRow(
   props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps
 ) {
   let rowRef: HTMLDivElement | undefined;
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
+  const isEditingThisMessage = () =>
+    props.msg.info.role === 'user' && editingMessage()?.messageId === props.msg.info.id;
+  const isAbandonedByEdit = createMemo(() => {
+    const editing = editingMessage();
+    if (!editing) return false;
+    const messages = state.messages;
+    const editedIndex = messages.findIndex((entry) => entry.info.id === editing.messageId);
+    if (editedIndex < 0) return false;
+    const ownIndex = messages.findIndex((entry) => entry.info.id === props.msg.info.id);
+    return ownIndex > editedIndex;
+  });
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
   const highlightFinalAnswer = () => {
@@ -92,6 +129,8 @@ export function MessageRow(
         fileEditStackGroup()
           ? `interactive-response-file-edit-group interactive-response-file-edit-group-${fileEditStackGroup()}`
           : ''
+      }${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
+        isEditingThisMessage() ? ' interactive-request-editing' : ''
       }`}
     >
       <Show when={changeLabel()}>
@@ -99,23 +138,25 @@ export function MessageRow(
           <span class="model-change-label">Switched to {changeLabel()}</span>
         </div>
       </Show>
-      <MessageComponent
-        info={props.msg.info}
-        parts={props.msg.parts}
-        isLastAssistant={props.msg.info.id === props.lastAssistantID}
-        nearViewport={props.nearViewport}
-        outerListVirtualized={props.outerListVirtualized}
-        highlightFinalAnswer={highlightFinalAnswer()}
-        highlightPlanningAnswer={highlightPlanningAnswer()}
-        previousTrailingFileEventSignature={
-          props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
-        }
-        fileEditStackGroup={fileEditStackGroup()}
-        streamingPartId={streamingPartId()}
-        streamingText={streamingText()}
-        questionRequestForTool={props.questionRequestForTool}
-        permissionMatchForTool={props.permissionMatchForTool}
-      />
+      <Show when={!isEditingThisMessage()} fallback={<InlineEditComposerSlot />}>
+        <MessageComponent
+          info={props.msg.info}
+          parts={props.msg.parts}
+          isLastAssistant={props.msg.info.id === props.lastAssistantID}
+          nearViewport={props.nearViewport}
+          outerListVirtualized={props.outerListVirtualized}
+          highlightFinalAnswer={highlightFinalAnswer()}
+          highlightPlanningAnswer={highlightPlanningAnswer()}
+          previousTrailingFileEventSignature={
+            props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
+          }
+          fileEditStackGroup={fileEditStackGroup()}
+          streamingPartId={streamingPartId()}
+          streamingText={streamingText()}
+          questionRequestForTool={props.questionRequestForTool}
+          permissionMatchForTool={props.permissionMatchForTool}
+        />
+      </Show>
       <Show when={summary()}>
         {(assistantSummary) => (
           <AssistantDialogSummary
