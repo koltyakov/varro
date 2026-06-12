@@ -185,14 +185,9 @@
           "default": "",
           "description": "Optional path to the OpenCode CLI executable Varro uses for server startup and other CLI-backed actions"
         },
-        "varro.server.autoStart": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically start the OpenCode server when Varro first needs it"
-        },
         "varro.server.autoUpdate": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically run OpenCode CLI updates in the background when Varro detects a newer version. If the background update fails, Varro falls back to the normal upgrade prompt"
         },
         "varro.chat.expandThinkingByDefault": {
@@ -221,7 +216,7 @@
             "auto",
             "full"
           ],
-          "default": "default",
+          "default": "auto",
           "markdownDescription": "Permission mode selected by default when no project or global Varro permission-mode selection has been saved."
         },
         "varro.chat.autoCompact": {
@@ -248,21 +243,6 @@
           "default": true,
           "description": "Automatically include the current selection in live editor context"
         },
-        "varro.providerLimits.enabledAdapters": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "anthropic",
-            "github-copilot",
-            "openrouter",
-            "zai",
-            "minimax",
-            "openai"
-          ],
-          "markdownDescription": "Allowlist of provider-limit adapters Varro may poll. Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity). Defaults to `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, and `openai`."
-        },
         "varro.providerLimits.disabled": {
           "type": "boolean",
           "default": false,
@@ -286,6 +266,28 @@
           "type": "boolean",
           "default": false,
           "description": "Debug only: make Varro behave as if no providers are configured"
+        },
+        "varro.server.autoStart": {
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the OpenCode server when Varro first needs it"
+        },
+        "varro.providerLimits.enabledAdapters": {
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "anthropic",
+            "github-copilot",
+            "openrouter",
+            "zai",
+            "minimax",
+            "openai"
+          ],
+          "markdownDescription": "Allowlist of provider-limit adapters Varro may poll. Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity). Defaults to `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, and `openai`."
         }
       }
     }
