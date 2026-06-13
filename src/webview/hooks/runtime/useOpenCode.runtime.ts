@@ -70,6 +70,7 @@ export async function sendMessage(
   text: string,
   options?: {
     noReply?: boolean;
+    delivery?: 'steer' | 'queue';
     queuedAttachments?: {
       droppedFiles?: QueuedMessage['droppedFiles'];
       clipboardImages?: QueuedMessage['clipboardImages'];
@@ -77,16 +78,20 @@ export async function sendMessage(
     };
     preserveComposer?: boolean;
   }
-) {
-  await getCurrentOpenCodeRuntime().sendMessage(text, options);
+): Promise<boolean> {
+  return await getCurrentOpenCodeRuntime().sendMessage(text, options);
 }
 
 export async function retryMessage(messageId: string, sessionId?: string | null) {
   await getCurrentOpenCodeRuntime().retryMessage(messageId, sessionId);
 }
 
-export async function editMessage(messageId: string, text: string) {
-  await getCurrentOpenCodeRuntime().editMessage(messageId, text);
+export async function editMessage(
+  messageId: string,
+  text: string,
+  options?: { allowEmptyText?: boolean }
+) {
+  await getCurrentOpenCodeRuntime().editMessage(messageId, text, options);
 }
 
 export async function implementPlan(prompt: string, sessionId?: string | null) {

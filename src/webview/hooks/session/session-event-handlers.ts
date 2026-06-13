@@ -188,8 +188,6 @@ type EventHandlerOperationDependencies = {
 
 type NormalizedSessionEventInfo = SessionEventInfo & { id: string };
 
-const ACTIVE_MESSAGE_RESYNC_DELAY_MS = 100;
-
 const ACTIVE_SESSION_PROGRESS_EVENTS = [
   'session.next.agent.switched',
   'session.next.model.switched',
@@ -220,6 +218,20 @@ const ACTIVE_TEXT_PROGRESS_EVENTS = new Set<string>([
   'session.next.text.started',
   'session.next.text.delta',
   'session.next.text.ended',
+]);
+
+const PROJECTED_SESSION_EVENTS = new Set<string>([
+  ...ACTIVE_TEXT_PROGRESS_EVENTS,
+  'session.next.tool.input.started',
+  'session.next.tool.input.delta',
+  'session.next.tool.input.ended',
+  'session.next.tool.called',
+  'session.next.tool.progress',
+  'session.next.tool.success',
+  'session.next.tool.failed',
+  'session.next.reasoning.started',
+  'session.next.reasoning.delta',
+  'session.next.reasoning.ended',
 ]);
 
 type ToolExecutionTime = { start?: number; end?: number };
@@ -386,7 +398,7 @@ export class SessionEventHandlerOperations {
 
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
-  const activeMessageSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const activeMessageSyncs = new Set<string>();
   const workingSessionIds = new Set<string>();
   const autoJudgingPermissionIds = new Set<string>();
   const pendingMissingPartDeltas = new Map<
@@ -402,7 +414,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   // `*.delta` fragments carry no `seq`). Lets us resync only when a durable event was
   // actually missed, instead of defensively on every progress event.
   const lastSeqBySession = new Map<string, number>();
-  let pendingPermissionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingPermissionSync = false;
   // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta — caller
   // keeps its default behavior), 'ok' when the event is in order or a duplicate, or 'gap'
   // when at least one durable event was skipped (a targeted resync is warranted).
@@ -435,17 +447,16 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const isStaleProgressAfterFinishedAssistant = (sessionId: string) =>
     isSessionInActiveTree(sessionId) &&
     latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt());
-  const scheduleActiveMessageSync = (
-    sessionId: string,
-    delayMs = ACTIVE_MESSAGE_RESYNC_DELAY_MS
-  ) => {
-    if (!isSessionInActiveTree(sessionId) || activeMessageSyncTimers.has(sessionId)) return;
+  const scheduleActiveMessageSync = (sessionId: string) => {
+    if (!isSessionInActiveTree(sessionId) || activeMessageSyncs.has(sessionId)) return;
 
-    const timer = setTimeout(() => {
-      activeMessageSyncTimers.delete(sessionId);
-      deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
-    }, delayMs);
-    activeMessageSyncTimers.set(sessionId, timer);
+    activeMessageSyncs.add(sessionId);
+    void deps
+      .syncSessionMessages(sessionId)
+      .catch((err) => deps.logError('syncSessionMessages', err))
+      .finally(() => {
+        activeMessageSyncs.delete(sessionId);
+      });
   };
   const refreshSettledTodos = (sessionId: string) => {
     const sync = deps.syncTodosForSession?.(sessionId, deps.getMessages());
@@ -455,6 +466,33 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const markSessionProgress = (sessionId: string) => {
     setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
+  };
+  const handleSessionIdle = (sessionId: string, abortedRetry: boolean) => {
+    deps.clearPendingAbort(sessionId);
+    sessionStore.setSessionCompacting(sessionId, false);
+    setSessionStatusEntry(sessionId, { type: 'idle' });
+    if (!abortedRetry) deps.updateUsageLimitState(sessionId, { type: 'idle' });
+    if (sessionId === deps.getActiveSessionId()) {
+      if (isActiveTreeWorking()) uiStore.startLoading();
+      else uiStore.stopLoading();
+    } else if (isSessionInActiveTree(sessionId) && !isActiveTreeWorking()) {
+      uiStore.stopLoading();
+    }
+    deps.syncSession(sessionId).catch(() => {});
+    if (sessionId === deps.getActiveSessionId()) {
+      const activeMessages = deps.getMessages();
+      const shouldResyncActiveMessages =
+        activeMessages.length === 0 || hasActiveAssistantReply(activeMessages);
+      if (!uiStore.showSessionPicker()) sessionStore.markSessionSeen(sessionId);
+      const handedOffTodos = deps.handoffTodosToMessages();
+      refreshSettledTodos(sessionId);
+      if (
+        (shouldResyncActiveMessages || !handedOffTodos) &&
+        deps.shouldResyncSessionAfterIdle(sessionId)
+      ) {
+        deps.syncSessionMessages(sessionId).catch(() => {});
+      }
+    }
   };
   const recordToolExecutionTime = (eventName: string, props: Record<string, unknown>) => {
     const sessionId = typeof props.sessionID === 'string' ? props.sessionID : null;
@@ -538,11 +576,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
   };
   const schedulePendingPermissionSync = () => {
-    if (!deps.syncPendingPermissions || pendingPermissionSyncTimer) return;
-    pendingPermissionSyncTimer = setTimeout(() => {
-      pendingPermissionSyncTimer = null;
-      deps.syncPendingPermissions?.().catch((err) => deps.logError('syncPendingPermissions', err));
-    }, ACTIVE_MESSAGE_RESYNC_DELAY_MS);
+    if (!deps.syncPendingPermissions || pendingPermissionSync) return;
+    pendingPermissionSync = true;
+    void deps
+      .syncPendingPermissions()
+      .catch((err) => deps.logError('syncPendingPermissions', err))
+      .finally(() => {
+        pendingPermissionSync = false;
+      });
   };
   const abortLateChildSession = (info: NormalizedSessionEventInfo) => {
     if (!info.parentID || !deps.hasPendingAbort(info.parentID)) return;
@@ -611,6 +652,239 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       })
       .catch((err) => deps.logError('syncSessionMessages', err));
   };
+  const findAssistantMessage = (sessionId: string, assistantMessageID?: string) => {
+    if (!assistantMessageID) return null;
+    return (
+      deps
+        .getMessages()
+        .find(
+          (entry) =>
+            entry.info.id === assistantMessageID &&
+            entry.info.sessionID === sessionId &&
+            entry.info.role === 'assistant'
+        ) || null
+    );
+  };
+  const findPart = (messageID: string, partID: string): Part | null => {
+    const message = deps.getMessages().find((entry) => entry.info.id === messageID);
+    return message?.parts.find((part) => part.id === partID) || null;
+  };
+  const applyProjectedPart = (
+    sessionId: string,
+    assistantMessageID: string | undefined,
+    part: Part
+  ) => {
+    const message = findAssistantMessage(sessionId, assistantMessageID);
+    if (!message) {
+      scheduleActiveMessageSync(sessionId);
+      return false;
+    }
+    sessionStore.upsertPart(part);
+    return true;
+  };
+  const ensureProjectedTextPart = (
+    sessionId: string,
+    assistantMessageID: string | undefined,
+    partID: string,
+    text = ''
+  ) => {
+    const message = findAssistantMessage(sessionId, assistantMessageID);
+    if (!message) {
+      scheduleActiveMessageSync(sessionId);
+      return null;
+    }
+    const existing = message.parts.find((part) => part.id === partID);
+    if (!existing) {
+      sessionStore.upsertPart({
+        id: partID,
+        sessionID: sessionId,
+        messageID: message.info.id,
+        type: 'text',
+        text,
+      } as Part);
+    }
+    return message.info.id;
+  };
+  const handleProjectedTextEvent = (
+    eventName: string,
+    props: Record<string, unknown>,
+    sessionId: string
+  ) => {
+    const textID = getEventString(props, 'textID');
+    const assistantMessageID = getEventString(props, 'assistantMessageID');
+    if (!textID) return false;
+    const text = getEventString(props, 'text') || '';
+    if (eventName === 'session.next.text.ended') {
+      return !!applyProjectedPart(sessionId, assistantMessageID, {
+        id: textID,
+        sessionID: sessionId,
+        messageID: assistantMessageID || '',
+        type: 'text',
+        text,
+      } as Part);
+    }
+    const messageID = ensureProjectedTextPart(sessionId, assistantMessageID, textID);
+    if (!messageID) return false;
+    if (eventName === 'session.next.text.delta') {
+      const delta = getEventString(props, 'delta') || text;
+      if (delta) sessionStore.applyMessagePartDelta(messageID, textID, delta, sessionId, 'text');
+    }
+    return true;
+  };
+  const handleProjectedToolEvent = (
+    eventName: string,
+    props: Record<string, unknown>,
+    sessionId: string
+  ) => {
+    const assistantMessageID = getEventString(props, 'assistantMessageID');
+    const callID = getEventString(props, 'callID');
+    if (!assistantMessageID || !callID) return false;
+    const message = findAssistantMessage(sessionId, assistantMessageID);
+    if (!message) {
+      scheduleActiveMessageSync(sessionId);
+      return false;
+    }
+    const existing = findPart(assistantMessageID, callID);
+    const existingTool = existing?.type === 'tool' ? existing : null;
+    const timestamp = getEventTimestamp(props);
+    const toolName =
+      getEventString(props, 'name') || getEventString(props, 'tool') || existingTool?.tool || '';
+    const inputText = getEventString(props, 'text') || getEventString(props, 'input') || '';
+
+    if (eventName === 'session.next.tool.input.delta') {
+      const delta = getEventString(props, 'delta') || inputText;
+      if (!delta || !existingTool || existingTool.state.status !== 'pending') return true;
+      sessionStore.upsertPart({
+        ...existingTool,
+        state: { ...existingTool.state, raw: `${existingTool.state.raw || ''}${delta}` },
+      });
+      return true;
+    }
+
+    if (eventName === 'session.next.tool.input.started') {
+      sessionStore.upsertPart({
+        id: callID,
+        sessionID: sessionId,
+        messageID: assistantMessageID,
+        type: 'tool',
+        callID,
+        tool: toolName,
+        state: { status: 'pending', input: {}, raw: '' },
+      });
+      return true;
+    }
+
+    if (eventName === 'session.next.tool.input.ended') {
+      sessionStore.upsertPart({
+        id: callID,
+        sessionID: sessionId,
+        messageID: assistantMessageID,
+        type: 'tool',
+        callID,
+        tool: toolName,
+        state: { status: 'pending', input: parseToolInput(inputText), raw: inputText },
+      });
+      return true;
+    }
+
+    if (eventName === 'session.next.tool.called') {
+      const input = asToolInput(props.input);
+      sessionStore.upsertPart({
+        id: callID,
+        sessionID: sessionId,
+        messageID: assistantMessageID,
+        type: 'tool',
+        callID,
+        tool: toolName,
+        state: {
+          status: 'running',
+          input,
+          title: toolName,
+          metadata: asToolMetadata(props.provider),
+          time: { start: timestamp },
+        },
+      });
+      return true;
+    }
+
+    if (eventName === 'session.next.tool.progress') {
+      if (!existingTool || existingTool.state.status !== 'running') return true;
+      sessionStore.upsertPart({
+        ...existingTool,
+        state: {
+          ...existingTool.state,
+          metadata: {
+            ...existingTool.state.metadata,
+            structured: asToolMetadata(props.structured),
+            content: props.content,
+          },
+        },
+      });
+      return true;
+    }
+
+    if (eventName === 'session.next.tool.success') {
+      const input = existingTool ? getToolStateInput(existingTool) : {};
+      const start = existingTool ? getToolStartTime(existingTool) : timestamp;
+      sessionStore.upsertPart({
+        id: callID,
+        sessionID: sessionId,
+        messageID: assistantMessageID,
+        type: 'tool',
+        callID,
+        tool: toolName,
+        state: {
+          status: 'completed',
+          input,
+          output: toolOutputToString(props.content, props.structured),
+          title: toolName,
+          metadata: {
+            ...asToolMetadata(props.structured),
+            provider: props.provider,
+            result: props.result,
+          },
+          time: { start, end: timestamp },
+        },
+      });
+      deps.syncTodosFromMessages();
+      return true;
+    }
+
+    if (eventName === 'session.next.tool.failed') {
+      const input = existingTool ? getToolStateInput(existingTool) : {};
+      const start = existingTool ? getToolStartTime(existingTool) : timestamp;
+      sessionStore.upsertPart({
+        id: callID,
+        sessionID: sessionId,
+        messageID: assistantMessageID,
+        type: 'tool',
+        callID,
+        tool: toolName,
+        state: {
+          status: 'error',
+          input,
+          error: getToolErrorMessage(props.error),
+          metadata: { provider: props.provider, result: props.result },
+          time: { start, end: timestamp },
+        },
+      });
+      deps.syncTodosFromMessages();
+      return true;
+    }
+
+    return false;
+  };
+  const handleProjectedSessionEvent = (eventName: string, props: Record<string, unknown>) => {
+    const sessionId = props.sessionID as string | undefined;
+    if (!sessionId || !isSessionInActiveTree(sessionId)) return false;
+    if (eventName.startsWith('session.next.text.')) {
+      return handleProjectedTextEvent(eventName, props, sessionId);
+    }
+    if (eventName.startsWith('session.next.tool.')) {
+      return handleProjectedToolEvent(eventName, props, sessionId);
+    }
+    return false;
+  };
   const syncMessagePartsIfMissing = (message: AssistantMessage) => {
     const localMessage = deps.getMessages().find((entry) => entry.info.id === message.id);
     if (localMessage && localMessage.parts.length > 0) return;
@@ -666,12 +940,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
 
   cleanups.push(() => {
-    for (const timer of activeMessageSyncTimers.values()) clearTimeout(timer);
-    activeMessageSyncTimers.clear();
+    activeMessageSyncs.clear();
     pendingMissingPartDeltas.clear();
     lastSeqBySession.clear();
-    if (pendingPermissionSyncTimer) clearTimeout(pendingPermissionSyncTimer);
-    pendingPermissionSyncTimer = null;
+    pendingPermissionSync = false;
   });
 
   cleanups.push(
@@ -720,17 +992,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const status = props.status as SessionStatus;
       if (deps.shouldIgnorePendingAbortStatus(sessionID, status)) return;
       const abortedRetry = deps.hasPendingAbort(sessionID);
+      if (status.type === 'idle') {
+        handleSessionIdle(sessionID, abortedRetry);
+        return;
+      }
       setSessionStatusEntry(sessionID, status);
       if (status.type === 'busy') {
         deps.clearUsageLimitOnResumedProgress(sessionID, status);
       }
-      if (!(abortedRetry && status.type === 'idle')) {
-        deps.updateUsageLimitState(sessionID, status);
-      }
-      if (status.type === 'idle') {
-        deps.clearPendingAbort(sessionID);
-        deps.syncSession(sessionID).catch(() => {});
-      }
+      deps.updateUsageLimitState(sessionID, status);
       if (sessionID === deps.getActiveSessionId()) {
         const statusType = (status as { type: string }).type;
         if (statusType === 'retry') {
@@ -752,34 +1022,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('session.idle', (data) => {
       const sid = data.properties?.sessionID as string | undefined;
-      const abortedRetry = deps.hasPendingAbort(sid);
-      deps.clearPendingAbort(sid);
-      if (sid) sessionStore.setSessionCompacting(sid, false);
-      if (sid) setSessionStatusEntry(sid, { type: 'idle' });
-      if (sid && !abortedRetry) {
-        deps.updateUsageLimitState(sid, { type: 'idle' });
-      }
-      if (!sid || sid === deps.getActiveSessionId()) {
-        if (isActiveTreeWorking()) uiStore.startLoading();
-        else uiStore.stopLoading();
-      } else if (isSessionInActiveTree(sid) && !isActiveTreeWorking()) {
-        uiStore.stopLoading();
-      }
-      if (sid) deps.syncSession(sid).catch(() => {});
-      if (sid && sid === deps.getActiveSessionId()) {
-        const activeMessages = deps.getMessages();
-        const shouldResyncActiveMessages =
-          activeMessages.length === 0 || hasActiveAssistantReply(activeMessages);
-        if (!uiStore.showSessionPicker()) sessionStore.markSessionSeen(sid);
-        const handedOffTodos = deps.handoffTodosToMessages();
-        refreshSettledTodos(sid);
-        if (
-          (shouldResyncActiveMessages || !handedOffTodos) &&
-          deps.shouldResyncSessionAfterIdle(sid)
-        ) {
-          deps.syncSessionMessages(sid).catch(() => {});
-        }
-      }
+      if (sid) handleSessionIdle(sid, deps.hasPendingAbort(sid));
     })
   );
 
@@ -997,7 +1240,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (!isSessionInActiveTree(sessionID)) return;
         uiStore.markLoadingActivity();
         if (sessionID === deps.getActiveSessionId()) uiStore.startLoading();
-        if (!ACTIVE_TEXT_PROGRESS_EVENTS.has(eventName)) {
+        const projected = PROJECTED_SESSION_EVENTS.has(eventName)
+          ? handleProjectedSessionEvent(eventName, p)
+          : false;
+        if (PROJECTED_SESSION_EVENTS.has(eventName)) {
+          if (!projected || seqStatus === 'gap') scheduleActiveMessageSync(sessionID);
+        } else {
           // Synchronized events arrive in durable order, so a contiguous seq means we have
           // not missed anything and can skip the refetch. We still resync when a gap proves
           // a durable event was missed, or when the event carries no seq (ephemeral delta).
@@ -1223,4 +1471,73 @@ function getEventString(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const item = (value as Record<string, unknown>)[key];
   return typeof item === 'string' ? item : undefined;
+}
+
+function parseToolInput(value: string): Record<string, unknown> {
+  if (!value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return asToolInput(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function asToolInput(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asToolMetadata(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function getToolStateInput(part: Part): Record<string, unknown> {
+  if (part.type !== 'tool') return {};
+  const input = part.state.input;
+  return input && typeof input === 'object' && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : {};
+}
+
+function getToolStartTime(part: Part): number {
+  if (part.type !== 'tool') return Date.now();
+  const time = (part.state as { time?: { start?: unknown } }).time;
+  return typeof time?.start === 'number' ? time.start : Date.now();
+}
+
+function getToolErrorMessage(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const message = (value as Record<string, unknown>).message;
+    if (typeof message === 'string') return message;
+  }
+  return 'Tool execution failed';
+}
+
+function toolOutputToString(content: unknown, structured: unknown): string {
+  if (Array.isArray(content)) {
+    const text = content
+      .map((item) => {
+        if (!item || typeof item !== 'object') return '';
+        const record = item as Record<string, unknown>;
+        if (record.type === 'text' && typeof record.text === 'string') return record.text;
+        if (record.type === 'file' && typeof record.uri === 'string') return record.uri;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+    if (text) return text;
+  }
+  if (structured && typeof structured === 'object') {
+    try {
+      return JSON.stringify(structured, null, 2);
+    } catch {
+      return String(structured);
+    }
+  }
+  return '';
 }

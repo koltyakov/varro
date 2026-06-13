@@ -2326,8 +2326,12 @@ export function hasSettledLatestAssistantMessage(
   sessionId: string,
   messages: MessageEntry[] = state.messages
 ) {
-  const latest = getLatestMessageInfoForSession(sessionId, messages);
-  return latest?.role === 'assistant' && (!!latest.error || !!latest.time.completed);
+  const latest = getLatestMessageEntryForSession(sessionId, messages);
+  return (
+    latest?.info.role === 'assistant' &&
+    (!!latest.info.error || !!latest.info.time.completed) &&
+    !hasRunningToolPart(latest.parts)
+  );
 }
 
 export function hasCompletedLatestAssistantMessage(
@@ -2359,18 +2363,32 @@ function settleRunningSessionStatusesFromMessages(messages: MessageEntry[]) {
 }
 
 function getSettledLatestAssistantMessages(messages: MessageEntry[]) {
-  const latestBySession = new Map<string, Message>();
+  const latestBySession = new Map<string, MessageEntry>();
   for (const entry of messages) {
-    latestBySession.set(entry.info.sessionID, entry.info);
+    latestBySession.set(entry.info.sessionID, entry);
   }
 
   const settled = new Map<string, AssistantMessage>();
-  for (const [sessionId, message] of latestBySession) {
+  for (const [sessionId, entry] of latestBySession) {
+    const message = entry.info;
     if (message.role !== 'assistant') continue;
     if (!message.error && !message.time.completed) continue;
+    if (hasRunningToolPart(entry.parts)) continue;
     settled.set(sessionId, message);
   }
   return settled;
+}
+
+function getLatestMessageEntryForSession(sessionId: string, messages: MessageEntry[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const entry = messages[index];
+    if (entry?.info.sessionID === sessionId) return entry;
+  }
+  return null;
+}
+
+function hasRunningToolPart(parts: Part[]) {
+  return parts.some((part) => part.type === 'tool' && part.state.status === 'running');
 }
 
 function getLatestMessageInfoForSession(sessionId: string, messages: MessageEntry[]) {

@@ -81,6 +81,7 @@ export interface OpenCodeRuntime {
     text: string,
     options?: {
       noReply?: boolean;
+      delivery?: 'steer' | 'queue';
       queuedAttachments?: {
         droppedFiles?: QueuedMessage['droppedFiles'];
         clipboardImages?: QueuedMessage['clipboardImages'];
@@ -88,9 +89,13 @@ export interface OpenCodeRuntime {
       };
       preserveComposer?: boolean;
     }
-  ): Promise<void>;
+  ): Promise<boolean>;
   retryMessage(messageId: string, sessionId?: string | null): Promise<void>;
-  editMessage(messageId: string, text: string): Promise<void>;
+  editMessage(
+    messageId: string,
+    text: string,
+    options?: { allowEmptyText?: boolean }
+  ): Promise<void>;
   implementPlan(prompt: string, sessionId?: string | null): Promise<void>;
   openPlan(markdown: string, sessionId?: string | null): Promise<void>;
   abortSession(): Promise<void>;
@@ -847,6 +852,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     text: string,
     options?: {
       noReply?: boolean;
+      delivery?: 'steer' | 'queue';
       queuedAttachments?: {
         droppedFiles?: QueuedMessage['droppedFiles'];
         clipboardImages?: QueuedMessage['clipboardImages'];
@@ -854,16 +860,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       };
       preserveComposer?: boolean;
     }
-  ) {
-    await sessionSendOperations.sendMessage(text, options);
+  ): Promise<boolean> {
+    return await sessionSendOperations.sendMessage(text, options);
   }
 
   async function retryMessage(messageId: string, sessionId = appStore.state.activeSessionId) {
     await sessionSendOperations.retryMessage(messageId, sessionId);
   }
 
-  async function editMessage(messageId: string, text: string) {
-    await sessionControlOperations.editMessage(messageId, text);
+  async function editMessage(
+    messageId: string,
+    text: string,
+    options?: { allowEmptyText?: boolean }
+  ) {
+    await sessionControlOperations.editMessage(messageId, text, options);
   }
 
   async function implementPlan(prompt: string, sessionId = appStore.state.activeSessionId) {

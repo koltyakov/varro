@@ -16,7 +16,7 @@ export async function implementPlanWithDependencies(
     setError(message: string): void;
     clearSkippedPlanSession(sessionId: string): void;
     applySelectedAgent(agent: string, sessionId: string): void;
-    sendMessage(prompt: string): Promise<void>;
+    sendMessage(prompt: string): Promise<unknown>;
   },
   prompt: string,
   sessionId: string | null
@@ -65,7 +65,7 @@ export async function initSessionWithDependencies(
     createSession(): Promise<string | null>;
     getMessageCount(): number;
     setError(message: string): void;
-    sendMessage(prompt: string): Promise<void>;
+    sendMessage(prompt: string): Promise<unknown>;
   },
   prompt = INIT_PROMPT
 ) {
@@ -151,7 +151,7 @@ type SessionActionDependencies = {
   setError(message: string | null): void;
   clearSkippedPlanSession(sessionId: string): void;
   applySelectedAgent(agent: string, sessionId: string): void;
-  sendMessage(prompt: string): Promise<void>;
+  sendMessage(prompt: string): Promise<unknown>;
   openPlan(markdown: string): Promise<unknown>;
   createSession(): Promise<string | null>;
   getMessageCount(): number;

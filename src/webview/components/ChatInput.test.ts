@@ -42,13 +42,29 @@ const {
   undoSessionMock,
   runSlashCommandByNameMock,
   sendMessageMock,
+  serverEventHandlers,
+  serverEventsOnMock,
 } = vi.hoisted(() => ({
   abortSessionMock: vi.fn(async () => {}),
   continueInterruptedSessionMock: vi.fn(async () => {}),
   redoSessionMock: vi.fn(async () => {}),
   undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
-  sendMessageMock: vi.fn(async () => {}),
+  sendMessageMock: vi.fn(async () => true),
+  serverEventHandlers: new Map<
+    string,
+    Set<(event: { type: string; properties?: Record<string, unknown> }) => void>
+  >(),
+  serverEventsOnMock: vi.fn(
+    (
+      type: string,
+      handler: (event: { type: string; properties?: Record<string, unknown> }) => void
+    ) => {
+      if (!serverEventHandlers.has(type)) serverEventHandlers.set(type, new Set());
+      serverEventHandlers.get(type)!.add(handler);
+      return () => serverEventHandlers.get(type)?.delete(handler);
+    }
+  ),
 }));
 
 vi.mock('../hooks/useOpenCode', async () => {
@@ -81,6 +97,9 @@ vi.mock('../lib/client', () => ({
       }),
     },
   },
+  serverEvents: {
+    on: serverEventsOnMock,
+  },
 }));
 
 let container: HTMLDivElement | null = null;
@@ -100,6 +119,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup?.();
   cleanup = undefined;
   container?.remove();
@@ -130,6 +150,8 @@ afterEach(() => {
   resetMessageEditState();
   __resetProviderLimitWindowSelectionsForTests();
   sendMessageMock.mockReset();
+  serverEventHandlers.clear();
+  serverEventsOnMock.mockClear();
   runSlashCommandByNameMock.mockReset();
   runSlashCommandByNameMock.mockResolvedValue(true);
   abortSessionMock.mockReset();
@@ -199,6 +221,12 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
 async function flushAsyncWork(count = 4) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
+  }
+}
+
+function emitServerEvent(type: string, properties: Record<string, unknown>) {
+  for (const handler of serverEventHandlers.get(type) ?? []) {
+    handler({ type, properties });
   }
 }
 
@@ -805,6 +833,184 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
   });
 
+  it('sends queued rows as steers and removes them on success', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'test 2',
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      },
+      { id: 'q2', sessionId: 'session-1', text: 'test 3' },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('test 2', {
+      delivery: 'steer',
+      queuedAttachments: {
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      },
+      preserveComposer: true,
+    });
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
+  });
+
+  it('keeps a queued steer visible and blocks later queue dispatch while pending', async () => {
+    vi.useFakeTimers();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'test 1' },
+      { id: 'q2', sessionId: 'session-1', text: 'test 2' },
+    ]);
+    let resolveSteer: ((value: boolean) => void) | undefined;
+    sendMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSteer = resolve;
+        })
+    );
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    const queueLabels = () =>
+      [...container!.querySelectorAll('.chat-queue-label')].map((item) => item.textContent);
+    expect(sendMessageMock).toHaveBeenCalledWith('test 1', {
+      delivery: 'steer',
+      queuedAttachments: {
+        droppedFiles: undefined,
+        clipboardImages: undefined,
+        terminalSelection: undefined,
+      },
+      preserveComposer: true,
+    });
+    expect(queueLabels()).toEqual(['test 1', 'test 2']);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.disabled
+    ).toBe(true);
+
+    setIsLoading(false);
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
+
+    expect(resolveSteer).toBeDefined();
+    resolveSteer?.(true);
+    await flushAsyncWork();
+
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
+
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock.mock.calls[1]).toEqual([
+      'test 2',
+      {
+        queuedAttachments: {
+          droppedFiles: undefined,
+          clipboardImages: undefined,
+          terminalSelection: undefined,
+        },
+        preserveComposer: true,
+      },
+    ]);
+  });
+
+  it('removes a pending queued steer when the backend admits it', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'test 1' },
+      { id: 'q2', sessionId: 'session-1', text: 'test 2' },
+    ]);
+    let resolveSteer: ((value: boolean) => void) | undefined;
+    sendMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSteer = resolve;
+        })
+    );
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
+
+    emitServerEvent('session.next.prompt.admitted', {
+      sessionID: 'session-1',
+      delivery: 'steer',
+      prompt: { text: 'test 1\n[Working directory: /repo]' },
+    });
+    await flushAsyncWork();
+
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
+    expect(container?.textContent).not.toContain('Steering...');
+
+    expect(resolveSteer).toBeDefined();
+    resolveSteer?.(false);
+    await flushAsyncWork();
+
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
+    expect(container?.textContent).not.toContain('Retry Steer');
+  });
+
+  it('restores a queued row when steering it reports a send error', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'test 2' },
+      { id: 'q2', sessionId: 'session-1', text: 'test 3' },
+    ]);
+    sendMessageMock.mockResolvedValueOnce(false);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('test 2', {
+      delivery: 'steer',
+      queuedAttachments: {
+        droppedFiles: undefined,
+        clipboardImages: undefined,
+        terminalSelection: undefined,
+      },
+      preserveComposer: true,
+    });
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
+  });
+
   it('restores edited message context and restores draft context on cancel', async () => {
     setState('activeSessionId', 'session-1');
     setInputText('draft prompt');
@@ -889,6 +1095,23 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('[title="Stop"]')).toBeNull();
     expect(container?.querySelector('[title="Add to queue (Enter)"]')).not.toBeNull();
+  });
+
+  it('sends busy composer input as a steer on modifier enter', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setInputText('Change direction');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true })
+    );
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('Change direction', { delivery: 'steer' });
+    expect(state.queuedMessages).toEqual([]);
   });
 
   it('stops the active response before sending from the busy send menu', async () => {

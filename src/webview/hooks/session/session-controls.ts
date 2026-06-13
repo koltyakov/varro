@@ -5,7 +5,7 @@ type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 export async function reviewSessionWithDependencies(
   deps: {
     getActiveSessionId(): string | null;
-    sendMessage(prompt: string): Promise<void>;
+    sendMessage(prompt: string): Promise<unknown>;
   },
   prompt = 'review the current changes in my code and provide feedback'
 ) {
@@ -105,15 +105,16 @@ export async function editMessageWithDependencies(
     revertSession(sessionId: string, messageId: string): Promise<unknown>;
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
-    sendEditedMessage(text: string): Promise<void>;
+    sendEditedMessage(text: string): Promise<unknown>;
     stopLoading(): void;
     setError(message: string): void;
   },
   messageId: string,
-  text: string
+  text: string,
+  options?: { allowEmptyText?: boolean }
 ) {
   const sessionId = deps.getActiveSessionId();
-  if (!sessionId || !text.trim()) return;
+  if (!sessionId || (!options?.allowEmptyText && !text.trim())) return;
 
   const target = deps
     .getMessages()
@@ -209,7 +210,7 @@ export async function compactSessionWithDependencies(deps: {
 
 type SessionControlDependencies = {
   getActiveSessionId(): string | null;
-  sendMessage(prompt: string): Promise<void>;
+  sendMessage(prompt: string): Promise<unknown>;
   getSessionTreeRootId(sessionId: string): string | null;
   getSessionTreeIds(sessionId: string): string[];
   getSelectedAgentForSession(sessionId: string): string | null;
@@ -230,7 +231,7 @@ type SessionControlDependencies = {
   syncSessionMessages(sessionId: string): Promise<void>;
   setError(message: string): void;
   isSessionWorking(sessionId: string): boolean;
-  sendEditedMessage(text: string): Promise<void>;
+  sendEditedMessage(text: string): Promise<unknown>;
   unrevertSession(sessionId: string): Promise<Session>;
   upsertSession(session: Session): void;
   clearPendingAbort(sessionId: string): void;
@@ -285,7 +286,11 @@ export class SessionControlOperations {
     });
   };
 
-  readonly editMessage = async (messageId: string, text: string) => {
+  readonly editMessage = async (
+    messageId: string,
+    text: string,
+    options?: { allowEmptyText?: boolean }
+  ) => {
     await editMessageWithDependencies(
       {
         getActiveSessionId: this.deps.getActiveSessionId,
@@ -301,7 +306,8 @@ export class SessionControlOperations {
         setError: this.deps.setError,
       },
       messageId,
-      text
+      text,
+      options
     );
   };
 

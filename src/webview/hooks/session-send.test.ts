@@ -241,6 +241,21 @@ describe('session-send helpers', () => {
     });
   });
 
+  it('marks steer payloads with explicit delivery', () => {
+    const result = buildSessionSendBody(
+      createState({ editorContext: createEditorContext({ workspacePath: null }) }),
+      'session-1',
+      'Change direction',
+      () => true,
+      { delivery: 'steer' }
+    );
+
+    expect(result?.body).toMatchObject({
+      delivery: 'steer',
+      parts: [{ type: 'text', text: 'Change direction' }],
+    });
+  });
+
   it('returns null when there is no text or attachment content to send', () => {
     const result = buildSessionSendBody(
       createState({
@@ -368,6 +383,50 @@ describe('session-send helpers', () => {
       parts: [{ type: 'text', text: 'hello' }],
     });
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-2', { type: 'busy' });
+  });
+
+  it('does not start a new loading state for steers', async () => {
+    const startLoading = vi.fn();
+    const setSessionStatusEntry = vi.fn();
+
+    await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        createSession: vi.fn(async () => 'session-1'),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: { parts: [{ type: 'text', text: 'steer' }], delivery: 'steer' },
+          effectiveModel: null,
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading,
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        sendAsync: vi.fn(async () => {}),
+        getMessageCount: () => 1,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        setSessionStatusEntry,
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'steer',
+      { delivery: 'steer' }
+    );
+
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
   });
 
   it('bootstraps missing session permissions before sending', async () => {

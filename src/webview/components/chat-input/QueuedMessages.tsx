@@ -8,6 +8,8 @@ export type QueuedMessageItem = Pick<
 
 export function QueuedMessages(props: {
   items: QueuedMessageItem[];
+  steeringItemIds?: ReadonlySet<string>;
+  failedSteerItemIds?: ReadonlySet<string>;
   onSendAsSteer: (item: QueuedMessageItem) => void;
   onRemove: (id: string) => void;
 }) {
@@ -15,6 +17,8 @@ export function QueuedMessages(props: {
     <div class="chat-queue-container" role="list" aria-label="Queued messages">
       <For each={props.items}>
         {(item) => {
+          const isSteering = () => props.steeringItemIds?.has(item.id) ?? false;
+          const didSteerFail = () => props.failedSteerItemIds?.has(item.id) ?? false;
           const attachmentCount =
             (item.droppedFiles?.length || 0) +
             (item.clipboardImages?.length || 0) +
@@ -64,7 +68,14 @@ export function QueuedMessages(props: {
                 <button
                   class="chat-queue-action"
                   onClick={() => props.onSendAsSteer(item)}
-                  title="Send now as Steer"
+                  disabled={isSteering()}
+                  title={
+                    isSteering()
+                      ? 'Sending as Steer'
+                      : didSteerFail()
+                        ? 'Retry send as Steer'
+                        : 'Send now as Steer'
+                  }
                   aria-label="Send as Steer"
                 >
                   <svg
@@ -79,7 +90,9 @@ export function QueuedMessages(props: {
                   >
                     <path d="M8 13V3M4 7l4-4 4 4" />
                   </svg>
-                  <span class="chat-queue-action-label">Steer</span>
+                  <span class="chat-queue-action-label">
+                    {isSteering() ? 'Steering...' : didSteerFail() ? 'Retry Steer' : 'Steer'}
+                  </span>
                 </button>
                 <button
                   class="chat-queue-remove"

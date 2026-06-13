@@ -55,6 +55,10 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
       const todos = extractTodos(await deps.loadSessionTodos(sessionId)) ?? [];
       nativeTodosEnabled = true;
       if (appStore.state.activeSessionId === sessionId) {
+        if (isStaleSettledNativeTodoSnapshot(todos, messages)) {
+          setStateTodos([]);
+          return;
+        }
         setStateTodos(todos, { preserveAdvancedStatuses: true });
         advanceTodosFromMessages(messages);
       }
@@ -95,6 +99,14 @@ function advanceTodosFromMessages(messages: SessionEntry[]) {
   const nextTodos = mergeTodoEventAdvance(currentTodos, messageTodos);
   setStateTodos(nextTodos);
   return true;
+}
+
+function isStaleSettledNativeTodoSnapshot(todos: Todo[], messages: SessionEntry[]) {
+  if (todos.length === 0 || todos.some((todo) => todo.status === 'completed')) return false;
+  if (deriveTodosFromMessages(messages).length > 0) return false;
+
+  const latestAssistant = getLatestAssistantMessageInTurn(messages);
+  return !!latestAssistant?.info.time.completed && !latestAssistant.info.error;
 }
 
 export function extractTodos(raw: unknown): Todo[] | null {

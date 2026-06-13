@@ -31,6 +31,7 @@ import {
   UserMessageContent,
   getUserMessageEditContext,
   getUserMessageEditText,
+  hasUserMessageEditableContent,
   parseUserMessageContent,
 } from './message/UserMessageContent';
 
@@ -45,6 +46,7 @@ export {
   getUserMessageEditText,
   getUserMessageEditContext,
   getUserMessagePreviewText,
+  hasUserMessageEditableContent,
   parseUserMessageContent,
 } from './message/UserMessageContent';
 export type { AssistantFileEditStackGroup } from './message/AssistantMessageContent';
@@ -201,7 +203,7 @@ export function Message(props: {
     hasUserContent() &&
     props.info.sessionID === state.activeSessionId &&
     !isActiveSessionWorking() &&
-    getUserMessageEditText(normalizedParts()).trim().length > 0;
+    hasUserMessageEditableContent(normalizedParts());
   const handleUserCardClick = (event: MouseEvent) => {
     if (!canEditUserMessage() || isEditingUserMessage()) return;
     const target = event.target;

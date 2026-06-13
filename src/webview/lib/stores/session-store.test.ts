@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEffect, createRoot } from 'solid-js';
-import type { FileDiff, Message, Session } from '../../types';
+import type { FileDiff, Message, Part, Session } from '../../types';
 import { sessionStore } from './session-store';
 import {
   resetDefaultAppState,
@@ -42,6 +42,34 @@ function completedAssistantMessage(sessionID = 'session-1'): Message {
       reasoning: 0,
       cache: { read: 0, write: 0 },
     },
+  };
+}
+
+function toolPart(status: 'running' | 'completed'): Part {
+  return {
+    id: 'tool-1',
+    sessionID: 'session-1',
+    messageID: 'session-1-assistant-1',
+    type: 'tool',
+    callID: 'call-1',
+    tool: 'bash',
+    state:
+      status === 'running'
+        ? {
+            status: 'running',
+            input: { command: 'npm test' },
+            title: 'Runs tests',
+            metadata: {},
+            time: { start: 1 },
+          }
+        : {
+            status: 'completed',
+            input: { command: 'npm test' },
+            output: 'ok',
+            title: 'Runs tests',
+            metadata: {},
+            time: { start: 1, end: 2 },
+          },
   };
 }
 
@@ -179,6 +207,28 @@ describe('sessionStore', () => {
     expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
 
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);
+
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+  });
+
+  it('keeps locally running sessions busy while a completed assistant still has a running tool', () => {
+    sessionStore.setActiveSessionId('session-1');
+    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+
+    setMessagesIncremental([{ info: completedAssistantMessage(), parts: [toolPart('running')] }]);
+
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+
+    sessionStore.setSessionStatuses(
+      {
+        'session-1': { type: 'idle' },
+      },
+      { snapshotStartedAt: Date.now() + 1000 }
+    );
+
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+
+    setMessagesIncremental([{ info: completedAssistantMessage(), parts: [toolPart('completed')] }]);
 
     expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
   });

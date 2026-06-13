@@ -118,10 +118,20 @@ export const client = {
         model?: { providerID: string; modelID: string };
         agent?: string;
         noReply?: boolean;
+        delivery?: 'steer' | 'queue';
         variant?: string;
       }
     ): Promise<void> {
-      await apiCall('POST', `/session/${id}/prompt_async`, body);
+      // `delivery` is a client-side timing concern, not a server one. "Steer" means
+      // inject this prompt into the turn that is already running: opencode's active
+      // loop re-reads session history on every step, so a prompt_async sent mid-turn
+      // is picked up on the next step. The v2 /api/session/:id/prompt endpoint admits
+      // into a separate SessionInput store that the active (v1) loop never consumes,
+      // so routing steer there dropped the message instead of steering. Always send
+      // through prompt_async; the queue/steer distinction lives entirely in the UI
+      // (queue holds the message until idle, steer sends it immediately).
+      const { delivery: _delivery, ...rest } = body;
+      await apiCall('POST', `/session/${id}/prompt_async`, rest);
     },
     async respondPermission(
       _sessionId: string,

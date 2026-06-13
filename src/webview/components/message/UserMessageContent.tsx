@@ -301,6 +301,15 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
   };
 }
 
+export function hasUserMessageEditableContent(parts: Part[]): boolean {
+  if (getUserMessageEditText(parts).trim().length > 0) return true;
+
+  const context = getUserMessageEditContext(parts);
+  return (
+    context.files.length > 0 || context.images.length > 0 || context.terminalSelection !== null
+  );
+}
+
 export function getUserMessagePreviewText(parts: Part[]): string {
   const parsed = parseUserMessageContent(parts);
   const firstText = parsed.messageTexts

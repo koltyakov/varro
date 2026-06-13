@@ -75,6 +75,14 @@ describe('client', () => {
       noReply: true,
       variant: 'high',
     });
+    await client.session.sendAsync('session-1', {
+      parts: [
+        { type: 'text', text: 'Steer now' },
+        { type: 'text', text: '[Working directory: /repo]' },
+        { type: 'file', url: 'blob:image-1', mime: 'image/png', filename: 'image.png' },
+      ],
+      delivery: 'steer',
+    });
     await client.session.respondPermission('session-1', 'perm-1', 'always');
     await client.session.revert('session-1', 'message-1');
     await client.session.unrevert('session-1');
@@ -126,6 +134,17 @@ describe('client', () => {
           agent: 'build',
           noReply: true,
           variant: 'high',
+        },
+      ],
+      [
+        'POST',
+        '/session/session-1/prompt_async',
+        {
+          parts: [
+            { type: 'text', text: 'Steer now' },
+            { type: 'text', text: '[Working directory: /repo]' },
+            { type: 'file', url: 'blob:image-1', mime: 'image/png', filename: 'image.png' },
+          ],
         },
       ],
       ['POST', '/permission/perm-1/reply', { reply: 'always' }],

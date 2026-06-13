@@ -37,6 +37,7 @@ import type { AssistantMessage, Message, Part, Permission, QuestionRequest } fro
 import {
   getUserMessageEditContext,
   getUserMessageEditText,
+  hasUserMessageEditableContent,
   type AssistantFileEditStackGroup,
 } from './Message';
 import { editingMessage, startEditingMessage } from '../lib/message-edit-state';
@@ -1794,14 +1795,13 @@ export function MessageList() {
         : messages().find((candidate) => candidate.info.id === preview.id);
     if (!entry || entry.info.role !== 'user') return;
     if (entry.info.sessionID !== state.activeSessionId) return;
-    const editText = getUserMessageEditText(entry.parts);
-    if (!editText.trim()) return;
+    if (!hasUserMessageEditableContent(entry.parts)) return;
     setAutoScroll(false);
     scrollMessageIntoView(preview);
     startEditingMessage(
       entry.info.id,
       entry.info.sessionID,
-      editText,
+      getUserMessageEditText(entry.parts),
       getUserMessageEditContext(entry.parts)
     );
   }
@@ -1968,6 +1968,15 @@ export function getAssistantDialogSummaryMap(
     }
 
     if (targetMessageIds && !targetMessageIds.has(lastMessage.id)) {
+      currentMessages = [];
+      currentPrimaryMessageIds = [];
+      currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
+      return;
+    }
+
+    const lastEntry = messages.find((entry) => entry.info.id === lastMessage.id);
+    if (lastEntry?.parts.some((part) => part.type === 'tool' && part.state.status === 'running')) {
       currentMessages = [];
       currentPrimaryMessageIds = [];
       currentSubagentHandoffCount = 0;

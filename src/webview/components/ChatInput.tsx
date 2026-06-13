@@ -55,7 +55,7 @@ import {
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { startNewChatDraft } from '../lib/new-chat-draft';
-import { client } from '../lib/client';
+import { client, serverEvents } from '../lib/client';
 import { openProviderSetup } from '../lib/provider-setup';
 import {
   applySessionMcps,
@@ -372,17 +372,83 @@ function activeContextEnabled() {
   return getCurrentDocumentEnabled(state.activeSessionId);
 }
 
-async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
-  removeQueuedMessage(item.id);
-  await sendMessage(item.text, {
-    noReply: true,
-    queuedAttachments: {
-      droppedFiles: item.droppedFiles,
-      clipboardImages: item.clipboardImages,
-      terminalSelection: item.terminalSelection,
-    },
-    preserveComposer: true,
+const [steeringQueuedMessageIds, setSteeringQueuedMessageIds] = createSignal<ReadonlySet<string>>(
+  new Set()
+);
+const [failedSteerQueuedMessageIds, setFailedSteerQueuedMessageIds] = createSignal<
+  ReadonlySet<string>
+>(new Set());
+
+function updateQueuedSteerId(
+  setter: typeof setSteeringQueuedMessageIds,
+  id: string,
+  active: boolean
+) {
+  setter((ids) => {
+    const next = new Set(ids);
+    if (active) {
+      next.add(id);
+    } else {
+      next.delete(id);
+    }
+    return next;
   });
+}
+
+function getPromptEventText(prompt: unknown) {
+  if (!prompt || typeof prompt !== 'object') return null;
+  const text = (prompt as { text?: unknown }).text;
+  return typeof text === 'string' ? text : null;
+}
+
+function matchesQueuedPromptText(itemText: string, promptText: string | null) {
+  const text = itemText.trim();
+  if (!text) return true;
+  const prompt = promptText?.trim();
+  return !!prompt && (prompt === text || prompt.startsWith(`${text}\n`));
+}
+
+function acceptQueuedSteer(sessionId: string, promptText: string | null) {
+  const steeringIds = steeringQueuedMessageIds();
+  const item = state.queuedMessages.find(
+    (queued) =>
+      queued.sessionId === sessionId &&
+      steeringIds.has(queued.id) &&
+      matchesQueuedPromptText(queued.text, promptText)
+  );
+  if (!item) return;
+  updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, false);
+  updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, false);
+  removeQueuedMessage(item.id);
+}
+
+async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
+  if (steeringQueuedMessageIds().has(item.id)) return;
+  updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, true);
+  updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, false);
+  let sent = false;
+  try {
+    sent =
+      (await sendMessage(item.text, {
+        delivery: 'steer',
+        queuedAttachments: {
+          droppedFiles: item.droppedFiles,
+          clipboardImages: item.clipboardImages,
+          terminalSelection: item.terminalSelection,
+        },
+        preserveComposer: true,
+      })) !== false;
+  } catch {
+    sent = false;
+  } finally {
+    updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, false);
+  }
+  if (sent) {
+    removeQueuedMessage(item.id);
+    return;
+  }
+  if (!state.queuedMessages.some((queued) => queued.id === item.id)) return;
+  updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, true);
 }
 
 function openContextFileInEditor(file: DroppedFile) {
@@ -1170,7 +1236,9 @@ export function ChatInput() {
 
     const editing = editingMessage();
     if (editing) {
-      if (!sendableText.trim()) return;
+      const hasEditableAttachments =
+        state.droppedFiles.length > 0 || hasSendableImages || !!state.terminalSelection;
+      if (!sendableText.trim() && !hasEditableAttachments) return;
       const editTargetExists = state.messages.some(
         (entry) => entry.info.role === 'user' && entry.info.id === editing.messageId
       );
@@ -1182,7 +1250,7 @@ export function ChatInput() {
       resetPastedImageIndex();
       resetMessageEditState();
       if (editTargetExists) {
-        await editMessage(editing.messageId, text);
+        await editMessage(editing.messageId, text, { allowEmptyText: hasEditableAttachments });
       } else {
         await sendMessage(text);
       }
@@ -1234,7 +1302,7 @@ export function ChatInput() {
     const prevError = error();
     setInputText('');
     resetPastedImageIndex();
-    await sendMessage(text, { noReply: mode === 'steer' });
+    await sendMessage(text, mode === 'steer' ? { delivery: 'steer' } : { noReply: false });
     if (error() && error() !== prevError) {
       setInputText(text);
     }
@@ -1246,18 +1314,47 @@ export function ChatInput() {
     const loading = isComposerBusy();
     const activeQuestion = hasActiveQuestion();
     const activePermission = hasActivePermission();
-    const hasQueued = state.queuedMessages.some((item) => item.sessionId === sessionId);
+    const steeringIds = steeringQueuedMessageIds();
+    const failedSteerIds = failedSteerQueuedMessageIds();
+    const hasSteeringQueued = state.queuedMessages.some(
+      (item) => item.sessionId === sessionId && steeringIds.has(item.id)
+    );
+    const hasQueued = state.queuedMessages.some(
+      (item) =>
+        item.sessionId === sessionId && !steeringIds.has(item.id) && !failedSteerIds.has(item.id)
+    );
     if (queueDispatchTimer) {
       clearTimeout(queueDispatchTimer);
       queueDispatchTimer = 0;
     }
-    if (!sessionId || loading || activeQuestion || activePermission || !hasQueued) return;
+    if (
+      !sessionId ||
+      loading ||
+      activeQuestion ||
+      activePermission ||
+      hasSteeringQueued ||
+      !hasQueued
+    )
+      return;
     queueDispatchTimer = setTimeout(() => {
       queueDispatchTimer = 0;
       if (isComposerBusy() || hasActiveQuestion() || hasActivePermission()) return;
       const sid = state.activeSessionId;
       if (!sid) return;
-      const next = state.queuedMessages.find((item) => item.sessionId === sid);
+      const currentSteeringIds = steeringQueuedMessageIds();
+      const currentFailedSteerIds = failedSteerQueuedMessageIds();
+      if (
+        state.queuedMessages.some(
+          (item) => item.sessionId === sid && currentSteeringIds.has(item.id)
+        )
+      )
+        return;
+      const next = state.queuedMessages.find(
+        (item) =>
+          item.sessionId === sid &&
+          !currentSteeringIds.has(item.id) &&
+          !currentFailedSteerIds.has(item.id)
+      );
       if (!next) return;
       removeQueuedMessage(next.id);
       void sendMessage(next.text, {
@@ -1270,9 +1367,22 @@ export function ChatInput() {
       });
     }, 250);
   });
+  const queuedSteerAdmissionCleanups = [
+    serverEvents.on('session.next.prompted', (event) => {
+      const properties = event.properties;
+      if (properties?.delivery !== 'steer') return;
+      acceptQueuedSteer(properties.sessionID, getPromptEventText(properties.prompt));
+    }),
+    serverEvents.on('session.next.prompt.admitted', (event) => {
+      const properties = event.properties;
+      if (properties?.delivery !== 'steer') return;
+      acceptQueuedSteer(properties.sessionID, getPromptEventText(properties.prompt));
+    }),
+  ];
   onCleanup(() => {
     if (queueDispatchTimer) clearTimeout(queueDispatchTimer);
     if (fileSearchTimer) clearTimeout(fileSearchTimer);
+    for (const cleanup of queuedSteerAdmissionCleanups) cleanup();
   });
 
   function setComposerValue(value: string) {
@@ -2041,6 +2151,8 @@ export function ChatInput() {
       <Show when={queuedForSession().length > 0 && !editingMessage()}>
         <QueuedMessages
           items={queuedForSession()}
+          steeringItemIds={steeringQueuedMessageIds()}
+          failedSteerItemIds={failedSteerQueuedMessageIds()}
           onSendAsSteer={sendQueuedAsSteer}
           onRemove={removeQueuedMessage}
         />

@@ -297,6 +297,39 @@ describe('todo-sync', () => {
     ]);
   });
 
+  it('hides stale native todos after a completed session settles', async () => {
+    state.todos = [{ id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' }];
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => [
+        { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
+      ]),
+    });
+
+    await operations.syncTodosForSession('session-1', [
+      { info: userMessage('user-1'), parts: [] },
+      { info: assistantMessage('assistant-1', { time: { created: 1, completed: 2 } }), parts: [] },
+    ]);
+
+    expect(setState).toHaveBeenCalledWith('todos', []);
+  });
+
+  it('keeps completed native todos after a completed session settles', async () => {
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => [
+        { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
+      ]),
+    });
+
+    await operations.syncTodosForSession('session-1', [
+      { info: userMessage('user-1'), parts: [] },
+      { info: assistantMessage('assistant-1', { time: { created: 1, completed: 2 } }), parts: [] },
+    ]);
+
+    expect(setState).toHaveBeenCalledWith('todos', [
+      { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
+    ]);
+  });
+
   it('uses matching todo.updated payloads to advance stale message todo status', () => {
     const messageTodos = [
       { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },

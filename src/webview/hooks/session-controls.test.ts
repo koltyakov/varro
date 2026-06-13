@@ -241,6 +241,33 @@ describe('session-controls helpers', () => {
     expect(revertSession).not.toHaveBeenCalled();
   });
 
+  it('editMessage can resend attachment-only edits with empty text', async () => {
+    const revertSession = vi.fn(async () => {});
+    const sendEditedMessage = vi.fn(async () => {});
+
+    await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [{ info: userMessage('user-1') }],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        startLoading: vi.fn(),
+        revertSession,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        sendEditedMessage,
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      '',
+      { allowEmptyText: true }
+    );
+
+    expect(revertSession).toHaveBeenCalledWith('session-1', 'user-1');
+    expect(sendEditedMessage).toHaveBeenCalledWith('');
+  });
+
   it('editMessage stops loading and reports errors without sending when revert fails', async () => {
     const stopLoading = vi.fn();
     const setError = vi.fn();

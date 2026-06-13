@@ -2743,6 +2743,58 @@ function getSessionTodos(state: ScenarioState, id: string): Todo[] {
   return [];
 }
 
+function appendMockPromptMessages(
+  state: ScenarioState,
+  sessionId: string,
+  textParts: string[],
+  options: { providerID?: string; modelID?: string; variant?: string; agent?: string } = {}
+) {
+  const promptText =
+    textParts.find((text) => !text.startsWith('[Working directory:')) || 'Untitled request';
+  const providerID = options.providerID || DEFAULT_PROVIDER_ID;
+  const modelID = options.modelID || DEFAULT_MODEL_ID;
+  const agent = options.agent || 'build';
+  const createdAt = nextTimestamp(state);
+  const userId = `message-user-${state.nextSequence}`;
+  const assistantId = `message-assistant-${state.nextSequence}`;
+  const userMessage: MessageEntry = {
+    info: {
+      id: userId,
+      sessionID: sessionId,
+      role: 'user',
+      time: { created: createdAt },
+      agent,
+      model: { providerID, modelID, ...(options.variant ? { variant: options.variant } : {}) },
+    },
+    parts: textParts.map((text, index) => ({
+      id: `${userId}-part-${index + 1}`,
+      sessionID: sessionId,
+      messageID: userId,
+      type: 'text',
+      text,
+    })),
+  };
+  const assistantMessage = makeAssistantMessage(
+    sessionId,
+    assistantId,
+    userId,
+    `Mock assistant response for: ${promptText}`,
+    createdAt + 1
+  );
+  assistantMessage.info.providerID = providerID;
+  assistantMessage.info.modelID = modelID;
+  assistantMessage.info.agent = agent;
+  if (options.variant) assistantMessage.info.variant = options.variant;
+
+  state.messagesBySessionId[sessionId] = [
+    ...(state.messagesBySessionId[sessionId] || []),
+    userMessage,
+    assistantMessage,
+  ];
+
+  return { assistantMessage, createdAt };
+}
+
 function extractTodoPayload(value: unknown): Todo[] | null {
   if (Array.isArray(value)) {
     return value.map(normalizeTodo).filter((todo): todo is Todo => Boolean(todo));
@@ -3071,6 +3123,26 @@ async function handleApiRequest(
     return [];
   }
 
+  const v2PromptMatch = path.match(/^\/api\/session\/([^/]+)\/prompt$/);
+  if (v2PromptMatch && method === 'POST') {
+    const sessionId = decodeURIComponent(v2PromptMatch[1]);
+    const payload = asRecord(body);
+    const prompt = asRecord(payload.prompt);
+    const promptText = typeof prompt.text === 'string' ? prompt.text : 'Untitled request';
+    const { createdAt } = appendMockPromptMessages(state, sessionId, promptText.split('\n'));
+    const session = getSession(state, sessionId);
+    session.time.updated = createdAt + 1;
+    if (!session.title.trim()) {
+      session.title = promptText.slice(0, 60);
+    }
+    if (state.sessionStatuses[sessionId]?.type === 'busy') {
+      state.sessionStatuses[sessionId] = { type: 'busy' };
+    } else {
+      state.sessionStatuses[sessionId] = { type: 'idle' };
+    }
+    return null;
+  }
+
   const promptMatch = path.match(/^\/session\/([^/]+)\/prompt_async$/);
   if (promptMatch && method === 'POST') {
     const sessionId = decodeURIComponent(promptMatch[1]);
@@ -3089,39 +3161,13 @@ async function handleApiRequest(
       typeof model.modelID === 'string' && model.modelID ? model.modelID : DEFAULT_MODEL_ID;
     const variant = typeof payload.variant === 'string' ? payload.variant : undefined;
     const agent = typeof payload.agent === 'string' && payload.agent ? payload.agent : 'build';
-    const createdAt = nextTimestamp(state);
-    const userId = `message-user-${state.nextSequence}`;
-    const assistantId = `message-assistant-${state.nextSequence}`;
-    const userMessage: MessageEntry = {
-      info: {
-        id: userId,
-        sessionID: sessionId,
-        role: 'user',
-        time: { created: createdAt },
-        agent,
-        model: { providerID, modelID, ...(variant ? { variant } : {}) },
-      },
-      parts: textParts.map((text, index) => ({
-        id: `${userId}-part-${index + 1}`,
-        sessionID: sessionId,
-        messageID: userId,
-        type: 'text',
-        text,
-      })),
-    };
-    const assistantMessage = makeAssistantMessage(
-      sessionId,
-      assistantId,
-      userId,
-      `Mock assistant response for: ${promptText}`,
-      createdAt + 1
-    );
-    assistantMessage.info.providerID = providerID;
-    assistantMessage.info.modelID = modelID;
-    assistantMessage.info.agent = agent;
-    if (variant) {
-      assistantMessage.info.variant = variant;
-    }
+    const { assistantMessage, createdAt } = appendMockPromptMessages(state, sessionId, textParts, {
+      providerID,
+      modelID,
+      variant,
+      agent,
+    });
+    const assistantId = assistantMessage.info.id;
 
     if (
       agent === 'plan' ||
@@ -3161,12 +3207,6 @@ async function handleApiRequest(
         cache: { read: 0, write: 0 },
       };
     }
-
-    state.messagesBySessionId[sessionId] = [
-      ...(state.messagesBySessionId[sessionId] || []),
-      userMessage,
-      assistantMessage,
-    ];
 
     const session = getSession(state, sessionId);
     if (

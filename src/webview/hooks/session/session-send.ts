@@ -45,10 +45,11 @@ export type SessionSendBody = {
   model?: { providerID: string; modelID: string };
   agent?: string;
   noReply?: boolean;
+  delivery?: 'steer' | 'queue';
   variant?: string;
 };
 
-type SendFlowOptions = { noReply?: boolean };
+type SendFlowOptions = { noReply?: boolean; delivery?: 'steer' | 'queue' };
 
 export type QueuedAttachmentSnapshot = Pick<
   QueuedMessage,
@@ -219,6 +220,7 @@ export function buildSessionSendBody(
       undefined;
   }
   if (options?.noReply) body.noReply = true;
+  if (options?.delivery) body.delivery = options.delivery;
 
   return { body, effectiveModel };
 }
@@ -267,7 +269,7 @@ export class SessionSendOperations {
     }
   ) => {
     const ensureSessionPermission = this.deps.ensureSessionPermission;
-    await sendMessageWithDependencies(
+    return await sendMessageWithDependencies(
       {
         getActiveSessionId: () => appStore.state.activeSessionId,
         getDefaultPermissionMode: () => permissionsStore.getPermissionModeForSession(null),
@@ -394,7 +396,7 @@ export async function sendMessageWithDependencies(
     queuedAttachments?: QueuedAttachmentSnapshot;
     preserveComposer?: boolean;
   }
-) {
+): Promise<boolean> {
   let sessionId = deps.getActiveSessionId();
   if (!sessionId) {
     // Creating a session resets the active agent to the session default (e.g. build),
@@ -402,7 +404,7 @@ export async function sendMessageWithDependencies(
     // session — otherwise the first message in a fresh chat ignores the chosen agent.
     const intendedAgent = deps.getSelectedAgent?.() ?? null;
     const createdId = await deps.createSession(deps.getDefaultPermissionMode());
-    if (!createdId) return;
+    if (!createdId) return false;
     sessionId = createdId;
     if (intendedAgent) deps.applySelectedAgentForSession?.(intendedAgent, sessionId);
   }
@@ -412,20 +414,24 @@ export async function sendMessageWithDependencies(
     sessionId = currentSessionId;
   }
 
-  if (deps.ensureSessionPermission && !(await deps.ensureSessionPermission(sessionId))) return;
+  if (deps.ensureSessionPermission && !(await deps.ensureSessionPermission(sessionId)))
+    return false;
 
   deps.clearPendingAbort(sessionId);
   await deps.syncSessionMcps(sessionId);
 
   const sendPayload = deps.buildSendPayload(sessionId, text, options);
-  if (!sendPayload) return;
+  if (!sendPayload) return false;
   const { body, effectiveModel } = sendPayload;
 
   deps.requestMessageListScrollToBottom();
-  if (!body.noReply) {
+  const expectsAssistantReply = !body.noReply && body.delivery !== 'steer';
+  if (expectsAssistantReply) {
     deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
   }
-  deps.startLoading();
+  if (expectsAssistantReply) {
+    deps.startLoading();
+  }
   deps.setError(null);
   if (effectiveModel) {
     deps.applyEffectiveModel(effectiveModel, sessionId);
@@ -460,23 +466,25 @@ export async function sendMessageWithDependencies(
       for (const failure of failures) {
         deps.logError?.('postSendSync', failure.reason);
       }
-      if (failures.length === syncResults.length) {
+      if (expectsAssistantReply && failures.length === syncResults.length) {
         deps.stopLoading();
       }
     }
+    return true;
   } catch (err) {
-    if (!body.noReply) {
+    if (expectsAssistantReply) {
       deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
+      deps.stopLoading();
     }
-    deps.stopLoading();
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
     if (body.model) {
       deps.setError(
         `Failed to send with ${body.model.providerID}/${body.model.modelID}: ${baseMessage}`
       );
-      return;
+      return false;
     }
     deps.setError(baseMessage);
+    return false;
   }
 }
 

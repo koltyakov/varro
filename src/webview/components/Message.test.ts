@@ -988,6 +988,43 @@ describe('Message user editing', () => {
     expect(container?.textContent).toContain('original prompt');
   });
 
+  it('starts a composer edit for image-only user messages', () => {
+    setAppState('activeSessionId', 'session-1');
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-image-only'),
+          parts: [imageFilePart('file-image-1', 'screenshot.png')],
+        }),
+      container!
+    );
+
+    window.getSelection()?.removeAllRanges();
+    const card = container?.querySelector<HTMLElement>('.user-message-card');
+    expect(card?.classList.contains('user-message-card-editable')).toBe(true);
+
+    card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(editingMessage()).toEqual({
+      messageId: 'message-image-only',
+      sessionId: 'session-1',
+      text: '',
+      context: {
+        files: [],
+        images: [
+          {
+            id: 'file-image-1',
+            url: 'https://example.test/file-image-1.png',
+            mime: 'image/png',
+            filename: 'screenshot.png',
+            size: 0,
+          },
+        ],
+        terminalSelection: null,
+      },
+    });
+  });
+
   it('does not offer editing when the message belongs to another session', () => {
     setAppState('activeSessionId', 'session-2');
     cleanup = render(

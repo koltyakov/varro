@@ -466,30 +466,22 @@ describe('registerSessionEventHandlers', () => {
     expect(removeQuestion).toHaveBeenNthCalledWith(2, 'question-v3');
   });
 
-  it('syncs pending permissions after shell progress events in case permission events were missed', async () => {
-    vi.useFakeTimers();
+  it('syncs pending permissions after shell progress events in case permission events were missed', () => {
     const handlers = installHandlers();
     const syncPendingPermissions = vi.fn().mockResolvedValue(undefined);
 
-    try {
-      registerSessionEventHandlers(
-        createDefaultDeps({
-          getActiveSessionId: () => 'session-1',
-          syncPendingPermissions,
-        })
-      );
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        syncPendingPermissions,
+      })
+    );
 
-      handlers.get('session.next.shell.started')?.({
-        properties: { sessionID: 'session-1' },
-      });
+    handlers.get('session.next.shell.started')?.({
+      properties: { sessionID: 'session-1' },
+    });
 
-      expect(syncPendingPermissions).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(100);
-
-      expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
   });
 
   it('marks session.error events failed and stops active loading', () => {
@@ -587,8 +579,7 @@ describe('registerSessionEventHandlers', () => {
     expect(setState).toHaveBeenCalledWith('sessionStatus', expect.any(Function));
   });
 
-  it('resyncs active messages for partial message.updated payloads', async () => {
-    vi.useFakeTimers();
+  it('resyncs active messages for partial message.updated payloads', () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(
@@ -606,64 +597,57 @@ describe('registerSessionEventHandlers', () => {
     const updateUsageLimitState = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
-    try {
-      registerSessionEventHandlers({
-        getActiveSessionId: () => 'session-1',
-        getMessages: () => [],
-        handoffTodosToMessages,
-        upsertSession: vi.fn(),
-        setSessionCompacting: vi.fn(),
-        removeDeletedSessionTree: vi.fn(),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        markPendingAbort: vi.fn(),
-        clearPendingAbort: vi.fn(),
-        setSessionStatusEntry: vi.fn(),
-        clearUsageLimitOnResumedProgress,
-        updateUsageLimitState,
-        syncSession: vi.fn().mockResolvedValue(undefined),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSessionMessages,
-        applyUsageLimitNotice,
-        syncTodosFromMessages: vi.fn(),
-        shouldAutoApprovePermissions: () => false,
-        respondPermission: vi.fn().mockResolvedValue(undefined),
-        setDiffs: vi.fn(),
-        abortRemoteSession: vi.fn().mockResolvedValue(true),
-        logError: vi.fn(),
-      });
+    registerSessionEventHandlers({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [],
+      handoffTodosToMessages,
+      upsertSession: vi.fn(),
+      setSessionCompacting: vi.fn(),
+      removeDeletedSessionTree: vi.fn(),
+      shouldIgnorePendingAbortStatus: () => false,
+      hasPendingAbort: () => false,
+      markPendingAbort: vi.fn(),
+      clearPendingAbort: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      clearUsageLimitOnResumedProgress,
+      updateUsageLimitState,
+      syncSession: vi.fn().mockResolvedValue(undefined),
+      shouldResyncSessionAfterIdle: () => false,
+      syncSessionMessages,
+      applyUsageLimitNotice,
+      syncTodosFromMessages: vi.fn(),
+      shouldAutoApprovePermissions: () => false,
+      respondPermission: vi.fn().mockResolvedValue(undefined),
+      setDiffs: vi.fn(),
+      abortRemoteSession: vi.fn().mockResolvedValue(true),
+      logError: vi.fn(),
+    });
 
-      upsertMessageInfo.mockClear();
-      markLoadingActivity.mockClear();
+    upsertMessageInfo.mockClear();
+    markLoadingActivity.mockClear();
 
-      handlers.get('message.updated')?.({
-        properties: {
-          info: {
-            sessionID: 'session-1',
-            role: 'assistant',
-            error: { name: 'rate_limit_exceeded', data: { message: '429 usage limit reached' } },
-          },
-        },
-      });
-
-      expect(handoffTodosToMessages).not.toHaveBeenCalled();
-      expect(applyUsageLimitNotice).toHaveBeenCalledWith(
-        'session-1',
-        expect.objectContaining({
-          source: 'message',
+    handlers.get('message.updated')?.({
+      properties: {
+        info: {
           sessionID: 'session-1',
-          message: '429 usage limit reached',
-        })
-      );
-      expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
-      expect(upsertMessageInfo).not.toHaveBeenCalled();
+          role: 'assistant',
+          error: { name: 'rate_limit_exceeded', data: { message: '429 usage limit reached' } },
+        },
+      },
+    });
 
-      await vi.advanceTimersByTimeAsync(100);
-
-      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(handoffTodosToMessages).not.toHaveBeenCalled();
+    expect(applyUsageLimitNotice).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        source: 'message',
+        sessionID: 'session-1',
+        message: '429 usage limit reached',
+      })
+    );
+    expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
+    expect(upsertMessageInfo).not.toHaveBeenCalled();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('rejects malformed user message.updated payloads with parent ids', () => {
@@ -769,8 +753,7 @@ describe('registerSessionEventHandlers', () => {
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
   });
 
-  it('resyncs active messages for partial message.part.updated payloads', async () => {
-    vi.useFakeTimers();
+  it('resyncs active messages for partial message.part.updated payloads', () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(
@@ -785,50 +768,43 @@ describe('registerSessionEventHandlers', () => {
     const syncTodosFromMessages = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
-    try {
-      registerSessionEventHandlers({
-        getActiveSessionId: () => 'session-1',
-        getMessages: () => [],
-        handoffTodosToMessages: vi.fn().mockReturnValue(true),
-        upsertSession: vi.fn(),
-        setSessionCompacting: vi.fn(),
-        removeDeletedSessionTree: vi.fn(),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        markPendingAbort: vi.fn(),
-        clearPendingAbort: vi.fn(),
-        setSessionStatusEntry: vi.fn(),
-        clearUsageLimitOnResumedProgress: vi.fn(),
-        updateUsageLimitState: vi.fn(),
-        syncSession: vi.fn().mockResolvedValue(undefined),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSessionMessages,
-        applyUsageLimitNotice: vi.fn(),
-        syncTodosFromMessages,
-        shouldAutoApprovePermissions: () => false,
-        respondPermission: vi.fn().mockResolvedValue(undefined),
-        setDiffs: vi.fn(),
-        abortRemoteSession: vi.fn().mockResolvedValue(true),
-        logError: vi.fn(),
-      });
+    registerSessionEventHandlers({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [],
+      handoffTodosToMessages: vi.fn().mockReturnValue(true),
+      upsertSession: vi.fn(),
+      setSessionCompacting: vi.fn(),
+      removeDeletedSessionTree: vi.fn(),
+      shouldIgnorePendingAbortStatus: () => false,
+      hasPendingAbort: () => false,
+      markPendingAbort: vi.fn(),
+      clearPendingAbort: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      clearUsageLimitOnResumedProgress: vi.fn(),
+      updateUsageLimitState: vi.fn(),
+      syncSession: vi.fn().mockResolvedValue(undefined),
+      shouldResyncSessionAfterIdle: () => false,
+      syncSessionMessages,
+      applyUsageLimitNotice: vi.fn(),
+      syncTodosFromMessages,
+      shouldAutoApprovePermissions: () => false,
+      respondPermission: vi.fn().mockResolvedValue(undefined),
+      setDiffs: vi.fn(),
+      abortRemoteSession: vi.fn().mockResolvedValue(true),
+      logError: vi.fn(),
+    });
 
-      handlers.get('message.part.updated')?.({
-        properties: {
-          part: {
-            sessionID: 'session-1',
-            type: 'tool',
-          },
+    handlers.get('message.part.updated')?.({
+      properties: {
+        part: {
+          sessionID: 'session-1',
+          type: 'tool',
         },
-      });
+      },
+    });
 
-      expect(syncTodosFromMessages).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(100);
-
-      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(syncTodosFromMessages).not.toHaveBeenCalled();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('resyncs before applying complete part updates when the parent message is missing', async () => {
@@ -1562,134 +1538,200 @@ describe('registerSessionEventHandlers', () => {
     );
   });
 
-  it('marks progress without resyncing active messages from session.next text progress events', async () => {
-    vi.useFakeTimers();
+  it('marks progress without resyncing active messages from session.next text progress events', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
     const setSessionStatusEntry = vi.fn();
     const clearUsageLimitOnResumedProgress = vi.fn();
 
-    try {
-      registerSessionEventHandlers(
-        createDefaultDeps({
-          getActiveSessionId: () => 'session-1',
-          syncSessionMessages,
-          setSessionStatusEntry,
-          clearUsageLimitOnResumedProgress,
-        })
-      );
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+        setSessionStatusEntry,
+        clearUsageLimitOnResumedProgress,
+      })
+    );
 
-      markLoadingActivity.mockClear();
-      startLoading.mockClear();
+    markLoadingActivity.mockClear();
+    startLoading.mockClear();
 
-      handlers.get('session.next.text.delta')?.({
-        properties: {
-          sessionID: 'session-1',
-          text: 'streaming response',
-        },
-      });
+    handlers.get('session.next.text.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        textID: 'text-1',
+        delta: 'streaming response',
+      },
+    });
 
-      expect(markLoadingActivity).toHaveBeenCalledTimes(1);
-      expect(startLoading).toHaveBeenCalledTimes(1);
-      expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
-      expect(clearUsageLimitOnResumedProgress).toHaveBeenCalledWith('session-1', { type: 'busy' });
-      expect(syncSessionMessages).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(100);
-
-      expect(syncSessionMessages).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(markLoadingActivity).toHaveBeenCalledTimes(1);
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(clearUsageLimitOnResumedProgress).toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
-  it('skips the defensive active-message resync for in-order v2 progress events (seq present)', async () => {
-    vi.useFakeTimers();
+  it('skips the defensive active-message resync for in-order v2 progress events (seq present)', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.tool.called')?.({
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
+      seq: 1,
+    });
+    handlers.get('session.next.tool.called')?.({
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-2' },
+      seq: 2,
+    });
+
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('resyncs active messages when a v2 sequence gap reveals a missed event', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.tool.called')?.({
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
+      seq: 1,
+    });
+    // seq jumps from 1 to 3 - event 2 was missed, so a targeted resync is expected.
+    handlers.get('session.next.tool.called')?.({
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-3' },
+      seq: 3,
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledTimes(1);
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('keeps the defensive resync for ephemeral progress events that carry no seq', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
-    try {
-      registerSessionEventHandlers(
-        createDefaultDeps({
-          getActiveSessionId: () => 'session-1',
-          syncSessionMessages,
-        })
-      );
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        syncSessionMessages,
+      })
+    );
 
-      handlers.get('session.next.tool.called')?.({
-        properties: { sessionID: 'session-1', callID: 'call-1' },
-        seq: 1,
-      });
-      handlers.get('session.next.tool.called')?.({
-        properties: { sessionID: 'session-1', callID: 'call-2' },
-        seq: 2,
-      });
+    // Ephemeral streaming fragments (e.g. tool input deltas) carry no seq, so we cannot
+    // reason about gaps and keep the defensive resync.
+    handlers.get('session.next.tool.input.delta')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', delta: '{' },
+    });
 
-      await vi.advanceTimersByTimeAsync(100);
-
-      expect(syncSessionMessages).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
-  it('resyncs active messages when a v2 sequence gap reveals a missed event', async () => {
-    vi.useFakeTimers();
+  it('projects v2 text deltas without defensive message resync when the assistant exists', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
 
-    try {
-      registerSessionEventHandlers(
-        createDefaultDeps({
-          getActiveSessionId: () => 'session-1',
-          syncSessionMessages,
-        })
-      );
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+      })
+    );
 
-      handlers.get('session.next.tool.called')?.({
-        properties: { sessionID: 'session-1', callID: 'call-1' },
-        seq: 1,
-      });
-      // seq jumps from 1 to 3 — event 2 was missed, so a targeted resync is expected.
-      handlers.get('session.next.tool.called')?.({
-        properties: { sessionID: 'session-1', callID: 'call-3' },
-        seq: 3,
-      });
+    upsertPart.mockClear();
+    applyMessagePartDelta.mockClear();
 
-      await vi.advanceTimersByTimeAsync(100);
+    handlers.get('session.next.text.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        textID: 'text-1',
+        delta: 'Hello',
+      },
+    });
 
-      expect(syncSessionMessages).toHaveBeenCalledTimes(1);
-      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'text-1',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: 'text',
+        text: '',
+      })
+    );
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-1',
+      'text-1',
+      'Hello',
+      'session-1',
+      'text'
+    );
+    expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
-  it('keeps the defensive resync for ephemeral progress events that carry no seq', async () => {
-    vi.useFakeTimers();
+  it('projects v2 tool calls without defensive message resync when the assistant exists', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
 
-    try {
-      registerSessionEventHandlers(
-        createDefaultDeps({
-          getActiveSessionId: () => 'session-1',
-          syncSessionMessages,
-        })
-      );
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+      })
+    );
 
-      // Ephemeral streaming fragments (e.g. tool input deltas) carry no seq, so we cannot
-      // reason about gaps and keep the defensive resync.
-      handlers.get('session.next.tool.input.delta')?.({
-        properties: { sessionID: 'session-1', callID: 'call-1', delta: '{' },
-      });
+    upsertPart.mockClear();
 
-      await vi.advanceTimersByTimeAsync(100);
+    handlers.get('session.next.tool.called')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        callID: 'call-1',
+        tool: 'bash',
+        input: { command: 'npm test' },
+        timestamp: 10,
+      },
+    });
 
-      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'call-1',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'bash',
+        state: expect.objectContaining({
+          status: 'running',
+          input: { command: 'npm test' },
+          time: { start: 10 },
+        }),
+      })
+    );
+    expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
   it('ignores stale active progress events after the assistant already completed', () => {
