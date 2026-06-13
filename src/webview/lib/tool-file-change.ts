@@ -1,5 +1,5 @@
-import type { ToolPart, ToolState } from '../types';
-import { normalizePath } from './path-display';
+import type { FileDiff, Part, ToolPart, ToolState } from '../types';
+import { getWorkspaceRelativePath, isAbsolutePath, normalizePath } from './path-display';
 
 export type FileChangeKind = 'added' | 'edited' | 'removed' | 'moved';
 
@@ -323,4 +323,153 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
 
 export function getToolChangePath(part: ToolPart): string | null {
   return getToolFileChange(part.tool, part.state)?.path || null;
+}
+
+function diffCount(diff: FileDiff, primary: 'additions' | 'deletions', alias: string): number {
+  const record = diff as unknown as Record<string, unknown>;
+  const value = record[primary];
+  if (typeof value === 'number') return value;
+  const aliased = record[alias];
+  return typeof aliased === 'number' ? aliased : 0;
+}
+
+function diffKind(diff: FileDiff): FileChangeKind {
+  const before = (diff as unknown as Record<string, unknown>).before;
+  const after = (diff as unknown as Record<string, unknown>).after;
+  if (before === '' && typeof after === 'string' && after !== '') return 'added';
+  if (after === '' && typeof before === 'string' && before !== '') return 'removed';
+  return 'edited';
+}
+
+/**
+ * Build file changes from a session/message diff summary, deduplicated per file.
+ * This is the authoritative source the session list counts from, so anything
+ * derived from it stays in sync.
+ */
+export function getDiffFileChanges(diffs: readonly FileDiff[]): FileChange[] {
+  const byFile = new Map<string, FileChange>();
+  for (const diff of diffs) {
+    if (!diff || typeof diff.file !== 'string' || diff.file === '') continue;
+    const change = withDedupeKey({
+      kind: diffKind(diff),
+      path: diff.file,
+      additions: diffCount(diff, 'additions', 'added'),
+      deletions: diffCount(diff, 'deletions', 'removed'),
+    });
+    const key = normalizePath(diff.file);
+    const existing = byFile.get(key);
+    if (!existing) {
+      byFile.set(key, change);
+      continue;
+    }
+    existing.kind = change.kind;
+    existing.additions = (existing.additions ?? 0) + (change.additions ?? 0);
+    existing.deletions = (existing.deletions ?? 0) + (change.deletions ?? 0);
+  }
+  return [...byFile.values()];
+}
+
+// The same file is often reported twice — once by a tool (absolute path) and
+// once by a patch part (workspace-relative path). Treat them as one file when
+// the absolute form ends with the relative form.
+function isSameFileKey(a: string, b: string): boolean {
+  if (a === b) return true;
+  const aAbs = isAbsolutePath(a);
+  const bAbs = isAbsolutePath(b);
+  if (aAbs === bAbs) return false;
+  const [abs, rel] = aAbs ? [a, b] : [b, a];
+  return abs.endsWith(`/${rel}`);
+}
+
+function hasExtension(path: string): boolean {
+  // A dot in the final segment signals a file (extension, e.g. `app.ts`, or a
+  // dotfile, e.g. `.gitignore`); bare segments like `src/extension` are dirs.
+  const basename = path.slice(path.lastIndexOf('/') + 1);
+  return basename.includes('.');
+}
+
+type SummaryMessage = {
+  info?: { summary?: { diffs?: readonly FileDiff[] } | unknown };
+  parts: readonly Part[];
+};
+
+/**
+ * Collect the deduplicated set of file changes across a session's messages, in
+ * the order each file was first touched. This is the single enumeration shared
+ * by the session list count and the in-chat Files block, so the two agree.
+ *
+ * It folds together message-level diff summaries, file-changing tool calls, and
+ * patch parts. The same file is merged across absolute (tool) and relative
+ * (patch) path forms, line counts accumulate, and directory entries (no
+ * extension and no line counts) are dropped.
+ */
+export function getMessageFileChanges(
+  messages: readonly SummaryMessage[],
+  workspacePath?: string | null
+): FileChange[] {
+  const result: FileChange[] = [];
+
+  const keyFor = (change: FileChange) => {
+    const path = change.toPath || change.path;
+    return (getWorkspaceRelativePath(path, workspacePath) ?? normalizePath(path)).replace(
+      /^\.\//,
+      ''
+    );
+  };
+
+  const record = (change: FileChange) => {
+    const key = keyFor(change);
+    const existing = result.find((entry) => isSameFileKey(keyFor(entry), key));
+    if (!existing) {
+      result.push({ ...change });
+      return;
+    }
+    existing.kind = change.kind;
+    // Prefer the shorter (workspace-relative) path for display.
+    if ((change.toPath || change.path).length < (existing.toPath || existing.path).length) {
+      existing.path = change.path;
+      if (change.fromPath !== undefined) existing.fromPath = change.fromPath;
+      if (change.toPath !== undefined) existing.toPath = change.toPath;
+    }
+    existing.dedupeKey = change.dedupeKey;
+    existing.additions = (existing.additions ?? 0) + (change.additions ?? 0);
+    existing.deletions = (existing.deletions ?? 0) + (change.deletions ?? 0);
+  };
+
+  for (const message of messages) {
+    const summary = message.info?.summary;
+    const summaryDiffs =
+      summary && typeof summary === 'object' && 'diffs' in summary && Array.isArray(summary.diffs)
+        ? (summary.diffs as readonly FileDiff[])
+        : [];
+    for (const change of getDiffFileChanges(summaryDiffs)) record(change);
+
+    for (const part of message.parts) {
+      if (part.type === 'tool') {
+        for (const change of getToolFileChanges(part.tool, (part as ToolPart).state)) {
+          record(change);
+        }
+        continue;
+      }
+      if (part.type === 'patch') {
+        for (const file of part.files) {
+          if (file) record(withDedupeKey({ kind: 'edited', path: file }));
+        }
+      }
+    }
+  }
+
+  // Drop directory entries: paths that are an ancestor of another changed path,
+  // or that have no file extension and no line counts. Real edited files keep an
+  // extension or carry actual +/- counts.
+  const keys = result.map(keyFor);
+  return result.filter((change, index) => {
+    const key = keys[index];
+    const isAncestor = keys.some(
+      (other, otherIndex) => otherIndex !== index && other.startsWith(`${key}/`)
+    );
+    if (isAncestor) return false;
+    const hasCounts = (change.additions ?? 0) > 0 || (change.deletions ?? 0) > 0;
+    return hasExtension(key) || hasCounts;
+  });
 }

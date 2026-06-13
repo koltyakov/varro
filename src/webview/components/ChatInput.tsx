@@ -126,6 +126,7 @@ import {
   type ComposerSnapshot,
 } from '../lib/composer-history';
 import { TodoList } from './TodoList';
+import { ChangedFilesList } from './ChangedFilesList';
 import { ImagePreviewOverlay, createImagePreviewEffect, type PreviewImage } from './ImagePreview';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
@@ -2160,6 +2161,10 @@ export function ChatInput() {
 
       <Show when={state.todos.length > 0 && !showModelPicker() && !editingMessage()}>
         <TodoList />
+      </Show>
+
+      <Show when={!showModelPicker() && !editingMessage()}>
+        <ChangedFilesList />
       </Show>
 
       <Show when={editingMessage()}>

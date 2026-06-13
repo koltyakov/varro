@@ -3325,6 +3325,129 @@ body.vscode-light
   color: var(--color-vscode-fg-soft);
 }
 
+.changed-files-lines {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.changed-files-list {
+  /* Show at most ~5 rows, then scroll. */
+  max-height: 124px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Bleed through the block's horizontal padding (11px) so the scrollbar hugs
+     the right edge. `scrollbar-gutter: both-edges` reserves matching space on
+     the left, keeping the hover background symmetric whether or not the
+     scrollbar is visible. */
+  margin-left: -11px;
+  margin-right: -11px;
+  padding-left: 0;
+  padding-right: 0;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable both-edges;
+  scrollbar-color: transparent transparent;
+}
+
+.changed-files-list:hover {
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 18%, transparent) transparent;
+}
+
+.changed-files-item {
+  padding: 0;
+}
+
+.changed-files-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 20px;
+  padding: 2px 11px;
+  border-radius: 5px;
+  text-align: left;
+  color: inherit;
+}
+
+.changed-files-row-button {
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.changed-files-row-button:hover {
+  background: color-mix(in srgb, var(--color-vscode-muted) 16%, transparent);
+}
+
+.changed-files-row-button:hover .changed-files-name {
+  text-decoration: underline;
+}
+
+.changed-files-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  font-family: var(--vscode-editor-font-family, monospace);
+  background: color-mix(in srgb, var(--color-vscode-muted) 22%, transparent);
+  color: var(--color-vscode-fg-soft);
+}
+
+.changed-files-badge.is-added {
+  background: color-mix(in srgb, var(--color-vscode-lines-add) 22%, transparent);
+  color: var(--color-vscode-lines-add);
+}
+
+.changed-files-badge.is-edited {
+  background: color-mix(in srgb, var(--color-vscode-accent) 20%, transparent);
+  color: var(--color-vscode-accent);
+}
+
+.changed-files-badge.is-removed {
+  background: color-mix(in srgb, var(--color-vscode-lines-del) 22%, transparent);
+  color: var(--color-vscode-lines-del);
+}
+
+.changed-files-badge.is-moved {
+  background: color-mix(in srgb, var(--color-vscode-muted) 24%, transparent);
+  color: var(--color-vscode-fg-soft);
+}
+
+.changed-files-path {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changed-files-dir {
+  color: color-mix(in srgb, var(--color-vscode-muted) 85%, transparent);
+}
+
+.changed-files-name {
+  color: var(--color-vscode-fg);
+}
+
+.changed-files-item.kind-removed .changed-files-name {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-vscode-muted) 55%, transparent);
+}
+
+.changed-files-item-lines {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .chat-queue-container {
   display: flex;
   flex-direction: column;

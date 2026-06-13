@@ -29,9 +29,9 @@ import {
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry } from '../../../shared/protocol';
-import type { Part, Session, ToolPart } from '../../types';
+import type { Part, Session } from '../../types';
 import { client } from '../../lib/client';
-import { getToolFileChanges } from '../../lib/tool-file-change';
+import { getMessageFileChanges } from '../../lib/tool-file-change';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatRelativeAge } from '../../lib/message-metrics';
@@ -87,6 +87,85 @@ const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
 
 function getDiffSummaryKey(sessionId: string, updated: number): string {
   return `${sessionId}:${updated}`;
+}
+
+// Module-scoped so cached diff summaries survive the session list being
+// unmounted and remounted (navigating away and back). Persisting the cache and
+// keeping the last-known stats while refreshing avoids the "0 0 0 -> numbers"
+// flash on every return.
+const [sessionDiffSummaryCache, setSessionDiffSummaryCache] = createSignal<
+  Record<string, SessionDiffSummaryCacheEntry | undefined>
+>({});
+let activeDiffSummaryRequests = 0;
+const diffSummaryQueue: SessionDiffSummaryRequest[] = [];
+const queuedDiffSummaryKeys = new Set<string>();
+
+function enqueueDiffSummaryRequest(session: Session) {
+  if (!shouldLoadSessionDiffSummary(session)) return;
+
+  const cached = sessionDiffSummaryCache()[session.id];
+  // Already resolved for this exact revision — nothing to do. Stale or errored
+  // entries fall through and refresh.
+  if (cached?.updated === session.time.updated && cached.status === 'ready') return;
+
+  const key = getDiffSummaryKey(session.id, session.time.updated);
+  if (queuedDiffSummaryKeys.has(key)) return;
+
+  queuedDiffSummaryKeys.add(key);
+  diffSummaryQueue.push({ sessionId: session.id, updated: session.time.updated });
+  setSessionDiffSummaryCache((cache) => ({
+    ...cache,
+    // Keep showing the previous numbers while the refresh is in flight.
+    [session.id]: {
+      status: 'loading',
+      updated: session.time.updated,
+      stats: cache[session.id]?.stats ?? null,
+    },
+  }));
+  pumpDiffSummaryQueue();
+}
+
+function pumpDiffSummaryQueue() {
+  while (
+    activeDiffSummaryRequests < SESSION_DIFF_SUMMARY_CONCURRENCY &&
+    diffSummaryQueue.length > 0
+  ) {
+    const request = diffSummaryQueue.shift()!;
+    queuedDiffSummaryKeys.delete(getDiffSummaryKey(request.sessionId, request.updated));
+
+    const current = state.sessions.find((session) => session.id === request.sessionId);
+    if (!current || current.time.updated !== request.updated) continue;
+
+    activeDiffSummaryRequests += 1;
+    void client.session
+      .messages(request.sessionId)
+      .then((messages) => {
+        const latest = state.sessions.find((session) => session.id === request.sessionId);
+        if (!latest || latest.time.updated !== request.updated) return;
+        setSessionDiffSummaryCache((cache) => ({
+          ...cache,
+          [request.sessionId]: {
+            status: 'ready',
+            updated: request.updated,
+            stats: getMessageToolSummaryStats(messages),
+          },
+        }));
+      })
+      .catch(() => {
+        setSessionDiffSummaryCache((cache) => ({
+          ...cache,
+          [request.sessionId]: {
+            status: 'error',
+            updated: request.updated,
+            stats: cache[request.sessionId]?.stats ?? null,
+          },
+        }));
+      })
+      .finally(() => {
+        activeDiffSummaryRequests -= 1;
+        pumpDiffSummaryQueue();
+      });
+  }
 }
 
 export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
@@ -247,47 +326,18 @@ export function getDiffSummaryStats(diffs: readonly unknown[]): SessionSummarySt
 export function getMessageToolSummaryStats(
   messages: readonly { info?: { summary?: unknown }; parts: readonly Part[] }[]
 ): SessionSummaryStats | null {
-  const files = new Set<string>();
+  // Derive from the shared file-change enumeration so the session list count
+  // matches the in-chat Files block exactly.
+  const changes = getMessageFileChanges(messages, state.editorContext.workspacePath);
+  if (changes.length === 0) return null;
+
   let additions = 0;
   let deletions = 0;
-
-  for (const message of messages) {
-    const messageSummary = message.info?.summary;
-    const messageDiffs =
-      messageSummary &&
-      typeof messageSummary === 'object' &&
-      'diffs' in messageSummary &&
-      Array.isArray(messageSummary.diffs)
-        ? messageSummary.diffs
-        : [];
-    for (const diff of messageDiffs) {
-      if (!diff || typeof diff !== 'object') continue;
-      const file = (diff as Record<string, unknown>).file;
-      if (typeof file === 'string' && file) files.add(file);
-      additions += readDiffCount(diff, 'additions', 'added');
-      deletions += readDiffCount(diff, 'deletions', 'removed');
-    }
-
-    for (const part of message.parts) {
-      if (part.type === 'patch') {
-        for (const file of part.files) {
-          if (file) files.add(file);
-        }
-        continue;
-      }
-
-      if (part.type === 'tool') {
-        for (const change of getToolFileChanges(part.tool, (part as ToolPart).state)) {
-          if (change.path) files.add(change.path);
-          additions += change.additions ?? 0;
-          deletions += change.deletions ?? 0;
-        }
-      }
-    }
+  for (const change of changes) {
+    additions += change.additions ?? 0;
+    deletions += change.deletions ?? 0;
   }
-
-  if (files.size === 0 && additions === 0 && deletions === 0) return null;
-  return { files: files.size, additions, deletions } satisfies SessionSummaryStats;
+  return { files: changes.length, additions, deletions } satisfies SessionSummaryStats;
 }
 
 function hasSessionSummaryEdits(stats: SessionSummaryStats) {
@@ -549,80 +599,9 @@ export function SessionListView(props: {
   let recentHeaderRef: HTMLDivElement | undefined;
   let archiveHeaderRef: HTMLDivElement | undefined;
   let recycleBinHeaderRef: HTMLDivElement | undefined;
-  let disposed = false;
-  let activeDiffSummaryRequests = 0;
-  const diffSummaryQueue: SessionDiffSummaryRequest[] = [];
-  const queuedDiffSummaryKeys = new Set<string>();
-  const [sessionDiffSummaryCache, setSessionDiffSummaryCache] = createSignal<
-    Record<string, SessionDiffSummaryCacheEntry | undefined>
-  >({});
-
-  onCleanup(() => {
-    disposed = true;
-  });
 
   const normalizedSearchQuery = createMemo(() => searchQuery().trim().toLowerCase());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
-
-  const enqueueDiffSummaryRequest = (session: Session) => {
-    if (!shouldLoadSessionDiffSummary(session)) return;
-
-    const cached = sessionDiffSummaryCache()[session.id];
-    if (cached?.updated === session.time.updated) return;
-
-    const key = getDiffSummaryKey(session.id, session.time.updated);
-    if (queuedDiffSummaryKeys.has(key)) return;
-
-    queuedDiffSummaryKeys.add(key);
-    diffSummaryQueue.push({ sessionId: session.id, updated: session.time.updated });
-    setSessionDiffSummaryCache((cache) => ({
-      ...cache,
-      [session.id]: { status: 'loading', updated: session.time.updated, stats: null },
-    }));
-    pumpDiffSummaryQueue();
-  };
-  const pumpDiffSummaryQueue = () => {
-    if (disposed) return;
-
-    while (
-      activeDiffSummaryRequests < SESSION_DIFF_SUMMARY_CONCURRENCY &&
-      diffSummaryQueue.length > 0
-    ) {
-      const request = diffSummaryQueue.shift()!;
-      queuedDiffSummaryKeys.delete(getDiffSummaryKey(request.sessionId, request.updated));
-
-      const current = state.sessions.find((session) => session.id === request.sessionId);
-      if (!current || current.time.updated !== request.updated) continue;
-
-      activeDiffSummaryRequests += 1;
-      void client.session
-        .messages(request.sessionId)
-        .then((messages) => {
-          if (disposed) return;
-          const latest = state.sessions.find((session) => session.id === request.sessionId);
-          if (!latest || latest.time.updated !== request.updated) return;
-          setSessionDiffSummaryCache((cache) => ({
-            ...cache,
-            [request.sessionId]: {
-              status: 'ready',
-              updated: request.updated,
-              stats: getMessageToolSummaryStats(messages),
-            },
-          }));
-        })
-        .catch(() => {
-          if (disposed) return;
-          setSessionDiffSummaryCache((cache) => ({
-            ...cache,
-            [request.sessionId]: { status: 'error', updated: request.updated, stats: null },
-          }));
-        })
-        .finally(() => {
-          activeDiffSummaryRequests -= 1;
-          pumpDiffSummaryQueue();
-        });
-    }
-  };
 
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const visibleSessionsForList = createMemo(() => {
