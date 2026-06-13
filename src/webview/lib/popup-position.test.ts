@@ -1,13 +1,32 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   alignPopupToBoundary,
-  clampAnchoredPopupHeight,
   clampPopupToViewport,
+  flipPopupDownIfNeeded,
   observePopupViewport,
+  placeDropdownAnchor,
 } from './popup-position';
 
 const originalInnerWidth = window.innerWidth;
 const originalInnerHeight = window.innerHeight;
+
+function mockRect(el: HTMLElement, rect: { top: number; bottom: number }) {
+  vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+    x: 40,
+    y: rect.top,
+    top: rect.top,
+    right: 280,
+    bottom: rect.bottom,
+    left: 40,
+    width: 240,
+    height: rect.bottom - rect.top,
+    toJSON: () => ({}),
+  });
+}
+
+function mockOffsetParent(el: HTMLElement, parent: HTMLElement | null) {
+  Object.defineProperty(el, 'offsetParent', { get: () => parent, configurable: true });
+}
 
 afterEach(() => {
   window.innerWidth = originalInnerWidth;
@@ -16,42 +35,103 @@ afterEach(() => {
 });
 
 describe('popup-position', () => {
-  it('leaves anchored popups uncapped when they fit above the anchor', () => {
-    const el = document.createElement('div');
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-      x: 0,
-      y: 120,
-      top: 120,
-      right: 280,
-      bottom: 420,
-      left: 40,
-      width: 240,
-      height: 300,
-      toJSON: () => ({}),
-    });
+  it('leaves dropdown menus uncapped and anchored above when they fit', () => {
+    const anchor = document.createElement('div');
+    const menu = document.createElement('div');
+    mockOffsetParent(anchor, null);
+    mockRect(menu, { top: 120, bottom: 420 });
 
-    clampAnchoredPopupHeight(el);
+    placeDropdownAnchor(anchor, menu, 10);
 
-    expect(el.style.maxHeight).toBe('');
+    expect(menu.style.maxHeight).toBe('');
+    expect(anchor.style.bottom).toBe('100%');
+    expect(anchor.style.paddingBottom).toBe('10px');
   });
 
-  it('caps anchored popups to the space above their bottom edge', () => {
-    const el = document.createElement('div');
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-      x: 0,
-      y: -24,
-      top: -24,
-      right: 280,
-      bottom: 420,
-      left: 40,
-      width: 240,
-      height: 444,
-      toJSON: () => ({}),
-    });
+  it('caps dropdown menus to the space above their bottom edge', () => {
+    const anchor = document.createElement('div');
+    const menu = document.createElement('div');
+    mockOffsetParent(anchor, null);
+    mockRect(menu, { top: -24, bottom: 420 });
 
-    clampAnchoredPopupHeight(el);
+    placeDropdownAnchor(anchor, menu, 10);
 
-    expect(el.style.maxHeight).toBe('412px');
+    expect(menu.style.maxHeight).toBe('412px');
+    expect(anchor.style.bottom).toBe('100%');
+  });
+
+  it('flips dropdown menus below their host when there is more room below', () => {
+    window.innerHeight = 600;
+
+    const host = document.createElement('div');
+    mockRect(host, { top: 100, bottom: 160 });
+
+    const anchor = document.createElement('div');
+    const menu = document.createElement('div');
+    mockOffsetParent(anchor, host);
+    mockRect(menu, { top: -24, bottom: 80 });
+
+    placeDropdownAnchor(anchor, menu, 10);
+
+    expect(anchor.style.top).toBe('100%');
+    expect(anchor.style.bottom).toBe('auto');
+    expect(anchor.style.paddingTop).toBe('10px');
+    expect(anchor.style.paddingBottom).toBe('0px');
+  });
+
+  it('keeps upward popups in place when they are not clipped', () => {
+    const trigger = document.createElement('div');
+    mockRect(trigger, { top: 400, bottom: 424 });
+
+    const popup = document.createElement('div');
+    mockOffsetParent(popup, trigger);
+    mockRect(popup, { top: 278, bottom: 398 });
+
+    expect(flipPopupDownIfNeeded(popup)).toBe(false);
+    expect(popup.style.top).toBe('');
+    expect(popup.style.bottom).toBe('');
+  });
+
+  it('flips clipped upward popups below their trigger, mirroring the gap', () => {
+    window.innerHeight = 600;
+
+    const trigger = document.createElement('div');
+    mockRect(trigger, { top: 82, bottom: 104 });
+
+    const popup = document.createElement('div');
+    mockOffsetParent(popup, trigger);
+    mockRect(popup, { top: -40, bottom: 80 });
+
+    expect(flipPopupDownIfNeeded(popup)).toBe(true);
+    expect(popup.style.top).toBe('calc(100% + 2px)');
+    expect(popup.style.bottom).toBe('auto');
+  });
+
+  it('treats scrollable ancestors as the top bound when flipping', () => {
+    window.innerHeight = 600;
+
+    const list = document.createElement('div');
+    list.style.overflowY = 'auto';
+    document.body.appendChild(list);
+    mockRect(list, { top: 50, bottom: 580 });
+
+    const trigger = document.createElement('div');
+    list.appendChild(trigger);
+    mockRect(trigger, { top: 162, bottom: 184 });
+
+    const popup = document.createElement('div');
+    trigger.appendChild(popup);
+    mockOffsetParent(popup, trigger);
+    // Above the viewport-top margin, but inside the zone the sticky header
+    // overlays (the list starts at y=50).
+    mockRect(popup, { top: 40, bottom: 160 });
+
+    try {
+      expect(flipPopupDownIfNeeded(popup)).toBe(true);
+      expect(popup.style.top).toBe('calc(100% + 2px)');
+    } finally {
+      list.remove();
+    }
   });
 
   it('translates free-floating popups horizontally and caps vertical overflow', () => {

@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { getSelectedMcpsForSession, state } from '../lib/state';
-import { clampAnchoredPopupHeight, observePopupViewport } from '../lib/popup-position';
+import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
 
 export function McpPicker(props: {
   sessionId: string | null;
@@ -8,6 +8,7 @@ export function McpPicker(props: {
   onClose: () => void;
   popoverRef?: (el: HTMLDivElement) => void;
 }) {
+  let anchorRef: HTMLDivElement | undefined;
   let menuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
 
@@ -81,7 +82,7 @@ export function McpPicker(props: {
 
   onMount(() => {
     const reposition = () => {
-      if (menuRef) clampAnchoredPopupHeight(menuRef);
+      if (anchorRef && menuRef) placeDropdownAnchor(anchorRef, menuRef, 10);
     };
 
     if (allItems().length > 8) searchInputRef?.focus();
@@ -93,6 +94,9 @@ export function McpPicker(props: {
 
   return (
     <div
+      ref={(el) => {
+        anchorRef = el;
+      }}
       class="dropdown-anchor absolute inset-x-0 z-50"
       onClick={props.onClose}
       style={{ bottom: '100%', 'padding-bottom': '10px' }}

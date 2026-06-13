@@ -1945,7 +1945,7 @@ describe('getSlashCommands', () => {
       'connect',
       'export',
       'init',
-      'mcps',
+      'mcp',
       'models',
       'new',
       'ralph',

@@ -34,7 +34,11 @@ import {
 } from '../lib/state';
 import { isAssistantMessage, sumAssistantTokens } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
-import { getUserMessageEditText, type AssistantFileEditStackGroup } from './Message';
+import {
+  getUserMessageEditContext,
+  getUserMessageEditText,
+  type AssistantFileEditStackGroup,
+} from './Message';
 import { editingMessage, startEditingMessage } from '../lib/message-edit-state';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
@@ -1794,7 +1798,12 @@ export function MessageList() {
     if (!editText.trim()) return;
     setAutoScroll(false);
     scrollMessageIntoView(preview);
-    startEditingMessage(entry.info.id, entry.info.sessionID, editText);
+    startEditingMessage(
+      entry.info.id,
+      entry.info.sessionID,
+      editText,
+      getUserMessageEditContext(entry.parts)
+    );
   }
 
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {

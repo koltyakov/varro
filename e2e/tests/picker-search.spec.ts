@@ -43,7 +43,7 @@ test('filters MCPs in the MCP picker and shows a no-match state', async ({ page 
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
-  await composer.fill('/mcps');
+  await composer.fill('/mcp');
   await page.keyboard.press('Enter');
 
   const search = page.getByLabel('Search MCPs');
@@ -61,7 +61,7 @@ test('supports keyboard navigation and escape in the MCP picker', async ({ page 
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
-  await composer.fill('/mcps');
+  await composer.fill('/mcp');
   await page.keyboard.press('Enter');
 
   const search = page.getByLabel('Search MCPs');
@@ -75,7 +75,7 @@ test('supports keyboard navigation and escape in the MCP picker', async ({ page 
     .filter({ has: page.getByText('sentry', { exact: true }) });
   await expect(sentryRow).toBeVisible();
 
-  await composer.fill('/mcps');
+  await composer.fill('/mcp');
   await page.keyboard.press('Enter');
   await expect(search).toBeVisible();
   await expect(sentryRow).toBeVisible();

@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
 import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
-import { clampAnchoredPopupHeight, observePopupViewport } from '../lib/popup-position';
+import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
 import {
   modelSupportsTools,
   modelSupportsVariants,
@@ -25,6 +25,7 @@ export function ModelPicker(props: {
 }) {
   const currentSelection = () =>
     props.currentSelection !== undefined ? props.currentSelection : state.selectedModel;
+  let anchorRef: HTMLDivElement | undefined;
   let menuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   const visibleProviders = createMemo(() => getVisibleProviders(state.providers));
@@ -161,7 +162,7 @@ export function ModelPicker(props: {
 
   onMount(() => {
     const reposition = () => {
-      if (menuRef) clampAnchoredPopupHeight(menuRef);
+      if (anchorRef && menuRef) placeDropdownAnchor(anchorRef, menuRef, props.popupGap ?? 10);
     };
 
     if (showSearch()) {
@@ -180,6 +181,9 @@ export function ModelPicker(props: {
 
   return (
     <div
+      ref={(el) => {
+        anchorRef = el;
+      }}
       class="dropdown-anchor absolute inset-x-0 z-50"
       onClick={props.onClose}
       style={{ bottom: '100%', 'padding-bottom': `${props.popupGap ?? 10}px` }}

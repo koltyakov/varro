@@ -1,6 +1,11 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { DocumentIcon } from '../DocumentIcon';
 import { FolderIcon } from '../FolderIcon';
+import {
+  clampPopupToViewport,
+  flipPopupDownIfNeeded,
+  observePopupViewport,
+} from '../../lib/popup-position';
 import type { DroppedFile } from '../../../shared/protocol';
 
 export type MentionCompletionItem =
@@ -79,7 +84,16 @@ export function CompletionMenu(props: {
   onMount(() => {
     updateScrollbarInset();
 
-    if (typeof ResizeObserver === 'undefined' || !menuRef) return;
+    if (!menuRef) return;
+
+    const reposition = () => {
+      if (!menuRef) return;
+      flipPopupDownIfNeeded(menuRef);
+      clampPopupToViewport(menuRef);
+    };
+    onCleanup(observePopupViewport(menuRef, reposition));
+
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => updateScrollbarInset());
     observer.observe(menuRef);
     onCleanup(() => observer.disconnect());

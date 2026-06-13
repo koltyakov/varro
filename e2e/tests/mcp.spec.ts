@@ -46,7 +46,7 @@ test('restores preselected MCPs after reload', async ({ page }) => {
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
-  await composer.fill('/mcps');
+  await composer.fill('/mcp');
   await page.keyboard.press('Enter');
 
   await expect(page.getByRole('button', { name: /chrome connected/i })).toBeVisible();
@@ -54,7 +54,7 @@ test('restores preselected MCPs after reload', async ({ page }) => {
 
   await page.reload();
   await composer.click();
-  await composer.fill('/mcps');
+  await composer.fill('/mcp');
   await page.keyboard.press('Enter');
 
   await expect(page.getByRole('button', { name: /chrome connected/i })).toBeVisible();

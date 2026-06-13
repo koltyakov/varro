@@ -2757,6 +2757,7 @@ export function getSlashCommands(props: {
     'agents',
     'models',
     'mcp',
+    'mcps',
     'connect',
     'attach',
     'files',
@@ -2804,8 +2805,8 @@ export function getSlashCommands(props: {
       action: () => props.onOpenModels(),
     },
     {
-      name: 'mcps',
-      aliases: ['mcp'],
+      name: 'mcp',
+      aliases: ['mcps'],
       description: 'Open the MCP picker for this session',
       action: () => props.onOpenMcps(),
     },

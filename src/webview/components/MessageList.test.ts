@@ -2208,6 +2208,83 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
+  it('restores image attachments when editing from the sticky prompt preview', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView,
+    });
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      {
+        info: userMessage('user-2'),
+        parts: [
+          textPart('text-3', 'Still is shown as this. Before switching to [Image 2]'),
+          filePart('image-2', 'Image 2'),
+        ],
+      },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    const rectMap = new Map<Element, DOMRect>();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    const assistant2Row = container?.querySelector(
+      '[data-msg-id="assistant-2"]'
+    ) as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    expect(user2Row).toBeInstanceOf(HTMLDivElement);
+    expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
+
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
+    rectMap.set(list!, new DOMRect(0, 0, 500, 500));
+    rectMap.set(user2Row!, new DOMRect(0, -80, 500, 52));
+    rectMap.set(assistant2Row!, new DOMRect(0, 20, 500, 320));
+
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    expect(sticky).toBeInstanceOf(HTMLDivElement);
+
+    sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(editingMessage()).toEqual({
+      messageId: 'user-2',
+      sessionId: 'session-1',
+      text: 'Still is shown as this. Before switching to [Image 2]',
+      context: {
+        files: [],
+        images: [
+          {
+            id: 'image-2',
+            url: 'https://example.test/image-2.png',
+            mime: 'image/png',
+            filename: 'Image 2',
+            size: 0,
+          },
+        ],
+        terminalSelection: null,
+      },
+    });
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+
+    animationFrames.restore();
+  });
+
   it('hides the sticky preview as soon as any part of the prompt is visible outside it', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');

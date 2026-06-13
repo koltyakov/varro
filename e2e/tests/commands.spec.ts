@@ -18,7 +18,7 @@ test('supports slash commands for sessions and settings-adjacent pickers', async
   await expect(page.getByText('OpenCode Go', { exact: true })).toBeVisible();
 
   await composer.click();
-  await composer.fill('/mcps');
+  await composer.fill('/mcp');
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', { name: /chrome connected/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /playwright disabled/i })).toBeVisible();

@@ -5,6 +5,7 @@ import { getProviderIcon } from '../../lib/provider-icons';
 import {
   alignPopupToBoundary,
   clampPopupToViewport,
+  flipPopupDownIfNeeded,
   observePopupViewport,
 } from '../../lib/popup-position';
 import { PermissionModeIcon } from './PermissionModeIcon';
@@ -56,11 +57,14 @@ export function PermissionModePicker(props: {
   let popupEl: HTMLDivElement | undefined;
 
   createEffect(() => {
-    if (!props.showPicker || !popupEl || !props.boundaryRef) return;
+    if (!props.showPicker || !popupEl) return;
 
     const reposition = () => {
-      if (!popupEl || !props.boundaryRef) return;
-      alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+      if (!popupEl) return;
+      flipPopupDownIfNeeded(popupEl);
+      if (props.boundaryRef) {
+        alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+      }
       clampPopupToViewport(popupEl);
     };
 
@@ -122,6 +126,26 @@ export function AgentPicker(props: {
   onSelect: (agent: Agent) => void;
   onFocusIndex: (index: number) => void;
 }) {
+  let popupEl: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!props.showPicker || !popupEl) return;
+
+    const reposition = () => {
+      if (!popupEl) return;
+      flipPopupDownIfNeeded(popupEl);
+      clampPopupToViewport(popupEl);
+    };
+
+    onCleanup(observePopupViewport(popupEl, reposition));
+  });
+
+  const setPopoverRef = (el: HTMLDivElement) => {
+    popupEl = el;
+    const forwarded = props.popoverRef;
+    if (typeof forwarded === 'function') forwarded(el);
+  };
+
   return (
     <div style={{ position: 'relative' }}>
       <button
@@ -135,7 +159,7 @@ export function AgentPicker(props: {
       </button>
       <Show when={props.showPicker}>
         <div
-          ref={props.popoverRef}
+          ref={setPopoverRef}
           class="toolbar-popover agent-popover"
           onClick={(e) => e.stopPropagation()}
         >
@@ -179,11 +203,14 @@ export function VariantPicker(props: {
   let popupEl: HTMLDivElement | undefined;
 
   createEffect(() => {
-    if (!props.showPicker || !popupEl || !props.boundaryRef) return;
+    if (!props.showPicker || !popupEl) return;
 
     const reposition = () => {
-      if (!popupEl || !props.boundaryRef) return;
-      alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+      if (!popupEl) return;
+      flipPopupDownIfNeeded(popupEl);
+      if (props.boundaryRef) {
+        alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
+      }
       clampPopupToViewport(popupEl);
     };
 

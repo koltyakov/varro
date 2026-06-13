@@ -1,4 +1,25 @@
 /**
+ * Top edge of the visually usable area for a popup, in viewport coordinates.
+ *
+ * The viewport top alone is not a safe bound: when the composer relocates
+ * inline for message editing it lives inside the scrollable message list,
+ * and the sticky chat header stacks above popups. Scrollable ancestors mark
+ * where that chrome begins, so popups are kept below it.
+ */
+function getPopupTopBound(el: HTMLElement, margin: number): number {
+  let bound = margin;
+  let node = el.parentElement;
+  while (node && node !== document.body) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === 'auto' || overflowY === 'scroll') {
+      bound = Math.max(bound, node.getBoundingClientRect().top + margin);
+    }
+    node = node.parentElement;
+  }
+  return bound;
+}
+
+/**
  * Adjust an absolutely positioned popup so it stays within the viewport.
  *
  * Resets any prior inline shifts before measuring, then applies horizontal
@@ -23,8 +44,9 @@ export function clampPopupToViewport(el: HTMLElement, margin = 8): void {
     dx += margin - (rect.left + dx);
   }
 
-  if (rect.top < margin) {
-    dy = margin - rect.top;
+  const topBound = getPopupTopBound(el, margin);
+  if (rect.top < topBound) {
+    dy = topBound - rect.top;
   }
 
   const transforms: string[] = [];
@@ -67,20 +89,82 @@ export function alignPopupToBoundary(
 }
 
 /**
- * Cap an upward-opening popup to the space available above its anchored bottom edge.
+ * Flip an upward-opening popup (anchored `bottom: 100%` inside a relative
+ * trigger wrapper) to open downward when it would be clipped above and there
+ * is more room below the trigger. Returns whether the popup now opens down.
  *
- * This preserves the popup's bottom alignment and only enables scrolling when the
- * natural height would overflow past the top viewport margin.
+ * Resets any previous flip before measuring so the stylesheet's upward
+ * anchoring is what gets measured, and mirrors the popup's natural gap from
+ * its trigger when flipped.
  */
-export function clampAnchoredPopupHeight(el: HTMLElement, margin = 8): void {
-  el.style.maxHeight = '';
+export function flipPopupDownIfNeeded(el: HTMLElement, margin = 8): boolean {
+  el.style.top = '';
+  el.style.bottom = '';
+
+  const anchor = el.offsetParent;
+  if (!(anchor instanceof HTMLElement)) return false;
 
   const rect = el.getBoundingClientRect();
-  const maxHeight = Math.max(0, rect.bottom - margin);
+  const topBound = getPopupTopBound(el, margin);
+  if (rect.top >= topBound) return false;
 
-  if (rect.top < margin) {
-    el.style.maxHeight = `${maxHeight}px`;
+  const anchorRect = anchor.getBoundingClientRect();
+  const spaceAbove = anchorRect.top - topBound;
+  const spaceBelow = window.innerHeight - margin - anchorRect.bottom;
+  if (spaceBelow <= spaceAbove) return false;
+
+  const gap = Math.max(0, Math.round(anchorRect.top - rect.bottom));
+  el.style.bottom = 'auto';
+  el.style.top = `calc(100% + ${gap}px)`;
+  return true;
+}
+
+/**
+ * Position a full-width dropdown (a `.dropdown-anchor` wrapping a
+ * `.dropdown-menu`) that opens above its host input container by default.
+ *
+ * Flips the anchor below the host when the menu would be clipped above and
+ * there is more room below, moving the gap padding to the matching side, and
+ * caps the menu height to whichever side it ends up on.
+ */
+export function placeDropdownAnchor(
+  anchorEl: HTMLElement,
+  menuEl: HTMLElement,
+  gap: number,
+  margin = 8
+): void {
+  anchorEl.style.bottom = '100%';
+  anchorEl.style.top = 'auto';
+  anchorEl.style.paddingTop = '0px';
+  anchorEl.style.paddingBottom = `${gap}px`;
+  menuEl.style.maxHeight = '';
+
+  const rect = menuEl.getBoundingClientRect();
+  const topBound = getPopupTopBound(menuEl, margin);
+  if (rect.top >= topBound) return;
+
+  const host = anchorEl.offsetParent instanceof HTMLElement ? anchorEl.offsetParent : null;
+  if (host) {
+    const hostRect = host.getBoundingClientRect();
+    const bottomBound = window.innerHeight - margin;
+    const spaceAbove = hostRect.top - topBound;
+    const spaceBelow = bottomBound - hostRect.bottom;
+    if (spaceBelow > spaceAbove) {
+      anchorEl.style.bottom = 'auto';
+      anchorEl.style.top = '100%';
+      anchorEl.style.paddingTop = `${gap}px`;
+      anchorEl.style.paddingBottom = '0px';
+      const flippedRect = menuEl.getBoundingClientRect();
+      if (flippedRect.bottom > bottomBound) {
+        menuEl.style.maxHeight = `${Math.max(0, bottomBound - flippedRect.top)}px`;
+      }
+      return;
+    }
   }
+
+  // Stay anchored above; cap the menu to the space between the top bound and
+  // its bottom edge so it scrolls instead of escaping the safe area.
+  menuEl.style.maxHeight = `${Math.max(0, rect.bottom - topBound)}px`;
 }
 
 export function observePopupViewport(el: HTMLElement, reposition: () => void): () => void {

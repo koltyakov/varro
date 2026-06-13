@@ -3,6 +3,7 @@ import { formatNumber } from '../../lib/message-metrics';
 import {
   alignPopupToBoundary,
   clampPopupToViewport,
+  flipPopupDownIfNeeded,
   observePopupViewport,
 } from '../../lib/popup-position';
 
@@ -51,6 +52,7 @@ export function ContextPopup(props: {
 
     const reposition = () => {
       if (!popupEl || !props.boundaryRef) return;
+      flipPopupDownIfNeeded(popupEl);
       alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'right');
       clampPopupToViewport(popupEl);
     };

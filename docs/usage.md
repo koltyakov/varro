@@ -81,7 +81,7 @@ Current built-in slash commands include:
 - `/skills` browses skill commands loaded from OpenCode
 - `/sessions` or `/resume` opens the session list
 - `/models` opens the model picker
-- `/mcps` or `/mcp` opens the MCP picker for the current session
+- `/mcp` or `/mcps` opens the MCP picker for the current session
 - `/connect` opens provider login in a VS Code terminal
 - `/attach` or `/files` picks files or folders to attach
 - `/settings` opens VS Code Settings filtered to Varro
