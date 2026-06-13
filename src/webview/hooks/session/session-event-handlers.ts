@@ -398,7 +398,28 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
   >();
   const toolExecutionTimes = new Map<string, ToolExecutionTime>();
+  // Per-session durable sequence cursor, advanced by synchronized events (ephemeral
+  // `*.delta` fragments carry no `seq`). Lets us resync only when a durable event was
+  // actually missed, instead of defensively on every progress event.
+  const lastSeqBySession = new Map<string, number>();
   let pendingPermissionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta — caller
+  // keeps its default behavior), 'ok' when the event is in order or a duplicate, or 'gap'
+  // when at least one durable event was skipped (a targeted resync is warranted).
+  const noteSeq = (
+    sessionId: string | null | undefined,
+    seq: number | undefined
+  ): 'unknown' | 'ok' | 'gap' => {
+    if (!sessionId || typeof seq !== 'number') return 'unknown';
+    const last = lastSeqBySession.get(sessionId);
+    if (last === undefined) {
+      lastSeqBySession.set(sessionId, seq);
+      return 'ok';
+    }
+    if (seq <= last) return 'ok';
+    lastSeqBySession.set(sessionId, seq);
+    return seq === last + 1 ? 'ok' : 'gap';
+  };
   const setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
     if (isWorkingStatus(status)) workingSessionIds.add(sessionId);
     else workingSessionIds.delete(sessionId);
@@ -536,8 +557,29 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       deps.logError('abortSession', err);
     });
   };
-  const ensureReasoningPart = (sessionId: string, reasoningId: string) => {
-    const message = latestAssistantMessageForSession(deps.getMessages(), sessionId);
+  // v2 reasoning events carry the owning assistantMessageID. When that message is loaded
+  // we attach directly to it; otherwise we fall back to the "latest active assistant"
+  // heuristic, preserving the pre-v2 behavior for older servers / not-yet-synced messages.
+  const findReasoningMessage = (sessionId: string, assistantMessageID?: string) => {
+    if (assistantMessageID) {
+      const named = deps
+        .getMessages()
+        .find(
+          (entry) =>
+            entry.info.id === assistantMessageID &&
+            entry.info.sessionID === sessionId &&
+            entry.info.role === 'assistant'
+        );
+      if (named) return named;
+    }
+    return latestAssistantMessageForSession(deps.getMessages(), sessionId);
+  };
+  const ensureReasoningPart = (
+    sessionId: string,
+    reasoningId: string,
+    assistantMessageID?: string
+  ) => {
+    const message = findReasoningMessage(sessionId, assistantMessageID);
     if (!message) return null;
     if (!message.parts.some((part) => part.id === reasoningId)) {
       sessionStore.upsertPart({
@@ -553,9 +595,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const withReasoningMessage = (
     sessionId: string,
     reasoningId: string,
-    apply: (messageID: string) => void
+    apply: (messageID: string) => void,
+    assistantMessageID?: string
   ) => {
-    const messageID = ensureReasoningPart(sessionId, reasoningId);
+    const messageID = ensureReasoningPart(sessionId, reasoningId, assistantMessageID);
     if (messageID) {
       apply(messageID);
       return;
@@ -563,7 +606,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     void deps
       .syncSessionMessages(sessionId)
       .then(() => {
-        const syncedMessageID = ensureReasoningPart(sessionId, reasoningId);
+        const syncedMessageID = ensureReasoningPart(sessionId, reasoningId, assistantMessageID);
         if (syncedMessageID) apply(syncedMessageID);
       })
       .catch((err) => deps.logError('syncSessionMessages', err));
@@ -626,6 +669,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     for (const timer of activeMessageSyncTimers.values()) clearTimeout(timer);
     activeMessageSyncTimers.clear();
     pendingMissingPartDeltas.clear();
+    lastSeqBySession.clear();
     if (pendingPermissionSyncTimer) clearTimeout(pendingPermissionSyncTimer);
     pendingPermissionSyncTimer = null;
   });
@@ -847,6 +891,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.updated', (data) => {
       const rawPart = data.properties?.part;
       const partialPart = rawPart as { sessionID?: string; type?: string } | undefined;
+      noteSeq(partialPart?.sessionID, data.seq);
       if (partialPart?.sessionID && partialPart.type === 'compaction') {
         sessionStore.setSessionCompacting(partialPart.sessionID, false);
       }
@@ -881,6 +926,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       if (!p) return;
       const sessionID = p.sessionID as string | undefined;
+      noteSeq(sessionID, data.seq);
       if (!sessionID || !isSessionInActiveTree(sessionID)) return;
 
       const messageID = p.messageID as string;
@@ -905,11 +951,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       const sessionID = p?.sessionID as string | undefined;
       const reasoningID = getEventString(p, 'reasoningID');
+      const assistantMessageID = getEventString(p, 'assistantMessageID');
       if (!sessionID) return;
       markSessionProgress(sessionID);
       if (!reasoningID || !isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
-      withReasoningMessage(sessionID, reasoningID, () => {});
+      withReasoningMessage(sessionID, reasoningID, () => {}, assistantMessageID);
     })
   );
 
@@ -920,6 +967,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (!p) return;
         const sessionID = p.sessionID as string | undefined;
         if (!sessionID) return;
+        const seqStatus = noteSeq(sessionID, data.seq);
         const toolTimingUpdate = recordToolExecutionTime(eventName, p);
         if (toolTimingUpdate?.ended) {
           updateExistingToolPartExecutionTime(toolTimingUpdate.sessionId, toolTimingUpdate.callId);
@@ -950,7 +998,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         uiStore.markLoadingActivity();
         if (sessionID === deps.getActiveSessionId()) uiStore.startLoading();
         if (!ACTIVE_TEXT_PROGRESS_EVENTS.has(eventName)) {
-          scheduleActiveMessageSync(sessionID);
+          // Synchronized events arrive in durable order, so a contiguous seq means we have
+          // not missed anything and can skip the refetch. We still resync when a gap proves
+          // a durable event was missed, or when the event carries no seq (ephemeral delta).
+          if (seqStatus !== 'ok') scheduleActiveMessageSync(sessionID);
         }
       })
     );
@@ -961,14 +1012,20 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       const sessionID = p?.sessionID as string | undefined;
       const reasoningID = getEventString(p, 'reasoningID');
+      const assistantMessageID = getEventString(p, 'assistantMessageID');
       const delta = getEventString(p, 'delta') || getEventString(p, 'text');
       if (!sessionID) return;
       markSessionProgress(sessionID);
       if (!reasoningID || !delta || !isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
-      withReasoningMessage(sessionID, reasoningID, (messageID) => {
-        sessionStore.applyMessagePartDelta(messageID, reasoningID, delta, sessionID, 'text');
-      });
+      withReasoningMessage(
+        sessionID,
+        reasoningID,
+        (messageID) => {
+          sessionStore.applyMessagePartDelta(messageID, reasoningID, delta, sessionID, 'text');
+        },
+        assistantMessageID
+      );
     })
   );
 
@@ -977,21 +1034,27 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const p = data.properties;
       const sessionID = p?.sessionID as string | undefined;
       const reasoningID = getEventString(p, 'reasoningID');
+      const assistantMessageID = getEventString(p, 'assistantMessageID');
       if (!sessionID) return;
       markSessionProgress(sessionID);
       if (!reasoningID || !isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
       const text = getEventString(p, 'text');
-      withReasoningMessage(sessionID, reasoningID, (messageID) => {
-        if (!text) return;
-        sessionStore.upsertPart({
-          id: reasoningID,
-          sessionID,
-          messageID,
-          type: 'reasoning',
-          text,
-        } as Part);
-      });
+      withReasoningMessage(
+        sessionID,
+        reasoningID,
+        (messageID) => {
+          if (!text) return;
+          sessionStore.upsertPart({
+            id: reasoningID,
+            sessionID,
+            messageID,
+            type: 'reasoning',
+            text,
+          } as Part);
+        },
+        assistantMessageID
+      );
     })
   );
 

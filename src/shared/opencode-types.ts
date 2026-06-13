@@ -656,21 +656,34 @@ export type ServerEventPropertiesByName = {
   'workspace.ready': { name?: string };
   'workspace.failed': { message?: string };
   'workspace.status': WorkspaceStatusEntry;
-  'session.next.agent.switched': { timestamp?: number; sessionID: string; agent: string };
+  'session.next.agent.switched': {
+    timestamp?: number;
+    sessionID: string;
+    messageID?: string;
+    agent: string;
+  };
   'session.next.model.switched': {
     timestamp?: number;
     sessionID: string;
+    messageID?: string;
     model: { id?: string; providerID?: string; variant?: string };
   };
   'session.next.prompted': {
     timestamp?: number;
     sessionID: string;
+    messageID?: string;
     prompt?: Record<string, unknown>;
   };
-  'session.next.synthetic': { timestamp?: number; sessionID: string; text?: string };
+  'session.next.synthetic': {
+    timestamp?: number;
+    sessionID: string;
+    messageID?: string;
+    text?: string;
+  };
   'session.next.shell.started': {
     timestamp?: number;
     sessionID: string;
+    messageID?: string;
     callID?: string;
     command?: string;
   };
@@ -683,6 +696,7 @@ export type ServerEventPropertiesByName = {
   'session.next.step.started': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     agent?: string;
     model?: { id?: string; providerID?: string; variant?: string };
     snapshot?: string;
@@ -690,6 +704,7 @@ export type ServerEventPropertiesByName = {
   'session.next.step.ended': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     finish?: string;
     cost?: number;
     tokens?: Record<string, unknown>;
@@ -698,24 +713,40 @@ export type ServerEventPropertiesByName = {
   'session.next.step.failed': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     error?: { type?: string; message?: string };
   };
-  'session.next.text.started': { timestamp?: number; sessionID: string };
+  'session.next.text.started': {
+    timestamp?: number;
+    sessionID: string;
+    assistantMessageID?: string;
+    textID?: string;
+  };
   'session.next.text.delta': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
+    textID?: string;
     delta?: string;
     text?: string;
   };
-  'session.next.text.ended': { timestamp?: number; sessionID: string; text?: string };
+  'session.next.text.ended': {
+    timestamp?: number;
+    sessionID: string;
+    assistantMessageID?: string;
+    textID?: string;
+    text?: string;
+  };
   'session.next.reasoning.started': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     reasoningID?: string;
   };
   'session.next.reasoning.delta': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     reasoningID?: string;
     delta?: string;
     text?: string;
@@ -723,18 +754,21 @@ export type ServerEventPropertiesByName = {
   'session.next.reasoning.ended': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     reasoningID?: string;
     text?: string;
   };
   'session.next.tool.input.started': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     callID?: string;
     name?: string;
   };
   'session.next.tool.input.delta': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     callID?: string;
     delta?: string;
     input?: string;
@@ -742,12 +776,14 @@ export type ServerEventPropertiesByName = {
   'session.next.tool.input.ended': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     callID?: string;
     text?: string;
   };
   'session.next.tool.called': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     callID?: string;
     tool?: string;
     title?: string;
@@ -757,6 +793,7 @@ export type ServerEventPropertiesByName = {
   'session.next.tool.progress': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     callID?: string;
     progress?: string;
     structured?: Record<string, unknown>;
@@ -765,6 +802,7 @@ export type ServerEventPropertiesByName = {
   'session.next.tool.success': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     callID?: string;
     output?: string;
     structured?: Record<string, unknown>;
@@ -774,6 +812,7 @@ export type ServerEventPropertiesByName = {
   'session.next.tool.failed': {
     timestamp?: number;
     sessionID: string;
+    assistantMessageID?: string;
     callID?: string;
     error?: string | SessionNextUnknownError;
     provider?: SessionNextProviderResult;
@@ -787,13 +826,22 @@ export type ServerEventPropertiesByName = {
   'session.next.compaction.started': {
     timestamp?: number;
     sessionID: string;
+    messageID?: string;
     reason?: 'auto' | 'manual';
   };
-  'session.next.compaction.delta': { timestamp?: number; sessionID: string; text?: string };
+  'session.next.compaction.delta': {
+    timestamp?: number;
+    sessionID: string;
+    messageID?: string;
+    text?: string;
+  };
   'session.next.compaction.ended': {
     timestamp?: number;
     sessionID: string;
+    messageID?: string;
+    reason?: 'auto' | 'manual';
     text?: string;
+    recent?: string;
     include?: string;
   };
 };

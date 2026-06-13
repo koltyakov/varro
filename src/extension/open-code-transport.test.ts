@@ -96,6 +96,26 @@ describe('OpenCodeTransport reconnect delay', () => {
   });
 });
 
+describe('OpenCodeTransport event stream path', () => {
+  it('subscribes to the v2 /api/event stream', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => undefined,
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => true,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.startEventStream();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/api/event');
+  });
+});
+
 describe('OpenCodeTransport request scoping', () => {
   it('keeps session reads scoped on non-Windows platforms', async () => {
     stubPlatform('darwin');

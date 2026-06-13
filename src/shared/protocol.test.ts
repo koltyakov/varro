@@ -120,6 +120,7 @@ describe('protocol conformance', () => {
       })
     ).toEqual({
       type: 'session.updated',
+      seq: 42,
       properties: {
         sessionID: 'session-1',
         info: {
@@ -150,6 +151,7 @@ describe('protocol conformance', () => {
       })
     ).toEqual({
       type: 'message.updated',
+      seq: 42,
       properties: {
         sessionID: 'session-1',
         info: {
@@ -182,6 +184,32 @@ describe('protocol conformance', () => {
           id: 'session-1',
           title: 'Fix chat titles',
         },
+      },
+    });
+  });
+
+  it('preserves seq on raw v2 /api/event payloads', () => {
+    expect(
+      parseServerEvent({
+        id: 'evt_1',
+        type: 'session.next.text.ended',
+        version: 1,
+        seq: 7,
+        data: {
+          sessionID: 'session-1',
+          assistantMessageID: 'message-1',
+          textID: 'text-1',
+          text: 'done',
+        },
+      })
+    ).toEqual({
+      type: 'session.next.text.ended',
+      seq: 7,
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'message-1',
+        textID: 'text-1',
+        text: 'done',
       },
     });
   });

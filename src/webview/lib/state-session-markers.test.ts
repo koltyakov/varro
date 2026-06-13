@@ -83,6 +83,22 @@ describe('state session markers', () => {
       'session-1': 150,
     });
     expect(nextCompletedSessionResponses({ 'session-1': 150 }, 'session-1', 150, 120)).toBeNull();
+    // Re-settling an already-seen message must use its real completion time, not `now`,
+    // so a session read at 500 stays read when its old (300) completion is replayed.
+    expect(nextCompletedSessionResponses({ 'session-1': 500 }, 'session-1', 300, 999)).toBeNull();
+    expect(
+      isSessionCompletedResponseUnreadMarker(
+        { 'session-1': 300 },
+        { 'session-1': 500 },
+        'session-1'
+      )
+    ).toBe(false);
+    // Completions without a timestamp still fall back to `now`.
+    expect(
+      nextCompletedSessionResponses({ 'session-1': 100 }, 'session-1', undefined, 999)
+    ).toEqual({
+      'session-1': 999,
+    });
 
     expect(removeSessionMarker({ 'session-1': 100, 'session-2': 200 }, 'session-1')).toEqual({
       'session-2': 200,

@@ -271,6 +271,9 @@ export class SessionSendOperations {
       {
         getActiveSessionId: () => appStore.state.activeSessionId,
         getDefaultPermissionMode: () => permissionsStore.getPermissionModeForSession(null),
+        getSelectedAgent: () => appStore.state.selectedAgent,
+        applySelectedAgentForSession: (agent, sessionId) =>
+          routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
         createSession: this.deps.createSession,
         ensureSessionPermission,
         clearPendingAbort: this.deps.clearPendingAbort,
@@ -350,6 +353,8 @@ export async function sendMessageWithDependencies(
   deps: {
     getActiveSessionId(): string | null;
     getDefaultPermissionMode(): PermissionMode;
+    getSelectedAgent?(): string | null;
+    applySelectedAgentForSession?(agent: string, sessionId: string): void;
     createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
     ensureSessionPermission?(sessionId: string): Promise<boolean>;
     clearPendingAbort(sessionId: string): void;
@@ -392,9 +397,14 @@ export async function sendMessageWithDependencies(
 ) {
   let sessionId = deps.getActiveSessionId();
   if (!sessionId) {
+    // Creating a session resets the active agent to the session default (e.g. build),
+    // so capture the agent the user selected in the composer and re-apply it to the new
+    // session — otherwise the first message in a fresh chat ignores the chosen agent.
+    const intendedAgent = deps.getSelectedAgent?.() ?? null;
     const createdId = await deps.createSession(deps.getDefaultPermissionMode());
     if (!createdId) return;
     sessionId = createdId;
+    if (intendedAgent) deps.applySelectedAgentForSession?.(intendedAgent, sessionId);
   }
 
   const currentSessionId = deps.getActiveSessionId();

@@ -518,6 +518,43 @@ describe('sendMessage', () => {
     expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
   });
 
+  it('sends the first message of a new chat with the selected agent', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('agents', [
+      {
+        name: 'build',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+      {
+        name: 'plan',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+    ]);
+    stateModule.setSelectedAgent('plan');
+
+    clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session('session-2'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Make a plan');
+
+    expect(stateModule.state.activeSessionId).toBe('session-2');
+    expect(stateModule.state.selectedAgent).toBe('plan');
+    expect(stateModule.getSelectedAgentForSession('session-2')).toBe('plan');
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-2',
+      expect.objectContaining({ agent: 'plan' })
+    );
+  });
+
   it('restores the previously used model when switching back to an existing session', async () => {
     const { stateModule, hookModule } = await loadModules();
 

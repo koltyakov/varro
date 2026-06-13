@@ -5,6 +5,11 @@ import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-u
 
 type EventStreamState = 'healthy' | 'degraded';
 
+// OpenCode's v2 event stream. Carries durable per-session `seq` on synchronized events
+// (used for targeted resync) and scopes by the `x-opencode-directory` header. Note: it
+// emits no heartbeat, so a quiet stream is kept honest by the idle-timeout reconnect.
+const EVENT_STREAM_PATH = '/api/event';
+
 interface OpenCodeTransportOptions {
   getUrl: () => string;
   getWorkspaceCwd: () => string | undefined;
@@ -146,7 +151,7 @@ export class OpenCodeTransport {
     let shouldReconnect = false;
     const scoped = scopeOpenCodeRequest(
       this.options.getUrl(),
-      '/event',
+      EVENT_STREAM_PATH,
       this.options.getWorkspaceCwd()
     );
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -343,7 +348,8 @@ export class OpenCodeTransport {
   private observeServerEvent(event: unknown) {
     const evt = asRecord(event);
     const type = getString(evt?.type);
-    const props = asRecord(evt?.properties);
+    // The v2 `/api/event` stream carries each event's payload under `data`.
+    const props = asRecord(evt?.data);
     if (!type) return;
     const requestProps = asRecord(props?.info) || props;
 

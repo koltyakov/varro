@@ -75,7 +75,11 @@ export function nextCompletedSessionResponses(
   completedAt?: number,
   now = Date.now()
 ) {
-  const completed = Math.max(current[sessionId] ?? 0, completedAt ?? 0, now);
+  // Use the real completion time when known so that re-settling already-seen messages
+  // (e.g. loading a session's history) can't push the marker past an older "seen" marker
+  // and resurrect a false unread badge. `now` is only a fallback for completions that
+  // arrive without a timestamp (status-transition events).
+  const completed = Math.max(current[sessionId] ?? 0, completedAt ?? now);
   if (current[sessionId] === completed) return null;
   return { ...current, [sessionId]: completed };
 }

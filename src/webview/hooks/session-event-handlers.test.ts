@@ -1403,6 +1403,48 @@ describe('registerSessionEventHandlers', () => {
     );
   });
 
+  it('attaches reasoning to the message named by assistantMessageID, not just the latest active assistant', () => {
+    const handlers = installHandlers();
+    state.messages = [
+      createAssistantEntry({ id: 'assistant-early', sessionID: 'session-1' }),
+      createAssistantEntry({ id: 'assistant-late', sessionID: 'session-1' }),
+    ];
+
+    upsertPart.mockClear();
+    applyMessagePartDelta.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => state.messages,
+      })
+    );
+
+    handlers.get('session.next.reasoning.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-early',
+        reasoningID: 'reason-early',
+        delta: 'Reasoning for the earlier step',
+      },
+    });
+
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'reason-early',
+        messageID: 'assistant-early',
+        type: 'reasoning',
+      })
+    );
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-early',
+      'reason-early',
+      'Reasoning for the earlier step',
+      'session-1',
+      'text'
+    );
+  });
+
   it('syncs messages before applying session.next reasoning when no active assistant is loaded', async () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn(async () => {
@@ -1488,6 +1530,95 @@ describe('registerSessionEventHandlers', () => {
       await vi.advanceTimersByTimeAsync(100);
 
       expect(syncSessionMessages).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('skips the defensive active-message resync for in-order v2 progress events (seq present)', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    try {
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          syncSessionMessages,
+        })
+      );
+
+      handlers.get('session.next.tool.called')?.({
+        properties: { sessionID: 'session-1', callID: 'call-1' },
+        seq: 1,
+      });
+      handlers.get('session.next.tool.called')?.({
+        properties: { sessionID: 'session-1', callID: 'call-2' },
+        seq: 2,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(syncSessionMessages).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resyncs active messages when a v2 sequence gap reveals a missed event', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    try {
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          syncSessionMessages,
+        })
+      );
+
+      handlers.get('session.next.tool.called')?.({
+        properties: { sessionID: 'session-1', callID: 'call-1' },
+        seq: 1,
+      });
+      // seq jumps from 1 to 3 — event 2 was missed, so a targeted resync is expected.
+      handlers.get('session.next.tool.called')?.({
+        properties: { sessionID: 'session-1', callID: 'call-3' },
+        seq: 3,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(syncSessionMessages).toHaveBeenCalledTimes(1);
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the defensive resync for ephemeral progress events that carry no seq', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    try {
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          syncSessionMessages,
+        })
+      );
+
+      // Ephemeral streaming fragments (e.g. tool input deltas) carry no seq, so we cannot
+      // reason about gaps and keep the defensive resync.
+      handlers.get('session.next.tool.input.delta')?.({
+        properties: { sessionID: 'session-1', callID: 'call-1', delta: '{' },
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     } finally {
       vi.useRealTimers();
     }

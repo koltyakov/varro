@@ -148,7 +148,7 @@ test('default permissions end up with a bash permission request for opencode ver
   });
 
   expect(promptBody).toMatchObject({
-    agent: 'build',
+    agent: 'plan',
     model: { providerID: 'z-ai', modelID: 'glm-5.1' },
   });
 });

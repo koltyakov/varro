@@ -211,6 +211,13 @@ export type ServerEvent = {
   [Name in ServerEventName]: {
     type: Name;
     properties?: ServerEventPropertiesByName[Name];
+    /**
+     * Durable per-session sequence number. Present on synchronized events; absent on
+     * ephemeral streaming fragments (`*.delta`), which carry no `seq`. Used for gap
+     * detection so we resync only when a durable event was actually missed. Consumers
+     * must treat `undefined` as "ordering unknown" and skip seq-based decisions.
+     */
+    seq?: number;
   };
 }[ServerEventName];
 
@@ -240,9 +247,11 @@ function parseServerEventRecord(record: Record<string, unknown> | null): ServerE
   const properties = asRecord(
     isServerEventName(record.type) ? (record.properties ?? record.data) : record.data
   );
-  return properties
-    ? ({ type: eventType, properties } as ServerEvent)
-    : ({ type: eventType } as ServerEvent);
+  // `seq` rides along on synchronized v2 events; absent on ephemeral deltas.
+  const seq =
+    typeof record.seq === 'number' && Number.isFinite(record.seq) ? record.seq : undefined;
+  const base = seq === undefined ? { type: eventType } : { type: eventType, seq };
+  return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
 }
 
 function getSyncServerEventName(type: unknown, name: unknown): ServerEventName | null {
