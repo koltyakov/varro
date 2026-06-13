@@ -126,14 +126,32 @@ export function flipPopupDownIfNeeded(el: HTMLElement, margin = 8): boolean {
  * Flips the anchor below the host when the menu would be clipped above and
  * there is more room below, moving the gap padding to the matching side, and
  * caps the menu height to whichever side it ends up on.
+ *
+ * When `liftAboveEl` is given, an upward-opening menu is raised so its bottom
+ * clears that element's top instead of the host's top. The composer relocates
+ * inline for message editing with an "Editing message" banner stacked above
+ * the input host; without this the menu would paint on top of that banner
+ * rather than above the whole editing block.
  */
 export function placeDropdownAnchor(
   anchorEl: HTMLElement,
   menuEl: HTMLElement,
   gap: number,
-  margin = 8
+  margin = 8,
+  liftAboveEl?: HTMLElement | null
 ): void {
-  anchorEl.style.bottom = '100%';
+  let lift = 0;
+  if (liftAboveEl) {
+    const host = anchorEl.offsetParent;
+    if (host instanceof HTMLElement) {
+      lift = Math.max(
+        0,
+        Math.round(host.getBoundingClientRect().top - liftAboveEl.getBoundingClientRect().top)
+      );
+    }
+  }
+
+  anchorEl.style.bottom = lift > 0 ? `calc(100% + ${lift}px)` : '100%';
   anchorEl.style.top = 'auto';
   anchorEl.style.paddingTop = '0px';
   anchorEl.style.paddingBottom = `${gap}px`;

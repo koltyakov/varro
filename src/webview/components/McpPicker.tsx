@@ -82,7 +82,12 @@ export function McpPicker(props: {
 
   onMount(() => {
     const reposition = () => {
-      if (anchorRef && menuRef) placeDropdownAnchor(anchorRef, menuRef, 10);
+      if (anchorRef && menuRef) {
+        const editBanner = anchorRef
+          .closest('.interactive-input-part')
+          ?.querySelector<HTMLElement>('.composer-edit-banner');
+        placeDropdownAnchor(anchorRef, menuRef, 10, 8, editBanner);
+      }
     };
 
     if (allItems().length > 8) searchInputRef?.focus();

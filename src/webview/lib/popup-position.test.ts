@@ -60,6 +60,44 @@ describe('popup-position', () => {
     expect(anchor.style.bottom).toBe('100%');
   });
 
+  it('lifts upward dropdown menus above a banner stacked over the host', () => {
+    const host = document.createElement('div');
+    mockRect(host, { top: 200, bottom: 260 });
+
+    const banner = document.createElement('div');
+    mockRect(banner, { top: 160, bottom: 184 });
+
+    const anchor = document.createElement('div');
+    const menu = document.createElement('div');
+    mockOffsetParent(anchor, host);
+    mockRect(menu, { top: 120, bottom: 150 });
+
+    placeDropdownAnchor(anchor, menu, 10, 8, banner);
+
+    expect(anchor.style.bottom).toBe('calc(100% + 40px)');
+    expect(anchor.style.top).toBe('auto');
+  });
+
+  it('flips below the host when lifting above a banner would clip the menu', () => {
+    window.innerHeight = 600;
+
+    const host = document.createElement('div');
+    mockRect(host, { top: 100, bottom: 160 });
+
+    const banner = document.createElement('div');
+    mockRect(banner, { top: 60, bottom: 84 });
+
+    const anchor = document.createElement('div');
+    const menu = document.createElement('div');
+    mockOffsetParent(anchor, host);
+    mockRect(menu, { top: -24, bottom: 80 });
+
+    placeDropdownAnchor(anchor, menu, 10, 8, banner);
+
+    expect(anchor.style.top).toBe('100%');
+    expect(anchor.style.bottom).toBe('auto');
+  });
+
   it('flips dropdown menus below their host when there is more room below', () => {
     window.innerHeight = 600;
 

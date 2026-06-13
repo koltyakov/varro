@@ -162,7 +162,12 @@ export function ModelPicker(props: {
 
   onMount(() => {
     const reposition = () => {
-      if (anchorRef && menuRef) placeDropdownAnchor(anchorRef, menuRef, props.popupGap ?? 10);
+      if (anchorRef && menuRef) {
+        const editBanner = anchorRef
+          .closest('.interactive-input-part')
+          ?.querySelector<HTMLElement>('.composer-edit-banner');
+        placeDropdownAnchor(anchorRef, menuRef, props.popupGap ?? 10, 8, editBanner);
+      }
     };
 
     if (showSearch()) {
