@@ -8,7 +8,6 @@ import {
   onMount,
   untrack,
 } from 'solid-js';
-import { Portal } from 'solid-js/web';
 import {
   state,
   inputText,
@@ -2580,17 +2579,15 @@ export function ChatInput() {
       </div>
 
       <Show when={previewImage()}>
-        <Portal>
-          <ImagePreviewOverlay
-            image={previewImage()}
-            onClose={() => setPreviewImageId(null)}
-            onPrevious={() => stepImagePreview(-1)}
-            onNext={() => stepImagePreview(1)}
-            showNavigation={composerClipboardImages().length > 1}
-            position={previewImageIndex() + 1}
-            total={composerClipboardImages().length}
-          />
-        </Portal>
+        <ImagePreviewOverlay
+          image={previewImage()}
+          onClose={() => setPreviewImageId(null)}
+          onPrevious={() => stepImagePreview(-1)}
+          onNext={() => stepImagePreview(1)}
+          showNavigation={composerClipboardImages().length > 1}
+          position={previewImageIndex() + 1}
+          total={composerClipboardImages().length}
+        />
       </Show>
     </div>
   );

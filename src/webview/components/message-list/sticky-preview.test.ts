@@ -12,6 +12,11 @@ vi.mock('../Message', () => ({
     if (!first || !first.text) return '(no content)';
     return first.text;
   }),
+  parseUserMessageContent: vi.fn(() => ({
+    messageTexts: [],
+    attachments: [],
+    fileParts: [],
+  })),
 }));
 
 type TestMessage = { info: { id: string; role: 'user' | 'assistant' }; parts: { text?: string }[] };
@@ -46,7 +51,13 @@ describe('getStickyUserMessagePreview', () => {
   it('finds the preceding user message', () => {
     const messages = [user('u1', 'my prompt'), assistant('a1')];
     const result = getStickyUserMessagePreview(messages, 1);
-    expect(result).toEqual({ id: 'u1', index: 0, text: 'my prompt' });
+    expect(result).toEqual({
+      id: 'u1',
+      index: 0,
+      text: 'my prompt',
+      attachmentCount: 0,
+      imageCount: 0,
+    });
   });
 
   it('skips empty previews and continues searching', () => {
@@ -58,7 +69,13 @@ describe('getStickyUserMessagePreview', () => {
     // The mock returns '(no content)' for empty text which gets skipped
     // Actually our mock checks `first.text` truthiness, empty string is falsy → '(no content)' → skipped
     const result = getStickyUserMessagePreview(messages, 2);
-    expect(result).toEqual({ id: 'u1', index: 0, text: 'good text' });
+    expect(result).toEqual({
+      id: 'u1',
+      index: 0,
+      text: 'good text',
+      attachmentCount: 0,
+      imageCount: 0,
+    });
   });
 
   it('skips user messages with (no content) preview', () => {
@@ -68,7 +85,13 @@ describe('getStickyUserMessagePreview', () => {
       assistant('a1'),
     ];
     const result = getStickyUserMessagePreview(messages, 2);
-    expect(result).toEqual({ id: 'u1', index: 0, text: 'visible' });
+    expect(result).toEqual({
+      id: 'u1',
+      index: 0,
+      text: 'visible',
+      attachmentCount: 0,
+      imageCount: 0,
+    });
   });
 
   it('returns null when no user message precedes the visible assistant', () => {
@@ -79,7 +102,13 @@ describe('getStickyUserMessagePreview', () => {
   it('picks the closest preceding user message', () => {
     const messages = [user('u1', 'first'), assistant('a1'), user('u2', 'second'), assistant('a2')];
     const result = getStickyUserMessagePreview(messages, 3);
-    expect(result).toEqual({ id: 'u2', index: 2, text: 'second' });
+    expect(result).toEqual({
+      id: 'u2',
+      index: 2,
+      text: 'second',
+      attachmentCount: 0,
+      imageCount: 0,
+    });
   });
 });
 
@@ -153,7 +182,7 @@ describe('getNextVisibleUserMessageTopMap', () => {
 
 describe('shouldShowStickyUserMessagePreview', () => {
   const baseArgs = {
-    preview: { id: 'u1', index: 0, text: 'hello' } as const,
+    preview: { id: 'u1', index: 0, text: 'hello', attachmentCount: 0, imageCount: 0 } as const,
     shouldVirtualize: true,
     visibleRange: { start: 2, end: 5 },
     rowTop: null as number | null,

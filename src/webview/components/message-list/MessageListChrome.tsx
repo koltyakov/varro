@@ -1,4 +1,4 @@
-import { For } from 'solid-js';
+import { For, Show } from 'solid-js';
 import type { Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
@@ -7,6 +7,8 @@ export type StickyUserMessagePreview = {
   id: string;
   index: number;
   text: string;
+  attachmentCount: number;
+  imageCount: number;
 };
 
 export function StickyUserMessagePreviewCard(props: {
@@ -29,6 +31,48 @@ export function StickyUserMessagePreviewCard(props: {
             onClick={() => onClick()?.(props.preview)}
           >
             <div class="latest-user-message-sticky-text">{props.preview.text}</div>
+            <Show
+              when={props.preview.attachmentCount > 0 || props.preview.imageCount > 0}
+            >
+              <div class="latest-user-message-sticky-meta" aria-hidden="true">
+                <Show when={props.preview.imageCount > 0}>
+                  <span class="latest-user-message-sticky-meta-item" title="Images">
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                      <circle cx="5.5" cy="6.5" r="1" />
+                      <path d="M3 11l3-3 2.5 2.5L11 7l2 2" />
+                    </svg>
+                    <span>{props.preview.imageCount}</span>
+                  </span>
+                </Show>
+                <Show when={props.preview.attachmentCount > 0}>
+                  <span class="latest-user-message-sticky-meta-item" title="Attachments">
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M10.5 5.5l-4.24 4.24a2 2 0 102.83 2.83l4.6-4.59a3 3 0 00-4.24-4.24L4.5 8.69a4 4 0 105.66 5.66l4.1-4.1" />
+                    </svg>
+                    <span>{props.preview.attachmentCount}</span>
+                  </span>
+                </Show>
+              </div>
+            </Show>
           </div>
         </div>
         <div class="latest-user-message-sticky-bottom-solid" />

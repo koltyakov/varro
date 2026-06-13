@@ -591,6 +591,7 @@ body.vscode-high-contrast-light .interactive-session {
 }
 
 .latest-user-message-sticky {
+  position: relative;
   display: flex;
   align-items: stretch;
   width: 100%;
@@ -648,6 +649,33 @@ body.vscode-high-contrast-light .interactive-session {
 
 .latest-user-message-sticky:hover .latest-user-message-sticky-text::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
+}
+
+.latest-user-message-sticky-meta {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-vscode-request-bubble) 80%, transparent);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.latest-user-message-sticky-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--color-vscode-fg) 65%, transparent);
+}
+
+.latest-user-message-sticky-meta-item svg {
+  flex: 0 0 auto;
 }
 
 /* Overlay control anchored to the list shell, never inside the scroll track:
@@ -4765,7 +4793,7 @@ kbd {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: color-mix(in srgb, var(--color-vscode-bg) 90%, black 10%);
+  background: color-mix(in srgb, var(--color-vscode-bg) 86%, transparent);
 }
 
 .chat-image-preview-close {
@@ -4835,7 +4863,7 @@ kbd {
 }
 
 .chat-image-preview-overlay-inner {
-  width: min(100%, var(--chat-content-max-width));
+  width: 100%;
   min-height: 100%;
   margin: 0 auto;
   display: flex;

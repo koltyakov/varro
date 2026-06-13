@@ -40,7 +40,13 @@ describe('MessageListChrome', () => {
     cleanup = render(
       () => (
         <StickyUserMessagePreviewCard
-          preview={{ id: 'msg-1', index: 3, text: 'Summarize the latest failing test output.' }}
+          preview={{
+            id: 'msg-1',
+            index: 3,
+            text: 'Summarize the latest failing test output.',
+            attachmentCount: 0,
+            imageCount: 0,
+          }}
         />
       ),
       container!
@@ -57,7 +63,13 @@ describe('MessageListChrome', () => {
 
   it('invokes onEdit with the preview when the sticky card is clicked', () => {
     const onEdit = vi.fn();
-    const preview = { id: 'msg-1', index: 3, text: 'Summarize the latest failing test output.' };
+    const preview = {
+      id: 'msg-1',
+      index: 3,
+      text: 'Summarize the latest failing test output.',
+      attachmentCount: 0,
+      imageCount: 0,
+    };
     cleanup = render(
       () => <StickyUserMessagePreviewCard preview={preview} onEdit={onEdit} />,
       container!
@@ -73,7 +85,13 @@ describe('MessageListChrome', () => {
 
   it('invokes the generic click handler with a custom title', () => {
     const onClick = vi.fn();
-    const preview = { id: 'msg-1', index: 3, text: 'Summarize the latest failing test output.' };
+    const preview = {
+      id: 'msg-1',
+      index: 3,
+      text: 'Summarize the latest failing test output.',
+      attachmentCount: 0,
+      imageCount: 0,
+    };
     cleanup = render(
       () => (
         <StickyUserMessagePreviewCard
@@ -95,12 +113,66 @@ describe('MessageListChrome', () => {
 
   it('is not clickable without an onEdit handler', () => {
     cleanup = render(
-      () => <StickyUserMessagePreviewCard preview={{ id: 'msg-1', index: 3, text: 'A prompt.' }} />,
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-1',
+            index: 3,
+            text: 'A prompt.',
+            attachmentCount: 0,
+            imageCount: 0,
+          }}
+        />
+      ),
       container!
     );
 
     const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(card?.classList.contains('latest-user-message-sticky-clickable')).toBe(false);
+  });
+
+  it('renders attachment and image counters when the preview contains them', () => {
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-1',
+            index: 3,
+            text: 'See attached.',
+            attachmentCount: 2,
+            imageCount: 1,
+          }}
+        />
+      ),
+      container!
+    );
+
+    const meta = container?.querySelector('.latest-user-message-sticky-meta');
+    expect(meta).not.toBeNull();
+    const items = Array.from(
+      container?.querySelectorAll('.latest-user-message-sticky-meta-item') || []
+    );
+    expect(items).toHaveLength(2);
+    expect(items.map((item) => item.textContent)).toEqual(['1', '2']);
+  });
+
+  it('omits the meta row when there are no attachments or images', () => {
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-1',
+            index: 3,
+            text: 'A prompt.',
+            attachmentCount: 0,
+            imageCount: 0,
+          }}
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.latest-user-message-sticky-meta')).toBeNull();
   });
 
   it('renders the chat content bottom fade shell with hidden semantics', () => {

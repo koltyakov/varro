@@ -1,11 +1,24 @@
-import { getUserMessagePreviewText } from '../Message';
+import { getUserMessagePreviewText, parseUserMessageContent } from '../Message';
 import type { Message, Part } from '../../types';
 
 export type StickyUserMessagePreview = {
   id: string;
   index: number;
   text: string;
+  attachmentCount: number;
+  imageCount: number;
 };
+
+export function getStickyUserMessageCounts(parts: Part[]): {
+  attachmentCount: number;
+  imageCount: number;
+} {
+  const parsed = parseUserMessageContent(parts);
+  const imageCount = parsed.fileParts.filter((part) => part.mime.startsWith('image/')).length;
+  const attachmentCount =
+    parsed.attachments.length + (parsed.fileParts.length - imageCount);
+  return { attachmentCount, imageCount };
+}
 
 const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
 const EMPTY_USER_MESSAGE_PREVIEW = '(no content)';
@@ -38,6 +51,7 @@ export function getStickyUserMessagePreview(
       id: entry.info.id,
       index: i,
       text,
+      ...getStickyUserMessageCounts(entry.parts),
     };
   }
 
