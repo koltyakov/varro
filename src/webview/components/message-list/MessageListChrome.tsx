@@ -31,9 +31,7 @@ export function StickyUserMessagePreviewCard(props: {
             onClick={() => onClick()?.(props.preview)}
           >
             <div class="latest-user-message-sticky-text">{props.preview.text}</div>
-            <Show
-              when={props.preview.attachmentCount > 0 || props.preview.imageCount > 0}
-            >
+            <Show when={props.preview.attachmentCount > 0 || props.preview.imageCount > 0}>
               <div class="latest-user-message-sticky-meta" aria-hidden="true">
                 <Show when={props.preview.imageCount > 0}>
                   <span class="latest-user-message-sticky-meta-item" title="Images">

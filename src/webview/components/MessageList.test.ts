@@ -335,6 +335,8 @@ describe('getStickyUserMessagePreview', () => {
       id: 'user-2',
       index: 2,
       text: 'Newest prompt',
+      attachmentCount: 0,
+      imageCount: 0,
     });
   });
 
@@ -351,6 +353,8 @@ describe('getStickyUserMessagePreview', () => {
       id: 'user-1',
       index: 0,
       text: 'Attachment: diagram.png',
+      attachmentCount: 0,
+      imageCount: 1,
     });
   });
 

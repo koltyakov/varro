@@ -585,8 +585,8 @@ describe('Message user prompt rendering', () => {
 
     imageChip?.click();
 
-    const overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
-    const overlayCaption = container?.querySelector('.chat-image-preview-caption');
+    const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    const overlayCaption = document.body.querySelector('.chat-image-preview-caption');
     const carouselCaption = container?.querySelector('.message-image-carousel-caption-row');
 
     expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
@@ -1459,19 +1459,19 @@ describe('Message assistant final answer rendering', () => {
 
     trigger?.click();
 
-    const overlay = container?.querySelector('.chat-image-preview-overlay');
-    const overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    const overlay = document.body.querySelector('.chat-image-preview-overlay');
+    const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
 
     expect(overlay).toBeInstanceOf(HTMLDivElement);
     expect(document.body.classList.contains('chat-image-preview-open')).toBe(true);
     expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-1.png');
-    expect(container?.querySelector('.chat-image-preview-caption')?.textContent).toContain(
+    expect(document.body.querySelector('.chat-image-preview-caption')?.textContent).toContain(
       'diagram.png'
     );
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 
-    expect(container?.querySelector('.chat-image-preview-overlay')).toBeNull();
+    expect(document.body.querySelector('.chat-image-preview-overlay')).toBeNull();
     expect(document.body.classList.contains('chat-image-preview-open')).toBe(false);
   });
 
@@ -1497,8 +1497,8 @@ describe('Message assistant final answer rendering', () => {
     );
     trigger?.click();
 
-    const overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
-    const overlayCaption = container?.querySelector('.chat-image-preview-caption');
+    const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    const overlayCaption = document.body.querySelector('.chat-image-preview-caption');
 
     expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
     expect(overlayCaption?.textContent).toContain('Image 2');
@@ -1521,13 +1521,13 @@ describe('Message assistant final answer rendering', () => {
     trigger?.click();
 
     const nextOverlayButton =
-      container?.querySelectorAll<HTMLButtonElement>('.chat-image-preview-nav')[1];
+      document.body.querySelectorAll<HTMLButtonElement>('.chat-image-preview-nav')[1];
     expect(nextOverlayButton).toBeInstanceOf(HTMLButtonElement);
 
     nextOverlayButton?.click();
 
-    let overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
-    let overlayCaption = container?.querySelector('.chat-image-preview-caption');
+    let overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    let overlayCaption = document.body.querySelector('.chat-image-preview-caption');
 
     expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
     expect(overlayCaption?.textContent).toContain('2 / 2');
@@ -1538,8 +1538,8 @@ describe('Message assistant final answer rendering', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
 
-    overlayImage = container?.querySelector<HTMLImageElement>('.chat-image-preview-img');
-    overlayCaption = container?.querySelector('.chat-image-preview-caption');
+    overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    overlayCaption = document.body.querySelector('.chat-image-preview-caption');
 
     expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-1.png');
     expect(overlayCaption?.textContent).toContain('1 / 2');

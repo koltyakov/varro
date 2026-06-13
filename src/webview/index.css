@@ -23,7 +23,7 @@
   --color-vscode-accent: var(--vscode-focusBorder, #007fd4);
   --color-vscode-error: var(--vscode-errorForeground, #f44747);
   --color-vscode-warning: var(--vscode-editorWarning-foreground, #cca700);
-  --color-vscode-success: #73c991;
+  --color-vscode-success: var(--vscode-charts-green, #73c991);
   --color-vscode-card: var(--vscode-editorWidget-background, #252526);
   --color-vscode-hover: var(--vscode-list-hoverBackground, #2a2d2e);
   --color-vscode-list-bg: var(

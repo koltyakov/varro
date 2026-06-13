@@ -395,12 +395,12 @@ describe('MessagePart', () => {
 
     expect(document.body.classList.contains('chat-image-preview-open')).toBe(true);
     expect(
-      container?.querySelector('.chat-image-preview-overlay')?.getAttribute('aria-label')
+      document.body.querySelector('.chat-image-preview-overlay')?.getAttribute('aria-label')
     ).toBe('Image preview: images/chart.png');
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
     expect(document.body.classList.contains('chat-image-preview-open')).toBe(false);
-    expect(container?.querySelector('.chat-image-preview-overlay')).toBeNull();
+    expect(document.body.querySelector('.chat-image-preview-overlay')).toBeNull();
   });
 });

@@ -15,8 +15,7 @@ export function getStickyUserMessageCounts(parts: Part[]): {
 } {
   const parsed = parseUserMessageContent(parts);
   const imageCount = parsed.fileParts.filter((part) => part.mime.startsWith('image/')).length;
-  const attachmentCount =
-    parsed.attachments.length + (parsed.fileParts.length - imageCount);
+  const attachmentCount = parsed.attachments.length + (parsed.fileParts.length - imageCount);
   return { attachmentCount, imageCount };
 }
 
