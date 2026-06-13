@@ -29,6 +29,9 @@ import {
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry } from '../../../shared/protocol';
+import type { Part, Session, ToolPart } from '../../types';
+import { client } from '../../lib/client';
+import { getToolFileChanges } from '../../lib/tool-file-change';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatRelativeAge } from '../../lib/message-metrics';
@@ -55,6 +58,23 @@ type SessionIndicatorSets = {
   newlyCompletedIds: Set<string>;
 };
 
+type SessionSummaryStats = {
+  files: number;
+  additions: number;
+  deletions: number;
+};
+
+type SessionDiffSummaryCacheEntry = {
+  status: 'loading' | 'ready' | 'error';
+  updated: number;
+  stats: SessionSummaryStats | null;
+};
+
+type SessionDiffSummaryRequest = {
+  sessionId: string;
+  updated: number;
+};
+
 export type SessionStatusIndicatorKind =
   | 'failed'
   | 'attention'
@@ -63,6 +83,11 @@ export type SessionStatusIndicatorKind =
   | 'completed';
 
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
+const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
+
+function getDiffSummaryKey(sessionId: string, updated: number): string {
+  return `${sessionId}:${updated}`;
+}
 
 export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
 
@@ -175,6 +200,116 @@ export function getSessionStatusIndicatorTitle(
     case 'completed':
       return 'Completed';
   }
+}
+
+export function getSessionSummaryStats(
+  session: Pick<Session, 'summary'>,
+  fallback?: SessionSummaryStats | null
+): SessionSummaryStats | null {
+  const summary = session.summary;
+  if (!summary) return fallback ?? null;
+
+  const diffs = Array.isArray(summary.diffs) ? summary.diffs : [];
+  if (diffs.length > 0) {
+    return getDiffSummaryStats(diffs);
+  }
+
+  const aggregate = {
+    files: summary.files,
+    additions: summary.additions,
+    deletions: summary.deletions,
+  } satisfies SessionSummaryStats;
+  return fallback && !hasSessionSummaryEdits(aggregate) ? fallback : aggregate;
+}
+
+export function getDiffSummaryStats(diffs: readonly unknown[]): SessionSummaryStats | null {
+  if (diffs.length === 0) return null;
+
+  const files = new Set<string>();
+  let additions = 0;
+  let deletions = 0;
+
+  for (const diff of diffs) {
+    if (!diff || typeof diff !== 'object') continue;
+    const file = (diff as Record<string, unknown>).file;
+    if (typeof file === 'string' && file) files.add(file);
+    additions += readDiffCount(diff, 'additions', 'added');
+    deletions += readDiffCount(diff, 'deletions', 'removed');
+  }
+
+  return {
+    files: files.size || diffs.length,
+    additions,
+    deletions,
+  } satisfies SessionSummaryStats;
+}
+
+export function getMessageToolSummaryStats(
+  messages: readonly { info?: { summary?: unknown }; parts: readonly Part[] }[]
+): SessionSummaryStats | null {
+  const files = new Set<string>();
+  let additions = 0;
+  let deletions = 0;
+
+  for (const message of messages) {
+    const messageSummary = message.info?.summary;
+    const messageDiffs =
+      messageSummary &&
+      typeof messageSummary === 'object' &&
+      'diffs' in messageSummary &&
+      Array.isArray(messageSummary.diffs)
+        ? messageSummary.diffs
+        : [];
+    for (const diff of messageDiffs) {
+      if (!diff || typeof diff !== 'object') continue;
+      const file = (diff as Record<string, unknown>).file;
+      if (typeof file === 'string' && file) files.add(file);
+      additions += readDiffCount(diff, 'additions', 'added');
+      deletions += readDiffCount(diff, 'deletions', 'removed');
+    }
+
+    for (const part of message.parts) {
+      if (part.type === 'patch') {
+        for (const file of part.files) {
+          if (file) files.add(file);
+        }
+        continue;
+      }
+
+      if (part.type === 'tool') {
+        for (const change of getToolFileChanges(part.tool, (part as ToolPart).state)) {
+          if (change.path) files.add(change.path);
+          additions += change.additions ?? 0;
+          deletions += change.deletions ?? 0;
+        }
+      }
+    }
+  }
+
+  if (files.size === 0 && additions === 0 && deletions === 0) return null;
+  return { files: files.size, additions, deletions } satisfies SessionSummaryStats;
+}
+
+function hasSessionSummaryEdits(stats: SessionSummaryStats) {
+  return stats.files > 0 || stats.additions > 0 || stats.deletions > 0;
+}
+
+function shouldLoadSessionDiffSummary(session: Pick<Session, 'summary'>): boolean {
+  const stats = getSessionSummaryStats(session);
+  return !stats || !hasSessionSummaryEdits(stats);
+}
+
+function readDiffCount(
+  diff: unknown,
+  primaryKey: 'additions' | 'deletions',
+  fallbackKey: 'added' | 'removed'
+): number {
+  if (!diff || typeof diff !== 'object') return 0;
+  const record = diff as Record<string, unknown>;
+  const primary = record[primaryKey];
+  if (typeof primary === 'number') return primary;
+  const fallback = record[fallbackKey];
+  return typeof fallback === 'number' ? fallback : 0;
 }
 
 export function groupSessions(
@@ -414,9 +549,80 @@ export function SessionListView(props: {
   let recentHeaderRef: HTMLDivElement | undefined;
   let archiveHeaderRef: HTMLDivElement | undefined;
   let recycleBinHeaderRef: HTMLDivElement | undefined;
+  let disposed = false;
+  let activeDiffSummaryRequests = 0;
+  const diffSummaryQueue: SessionDiffSummaryRequest[] = [];
+  const queuedDiffSummaryKeys = new Set<string>();
+  const [sessionDiffSummaryCache, setSessionDiffSummaryCache] = createSignal<
+    Record<string, SessionDiffSummaryCacheEntry | undefined>
+  >({});
+
+  onCleanup(() => {
+    disposed = true;
+  });
 
   const normalizedSearchQuery = createMemo(() => searchQuery().trim().toLowerCase());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
+
+  const enqueueDiffSummaryRequest = (session: Session) => {
+    if (!shouldLoadSessionDiffSummary(session)) return;
+
+    const cached = sessionDiffSummaryCache()[session.id];
+    if (cached?.updated === session.time.updated) return;
+
+    const key = getDiffSummaryKey(session.id, session.time.updated);
+    if (queuedDiffSummaryKeys.has(key)) return;
+
+    queuedDiffSummaryKeys.add(key);
+    diffSummaryQueue.push({ sessionId: session.id, updated: session.time.updated });
+    setSessionDiffSummaryCache((cache) => ({
+      ...cache,
+      [session.id]: { status: 'loading', updated: session.time.updated, stats: null },
+    }));
+    pumpDiffSummaryQueue();
+  };
+  const pumpDiffSummaryQueue = () => {
+    if (disposed) return;
+
+    while (
+      activeDiffSummaryRequests < SESSION_DIFF_SUMMARY_CONCURRENCY &&
+      diffSummaryQueue.length > 0
+    ) {
+      const request = diffSummaryQueue.shift()!;
+      queuedDiffSummaryKeys.delete(getDiffSummaryKey(request.sessionId, request.updated));
+
+      const current = state.sessions.find((session) => session.id === request.sessionId);
+      if (!current || current.time.updated !== request.updated) continue;
+
+      activeDiffSummaryRequests += 1;
+      void client.session
+        .messages(request.sessionId)
+        .then((messages) => {
+          if (disposed) return;
+          const latest = state.sessions.find((session) => session.id === request.sessionId);
+          if (!latest || latest.time.updated !== request.updated) return;
+          setSessionDiffSummaryCache((cache) => ({
+            ...cache,
+            [request.sessionId]: {
+              status: 'ready',
+              updated: request.updated,
+              stats: getMessageToolSummaryStats(messages),
+            },
+          }));
+        })
+        .catch(() => {
+          if (disposed) return;
+          setSessionDiffSummaryCache((cache) => ({
+            ...cache,
+            [request.sessionId]: { status: 'error', updated: request.updated, stats: null },
+          }));
+        })
+        .finally(() => {
+          activeDiffSummaryRequests -= 1;
+          pumpDiffSummaryQueue();
+        });
+    }
+  };
 
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const visibleSessionsForList = createMemo(() => {
@@ -542,6 +748,12 @@ export function SessionListView(props: {
     });
   });
 
+  createEffect(() => {
+    for (const session of visibleSessions()) {
+      enqueueDiffSummaryRequest(session);
+    }
+  });
+
   createEffect(
     on(
       () => [props.sessionFilter, props.subagentParentId],
@@ -603,6 +815,7 @@ export function SessionListView(props: {
       {(session, index) => (
         <SessionListItem
           session={session}
+          diffSummary={sessionDiffSummaryCache()[session.id]?.stats ?? null}
           itemIndex={() => indexOffset + index()}
           focusedIndex={focusedIndex}
           setFocusedIndex={setFocusedIndex}
@@ -900,6 +1113,7 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
 
 function SessionListItem(props: {
   session: (typeof state.sessions)[number];
+  diffSummary: SessionSummaryStats | null;
   itemIndex: () => number;
   focusedIndex: () => number;
   setFocusedIndex: (index: number) => void;
@@ -938,6 +1152,7 @@ function SessionListItem(props: {
     }
     return { files: unique.size, iterations: run.iterations.length };
   };
+  const summaryStats = () => getSessionSummaryStats(props.session, props.diffSummary);
   const indicatorKind = () =>
     getSessionStatusIndicatorKind({
       isFailed: props.isFailed,
@@ -984,12 +1199,16 @@ function SessionListItem(props: {
             <Show
               when={ralphSummary()}
               fallback={
-                <Show when={props.session.summary}>
-                  {props.session.summary!.files} file
-                  {props.session.summary!.files !== 1 ? 's' : ''}
-                  {' · '}
-                  <span class="diff-lines-added">+{props.session.summary!.additions}</span>{' '}
-                  <span class="diff-lines-removed">-{props.session.summary!.deletions}</span>
+                <Show when={summaryStats()}>
+                  {(summary) => (
+                    <>
+                      {summary().files} file
+                      {summary().files !== 1 ? 's' : ''}
+                      {' · '}
+                      <span class="diff-lines-added">+{summary().additions}</span>{' '}
+                      <span class="diff-lines-removed">-{summary().deletions}</span>
+                    </>
+                  )}
                 </Show>
               }
             >

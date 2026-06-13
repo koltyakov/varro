@@ -990,4 +990,56 @@ describe('FileChangeCard', () => {
       payload: { path: '/repo/src/new.ts', kind: 'file' },
     });
   });
+
+  it('shows grouped paths and per-file stats for multi-file apply_patch metadata', () => {
+    const sendSpy = setExtensionSender();
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'apply_patch',
+      state: {
+        status: 'completed',
+        input: {},
+        output: '',
+        title: 'apply_patch',
+        metadata: {
+          files: [
+            { type: 'add', relativePath: 'src/new.ts', additions: 2, deletions: 0 },
+            { type: 'update', relativePath: 'src/app.ts', additions: 3, deletions: 1 },
+          ],
+        },
+        time: { start: 0, end: 1500 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const links = Array.from(
+      container?.querySelectorAll<HTMLAnchorElement>(
+        '.file-edit-multi-list .file-edit-path-link'
+      ) || []
+    );
+
+    expect(container?.querySelector('.file-edit-path-link')?.textContent).toBe('2 files');
+    expect(links.map((link) => link.textContent)).toEqual(['src/new.ts', 'src/app.ts']);
+    expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+5');
+    expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-1');
+
+    links[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: 'src/app.ts', kind: 'file' },
+    });
+  });
 });

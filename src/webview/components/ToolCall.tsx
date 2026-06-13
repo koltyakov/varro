@@ -5,7 +5,8 @@ import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } fr
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { formatDuration } from '../lib/message-metrics';
-import { getToolFileChange, getToolReadPath } from '../lib/tool-file-change';
+import { getToolFileChanges, getToolReadPath } from '../lib/tool-file-change';
+import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { QuestionPrompt } from './QuestionPrompt';
@@ -233,7 +234,7 @@ export function ToolCall(props: {
     return getToolReadPath(tool().tool, state());
   };
 
-  const fileChange = () => getToolFileChange(tool().tool, state());
+  const fileChanges = () => getToolFileChanges(tool().tool, state());
   const isRead = () => filePath() !== null;
 
   const statusClass = () => {
@@ -306,8 +307,8 @@ export function ToolCall(props: {
   };
 
   const toolContent = () => {
-    if (fileChange()) {
-      return <FileChangeCard toolState={state()} change={fileChange()!} />;
+    if (fileChanges().length > 0) {
+      return <FileChangeCard toolState={state()} changes={fileChanges()} />;
     }
 
     if (isRead()) {
@@ -451,17 +452,16 @@ function ReadToolCard(props: {
   );
 }
 
-function FileChangeCard(props: {
-  toolState: ToolPart['state'];
-  change: ReturnType<typeof getToolFileChange>;
-}) {
+function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChange[] }) {
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
   const isRunning = () => s().status === 'running';
   const isError = () => s().status === 'error';
   const isAborted = () => isAbortedToolError(s());
-  const change = () => props.change!;
-  const effectiveKind = () => change().kind;
+  const changes = () => props.changes;
+  const change = () => changes()[0]!;
+  const isMultiFile = () => changes().length > 1;
+  const effectiveKind = () => (isMultiFile() ? 'edited' : change().kind);
 
   const action = () => {
     switch (effectiveKind()) {
@@ -478,6 +478,18 @@ function FileChangeCard(props: {
 
   const diffStats = () => {
     if (!isCompleted()) return null;
+    const fromChanges = changes().reduce(
+      (acc, item) => {
+        acc.additions += item.additions || 0;
+        acc.deletions += item.deletions || 0;
+        acc.hasStats = acc.hasStats || item.additions !== undefined || item.deletions !== undefined;
+        return acc;
+      },
+      { additions: 0, deletions: 0, hasStats: false }
+    );
+    if (fromChanges.hasStats) {
+      return { additions: fromChanges.additions, deletions: fromChanges.deletions };
+    }
     const meta = (s() as ToolStateCompleted).metadata || {};
     const additions =
       typeof meta.additions === 'number'
@@ -514,34 +526,57 @@ function FileChangeCard(props: {
         />
         <span class="file-edit-action-label">{action()}</span>
         <Show
-          when={effectiveKind() !== 'moved'}
-          fallback={
-            <span class="file-edit-move-paths">
-              <a
-                href="#"
-                class="file-path-link file-edit-path-link"
-                onClick={openFileChangePath(change().fromPath || change().path)}
-              >
-                {formatFileChangeDisplayName(change().fromPath || change().path)}
-              </a>
-              <span class="file-edit-move-arrow">→</span>
-              <a
-                href="#"
-                class="file-path-link file-edit-path-link"
-                onClick={openFileChangePath(change().toPath || change().path)}
-              >
-                {formatFileChangeDisplayName(change().toPath || change().path)}
-              </a>
-            </span>
-          }
+          when={!isMultiFile()}
+          fallback={<span class="file-edit-path-link">{changes().length} files</span>}
         >
-          <a
-            href="#"
-            class="file-path-link file-edit-path-link"
-            onClick={openFileChangePath(change().path)}
+          <Show
+            when={effectiveKind() !== 'moved'}
+            fallback={
+              <span class="file-edit-move-paths">
+                <a
+                  href="#"
+                  class="file-path-link file-edit-path-link"
+                  onClick={openFileChangePath(change().fromPath || change().path)}
+                >
+                  {formatFileChangeDisplayName(change().fromPath || change().path)}
+                </a>
+                <span class="file-edit-move-arrow">→</span>
+                <a
+                  href="#"
+                  class="file-path-link file-edit-path-link"
+                  onClick={openFileChangePath(change().toPath || change().path)}
+                >
+                  {formatFileChangeDisplayName(change().toPath || change().path)}
+                </a>
+              </span>
+            }
           >
-            {formatFileChangeDisplayName(change().path)}
-          </a>
+            <a
+              href="#"
+              class="file-path-link file-edit-path-link"
+              onClick={openFileChangePath(change().path)}
+            >
+              {formatFileChangeDisplayName(change().path)}
+            </a>
+          </Show>
+        </Show>
+        <Show when={isMultiFile()}>
+          <span class="file-edit-multi-list">
+            <For each={changes().slice(0, 3)}>
+              {(item) => (
+                <a
+                  href="#"
+                  class="file-path-link file-edit-path-link"
+                  onClick={openFileChangePath(item.toPath || item.path)}
+                >
+                  {formatFileChangeDisplayName(item.toPath || item.path)}
+                </a>
+              )}
+            </For>
+            <Show when={changes().length > 3}>
+              <span class="file-edit-more-count">+{changes().length - 3} more</span>
+            </Show>
+          </span>
         </Show>
         <Show when={isCompleted() && diffStats()}>
           <span class="file-edit-diff-stats">

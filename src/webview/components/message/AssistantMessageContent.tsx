@@ -5,7 +5,7 @@ import {
   isFileEditPart,
   shouldShowAssistantPartInHighlightedCard,
 } from '../../lib/part-utils';
-import { getToolFileChange } from '../../lib/tool-file-change';
+import { getToolFileChangeSignature } from '../../lib/tool-file-change';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
 import { MarkdownRenderer } from '../MarkdownRenderer';
@@ -166,7 +166,7 @@ export function deduplicateFileEdits(parts: Part[]): Part[] {
       result.push(parts[index]);
       continue;
     }
-    const currentChange = getToolFileChange(
+    const currentChangeSignature = getToolFileChangeSignature(
       (parts[index] as ToolPart).tool,
       (parts[index] as ToolPart).state
     );
@@ -174,8 +174,10 @@ export function deduplicateFileEdits(parts: Part[]): Part[] {
     while (
       last + 1 < parts.length &&
       isFileEditPart(parts[last + 1]) &&
-      getToolFileChange((parts[last + 1] as ToolPart).tool, (parts[last + 1] as ToolPart).state)
-        ?.dedupeKey === currentChange?.dedupeKey
+      getToolFileChangeSignature(
+        (parts[last + 1] as ToolPart).tool,
+        (parts[last + 1] as ToolPart).state
+      ) === currentChangeSignature
     ) {
       last += 1;
     }

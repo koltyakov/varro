@@ -1,5 +1,5 @@
 import type { Part, ToolPart, ToolStateCompleted } from '../types';
-import { getToolFileChange } from './tool-file-change';
+import { getToolFileChangeSignature } from './tool-file-change';
 
 function getDiffStatsSignature(part: ToolPart): string {
   if (part.state.status !== 'completed') return '';
@@ -23,9 +23,9 @@ function getDiffStatsSignature(part: ToolPart): string {
 
 export function getFileEditVisualSignature(part: Part): string | null {
   if (part.type !== 'tool') return null;
-  const change = getToolFileChange(part.tool, part.state);
-  if (!change) return null;
-  return `${change.dedupeKey}${getDiffStatsSignature(part)}`;
+  const signature = getToolFileChangeSignature(part.tool, part.state);
+  if (!signature) return null;
+  return `${signature}${getDiffStatsSignature(part)}`;
 }
 
 export function collapseLeadingDuplicateFileEvents(

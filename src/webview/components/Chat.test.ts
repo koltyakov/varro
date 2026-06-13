@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
-import type { AssistantMessage, Session } from '../types';
+import type { AssistantMessage, Session, ToolPart } from '../types';
 import * as openCodeModule from '../hooks/useOpenCode';
 import {
   archiveSessionGroup,
@@ -15,9 +15,12 @@ import {
   getHeaderFailedCount,
   getHeaderPlanReadyCount,
   getHeaderRunningCount,
+  getDiffSummaryStats,
+  getMessageToolSummaryStats,
   getOtherSessions,
   getPrimarySessionsForFilter,
   getSessionListFilterLabel,
+  getSessionSummaryStats,
   getSubagentSessionsForParent,
   groupSessions,
   isEmptySession,
@@ -162,6 +165,101 @@ function assistantMessageEntry(id: string) {
 
   return { info, parts: [] };
 }
+
+function toolPart(tool: string, metadata: Record<string, unknown>): ToolPart {
+  return {
+    id: `${tool}-part`,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'tool',
+    callID: `${tool}-call`,
+    tool,
+    state: {
+      status: 'completed',
+      input: {},
+      output: '',
+      title: '',
+      metadata,
+      time: { start: 0, end: 1 },
+    },
+  };
+}
+
+describe('getSessionSummaryStats', () => {
+  it('derives totals from summary diffs when aggregate fields are zeroed', () => {
+    expect(
+      getSessionSummaryStats(
+        session('session-1', 1_000, {
+          summary: {
+            additions: 0,
+            deletions: 0,
+            files: 0,
+            diffs: [
+              { file: 'src/a.ts', before: '', after: '', additions: 4, deletions: 1 },
+              { file: 'src/b.ts', before: '', after: '', additions: 2, deletions: 3 },
+            ],
+          },
+        })
+      )
+    ).toEqual({ files: 2, additions: 6, deletions: 4 });
+  });
+
+  it('supports added and removed diff counts from newer OpenCode summaries', () => {
+    expect(getDiffSummaryStats([{ file: 'src/a.ts', added: 5, removed: 2 }])).toEqual({
+      files: 1,
+      additions: 5,
+      deletions: 2,
+    });
+  });
+
+  it('uses a loaded diff fallback when session aggregate fields are zeroed', () => {
+    expect(
+      getSessionSummaryStats(
+        session('session-1', 1_000, {
+          summary: { additions: 0, deletions: 0, files: 0 },
+        }),
+        { files: 2, additions: 6, deletions: 4 }
+      )
+    ).toEqual({ files: 2, additions: 6, deletions: 4 });
+  });
+
+  it('preserves non-zero aggregate fields over a diff fallback', () => {
+    expect(
+      getSessionSummaryStats(
+        session('session-1', 1_000, {
+          summary: { additions: 1, deletions: 2, files: 3 },
+        }),
+        { files: 4, additions: 5, deletions: 6 }
+      )
+    ).toEqual({ files: 3, additions: 1, deletions: 2 });
+  });
+
+  it('derives fallback totals from file-changing tool messages', () => {
+    expect(
+      getMessageToolSummaryStats([
+        {
+          parts: [
+            toolPart('write', { filepath: 'src/a.ts', additions: 4, deletions: 1 }),
+            toolPart('apply_patch', {
+              files: [
+                { type: 'update', relativePath: 'src/a.ts', additions: 2, deletions: 0 },
+                { type: 'add', relativePath: 'src/b.ts', additions: 3, deletions: 0 },
+              ],
+            }),
+            {
+              id: 'patch-part',
+              sessionID: 'session-1',
+              messageID: 'message-1',
+              type: 'patch',
+              hash: 'abc',
+              files: ['src/c.ts'],
+            },
+          ],
+        },
+      ])
+    ).toEqual({ files: 3, additions: 9, deletions: 1 });
+  });
+});
 
 describe('groupSessions', () => {
   const now = 2 * 24 * 60 * 60 * 1_000;

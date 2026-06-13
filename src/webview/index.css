@@ -4534,6 +4534,24 @@ kbd {
   flex-shrink: 0;
 }
 
+.file-edit-multi-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.file-edit-multi-list .file-edit-path-link {
+  max-width: 160px;
+}
+
+.file-edit-more-count {
+  color: var(--color-vscode-fg-muted);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
 .file-edit-diff-stats {
   display: inline-flex;
   align-items: center;

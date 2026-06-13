@@ -3,6 +3,8 @@ import type { ToolPart, ToolState } from '../types';
 import {
   getToolChangePath,
   getToolFileChange,
+  getToolFileChanges,
+  getToolFileChangeSignature,
   getToolReadPath,
   isToolFileRead,
 } from './tool-file-change';
@@ -88,6 +90,87 @@ describe('tool file change helpers', () => {
       toPath: 'src/new.ts',
       dedupeKey: 'moved:src/old.ts->src/new.ts',
     });
+  });
+
+  it('extracts OpenCode write metadata paths', () => {
+    expect(
+      getToolFileChange(
+        'write',
+        completedState(
+          {},
+          { metadata: { filepath: '/repo/src/app.ts', additions: 4, deletions: 1 } }
+        )
+      )
+    ).toEqual({
+      kind: 'edited',
+      path: '/repo/src/app.ts',
+      additions: 4,
+      deletions: 1,
+      dedupeKey: 'edited:/repo/src/app.ts',
+    });
+  });
+
+  it('extracts multi-file apply_patch metadata', () => {
+    const state = completedState(
+      {},
+      {
+        metadata: {
+          files: [
+            {
+              type: 'add',
+              filePath: '/repo/src/new.ts',
+              relativePath: 'src/new.ts',
+              additions: 2,
+              deletions: 0,
+            },
+            {
+              type: 'update',
+              filePath: '/repo/src/app.ts',
+              relativePath: 'src/app.ts',
+              additions: 3,
+              deletions: 1,
+            },
+            {
+              type: 'move',
+              filePath: '/repo/src/old.ts',
+              movePath: '/repo/src/renamed.ts',
+              relativePath: 'src/renamed.ts',
+              additions: 0,
+              deletions: 0,
+            },
+          ],
+        },
+      }
+    );
+
+    expect(getToolFileChanges('apply_patch', state)).toEqual([
+      {
+        kind: 'added',
+        path: 'src/new.ts',
+        additions: 2,
+        deletions: 0,
+        dedupeKey: 'added:src/new.ts',
+      },
+      {
+        kind: 'edited',
+        path: 'src/app.ts',
+        additions: 3,
+        deletions: 1,
+        dedupeKey: 'edited:src/app.ts',
+      },
+      {
+        kind: 'moved',
+        path: '/repo/src/renamed.ts',
+        fromPath: '/repo/src/old.ts',
+        toPath: '/repo/src/renamed.ts',
+        additions: 0,
+        deletions: 0,
+        dedupeKey: 'moved:/repo/src/old.ts->/repo/src/renamed.ts',
+      },
+    ]);
+    expect(getToolFileChangeSignature('apply_patch', state)).toBe(
+      'added:src/new.ts|edited:src/app.ts|moved:/repo/src/old.ts->/repo/src/renamed.ts'
+    );
   });
 
   it('returns null when there is no recognizable file change', () => {
