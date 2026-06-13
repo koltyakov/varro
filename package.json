@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.17.21",
+  "version": "0.17.22",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -52,7 +52,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "@tailwindcss/vite": "4.3.0",
+    "@tailwindcss/vite": "4.3.1",
     "@types/node": "25.9.3",
     "@types/vscode": "1.96.0",
     "@vitest/coverage-v8": "4.1.8",
@@ -62,14 +62,11 @@
     "oxfmt": "0.54.0",
     "oxlint": "1.69.0",
     "postcss": "8.5.15",
-    "tailwindcss": "4.3.0",
+    "tailwindcss": "4.3.1",
     "typescript": "6.0.3",
     "vite": "8.0.16",
     "vite-plugin-solid": "2.11.12",
     "vitest": "4.1.8"
-  },
-  "overrides": {
-    "fast-uri": "3.1.2"
   },
   "contributes": {
     "viewsContainers": {
@@ -304,5 +301,8 @@
   "volta": {
     "node": "24.12.0",
     "npm": "10.9.8"
+  },
+  "_overrides": {
+    "fast-uri": "3.1.2"
   }
 }

@@ -598,6 +598,12 @@ describe('state helpers', () => {
     ];
 
     stateModule.setQuestions([{ id: 'q1', sessionID: 'session-1', questions: [] }]);
+    const question = stateModule.state.questions[0];
+
+    stateModule.setQuestions([{ id: 'q1', sessionID: 'session-1', questions: [] }]);
+
+    expect(stateModule.state.questions[0]).toBe(question);
+
     stateModule.upsertQuestion({
       id: 'q1',
       sessionID: 'session-1',

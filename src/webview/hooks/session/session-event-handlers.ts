@@ -138,6 +138,10 @@ type EventHandlerDependencies = {
     messages?: Array<{ info: Message; parts: Part[] }>,
     latestEventPayload?: unknown
   ): void;
+  syncTodosForSession?(
+    sessionId: string,
+    messages?: Array<{ info: Message; parts: Part[] }>
+  ): Promise<void>;
   shouldAutoApprovePermissions(sessionId: string): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   judgePermission?(permission: Permission): Promise<void>;
@@ -156,7 +160,7 @@ type EventHandlerDependencies = {
 type EventHandlerOperationDependencies = {
   todoSyncOperations: Pick<
     EventHandlerDependencies,
-    'handoffTodosToMessages' | 'syncTodosFromMessages'
+    'handoffTodosToMessages' | 'syncTodosFromMessages' | 'syncTodosForSession'
   >;
   sessionLifecycleOperations: Pick<
     EventHandlerDependencies,
@@ -365,6 +369,7 @@ export class SessionEventHandlerOperations {
       syncSessionMessages: this.deps.sessionSyncOperations.syncSessionMessages,
       applyUsageLimitNotice: this.deps.sessionStatusOperations.applyUsageLimitNotice,
       syncTodosFromMessages: this.deps.todoSyncOperations.syncTodosFromMessages,
+      syncTodosForSession: this.deps.todoSyncOperations.syncTodosForSession,
       shouldAutoApprovePermissions: (sessionId) =>
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
       shouldAutoJudgePermissions: (sessionId) =>
@@ -420,6 +425,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
     }, delayMs);
     activeMessageSyncTimers.set(sessionId, timer);
+  };
+  const refreshSettledTodos = (sessionId: string) => {
+    const sync = deps.syncTodosForSession?.(sessionId, deps.getMessages());
+    if (!sync) return;
+    sync.catch((err) => deps.logError('syncTodosForSession', err));
   };
   const markSessionProgress = (sessionId: string) => {
     setSessionStatusEntry(sessionId, { type: 'busy' });
@@ -718,6 +728,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           activeMessages.length === 0 || hasActiveAssistantReply(activeMessages);
         if (!uiStore.showSessionPicker()) sessionStore.markSessionSeen(sid);
         const handedOffTodos = deps.handoffTodosToMessages();
+        refreshSettledTodos(sid);
         if (
           (shouldResyncActiveMessages || !handedOffTodos) &&
           deps.shouldResyncSessionAfterIdle(sid)
@@ -803,6 +814,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           if (assistantMessage) {
             syncMessagePartsIfMissing(assistantMessage);
             deps.handoffTodosToMessages();
+            refreshSettledTodos(sessionID);
           }
         }
       }

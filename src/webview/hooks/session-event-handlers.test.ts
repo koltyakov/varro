@@ -1712,6 +1712,24 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
+  it('refreshes todos when the active session becomes idle', () => {
+    const handlers = installHandlers();
+    const messages = [createCompletedAssistantEntry(1, 2)];
+    const syncTodosForSession = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        syncTodosForSession,
+      })
+    );
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+    expect(syncTodosForSession).toHaveBeenCalledWith('session-1', messages);
+  });
+
   it('does not mark the active session seen on idle while the session list is open', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();

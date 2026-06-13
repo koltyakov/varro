@@ -147,6 +147,43 @@ describe('todo-sync', () => {
     ).toEqual(todos);
   });
 
+  it('prefers completed tool output over stale todo input', () => {
+    expect(
+      deriveTodosFromMessages([
+        { info: userMessage('user-1'), parts: [] },
+        {
+          info: assistantMessage('assistant-1'),
+          parts: [
+            {
+              id: 'part-1',
+              sessionID: 'session-1',
+              messageID: 'assistant-1',
+              type: 'tool',
+              callID: 'call-1',
+              tool: 'todowrite',
+              state: {
+                status: 'completed',
+                input: {
+                  todos: [
+                    { id: 'todo-1', content: 'ship it', status: 'in_progress', priority: 'high' },
+                  ],
+                },
+                output: JSON.stringify({
+                  todos: [
+                    { id: 'todo-1', content: 'ship it', status: 'completed', priority: 'high' },
+                  ],
+                }),
+                title: 'TodoWrite',
+                metadata: {},
+                time: { start: 0, end: 1 },
+              },
+            } as Part,
+          ],
+        },
+      ])
+    ).toEqual([{ id: 'todo-1', content: 'ship it', status: 'completed', priority: 'high' }]);
+  });
+
   it('keeps event-owned todos until messages fully catch up', () => {
     const setTodos = vi.fn();
     state.sessionStatus = { 'session-1': { type: 'busy' } };
@@ -202,6 +239,61 @@ describe('todo-sync', () => {
 
     expect(setState).toHaveBeenCalledWith('todos', [
       { id: 'native', content: 'native', status: 'completed', priority: 'high' },
+    ]);
+  });
+
+  it('does not let native todo refreshes downgrade matching completed todos', async () => {
+    state.todos = [{ id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' }];
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => [
+        { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
+      ]),
+    });
+
+    await operations.syncTodosForSession('session-1', []);
+
+    expect(setState).not.toHaveBeenCalled();
+  });
+
+  it('allows native todo update events to reset matching completed todos', async () => {
+    state.todos = [{ id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' }];
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => []),
+    });
+
+    await operations.syncTodosForSession('session-1', []);
+    setState.mockClear();
+
+    operations.syncTodosFromMessages([], {
+      todos: [{ id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' }],
+    });
+
+    expect(setState).toHaveBeenCalledWith('todos', [
+      { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
+    ]);
+  });
+
+  it('uses message todos to advance stale native session todos', async () => {
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => [
+        { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
+      ]),
+    });
+
+    await operations.syncTodosForSession('session-1', [
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [
+          todoToolPart([
+            { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
+          ]),
+        ],
+      },
+    ]);
+
+    expect(setState).toHaveBeenLastCalledWith('todos', [
+      { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
     ]);
   });
 

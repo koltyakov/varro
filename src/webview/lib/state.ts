@@ -1464,7 +1464,7 @@ export function resetPastedImageIndex() {
 }
 
 export function setQuestions(questions: QuestionRequest[]) {
-  setState('questions', questions);
+  setState('questions', reconcile(questions, { key: 'id' }));
 }
 
 export function setProviderAuthMethods(methods: ProviderAuthMethodsByProvider) {
@@ -1484,7 +1484,7 @@ export function setCommands(commands: Command[]) {
 }
 
 export function setSessions(nextSessions: Session[]) {
-  setState('sessions', nextSessions);
+  setState('sessions', reconcile(nextSessions, { key: 'id' }));
   const sessionIds = new Set(nextSessions.map((session) => session.id));
   const nextMarkers = pruneSkippedPlanSessions(state.skippedPlanSessions, sessionIds);
   if (nextMarkers) {

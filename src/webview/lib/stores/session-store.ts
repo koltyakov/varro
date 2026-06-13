@@ -100,7 +100,9 @@ export const sessionStore = {
     options?: SessionStatusSnapshotOptions
   ) {
     setState('sessionStatus', (current) => {
-      if (options?.snapshotStartedAt === undefined) return statuses;
+      if (options?.snapshotStartedAt === undefined) {
+        return areEqualSessionStatusRecords(current, statuses) ? current : statuses;
+      }
 
       const next = { ...statuses };
       for (const sessionId of sessionStatusLocalUpdatedAt.keys()) {
@@ -135,7 +137,7 @@ export const sessionStore = {
         if (currentStatus) next[sessionId] = currentStatus;
         else delete next[sessionId];
       }
-      return next;
+      return areEqualSessionStatusRecords(current, next) ? current : next;
     });
   },
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
@@ -168,6 +170,23 @@ function isEqualSessionStatus(a: SessionStatus, b: SessionStatus): boolean {
   if (a.type === 'retry' && b.type === 'retry') {
     return a.attempt === b.attempt && a.message === b.message && a.next === b.next;
   }
+  return true;
+}
+
+function areEqualSessionStatusRecords(
+  a: Record<string, SessionStatus>,
+  b: Record<string, SessionStatus>
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+
+  for (const key of aKeys) {
+    const left = a[key];
+    const right = b[key];
+    if (!left || !right || !isEqualSessionStatus(left, right)) return false;
+  }
+
   return true;
 }
 

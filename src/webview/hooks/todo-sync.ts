@@ -11,18 +11,22 @@ export function resetTodoSync() {
   appStore.setState('todos', []);
 }
 
-function setStateTodos(todos: Todo[]) {
-  appStore.setState('todos', todos);
+function setStateTodos(todos: Todo[], options?: { preserveAdvancedStatuses?: boolean }) {
+  const nextTodos = options?.preserveAdvancedStatuses
+    ? preserveAdvancedTodoStatuses(todos, appStore.state.todos)
+    : todos;
+  if (areTodosEqual(appStore.state.todos, nextTodos)) return;
+  appStore.setState('todos', nextTodos);
 }
 
 export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   let nativeTodosEnabled = false;
 
-  const applyNativeTodos = (raw: unknown) => {
+  const applyNativeTodos = (raw: unknown, options?: { preserveAdvancedStatuses?: boolean }) => {
     const todos = extractTodos(raw);
     if (!todos) return false;
     nativeTodosEnabled = true;
-    setStateTodos(todos);
+    setStateTodos(todos, options);
     return true;
   };
 
@@ -31,7 +35,10 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     latestEventPayload?: unknown
   ) => {
     if (nativeTodosEnabled && applyNativeTodos(latestEventPayload)) return;
-    if (nativeTodosEnabled) return;
+    if (nativeTodosEnabled) {
+      advanceTodosFromMessages(messages);
+      return;
+    }
     syncTodosFromMessages(setStateTodos, messages, latestEventPayload);
   };
 
@@ -47,7 +54,10 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     try {
       const todos = extractTodos(await deps.loadSessionTodos(sessionId)) ?? [];
       nativeTodosEnabled = true;
-      if (appStore.state.activeSessionId === sessionId) setStateTodos(todos);
+      if (appStore.state.activeSessionId === sessionId) {
+        setStateTodos(todos, { preserveAdvancedStatuses: true });
+        advanceTodosFromMessages(messages);
+      }
     } catch {
       nativeTodosEnabled = false;
       syncTodosFromMessagesWithState(messages);
@@ -55,7 +65,10 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   };
 
   const handoffTodosToMessagesWithState = (messages: SessionEntry[] = appStore.state.messages) => {
-    if (nativeTodosEnabled) return true;
+    if (nativeTodosEnabled) {
+      advanceTodosFromMessages(messages);
+      return true;
+    }
     const handedOff = handoffTodosToMessages(appStore.state.todos, setStateTodos, messages);
     return handedOff;
   };
@@ -66,6 +79,22 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     syncTodosForSession: syncTodosForSessionWithState,
     handoffTodosToMessages: handoffTodosToMessagesWithState,
   };
+}
+
+function advanceTodosFromMessages(messages: SessionEntry[]) {
+  const messageTodos = deriveTodosFromMessages(messages);
+  if (messageTodos.length === 0) return false;
+
+  const currentTodos = appStore.state.todos;
+  if (currentTodos.length === 0) {
+    setStateTodos(messageTodos);
+    return true;
+  }
+
+  if (currentTodos.length !== messageTodos.length) return false;
+  const nextTodos = mergeTodoEventAdvance(currentTodos, messageTodos);
+  setStateTodos(nextTodos);
+  return true;
 }
 
 export function extractTodos(raw: unknown): Todo[] | null {
@@ -130,6 +159,17 @@ export function mergeTodoEventAdvance(messageTodos: Todo[], eventTodos: Todo[] |
     if (!isSameTodo(messageTodo, eventTodo)) return messageTodo;
     if (statusRank(eventTodo.status) <= statusRank(messageTodo.status)) return messageTodo;
     return { ...messageTodo, status: eventTodo.status };
+  });
+}
+
+export function preserveAdvancedTodoStatuses(nextTodos: Todo[], currentTodos: Todo[]): Todo[] {
+  if (nextTodos.length === 0 || nextTodos.length !== currentTodos.length) return nextTodos;
+
+  return nextTodos.map((nextTodo, index) => {
+    const currentTodo = currentTodos[index];
+    if (!isSameTodo(nextTodo, currentTodo)) return nextTodo;
+    if (statusRank(currentTodo.status) <= statusRank(nextTodo.status)) return nextTodo;
+    return { ...nextTodo, status: currentTodo.status };
   });
 }
 
@@ -255,7 +295,42 @@ function extractTodosFromPart(part: Part): Todo[] | null {
     return null;
   }
 
-  return extractTodos(toolState.input) || extractTodos(toolState.metadata) || null;
+  return (
+    extractTodosFromOutput(toolState.output) ||
+    extractTodos(toolState.metadata) ||
+    extractTodos(toolState.input) ||
+    null
+  );
+}
+
+function extractTodosFromOutput(raw: unknown): Todo[] | null {
+  if (typeof raw !== 'string') return extractTodos(raw);
+
+  try {
+    return extractTodos(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function areTodosEqual(left: Todo[], right: Todo[]) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftTodo = left[index];
+    const rightTodo = right[index];
+    if (
+      leftTodo.id !== rightTodo.id ||
+      leftTodo.content !== rightTodo.content ||
+      leftTodo.status !== rightTodo.status ||
+      leftTodo.priority !== rightTodo.priority
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function getLatestAssistantMessageInTurn(

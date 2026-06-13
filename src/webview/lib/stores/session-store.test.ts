@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createEffect, createRoot } from 'solid-js';
 import type { FileDiff, Message, Session } from '../../types';
 import { sessionStore } from './session-store';
 import {
@@ -117,6 +118,53 @@ describe('sessionStore', () => {
     nowSpy.mockRestore();
   });
 
+  it('ignores equivalent status snapshots', () => {
+    sessionStore.setSessionStatuses({
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'retry', attempt: 1, message: 'retrying', next: 2 },
+    });
+    let runs = 0;
+    const dispose = createRoot((cleanup) => {
+      createEffect(() => {
+        const firstType = state.sessionStatus['session-1']?.type;
+        const secondType = state.sessionStatus['session-2']?.type;
+        if (!firstType || !secondType) throw new Error('Expected test statuses to exist');
+        runs += 1;
+      });
+      return cleanup;
+    });
+
+    sessionStore.setSessionStatuses(
+      {
+        'session-1': { type: 'busy' },
+        'session-2': { type: 'retry', attempt: 1, message: 'retrying', next: 2 },
+      },
+      { snapshotStartedAt: Date.now() + 1 }
+    );
+
+    expect(runs).toBe(1);
+    dispose();
+  });
+
+  it('applies changed status snapshots', () => {
+    sessionStore.setSessionStatuses({ 'session-1': { type: 'busy' } });
+    let runs = 0;
+    const dispose = createRoot((cleanup) => {
+      createEffect(() => {
+        const type = state.sessionStatus['session-1']?.type;
+        if (!type) throw new Error('Expected test status to exist');
+        runs += 1;
+      });
+      return cleanup;
+    });
+
+    sessionStore.setSessionStatuses({ 'session-1': { type: 'idle' } });
+
+    expect(runs).toBe(2);
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+    dispose();
+  });
+
   it('keeps locally running sessions busy until their latest assistant settles', () => {
     sessionStore.setActiveSessionId('session-1');
     sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
@@ -224,5 +272,22 @@ describe('sessionStore', () => {
 
     expect(sessionStore.getSessionTreeIds('root')).toEqual(['root', 'child']);
     expect(sessionStore.getSessionTreeRootId('child')).toBe('root');
+  });
+
+  it('preserves session row identity across same-id refreshes', () => {
+    sessionStore.setSessions([createSession('session-1')]);
+    const existing = state.sessions[0];
+
+    sessionStore.setSessions([
+      {
+        ...createSession('session-1'),
+        title: 'Updated title',
+        time: { created: 1, updated: 2 },
+      },
+    ]);
+
+    expect(state.sessions[0]).toBe(existing);
+    expect(state.sessions[0]?.title).toBe('Updated title');
+    expect(state.sessions[0]?.time.updated).toBe(2);
   });
 });
