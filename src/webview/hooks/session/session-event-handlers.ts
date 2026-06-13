@@ -1132,7 +1132,23 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   );
 
   cleanups.push(
+    serverEvents.on('permission.v2.asked', (data) => {
+      const props = data.properties;
+      if (props) handlePermissionEvent(props);
+    })
+  );
+
+  cleanups.push(
     serverEvents.on('permission.replied', (data) => {
+      const props = data.properties;
+      if (!props) return;
+      const pid = getPermissionReplyId(props);
+      if (pid) permissionsStore.removePermission(pid);
+    })
+  );
+
+  cleanups.push(
+    serverEvents.on('permission.v2.replied', (data) => {
       const props = data.properties;
       if (!props) return;
       const pid = getPermissionReplyId(props);
@@ -1148,6 +1164,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   );
 
   cleanups.push(
+    serverEvents.on('question.v2.asked', (data) => {
+      const props = data.properties;
+      if (props) permissionsStore.upsertQuestion(props as QuestionRequest);
+    })
+  );
+
+  cleanups.push(
     serverEvents.on('question.replied', (data) => {
       const requestID = data.properties?.requestID as string | undefined;
       if (requestID) permissionsStore.removeQuestion(requestID);
@@ -1156,6 +1179,20 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('question.rejected', (data) => {
+      const requestID = data.properties?.requestID as string | undefined;
+      if (requestID) permissionsStore.removeQuestion(requestID);
+    })
+  );
+
+  cleanups.push(
+    serverEvents.on('question.v2.replied', (data) => {
+      const requestID = data.properties?.requestID as string | undefined;
+      if (requestID) permissionsStore.removeQuestion(requestID);
+    })
+  );
+
+  cleanups.push(
+    serverEvents.on('question.v2.rejected', (data) => {
       const requestID = data.properties?.requestID as string | undefined;
       if (requestID) permissionsStore.removeQuestion(requestID);
     })

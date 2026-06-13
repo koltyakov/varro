@@ -128,7 +128,7 @@ export class SessionStateManager {
         break;
       }
       case 'session.deleted': {
-        const sessionID = getString(asRecord(props?.info)?.id);
+        const sessionID = getString(props?.sessionID) || getString(asRecord(props?.info)?.id);
         if (!sessionID) break;
         changed = this.removeSession(sessionID) || changed;
         break;
@@ -191,14 +191,16 @@ export class SessionStateManager {
         }
         break;
       }
-      case 'permission.asked': {
+      case 'permission.asked':
+      case 'permission.v2.asked': {
         const propsRecord = asRecord(props);
         const requestProps = asRecord(propsRecord?.info) || propsRecord;
         changed =
           (requestProps ? this.trackBlockingRequest('permission', requestProps) : false) || changed;
         break;
       }
-      case 'permission.replied': {
+      case 'permission.replied':
+      case 'permission.v2.replied': {
         const propsRecord = asRecord(props);
         const requestProps = asRecord(propsRecord?.info) || propsRecord;
         changed =
@@ -209,12 +211,15 @@ export class SessionStateManager {
           ) || changed;
         break;
       }
-      case 'question.asked': {
+      case 'question.asked':
+      case 'question.v2.asked': {
         changed = (props ? this.trackBlockingRequest('question', props) : false) || changed;
         break;
       }
       case 'question.replied':
-      case 'question.rejected': {
+      case 'question.rejected':
+      case 'question.v2.replied':
+      case 'question.v2.rejected': {
         changed =
           this.clearBlockingRequest(getString(props?.requestID) || getString(props?.id)) || changed;
         break;

@@ -5,9 +5,8 @@ import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-u
 
 type EventStreamState = 'healthy' | 'degraded';
 
-// OpenCode's v2 event stream. Carries durable per-session `seq` on synchronized events
-// (used for targeted resync) and scopes by the `x-opencode-directory` header. Note: it
-// emits no heartbeat, so a quiet stream is kept honest by the idle-timeout reconnect.
+// OpenCode's v2 event stream. Current servers emit direct `{ id, type, properties }`
+// events plus heartbeat messages, scoped by the `x-opencode-directory` header.
 const EVENT_STREAM_PATH = '/api/event';
 
 interface OpenCodeTransportOptions {
@@ -347,15 +346,17 @@ export class OpenCodeTransport {
 
   private observeServerEvent(event: unknown) {
     const evt = asRecord(event);
-    const type = getString(evt?.type);
-    // The v2 `/api/event` stream carries each event's payload under `data`.
-    const props = asRecord(evt?.data);
+    const envelope = asRecord(evt?.payload) || evt;
+    const type = getString(envelope?.type);
+    const props = asRecord(envelope?.properties) || asRecord(envelope?.data);
     if (!type) return;
     const requestProps = asRecord(props?.info) || props;
 
     switch (type) {
       case 'permission.asked':
-      case 'question.asked': {
+      case 'permission.v2.asked':
+      case 'question.asked':
+      case 'question.v2.asked': {
         const requestID =
           getString(requestProps?.id) ||
           getString(requestProps?.permissionID) ||
@@ -367,8 +368,11 @@ export class OpenCodeTransport {
         break;
       }
       case 'permission.replied':
+      case 'permission.v2.replied':
       case 'question.replied':
-      case 'question.rejected': {
+      case 'question.rejected':
+      case 'question.v2.replied':
+      case 'question.v2.rejected': {
         const requestID =
           getString(requestProps?.id) ||
           getString(requestProps?.permissionID) ||
@@ -379,7 +383,7 @@ export class OpenCodeTransport {
         break;
       }
       case 'session.deleted': {
-        const sessionID = getString(asRecord(props?.info)?.id);
+        const sessionID = getString(props?.sessionID) || getString(asRecord(props?.info)?.id);
         if (!sessionID) break;
         for (const [requestID, requestSessionID] of this.pendingAttentionRequests.entries()) {
           if (requestSessionID === sessionID) {

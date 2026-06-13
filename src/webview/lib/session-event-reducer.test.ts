@@ -109,6 +109,26 @@ describe('normalizePermissionEvent', () => {
     expect(out?.callID).toBe('call-1');
   });
 
+  it('normalizes a v2 permission request', () => {
+    const out = normalizePermissionEvent({
+      id: 'perm-v2',
+      sessionID: 'session-1',
+      action: 'edit',
+      resources: ['src/app.ts', 'src/app.test.ts'],
+      metadata: { reason: 'tool call' },
+      source: { type: 'tool', messageID: 'msg-42', callID: 'call-1' },
+    });
+
+    expect(out).not.toBeNull();
+    expect(out?.id).toBe('perm-v2');
+    expect(out?.type).toBe('edit');
+    expect(out?.pattern).toEqual(['src/app.ts', 'src/app.test.ts']);
+    expect(out?.messageID).toBe('msg-42');
+    expect(out?.callID).toBe('call-1');
+    expect(out?.title).toBe('edit src/app.ts, src/app.test.ts');
+    expect(out?.metadata).toEqual({ reason: 'tool call' });
+  });
+
   it('accepts requestID when the live event omits id', () => {
     const out = normalizePermissionEvent({
       requestID: 'perm-3',

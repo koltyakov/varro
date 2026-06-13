@@ -114,6 +114,58 @@ describe('OpenCodeTransport event stream path', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/api/event');
   });
+
+  it('tracks direct v2 permission events from properties payloads', () => {
+    const transport = createTransport() as unknown as {
+      observeServerEvent(event: unknown): void;
+      hasPendingAttentionRequests(): boolean;
+    };
+
+    transport.observeServerEvent({
+      id: 'evt_1',
+      type: 'permission.asked',
+      properties: {
+        id: 'permission-1',
+        sessionID: 'session-1',
+        permission: 'bash',
+        patterns: ['*'],
+        metadata: {},
+        always: [],
+      },
+    });
+
+    expect(transport.hasPendingAttentionRequests()).toBe(true);
+
+    transport.observeServerEvent({
+      id: 'evt_2',
+      type: 'permission.replied',
+      properties: { sessionID: 'session-1', requestID: 'permission-1', reply: 'once' },
+    });
+
+    expect(transport.hasPendingAttentionRequests()).toBe(false);
+  });
+
+  it('clears direct v2 attention requests when a session is deleted', () => {
+    const transport = createTransport() as unknown as {
+      observeServerEvent(event: unknown): void;
+      hasPendingAttentionRequests(): boolean;
+    };
+
+    transport.observeServerEvent({
+      id: 'evt_1',
+      type: 'question.asked',
+      properties: { id: 'question-1', sessionID: 'session-1', questions: [] },
+    });
+    expect(transport.hasPendingAttentionRequests()).toBe(true);
+
+    transport.observeServerEvent({
+      id: 'evt_2',
+      type: 'session.deleted',
+      properties: { sessionID: 'session-1', info: { id: 'session-1' } },
+    });
+
+    expect(transport.hasPendingAttentionRequests()).toBe(false);
+  });
 });
 
 describe('OpenCodeTransport request scoping', () => {

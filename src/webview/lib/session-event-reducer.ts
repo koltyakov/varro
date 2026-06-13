@@ -35,13 +35,19 @@ export function normalizePermissionEvent(props: Record<string, unknown>): Permis
   if (!id || !sessionID) return null;
 
   const tool = (source.tool as { messageID?: string; callID?: string } | undefined) || undefined;
+  const v2Source =
+    source.source && typeof source.source === 'object'
+      ? (source.source as { messageID?: string; callID?: string })
+      : undefined;
   const permissionName =
     typeof source.permission === 'string'
       ? source.permission
       : typeof source.type === 'string'
         ? source.type
-        : '';
-  const patternValue = source.patterns ?? source.pattern;
+        : typeof source.action === 'string'
+          ? source.action
+          : '';
+  const patternValue = source.patterns ?? source.pattern ?? source.resources;
   const patterns = Array.isArray(patternValue)
     ? (patternValue.filter((p): p is string => typeof p === 'string') as string[])
     : typeof patternValue === 'string'
@@ -70,13 +76,17 @@ export function normalizePermissionEvent(props: Record<string, unknown>): Permis
         ? source.messageID
         : typeof tool?.messageID === 'string'
           ? tool.messageID
-          : '',
+          : typeof v2Source?.messageID === 'string'
+            ? v2Source.messageID
+            : '',
     callID:
       typeof source.callID === 'string'
         ? source.callID
         : typeof tool?.callID === 'string'
           ? tool.callID
-          : undefined,
+          : typeof v2Source?.callID === 'string'
+            ? v2Source.callID
+            : undefined,
     title,
     metadata: (source.metadata as { [key: string]: unknown } | undefined) || {},
     time: { created: createdAt },

@@ -512,10 +512,40 @@ export type PermissionReplyProperties = {
   sessionID?: string;
 };
 
+export type PermissionV2AskedProperties = {
+  id: string;
+  sessionID: string;
+  action: string;
+  resources: string[];
+  save?: string[];
+  metadata?: Record<string, unknown>;
+  source?: { type: 'tool'; messageID: string; callID: string };
+};
+
+export type PermissionV2ReplyProperties = {
+  sessionID: string;
+  requestID: string;
+  reply: unknown;
+};
+
 export type QuestionReplyProperties = {
   id?: string;
   requestID: string;
   sessionID?: string;
+};
+
+export type QuestionV2AskedProperties = {
+  id: string;
+  sessionID: string;
+  questions: QuestionInfo[];
+  tool?: QuestionTool;
+};
+
+export type QuestionV2ReplyProperties = {
+  id?: string;
+  sessionID: string;
+  requestID: string;
+  answers?: unknown[];
 };
 
 export type MessagePartUpdatedProperties = {
@@ -563,6 +593,19 @@ export type WorkspaceConnectionState = 'connected' | 'connecting' | 'disconnecte
 export type WorkspaceStatusEntry = {
   workspaceID: string;
   status: WorkspaceConnectionState;
+};
+
+export type ServerLifecycleEventProperties = Record<string, unknown>;
+
+export type ProjectUpdatedProperties = {
+  id: string;
+  worktree?: string;
+  name?: string;
+  vcs?: string;
+  icon?: Record<string, unknown>;
+  commands?: Record<string, unknown>;
+  time?: Record<string, unknown>;
+  sandboxes?: string[];
 };
 
 export type ToolOutputContent =
@@ -631,9 +674,13 @@ export type ProviderAuthAuthorization = {
 };
 
 export type ServerEventPropertiesByName = {
+  'server.connected': ServerLifecycleEventProperties;
+  'server.heartbeat': ServerLifecycleEventProperties;
+  'server.instance.disposed': ServerLifecycleEventProperties;
+  'project.updated': ProjectUpdatedProperties;
   'session.created': { sessionID?: string; info: SessionEventInfo };
   'session.updated': { sessionID?: string; info: SessionEventInfo };
-  'session.deleted': { info: { id: string } };
+  'session.deleted': { sessionID?: string; info: { id: string } };
   'session.status': { sessionID: string; status: SessionStatus };
   'session.error': SessionErrorProperties;
   'session.idle': { sessionID: string };
@@ -647,10 +694,17 @@ export type ServerEventPropertiesByName = {
   'permission.updated': PermissionEventProperties;
   'permission.asked': PermissionEventProperties;
   'permission.replied': PermissionReplyProperties;
+  'permission.v2.asked': PermissionV2AskedProperties;
+  'permission.v2.replied': PermissionV2ReplyProperties;
   'question.asked': QuestionRequest;
   'question.replied': QuestionReplyProperties;
   'question.rejected': QuestionReplyProperties;
+  'question.v2.asked': QuestionV2AskedProperties;
+  'question.v2.replied': QuestionV2ReplyProperties;
+  'question.v2.rejected': QuestionV2ReplyProperties;
   'todo.updated': TodoUpdatedProperties;
+  'lsp.updated': Record<string, unknown>;
+  'vcs.branch.updated': { branch?: string };
   'mcp.tools.changed': Record<string, unknown>;
   'mcp.browser.open.failed': Record<string, unknown>;
   'workspace.ready': { name?: string };
@@ -668,11 +722,42 @@ export type ServerEventPropertiesByName = {
     messageID?: string;
     model: { id?: string; providerID?: string; variant?: string };
   };
+  'session.next.moved': {
+    timestamp?: number;
+    sessionID: string;
+    location?: Record<string, unknown>;
+    subdirectory?: string;
+  };
   'session.next.prompted': {
     timestamp?: number;
     sessionID: string;
     messageID?: string;
     prompt?: Record<string, unknown>;
+    delivery?: 'steer' | 'queue';
+  };
+  'session.next.prompt.admitted': {
+    timestamp?: number;
+    sessionID: string;
+    messageID?: string;
+    prompt?: Record<string, unknown>;
+    delivery?: 'steer' | 'queue';
+  };
+  'session.next.prompt.promoted': {
+    timestamp?: number;
+    sessionID: string;
+    messageID?: string;
+    prompt?: Record<string, unknown>;
+    timeCreated?: number;
+  };
+  'session.next.interrupt.requested': {
+    timestamp?: number;
+    sessionID: string;
+  };
+  'session.next.context.updated': {
+    timestamp?: number;
+    sessionID: string;
+    messageID?: string;
+    text?: string;
   };
   'session.next.synthetic': {
     timestamp?: number;

@@ -66,6 +66,34 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
+  it('tracks v2 permission events as blocking attention', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'permission.v2.asked',
+      properties: {
+        id: 'perm-1',
+        sessionID: 'session-1',
+        action: 'bash',
+        resources: ['*'],
+      },
+    });
+
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      'Varro needs permission approval.',
+      'Open Chat'
+    );
+
+    manager.handleServerEvent({
+      type: 'permission.v2.replied',
+      properties: { sessionID: 'session-1', requestID: 'perm-1', reply: { type: 'once' } },
+    });
+
+    const post = vi.fn();
+    manager.replayBlockingRequests(post, new Set());
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it('suppresses notifications when the gate returns false', () => {
     const manager = createManager(() => false);
 

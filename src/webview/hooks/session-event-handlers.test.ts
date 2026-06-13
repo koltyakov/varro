@@ -398,6 +398,74 @@ describe('registerSessionEventHandlers', () => {
     expect(removePermission).toHaveBeenCalledWith('perm-1');
   });
 
+  it('handles v2 permission ask and reply events', () => {
+    addPermission.mockClear();
+    removePermission.mockClear();
+    const handlers = installHandlers();
+
+    registerSessionEventHandlers(createDefaultDeps());
+
+    handlers.get('permission.v2.asked')?.({
+      properties: {
+        id: 'perm-v2',
+        sessionID: 'session-1',
+        action: 'edit',
+        resources: ['src/app.ts'],
+        source: { type: 'tool', messageID: 'msg-1', callID: 'call-1' },
+      },
+    });
+    handlers.get('permission.v2.replied')?.({
+      properties: {
+        sessionID: 'session-1',
+        requestID: 'perm-v2',
+        reply: 'once',
+      },
+    });
+
+    expect(addPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'perm-v2',
+        sessionID: 'session-1',
+        type: 'edit',
+        pattern: ['src/app.ts'],
+        messageID: 'msg-1',
+        callID: 'call-1',
+      })
+    );
+    expect(removePermission).toHaveBeenCalledWith('perm-v2');
+  });
+
+  it('handles v2 question ask and completion events', () => {
+    upsertQuestion.mockClear();
+    removeQuestion.mockClear();
+    const handlers = installHandlers();
+
+    registerSessionEventHandlers(createDefaultDeps());
+
+    const question = {
+      id: 'question-v2',
+      sessionID: 'session-1',
+      questions: [
+        {
+          question: 'Choose one',
+          header: 'Choice',
+          options: [{ label: 'Yes', description: 'Proceed' }],
+        },
+      ],
+    };
+    handlers.get('question.v2.asked')?.({ properties: question });
+    handlers.get('question.v2.replied')?.({
+      properties: { sessionID: 'session-1', requestID: 'question-v2', answers: [] },
+    });
+    handlers.get('question.v2.rejected')?.({
+      properties: { sessionID: 'session-1', requestID: 'question-v3' },
+    });
+
+    expect(upsertQuestion).toHaveBeenCalledWith(question);
+    expect(removeQuestion).toHaveBeenNthCalledWith(1, 'question-v2');
+    expect(removeQuestion).toHaveBeenNthCalledWith(2, 'question-v3');
+  });
+
   it('syncs pending permissions after shell progress events in case permission events were missed', async () => {
     vi.useFakeTimers();
     const handlers = installHandlers();

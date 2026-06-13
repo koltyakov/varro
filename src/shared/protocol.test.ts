@@ -131,6 +131,41 @@ describe('protocol conformance', () => {
     });
   });
 
+  it('parses wrapped OpenCode v2 syncEvent payloads', () => {
+    expect(
+      parseServerEvent({
+        directory: '/repo',
+        payload: {
+          type: 'sync',
+          id: 'event-1',
+          syncEvent: {
+            type: 'session.next.text.ended.1',
+            id: 'event-2',
+            seq: 42,
+            aggregateID: 'session-1',
+            data: {
+              timestamp: 1_234,
+              sessionID: 'session-1',
+              assistantMessageID: 'message-1',
+              textID: 'text-1',
+              text: 'done',
+            },
+          },
+        },
+      })
+    ).toEqual({
+      type: 'session.next.text.ended',
+      seq: 42,
+      properties: {
+        timestamp: 1_234,
+        sessionID: 'session-1',
+        assistantMessageID: 'message-1',
+        textID: 'text-1',
+        text: 'done',
+      },
+    });
+  });
+
   it('parses direct OpenCode sync events', () => {
     expect(
       parseServerEvent({
@@ -188,7 +223,7 @@ describe('protocol conformance', () => {
     });
   });
 
-  it('preserves seq on raw v2 /api/event payloads', () => {
+  it('preserves seq when present on direct event payloads', () => {
     expect(
       parseServerEvent({
         id: 'evt_1',
@@ -211,6 +246,19 @@ describe('protocol conformance', () => {
         textID: 'text-1',
         text: 'done',
       },
+    });
+  });
+
+  it('parses direct v2 lifecycle events', () => {
+    expect(
+      parseServerEvent({
+        id: 'evt_1',
+        type: 'server.connected',
+        properties: {},
+      })
+    ).toEqual({
+      type: 'server.connected',
+      properties: {},
     });
   });
 

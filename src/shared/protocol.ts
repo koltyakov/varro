@@ -150,6 +150,10 @@ export const VARRO_API_ENDPOINTS = {
 export type { OpenCodeModelRoute, OpenCodeModelRouting } from './opencode-types';
 
 export const SERVER_EVENT_NAMES = [
+  'server.connected',
+  'server.heartbeat',
+  'server.instance.disposed',
+  'project.updated',
   'session.created',
   'session.updated',
   'session.deleted',
@@ -166,10 +170,17 @@ export const SERVER_EVENT_NAMES = [
   'permission.updated',
   'permission.asked',
   'permission.replied',
+  'permission.v2.asked',
+  'permission.v2.replied',
   'question.asked',
   'question.replied',
   'question.rejected',
+  'question.v2.asked',
+  'question.v2.replied',
+  'question.v2.rejected',
   'todo.updated',
+  'lsp.updated',
+  'vcs.branch.updated',
   'mcp.tools.changed',
   'mcp.browser.open.failed',
   'workspace.ready',
@@ -177,7 +188,12 @@ export const SERVER_EVENT_NAMES = [
   'workspace.status',
   'session.next.agent.switched',
   'session.next.model.switched',
+  'session.next.moved',
   'session.next.prompted',
+  'session.next.prompt.admitted',
+  'session.next.prompt.promoted',
+  'session.next.interrupt.requested',
+  'session.next.context.updated',
   'session.next.synthetic',
   'session.next.shell.started',
   'session.next.shell.ended',
@@ -239,6 +255,9 @@ export function parseServerEvent(value: unknown): ServerEvent | null {
 function parseServerEventRecord(record: Record<string, unknown> | null): ServerEvent | null {
   if (!record) return null;
 
+  const syncEvent = parseSyncEventRecord(asRecord(record.syncEvent));
+  if (record.type === 'sync' && syncEvent) return syncEvent;
+
   const eventType = isServerEventName(record.type)
     ? record.type
     : getSyncServerEventName(record.type, record.name);
@@ -254,9 +273,27 @@ function parseServerEventRecord(record: Record<string, unknown> | null): ServerE
   return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
 }
 
+function parseSyncEventRecord(record: Record<string, unknown> | null): ServerEvent | null {
+  if (!record) return null;
+
+  const eventType = getVersionedServerEventName(record.type);
+  if (!eventType) return null;
+
+  const properties = asRecord(record.data);
+  const seq =
+    typeof record.seq === 'number' && Number.isFinite(record.seq) ? record.seq : undefined;
+  const base = seq === undefined ? { type: eventType } : { type: eventType, seq };
+  return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
+}
+
 function getSyncServerEventName(type: unknown, name: unknown): ServerEventName | null {
   if (type !== 'sync' || typeof name !== 'string') return null;
-  const eventName = name.replace(/\.\d+$/, '');
+  return getVersionedServerEventName(name);
+}
+
+function getVersionedServerEventName(value: unknown): ServerEventName | null {
+  if (typeof value !== 'string') return null;
+  const eventName = value.replace(/\.\d+$/, '');
   return isServerEventName(eventName) ? eventName : null;
 }
 
