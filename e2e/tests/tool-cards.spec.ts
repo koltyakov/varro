@@ -39,13 +39,13 @@ test('opens files and directories from tool cards', async ({ page }) => {
     .poll(() =>
       getE2EState(page, () => {
         const value = (window as Window & {
-          __varroE2E?: { openTargets?: Array<{ path: string; kind?: string }> };
+          __varroE2E?: { openTargets?: Array<{ path: string; kind?: string; line?: number }> };
         }).__varroE2E;
         return value?.openTargets || [];
       })
     )
     .toEqual([
-      { path: '/workspace/varro/src/components/App.tsx', kind: 'file' },
+      { path: '/workspace/varro/src/components/App.tsx', kind: 'file', line: 2 },
       { path: '/workspace/varro/src/components', kind: 'directory' },
     ]);
 });

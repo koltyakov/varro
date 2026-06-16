@@ -774,7 +774,7 @@ describe('ToolCall', () => {
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: '/repo/src/main.ts', kind: 'file' },
+      payload: { path: '/repo/src/main.ts', kind: 'file', line: 5 },
     });
   });
 

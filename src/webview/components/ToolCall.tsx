@@ -394,9 +394,15 @@ function ReadToolCard(props: {
   const openFile = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
+    const range = lineRange();
+    const directory = isDirectory();
     postMessage({
       type: 'vscode/open',
-      payload: { path: props.filePath, kind: isDirectory() ? 'directory' : 'file' },
+      payload: {
+        path: props.filePath,
+        kind: directory ? 'directory' : 'file',
+        ...(!directory && range ? { line: range.start } : {}),
+      },
     });
   };
 
