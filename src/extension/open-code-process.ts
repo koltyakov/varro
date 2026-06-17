@@ -58,10 +58,10 @@ interface MaintenanceCallbacks {
   isDisposing: () => boolean;
   getStatus: () => ServerStatus;
   readInstalledCliVersion: () => Promise<string | null>;
-  maybeSuggestCliUpdate: (installedCliVersion: string | null) => Promise<void>;
+  maybeSuggestCliUpdate: (installedCliVersion: string | null) => Promise<string | null>;
   readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
   hasActiveSessions: () => Promise<boolean>;
-  restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+  restartServerForCliUpdate: (serverVersion: string, installedCliVersion: string) => Promise<void>;
 }
 
 interface MaybeSuggestCliUpdateCallbacks {
@@ -628,9 +628,10 @@ export class OpenCodeProcess {
     this.maintenanceInFlight = true;
     try {
       const installedCliVersion = await callbacks.readInstalledCliVersion();
-      await callbacks.maybeSuggestCliUpdate(installedCliVersion);
+      const updatedCliVersion = await callbacks.maybeSuggestCliUpdate(installedCliVersion);
+      const restartCliVersion = updatedCliVersion || installedCliVersion;
 
-      if (callbacks.getStatus().state !== 'running' || !installedCliVersion) {
+      if (callbacks.getStatus().state !== 'running' || !restartCliVersion) {
         return;
       }
 
@@ -640,7 +641,7 @@ export class OpenCodeProcess {
         return;
       }
 
-      if (compareVersions(installedCliVersion, serverVersion) <= 0) {
+      if (compareVersions(restartCliVersion, serverVersion) <= 0) {
         this.lastLoggedUnmanagedRestartKey = '';
         return;
       }
@@ -649,19 +650,19 @@ export class OpenCodeProcess {
         return;
       }
 
-      if (!this._process || !this._managedProcess) {
-        const key = `${serverVersion}->${installedCliVersion}`;
+      if ((!this._process || !this._managedProcess) && !this.autoStart) {
+        const key = `${serverVersion}->${restartCliVersion}`;
         if (this.lastLoggedUnmanagedRestartKey !== key) {
           this.lastLoggedUnmanagedRestartKey = key;
           logger.info(
-            `OpenCode CLI ${installedCliVersion} is newer than running server ${serverVersion}, but the server is not managed by Varro; skipping automatic restart`
+            `OpenCode CLI ${restartCliVersion} is newer than running server ${serverVersion}, but Varro server auto-start is disabled; skipping automatic restart`
           );
         }
         return;
       }
 
       this.lastLoggedUnmanagedRestartKey = '';
-      await callbacks.restartManagedServer(serverVersion, installedCliVersion);
+      await callbacks.restartServerForCliUpdate(serverVersion, restartCliVersion);
     } catch (err) {
       logger.warn(
         `OpenCode background maintenance failed: ${err instanceof Error ? err.message : String(err)}`
@@ -671,17 +672,17 @@ export class OpenCodeProcess {
     }
   }
 
-  async restartManagedServer(
+  async restartServerForCliUpdate(
     serverVersion: string,
     installedCliVersion: string,
-    callbacks: RestartCallbacks
+    callbacks: RestartCallbacks & { stopServerForRestart: () => Promise<void> }
   ) {
     if (callbacks.beginManagedRestart() === null) return;
     try {
       logger.info(
-        `Restarting managed OpenCode server to use CLI ${installedCliVersion} instead of server ${serverVersion}`
+        `Restarting OpenCode server to use CLI ${installedCliVersion} instead of server ${serverVersion}`
       );
-      await callbacks.stopManagedProcessForRestart();
+      await callbacks.stopServerForRestart();
       await callbacks.start();
     } finally {
       callbacks.finishManagedRestart();
@@ -702,28 +703,28 @@ export class OpenCodeProcess {
   async maybeSuggestCliUpdate(
     installedCliVersion: string | null,
     callbacks: MaybeSuggestCliUpdateCallbacks
-  ) {
-    if (!installedCliVersion) return;
+  ): Promise<string | null> {
+    if (!installedCliVersion) return null;
 
     const now = Date.now();
     if (now - this.lastCliUpdateCheckAt < OpenCodeProcess.CLI_UPDATE_CHECK_INTERVAL_MS) {
-      return;
+      return null;
     }
     this.lastCliUpdateCheckAt = now;
 
     const latestCliVersion = await callbacks.readLatestCliVersion();
     if (!latestCliVersion || compareVersions(latestCliVersion, installedCliVersion) <= 0) {
-      return;
+      return null;
     }
 
     if (this.isBackgroundCliAutoUpdateEnabled() && process.platform !== 'win32') {
       if (this.lastSuggestedCliVersion === latestCliVersion) {
-        return;
+        return null;
       }
       try {
         await this.runBackgroundCliUpgrade(installedCliVersion, latestCliVersion, callbacks);
         this.lastSuggestedCliVersion = latestCliVersion;
-        return;
+        return latestCliVersion;
       } catch (err) {
         logger.warn(
           `Failed to auto-update OpenCode CLI in background: ${err instanceof Error ? err.message : String(err)}`
@@ -732,7 +733,7 @@ export class OpenCodeProcess {
     }
 
     if (this.lastSuggestedCliVersion === latestCliVersion) {
-      return;
+      return null;
     }
     this.lastSuggestedCliVersion = latestCliVersion;
 
@@ -747,6 +748,7 @@ export class OpenCodeProcess {
           await this.runTerminalCliUpgrade(callbacks);
         }
       });
+    return null;
   }
 
   async readInstalledCliVersion(): Promise<string | null> {

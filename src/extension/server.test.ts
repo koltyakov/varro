@@ -158,7 +158,7 @@ function runMaintenanceTick(server: OpenCodeServer) {
 function maybeSuggestCliUpdate(server: OpenCodeServer, installedCliVersion: string | null) {
   return (
     server as unknown as {
-      maybeSuggestCliUpdate: (version: string | null) => Promise<void>;
+      maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
     }
   ).maybeSuggestCliUpdate(installedCliVersion);
 }
@@ -619,29 +619,32 @@ describe('OpenCodeServer compaction config injection', () => {
 describe('OpenCodeServer maintenance', () => {
   it('restarts a managed idle server when the installed CLI is newer', async () => {
     const server = new OpenCodeServer(4096, false);
-    const restartManagedServer = vi.fn().mockResolvedValue(undefined);
+    const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
     const api = server as unknown as {
       process: Record<string, unknown> | null;
       managedProcess: boolean;
       readInstalledCliVersion: () => Promise<string | null>;
-      maybeSuggestCliUpdate: (version: string | null) => Promise<void>;
+      maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
       readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
       hasActiveSessions: () => Promise<boolean>;
-      restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+      restartServerForCliUpdate: (
+        serverVersion: string,
+        installedCliVersion: string
+      ) => Promise<void>;
     };
 
     setRunning(server);
     api.process = {};
     api.managedProcess = true;
     api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.22');
-    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(undefined);
+    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(null);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
     api.hasActiveSessions = vi.fn().mockResolvedValue(false);
-    api.restartManagedServer = restartManagedServer;
+    api.restartServerForCliUpdate = restartServerForCliUpdate;
 
     await runMaintenanceTick(server);
 
-    expect(restartManagedServer).toHaveBeenCalledWith('1.14.20', '1.14.22');
+    expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.14.20', '1.14.22');
   });
 
   it('restarts a managed process without emitting a stopped status', async () => {
@@ -650,77 +653,175 @@ describe('OpenCodeServer maintenance', () => {
     const api = server as unknown as {
       process: { kill: ReturnType<typeof vi.fn>; exitCode: number; signalCode: null } | null;
       managedProcess: boolean;
+      stopServerForRestart: () => Promise<void>;
       start: () => Promise<string>;
-      restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+      restartServerForCliUpdate: (
+        serverVersion: string,
+        installedCliVersion: string
+      ) => Promise<void>;
     };
 
     setRunning(server);
     server.on('status', (status) => statuses.push(status));
     api.process = { kill: vi.fn(), exitCode: 0, signalCode: null };
     api.managedProcess = true;
+    api.stopServerForRestart = vi.fn().mockResolvedValue(undefined);
     api.start = vi.fn().mockResolvedValue(server.url);
 
-    await api.restartManagedServer('1.14.20', '1.14.22');
+    await api.restartServerForCliUpdate('1.14.20', '1.14.22');
 
+    expect(api.stopServerForRestart).toHaveBeenCalledTimes(1);
     expect(api.start).toHaveBeenCalledTimes(1);
     expect(statuses.some((status) => status.state === 'stopped')).toBe(false);
   });
 
   it('does not restart when there are active sessions', async () => {
     const server = new OpenCodeServer(4096, false);
-    const restartManagedServer = vi.fn().mockResolvedValue(undefined);
+    const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
     const api = server as unknown as {
       process: Record<string, unknown> | null;
       managedProcess: boolean;
       readInstalledCliVersion: () => Promise<string | null>;
-      maybeSuggestCliUpdate: (version: string | null) => Promise<void>;
+      maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
       readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
       hasActiveSessions: () => Promise<boolean>;
-      restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+      restartServerForCliUpdate: (
+        serverVersion: string,
+        installedCliVersion: string
+      ) => Promise<void>;
     };
 
     setRunning(server);
     api.process = {};
     api.managedProcess = true;
     api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.22');
-    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(undefined);
+    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(null);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
     api.hasActiveSessions = vi.fn().mockResolvedValue(true);
-    api.restartManagedServer = restartManagedServer;
+    api.restartServerForCliUpdate = restartServerForCliUpdate;
 
     await runMaintenanceTick(server);
 
-    expect(restartManagedServer).not.toHaveBeenCalled();
+    expect(restartServerForCliUpdate).not.toHaveBeenCalled();
   });
 
-  it('does not restart an unmanaged server even when the CLI is newer', async () => {
+  it('does not restart an unmanaged server when auto-start is disabled', async () => {
     const server = new OpenCodeServer(4096, false);
-    const restartManagedServer = vi.fn().mockResolvedValue(undefined);
+    const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
     const api = server as unknown as {
       process: Record<string, unknown> | null;
       managedProcess: boolean;
       readInstalledCliVersion: () => Promise<string | null>;
-      maybeSuggestCliUpdate: (version: string | null) => Promise<void>;
+      maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
       readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
       hasActiveSessions: () => Promise<boolean>;
-      restartManagedServer: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+      restartServerForCliUpdate: (
+        serverVersion: string,
+        installedCliVersion: string
+      ) => Promise<void>;
     };
 
     setRunning(server);
     api.process = null;
     api.managedProcess = false;
     api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.22');
-    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(undefined);
+    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(null);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
     api.hasActiveSessions = vi.fn().mockResolvedValue(false);
-    api.restartManagedServer = restartManagedServer;
+    api.restartServerForCliUpdate = restartServerForCliUpdate;
 
     await runMaintenanceTick(server);
 
-    expect(restartManagedServer).not.toHaveBeenCalled();
+    expect(restartServerForCliUpdate).not.toHaveBeenCalled();
     expect(loggerMock.info).toHaveBeenCalledWith(
-      'OpenCode CLI 1.14.22 is newer than running server 1.14.20, but the server is not managed by Varro; skipping automatic restart'
+      'OpenCode CLI 1.14.22 is newer than running server 1.14.20, but Varro server auto-start is disabled; skipping automatic restart'
     );
+  });
+
+  it('restarts an unmanaged running server when auto-start can relaunch it', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      readInstalledCliVersion: () => Promise<string | null>;
+      maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: () => Promise<boolean>;
+      restartServerForCliUpdate: (
+        serverVersion: string,
+        installedCliVersion: string
+      ) => Promise<void>;
+    };
+
+    setRunning(server);
+    api.process = null;
+    api.managedProcess = false;
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(null);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.restartServerForCliUpdate = restartServerForCliUpdate;
+
+    await runMaintenanceTick(server);
+
+    expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.14.20', '1.14.22');
+  });
+
+  it('restarts with the new CLI version after a background update', async () => {
+    stubPlatform('linux');
+
+    const server = new OpenCodeServer(4096, true);
+    const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      readInstalledCliVersion: () => Promise<string | null>;
+      readLatestCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: () => Promise<boolean>;
+      restartServerForCliUpdate: (
+        serverVersion: string,
+        installedCliVersion: string
+      ) => Promise<void>;
+    };
+
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    setRunning(server);
+    api.process = {};
+    api.managedProcess = true;
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.20');
+    api.readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.restartServerForCliUpdate = restartServerForCliUpdate;
+    spawnMock.mockImplementation((_command, _args) => {
+      let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+      const proc = {
+        stdout: { on: vi.fn(), off: vi.fn() },
+        stderr: { on: vi.fn(), off: vi.fn() },
+        once: vi.fn((event: string, listener: typeof exitHandler) => {
+          if (event === 'exit') {
+            exitHandler = listener;
+          }
+        }),
+        removeAllListeners: vi.fn(),
+        kill: vi.fn(),
+        exitCode: null,
+        signalCode: null,
+      };
+      queueMicrotask(() => {
+        exitHandler?.(0, null);
+      });
+      return proc as never;
+    });
+
+    await runMaintenanceTick(server);
+    await flushMicrotasks();
+
+    expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.14.20', '1.14.22');
   });
 
   it('suggests a newer CLI version only on the slower update cadence', async () => {

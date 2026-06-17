@@ -475,16 +475,17 @@ export class OpenCodeServer extends EventEmitter {
         this.maybeSuggestCliUpdate(installedCliVersion),
       readHealthInfo: () => this.readHealthInfo(),
       hasActiveSessions: () => this.hasActiveSessions(),
-      restartManagedServer: (serverVersion, installedCliVersion) =>
-        this.restartManagedServer(serverVersion, installedCliVersion),
+      restartServerForCliUpdate: (serverVersion, installedCliVersion) =>
+        this.restartServerForCliUpdate(serverVersion, installedCliVersion),
     });
   }
 
-  private async restartManagedServer(serverVersion: string, installedCliVersion: string) {
-    await this.processManager.restartManagedServer(serverVersion, installedCliVersion, {
+  private async restartServerForCliUpdate(serverVersion: string, installedCliVersion: string) {
+    await this.processManager.restartServerForCliUpdate(serverVersion, installedCliVersion, {
       beginManagedRestart: () => this.lifecycle.beginManagedRestart(),
       finishManagedRestart: () => this.lifecycle.finishManagedRestart(),
       stopManagedProcessForRestart: () => this.stopManagedProcessForRestart(),
+      stopServerForRestart: () => this.stopServerForRestart(),
       start: () => this.start(),
     });
   }
@@ -495,6 +496,14 @@ export class OpenCodeServer extends EventEmitter {
     this.stopEventStream();
     this.transport.abortRequests();
     await this.processManager.stopManagedProcessForRestart();
+  }
+
+  private async stopServerForRestart() {
+    this.clearRestartTimer();
+    this.cancelPollHealth();
+    this.stopEventStream();
+    this.transport.abortRequests();
+    await this.processManager.stopServerForRestart();
   }
 
   private async hasActiveSessions(): Promise<boolean> {
@@ -531,7 +540,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async maybeSuggestCliUpdate(installedCliVersion: string | null) {
-    await this.processManager.maybeSuggestCliUpdate(installedCliVersion, {
+    return this.processManager.maybeSuggestCliUpdate(installedCliVersion, {
       readLatestCliVersion: () => this.readLatestCliVersion(),
       upgradeRunningServer: (targetVersion) => this.upgradeRunningServer(targetVersion),
       getWorkspaceCwd: () => this.getWorkspaceCwd(),
