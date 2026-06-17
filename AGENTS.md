@@ -1,6 +1,6 @@
 # Agent Notes for Varro
 
-- Package manager: `npm`; install with `npm install`; use Node 20.19+, 22.12+, or 24+.
+- Package manager: `npm`; install with `npm install`; use Node 22.12+ or 24+.
 - Build: `npm run build` (`build:extension` + `build:webview`).
 - Dev/watch: `npm run dev`; preview only: `npm run preview:webview`.
 - Lint fix: `npm run lint`; lint check: `npm run lint:check`; format: `npm run fmt`.

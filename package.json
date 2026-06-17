@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.18.1",
+  "version": "0.18.2",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -41,32 +41,32 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.webview.json && tsc --noEmit -p tsconfig.e2e.json",
     "package": "npm run build && npx vsce package --no-dependencies",
-    "vscode:install": "rm -f varro-*.vsix && npm run package && code --install-extension varro-*.vsix"
+    "vscode:install": "rm -f varro-*.vsix && npm run package && NODE_NO_WARNINGS=1 code --install-extension varro-*.vsix"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.17.4",
+    "@opencode-ai/sdk": "^1.17.7",
     "dompurify": "^3.4.10",
     "highlight.js": "11.11.1",
     "marked": "18.0.5",
     "solid-js": "1.9.13"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.61.0",
     "@tailwindcss/vite": "4.3.1",
     "@types/node": "25.9.3",
-    "@types/vscode": "1.96.0",
-    "@vitest/coverage-v8": "4.1.8",
+    "@types/vscode": "1.120.0",
+    "@vitest/coverage-v8": "4.1.9",
     "@vscode/vsce": "3.9.2",
     "esbuild": "0.28.1",
     "jsdom": "29.1.1",
-    "oxfmt": "0.54.0",
-    "oxlint": "1.69.0",
+    "oxfmt": "0.55.0",
+    "oxlint": "1.70.0",
     "postcss": "8.5.15",
     "tailwindcss": "4.3.1",
     "typescript": "6.0.3",
     "vite": "8.0.16",
     "vite-plugin-solid": "2.11.12",
-    "vitest": "4.1.8"
+    "vitest": "4.1.9"
   },
   "contributes": {
     "viewsContainers": {
@@ -295,14 +295,11 @@
   ],
   "icon": "assets/icon.png",
   "engines": {
-    "node": "^20.19.0 || ^22.12.0 || >=24.0.0",
-    "vscode": "^1.96.0"
+    "node": "^22.12.0 || >=24.0.0",
+    "vscode": "^1.120.0"
   },
   "volta": {
-    "node": "24.12.0",
+    "node": "24.16.0",
     "npm": "10.9.8"
-  },
-  "_overrides": {
-    "fast-uri": "3.1.2"
   }
 }
