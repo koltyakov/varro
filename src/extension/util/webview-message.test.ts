@@ -60,6 +60,28 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session/session-1/permissions/perm-1')).toBe(false);
   });
 
+  it('preserves route precedence so specific patterns shadow param patterns', () => {
+    // `/session/status` must resolve via its own route, not the `/session/:id`
+    // catch-all, so a non-GET method is rejected rather than treated as a session id.
+    expect(isAllowedApiRequest('GET', '/session/status')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/session/status')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session/abc')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/session/abc')).toBe(true);
+
+    // `/session/:id/diff` is GET-only and must not fall through to the POST action list.
+    expect(isAllowedApiRequest('POST', '/session/abc/diff')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session/abc/not-an-action')).toBe(false);
+
+    // Action enums on param routes only accept their whitelisted final segment.
+    expect(isAllowedApiRequest('POST', '/mcp/server/connect')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/mcp/server/restart')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/question/req/reject')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/question/req/approve')).toBe(false);
+
+    // Deeper-than-known session paths have no matching route.
+    expect(isAllowedApiRequest('GET', '/session/abc/message/extra')).toBe(false);
+  });
+
   it('rejects unsafe extension-host actions from malformed messages', () => {
     expect(
       parseWebviewMessage({
