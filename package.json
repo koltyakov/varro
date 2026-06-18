@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -45,7 +45,7 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.17.7",
-    "dompurify": "^3.4.10",
+    "dompurify": "^3.4.11",
     "highlight.js": "11.11.1",
     "marked": "18.0.5",
     "solid-js": "1.9.13"

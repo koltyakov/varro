@@ -1930,6 +1930,15 @@ body.vscode-light
     box-shadow 0.15s;
 }
 
+body.vscode-dark .interactive-session .chat-input-container {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-vscode-fg) 4%, var(--color-vscode-input-bg)),
+    var(--color-vscode-input-bg)
+  );
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-border));
+}
+
 .interactive-session .chat-input-container.showing-context-popup {
   overflow: visible;
   z-index: 5;
