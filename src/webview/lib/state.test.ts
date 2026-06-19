@@ -595,6 +595,31 @@ describe('permission deduping', () => {
     expect(state.permissions[0]?.messageID).toBe('message-2');
     expect(state.permissions[0]?.callID).toBe('call-2');
   });
+
+  it('removes grouped duplicates together when requested', () => {
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'external_directory',
+        pattern: '/tmp/*',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'external_directory /tmp/*',
+        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+        time: { created: 1 },
+        duplicateIDs: ['perm-1', 'perm-2'],
+        groupMembers: [
+          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+          { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
+        ],
+      },
+    ]);
+
+    removePermission('perm-1', { removeGroup: true });
+
+    expect(state.permissions).toHaveLength(0);
+  });
 });
 
 describe('failed session tracking', () => {

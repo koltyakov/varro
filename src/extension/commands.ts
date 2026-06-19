@@ -2,10 +2,18 @@ import * as vscode from 'vscode';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
-import type { OpenCodeServer } from './server';
+import type { OpenCodeServer, OpenCodeServerInfo } from './server';
 import { getRelativePath } from './util/path';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
+
+type ExtensionPackageJson = {
+  name?: unknown;
+  displayName?: unknown;
+  publisher?: unknown;
+  version?: unknown;
+  dependencies?: unknown;
+};
 
 export function registerCommands(
   context: vscode.ExtensionContext,
@@ -44,6 +52,21 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.chat.abort', () => {
       sidebar.postCommand('abort');
+    }),
+
+    vscode.commands.registerCommand('varro.about', async () => {
+      try {
+        const serverInfo = await server.readServerInfo();
+        const document = await vscode.workspace.openTextDocument({
+          language: 'markdown',
+          content: renderAboutMarkdown(context, serverInfo),
+        });
+        await vscode.window.showTextDocument(document, { preview: false });
+      } catch (err) {
+        const message = `Failed to open Varro about: ${err instanceof Error ? err.message : String(err)}`;
+        logger.error(message);
+        vscode.window.showErrorMessage(message);
+      }
     }),
 
     vscode.commands.registerCommand('varro.server.restart', async () => {
@@ -136,6 +159,78 @@ export function registerCommands(
       }
     )
   );
+}
+
+function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenCodeServerInfo) {
+  const pkg = readPackageJson(context);
+  const name = getString(pkg.displayName) || getString(pkg.name) || 'Varro';
+  const version = getString(pkg.version) || 'unknown';
+  const publisher = getString(pkg.publisher) || 'unknown';
+  const sdkVersion = readDependencyVersion(pkg, '@opencode-ai/sdk');
+  const status = formatServerStatus(serverInfo);
+  const cliVersion = serverInfo.cliVersionError
+    ? `error: ${serverInfo.cliVersionError}`
+    : serverInfo.cliVersion || 'not found';
+
+  return [
+    `# ${name} About`,
+    '',
+    '## Varro',
+    `- Version: ${version}`,
+    `- Publisher: ${publisher}`,
+    '',
+    '## OpenCode',
+    `- SDK version: ${sdkVersion}`,
+    `- CLI version: ${cliVersion}`,
+    `- Server status: ${status}`,
+    `- Server URL: ${serverInfo.url}`,
+    `- Server port: ${serverInfo.port}`,
+    `- Server health: ${serverInfo.health.healthy ? 'healthy' : 'unhealthy'}`,
+    `- Server version: ${serverInfo.health.version || 'unknown'}`,
+    `- Managed by Varro: ${serverInfo.managedProcess ? 'yes' : 'no'}`,
+    `- Auto-start: ${serverInfo.autoStart ? 'enabled' : 'disabled'}`,
+    `- Process ID: ${serverInfo.processId ?? 'unknown'}`,
+    `- CLI command: ${serverInfo.command}`,
+    `- Workspace: ${serverInfo.workspaceCwd || 'none'}`,
+    '',
+    '## Runtime',
+    `- VS Code: ${vscode.version}`,
+    `- Node: ${process.version}`,
+    `- Platform: ${process.platform} ${process.arch}`,
+    '',
+  ].join('\n');
+}
+
+function readPackageJson(context: vscode.ExtensionContext): ExtensionPackageJson {
+  const pkg = (context as { extension?: { packageJSON?: unknown } }).extension?.packageJSON;
+  return pkg && typeof pkg === 'object' ? (pkg as ExtensionPackageJson) : {};
+}
+
+function readDependencyVersion(pkg: ExtensionPackageJson, name: string) {
+  if (!pkg.dependencies || typeof pkg.dependencies !== 'object') return 'unknown';
+
+  const value = (pkg.dependencies as Record<string, unknown>)[name];
+  if (typeof value !== 'string') return 'unknown';
+
+  const normalized = value.match(/\d+(?:\.\d+)+/)?.[0];
+  if (!normalized || normalized === value) return value;
+  return `${normalized} (declared ${value})`;
+}
+
+function formatServerStatus(serverInfo: OpenCodeServerInfo) {
+  const status = serverInfo.status;
+  switch (status.state) {
+    case 'running':
+      return status.eventStream ? `running, event stream ${status.eventStream}` : 'running';
+    case 'error':
+      return `error: ${status.message}`;
+    default:
+      return status.state;
+  }
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 async function getEditorSelectionTarget() {

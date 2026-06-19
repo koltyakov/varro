@@ -2093,7 +2093,7 @@ export function addPermission(permission: Permission) {
   );
 }
 
-export function removePermission(permissionId: string) {
+export function removePermission(permissionId: string, options?: { removeGroup?: boolean }) {
   setState(
     'permissions',
     produce((perms) => {
@@ -2104,6 +2104,11 @@ export function removePermission(permissionId: string) {
           p.groupMembers?.some((member) => member.id === permissionId)
       );
       if (idx === -1) return;
+      if (options?.removeGroup) {
+        perms.splice(idx, 1);
+        return;
+      }
+
       const permission = perms[idx];
       const groupMembers = getPermissionGroupMembers(permission).filter(
         (member) => member.id !== permissionId

@@ -11,7 +11,7 @@ export async function respondPermissionWithDependencies(
       permissionId: string,
       response: PermissionResponse
     ): Promise<unknown>;
-    removePermission(permissionId: string): void;
+    removePermission(permissionId: string, options?: { removeGroup?: boolean }): void;
     setError(message: string): void;
   },
   sessionId: string,
@@ -21,7 +21,7 @@ export async function respondPermissionWithDependencies(
 ) {
   try {
     await deps.respondPermission(sessionId, permissionId, response);
-    deps.removePermission(permissionId);
+    deps.removePermission(permissionId, { removeGroup: response !== 'once' });
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to respond to permission');
     if (options?.rethrow) {
@@ -144,7 +144,7 @@ type SessionApprovalDependencies = {
     permissionId: string,
     response: PermissionResponse
   ): Promise<unknown>;
-  removePermission(permissionId: string): void;
+  removePermission(permissionId: string, options?: { removeGroup?: boolean }): void;
   setError(message: string): void;
   replyQuestion(requestId: string, answers: Array<Array<string>>): Promise<unknown>;
   removeQuestion(requestId: string): void;

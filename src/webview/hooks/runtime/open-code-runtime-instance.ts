@@ -758,8 +758,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     saveProjectPermissionMode: permissionsStore.saveProjectPermissionMode,
     updateSessionPermission: (sessionId, input) => client.session.update(sessionId, input),
     upsertSession,
-    getPermissionsForSession: (sessionId) =>
-      appStore.state.permissions.filter((permission) => permission.sessionID === sessionId),
+    getPermissionsForSession: (sessionId) => {
+      const rootId = getSessionTreeRootId(sessionId) || sessionId;
+      const sessionIds = new Set(getSessionTreeIds(rootId));
+      return appStore.state.permissions.filter((permission) =>
+        permissionsStore
+          .getPermissionGroupMembers(permission)
+          .some((member) => sessionIds.has(member.sessionID))
+      );
+    },
     syncPendingPermissions,
   });
 

@@ -53,7 +53,7 @@ function question(id: string): QuestionRequest {
 }
 
 describe('session-approvals helpers', () => {
-  it('responds to the selected permission and lets OpenCode clear covered prompts', async () => {
+  it('responds to the selected permission and clears covered prompts locally', async () => {
     const removePermission = vi.fn();
     const respondPermission = vi.fn(async () => {});
 
@@ -70,7 +70,26 @@ describe('session-approvals helpers', () => {
 
     expect(respondPermission).toHaveBeenCalledTimes(1);
     expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'always');
-    expect(removePermission).toHaveBeenCalledWith('perm-1');
+    expect(removePermission).toHaveBeenCalledWith('perm-1', { removeGroup: true });
+  });
+
+  it('keeps one-time approvals scoped to the selected permission', async () => {
+    const removePermission = vi.fn();
+    const respondPermission = vi.fn(async () => {});
+
+    await respondPermissionWithDependencies(
+      {
+        respondPermission,
+        removePermission,
+        setError: vi.fn(),
+      },
+      'session-1',
+      'perm-1',
+      'once'
+    );
+
+    expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'once');
+    expect(removePermission).toHaveBeenCalledWith('perm-1', { removeGroup: false });
   });
 
   it('sets a fallback error and rethrows when permission responses fail', async () => {

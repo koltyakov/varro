@@ -13,6 +13,20 @@ import { getServerPathEntries } from './util/server-path';
 
 export type { OpenCodeCompactionSettings };
 
+export interface OpenCodeServerInfo {
+  status: ServerStatus;
+  url: string;
+  port: number;
+  command: string;
+  autoStart: boolean;
+  managedProcess: boolean;
+  processId: number | null;
+  cliVersion: string | null;
+  cliVersionError: string | null;
+  health: { healthy: boolean; version?: string };
+  workspaceCwd: string | undefined;
+}
+
 function isSuccessfulUpgradeResult(value: unknown): value is { success: true; version: string } {
   return (
     !!value &&
@@ -432,6 +446,31 @@ export class OpenCodeServer extends EventEmitter {
 
   async request(method: string, path: string, body?: unknown): Promise<unknown> {
     return this.transport.request(method, path, body);
+  }
+
+  async readServerInfo(): Promise<OpenCodeServerInfo> {
+    let cliVersion: string | null = null;
+    let cliVersionError: string | null = null;
+
+    try {
+      cliVersion = await this.readInstalledCliVersion();
+    } catch (err) {
+      cliVersionError = err instanceof Error ? err.message : String(err);
+    }
+
+    return {
+      status: this._status,
+      url: this.url,
+      port: this.processManager.port,
+      command: this.resolveCommand(),
+      autoStart: this.processManager.isAutoStartEnabled,
+      managedProcess: this.managedProcess,
+      processId: this.process?.pid ?? null,
+      cliVersion,
+      cliVersionError,
+      health: await this.readHealthInfo(),
+      workspaceCwd: this.getWorkspaceCwd(),
+    };
   }
 
   private async startEventStream() {

@@ -159,7 +159,7 @@ describe('state perf guards', () => {
         },
         'session-1',
         'perm-1',
-        'always'
+        'once'
       );
       await settlePerfEffects();
 
