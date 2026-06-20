@@ -133,6 +133,37 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
+  it('marks a busy session complete from assistant completion without session.idle', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Auth cleanup' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          agent: 'plan',
+          time: { completed: 2 },
+        },
+      },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      'Varro has a plan ready for review for "Auth cleanup".',
+      'Open Chat'
+    );
+  });
+
   it('remembers sync session metadata when id is only on the event properties', () => {
     const manager = createManager(() => false);
 

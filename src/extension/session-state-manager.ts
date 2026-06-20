@@ -189,6 +189,14 @@ export class SessionStateManager {
         } else {
           changed = this.failedSessions.delete(sessionID) || changed;
         }
+        if (error || typeof asRecord(info?.time)?.completed === 'number') {
+          const wasBusy = this.busySessions.delete(sessionID);
+          if (wasBusy && !error && !this.hasPendingAttentionForSession(sessionID)) {
+            this.completedSessions.add(sessionID);
+            this.showCompletionNotification(sessionID);
+          }
+          changed = wasBusy || changed;
+        }
         break;
       }
       case 'permission.asked':

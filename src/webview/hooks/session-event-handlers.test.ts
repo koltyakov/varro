@@ -2241,6 +2241,87 @@ describe('registerSessionEventHandlers', () => {
     expect(startLoading).not.toHaveBeenCalled();
   });
 
+  it('applies late part deltas after completion without marking the session busy', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const completedAssistant = createCompletedAssistantEntry(1, 2);
+    completedAssistant.parts = [
+      {
+        id: 'text-1',
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        type: 'text',
+        text: 'done',
+      },
+    ];
+
+    loadingStartedAt.mockReturnValueOnce(1);
+    applyMessagePartDelta.mockClear();
+    markLoadingActivity.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [completedAssistant],
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('message.part.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        partID: 'text-1',
+        delta: 'late',
+        field: 'text',
+      },
+    });
+
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    expect(markLoadingActivity).not.toHaveBeenCalled();
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-1',
+      'text-1',
+      'late',
+      'session-1',
+      'text'
+    );
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores late reasoning deltas after the assistant message already completed', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    loadingStartedAt.mockReturnValueOnce(1);
+    applyMessagePartDelta.mockClear();
+    markLoadingActivity.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.next.reasoning.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        reasoningID: 'reasoning-1',
+        delta: 'late',
+      },
+    });
+
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    expect(markLoadingActivity).not.toHaveBeenCalled();
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
   it('tracks session lifecycle events and active status transitions', () => {
     const handlers = installHandlers();
     const upsertSession = vi.fn();

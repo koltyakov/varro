@@ -463,6 +463,26 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (!sync) return;
     sync.catch((err) => deps.logError('syncTodosForSession', err));
   };
+  const ignoreStaleProgressAfterFinishedAssistant = (sessionId: string) => {
+    if (!isStaleProgressAfterFinishedAssistant(sessionId)) return false;
+    if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) {
+      uiStore.stopLoading();
+    }
+    return true;
+  };
+  const ignoreStaleProgressForCompletedMessage = (sessionId: string, messageId: string) => {
+    if (!isSessionInActiveTree(sessionId)) return false;
+    const message = deps.getMessages().find((entry) => entry.info.id === messageId)?.info;
+    if (!message || message.sessionID !== sessionId || message.role !== 'assistant') return false;
+    const finishedAt = message.time.completed ?? (message.error ? message.time.created : null);
+    if (finishedAt === null) return false;
+    const startedAt = uiStore.loadingStartedAt();
+    if (startedAt !== null && startedAt > finishedAt) return false;
+    if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) {
+      uiStore.stopLoading();
+    }
+    return true;
+  };
   const markSessionProgress = (sessionId: string) => {
     setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
@@ -1176,8 +1196,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const partID = p.partID as string;
       const delta = p.delta as string;
       const field = p.field as string;
-      markSessionProgress(sessionID);
-      uiStore.markLoadingActivity();
+      const staleCompletedMessage = ignoreStaleProgressForCompletedMessage(sessionID, messageID);
+      if (!staleCompletedMessage) {
+        markSessionProgress(sessionID);
+        uiStore.markLoadingActivity();
+      }
       if (
         pendingMissingPartDeltas.has(getPartDeltaQueueKey(messageID, partID)) ||
         !hasMessagePart(messageID, partID)
@@ -1196,6 +1219,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const reasoningID = getEventString(p, 'reasoningID');
       const assistantMessageID = getEventString(p, 'assistantMessageID');
       if (!sessionID) return;
+      if (
+        assistantMessageID &&
+        ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
+      ) {
+        return;
+      }
       markSessionProgress(sessionID);
       if (!reasoningID || !isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
@@ -1217,11 +1246,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         }
         if (
           !eventName.startsWith('session.next.compaction.') &&
-          isStaleProgressAfterFinishedAssistant(sessionID)
+          ignoreStaleProgressAfterFinishedAssistant(sessionID)
         ) {
-          if (sessionID === deps.getActiveSessionId() && !isActiveTreeWorking()) {
-            uiStore.stopLoading();
-          }
           return;
         }
         markSessionProgress(sessionID);
@@ -1263,6 +1289,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const assistantMessageID = getEventString(p, 'assistantMessageID');
       const delta = getEventString(p, 'delta') || getEventString(p, 'text');
       if (!sessionID) return;
+      if (
+        assistantMessageID &&
+        ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
+      ) {
+        return;
+      }
       markSessionProgress(sessionID);
       if (!reasoningID || !delta || !isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
@@ -1284,6 +1316,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const reasoningID = getEventString(p, 'reasoningID');
       const assistantMessageID = getEventString(p, 'assistantMessageID');
       if (!sessionID) return;
+      if (
+        assistantMessageID &&
+        ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
+      ) {
+        return;
+      }
       markSessionProgress(sessionID);
       if (!reasoningID || !isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
