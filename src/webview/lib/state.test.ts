@@ -268,6 +268,33 @@ describe('state streaming deltas', () => {
     expect(state.streamingText).toBe('Received.');
   });
 
+  it('preserves time.completed when an incremental sync lacks it', () => {
+    const completed = assistantMessage();
+    completed.time.completed = 5000;
+    upsertMessage({
+      info: completed,
+      parts: [textPart('text-1', 'Done')],
+    });
+
+    const withoutCompletion = assistantMessage();
+    setMessagesIncremental([{ info: withoutCompletion, parts: [textPart('text-1', 'Done')] }]);
+
+    expect(state.messages[0]?.info.time.completed).toBe(5000);
+  });
+
+  it('preserves error state when an incremental sync lacks it', () => {
+    const errored = assistantMessage();
+    errored.error = { name: 'rate_limit' };
+    upsertMessage({
+      info: errored,
+      parts: [textPart('text-1', 'Partial')],
+    });
+
+    setMessagesIncremental([{ info: assistantMessage(), parts: [textPart('text-1', 'Partial')] }]);
+
+    expect(state.messages[0]?.info.error).toEqual({ name: 'rate_limit' });
+  });
+
   it('keeps active streaming text across incremental message refreshes', async () => {
     upsertMessage({
       info: assistantMessage(),

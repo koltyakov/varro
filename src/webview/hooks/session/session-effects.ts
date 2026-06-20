@@ -49,6 +49,23 @@ export function registerLoadingStatusPollEffect(deps: {
   });
 }
 
+export function registerEventStreamRecoveryEffect(deps: {
+  getEventStreamState(): 'healthy' | 'degraded' | undefined;
+  isLoading(): boolean;
+  getActiveSessionId(): string | null;
+  recheckSessionStatus(sessionId: string): void;
+  logError(context: string, err: unknown): void;
+}) {
+  createEffect(
+    on(deps.getEventStreamState, (current, previous) => {
+      if (previous !== 'degraded' || current !== 'healthy') return;
+      const sessionId = deps.getActiveSessionId();
+      if (!sessionId || !deps.isLoading()) return;
+      deps.recheckSessionStatus(sessionId);
+    })
+  );
+}
+
 export function registerVisibleRunningSessionSyncEffect(deps: {
   getServerState(): string;
   isDocumentVisible(): boolean;

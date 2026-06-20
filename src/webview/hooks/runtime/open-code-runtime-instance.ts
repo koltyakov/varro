@@ -45,6 +45,7 @@ import { SessionApprovalOperations } from '../session/session-approvals';
 import { SessionControlOperations } from '../session/session-controls';
 import {
   registerLoadingStatusPollEffect,
+  registerEventStreamRecoveryEffect,
   registerProviderLimitRefreshEffect,
   registerVisibleRunningSessionSyncEffect,
 } from '../session/session-effects';
@@ -368,6 +369,19 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       recheckSessionStatus: (sessionId) => {
         void recheckSessionStatus(sessionId);
       },
+    });
+
+    registerEventStreamRecoveryEffect({
+      getEventStreamState: () =>
+        appStore.state.serverStatus.state === 'running'
+          ? appStore.state.serverStatus.eventStream
+          : undefined,
+      isLoading: uiStore.isLoading,
+      getActiveSessionId: () => appStore.state.activeSessionId,
+      recheckSessionStatus: (sessionId) => {
+        void recheckSessionStatus(sessionId);
+      },
+      logError,
     });
 
     registerProviderLimitRefreshEffect({

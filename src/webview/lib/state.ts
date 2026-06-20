@@ -2412,6 +2412,7 @@ function mergeMessageEntry(
 ) {
   const next = cloneValue(incoming);
   preserveLongerToolExecutionTimes(current, next);
+  preserveCompletionState(current, next);
   if (!current || !options?.preserveExtraParts || current.parts.length === 0) {
     materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
     return next;
@@ -2426,6 +2427,16 @@ function mergeMessageEntry(
 
   materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
   return next;
+}
+
+function preserveCompletionState(current: MessageEntry | undefined, next: MessageEntry) {
+  if (!current || current.info.role !== 'assistant' || next.info.role !== 'assistant') return;
+  if (next.info.time.completed === undefined && current.info.time.completed !== undefined) {
+    next.info.time = { ...next.info.time, completed: current.info.time.completed };
+  }
+  if (!next.info.error && current.info.error) {
+    next.info.error = current.info.error;
+  }
 }
 
 function preserveLongerToolExecutionTimes(current: MessageEntry | undefined, next: MessageEntry) {

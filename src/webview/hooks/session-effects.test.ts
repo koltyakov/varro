@@ -1,6 +1,7 @@
 import { createRoot, createSignal } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  registerEventStreamRecoveryEffect,
   registerLoadingStatusPollEffect,
   registerProviderLimitRefreshEffect,
   registerVisibleRunningSessionSyncEffect,
@@ -190,6 +191,64 @@ describe('session effect helpers', () => {
     } finally {
       dispose();
       vi.useRealTimers();
+    }
+  });
+
+  it('rechecks active session status when the event stream recovers from degraded while loading', async () => {
+    const [eventStreamState, setEventStreamState] = createSignal<
+      'healthy' | 'degraded' | undefined
+    >('healthy');
+    const recheckSessionStatus = vi.fn();
+
+    const dispose = createRoot((cleanup) => {
+      registerEventStreamRecoveryEffect({
+        getEventStreamState: eventStreamState,
+        isLoading: () => true,
+        getActiveSessionId: () => 'session-1',
+        recheckSessionStatus,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      setEventStreamState('degraded');
+      await Promise.resolve();
+      expect(recheckSessionStatus).not.toHaveBeenCalled();
+
+      setEventStreamState('healthy');
+      await Promise.resolve();
+
+      expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+    } finally {
+      dispose();
+    }
+  });
+
+  it('does not recheck when the event stream recovers but no session is loading', async () => {
+    const [eventStreamState, setEventStreamState] = createSignal<
+      'healthy' | 'degraded' | undefined
+    >('degraded');
+    const recheckSessionStatus = vi.fn();
+
+    const dispose = createRoot((cleanup) => {
+      registerEventStreamRecoveryEffect({
+        getEventStreamState: eventStreamState,
+        isLoading: () => false,
+        getActiveSessionId: () => 'session-1',
+        recheckSessionStatus,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      setEventStreamState('healthy');
+      await Promise.resolve();
+
+      expect(recheckSessionStatus).not.toHaveBeenCalled();
+    } finally {
+      dispose();
     }
   });
 
