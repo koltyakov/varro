@@ -13,6 +13,7 @@ export function SessionPickerHeader(props: {
   filterPrefix: string;
   filterTitle?: string;
   primarySessionsCount: number;
+  showBackButton?: boolean;
   showFailedBadge: boolean;
   showAttentionBadge: boolean;
   showPlanReadyBadge: boolean;
@@ -24,6 +25,7 @@ export function SessionPickerHeader(props: {
   completedCount: number;
   runningCount: number;
   showNewChatButton?: boolean;
+  onBack?: () => void;
   onClearFilter: () => void;
   onOpenFailedSessions: () => void;
   onOpenAttentionSessions: () => void;
@@ -35,6 +37,17 @@ export function SessionPickerHeader(props: {
   return (
     <>
       <div class="chat-header-left">
+        <Show when={props.showBackButton}>
+          <button
+            class="chat-header-btn"
+            onClick={() => props.onBack?.()}
+            title="Back to parent session"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+            </svg>
+          </button>
+        </Show>
         <Show
           when={props.filterLabel}
           fallback={
@@ -103,6 +116,7 @@ export function ActiveChatHeader(props: {
   showBackButton: boolean;
   showActions?: boolean;
   activeSubagentRootId: string | null;
+  activeSubagentCount: number;
   activeSubagentLabel: string;
   failedCount: number;
   attentionCount: number;
@@ -133,7 +147,7 @@ export function ActiveChatHeader(props: {
           {(rootSessionId) => (
             <button
               type="button"
-              class="session-item-subagents chat-header-subagents"
+              class="session-item-subagents session-item-subagents-counter chat-header-subagents"
               onClick={() => props.onOpenSubagents(rootSessionId())}
               title={props.activeSubagentLabel}
               aria-label={props.activeSubagentLabel}
@@ -141,6 +155,7 @@ export function ActiveChatHeader(props: {
               <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                 <path d="M5.5 2.5a2 2 0 110 4 2 2 0 010-4zm5 1a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM2 9.25c0-1.8 2.1-2.75 3.5-2.75S9 7.45 9 9.25V10H2v-.75zm7.5.75v-.5c0-.66-.2-1.23-.54-1.7.5-.19 1.04-.3 1.54-.3 1.22 0 3 .73 3 2.25V10h-4z" />
               </svg>
+              <span class="session-item-subagents-count">{props.activeSubagentCount}</span>
             </button>
           )}
         </Show>

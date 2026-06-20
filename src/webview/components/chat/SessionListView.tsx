@@ -1216,7 +1216,7 @@ function SessionListItem(props: {
         <Show when={hasSubagents()}>
           <button
             type="button"
-            class="session-item-subagents"
+            class="session-item-subagents session-item-subagents-counter"
             onClick={() => props.onOpenSubagents?.(props.session.id)}
             title={subagentLabel()}
             aria-label={subagentLabel()}
@@ -1224,6 +1224,7 @@ function SessionListItem(props: {
             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
               <path d="M5.5 2.5a2 2 0 110 4 2 2 0 010-4zm5 1a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM2 9.25c0-1.8 2.1-2.75 3.5-2.75S9 7.45 9 9.25V10H2v-.75zm7.5.75v-.5c0-.66-.2-1.23-.54-1.7.5-.19 1.04-.3 1.54-.3 1.22 0 3 .73 3 2.25V10h-4z" />
             </svg>
+            <span class="session-item-subagents-count">{props.subagentCount}</span>
           </button>
         </Show>
         <button

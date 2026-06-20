@@ -71,9 +71,11 @@ export function ChatWorkspace(props: {
   sessionSidebarRunningCount: number;
   activeTitle: string;
   activeSubagentRootId: string | null;
+  activeSubagentCount: number;
   activeSubagentLabel: string;
   onClearSessionListView: () => void;
   onOpenAllSessions: () => void;
+  onOpenParentSession: () => void;
   onOpenSubagentSessions: (parentSessionId: string) => void;
   onOpenFailedSessions: () => void;
   onOpenAttentionSessions: () => void;
@@ -89,6 +91,7 @@ export function ChatWorkspace(props: {
       filterPrefix={props.sessionListFilterPrefix}
       filterTitle={props.sessionListFilterTitle}
       primarySessionsCount={props.primarySessionsCount}
+      showBackButton={!!props.subagentParentId}
       showFailedBadge={props.shouldShowFailedBadge}
       showAttentionBadge={props.shouldShowAttentionBadge}
       showPlanReadyBadge={props.shouldShowPlanReadyBadge}
@@ -108,6 +111,7 @@ export function ChatWorkspace(props: {
         useSidebarCounts ? props.sessionSidebarRunningCount : props.runningSessionsCount
       }
       showNewChatButton
+      onBack={props.onOpenParentSession}
       onClearFilter={props.onClearSessionListView}
       onOpenFailedSessions={props.onOpenFailedSessions}
       onOpenAttentionSessions={props.onOpenAttentionSessions}
@@ -124,6 +128,7 @@ export function ChatWorkspace(props: {
       showBackButton={showBackButton}
       showActions={showActions}
       activeSubagentRootId={props.activeSubagentRootId}
+      activeSubagentCount={props.activeSubagentCount}
       activeSubagentLabel={props.activeSubagentLabel}
       failedCount={props.failedSessionsCount}
       attentionCount={props.attentionSessionsCount}

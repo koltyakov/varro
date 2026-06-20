@@ -2086,7 +2086,7 @@ body.vscode-dark .interactive-session .chat-input-container {
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button {
   height: 22px;
   padding: 0 6px;
-  gap: 1px;
+  gap: 0;
   border: none;
   background: transparent;
   box-shadow: none;
@@ -2611,7 +2611,7 @@ body.vscode-dark .interactive-session .chat-input-container {
 .toolbar-picker {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 1px;
   height: 26px;
   padding: 0 6px 0 9px;
   min-width: 0;
@@ -6531,6 +6531,25 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-item-subagents svg {
   width: 14px;
   height: 14px;
+}
+
+.session-item-subagents-counter {
+  gap: 1px;
+  min-width: 24px;
+  width: auto;
+  padding: 0 5px;
+}
+
+.session-item-subagents-counter svg {
+  flex-shrink: 0;
+  transform: translateY(1.5px);
+}
+
+.session-item-subagents-counter .session-item-subagents-count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .session-item-plan-skip {

@@ -211,6 +211,13 @@ export function Chat() {
   const sessionSidebarCompletedCount = () => headerSessionCounts().sidebarCompleted;
   const primarySessionsCount = () => primarySessions().length;
 
+  const openParentSession = async (parentSessionId: string) => {
+    setSessionFilter(null);
+    setSubagentParentId(null);
+    setShowSessionPicker(false);
+    await selectSession(parentSessionId);
+  };
+
   const openSessionFilter = async (filter: SessionListFilter, count: number) => {
     if (count === 0) return;
 
@@ -277,6 +284,11 @@ export function Chat() {
     setSessionFilter(null);
     setSubagentParentId(null);
     const sessionId = state.activeSessionId;
+    const parentSessionId = sessionId ? sessionsById().get(sessionId)?.parentID : null;
+    if (parentSessionId) {
+      await openParentSession(parentSessionId);
+      return;
+    }
     // If the user is currently viewing a Ralph iteration child session, "back"
     // should return to the owning Ralph dashboard instead of the global
     // sessions list.
@@ -293,6 +305,12 @@ export function Chat() {
       return;
     }
     setShowSessionPicker(true);
+  };
+
+  const openSubagentListParentSession = () => {
+    const parentSessionId = subagentParentId();
+    if (!parentSessionId) return;
+    void openParentSession(parentSessionId);
   };
 
   const openRunningSessions = () => {
@@ -402,11 +420,13 @@ export function Chat() {
       sessionSidebarRunningCount={sessionSidebarRunningCount()}
       activeTitle={activeTitle()}
       activeSubagentRootId={activeSubagentCount() > 0 ? activeRootSessionId() : null}
+      activeSubagentCount={activeSubagentCount()}
       activeSubagentLabel={activeSubagentLabel()}
       onClearSessionListView={clearSessionListView}
       onOpenAllSessions={() => {
         void openAllSessions();
       }}
+      onOpenParentSession={openSubagentListParentSession}
       onOpenSubagentSessions={openSubagentSessions}
       onOpenFailedSessions={openFailedSessions}
       onOpenAttentionSessions={openAttentionSessions}

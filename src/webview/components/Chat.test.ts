@@ -1072,6 +1072,7 @@ describe('header status badges', () => {
 
     expect(title?.textContent).toBe('parent');
     expect(subagentsButton?.getAttribute('title')).toBe('Show 2 sub-agent sessions');
+    expect(subagentsButton?.textContent?.trim()).toBe('2');
     expect(headerChildren.indexOf(title as Element)).toBeLessThan(
       headerChildren.indexOf(subagentsButton as Element)
     );
@@ -1102,6 +1103,7 @@ describe('header status badges', () => {
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;
     expect(subagentsButton?.getAttribute('title')).toBe('Show 2 sub-agent sessions');
+    expect(subagentsButton?.textContent?.trim()).toBe('2');
 
     subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
@@ -1113,6 +1115,60 @@ describe('header status badges', () => {
       (item) => item.textContent?.trim()
     );
     expect(titles).toEqual(['child-1', 'child-2']);
+  });
+
+  it('returns from an active sub-agent session to its parent session', async () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+
+    setState('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })]);
+    setState('activeSessionId', 'child');
+
+    cleanup = render(() => Chat(), container!);
+
+    const backButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="Back to sessions"]'
+    ) as HTMLButtonElement | null;
+    expect(backButton).toBeInstanceOf(HTMLButtonElement);
+
+    backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('parent');
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeNull();
+  });
+
+  it('returns from the sub-agent list to the parent session', async () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+
+    setState('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })]);
+    setState('activeSessionId', 'parent');
+
+    cleanup = render(() => Chat(), container!);
+
+    const subagentsButton = container?.querySelector(
+      '.chat-header-subagents'
+    ) as HTMLButtonElement | null;
+    subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const backButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="Back to parent session"]'
+    ) as HTMLButtonElement | null;
+    expect(backButton).toBeInstanceOf(HTMLButtonElement);
+
+    backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('parent');
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeNull();
   });
 
   it('shows session status badges in the desktop session sidebar header', () => {
