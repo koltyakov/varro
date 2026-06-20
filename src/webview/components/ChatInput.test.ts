@@ -591,6 +591,7 @@ describe('ChatInput', () => {
 
   it('removes the context button title while the popup is open', async () => {
     setupModelState();
+    setState('activeSessionId', 'session-1');
     setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
 
     cleanup = render(() => ChatInput(), container!);
@@ -632,6 +633,7 @@ describe('ChatInput', () => {
 
   it('renders permission, context usage, and provider limits in the lower metadata row', () => {
     setupModelState();
+    setState('activeSessionId', 'session-1');
     setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
     setState('providerLimits', {
       'openai:gpt-4o': availableProviderLimit(),
@@ -686,6 +688,7 @@ describe('ChatInput', () => {
   it('right-aligns the provider limit popup when context is shown', async () => {
     setProviderLimitThresholdPercent(40);
     setupModelState();
+    setState('activeSessionId', 'session-1');
     setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
     setState('providerLimits', {
       'openai:gpt-4o': availableProviderLimit(),

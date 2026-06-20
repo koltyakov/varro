@@ -3325,6 +3325,14 @@ body.vscode-dark .interactive-session .chat-input-container {
   text-decoration-thickness: 1px;
 }
 
+.todo-block-item.status-cancelled .todo-block-item-text,
+.todo-block-item.status-canceled .todo-block-item-text {
+  color: color-mix(in srgb, var(--color-vscode-fg) 48%, transparent);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-vscode-muted) 50%, transparent);
+  text-decoration-thickness: 1px;
+}
+
 .todo-block-item.status-in_progress .todo-block-item-text {
   color: var(--color-vscode-fg);
   font-weight: 500;

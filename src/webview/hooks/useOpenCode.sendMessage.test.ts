@@ -152,7 +152,7 @@ describe('sendMessage', () => {
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(true);
   });
 
-  it('resets todos immediately when sending a new turn', async () => {
+  it('keeps completed todos visible when sending a new turn', async () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('activeSessionId', 'session-1');
@@ -191,7 +191,9 @@ describe('sendMessage', () => {
 
     await hookModule.sendMessage('Start something new');
 
-    expect(stateModule.state.todos).toEqual([]);
+    expect(stateModule.state.todos).toEqual([
+      { id: 'old-todo', content: 'Old completed task', status: 'completed', priority: 'medium' },
+    ]);
   });
 
   it('sends merged explicit selections as a single document attachment', async () => {

@@ -1,0 +1,115 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { render } from 'solid-js/web';
+import { ChangedFilesList } from './ChangedFilesList';
+import { resetDefaultAppState, setState } from '../lib/state';
+import type { Message, Part, Session } from '../types';
+
+let container: HTMLDivElement | null = null;
+let cleanup: (() => void) | undefined;
+
+function session(overrides?: Partial<Session>): Session {
+  return {
+    id: 'session-1',
+    projectID: 'project-1',
+    directory: '/workspace',
+    title: 'Session',
+    version: '1',
+    time: { created: 1, updated: 2 },
+    ...overrides,
+  };
+}
+
+function assistantMessage(id = 'assistant-1'): Message {
+  return {
+    id,
+    sessionID: 'session-1',
+    role: 'assistant',
+    time: { created: 1, completed: 2 },
+    parentID: 'user-1',
+    modelID: 'model-1',
+    providerID: 'provider-1',
+    mode: 'default',
+    path: { cwd: '/workspace', root: '/workspace' },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  };
+}
+
+function fileEditPart(path: string): Part {
+  return {
+    id: 'tool-1',
+    sessionID: 'session-1',
+    messageID: 'assistant-1',
+    type: 'tool',
+    callID: 'call-1',
+    tool: 'edit',
+    state: {
+      status: 'completed',
+      input: { path, additions: 3, deletions: 1 },
+      output: '',
+      title: 'Edited file',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    },
+  };
+}
+
+describe('ChangedFilesList', () => {
+  beforeEach(() => {
+    resetDefaultAppState();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    cleanup?.();
+    cleanup = undefined;
+    container?.remove();
+    container = null;
+    resetDefaultAppState();
+  });
+
+  it('keeps authoritative session summary files visible while the session is busy', () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session({
+        summary: {
+          additions: 4,
+          deletions: 1,
+          files: 1,
+          diffs: [{ file: 'src/app.ts', before: '', after: 'updated', additions: 4, deletions: 1 }],
+        },
+      }),
+    ]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+
+    expect(container?.textContent).toContain('Files');
+    expect(container?.textContent).toContain('1');
+    expect(container?.textContent).toContain('+4');
+    expect(container?.textContent).toContain('-1');
+  });
+
+  it('keeps message-derived files visible while the same session is busy', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session()]);
+    setState('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Files');
+    expect(container?.textContent).toContain('1');
+    expect(container?.textContent).toContain('+3');
+    expect(container?.textContent).toContain('-1');
+
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Files');
+    expect(container?.textContent).toContain('1');
+    expect(container?.textContent).toContain('+3');
+    expect(container?.textContent).toContain('-1');
+  });
+});

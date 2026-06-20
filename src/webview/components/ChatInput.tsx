@@ -195,6 +195,18 @@ type MentionCompletionSource = {
 
 type MessageInfoEntry = { info: Message };
 
+type AssistantMessageLookupOptions = {
+  includeSubagents?: boolean;
+};
+
+export function getMessageEntriesForSession(
+  messages: readonly MessageInfoEntry[],
+  sessionId: string | null
+): MessageInfoEntry[] {
+  if (!sessionId) return [];
+  return messages.filter((entry) => entry.info.sessionID === sessionId);
+}
+
 export function getLatestAssistantMessageInfo(
   messages: readonly MessageInfoEntry[]
 ): AssistantMessage | null {
@@ -208,12 +220,13 @@ export function getLatestAssistantMessageInfo(
 }
 
 export function getLatestAssistantMessageInfoWithTokens(
-  messages: readonly MessageInfoEntry[]
+  messages: readonly MessageInfoEntry[],
+  options?: AssistantMessageLookupOptions
 ): AssistantMessage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const info = messages[index]?.info;
     if (!info || !isAssistantMessage(info)) continue;
-    if (info.mode === 'subagent') continue;
+    if (!options?.includeSubagents && info.mode === 'subagent') continue;
     if ((info.tokens.input || 0) + (info.tokens.output || 0) > 0) return info;
   }
   return null;
@@ -1883,15 +1896,23 @@ export function ChatInput() {
   const clipboardImagesDisabled = () =>
     composerClipboardImages().length > 0 && !currentModelSupportsVision();
 
+  const currentSessionMessageEntries = createMemo(() =>
+    getMessageEntriesForSession(state.messages, state.activeSessionId)
+  );
+
   const contextUsage = createMemo(() => {
-    const best = getLatestAssistantMessageInfoWithTokens(state.messages);
+    const best = getLatestAssistantMessageInfoWithTokens(currentSessionMessageEntries(), {
+      includeSubagents: true,
+    });
     if (!best) return null;
     const ctx = getContextWindow(best, state.providers);
     if (!ctx) return null;
     return ctx;
   });
 
-  const sessionTokens = createMemo(() => sumAssistantTokensFromMessageEntries(state.messages));
+  const sessionTokens = createMemo(() =>
+    sumAssistantTokensFromMessageEntries(currentSessionMessageEntries())
+  );
 
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
   const showProviderLimits = createMemo(

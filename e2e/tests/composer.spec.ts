@@ -80,7 +80,7 @@ test('removes queued follow-up messages before sending them', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Send as Steer' })).toHaveCount(0);
 });
 
-test('refreshes todos from native todo update events', async ({ page }) => {
+test('preserves completed todos against stale native todo update events', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-completion');
 
   const todoButton = page.getByRole('button', { name: /Todos/i });
@@ -114,8 +114,8 @@ test('refreshes todos from native todo update events', async ({ page }) => {
     );
   });
 
-  await expect(todoButton).toContainText('0/1');
-  await expect(page.locator('.todo-block-item.status-in_progress')).toContainText(
+  await expect(todoButton).toContainText('1/1');
+  await expect(page.locator('.todo-block-item.status-completed')).toContainText(
     'Patch stale incremental message equivalence and add regression coverage'
   );
 

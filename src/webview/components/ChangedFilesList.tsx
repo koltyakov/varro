@@ -22,30 +22,55 @@ function getActiveSession() {
 }
 
 export function ChangedFilesList() {
+  let cachedSessionId: string | null = null;
+  let cachedChanges: FileChange[] = [];
+  let cachedSummaryStats: ReturnType<typeof getSessionSummaryStats> = null;
+
+  const resetCacheForSession = (sessionId: string | null) => {
+    if (cachedSessionId === sessionId) return;
+    cachedSessionId = sessionId;
+    cachedChanges = [];
+    cachedSummaryStats = null;
+  };
+
   // The file rows: prefer the session's authoritative diff summary (the source
   // the session list counts from) so they match; fall back to scanning messages
-  // only when no summary is available. Skip the scan entirely while streaming —
-  // the block is hidden then, and short-circuiting avoids re-running on every
-  // message update.
+  // only when no summary is available. Keep authoritative summaries visible
+  // while a follow-up is running so completed file changes do not flicker away.
   const changes = createMemo(() => {
-    if (isActiveSessionWorking()) return [];
-    const diffs = getActiveSession()?.summary?.diffs;
-    if (diffs && diffs.length > 0) return getDiffFileChanges(diffs);
-    return getMessageFileChanges(state.messages, state.editorContext.workspacePath);
+    const session = getActiveSession();
+    resetCacheForSession(session?.id ?? null);
+
+    const diffs = session?.summary?.diffs;
+    if (diffs && diffs.length > 0) {
+      cachedChanges = getDiffFileChanges(diffs);
+      return cachedChanges;
+    }
+    if (isActiveSessionWorking() && cachedChanges.length > 0) return cachedChanges;
+
+    cachedChanges = getMessageFileChanges(state.messages, state.editorContext.workspacePath);
+    return cachedChanges;
   });
   // The header counter mirrors the session list exactly: same summary
   // resolution with the same message-derived fallback. Unlike the list, the
   // active session's messages are already loaded, so the fallback resolves
   // synchronously — no "0 0 0" placeholder here.
   const summaryStats = createMemo(() => {
-    if (isActiveSessionWorking()) return null;
     const session = getActiveSession();
+    resetCacheForSession(session?.id ?? null);
     if (!session) return null;
     const direct = getSessionSummaryStats(session);
     if (direct && (direct.files > 0 || direct.additions > 0 || direct.deletions > 0)) {
+      cachedSummaryStats = direct;
       return direct;
     }
-    return getSessionSummaryStats(session, getMessageToolSummaryStats(state.messages));
+    if (isActiveSessionWorking() && cachedSummaryStats) return cachedSummaryStats;
+
+    cachedSummaryStats = getSessionSummaryStats(
+      session,
+      getMessageToolSummaryStats(state.messages)
+    );
+    return cachedSummaryStats;
   });
   const total = () => summaryStats()?.files ?? changes().length;
   const additions = () =>

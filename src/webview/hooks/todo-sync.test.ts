@@ -255,7 +255,7 @@ describe('todo-sync', () => {
     expect(setState).not.toHaveBeenCalled();
   });
 
-  it('allows native todo update events to reset matching completed todos', async () => {
+  it('does not let native todo update events downgrade matching completed todos', async () => {
     state.todos = [{ id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' }];
     const operations = createTodoSyncOperations({
       loadSessionTodos: vi.fn(async () => []),
@@ -268,9 +268,7 @@ describe('todo-sync', () => {
       todos: [{ id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' }],
     });
 
-    expect(setState).toHaveBeenCalledWith('todos', [
-      { id: 'todo-1', content: 'sync', status: 'in_progress', priority: 'medium' },
-    ]);
+    expect(setState).not.toHaveBeenCalled();
   });
 
   it('uses message todos to advance stale native session todos', async () => {

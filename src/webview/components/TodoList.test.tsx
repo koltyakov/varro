@@ -38,7 +38,7 @@ describe('TodoList', () => {
     expect(progressFill?.style.width).toBe('0%');
   });
 
-  it('renders pending, in-progress, and completed todos and toggles collapse', () => {
+  it('renders pending, in-progress, completed, and cancelled todos and toggles collapse', () => {
     setState('todos', [
       { id: 'todo-1', content: 'Pending task', status: 'pending', priority: 'low' },
       {
@@ -48,16 +48,17 @@ describe('TodoList', () => {
         priority: 'medium',
       },
       { id: 'todo-3', content: 'Done task', status: 'completed', priority: 'high' },
+      { id: 'todo-4', content: 'Cancelled task', status: 'cancelled', priority: 'low' },
     ]);
 
     cleanup = render(() => TodoList(), container!);
 
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
-    expect(container?.textContent).toContain('1/3');
+    expect(container?.textContent).toContain('2/4');
 
     let items = container?.querySelectorAll('li.todo-block-item');
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
     expect(container?.querySelector('.status-pending .todo-block-item-text')?.textContent).toBe(
       'Pending task'
     );
@@ -67,6 +68,9 @@ describe('TodoList', () => {
     expect(container?.querySelector('.status-completed .todo-block-item-text')?.textContent).toBe(
       'Done task'
     );
+    expect(container?.querySelector('.status-cancelled .todo-block-item-text')?.textContent).toBe(
+      'Cancelled task'
+    );
 
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
@@ -75,7 +79,7 @@ describe('TodoList', () => {
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     items = container?.querySelectorAll('li.todo-block-item');
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
   });
 
   it('starts collapsed when all todos are completed and expands when a new todo arrives', async () => {

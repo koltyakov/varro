@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getMessageEntriesForSession,
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
   sumAssistantTokensFromMessageEntries,
@@ -96,6 +97,38 @@ describe('ChatInput perf helpers', () => {
 
     expect(getLatestAssistantMessageInfo(entries)?.id).toBe('primary');
     expect(getLatestAssistantMessageInfoWithTokens(entries)?.id).toBe('primary');
+  });
+
+  it('scopes context token helpers to the active session including selected subagents', () => {
+    const entries = [
+      { info: assistantMessage('primary', { input: 10, output: 5 }) },
+      {
+        info: {
+          ...assistantMessage('other-session', { input: 100, output: 50 }),
+          sessionID: 'session-2',
+        },
+      },
+      {
+        info: {
+          ...assistantMessage('selected-subagent', { input: 20, output: 10 }),
+          sessionID: 'child-1',
+          mode: 'subagent',
+        },
+      },
+    ];
+
+    const currentSessionEntries = getMessageEntriesForSession(entries, 'child-1');
+
+    expect(
+      getLatestAssistantMessageInfoWithTokens(currentSessionEntries, {
+        includeSubagents: true,
+      })?.id
+    ).toBe('selected-subagent');
+    expect(sumAssistantTokensFromMessageEntries(currentSessionEntries)).toMatchObject({
+      total: 30,
+      input: 20,
+      output: 10,
+    });
   });
 
   it('sums assistant tokens directly from message entries', () => {

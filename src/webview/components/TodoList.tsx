@@ -5,7 +5,7 @@ import type { Todo } from '../types';
 export function TodoList() {
   const appState = useAppState();
   const todos = () => appState.state.todos;
-  const completed = () => todos().filter((t) => t.status === 'completed').length;
+  const completed = () => todos().filter((todo) => isResolvedTodoStatus(todo.status)).length;
   const total = () => todos().length;
   const progress = () => (total() > 0 ? (completed() / total()) * 100 : 0);
   const allDone = () => total() > 0 && completed() === total();
@@ -89,6 +89,19 @@ function TodoItem(props: { todo: Todo }) {
             />
           </svg>
         );
+      case 'cancelled':
+      case 'canceled':
+        return (
+          <svg class="h-3.5 w-3.5 text-vscode-muted/70" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="5.75" stroke="currentColor" stroke-width="1.25" />
+            <path
+              d="M5.5 5.5l5 5m0-5l-5 5"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+            />
+          </svg>
+        );
       case 'in_progress':
         return (
           <svg class="h-3.5 w-3.5 text-vscode-accent" viewBox="0 0 16 16">
@@ -125,6 +138,9 @@ function TodoItem(props: { todo: Todo }) {
         return 'completed';
       case 'in_progress':
         return 'in progress';
+      case 'cancelled':
+      case 'canceled':
+        return 'cancelled';
       default:
         return 'pending';
     }
@@ -137,4 +153,8 @@ function TodoItem(props: { todo: Todo }) {
       <span class="todo-block-item-text">{props.todo.content}</span>
     </li>
   );
+}
+
+function isResolvedTodoStatus(status: string) {
+  return status === 'completed' || status === 'cancelled' || status === 'canceled';
 }

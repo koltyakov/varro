@@ -106,6 +106,9 @@ describe('SessionSendOperations', () => {
   it('builds and sends payloads from shared state', async () => {
     const sendAsync = vi.fn(async () => {});
     const resetTodoSync = vi.fn();
+    state.todos = [
+      { id: 'todo-1', content: 'Keep visible', status: 'completed', priority: 'high' },
+    ];
     const operations = new SessionSendOperations({
       createSession: vi.fn(async () => 'session-2'),
       clearPendingAbort: vi.fn(),
@@ -124,8 +127,8 @@ describe('SessionSendOperations', () => {
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
       parts: [{ type: 'text', text: 'hello' }],
     });
-    expect(resetTodoSync).toHaveBeenCalledTimes(1);
-    expect(setState).toHaveBeenCalledWith('todos', []);
+    expect(resetTodoSync).not.toHaveBeenCalled();
+    expect(setState).not.toHaveBeenCalledWith('todos', []);
     expect(postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
     expect(postMessage).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
   });

@@ -34,7 +34,12 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     messages: SessionEntry[] = appStore.state.messages,
     latestEventPayload?: unknown
   ) => {
-    if (nativeTodosEnabled && applyNativeTodos(latestEventPayload)) return;
+    if (
+      nativeTodosEnabled &&
+      applyNativeTodos(latestEventPayload, { preserveAdvancedStatuses: true })
+    ) {
+      return;
+    }
     if (nativeTodosEnabled) {
       advanceTodosFromMessages(messages);
       return;

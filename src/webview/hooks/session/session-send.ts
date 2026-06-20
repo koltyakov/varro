@@ -437,8 +437,6 @@ export async function sendMessageWithDependencies(
     deps.applyEffectiveModel(effectiveModel, sessionId);
   }
 
-  deps.resetTodoSync();
-  deps.clearTodos();
   deps.clearSessionUsageLimit(sessionId);
 
   try {
