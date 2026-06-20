@@ -1089,7 +1089,7 @@ describe('header status badges', () => {
     expect(titles).toEqual(['child-1', 'child-2']);
   });
 
-  it('shows the root session subagent button when the active session is a sub-agent', async () => {
+  it('hides the parent subagent button when the active session is a sub-agent', () => {
     setState('sessions', [
       session('parent', 500),
       session('child-1', 400, { parentID: 'parent' }),
@@ -1102,19 +1102,7 @@ describe('header status badges', () => {
     const subagentsButton = container?.querySelector(
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;
-    expect(subagentsButton?.getAttribute('title')).toBe('Show 2 sub-agent sessions');
-    expect(subagentsButton?.textContent?.trim()).toBe('2');
-
-    subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
-
-    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
-      'Sub-agents'
-    );
-    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
-      (item) => item.textContent?.trim()
-    );
-    expect(titles).toEqual(['child-1', 'child-2']);
+    expect(subagentsButton).toBeNull();
   });
 
   it('returns from an active sub-agent session to its parent session', async () => {

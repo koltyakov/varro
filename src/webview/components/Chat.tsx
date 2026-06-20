@@ -6,7 +6,6 @@ import {
   showSettings,
   openAttentionSessionsKey,
   isSessionAwaitingInput,
-  getSessionTreeRootId,
 } from '../lib/state';
 import { createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
 import { selectSession, deleteSessionImmediately } from '../hooks/useOpenCode';
@@ -351,9 +350,16 @@ export function Chat() {
     setShowSessionPicker(true);
   };
 
-  const activeRootSessionId = createMemo(() => getSessionTreeRootId(state.activeSessionId) || null);
+  const activeSession = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    return sessionId ? sessionsById().get(sessionId) || null : null;
+  });
+  const activeSubagentRootId = createMemo(() => {
+    const session = activeSession();
+    return session && !session.parentID ? session.id : null;
+  });
   const activeSubagentCount = createMemo(() => {
-    const rootSessionId = activeRootSessionId();
+    const rootSessionId = activeSubagentRootId();
     if (!rootSessionId) return 0;
     return sessionIndicators().subagentCounts.get(rootSessionId) || 0;
   });
@@ -419,7 +425,7 @@ export function Chat() {
       sessionSidebarCompletedCount={sessionSidebarCompletedCount()}
       sessionSidebarRunningCount={sessionSidebarRunningCount()}
       activeTitle={activeTitle()}
-      activeSubagentRootId={activeSubagentCount() > 0 ? activeRootSessionId() : null}
+      activeSubagentRootId={activeSubagentCount() > 0 ? activeSubagentRootId() : null}
       activeSubagentCount={activeSubagentCount()}
       activeSubagentLabel={activeSubagentLabel()}
       onClearSessionListView={clearSessionListView}
