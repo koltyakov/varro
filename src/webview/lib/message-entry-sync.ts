@@ -5,7 +5,7 @@ export type MessageEntry = { info: Message; parts: Part[] };
 export function getSharedMessagePrefixLength(current: MessageEntry[], incoming: MessageEntry[]) {
   const minLen = Math.min(current.length, incoming.length);
   let index = 0;
-  while (index < minLen && current[index].info.id === incoming[index].info.id) {
+  while (index < minLen && current[index]!.info.id === incoming[index]!.info.id) {
     index += 1;
   }
   return index;

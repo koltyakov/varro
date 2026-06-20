@@ -74,7 +74,7 @@ export function createComposerHistory(options?: {
   }
 
   function record(snapshot: ComposerSnapshot) {
-    const current = stack[index];
+    const current = stack[index]!;
     const attachmentsChanged = getAttachmentSignature(snapshot) !== getAttachmentSignature(current);
 
     if (snapshot.text === current.text && !attachmentsChanged) {
@@ -131,7 +131,7 @@ export function createComposerHistory(options?: {
     index -= 1;
     lastEditKind = null;
     breakNextCoalesce = false;
-    return cloneSnapshot(stack[index]);
+    return cloneSnapshot(stack[index]!);
   }
 
   function redo(): ComposerSnapshot | null {
@@ -139,7 +139,7 @@ export function createComposerHistory(options?: {
     index += 1;
     lastEditKind = null;
     breakNextCoalesce = false;
-    return cloneSnapshot(stack[index]);
+    return cloneSnapshot(stack[index]!);
   }
 
   return {

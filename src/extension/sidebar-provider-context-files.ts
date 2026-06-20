@@ -106,7 +106,7 @@ export class SidebarProviderContextFiles {
       }
 
       const merged = mergeContextFile(this.contextFiles[index], incoming);
-      if (areContextFilesEqual(this.contextFiles[index], merged)) {
+      if (areContextFilesEqual(this.contextFiles[index]!, merged)) {
         continue;
       }
       this.contextFiles[index] = merged;

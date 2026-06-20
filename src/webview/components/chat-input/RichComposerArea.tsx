@@ -342,7 +342,7 @@ function appendTextWithLineBreaks(parent: Node, text: string) {
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (i > 0) parent.appendChild(document.createElement('br'));
-    if (lines[i]) parent.appendChild(document.createTextNode(lines[i]));
+    if (lines[i]) parent.appendChild(document.createTextNode(lines[i]!));
   }
 }
 

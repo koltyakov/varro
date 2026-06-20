@@ -121,7 +121,7 @@ export function reconcileLoadedProviders(args: {
   }
 
   if (!args.selectedModel && args.providers.length > 0) {
-    const firstProvider = args.providers[0];
+    const firstProvider = args.providers[0]!;
     const defaultModelID = args.providerDefaults[firstProvider.id];
     const modelID = defaultModelID || Object.keys(firstProvider.models)[0];
     if (modelID) {

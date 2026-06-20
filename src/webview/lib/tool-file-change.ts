@@ -105,8 +105,8 @@ function parseTitleFileChange(title: string): Omit<FileChange, 'dedupeKey'> | nu
 
   const movedMatch = trimmed.match(/^(moved|renamed)\s+(.+?)\s*(?:->|→)\s*(.+)$/i);
   if (movedMatch) {
-    const fromPath = stripPathWrapping(movedMatch[2]);
-    const toPath = stripPathWrapping(movedMatch[3]);
+    const fromPath = stripPathWrapping(movedMatch[2]!);
+    const toPath = stripPathWrapping(movedMatch[3]!);
     if (!looksLikePath(fromPath) || !looksLikePath(toPath)) return null;
     return { kind: 'moved', path: toPath, fromPath, toPath };
   }
@@ -116,8 +116,8 @@ function parseTitleFileChange(title: string): Omit<FileChange, 'dedupeKey'> | nu
   );
   if (!basicMatch) return null;
 
-  const action = basicMatch[1].toLowerCase();
-  const path = stripPathWrapping(basicMatch[2]);
+  const action = basicMatch[1]!.toLowerCase();
+  const path = stripPathWrapping(basicMatch[2]!);
   if (!looksLikePath(path)) return null;
 
   return {
@@ -464,7 +464,7 @@ export function getMessageFileChanges(
   // extension or carry actual +/- counts.
   const keys = result.map(keyFor);
   return result.filter((change, index) => {
-    const key = keys[index];
+    const key = keys[index]!;
     const isAncestor = keys.some(
       (other, otherIndex) => otherIndex !== index && other.startsWith(`${key}/`)
     );

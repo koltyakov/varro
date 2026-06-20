@@ -24,9 +24,9 @@ export function createMessageIndex(callbacks?: MessageIndexCallbacks | (() => vo
     messageById = new Map();
     partById = new Map();
     for (let i = 0; i < msgs.length; i++) {
-      messageById.set(msgs[i].info.id, i);
-      for (let j = 0; j < msgs[i].parts.length; j++) {
-        partById.set(msgs[i].parts[j].id, { msgIdx: i, partIdx: j });
+      messageById.set(msgs[i]!.info.id, i);
+      for (let j = 0; j < msgs[i]!.parts.length; j++) {
+        partById.set(msgs[i]!.parts[j]!.id, { msgIdx: i, partIdx: j });
       }
     }
     indexedVersion = messageIndexVersion;
@@ -70,7 +70,7 @@ export function createMessageIndex(callbacks?: MessageIndexCallbacks | (() => vo
       const message = msgs[location.msgIdx];
       if (message) {
         for (let partIdx = location.partIdx; partIdx < message.parts.length; partIdx++) {
-          partById.set(message.parts[partIdx].id, { msgIdx: location.msgIdx, partIdx });
+          partById.set(message.parts[partIdx]!.id, { msgIdx: location.msgIdx, partIdx });
         }
       }
 
@@ -80,7 +80,7 @@ export function createMessageIndex(callbacks?: MessageIndexCallbacks | (() => vo
     findMessageIndex(msgs: MessageEntry[], id: string) {
       ensureIndex(msgs);
       const idx = messageById.get(id);
-      if (idx !== undefined && idx < msgs.length && msgs[idx].info.id === id) return idx;
+      if (idx !== undefined && idx < msgs.length && msgs[idx]!.info.id === id) return idx;
       return msgs.findIndex((m) => m.info.id === id);
     },
 
@@ -95,7 +95,7 @@ export function createMessageIndex(callbacks?: MessageIndexCallbacks | (() => vo
       }
 
       for (let msgIdx = 0; msgIdx < msgs.length; msgIdx++) {
-        const partIdx = msgs[msgIdx].parts.findIndex((part) => part.id === partId);
+        const partIdx = msgs[msgIdx]!.parts.findIndex((part) => part.id === partId);
         if (partIdx !== -1) {
           const location = { msgIdx, partIdx };
           partById.set(partId, location);

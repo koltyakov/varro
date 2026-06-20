@@ -949,7 +949,7 @@ export function SessionListView(props: {
       e.preventDefault();
       const idx = focusedIndex();
       if (idx >= 0 && idx < sessions.length) {
-        selectSession(sessions[idx].id);
+        selectSession(sessions[idx]!.id);
         if (!props.embedded) setShowSessionPicker(false);
       }
       return;

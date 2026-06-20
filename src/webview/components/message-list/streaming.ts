@@ -37,7 +37,7 @@ export function hasCommittedVisibleTextAsLastPart(
   loadingStartedAt: number | null
 ): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const entry = messages[i];
+    const entry = messages[i]!;
     if (entry.info.role !== 'assistant') return false;
     if (entry.info.error) return false;
     const completedAt = entry.info.time.completed;
@@ -49,7 +49,7 @@ export function hasCommittedVisibleTextAsLastPart(
       return false;
     }
     for (let j = entry.parts.length - 1; j >= 0; j--) {
-      const part = entry.parts[j];
+      const part = entry.parts[j]!;
       if (!shouldShowAssistantPartInline(part)) continue;
       if (part.id === streamingPartId) return false;
       if (part.type === 'text') {

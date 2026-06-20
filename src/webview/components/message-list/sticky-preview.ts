@@ -65,7 +65,7 @@ export function getNextVisibleUserMessageTopMap(
   let nextVisibleUserMessageTop: number | null = null;
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const entry = messages[index];
+    const entry = messages[index]!;
     result.set(entry.info.id, nextVisibleUserMessageTop);
     if (entry.info.role !== 'user') continue;
 

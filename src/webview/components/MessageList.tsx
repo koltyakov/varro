@@ -296,7 +296,7 @@ export function MessageList() {
   const lastAssistantID = createMemo(() => {
     const msgs = state.messages;
     for (let i = msgs.length - 1; i >= 0; i--) {
-      if (isAssistantMessage(msgs[i].info)) return msgs[i].info.id;
+      if (isAssistantMessage(msgs[i]!.info)) return msgs[i]!.info.id;
     }
     return null;
   });
@@ -815,7 +815,7 @@ export function MessageList() {
     items.forEach((el, index) => {
       const id = el.dataset.msgId;
       if (!id) return;
-      const h = hasLayoutMeasurements ? measuredHeightsFromLayout[index] : noLayoutFallbackHeight;
+      const h = hasLayoutMeasurements ? measuredHeightsFromLayout[index]! : noLayoutFallbackHeight;
       if ((measuredHeights.get(id) ?? -1) !== h) {
         measuredHeights.set(id, h);
         markVirtualMetricsDirty(id);
@@ -871,7 +871,7 @@ export function MessageList() {
       const ids = messageIds();
       const range = visibleRange();
       for (let i = range.start; i < range.end && i < ids.length; i += 1) {
-        const id = ids[i];
+        const id = ids[i]!;
         const bounds = observedVisibleMessageBounds.get(id);
         if (bounds && bounds.bottom > 0) {
           return { messageId: id, top: bounds.top, topPad: range.topPad };
@@ -2000,7 +2000,10 @@ export function getAssistantDialogSummaryMap(
     );
     const agentCount = Math.max(childRunCount, currentSubagentHandoffCount);
     result.set(lastMessage.id, {
-      durationMs: Math.max(0, end - (currentUserRequestCreated ?? currentMessages[0].time.created)),
+      durationMs: Math.max(
+        0,
+        end - (currentUserRequestCreated ?? currentMessages[0]!.time.created)
+      ),
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       agentCount,

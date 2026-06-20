@@ -115,7 +115,7 @@ export function subtractContextLineRanges(
 
     while (
       excludedIndex < excludedRanges.length &&
-      excludedRanges[excludedIndex].endLine < cursor
+      excludedRanges[excludedIndex]!.endLine < cursor
     ) {
       excludedIndex++;
     }
@@ -123,9 +123,9 @@ export function subtractContextLineRanges(
     let index = excludedIndex;
     while (
       index < excludedRanges.length &&
-      excludedRanges[index].startLine <= sourceRange.endLine
+      excludedRanges[index]!.startLine <= sourceRange.endLine
     ) {
-      const excludedRange = excludedRanges[index];
+      const excludedRange = excludedRanges[index]!;
       if (excludedRange.startLine > cursor) {
         result.push({ startLine: cursor, endLine: excludedRange.startLine - 1 });
       }
@@ -144,17 +144,17 @@ export function subtractContextLineRanges(
 
 export function parseSelectionReference(text: string) {
   const match = text.match(/^\[Selection from (.+?) lines (.+)\]$/);
-  if (!match || match[1].startsWith('terminal ')) return null;
+  if (!match || match[1]!.startsWith('terminal ')) return null;
 
   const lineRanges = normalizeContextLineRanges(
-    match[2]
+    match[2]!
       .split(',')
       .map((part) => part.trim())
       .filter(Boolean)
       .map((part) => {
         const rangeMatch = part.match(/^(\d+)(?:-(\d+))?$/);
         if (!rangeMatch) return null;
-        const startLine = parseInt(rangeMatch[1], 10);
+        const startLine = parseInt(rangeMatch[1]!, 10);
         const endLine = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : startLine;
         return { startLine, endLine };
       })

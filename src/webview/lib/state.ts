@@ -816,7 +816,7 @@ export function getPersistedActiveSessionId(): string | null {
 export function markSessionSeen(id: string, updatedAt?: number) {
   const nextSessions = nextSeenSessions(state.lastSeenSessions, id, updatedAt);
   if (!nextSessions) return;
-  setState('lastSeenSessions', id, nextSessions[id]);
+  setState('lastSeenSessions', id, nextSessions[id]!);
   writeScopedSessionMarkerState(
     { readStored, writeStored },
     STORAGE_KEYS.lastSeenSessions,
@@ -832,7 +832,7 @@ export function markSessionResponseCompleted(id: string, completedAt?: number) {
     completedAt
   );
   if (!nextSessions) return;
-  setState('completedSessionResponses', id, nextSessions[id]);
+  setState('completedSessionResponses', id, nextSessions[id]!);
   writeScopedSessionMarkerState(
     { readStored, writeStored },
     STORAGE_KEYS.completedSessionResponses,
@@ -866,7 +866,7 @@ export function skipPlanSession(sessionId: string, updatedAt?: number) {
     updatedAt
   );
   if (!next) return;
-  setState('skippedPlanSessions', sessionId, next[sessionId]);
+  setState('skippedPlanSessions', sessionId, next[sessionId]!);
   writeScopedSessionMarkerState(
     { readStored, writeStored },
     STORAGE_KEYS.skippedPlanSessions,
@@ -1767,7 +1767,7 @@ export function resolveSelectedModel(
 function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
   const deltas = appState.streamingDeltaQueue.takeAll();
   if (deltas.length === 0) return;
-  const latest = deltas[deltas.length - 1];
+  const latest = deltas[deltas.length - 1]!;
   let appendedPart = false;
   let committedPreviousStreamingPart = false;
 
@@ -1837,7 +1837,7 @@ function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
         {
           id: item.partId,
           messageID: item.messageId,
-          sessionID: item.sessionId || appState.state.messages[msgIdx].info.sessionID,
+          sessionID: item.sessionId || appState.state.messages[msgIdx]!.info.sessionID,
           type: 'text' as const,
           text: item.text,
         },
@@ -1845,7 +1845,7 @@ function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
       appendedPart = true;
       appState.messageIndex.appendPart(appState.state.messages, item.partId, {
         msgIdx,
-        partIdx: appState.state.messages[msgIdx].parts.length - 1,
+        partIdx: appState.state.messages[msgIdx]!.parts.length - 1,
       });
     }
 
@@ -1867,7 +1867,7 @@ export function upsertMessage(msg: { info: Message; parts: Part[] }) {
     produce((msgs) => {
       const idx = messageIndex.findMessageIndex(msgs, msg.info.id);
       if (idx !== -1) {
-        if (areMessageEntriesEquivalent(msgs[idx], msg)) return;
+        if (areMessageEntriesEquivalent(msgs[idx]!, msg)) return;
         msgs[idx] = msg;
         messageIndex.invalidate();
       } else {
@@ -1884,8 +1884,8 @@ export function upsertMessageInfo(info: Message) {
     produce((msgs) => {
       const idx = messageIndex.findMessageIndex(msgs, info.id);
       if (idx !== -1) {
-        if (msgs[idx].info === info) return;
-        msgs[idx].info = info;
+        if (msgs[idx]!.info === info) return;
+        msgs[idx]!.info = info;
         messageIndex.invalidate();
         return;
       } else {
@@ -1908,14 +1908,14 @@ export function upsertPart(part: Part) {
         if (idx === -1) return;
         const location = messageIndex.findPartLocation(msgs, nextPart.id);
         if (location && location.msgIdx === idx) {
-          msgs[idx].parts[location.partIdx] = nextPart;
+          msgs[idx]!.parts[location.partIdx] = nextPart;
           return;
         }
 
-        msgs[idx].parts.push(nextPart);
+        msgs[idx]!.parts.push(nextPart);
         messageIndex.appendPart(msgs, nextPart.id, {
           msgIdx: idx,
-          partIdx: msgs[idx].parts.length - 1,
+          partIdx: msgs[idx]!.parts.length - 1,
         });
       })
     );
@@ -2028,10 +2028,10 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
       'messages',
       produce((msgs) => {
         const idx = messageIndex.findMessageIndex(msgs, messageId);
-        if (idx !== -1 && msgs[idx].info.sessionID === sessionId) {
+        if (idx !== -1 && msgs[idx]!.info.sessionID === sessionId) {
           const location = messageIndex.findPartLocation(msgs, partId);
           if (location && location.msgIdx === idx) {
-            msgs[idx].parts.splice(location.partIdx, 1);
+            msgs[idx]!.parts.splice(location.partIdx, 1);
             messageIndex.removePart(msgs, partId, location);
           }
         }
@@ -2109,7 +2109,7 @@ export function removePermission(permissionId: string, options?: { removeGroup?:
         return;
       }
 
-      const permission = perms[idx];
+      const permission = perms[idx]!;
       const groupMembers = getPermissionGroupMembers(permission).filter(
         (member) => member.id !== permissionId
       );
@@ -2118,7 +2118,7 @@ export function removePermission(permissionId: string, options?: { removeGroup?:
         return;
       }
 
-      const nextLeader = groupMembers[0];
+      const nextLeader = groupMembers[0]!;
       permission.id = nextLeader.id;
       permission.sessionID = nextLeader.sessionID;
       permission.messageID = nextLeader.messageID;
@@ -2286,7 +2286,7 @@ export function setMessagesIncremental(
         }
 
         for (let i = startIndex; i < incoming.length; i++) {
-          const next = incoming[i];
+          const next = incoming[i]!;
           const currentEntry = msgs[i];
           if (
             currentEntry &&
@@ -2299,7 +2299,7 @@ export function setMessagesIncremental(
 
           const nextEntry = mergeMessageEntry(currentEntry, next, options, streamingSnapshot);
           if (i < sharedPrefixLength) {
-            if (!areMessageEntriesEquivalent(currentEntry, nextEntry)) {
+            if (!areMessageEntriesEquivalent(currentEntry!, nextEntry)) {
               msgs[i] = nextEntry;
               changed = true;
             }
@@ -2307,7 +2307,7 @@ export function setMessagesIncremental(
           }
 
           if (i < msgs.length) {
-            if (!areMessageEntriesEquivalent(msgs[i], nextEntry)) {
+            if (!areMessageEntriesEquivalent(msgs[i]!, nextEntry)) {
               msgs[i] = nextEntry;
               changed = true;
             }
@@ -2438,7 +2438,7 @@ function preserveLongerToolExecutionTimes(current: MessageEntry | undefined, nex
   if (currentToolParts.size === 0) return;
 
   for (let index = 0; index < next.parts.length; index += 1) {
-    const incomingPart = next.parts[index];
+    const incomingPart = next.parts[index]!;
     if (incomingPart.type !== 'tool') continue;
     const currentPart = currentToolParts.get(incomingPart.id);
     if (!currentPart || currentPart.callID !== incomingPart.callID) continue;
@@ -2496,7 +2496,7 @@ function materializeStreamingTextInEntry(
 ) {
   if (!streamingSnapshot) return;
   for (let index = 0; index < entry.parts.length; index += 1) {
-    const part = entry.parts[index];
+    const part = entry.parts[index]!;
     if (part.id !== streamingSnapshot.partId) continue;
     const nextPart = materializeStreamingTextInPart(part, streamingSnapshot);
     if (nextPart !== part) entry.parts[index] = nextPart;

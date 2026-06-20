@@ -395,8 +395,8 @@ function splitPathReference(
   if (!match) return { path: trimmed };
 
   return {
-    path: match[1],
-    line: parseInt(match[2], 10),
+    path: match[1]!,
+    line: parseInt(match[2]!, 10),
     lineSuffix: match[2],
   };
 }
@@ -638,9 +638,9 @@ function scanLastSafeMarkdownBoundary(
     const wasInsideFence = openFence !== null;
 
     if (fenceMatch) {
-      const marker = fenceMatch[1];
+      const marker = fenceMatch[1]!;
       if (!openFence) {
-        openFence = { char: marker[0], length: marker.length };
+        openFence = { char: marker[0]!, length: marker.length };
       } else if (marker[0] === openFence.char && marker.length >= openFence.length) {
         openFence = null;
       }
@@ -719,11 +719,11 @@ function hasCompletedHighlightableFence(content: string) {
     const fenceMatch = line.match(MARKDOWN_FENCE_INFO_RE);
 
     if (fenceMatch) {
-      const marker = fenceMatch[1];
+      const marker = fenceMatch[1]!;
       if (!openFence) {
-        const lang = fenceMatch[2].trim().split(/\s+/, 1)[0];
+        const lang = fenceMatch[2]!.trim().split(/\s+/, 1)[0];
         openFence = {
-          char: marker[0],
+          char: marker[0]!,
           length: marker.length,
           highlightable: !!resolveCodeLanguage(lang),
         };

@@ -70,27 +70,27 @@ export function Chat() {
     () => state.serverStatus.state === 'running' && state.serverStatus.eventStream === 'degraded'
   );
   const shouldRenderWorkspace = () => !showSessionPicker() || isDesktopSessionLayout();
-  let reconnectBannerShowTimer: number | undefined;
-  let reconnectBannerHideTimer: number | undefined;
+  let reconnectBannerShowTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconnectBannerHideTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectBannerVisibleSince = 0;
-  let chatViewEnterTimer: number | undefined;
-  const pendingEmptySessionDeleteTimers = new Map<string, number>();
+  let chatViewEnterTimer: ReturnType<typeof setTimeout> | undefined;
+  const pendingEmptySessionDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const clearReconnectBannerShowTimer = () => {
     if (reconnectBannerShowTimer == null) return;
-    window.clearTimeout(reconnectBannerShowTimer);
+    clearTimeout(reconnectBannerShowTimer);
     reconnectBannerShowTimer = undefined;
   };
 
   const clearReconnectBannerHideTimer = () => {
     if (reconnectBannerHideTimer == null) return;
-    window.clearTimeout(reconnectBannerHideTimer);
+    clearTimeout(reconnectBannerHideTimer);
     reconnectBannerHideTimer = undefined;
   };
 
   const clearChatViewEnterTimer = () => {
     if (chatViewEnterTimer == null) return;
-    window.clearTimeout(chatViewEnterTimer);
+    clearTimeout(chatViewEnterTimer);
     chatViewEnterTimer = undefined;
   };
 
@@ -113,7 +113,7 @@ export function Chat() {
         clearReconnectBannerHideTimer();
         if (showReconnectBanner() || reconnectBannerShowTimer != null) return;
 
-        reconnectBannerShowTimer = window.setTimeout(() => {
+        reconnectBannerShowTimer = setTimeout(() => {
           reconnectBannerShowTimer = undefined;
           reconnectBannerVisibleSince = Date.now();
           setShowReconnectBanner(true);
@@ -133,7 +133,7 @@ export function Chat() {
       }
 
       if (reconnectBannerHideTimer != null) return;
-      reconnectBannerHideTimer = window.setTimeout(() => {
+      reconnectBannerHideTimer = setTimeout(() => {
         reconnectBannerHideTimer = undefined;
         reconnectBannerVisibleSince = 0;
         if (!isEventStreamDegraded()) setShowReconnectBanner(false);
@@ -149,7 +149,7 @@ export function Chat() {
       candidateIds.add(session.id);
       if (pendingEmptySessionDeleteTimers.has(session.id)) continue;
 
-      const timer = window.setTimeout(() => {
+      const timer = setTimeout(() => {
         pendingEmptySessionDeleteTimers.delete(session.id);
         const latestSession = state.sessions.find((item) => item.id === session.id);
         if (!latestSession) return;
@@ -165,7 +165,7 @@ export function Chat() {
 
     for (const [sessionId, timer] of pendingEmptySessionDeleteTimers) {
       if (candidateIds.has(sessionId)) continue;
-      window.clearTimeout(timer);
+      clearTimeout(timer);
       pendingEmptySessionDeleteTimers.delete(sessionId);
     }
   });
@@ -175,7 +175,7 @@ export function Chat() {
     clearReconnectBannerHideTimer();
     clearChatViewEnterTimer();
     for (const timer of pendingEmptySessionDeleteTimers.values()) {
-      window.clearTimeout(timer);
+      clearTimeout(timer);
     }
     pendingEmptySessionDeleteTimers.clear();
   });
@@ -256,7 +256,7 @@ export function Chat() {
       }
 
       setIsEnteringChatView(true);
-      chatViewEnterTimer = window.setTimeout(() => {
+      chatViewEnterTimer = setTimeout(() => {
         chatViewEnterTimer = undefined;
         setIsEnteringChatView(false);
       }, CHAT_VIEW_ENTER_DURATION_MS);

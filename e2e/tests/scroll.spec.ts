@@ -245,7 +245,7 @@ test.describe('auto-scroll', () => {
     }
 
     for (let index = 1; index < positions.length; index += 1) {
-      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1] + 2);
+      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1]! + 2);
     }
 
     const visibleRows = await list.evaluate((element) => {
@@ -282,8 +282,8 @@ test.describe('auto-scroll', () => {
     }
 
     for (let index = 1; index < samples.length; index += 1) {
-      const previous = samples[index - 1];
-      const current = samples[index];
+      const previous = samples[index - 1]!;
+      const current = samples[index]!;
       const upwardScrollDelta = previous.scrollTop - current.scrollTop;
       expect(current.scrollTop).toBeLessThanOrEqual(previous.scrollTop + 2);
       expect(upwardScrollDelta).toBeLessThan(current.viewportHeight * 0.8);
@@ -314,8 +314,8 @@ test.describe('auto-scroll', () => {
 
     const viewportHeight = await list.evaluate((element) => element.clientHeight);
     for (let index = 1; index < positions.length; index += 1) {
-      const upwardDelta = positions[index - 1] - positions[index];
-      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1] + 2);
+      const upwardDelta = positions[index - 1]! - positions[index]!;
+      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1]! + 2);
       expect(upwardDelta).toBeLessThan(viewportHeight * 0.75);
     }
   });
@@ -422,7 +422,7 @@ test.describe('auto-scroll', () => {
 
     const largestUpwardJump = positions.reduce((largest, current, index) => {
       if (index === 0) return largest;
-      return Math.max(largest, positions[index - 1] - current);
+      return Math.max(largest, positions[index - 1]! - current);
     }, 0);
     expect(largestUpwardJump).toBeLessThan(25);
     await expect
@@ -491,7 +491,7 @@ test.describe('scroll stability regressions', () => {
 
     let upwardJumpCount = 0;
     for (let index = 1; index < positions.length; index += 1) {
-      if (positions[index] < positions[index - 1] - 3) {
+      if (positions[index]! < positions[index - 1]! - 3) {
         upwardJumpCount++;
       }
     }
@@ -500,7 +500,7 @@ test.describe('scroll stability regressions', () => {
     let maxJitterAmplitude = 0;
     for (let index = 2; index < positions.length; index += 1) {
       const jitter = Math.abs(
-        (positions[index] - positions[index - 1]) - (positions[index - 1] - positions[index - 2])
+        (positions[index]! - positions[index - 1]!) - (positions[index - 1]! - positions[index - 2]!)
       );
       maxJitterAmplitude = Math.max(maxJitterAmplitude, jitter);
     }
@@ -800,7 +800,7 @@ test.describe('multi-agent scroll stability', () => {
 
     let maxFrameDelta = 0;
     for (let i = 1; i < positions.length; i += 1) {
-      const frameDelta = Math.abs(positions[i] - positions[i - 1]);
+      const frameDelta = Math.abs(positions[i]! - positions[i - 1]!);
       maxFrameDelta = Math.max(maxFrameDelta, frameDelta);
     }
 
@@ -837,7 +837,7 @@ test.describe('multi-agent scroll stability', () => {
     }
 
     for (let i = 1; i < positions.length; i += 1) {
-      expect(positions[i]).toBeGreaterThanOrEqual(positions[i - 1] - 3);
+      expect(positions[i]).toBeGreaterThanOrEqual(positions[i - 1]! - 3);
     }
 
     await expect
@@ -876,7 +876,7 @@ test.describe('rapid streaming jitter resistance', () => {
     let maxOscillation = 0;
     for (let i = 2; i < positions.length; i += 1) {
       const oscillation = Math.abs(
-        (positions[i] - positions[i - 1]) - (positions[i - 1] - positions[i - 2])
+        (positions[i]! - positions[i - 1]!) - (positions[i - 1]! - positions[i - 2]!)
       );
       maxOscillation = Math.max(maxOscillation, oscillation);
     }
@@ -1114,8 +1114,8 @@ test.describe('viewport content coverage', () => {
     }
 
     for (let index = 1; index < samples.length; index += 1) {
-      expect(samples[index].firstIndex).toBeGreaterThan(samples[index - 1].firstIndex);
-      expect(samples[index].scrollTop).toBeGreaterThan(samples[index - 1].scrollTop);
+      expect(samples[index]!.firstIndex).toBeGreaterThan(samples[index - 1]!.firstIndex);
+      expect(samples[index]!.scrollTop).toBeGreaterThan(samples[index - 1]!.scrollTop);
     }
   });
 
@@ -1178,7 +1178,7 @@ test.describe('viewport content coverage', () => {
     }
 
     for (let index = 1; index < samples.length; index += 1) {
-      expect(samples[index].firstIndex).toBeGreaterThan(samples[index - 1].firstIndex);
+      expect(samples[index]!.firstIndex).toBeGreaterThan(samples[index - 1]!.firstIndex);
     }
   });
 
@@ -1341,12 +1341,12 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     }
 
     for (let index = 1; index < positions.length; index += 1) {
-      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1] + 2);
+      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1]! + 2);
     }
 
     const viewportHeight = await list.evaluate((element) => element.clientHeight);
     for (let index = 1; index < positions.length; index += 1) {
-      const upwardDelta = positions[index - 1] - positions[index];
+      const upwardDelta = positions[index - 1]! - positions[index]!;
       expect(upwardDelta).toBeLessThan(viewportHeight * 0.8);
     }
   });
@@ -1410,7 +1410,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     }
 
     for (let i = 1; i < positions.length; i += 1) {
-      expect(positions[i]).toBeGreaterThanOrEqual(positions[i - 1] - 3);
+      expect(positions[i]).toBeGreaterThanOrEqual(positions[i - 1]! - 3);
     }
 
     await expect
@@ -1512,7 +1512,7 @@ test.describe('bottom scroll stability during height changes', () => {
 
     let maxBackwardJump = 0;
     for (let i = 1; i < positions.length; i += 1) {
-      const backward = positions[i - 1] - positions[i];
+      const backward = positions[i - 1]! - positions[i]!;
       maxBackwardJump = Math.max(maxBackwardJump, backward);
     }
     expect(maxBackwardJump).toBeLessThan(25);
@@ -1552,8 +1552,8 @@ test.describe('bottom scroll stability during height changes', () => {
 
     let oscillationCount = 0;
     for (let i = 2; i < positions.length; i += 1) {
-      const d1 = positions[i - 1] - positions[i - 2];
-      const d2 = positions[i] - positions[i - 1];
+      const d1 = positions[i - 1]! - positions[i - 2]!;
+      const d2 = positions[i]! - positions[i - 1]!;
       if ((d1 > 5 && d2 < -5) || (d1 < -5 && d2 > 5)) {
         oscillationCount++;
       }

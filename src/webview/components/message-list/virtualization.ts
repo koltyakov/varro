@@ -57,7 +57,7 @@ export function buildVirtualMetrics(args: {
     prefix[0] = 0;
     const copyUpTo = Math.min(rebuildFrom, previousPrefix.length - 1);
     for (let index = 1; index <= copyUpTo; index += 1) {
-      prefix[index] = previousPrefix[index];
+      prefix[index] = previousPrefix[index]!;
     }
     rebuildFrom = copyUpTo;
   } else {
@@ -66,8 +66,8 @@ export function buildVirtualMetrics(args: {
   }
 
   for (let index = rebuildFrom; index < itemCount; index += 1) {
-    const id = args.itemIds[index];
-    prefix[index + 1] = prefix[index] + (args.measuredHeights.get(id) ?? defaultItemHeight);
+    const id = args.itemIds[index]!;
+    prefix[index + 1] = prefix[index]! + (args.measuredHeights.get(id) ?? defaultItemHeight);
   }
 
   return {
@@ -169,7 +169,7 @@ function lowerBound(values: number[], target: number) {
   let high = values.length - 1;
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
-    if (values[mid] < target) low = mid + 1;
+    if (values[mid]! < target) low = mid + 1;
     else high = mid;
   }
   return low;

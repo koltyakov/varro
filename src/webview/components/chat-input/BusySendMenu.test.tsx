@@ -63,9 +63,9 @@ describe('BusySendMenu', () => {
     const buttons = container?.querySelectorAll<HTMLButtonElement>('button');
     expect(buttons).toHaveLength(3);
 
-    buttons?.[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    buttons?.[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    buttons?.[2].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    buttons?.[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    buttons?.[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    buttons?.[2]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(onQueue).toHaveBeenCalledOnce();
     expect(onSteer).toHaveBeenCalledOnce();

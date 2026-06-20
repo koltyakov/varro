@@ -128,7 +128,7 @@ export function extractTodos(raw: unknown): Todo[] | null {
 export function deriveTodosFromMessages(messages: SessionEntry[]): Todo[] {
   let lastUserMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].info.role === 'user') {
+    if (messages[index]!.info.role === 'user') {
       lastUserMessageIndex = index;
       break;
     }
@@ -139,11 +139,11 @@ export function deriveTodosFromMessages(messages: SessionEntry[]): Todo[] {
     messageIndex > lastUserMessageIndex;
     messageIndex -= 1
   ) {
-    const message = messages[messageIndex];
+    const message = messages[messageIndex]!;
     if (message.info.role !== 'assistant') continue;
 
     for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const todos = extractTodosFromPart(message.parts[partIndex]);
+      const todos = extractTodosFromPart(message.parts[partIndex]!);
       if (todos) return todos;
     }
   }
@@ -167,7 +167,7 @@ export function mergeTodoEventAdvance(messageTodos: Todo[], eventTodos: Todo[] |
   }
 
   return messageTodos.map((messageTodo, index) => {
-    const eventTodo = eventTodos[index];
+    const eventTodo = eventTodos[index]!;
     if (!isSameTodo(messageTodo, eventTodo)) return messageTodo;
     if (statusRank(eventTodo.status) <= statusRank(messageTodo.status)) return messageTodo;
     return { ...messageTodo, status: eventTodo.status };
@@ -178,7 +178,7 @@ export function preserveAdvancedTodoStatuses(nextTodos: Todo[], currentTodos: To
   if (nextTodos.length === 0 || nextTodos.length !== currentTodos.length) return nextTodos;
 
   return nextTodos.map((nextTodo, index) => {
-    const currentTodo = currentTodos[index];
+    const currentTodo = currentTodos[index]!;
     if (!isSameTodo(nextTodo, currentTodo)) return nextTodo;
     if (statusRank(currentTodo.status) <= statusRank(nextTodo.status)) return nextTodo;
     return { ...nextTodo, status: currentTodo.status };
@@ -330,8 +330,8 @@ function areTodosEqual(left: Todo[], right: Todo[]) {
   if (left.length !== right.length) return false;
 
   for (let index = 0; index < left.length; index += 1) {
-    const leftTodo = left[index];
-    const rightTodo = right[index];
+    const leftTodo = left[index]!;
+    const rightTodo = right[index]!;
     if (
       leftTodo.id !== rightTodo.id ||
       leftTodo.content !== rightTodo.content ||
@@ -350,7 +350,7 @@ function getLatestAssistantMessageInTurn(
 ): { info: AssistantMessage; parts: Part[] } | undefined {
   let lastUserMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].info.role === 'user') {
+    if (messages[index]!.info.role === 'user') {
       lastUserMessageIndex = index;
       break;
     }
@@ -367,7 +367,7 @@ function getLatestAssistantMessageInTurn(
 function getLatestTodoMessageId(messages: Array<{ info: Message; parts: Part[] }>) {
   let lastUserMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].info.role === 'user') {
+    if (messages[index]!.info.role === 'user') {
       lastUserMessageIndex = index;
       break;
     }
@@ -378,11 +378,11 @@ function getLatestTodoMessageId(messages: Array<{ info: Message; parts: Part[] }
     messageIndex > lastUserMessageIndex;
     messageIndex -= 1
   ) {
-    const message = messages[messageIndex];
+    const message = messages[messageIndex]!;
     if (message.info.role !== 'assistant') continue;
 
     for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const todos = extractTodosFromPart(message.parts[partIndex]);
+      const todos = extractTodosFromPart(message.parts[partIndex]!);
       if (todos) return message.info.id;
     }
   }

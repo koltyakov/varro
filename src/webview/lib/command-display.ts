@@ -33,7 +33,7 @@ export function stripRedundantWorkspaceCdPrefix(
     .map((line) => {
       const match = line.match(REDUNDANT_CD_PREFIX_RE);
       if (!match) return line;
-      if (!shouldStripWorkspacePrefix(match[2], workspacePath)) return line;
+      if (!shouldStripWorkspacePrefix(match[2]!, workspacePath)) return line;
       return `${match[1]}${line.slice(match[0].length)}`;
     })
     .join('\n');

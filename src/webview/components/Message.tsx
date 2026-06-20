@@ -137,7 +137,7 @@ export function Message(props: {
 
   const [diffs] = createResource(diffRequest, async (requestKey) => {
     const [sessionID, messageID] = requestKey.split('\u0000');
-    return client.session.diff(sessionID, messageID).catch(() => [] as FileDiff[]);
+    return client.session.diff(sessionID!, messageID!).catch(() => [] as FileDiff[]);
   });
   const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
   const compactionDivider = createMemo<CompactionPart | null>(() => {
@@ -150,7 +150,7 @@ export function Message(props: {
       if (part.type === 'file') return true;
       return false;
     });
-    return hasOtherVisibleContent ? null : compactions[compactions.length - 1];
+    return hasOtherVisibleContent ? null : compactions[compactions.length - 1]!;
   });
   const shouldRender = () => {
     if (compactionDivider()) return true;

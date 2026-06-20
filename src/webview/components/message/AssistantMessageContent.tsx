@@ -102,7 +102,7 @@ export function getAssistantContainerVariant(params: {
   if (parts.length === 0) return false;
 
   if (params.highlightFinalAnswer && textPartCount === 0) {
-    return parts.length === 1 && parts[0].type === 'tool' && !isFileEditPart(parts[0])
+    return parts.length === 1 && parts[0]!.type === 'tool' && !isFileEditPart(parts[0]!)
       ? 'bare'
       : 'plain';
   }
@@ -129,7 +129,7 @@ export function getAssistantContainerVariant(params: {
     return false;
   }
 
-  const part = parts[0];
+  const part = parts[0]!;
   if (part.type === 'reasoning') return 'bare';
   return part.type === 'tool' && !isFileEditPart(part) ? 'bare' : false;
 }
@@ -137,8 +137,8 @@ export function getAssistantContainerVariant(params: {
 export function shouldShowReadModeToggle(text: string): boolean {
   let start = 0;
   let end = text.length;
-  while (start < end && text[start].trim().length === 0) start += 1;
-  while (end > start && text[end - 1].trim().length === 0) end -= 1;
+  while (start < end && text[start]!.trim().length === 0) start += 1;
+  while (end > start && text[end - 1]!.trim().length === 0) end -= 1;
 
   if (end <= start) return false;
   if (end - start >= 420) return true;
@@ -162,26 +162,26 @@ export function shouldShowReadModeToggle(text: string): boolean {
 export function deduplicateFileEdits(parts: Part[]): Part[] {
   const result: Part[] = [];
   for (let index = 0; index < parts.length; index += 1) {
-    if (!isFileEditPart(parts[index])) {
-      result.push(parts[index]);
+    if (!isFileEditPart(parts[index]!)) {
+      result.push(parts[index]!);
       continue;
     }
     const currentChangeSignature = getToolFileChangeSignature(
-      (parts[index] as ToolPart).tool,
-      (parts[index] as ToolPart).state
+      (parts[index]! as ToolPart).tool,
+      (parts[index]! as ToolPart).state
     );
     let last = index;
     while (
       last + 1 < parts.length &&
-      isFileEditPart(parts[last + 1]) &&
+      isFileEditPart(parts[last + 1]!) &&
       getToolFileChangeSignature(
-        (parts[last + 1] as ToolPart).tool,
-        (parts[last + 1] as ToolPart).state
+        (parts[last + 1]! as ToolPart).tool,
+        (parts[last + 1]! as ToolPart).state
       ) === currentChangeSignature
     ) {
       last += 1;
     }
-    result.push(parts[last]);
+    result.push(parts[last]!);
     index = last;
   }
   return result;
@@ -192,7 +192,7 @@ function lowerBound(values: number[], target: number) {
   let high = values.length - 1;
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
-    if (values[mid] < target) low = mid + 1;
+    if (values[mid]! < target) low = mid + 1;
     else high = mid;
   }
   return low;
@@ -233,7 +233,7 @@ export function calculateAssistantPartVirtualRange(args: {
   prefix[0] = 0;
   for (let index = 0; index < itemCount; index += 1) {
     prefix[index + 1] =
-      prefix[index] + (args.measuredHeights.get(args.itemKeys[index]) ?? defaultItemHeight);
+      prefix[index]! + (args.measuredHeights.get(args.itemKeys[index]!) ?? defaultItemHeight);
   }
 
   const overscanPx = overscan * defaultItemHeight;
@@ -339,14 +339,14 @@ export function AssistantMessageContent(props: {
     const parts = displayParts();
 
     for (let index = 0; index < parts.length; index += 1) {
-      const part = parts[index];
+      const part = parts[index]!;
 
       if (isFileEditPart(part)) {
         const fileEditParts: ToolPart[] = [part as ToolPart];
-        while (index + 1 < parts.length && isFileEditPart(parts[index + 1])) {
-          fileEditParts.push(parts[++index] as ToolPart);
+        while (index + 1 < parts.length && isFileEditPart(parts[index + 1]!)) {
+          fileEditParts.push(parts[++index]! as ToolPart);
         }
-        const key = `file-edit-stack:${fileEditParts[0].id}:${fileEditParts[fileEditParts.length - 1].id}`;
+        const key = `file-edit-stack:${fileEditParts[0]!.id}:${fileEditParts[fileEditParts.length - 1]!.id}`;
         const previous = previousByKey.get(key);
         if (previous?.kind === 'file-edit-stack' && samePartList(previous.parts, fileEditParts)) {
           items.push(previous);

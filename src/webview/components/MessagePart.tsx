@@ -170,7 +170,7 @@ function getReasoningSubject(text: string) {
     const line = normalized.slice(index, lineEnd).trim();
     if (line.length > 0) {
       const subjectMatch = line.match(/^\*\*(.+?)\*\*$/);
-      const subject = subjectMatch?.[1].trim();
+      const subject = subjectMatch?.[1]!.trim();
       return subject || null;
     }
     if (nextBreak === -1) break;
@@ -184,7 +184,7 @@ export function splitReasoningText(text: string) {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   let subjectIndex = 0;
 
-  while (subjectIndex < lines.length && lines[subjectIndex].trim().length === 0) {
+  while (subjectIndex < lines.length && lines[subjectIndex]!.trim().length === 0) {
     subjectIndex += 1;
   }
 
@@ -192,11 +192,11 @@ export function splitReasoningText(text: string) {
   const subjectMatch = subjectLine?.match(/^\*\*(.+?)\*\*$/);
   if (!subjectMatch) return { subject: null, body: text };
 
-  const subject = subjectMatch[1].trim();
+  const subject = subjectMatch[1]!.trim();
   if (!subject) return { subject: null, body: text };
 
   let bodyStart = subjectIndex + 1;
-  while (bodyStart < lines.length && lines[bodyStart].trim().length === 0) {
+  while (bodyStart < lines.length && lines[bodyStart]!.trim().length === 0) {
     bodyStart += 1;
   }
 

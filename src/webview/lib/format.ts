@@ -3,7 +3,7 @@ import type { ProviderLimitStatus, ProviderLimitWindow } from '../../shared/prot
 export function formatVariantLabel(variant: string) {
   return variant
     .split(/[-_]/g)
-    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
     .join(' ');
 }
 
@@ -14,7 +14,7 @@ export function formatVariantInitial(variant: string) {
 
 export function formatAgentLabel(agent: string | null | undefined) {
   if (!agent) return '';
-  return agent[0].toUpperCase() + agent.slice(1);
+  return agent[0]!.toUpperCase() + agent.slice(1);
 }
 
 export function formatAgentInitial(agent: string | null | undefined) {

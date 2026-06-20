@@ -2724,10 +2724,10 @@ function getSession(state: ScenarioState, id: string) {
 function getSessionTodos(state: ScenarioState, id: string): Todo[] {
   const messages = state.messagesBySessionId[id] || [];
   for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const message = messages[messageIndex];
+    const message = messages[messageIndex]!;
     if (message.info.role !== 'assistant') continue;
     for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const part = message.parts[partIndex];
+      const part = message.parts[partIndex]!;
       if (part.type !== 'tool' || !part.tool.toLowerCase().includes('todo')) continue;
       const stateRecord = asRecord(part.state);
       const todos = extractTodoPayload(stateRecord.input) || extractTodoPayload(stateRecord.metadata);
@@ -2954,7 +2954,7 @@ async function handleApiRequest(
 
   if (method === 'POST' && /\/mcp\/[^/]+\/(connect|disconnect)$/.test(path)) {
     const match = path.match(/^\/mcp\/([^/]+)\/(connect|disconnect)$/);
-    const name = match ? decodeURIComponent(match[1]) : null;
+    const name = match ? decodeURIComponent(match[1]!) : null;
     const action = match?.[2];
     if (name && state.mcpStatus[name]) {
       if (action === 'connect') {
@@ -3040,11 +3040,11 @@ async function handleApiRequest(
 
   const sessionMatch = path.match(/^\/session\/([^/]+)$/);
   if (sessionMatch && method === 'GET') {
-    return getSession(state, decodeURIComponent(sessionMatch[1]));
+    return getSession(state, decodeURIComponent(sessionMatch[1]!));
   }
 
   if (sessionMatch && method === 'DELETE') {
-    const sessionId = decodeURIComponent(sessionMatch[1]);
+    const sessionId = decodeURIComponent(sessionMatch[1]!);
     const root = state.sessions.find((item) => item.id === sessionId);
     if (!root) return true;
     const hidden = new Set<string>();
@@ -3073,7 +3073,7 @@ async function handleApiRequest(
 
   if (method === 'POST' && path.match(/^\/varro\/session-trash\/[^/]+\/restore$/)) {
     const match = path.match(/^\/varro\/session-trash\/([^/]+)\/restore$/);
-    const rootID = match ? decodeURIComponent(match[1]) : null;
+    const rootID = match ? decodeURIComponent(match[1]!) : null;
     const entry = rootID ? state.recycleBinEntries.find((item) => item.rootID === rootID) : null;
     if (!entry) return false;
     state.recycleBinEntries = state.recycleBinEntries.filter((item) => item.rootID !== rootID);
@@ -3085,7 +3085,7 @@ async function handleApiRequest(
 
   if (method === 'DELETE' && path.match(/^\/varro\/session-trash\/[^/]+\/delete$/)) {
     const match = path.match(/^\/varro\/session-trash\/([^/]+)\/delete$/);
-    const rootID = match ? decodeURIComponent(match[1]) : null;
+    const rootID = match ? decodeURIComponent(match[1]!) : null;
     const entry = rootID ? state.recycleBinEntries.find((item) => item.rootID === rootID) : null;
     if (!entry) return false;
     state.recycleBinEntries = state.recycleBinEntries.filter((item) => item.rootID !== rootID);
@@ -3109,13 +3109,13 @@ async function handleApiRequest(
 
   const messageMatch = path.match(/^\/session\/([^/]+)\/message$/);
   if (messageMatch && method === 'GET') {
-    const sessionId = decodeURIComponent(messageMatch[1]);
+    const sessionId = decodeURIComponent(messageMatch[1]!);
     return state.messagesBySessionId[sessionId] || [];
   }
 
   const todoMatch = path.match(/^\/session\/([^/]+)\/todo$/);
   if (todoMatch && method === 'GET') {
-    return getSessionTodos(state, decodeURIComponent(todoMatch[1]));
+    return getSessionTodos(state, decodeURIComponent(todoMatch[1]!));
   }
 
   const diffMatch = path.match(/^\/session\/([^/]+)\/diff$/);
@@ -3125,7 +3125,7 @@ async function handleApiRequest(
 
   const v2PromptMatch = path.match(/^\/api\/session\/([^/]+)\/prompt$/);
   if (v2PromptMatch && method === 'POST') {
-    const sessionId = decodeURIComponent(v2PromptMatch[1]);
+    const sessionId = decodeURIComponent(v2PromptMatch[1]!);
     const payload = asRecord(body);
     const prompt = asRecord(payload.prompt);
     const promptText = typeof prompt.text === 'string' ? prompt.text : 'Untitled request';
@@ -3145,7 +3145,7 @@ async function handleApiRequest(
 
   const promptMatch = path.match(/^\/session\/([^/]+)\/prompt_async$/);
   if (promptMatch && method === 'POST') {
-    const sessionId = decodeURIComponent(promptMatch[1]);
+    const sessionId = decodeURIComponent(promptMatch[1]!);
     const payload = asRecord(body);
     const parts = Array.isArray(payload.parts) ? payload.parts : [];
     const textParts = parts
@@ -3258,8 +3258,8 @@ async function handleApiRequest(
 
   const permissionMatch = path.match(/^\/session\/([^/]+)\/permissions\/([^/]+)$/);
   if (permissionMatch && method === 'POST') {
-    const sessionId = decodeURIComponent(permissionMatch[1]);
-    const permissionId = decodeURIComponent(permissionMatch[2]);
+    const sessionId = decodeURIComponent(permissionMatch[1]!);
+    const permissionId = decodeURIComponent(permissionMatch[2]!);
     const payload = asRecord(body);
     const response = payload.response;
     if (response !== 'once' && response !== 'always' && response !== 'reject') {
@@ -3272,7 +3272,7 @@ async function handleApiRequest(
 
   const permissionReplyMatch = path.match(/^\/permission\/([^/]+)\/reply$/);
   if (permissionReplyMatch && method === 'POST') {
-    const permissionId = decodeURIComponent(permissionReplyMatch[1]);
+    const permissionId = decodeURIComponent(permissionReplyMatch[1]!);
     const payload = asRecord(body);
     const response = payload.reply;
     if (response !== 'once' && response !== 'always' && response !== 'reject') {
@@ -3304,21 +3304,21 @@ async function handleApiRequest(
 
   const rejectQuestionMatch = path.match(/^\/question\/([^/]+)\/reject$/);
   if (rejectQuestionMatch && method === 'POST') {
-    const requestId = decodeURIComponent(rejectQuestionMatch[1]);
+    const requestId = decodeURIComponent(rejectQuestionMatch[1]!);
     state.questions = state.questions.filter((item) => item.id !== requestId);
     return true;
   }
 
   const replyQuestionMatch = path.match(/^\/question\/([^/]+)\/reply$/);
   if (replyQuestionMatch && method === 'POST') {
-    const requestId = decodeURIComponent(replyQuestionMatch[1]);
+    const requestId = decodeURIComponent(replyQuestionMatch[1]!);
     state.questions = state.questions.filter((item) => item.id !== requestId);
     return true;
   }
 
   const updateSessionMatch = path.match(/^\/session\/([^/]+)$/);
   if (updateSessionMatch && method === 'PATCH') {
-    const sessionId = decodeURIComponent(updateSessionMatch[1]);
+    const sessionId = decodeURIComponent(updateSessionMatch[1]!);
     const payload = asRecord(body);
     const session = getSession(state, sessionId);
     if (typeof payload.title === 'string') {

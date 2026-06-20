@@ -219,12 +219,12 @@ export class RestProxy {
 
     const restoreMatch = url.pathname.match(/^\/varro\/session-trash\/([^/]+)\/restore$/);
     if (restoreMatch && method === 'POST') {
-      return { kind: 'restore', rootID: decodeURIComponent(restoreMatch[1]) };
+      return { kind: 'restore', rootID: decodeURIComponent(restoreMatch[1]!) };
     }
 
     const deleteMatch = url.pathname.match(/^\/varro\/session-trash\/([^/]+)\/delete$/);
     if (deleteMatch && method === 'DELETE') {
-      return { kind: 'delete', rootID: decodeURIComponent(deleteMatch[1]) };
+      return { kind: 'delete', rootID: decodeURIComponent(deleteMatch[1]!) };
     }
 
     return null;
@@ -234,7 +234,7 @@ export class RestProxy {
     if (method !== 'DELETE') return null;
     const url = new URL(path, 'http://localhost');
     const match = url.pathname.match(/^\/session\/([^/]+)$/);
-    return match ? decodeURIComponent(match[1]) : null;
+    return match ? decodeURIComponent(match[1]!) : null;
   }
 
   private parsePermanentDeleteRequest(method: string, path: string): PermanentDeleteRequest | null {
@@ -242,14 +242,14 @@ export class RestProxy {
     const url = new URL(path, 'http://localhost');
     const match = url.pathname.match(/^\/varro\/session\/([^/]+)\/delete$/);
     if (!match) return null;
-    return { sessionID: decodeURIComponent(match[1]) };
+    return { sessionID: decodeURIComponent(match[1]!) };
   }
 
   private getHiddenSessionIdFromPath(path: string) {
     const url = new URL(path, 'http://localhost');
     const match = url.pathname.match(/^\/session\/([^/]+)/);
     if (!match) return null;
-    const sessionID = decodeURIComponent(match[1]);
+    const sessionID = decodeURIComponent(match[1]!);
     return this.isHiddenSession(sessionID) ? sessionID : null;
   }
 

@@ -965,7 +965,7 @@ export class OpenCodeProcess {
     }
 
     const folders = vscode.workspace.workspaceFolders;
-    return folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
+    return folders && folders.length > 0 ? folders[0]!.uri.fsPath : undefined;
   }
 
   private serverPathEntries(): string[] {

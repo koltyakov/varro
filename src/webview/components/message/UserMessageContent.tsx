@@ -77,8 +77,8 @@ function parseUserMessageSegments(text: string): UserMessageSegment[] {
 
     segments.push({
       type: 'code',
-      content: match[2],
-      language: match[1].trim() || undefined,
+      content: match[2]!,
+      language: match[1]!.trim() || undefined,
     });
     lastIndex = index + match[0].length;
   }
@@ -140,7 +140,7 @@ function parseUserMessageText(text: string): {
   };
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
+    const line = lines[index]!;
     const trimmedLine = line.trim();
 
     if (!inCodeFence) {
@@ -157,14 +157,14 @@ function parseUserMessageText(text: string): {
         if (lines[index + 1]?.trim().startsWith('```')) {
           index += 2;
           while (index < lines.length) {
-            if (lines[index].trim() === '```') break;
-            terminalText += `${terminalText ? '\n' : ''}${lines[index]}`;
+            if (lines[index]!.trim() === '```') break;
+            terminalText += `${terminalText ? '\n' : ''}${lines[index]!}`;
             index += 1;
           }
         }
         attachments.push({
           type: 'terminal-selection',
-          terminalName: terminalMatch[1],
+          terminalName: terminalMatch[1]!,
           text: terminalText || undefined,
         });
         continue;
@@ -197,7 +197,7 @@ function parseUserMessageAttachmentLine(line: string): MessageAttachment | null 
     if (selectionRef) {
       return {
         type: 'file-selection',
-        filename: selectionRef.path,
+        filename: selectionRef.path!,
         lineRanges: selectionRef.lineRanges,
       };
     }
@@ -208,7 +208,7 @@ function parseUserMessageAttachmentLine(line: string): MessageAttachment | null 
     if (match) {
       return {
         type: 'file-reference',
-        path: match[1],
+        path: match[1]!,
         isDirectory: false,
       };
     }

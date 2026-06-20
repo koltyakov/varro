@@ -68,7 +68,7 @@ export function deriveUsageLimitNotice(params: {
   }
 
   for (let messageIndex = params.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const entry = params.messages[messageIndex];
+    const entry = params.messages[messageIndex]!;
     if (entry.info.sessionID !== sessionID || entry.info.role !== 'assistant') continue;
 
     const assistantNotice = parseUsageLimitNotice(
@@ -89,7 +89,7 @@ export function deriveUsageLimitNotice(params: {
     }
 
     for (let partIndex = entry.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const part = entry.parts[partIndex];
+      const part = entry.parts[partIndex]!;
       if (part.type !== 'retry') continue;
       const retryNotice = parseUsageLimitNotice(part.error?.data?.message, {
         attempt: part.attempt,
@@ -161,7 +161,7 @@ function extractRetryAt(message: string) {
   const amount = Number(match[1]);
   if (!Number.isFinite(amount)) return null;
 
-  const unitStr = match[2].toLowerCase();
+  const unitStr = match[2]!.toLowerCase();
   const multiplier =
     unitStr === 'ms' || unitStr.startsWith('millisecond')
       ? 1

@@ -35,7 +35,7 @@ export function collapseLeadingDuplicateFileEvents(
   if (!previousTrailingSignature) return parts;
   let start = 0;
   while (start < parts.length) {
-    const signature = getFileEditVisualSignature(parts[start]);
+    const signature = getFileEditVisualSignature(parts[start]!);
     if (signature !== previousTrailingSignature) break;
     start++;
   }
@@ -44,9 +44,9 @@ export function collapseLeadingDuplicateFileEvents(
 
 export function getTrailingFileEventSignature(parts: Part[]): string | null {
   for (let index = parts.length - 1; index >= 0; index--) {
-    const signature = getFileEditVisualSignature(parts[index]);
+    const signature = getFileEditVisualSignature(parts[index]!);
     if (signature) return signature;
-    if (parts[index].type !== 'step-finish') return null;
+    if (parts[index]!.type !== 'step-finish') return null;
   }
   return null;
 }

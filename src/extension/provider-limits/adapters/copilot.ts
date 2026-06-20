@@ -238,7 +238,7 @@ function parseGhHostsOauthToken(raw: string) {
         githubDotComIndent = -1;
       } else {
         const tokenMatch = line.match(/^\s*oauth_token:\s*(.+?)\s*$/);
-        if (tokenMatch) return stripOptionalYamlQuotes(tokenMatch[1]);
+        if (tokenMatch) return stripOptionalYamlQuotes(tokenMatch[1]!);
         continue;
       }
     }
@@ -246,7 +246,7 @@ function parseGhHostsOauthToken(raw: string) {
     const sectionMatch = line.match(/^(\s*)(['"]?)([^'"]+)\2:\s*$/);
     if (!sectionMatch) continue;
 
-    inGithubDotComBlock = sectionMatch[3].trim() === 'github.com';
+    inGithubDotComBlock = sectionMatch[3]!.trim() === 'github.com';
     githubDotComIndent = inGithubDotComBlock ? indent : -1;
   }
 

@@ -205,7 +205,7 @@ function parseAntigravityProcessLine(line: string): AntigravityProcessInfo | nul
   if (!match) return null;
 
   const pid = Number(match[1]);
-  const commandLine = match[2].trim();
+  const commandLine = match[2]!.trim();
   if (!Number.isInteger(pid) || !commandLine) return null;
 
   const normalized = commandLine.toLowerCase();

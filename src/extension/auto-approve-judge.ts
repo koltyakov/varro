@@ -333,8 +333,8 @@ function isSafeLocalCommandSegment(command: string) {
 function isSafeGitInspectionCommand(command: string) {
   const match = command.match(/^(?:rtk\s+)?git(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+))?\s+(\S+)(.*)$/);
   if (!match) return false;
-  const subcommand = match[1];
-  const args = match[2].trim();
+  const subcommand = match[1]!;
+  const args = match[2]!.trim();
   if (/\s--(?:output|ext-diff)\b/.test(` ${args}`)) return false;
   if (SAFE_GIT_INSPECTION_COMMANDS.has(subcommand)) return true;
   if (subcommand !== 'branch') return false;

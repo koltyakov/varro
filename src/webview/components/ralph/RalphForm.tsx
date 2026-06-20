@@ -322,7 +322,7 @@ export function RalphForm() {
                       alignTo="right"
                       popupGap={6}
                       variants={availableVariants()}
-                      selectedVariant={effectiveVariant()}
+                      selectedVariant={effectiveVariant() ?? null}
                       selectedLabel={
                         effectiveVariant() ? formatVariantLabel(effectiveVariant()!) : ''
                       }

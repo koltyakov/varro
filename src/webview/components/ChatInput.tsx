@@ -1464,7 +1464,7 @@ export function ChatInput() {
     }
 
     setHistoryIndex(nextIndex);
-    setComposerValue(history[nextIndex]);
+    setComposerValue(history[nextIndex]!);
     return true;
   }
 
@@ -1485,7 +1485,7 @@ export function ChatInput() {
 
   function fitToolbar(modeIndex: number, requestId: number) {
     if (requestId !== toolbarFitRequestId) return;
-    const nextMode = TOOLBAR_COMPACT_MODES[Math.min(modeIndex, TOOLBAR_COMPACT_MODES.length - 1)];
+    const nextMode = TOOLBAR_COMPACT_MODES[Math.min(modeIndex, TOOLBAR_COMPACT_MODES.length - 1)]!;
     setToolbarCompactMode(nextMode);
     queueMicrotask(() => {
       if (requestId !== toolbarFitRequestId) return;
@@ -2417,7 +2417,7 @@ export function ChatInput() {
             }}
             agents={state.agents}
             selectedAgent={state.selectedAgent}
-            selectedAgentLabel={selectedAgentLabel()}
+            selectedAgentLabel={selectedAgentLabel() ?? ''}
             agentFocusIndex={agentFocusIndex()}
             showAgentPicker={showAgentPicker()}
             showAgentControl={isToolbarControlVisible('agent')}
@@ -2468,8 +2468,8 @@ export function ChatInput() {
             }}
             onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
             availableVariants={availableVariants()}
-            selectedVariant={effectiveVariant()}
-            selectedVariantLabel={selectedVariantLabel()}
+            selectedVariant={effectiveVariant() ?? null}
+            selectedVariantLabel={selectedVariantLabel() ?? ''}
             showVariantPicker={showVariantPicker()}
             showReasoningControl={isToolbarControlVisible('reasoning')}
             variantButtonRef={(el) => {
@@ -2572,7 +2572,7 @@ export function ChatInput() {
           }}
           agents={state.agents}
           selectedAgent={state.selectedAgent}
-          selectedAgentLabel={selectedAgentLabel()}
+          selectedAgentLabel={selectedAgentLabel() ?? ''}
           agentFocusIndex={agentFocusIndex()}
           showAgentPicker={showAgentPicker()}
           showAgentControl={isToolbarControlVisible('agent')}
@@ -2623,8 +2623,8 @@ export function ChatInput() {
           }}
           onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
           availableVariants={availableVariants()}
-          selectedVariant={effectiveVariant()}
-          selectedVariantLabel={selectedVariantLabel()}
+          selectedVariant={effectiveVariant() ?? null}
+          selectedVariantLabel={selectedVariantLabel() ?? ''}
           showVariantPicker={showVariantPicker()}
           showReasoningControl={isToolbarControlVisible('reasoning')}
           variantButtonRef={(el) => {
@@ -2732,7 +2732,7 @@ function getPastedContextFiles(text: string, workspacePath: string | null): Drop
   for (const line of lines) {
     const selectionRef = parseSelectionReference(line);
     if (selectionRef) {
-      const file = createDroppedFileFromReference(selectionRef.path, workspacePath, false);
+      const file = createDroppedFileFromReference(selectionRef.path!, workspacePath, false);
       if (!file) continue;
       addOrMergePastedContextFile(files, { ...file, lineRanges: selectionRef.lineRanges });
       continue;
@@ -2740,7 +2740,7 @@ function getPastedContextFiles(text: string, workspacePath: string | null): Drop
 
     const activeFileMatch = line.match(/^\[Active file: (.+?)\]$/);
     if (activeFileMatch) {
-      const file = createDroppedFileFromReference(activeFileMatch[1], workspacePath, false);
+      const file = createDroppedFileFromReference(activeFileMatch[1]!, workspacePath, false);
       if (file) addOrMergePastedContextFile(files, file);
     }
   }
@@ -3122,7 +3122,7 @@ export function getLeadingSlashCommand(text: string) {
   if (!match) return null;
 
   return {
-    name: match[1].toLowerCase(),
+    name: match[1]!.toLowerCase(),
     args: match[2]?.trim() || '',
   };
 }

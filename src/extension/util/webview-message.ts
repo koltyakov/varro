@@ -273,9 +273,9 @@ function matchRouteSegments(pattern: string[], segments: string[]): Record<strin
   if (pattern.length !== segments.length) return null;
   const params: Record<string, string> = {};
   for (let i = 0; i < pattern.length; i += 1) {
-    const patternSegment = pattern[i];
+    const patternSegment = pattern[i]!;
     if (patternSegment.startsWith(':')) {
-      params[patternSegment.slice(1)] = segments[i];
+      params[patternSegment.slice(1)] = segments[i]!;
       continue;
     }
     if (patternSegment !== segments[i]) return null;
@@ -353,7 +353,7 @@ const API_ROUTES: ApiRoute[] = [
   route(
     '/session/:id/:action',
     ({ method, url, params }) =>
-      method === 'POST' && noQuery(url) && SESSION_ACTIONS.has(params.action)
+      method === 'POST' && noQuery(url) && SESSION_ACTIONS.has(params.action!)
   ),
   route('/session/:id', methodsNoQuery('GET', 'PATCH', 'DELETE')),
 ];
