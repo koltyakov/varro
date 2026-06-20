@@ -19,9 +19,13 @@ export function isNormalizedPermission(props: Record<string, unknown>): props is
   );
 }
 
-export function normalizePermissionEvent(props: Record<string, unknown>): Permission | null {
+export function normalizePermissionEvent(props: unknown): Permission | null {
+  const record = props && typeof props === 'object' ? (props as Record<string, unknown>) : null;
+  if (!record) return null;
   const source =
-    props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : props;
+    record.info && typeof record.info === 'object'
+      ? (record.info as Record<string, unknown>)
+      : record;
   if (isNormalizedPermission(source)) return source;
   const id =
     typeof source.id === 'string'

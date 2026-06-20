@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { asRecord } from '../../shared/type-utils';
 import {
   isModelVisible,
   setModelVisible,
@@ -503,12 +504,6 @@ function parseModelRoute(value: unknown): OpenCodeModelRouting['smallModel'] {
 
   if (!providerID || !modelID) return null;
   return { providerID, modelID };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function ProviderCheckbox(props: {

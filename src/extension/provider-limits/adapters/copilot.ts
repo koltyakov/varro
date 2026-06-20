@@ -1,13 +1,21 @@
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
+import type { ProviderLimitWindow } from '../../../shared/protocol';
 import {
   parseRateLimitResetAt,
   type ProviderAuthRecord,
   type ProviderMetadata,
 } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
+import {
+  asRecord,
+  getString,
+  parseFiniteNumber,
+  clampPercent,
+  toLabel,
+  unsupportedProviderStatus,
+} from '../adapter-utils';
 
 const COPILOT_USER_ENDPOINT = 'https://api.github.com/copilot_internal/user';
 const GITHUB_HOSTS_FILE_PATH = join(homedir(), '.config', 'gh', 'hosts.yml');
@@ -257,28 +265,6 @@ function stripOptionalYamlQuotes(value: string) {
   return trimmed;
 }
 
-function unsupportedProviderStatus(
-  providerID: string,
-  modelID: string | null,
-  checkedAt: number,
-  note: string
-): ProviderLimitStatus {
-  return {
-    providerID,
-    modelID,
-    status: 'unsupported',
-    source: 'provider',
-    checkedAt,
-    note,
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function asUnknownMap(value: unknown) {
   return asRecord(value) ?? {};
 }
@@ -292,33 +278,6 @@ function asNestedRecordMap(value: unknown) {
   ) as Record<string, Record<string, unknown>>;
 }
 
-function getString(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function parseFiniteNumber(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim().replace(/,/g, '');
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function clampPercent(value: number) {
-  if (!Number.isFinite(value)) return null;
-  return Math.round(Math.max(0, Math.min(100, value)) * 1000) / 1000;
-}
-
 function toUtcMidnightDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : '';
-}
-
-function toLabel(value: string) {
-  return (
-    value
-      .replace(/[_-]+/g, ' ')
-      .trim()
-      .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit'
-  );
 }

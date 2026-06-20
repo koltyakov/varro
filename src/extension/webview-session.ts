@@ -167,7 +167,6 @@ export class WebviewSession {
     this.themeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
       this.deps.postThemeUpdate();
     });
-    this.webviewDisposables.push(this.themeDisposable);
   }
 
   async handleReady() {

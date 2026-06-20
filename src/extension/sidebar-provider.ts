@@ -8,6 +8,7 @@ import { DroppedFilesService } from './dropped-files-service';
 import { FileSearchService } from './file-search-service';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
+import { logger } from './logger';
 import { MessageRouter } from './message-router';
 import { getOpenCodeConfigPath } from './open-code-process';
 import { readExtensionConfigState } from './provider-limit-config';
@@ -83,6 +84,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     workspaceState: vscode.Memento,
     contextProvider: ContextProvider,
     private readonly server: OpenCodeServer,
+    private readonly extensionId: string,
     private readonly simulateNoProviders = false
   ) {
     this.contextProvider = contextProvider;
@@ -170,6 +172,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.messageRouter = new MessageRouter(
       createSidebarProviderActions({
         contextProvider,
+        extensionId: this.extensionId,
         webviewSession: {
           setFocus: (focused) => this.webviewSession.setFocus(focused),
         },
@@ -326,7 +329,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.server.status.state === 'running') {
       try {
         await this.server.restart();
-      } catch {}
+      } catch (err) {
+        logger.warn(
+          `Provider refresh restart failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
     }
     this.providerFilesSignature = this.readProviderFilesSignature();
     this.post({ type: 'providers/refresh' });

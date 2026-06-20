@@ -1,5 +1,6 @@
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
 import type { WebviewConfigUpdatePayload } from './provider-limit-config';
+import { asRecord } from './type-utils';
 
 export interface EditorContext {
   workspacePath: string | null;
@@ -382,9 +383,3 @@ export type WebviewMessage =
       type: 'log';
       payload: { msg: string; data?: string; error?: string; level?: 'info' | 'warn' | 'error' };
     };
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}

@@ -53,7 +53,6 @@ vi.mock('fs/promises', async () => {
 });
 
 import { OpenCodeServer } from './server';
-import { existsSync } from 'fs';
 
 function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve());
@@ -1122,22 +1121,5 @@ describe('OpenCodeServer startup health polling', () => {
     expect(resolved).toHaveBeenCalledWith(server.url);
     expect(resolved).toHaveBeenCalledTimes(1);
     expect(rejected).not.toHaveBeenCalled();
-  });
-});
-
-describe('OpenCodeServer command resolution', () => {
-  it('caches the resolved CLI path across repeated lookups', () => {
-    const server = new OpenCodeServer(4096, false);
-    const api = server as unknown as {
-      getResolvedCommandCacheKey: () => string;
-      resolveCommand: () => string;
-      resolvedCommandCache: { key: string; value: string } | null;
-    };
-    api.getResolvedCommandCacheKey = vi.fn(() => 'stable-key');
-    api.resolvedCommandCache = { key: 'stable-key', value: '/tmp/bin/opencode' };
-
-    expect(api.resolveCommand()).toBe('/tmp/bin/opencode');
-    expect(api.getResolvedCommandCacheKey).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(existsSync)).not.toHaveBeenCalled();
   });
 });

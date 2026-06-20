@@ -5,5 +5,6 @@
     "types": ["vscode", "node"],
     "lib": ["ES2023"]
   },
-  "include": ["src/extension/**/*", "src/shared/**/*"]
+  "include": ["src/extension/**/*", "src/shared/**/*"],
+  "exclude": ["**/*.test.ts"]
 }

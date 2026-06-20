@@ -8,5 +8,5 @@
     "types": []
   },
   "include": ["src/webview/**/*", "src/shared/**/*"],
-  "exclude": ["src/webview/**/*.test.ts"]
+  "exclude": ["**/*.test.ts"]
 }

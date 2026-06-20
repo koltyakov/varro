@@ -139,6 +139,7 @@ describe('extension activation', () => {
 
     await activate({
       extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
       workspaceState: {},
       subscriptions: [],
     } as never);
@@ -154,6 +155,7 @@ describe('extension activation', () => {
 
     await activate({
       extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
       workspaceState: {},
       subscriptions: [],
     } as never);
@@ -198,6 +200,7 @@ describe('extension activation', () => {
 
     await activate({
       extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
       workspaceState: {},
       subscriptions: [],
     } as never);
@@ -212,6 +215,7 @@ describe('extension activation', () => {
     const { activate } = await import('./extension');
     const context = {
       extensionUri: { path: '/extension' },
+      extension: { id: 'koltyakov.varro' },
       workspaceState: { get: vi.fn(), update: vi.fn() },
       subscriptions: [] as Array<{ dispose: () => void }>,
     };
@@ -247,6 +251,7 @@ describe('extension activation', () => {
 
     await activate({
       extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
       workspaceState: {},
       subscriptions: [],
     } as never);
@@ -265,6 +270,7 @@ describe('extension activation', () => {
 
     await activate({
       extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
       workspaceState: {},
       subscriptions: [],
     } as never);

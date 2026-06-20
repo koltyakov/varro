@@ -157,9 +157,11 @@ export async function initConnectionWithDependencies(
     if (!generationRef.isCurrent(generation)) return;
 
     deps.setInitialized(true);
-  } catch {
+  } catch (err) {
     deps.setInitialized(false);
-    deps.setError('Failed to connect to OpenCode server');
+    deps.setError(
+      `Failed to connect to OpenCode server: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }
 

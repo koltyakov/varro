@@ -14,7 +14,7 @@ vi.mock('./logger', () => ({
   },
 }));
 
-vi.mock('./rest-proxy', () => ({
+vi.mock('./util/opencode-request', () => ({
   getOpenCodeDirectoryHeaders: vi.fn(() => ({})),
   scopeOpenCodeRequest: vi.fn((baseUrl: string, path: string, directory?: string) => ({
     url: new URL(path, baseUrl).toString(),
@@ -23,7 +23,7 @@ vi.mock('./rest-proxy', () => ({
 }));
 
 import { OpenCodeTransport } from './open-code-transport';
-import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './rest-proxy';
+import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 
 function createTransport() {
   return new OpenCodeTransport({

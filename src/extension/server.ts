@@ -1,15 +1,11 @@
 import type { ChildProcess } from 'child_process';
-import { existsSync } from 'fs';
 import { EventEmitter } from 'events';
-import { join } from 'path';
-import * as vscode from 'vscode';
 import type { ServerStatus } from '../shared/protocol';
 import { OpenCodeProcess, type OpenCodeCompactionSettings } from './open-code-process';
 import { OpenCodeTransport } from './open-code-transport';
 import { logger } from './logger';
 import { ServerLifecycleStateMachine } from './server-lifecycle';
 import { isPortInUseMessage, normalizeRunningStatus } from './server-utils';
-import { getServerPathEntries } from './util/server-path';
 
 export type { OpenCodeCompactionSettings };
 
@@ -675,45 +671,11 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   getWorkspaceCwd(): string | undefined {
-    const activeUri = vscode.window.activeTextEditor?.document.uri;
-    const activeFolder = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri) : undefined;
-    if (activeFolder) {
-      return activeFolder.uri.fsPath;
-    }
-
-    const folders = vscode.workspace.workspaceFolders;
-    return folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
+    return this.processManager.getWorkspaceCwd();
   }
 
   resolveCommand(): string {
-    const configuredCommand = (
-      this.processManager as unknown as { command?: string }
-    ).command?.trim();
-    if (configuredCommand) return configuredCommand;
-
-    const cacheKey = this.getResolvedCommandCacheKey();
-    if (this.resolvedCommandCache?.key === cacheKey) {
-      return this.resolvedCommandCache.value;
-    }
-
-    const candidates =
-      process.platform === 'win32'
-        ? ['opencode.exe', 'opencode.cmd', 'opencode.bat']
-        : ['opencode'];
-
-    for (const dir of this.serverPathEntries()) {
-      for (const candidate of candidates) {
-        const fullPath = join(dir, candidate);
-        if (existsSync(fullPath)) {
-          this.resolvedCommandCache = { key: cacheKey, value: fullPath };
-          return fullPath;
-        }
-      }
-    }
-
-    const fallback = process.platform === 'win32' ? 'opencode.cmd' : 'opencode';
-    this.resolvedCommandCache = { key: cacheKey, value: fallback };
-    return fallback;
+    return this.processManager.resolveCommand();
   }
 
   private async syncInjectedConfigFile() {
@@ -735,26 +697,6 @@ export class OpenCodeServer extends EventEmitter {
 
   private hasInjectedCompactionOverride() {
     return this.processManager.hasInjectedCompactionOverride();
-  }
-
-  private serverPathEntries(): string[] {
-    return getServerPathEntries();
-  }
-
-  private resolvedCommandCache: {
-    key: string;
-    value: string;
-  } | null = null;
-
-  private getResolvedCommandCacheKey() {
-    return JSON.stringify({
-      platform: process.platform,
-      pathEntries: this.serverPathEntries(),
-      home: process.env.HOME || process.env.USERPROFILE || '',
-      pnpmHome: process.env.PNPM_HOME || '',
-      appData: process.env.APPDATA || '',
-      localAppData: process.env.LOCALAPPDATA || '',
-    });
   }
 
   private throwIfStartCancelled(disposeGeneration: number) {

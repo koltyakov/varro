@@ -1,5 +1,6 @@
 import {
   parseServerEvent,
+  type ContextLineRange,
   type DesktopSessionPaneSide,
   type DroppedFile,
   type EditorContext,
@@ -12,6 +13,7 @@ import {
   DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS,
   normalizeProviderLimitThresholdPercent,
 } from './provider-limit-config';
+import { asRecord } from './type-utils';
 
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'server/status',
@@ -249,7 +251,7 @@ function isSelection(value: unknown): value is { startLine: number; endLine: num
   );
 }
 
-function isDiagnostic(value: unknown): boolean {
+function isDiagnostic(value: unknown): value is EditorContext['diagnostics'][number] {
   const record = asRecord(value);
   return (
     !!record &&
@@ -261,7 +263,7 @@ function isDiagnostic(value: unknown): boolean {
   );
 }
 
-function isLineRange(value: unknown): boolean {
+function isLineRange(value: unknown): value is ContextLineRange {
   const record = asRecord(value);
   return (
     !!record &&
@@ -285,10 +287,4 @@ function isDroppedFile(value: unknown): value is DroppedFile {
   }
   if (record.lineRanges === undefined) return true;
   return Array.isArray(record.lineRanges) && record.lineRanges.every(isLineRange);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }

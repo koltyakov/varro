@@ -1,12 +1,7 @@
 import type { Provider } from '../types';
+import { asRecord } from '../../shared/type-utils';
 
 type ProviderModel = Provider['models'][string];
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
 
 function getModel(
   providerID: string | null,

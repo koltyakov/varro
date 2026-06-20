@@ -21,6 +21,19 @@ import { reconcileLoadedAgents, reconcileLoadedProviders } from './routing-state
 type Logger = (context: string, err: unknown) => void;
 const EMPTY_SESSION_SNAPSHOT_CONFIRMATIONS = 2;
 
+async function runLoad<T>(
+  label: string,
+  load: () => Promise<T>,
+  apply: (value: T) => void,
+  logError: Logger
+): Promise<void> {
+  try {
+    apply(await load());
+  } catch (err) {
+    logError(label, err);
+  }
+}
+
 export function createStateBoundDataLoaderOperations(deps: {
   applySessions(sessions: Session[]): void;
   updateUsageLimitState(
@@ -294,11 +307,12 @@ export async function loadProviderAuthMethodsWithDependencies(
   },
   logError: Logger
 ) {
-  try {
-    deps.setProviderAuthMethods((await deps.listProviderAuthMethods()) || {});
-  } catch (err) {
-    logError('loadProviderAuthMethods', err);
-  }
+  await runLoad(
+    'loadProviderAuthMethods',
+    deps.listProviderAuthMethods,
+    (methods) => deps.setProviderAuthMethods(methods || {}),
+    logError
+  );
 }
 
 export async function loadWorkspaceStatusesWithDependencies(
@@ -308,11 +322,12 @@ export async function loadWorkspaceStatusesWithDependencies(
   },
   logError: Logger
 ) {
-  try {
-    deps.setWorkspaceStatuses((await deps.listWorkspaceStatuses()) || []);
-  } catch (err) {
-    logError('loadWorkspaceStatuses', err);
-  }
+  await runLoad(
+    'loadWorkspaceStatuses',
+    deps.listWorkspaceStatuses,
+    (entries) => deps.setWorkspaceStatuses(entries || []),
+    logError
+  );
 }
 
 export async function loadMcpsWithDependencies(
@@ -350,12 +365,7 @@ export async function loadQuestionsWithDependencies(
   },
   logError: Logger
 ) {
-  try {
-    const questions = await deps.listQuestions();
-    deps.setQuestions(questions);
-  } catch (err) {
-    logError('loadQuestions', err);
-  }
+  await runLoad('loadQuestions', deps.listQuestions, deps.setQuestions, logError);
 }
 
 export async function loadAgentsWithDependencies(
@@ -407,12 +417,12 @@ export async function loadCommandsWithDependencies(
   },
   logError: Logger
 ) {
-  try {
-    const commands = await deps.listCommands();
-    deps.setCommands(commands || []);
-  } catch (err) {
-    logError('loadCommands', err);
-  }
+  await runLoad(
+    'loadCommands',
+    deps.listCommands,
+    (commands) => deps.setCommands(commands || []),
+    logError
+  );
 }
 
 export async function loadProvidersWithDependencies(
@@ -495,12 +505,12 @@ export async function loadRecycleBinWithDependencies(
   },
   logError: Logger
 ) {
-  try {
-    const entries = await deps.listRecycleBin();
-    deps.setRecycleBinEntries(entries || []);
-  } catch (err) {
-    logError('loadRecycleBin', err);
-  }
+  await runLoad(
+    'loadRecycleBin',
+    deps.listRecycleBin,
+    (entries) => deps.setRecycleBinEntries(entries || []),
+    logError
+  );
 }
 
 export async function hydrateSessionStatusesWithDependencies(

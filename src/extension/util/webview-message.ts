@@ -1,4 +1,5 @@
 import type { DesktopSessionPaneSide, PermissionMode, WebviewMessage } from '../../shared/protocol';
+import { asRecord } from '../../shared/type-utils';
 
 const MAX_PATH_LENGTH = 4096;
 const MAX_QUERY_LENGTH = 2048;
@@ -373,12 +374,6 @@ function isSafePathSegment(segment: string) {
   if (!segment || segment === '.' || segment === '..') return false;
   if (segment.length > 512) return false;
   return !/%2f|%5c/i.test(segment);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function getString(value: unknown) {

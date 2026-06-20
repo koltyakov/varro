@@ -67,6 +67,7 @@ function createActionFixture() {
 
   const deps: SidebarProviderActionDeps = {
     contextProvider: contextProvider as unknown as SidebarProviderActionDeps['contextProvider'],
+    extensionId: 'koltyakov.varro',
     webviewSession,
     contextFilesState:
       contextFilesState as unknown as SidebarProviderActionDeps['contextFilesState'],

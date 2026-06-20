@@ -15,6 +15,7 @@ type OpenPathPayload = Parameters<MessageRouterCallbacks['openPath']>[0];
 
 export interface SidebarProviderActionDeps {
   contextProvider: ContextProvider;
+  extensionId: string;
   webviewSession: {
     setFocus(focused: boolean): void;
   };
@@ -64,7 +65,7 @@ export function createSidebarProviderActions(
     openSettings: async (query) => {
       await vscode.commands.executeCommand(
         'workbench.action.openSettings',
-        query ?? '@ext:koltyakov.varro'
+        query ?? `@ext:${deps.extensionId}`
       );
     },
     handleDroppedPaths: (paths) => deps.handleDroppedPaths(paths),

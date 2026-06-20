@@ -605,7 +605,7 @@ describe('connection-bootstrap helpers', () => {
     );
 
     expect(setInitialized).toHaveBeenCalledWith(false);
-    expect(setError).toHaveBeenCalledWith('Failed to connect to OpenCode server');
+    expect(setError).toHaveBeenCalledWith('Failed to connect to OpenCode server: offline');
   });
 
   it('starts connection initialization only once at a time', async () => {

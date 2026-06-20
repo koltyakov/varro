@@ -50,6 +50,7 @@ export class ServerEventBridge {
         this.providerLimitService.clearCache();
       }
       this.post({ type: 'server/status', payload: status });
+      this.updateStatusBarItem();
     };
 
     this.serverEventHandler = (event: unknown) => {

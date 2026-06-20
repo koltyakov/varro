@@ -957,7 +957,7 @@ export class OpenCodeProcess {
     terminal.sendText(text, true);
   }
 
-  private getWorkspaceCwd(): string | undefined {
+  getWorkspaceCwd(): string | undefined {
     const activeUri = vscode.window.activeTextEditor?.document.uri;
     const activeFolder = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri) : undefined;
     if (activeFolder) {

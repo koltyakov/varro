@@ -1,6 +1,7 @@
 import { Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { Dynamic, Portal } from 'solid-js/web';
 import { client } from '../../lib/client';
+import { logError } from '../../lib/log';
 import { getStoredVariantForModel, isSessionAwaitingInput, state } from '../../lib/state';
 import { deleteSession, selectSession } from '../../hooks/useOpenCode';
 import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
@@ -203,13 +204,19 @@ export function RalphForm() {
           (anchorBody.model as { variant?: string }).variant = config.model.variant;
         }
       }
-      await client.session.sendAsync(session.id, anchorBody).catch(() => {});
+      await client.session.sendAsync(session.id, anchorBody).catch((err) => {
+        logError('ralph-form:sendAsync', err);
+      });
 
       await selectSession(session.id);
       if (previousSessionId && shouldDeletePreviousSession && previousSessionId !== session.id) {
-        await deleteSession(previousSessionId).catch(() => {});
+        await deleteSession(previousSessionId).catch((err) => {
+          logError('ralph-form:deletePrevious', err);
+        });
       }
-      void ralphRunner.start(config).catch(() => {});
+      void ralphRunner.start(config).catch((err) => {
+        logError('ralph-form:start', err);
+      });
 
       close();
     } catch (err) {

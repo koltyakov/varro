@@ -1,4 +1,3 @@
-import type { ProviderLimitStatus } from '../../../shared/protocol';
 import {
   buildProviderLimitProbe,
   parseProviderLimitHeaders,
@@ -6,6 +5,7 @@ import {
   type ProviderMetadata,
 } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
+import { unsupportedProviderStatus } from '../adapter-utils';
 
 export function createHeaderProbeAdapter(id: string): ProviderLimitAdapter {
   return {
@@ -16,7 +16,12 @@ export function createHeaderProbeAdapter(id: string): ProviderLimitAdapter {
     async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
       const probe = buildProviderLimitProbe(provider, authStore);
       if (!probe) {
-        return unsupportedProviderStatus(provider.id, modelID, checkedAt);
+        return unsupportedProviderStatus(
+          provider.id,
+          modelID,
+          checkedAt,
+          'No zero-cost provider quota endpoint is known for this provider'
+        );
       }
 
       try {
@@ -67,19 +72,4 @@ export function supportsHeaderProbeProvider(
   authStore: Record<string, ProviderAuthRecord>
 ) {
   return provider.id === id && buildProviderLimitProbe(provider, authStore) != null;
-}
-
-function unsupportedProviderStatus(
-  providerID: string,
-  modelID: string | null,
-  checkedAt: number
-): ProviderLimitStatus {
-  return {
-    providerID,
-    modelID,
-    status: 'unsupported',
-    source: 'provider',
-    checkedAt,
-    note: 'No zero-cost provider quota endpoint is known for this provider',
-  };
 }

@@ -54,11 +54,14 @@ export class SessionTrashManager {
     return items.filter((item) => !hidden.has(item.sessionID));
   }
 
-  async moveToTrash(sessionID: string, sessions: RecycleBinSession[], now = Date.now()) {
+  async moveToTrash(sessionID: string, sessions: unknown[], now = Date.now()) {
     if (this.isHidden(sessionID)) return this.entries.get(sessionID) || null;
-    const root = sessions.find((session) => session.id === sessionID);
+    const normalized = sessions
+      .map(normalizeSession)
+      .filter((session): session is RecycleBinSession => !!session);
+    const root = normalized.find((session) => session.id === sessionID);
     if (!root) return null;
-    const tree = collectSessionTree(sessionID, sessions);
+    const tree = collectSessionTree(sessionID, normalized);
     if (tree.length === 0) return null;
 
     const entry: RecycleBinEntry = {

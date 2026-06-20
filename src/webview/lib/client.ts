@@ -292,7 +292,7 @@ export const client = {
   },
 
   permission: {
-    async list(): Promise<Array<Record<string, unknown>>> {
+    async list(): Promise<unknown[]> {
       return getSharedPermissionList();
     },
   },
@@ -302,9 +302,23 @@ let fileStatusCache: {
   expiresAt: number;
   promise: Promise<RepoFileStatus[]>;
 } | null = null;
-let sessionStatusRequest: Promise<Record<string, SessionStatus>> | null = null;
-let questionListRequest: Promise<QuestionRequest[]> | null = null;
-let permissionListRequest: Promise<Array<Record<string, unknown>>> | null = null;
+const sessionStatusSlot: { current: Promise<Record<string, SessionStatus>> | null } = {
+  current: null,
+};
+const questionListSlot: { current: Promise<QuestionRequest[]> | null } = { current: null };
+const permissionListSlot: { current: Promise<unknown[]> | null } = { current: null };
+
+function sharedRequest<T>(
+  slot: { current: Promise<T> | null },
+  factory: () => Promise<T>
+): Promise<T> {
+  if (slot.current) return slot.current;
+  const promise = factory().finally(() => {
+    if (slot.current === promise) slot.current = null;
+  });
+  slot.current = promise;
+  return promise;
+}
 
 function getCachedFileStatus(): Promise<RepoFileStatus[]> {
   const now = Date.now();
@@ -318,30 +332,17 @@ function getCachedFileStatus(): Promise<RepoFileStatus[]> {
 }
 
 function getSharedSessionStatus(): Promise<Record<string, SessionStatus>> {
-  if (sessionStatusRequest) return sessionStatusRequest;
-  const promise = apiCall<Record<string, SessionStatus>>('GET', '/session/status').finally(() => {
-    if (sessionStatusRequest === promise) sessionStatusRequest = null;
-  });
-  sessionStatusRequest = promise;
-  return promise;
+  return sharedRequest(sessionStatusSlot, () =>
+    apiCall<Record<string, SessionStatus>>('GET', '/session/status')
+  );
 }
 
 function getSharedQuestionList(): Promise<QuestionRequest[]> {
-  if (questionListRequest) return questionListRequest;
-  const promise = apiCall<QuestionRequest[]>('GET', '/question').finally(() => {
-    if (questionListRequest === promise) questionListRequest = null;
-  });
-  questionListRequest = promise;
-  return promise;
+  return sharedRequest(questionListSlot, () => apiCall<QuestionRequest[]>('GET', '/question'));
 }
 
-function getSharedPermissionList(): Promise<Array<Record<string, unknown>>> {
-  if (permissionListRequest) return permissionListRequest;
-  const promise = apiCall<Array<Record<string, unknown>>>('GET', '/permission').finally(() => {
-    if (permissionListRequest === promise) permissionListRequest = null;
-  });
-  permissionListRequest = promise;
-  return promise;
+function getSharedPermissionList(): Promise<unknown[]> {
+  return sharedRequest(permissionListSlot, () => apiCall<unknown[]>('GET', '/permission'));
 }
 
 function normalizeRecycleBinEntries(value: unknown): RecycleBinEntry[] {

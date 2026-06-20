@@ -54,6 +54,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.workspaceState,
     contextProvider,
     server,
+    context.extension.id,
     simulateNoProviders
   );
 

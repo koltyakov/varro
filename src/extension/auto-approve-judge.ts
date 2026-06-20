@@ -5,6 +5,7 @@ import type {
   AutoApproveJudgeResponse,
 } from '../shared/protocol';
 import type { PermissionRule } from '../shared/opencode-types';
+import { asRecord } from '../shared/type-utils';
 import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
@@ -464,12 +465,6 @@ function normalizeModel(value: AutoApproveJudgeRequest['model']) {
     modelID: value.modelID,
     ...(value.variant ? { variant: value.variant } : {}),
   };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function getString(value: unknown) {

@@ -1,6 +1,6 @@
 import type { ServerStatus } from '../shared/protocol';
 import { logger } from './logger';
-import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './rest-proxy';
+import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-utils';
 
 type EventStreamState = 'healthy' | 'degraded';

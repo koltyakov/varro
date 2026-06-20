@@ -5,6 +5,7 @@ import type {
   ProviderLimitUnit,
   ProviderLimitWindow,
 } from '../../shared/protocol';
+import { getString } from '../../shared/type-utils';
 
 export type ProviderAuthRecord =
   | { type: 'oauth'; access: string }
@@ -319,8 +320,6 @@ function buildHeaderWindow(
   const remaining = parseFiniteNumber(headers.get(remainingHeader));
   if (remaining == null) return null;
 
-  const percent = null;
-
   return {
     id,
     label,
@@ -328,7 +327,6 @@ function buildHeaderWindow(
     remaining,
     limit: parseFiniteNumber(headers.get(limitHeader)),
     resetAt: parseRateLimitResetAt(headers.get(resetHeader), checkedAt),
-    ...(percent == null ? {} : { percent }),
   } satisfies ProviderLimitWindow;
 }
 
@@ -426,10 +424,6 @@ function parseDurationMs(value: string) {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-}
-
-function getString(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function parseFiniteNumber(value: unknown) {

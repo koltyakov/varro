@@ -13,6 +13,14 @@ import {
   type ProviderMetadata,
 } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
+import {
+  asRecord,
+  getString,
+  parseFiniteNumber,
+  clampPercent,
+  toLabel,
+  unsupportedProviderStatus,
+} from '../adapter-utils';
 
 const ANTHROPIC_USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
 const ANTHROPIC_OAUTH_TOKEN_ENDPOINT = 'https://console.anthropic.com/v1/oauth/token';
@@ -345,7 +353,7 @@ function buildMeridianBucketWindow(
 
   return {
     id,
-    label: MERIDIAN_WINDOW_LABELS[id] || toTitleLabel(id),
+    label: MERIDIAN_WINDOW_LABELS[id] || toLabel(id),
     unit: 'unknown',
     remaining: Math.max(100 - percent, 0),
     limit: 100,
@@ -672,41 +680,6 @@ async function writeAnthropicCredentials(
   await rename(tempPath, credentialsFilePath);
 }
 
-function unsupportedProviderStatus(
-  providerID: string,
-  modelID: string | null,
-  checkedAt: number,
-  note: string
-): ProviderLimitStatus {
-  return {
-    providerID,
-    modelID,
-    status: 'unsupported',
-    source: 'provider',
-    checkedAt,
-    note,
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function getString(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function parseFiniteNumber(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim().replace(/,/g, '');
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function parsePositiveInteger(value: unknown) {
   const parsed = parseFiniteNumber(value);
   if (parsed == null || parsed <= 0) return null;
@@ -727,24 +700,10 @@ function parseJsonRecord(raw: string) {
   }
 }
 
-function clampPercent(value: number | null) {
-  if (value == null || !Number.isFinite(value)) return null;
-  return Math.round(Math.max(0, Math.min(100, value)) * 1000) / 1000;
-}
-
 function parseStatuslinePercent(value: unknown) {
   const percent = parseFiniteNumber(value);
   if (percent == null || percent < 0 || percent > 100) return null;
   return Math.round(percent * 1000) / 1000;
-}
-
-function toTitleLabel(value: string) {
-  return (
-    value
-      .replace(/[_-]+/g, ' ')
-      .trim()
-      .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit'
-  );
 }
 
 function parseStatuslineResetAt(value: unknown, checkedAt: number) {

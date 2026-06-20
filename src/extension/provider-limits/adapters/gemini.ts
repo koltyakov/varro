@@ -1,9 +1,16 @@
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
+import type { ProviderLimitWindow } from '../../../shared/protocol';
 import { parseRateLimitResetAt, type ProviderAuthRecord } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
+import {
+  asRecord,
+  getString,
+  parseFiniteNumber,
+  toLabel,
+  unsupportedProviderStatus,
+} from '../adapter-utils';
 
 const GEMINI_QUOTA_ENDPOINT = 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota';
 const GEMINI_AUTH_FILE_NAME = 'oauth_creds.json';
@@ -191,41 +198,6 @@ function parseGeminiCredentials(raw: string) {
   }
 }
 
-function unsupportedProviderStatus(
-  providerID: string,
-  modelID: string | null,
-  checkedAt: number,
-  note: string
-): ProviderLimitStatus {
-  return {
-    providerID,
-    modelID,
-    status: 'unsupported',
-    source: 'provider',
-    checkedAt,
-    note,
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function getString(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function parseFiniteNumber(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim().replace(/,/g, '');
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function clampFraction(value: number | null) {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.max(0, Math.min(1, value));
@@ -233,13 +205,4 @@ function clampFraction(value: number | null) {
 
 function roundMetric(value: number) {
   return Math.round(value * 1000) / 1000;
-}
-
-function toLabel(value: string) {
-  return (
-    value
-      .replace(/[_-]+/g, ' ')
-      .trim()
-      .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit'
-  );
 }

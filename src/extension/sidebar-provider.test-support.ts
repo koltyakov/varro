@@ -224,7 +224,8 @@ export async function createSidebarProviderInstance(
     (options.extensionUri ?? { fsPath: '/extension' }) as never,
     workspaceState as never,
     contextProvider as never,
-    server as never
+    server as never,
+    'koltyakov.varro'
   );
 
   return { SidebarProvider, provider, workspaceState, contextProvider, server };

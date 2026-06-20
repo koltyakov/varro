@@ -64,10 +64,11 @@ export function createScopedCache<T>(
   const peek = (key: string) => {
     sweep();
     const entry = store.get(key);
-    if (!entry) return;
+    if (!entry) return undefined;
     if (!expired(entry)) return entry.value;
     store.delete(key);
     dispose(key, entry);
+    return undefined;
   };
 
   const get = (key: string) => {

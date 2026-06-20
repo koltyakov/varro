@@ -1568,7 +1568,16 @@ export function ChatInput() {
       try {
         const base64 = await readFileAsBase64(file);
         payloads.push({ name: file.name, content: base64, size: file.size });
-      } catch {}
+      } catch (err) {
+        postMessage({
+          type: 'log',
+          payload: {
+            msg: 'sendDroppedContent:readFailed',
+            error: err instanceof Error ? err.message : String(err),
+            level: 'warn',
+          },
+        });
+      }
     }
 
     if (payloads.length === 0) return;

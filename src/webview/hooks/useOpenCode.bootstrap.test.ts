@@ -165,7 +165,7 @@ describe('useOpenCode initialization', () => {
       await Promise.resolve();
 
       expect(clientMocks.health).toHaveBeenCalledTimes(1);
-      expect(stateModule.error()).toBe('Failed to connect to OpenCode server');
+      expect(stateModule.error()).toBe('Failed to connect to OpenCode server: offline');
 
       bridgeHandler({
         type: 'server/status',

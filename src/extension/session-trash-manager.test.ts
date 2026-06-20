@@ -44,7 +44,7 @@ describe('SessionTrashManager', () => {
     ];
     const deleteSession = vi.fn(async (_target: { id: string; directory?: string }) => undefined);
 
-    await manager.moveToTrash('root', sessions as never[], 5_000);
+    await manager.moveToTrash('root', sessions, 5_000);
     await manager.deletePermanently('root', deleteSession);
 
     expect(deleteSession).toHaveBeenCalledTimes(3);
@@ -63,7 +63,7 @@ describe('SessionTrashManager', () => {
       if (target.id === 'child') throw new Error('404 Session not found');
     });
 
-    await manager.moveToTrash('root', sessions as never[], 5_000);
+    await manager.moveToTrash('root', sessions, 5_000);
     const removed = await manager.empty(deleteSession);
 
     expect(deleteSession.mock.calls.map(([target]) => target)).toEqual([
@@ -82,7 +82,7 @@ describe('SessionTrashManager', () => {
       session('visible', 1_000),
     ];
 
-    const entry = await manager.moveToTrash('root', sessions as never[], 5_000);
+    const entry = await manager.moveToTrash('root', sessions, 5_000);
 
     expect(entry?.sessions.map(({ id }) => id)).toEqual(['root', 'child']);
     expect([...manager.hiddenSessionIds()].toSorted()).toEqual(['child', 'root']);
@@ -114,8 +114,8 @@ describe('SessionTrashManager', () => {
 
   it('cleans up only expired entries and retries failed evictions later', async () => {
     const manager = new SessionTrashManager(workspaceState as never);
-    await manager.moveToTrash('expired', [session('expired', 1_000)] as never[], 10_000);
-    await manager.moveToTrash('fresh', [session('fresh', 2_000)] as never[], 50_000);
+    await manager.moveToTrash('expired', [session('expired', 1_000)], 10_000);
+    await manager.moveToTrash('fresh', [session('fresh', 2_000)], 50_000);
 
     const deleteSession = vi
       .fn(async (_target: { id: string; directory?: string }) => undefined)
