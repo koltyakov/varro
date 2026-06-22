@@ -734,6 +734,22 @@ describe('parseUserMessageContent', () => {
     expect(parsed.attachments).toEqual([]);
   });
 
+  it('keeps route-like slash-prefixed prose as text', () => {
+    const parsed = parseUserMessageContent([
+      textPart('text-1', '/service/v2/resources should paginate results.'),
+    ]);
+
+    expect(parsed.messageTexts).toEqual(['/service/v2/resources should paginate results.']);
+    expect(parsed.attachments).toEqual([]);
+  });
+
+  it('keeps standalone extensionless slash-prefixed routes as text', () => {
+    const parsed = parseUserMessageContent([textPart('text-1', '/service/v2/resources')]);
+
+    expect(parsed.messageTexts).toEqual(['/service/v2/resources']);
+    expect(parsed.attachments).toEqual([]);
+  });
+
   it('treats relative folder references as attachments', () => {
     const parsed = parseUserMessageContent([textPart('text-1', 'See that\n\nsrc/')]);
 

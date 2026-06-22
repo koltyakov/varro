@@ -676,8 +676,11 @@ function isStandaloneFileReference(text: string): boolean {
   const normalizedInput = trimmed.replace(/\\/g, '/');
   const hasTrailingSlash = normalizedInput.endsWith('/');
   const normalized = normalizePath(trimmed);
+  const hasFileLikeExtension = /\.[^\s/.]{1,16}$/.test(normalized);
   if (/\s\/|\/\s/.test(normalized)) return false;
-  if (isAbsolutePath(normalized)) return true;
+  if (isAbsolutePath(normalized)) {
+    return hasTrailingSlash || hasFileLikeExtension;
+  }
   if (trimmed.includes(' ') && !normalized.endsWith('/') && !/\.\w{1,12}$/.test(trimmed)) {
     return false;
   }
