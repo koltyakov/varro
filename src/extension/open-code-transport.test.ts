@@ -168,6 +168,37 @@ describe('OpenCodeTransport event stream path', () => {
   });
 });
 
+describe('OpenCodeTransport requests', () => {
+  it('only sends JSON content type when forwarding a request body', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = createTransport();
+
+    await transport.request('GET', '/session');
+    await transport.request('POST', '/session', {});
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({});
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe('{}');
+  });
+
+  it('preserves structured server error details', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: async () => JSON.stringify({ detail: 'Unsupported content type' }),
+      })) as unknown as typeof fetch
+    );
+
+    await expect(
+      createTransport().request('PATCH', '/session/session-1', { title: 'x' })
+    ).rejects.toThrow('400 Unsupported content type');
+  });
+});
+
 describe('OpenCodeTransport request scoping', () => {
   it('keeps session reads scoped on non-Windows platforms', async () => {
     stubPlatform('darwin');

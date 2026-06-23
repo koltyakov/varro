@@ -52,7 +52,7 @@ const pending = new Map<
     cleanupAbort?: () => void;
   }
 >();
-const API_CALL_TIMEOUT_MS = 8_000;
+const API_CALL_TIMEOUT_MS = 35_000;
 const API_CALL_LONG_TIMEOUT_MS = 40_000;
 const API_CALL_RETRY_DELAY_MS = 150;
 

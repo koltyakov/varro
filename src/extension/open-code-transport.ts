@@ -48,20 +48,19 @@ export class OpenCodeTransport {
       this.getWorkspaceDirectoryForRequest(method, path)
     );
     const controller = new AbortController();
+    const timeoutSignal = AbortSignal.timeout(OpenCodeTransport.REQUEST_TIMEOUT_MS);
     this.requestControllers.add(controller);
+    const headers: Record<string, string> = {
+      ...getOpenCodeDirectoryHeaders(scoped.directory),
+    };
     const init: RequestInit = {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...getOpenCodeDirectoryHeaders(scoped.directory),
-      },
-      signal: anySignal(
-        controller.signal,
-        AbortSignal.timeout(OpenCodeTransport.REQUEST_TIMEOUT_MS)
-      ),
+      headers,
+      signal: anySignal(controller.signal, timeoutSignal),
     };
     try {
       if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
+        headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(body);
       }
       const res = await fetch(scoped.url, init);
@@ -71,16 +70,15 @@ export class OpenCodeTransport {
         data = text ? JSON.parse(text) : null;
       } catch {}
       if (!res.ok) {
-        const msg =
-          typeof data === 'object' &&
-          data &&
-          'message' in data &&
-          typeof (data as { message: unknown }).message === 'string'
-            ? (data as { message: string }).message
-            : res.statusText;
+        const msg = getResponseErrorMessage(data, res.statusText);
         throw new Error(`${res.status} ${msg}`);
       }
       return data;
+    } catch (err) {
+      if (timeoutSignal.aborted && !controller.signal.aborted) {
+        throw new Error(`OpenCode request timed out: ${method} ${path}`, { cause: err });
+      }
+      throw err;
     } finally {
       this.requestControllers.delete(controller);
     }
@@ -409,4 +407,17 @@ export class OpenCodeTransport {
   private isCurrentEventStream(controller: AbortController, generation: number) {
     return this.eventController === controller && this.eventStreamGeneration === generation;
   }
+}
+
+function getResponseErrorMessage(data: unknown, fallback: string) {
+  const record = asRecord(data);
+  const direct =
+    getString(record?.message) || getString(record?.detail) || getString(record?.error);
+  if (direct) return direct;
+
+  const nestedData = asRecord(record?.data);
+  const nested = getString(nestedData?.message) || getString(nestedData?.detail);
+  if (nested) return nested;
+
+  return fallback;
 }
