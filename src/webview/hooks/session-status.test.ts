@@ -611,6 +611,44 @@ describe('session status helpers', () => {
     expect(startLoadingSpy).not.toHaveBeenCalled();
   });
 
+  it('syncs busy recheck messages and settles after a missed terminal event', async () => {
+    const stopLoadingSpy = vi.fn();
+    const startLoadingSpy = vi.fn();
+    const setSessionStatusEntry = vi.fn();
+    let messages = [{ info: userMessage(), parts: [] }];
+    const syncSessionMessages = vi.fn(async () => {
+      messages = [{ info: completedAssistantMessage(), parts: [] }];
+    });
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: stopLoadingSpy,
+        setSessionStatusEntry,
+        setSessionStatuses: vi.fn(),
+        shouldResyncSessionAfterIdle: () => false,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages,
+        startLoading: startLoadingSpy,
+        loadingStartedAt: () => 1,
+        isActiveSession: () => true,
+        getMessages: () => messages,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(stopLoadingSpy).toHaveBeenCalledTimes(1);
+    expect(startLoadingSpy).not.toHaveBeenCalled();
+  });
+
   it('keeps loading from a busy recheck when completion predates the current loading turn', async () => {
     const stopLoadingSpy = vi.fn();
     const startLoadingSpy = vi.fn();

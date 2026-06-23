@@ -96,7 +96,11 @@ function isWorkingStatus(status: SessionStatus | null | undefined) {
 
 function isContinuationStepEnd(eventName: string, props: Record<string, unknown>) {
   if (eventName !== 'session.next.step.ended') return false;
-  const finish = normalizeStepFinish(getEventString(props, 'finish'));
+  return isContinuationStepFinish(getEventString(props, 'finish'));
+}
+
+function isContinuationStepFinish(value: string | undefined) {
+  const finish = normalizeStepFinish(value);
   return (
     finish === 'tool' ||
     finish === 'tools' ||
@@ -715,9 +719,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (assistantMessageID) return findAssistantMessage(sessionId, assistantMessageID);
     return latestAssistantMessageForSession(deps.getMessages(), sessionId);
   };
-  const settleAssistantStepEnd = (sessionId: string, props: Record<string, unknown>) => {
-    if (isContinuationStepEnd('session.next.step.ended', props)) return false;
-    const assistantMessageID = getEventString(props, 'assistantMessageID');
+  const settleAssistantStepCompletion = (
+    sessionId: string,
+    assistantMessageID: string | undefined,
+    completedAt: number
+  ) => {
     const message = findStepAssistantMessage(sessionId, assistantMessageID);
     if (!message) {
       if (isSessionInActiveTree(sessionId)) scheduleActiveMessageSync(sessionId);
@@ -728,11 +734,24 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (!message.info.time.completed && !message.info.error) {
       sessionStore.upsertMessageInfo({
         ...message.info,
-        time: { ...message.info.time, completed: getEventTimestamp(props) },
+        time: { ...message.info.time, completed: completedAt },
       } as Message);
     }
     sessionStore.finishMessageStreaming(message.info.id);
     return true;
+  };
+  const settleAssistantStepEnd = (sessionId: string, props: Record<string, unknown>) => {
+    if (isContinuationStepEnd('session.next.step.ended', props)) return false;
+    return settleAssistantStepCompletion(
+      sessionId,
+      getEventString(props, 'assistantMessageID'),
+      getEventTimestamp(props)
+    );
+  };
+  const settleAssistantStepFinishPart = (part: Part, completedAt: number) => {
+    if (part.type !== 'step-finish') return false;
+    if (isContinuationStepFinish(part.reason)) return false;
+    return settleAssistantStepCompletion(part.sessionID, part.messageID, completedAt);
   };
   const findPart = (messageID: string, partID: string): Part | null => {
     const message = deps.getMessages().find((entry) => entry.info.id === messageID);
@@ -1217,8 +1236,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
       const applyPart = () => {
         if (!isSessionInActiveTree(rawPart.sessionID)) return;
-        sessionStore.upsertPart(applyToolExecutionTime(rawPart));
-        if (rawPart.type === 'tool') deps.syncTodosFromMessages();
+        const part = applyToolExecutionTime(rawPart);
+        sessionStore.upsertPart(part);
+        if (part.type === 'tool') deps.syncTodosFromMessages();
+        if (settleAssistantStepFinishPart(part, getEventTimestamp(data.properties || {}))) {
+          handleSessionIdle(part.sessionID, deps.hasPendingAbort(part.sessionID));
+        }
       };
 
       if (!deps.getMessages().some((message) => message.info.id === rawPart.messageID)) {

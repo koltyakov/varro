@@ -549,16 +549,15 @@ export function MessageList() {
     }
   });
 
-  const hasIncompleteVisibleAssistantReply = createMemo(() => {
+  const hasIncompleteLatestVisibleAssistantReply = createMemo(() => {
     messageInfoVersion();
-    return messages().some(
-      (entry) => isAssistantMessage(entry.info) && !entry.info.time.completed && !entry.info.error
-    );
+    const latest = messages().at(-1)?.info;
+    return !!latest && isAssistantMessage(latest) && !latest.time.completed && !latest.error;
   });
 
   const loadingRowEligible = createMemo(
     () =>
-      (activeSessionWorking() || hasIncompleteVisibleAssistantReply()) &&
+      (activeSessionWorking() || hasIncompleteLatestVisibleAssistantReply()) &&
       !hasActiveQuestion() &&
       !hasActivePermission() &&
       !activeUsageLimit()

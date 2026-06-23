@@ -135,7 +135,7 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
-  it('does not mark a busy session complete from idle alone', () => {
+  it('keeps a busy session in progress from idle alone', () => {
     const manager = createManager();
 
     manager.handleServerEvent({
@@ -147,11 +147,15 @@ describe('SessionStateManager notifications', () => {
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
     manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+    manager.handleServerEvent({
       type: 'session.idle',
       properties: { sessionID: 'session-1' },
     });
 
-    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.busy.has('session-1')).toBe(true);
     expect(manager.completed.has('session-1')).toBe(false);
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
@@ -172,9 +176,95 @@ describe('SessionStateManager notifications', () => {
       properties: { sessionID: 'session-1' },
     });
 
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not notify for child session completions', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'child-1',
+          parentID: 'session-1',
+          title: 'Analyze opencode capabilities',
+        },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'child-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'child-1', finish: 'stop', timestamp: Date.now() },
+    });
+
+    expect(manager.busy.has('child-1')).toBe(false);
+    expect(manager.completed.has('child-1')).toBe(false);
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not notify for subagent assistant completions', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: { id: 'session-1', title: 'Analyze opencode capabilities (@explore subagent)' },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          mode: 'subagent',
+          time: { completed: Date.now() },
+        },
+      },
+    });
+
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(false);
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not notify for historical completions replayed after a busy marker', () => {
+    const now = 1_800_000_000_000;
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const manager = createManager();
+
+      manager.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'busy' } },
+      });
+      manager.handleServerEvent({
+        type: 'message.updated',
+        properties: {
+          info: {
+            sessionID: 'session-1',
+            role: 'assistant',
+            time: { completed: now - 60_000 },
+          },
+        },
+      });
+
+      expect(manager.busy.has('session-1')).toBe(true);
+      expect(manager.completed.has('session-1')).toBe(false);
+      expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it('marks a busy session complete from assistant completion without session.idle', () => {
@@ -206,6 +296,33 @@ describe('SessionStateManager notifications', () => {
       'Varro has a plan ready for review for "Auth cleanup".',
       'Open Chat'
     );
+  });
+
+  it('does not show completion notifications for normal background sessions', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Codebase improvement research' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { completed: 2 },
+        },
+      },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
   it('remembers sync session metadata when id is only on the event properties', () => {
@@ -253,6 +370,30 @@ describe('SessionStateManager notifications', () => {
       'Varro hit an error for "Build release": Command failed',
       'Open Chat'
     );
+  });
+
+  it('does not show failure notifications for child sessions', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'child-1',
+          parentID: 'session-1',
+          title: 'Analyze opencode capabilities',
+        },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: 'child-1',
+        error: { name: 'UnknownError', data: { message: 'Command failed' } },
+      },
+    });
+
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
   });
 
   it('uses session.error events for background failure notifications', () => {
@@ -391,6 +532,7 @@ describe('SessionStateManager notifications', () => {
         if (key === 'varro.interruptedSessions') {
           return [
             { id: 'session-1', title: 'Session 1' },
+            { id: 'child-1', title: 'Analyze opencode capabilities (@explore subagent)' },
             { id: '   ' },
             { id: 42 },
             null,

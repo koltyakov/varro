@@ -373,12 +373,11 @@ export async function recheckSessionStatusWithDependencies(
     if (status.type === 'retry' && deps.isActiveSession(sessionId)) {
       deps.startLoading();
     } else if (status.type === 'busy' && deps.isActiveSession(sessionId)) {
-      if (
-        latestAssistantFinishedBeforeLoading(
-          deps.getMessages?.() ?? [],
-          deps.loadingStartedAt?.() ?? null
-        )
-      ) {
+      const syncResult = await settleVoid(deps.syncSessionMessages(sessionId));
+      logRejectedSyncs(deps, [syncResult]);
+      const messages = deps.getMessages?.() ?? [];
+      if (latestAssistantFinishedBeforeLoading(messages, deps.loadingStartedAt?.() ?? null)) {
+        deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
         deps.stopLoading();
       } else deps.startLoading();
     }

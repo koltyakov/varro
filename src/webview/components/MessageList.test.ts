@@ -2544,6 +2544,27 @@ describe('MessageList loading row', () => {
     expect(row?.classList.contains('is-reserved')).toBe(false);
   });
 
+  it('does not keep the loading row for older incomplete assistant replies', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'First prompt')] },
+      {
+        info: assistantMessage('assistant-1', { time: { created: 2 } }),
+        parts: [textPart('assistant-text-1', 'Intermediate answer')],
+      },
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Follow-up prompt')] },
+      {
+        info: assistantMessage('assistant-2', { time: { created: 3, completed: 4 } }),
+        parts: [textPart('assistant-text-2', 'Final answer')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
+  });
+
   it('reserves the loading row while visible text is streaming', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([

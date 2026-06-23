@@ -1825,6 +1825,128 @@ describe('registerSessionEventHandlers', () => {
     upsertMessageInfo.mockReset();
   });
 
+  it('settles a terminal step-finish part when no idle event arrives', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const updateUsageLimitState = vi.fn();
+    const clearPendingAbort = vi.fn();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    upsertMessageInfo.mockClear();
+    upsertMessageInfo.mockImplementation((info: Message) => {
+      assistantEntry = { ...assistantEntry, info };
+    });
+    upsertPart.mockClear();
+    finishMessageStreaming.mockClear();
+    markLoadingActivity.mockClear();
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        setSessionStatusEntry,
+        updateUsageLimitState,
+        clearPendingAbort,
+        syncSession,
+        shouldResyncSessionAfterIdle: () => true,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('message.part.updated')?.({
+      properties: {
+        timestamp: 3,
+        part: {
+          id: 'step-finish-1',
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          type: 'step-finish',
+          reason: 'stop',
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      },
+    });
+
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'step-finish-1',
+        type: 'step-finish',
+        reason: 'stop',
+      })
+    );
+    expect(upsertMessageInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-1',
+        time: { created: 1, completed: 3 },
+      })
+    );
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
+    expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(syncSession).toHaveBeenCalledWith('session-1');
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    upsertMessageInfo.mockReset();
+  });
+
+  it('keeps tool-call step-finish parts in progress', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    upsertMessageInfo.mockClear();
+    upsertMessageInfo.mockImplementation((info: Message) => {
+      assistantEntry = { ...assistantEntry, info };
+    });
+    upsertPart.mockClear();
+    finishMessageStreaming.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('message.part.updated')?.({
+      properties: {
+        part: {
+          id: 'step-finish-1',
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          type: 'step-finish',
+          reason: 'tool-calls',
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      },
+    });
+
+    expect(upsertPart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'step-finish-1',
+        type: 'step-finish',
+        reason: 'tool-calls',
+      })
+    );
+    expect(upsertMessageInfo).not.toHaveBeenCalled();
+    expect(finishMessageStreaming).not.toHaveBeenCalled();
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
+
+    upsertMessageInfo.mockReset();
+  });
+
   it('ignores replayed v2 parts after a terminal step completes the assistant message', () => {
     const handlers = installHandlers();
     let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };

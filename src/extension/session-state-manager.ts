@@ -46,6 +46,8 @@ const MAX_PERSISTED_BLOCKING_REQUESTS = 100;
 const MAX_PERSISTED_METADATA_ENTRIES = 20;
 const MAX_PERSISTED_STRING_LENGTH = 500;
 const MAX_SESSION_METADATA_ENTRIES = 200;
+const MIN_EPOCH_MILLIS = 1_000_000_000_000;
+const COMPLETION_NOTIFICATION_CLOCK_SKEW_MS = 5_000;
 
 /**
  * Owns all per-session state derived from the OpenCode event stream:
@@ -61,6 +63,9 @@ export class SessionStateManager {
   private readonly sessionAgents = new Map<string, string>();
   private readonly sessionTitles = new Map<string, string>();
   private readonly sessionDirectories = new Map<string, string>();
+  private readonly sessionParentIDs = new Map<string, string>();
+  private readonly sessionModes = new Map<string, string>();
+  private readonly busyStartedAt = new Map<string, number>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
 
   constructor(
@@ -138,13 +143,12 @@ export class SessionStateManager {
         const statusType = getString(asRecord(props?.status)?.type);
         if (!sessionID || !statusType) break;
         if (statusType === 'busy' || statusType === 'retry') {
+          if (!this.busySessions.has(sessionID)) {
+            this.busyStartedAt.set(sessionID, Date.now());
+          }
           this.busySessions.add(sessionID);
           this.completedSessions.delete(sessionID);
           this.failedSessions.delete(sessionID);
-          changed = true;
-        }
-        if (statusType === 'idle') {
-          this.busySessions.delete(sessionID);
           changed = true;
         }
         break;
@@ -152,22 +156,12 @@ export class SessionStateManager {
       case 'session.idle': {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
-        changed = this.busySessions.delete(sessionID) || changed;
         break;
       }
       case 'session.next.step.ended': {
         const sessionID = getString(props?.sessionID);
         if (!sessionID || !props || isContinuationStepEnd(props)) break;
-        const wasBusy = this.busySessions.delete(sessionID);
-        if (
-          wasBusy &&
-          !this.hasPendingAttentionForSession(sessionID) &&
-          !this.failedSessions.has(sessionID)
-        ) {
-          this.completedSessions.add(sessionID);
-          this.showCompletionNotification(sessionID);
-        }
-        changed = wasBusy || changed;
+        changed = this.finishBusySession(sessionID, getNumber(props.timestamp)) || changed;
         break;
       }
       case 'session.error': {
@@ -187,6 +181,12 @@ export class SessionStateManager {
           this.evictOldestSessionMetadata(this.sessionAgents);
         }
 
+        const mode = getString(info?.mode);
+        if (mode) {
+          this.sessionModes.set(sessionID, mode);
+          this.evictOldestSessionMetadata(this.sessionModes);
+        }
+
         if (getString(info?.role) !== 'assistant') break;
 
         const error = asRecord(info?.error);
@@ -196,12 +196,13 @@ export class SessionStateManager {
           changed = this.failedSessions.delete(sessionID) || changed;
         }
         if (error || typeof asRecord(info?.time)?.completed === 'number') {
-          const wasBusy = this.busySessions.delete(sessionID);
-          if (wasBusy && !error && !this.hasPendingAttentionForSession(sessionID)) {
-            this.completedSessions.add(sessionID);
-            this.showCompletionNotification(sessionID);
+          if (error) {
+            changed = this.clearBusy(sessionID) || changed;
+          } else {
+            changed =
+              this.finishBusySession(sessionID, getNumber(asRecord(info?.time)?.completed)) ||
+              changed;
           }
-          changed = wasBusy || changed;
         }
         break;
       }
@@ -264,7 +265,12 @@ export class SessionStateManager {
     const snapshots =
       this.persistence.get<InterruptedSessionSnapshot[]>(INTERRUPTED_SESSIONS_KEY) || [];
     await this.persistence.remove(INTERRUPTED_SESSIONS_KEY);
-    return snapshots.filter((item) => typeof item?.id === 'string' && item.id.trim().length > 0);
+    return snapshots.filter(
+      (item) =>
+        typeof item?.id === 'string' &&
+        item.id.trim().length > 0 &&
+        !isSubagentSessionTitle(item.title)
+    );
   }
 
   async consumeBlockingRequests(): Promise<BlockingRequestSnapshot[]> {
@@ -388,6 +394,7 @@ export class SessionStateManager {
 
   private async persistInterruptedSessions() {
     const snapshots = [...this.busySessions]
+      .filter((id) => !this.isIgnoredBackgroundSession(id))
       .toSorted()
       .slice(0, MAX_PERSISTED_INTERRUPTED_SESSIONS)
       .map((id) => ({
@@ -438,6 +445,12 @@ export class SessionStateManager {
       this.sessionDirectories.set(sessionID, directory);
       this.evictOldestSessionMetadata(this.sessionDirectories);
     }
+
+    const parentID = getString(info?.parentID);
+    if (sessionID && parentID) {
+      this.sessionParentIDs.set(sessionID, parentID);
+      this.evictOldestSessionMetadata(this.sessionParentIDs);
+    }
   }
 
   private evictOldestSessionMetadata(map: Map<string, string>) {
@@ -459,7 +472,7 @@ export class SessionStateManager {
 
     const label =
       kind === 'question' ? describeQuestionRequest(props) : describePermissionRequest(props);
-    this.busySessions.delete(sessionID);
+    this.clearBusy(sessionID);
     this.pendingAttention.set(requestID, {
       sessionID,
       kind,
@@ -480,6 +493,9 @@ export class SessionStateManager {
     changed = this.sessionAgents.delete(sessionID) || changed;
     changed = this.sessionTitles.delete(sessionID) || changed;
     changed = this.sessionDirectories.delete(sessionID) || changed;
+    changed = this.sessionParentIDs.delete(sessionID) || changed;
+    changed = this.sessionModes.delete(sessionID) || changed;
+    this.busyStartedAt.delete(sessionID);
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
       this.pendingAttention.delete(requestID);
@@ -500,6 +516,49 @@ export class SessionStateManager {
     return false;
   }
 
+  private clearBusy(sessionID: string): boolean {
+    const wasBusy = this.busySessions.delete(sessionID);
+    if (wasBusy) this.busyStartedAt.delete(sessionID);
+    return wasBusy;
+  }
+
+  private finishBusySession(sessionID: string, completedAt: number | undefined): boolean {
+    if (!this.busySessions.has(sessionID)) return false;
+
+    if (
+      this.isIgnoredBackgroundSession(sessionID) ||
+      this.hasPendingAttentionForSession(sessionID) ||
+      this.failedSessions.has(sessionID)
+    ) {
+      return this.clearBusy(sessionID);
+    }
+
+    if (this.isStaleCompletion(completedAt, this.busyStartedAt.get(sessionID))) return false;
+
+    this.clearBusy(sessionID);
+    this.completedSessions.add(sessionID);
+    this.showCompletionNotification(sessionID);
+    return true;
+  }
+
+  private isIgnoredBackgroundSession(sessionID: string): boolean {
+    return (
+      this.sessionParentIDs.has(sessionID) ||
+      this.sessionModes.get(sessionID) === 'subagent' ||
+      isSubagentSessionTitle(this.sessionTitles.get(sessionID))
+    );
+  }
+
+  private isStaleCompletion(
+    completedAt: number | undefined,
+    startedAt: number | undefined
+  ): boolean {
+    if (completedAt === undefined || completedAt < MIN_EPOCH_MILLIS) return false;
+    return (
+      startedAt !== undefined && completedAt + COMPLETION_NOTIFICATION_CLOCK_SKEW_MS < startedAt
+    );
+  }
+
   private markSessionFailed(
     sessionID: string,
     error: Record<string, unknown> | undefined
@@ -509,7 +568,7 @@ export class SessionStateManager {
     const wasFailed = this.failedSessions.has(sessionID);
     this.failedSessions.add(sessionID);
     this.completedSessions.delete(sessionID);
-    if (!wasFailed) {
+    if (!wasFailed && !this.isIgnoredBackgroundSession(sessionID)) {
       this.showFailureNotification(sessionID, error ? describeFailure(error) : undefined);
     }
     return !wasFailed;
@@ -534,11 +593,10 @@ export class SessionStateManager {
   }
 
   private showCompletionNotification(sessionID: string): void {
+    if (!this.isPlanSession(sessionID)) return;
     if (!this.notificationGate.shouldShow()) return;
 
-    const message = this.isPlanSession(sessionID)
-      ? `Varro has a plan ready for review${this.describeSessionSuffix(sessionID)}.`
-      : `Varro completed a background session${this.describeSessionSuffix(sessionID)}.`;
+    const message = `Varro has a plan ready for review${this.describeSessionSuffix(sessionID)}.`;
     void vscode.window.showInformationMessage(message, 'Open Chat').then((action) => {
       if (action === 'Open Chat') {
         void vscode.commands.executeCommand('varro.chat.focus');
@@ -611,12 +669,20 @@ function isContinuationStepEnd(props: Record<string, unknown>): boolean {
   );
 }
 
+function isSubagentSessionTitle(title: string | undefined): boolean {
+  return !!title?.trim().match(/\(@[^)]*\bsubagent\)$/i);
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
 }
 
 function getString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function getNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function trimOptionalString(value: string | undefined): string | undefined {
