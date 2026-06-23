@@ -23,6 +23,16 @@ export type StuckSessionReconcileDeps = {
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   /** The webview's current view of per-session status. */
   getLocalSessionStatuses(): Record<string, SessionStatus>;
+  /** The currently focused session, whose spinner may be driven by `isLoading`. */
+  getActiveSessionId(): string | null | undefined;
+  /**
+   * The webview's global loading flag. The active session's "Thinking..."
+   * indicator is driven by this (see `isActiveSessionWorking`), and it can be
+   * left on when a completion event is missed even though no session status is
+   * busy. The watchdog folds the active session in as a candidate in that case
+   * so orphaned loading states are recovered, not just busy statuses.
+   */
+  isLoading(): boolean;
   /** Sessions paused on a permission/question prompt legitimately show as working. */
   isAwaitingInput(sessionId: string): boolean;
   /** The abort flow owns its own busy->idle transition; don't fight it. */
@@ -44,8 +54,18 @@ export async function reconcileStuckSessionsWithDependencies(
   graceMs: number = STUCK_SESSION_GRACE_MS
 ): Promise<void> {
   const local = deps.getLocalSessionStatuses();
-  const locallyBusy = Object.keys(local).filter((sessionId) => isRunningStatus(local[sessionId]));
-  if (locallyBusy.length === 0) {
+  const candidates = new Set<string>(
+    Object.keys(local).filter((sessionId) => isRunningStatus(local[sessionId]))
+  );
+  // The active session's spinner is also driven by the global loading flag,
+  // which can be left on when a completion event is missed even though no
+  // session status is busy. Treat it as a candidate so the watchdog recovers
+  // orphaned loading states too — not just stale busy statuses.
+  if (deps.isLoading()) {
+    const activeSessionId = deps.getActiveSessionId();
+    if (activeSessionId) candidates.add(activeSessionId);
+  }
+  if (candidates.size === 0) {
     stuckSince.clear();
     return;
   }
@@ -59,7 +79,7 @@ export async function reconcileStuckSessionsWithDependencies(
   }
 
   const stillTracked = new Set<string>();
-  for (const sessionId of locallyBusy) {
+  for (const sessionId of candidates) {
     if (deps.hasPendingAbort(sessionId) || deps.isAwaitingInput(sessionId)) continue;
     if (isRunningStatus(serverStatuses[sessionId])) continue;
 

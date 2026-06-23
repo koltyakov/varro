@@ -36,6 +36,8 @@ function baseReconcileDeps(overrides: Record<string, unknown> = {}) {
   return {
     loadSessionStatuses: vi.fn(async () => ({}) as Record<string, SessionStatus>),
     getLocalSessionStatuses: vi.fn(() => ({}) as Record<string, SessionStatus>),
+    getActiveSessionId: vi.fn(() => null as string | null),
+    isLoading: vi.fn(() => false),
     isAwaitingInput: vi.fn(() => false),
     hasPendingAbort: vi.fn(() => false),
     forceReconcileIdleSession: vi.fn(async () => {}),
@@ -128,6 +130,40 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(deps.logError).toHaveBeenCalledWith('stuckSessionWatchdog', expect.any(Error));
     expect(timers.get('s1')).toBe(1);
+  });
+
+  it('recovers an orphaned loading flag for the active session even with no busy status', async () => {
+    // Completion event was missed: the session status is idle, but the global
+    // loading flag (which drives the "Thinking..." spinner) is still on.
+    const deps = baseReconcileDeps({
+      getLocalSessionStatuses: () => ({ s1: { type: 'idle' } }) as Record<string, SessionStatus>,
+      getActiveSessionId: () => 's1',
+      isLoading: () => true,
+      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+    });
+    const timers = new Map<string, number>();
+
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
+    expect(timers.get('s1')).toBe(1000);
+
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
+  });
+
+  it('does not treat the active session as stuck when the loading flag clears', async () => {
+    const loadSessionStatuses = vi.fn(async () => ({}) as Record<string, SessionStatus>);
+    const deps = baseReconcileDeps({
+      getLocalSessionStatuses: () => ({ s1: { type: 'idle' } }) as Record<string, SessionStatus>,
+      getActiveSessionId: () => 's1',
+      isLoading: () => false,
+      loadSessionStatuses,
+    });
+    const timers = new Map<string, number>([['s1', 1]]);
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    expect(loadSessionStatuses).not.toHaveBeenCalled();
+    expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
+    expect(timers.size).toBe(0);
   });
 });
 

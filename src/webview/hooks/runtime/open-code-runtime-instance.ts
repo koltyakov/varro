@@ -438,6 +438,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       getServerState: () => appStore.state.serverStatus.state,
       isDocumentVisible: documentVisible,
       hasBusySession: () =>
+        uiStore.isLoading() ||
         Object.values(appStore.state.sessionStatus).some(
           (status) => status?.type === 'busy' || status?.type === 'retry'
         ),
@@ -471,6 +472,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       {
         loadSessionStatuses: () => client.session.status(),
         getLocalSessionStatuses: () => appStore.state.sessionStatus,
+        getActiveSessionId: () => appStore.state.activeSessionId,
+        isLoading: uiStore.isLoading,
         isAwaitingInput: isSessionAwaitingInput,
         hasPendingAbort: (sessionId) => pendingAbortRetryAttempts.has(sessionId),
         forceReconcileIdleSession,
