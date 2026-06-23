@@ -10,7 +10,6 @@ import { logger } from './logger';
 type ExtensionPackageJson = {
   name?: unknown;
   displayName?: unknown;
-  publisher?: unknown;
   version?: unknown;
   dependencies?: unknown;
 };
@@ -165,9 +164,11 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   const pkg = readPackageJson(context);
   const name = getString(pkg.displayName) || getString(pkg.name) || 'Varro';
   const version = getString(pkg.version) || 'unknown';
-  const publisher = getString(pkg.publisher) || 'unknown';
   const sdkVersion = readDependencyVersion(pkg, '@opencode-ai/sdk');
   const status = formatServerStatus(serverInfo);
+  const autoUpdate = vscode.workspace
+    .getConfiguration('varro')
+    .get<boolean>('server.autoUpdate', true);
   const cliVersion = serverInfo.cliVersionError
     ? `error: ${serverInfo.cliVersionError}`
     : serverInfo.cliVersion || 'not found';
@@ -177,7 +178,6 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     '',
     '## Varro',
     `- Version: ${version}`,
-    `- Publisher: ${publisher}`,
     '',
     '## OpenCode',
     `- SDK version: ${sdkVersion}`,
@@ -187,9 +187,7 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `- Server port: ${serverInfo.port}`,
     `- Server health: ${serverInfo.health.healthy ? 'healthy' : 'unhealthy'}`,
     `- Server version: ${serverInfo.health.version || 'unknown'}`,
-    `- Managed by Varro: ${serverInfo.managedProcess ? 'yes' : 'no'}`,
-    `- Auto-start: ${serverInfo.autoStart ? 'enabled' : 'disabled'}`,
-    `- Process ID: ${serverInfo.processId ?? 'unknown'}`,
+    `- Auto updates: ${autoUpdate ? 'enabled' : 'disabled'}`,
     `- CLI command: ${serverInfo.command}`,
     `- Workspace: ${serverInfo.workspaceCwd || 'none'}`,
     '',
