@@ -152,6 +152,12 @@ export class SessionStateManager {
       case 'session.idle': {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
+        changed = this.busySessions.delete(sessionID) || changed;
+        break;
+      }
+      case 'session.next.step.ended': {
+        const sessionID = getString(props?.sessionID);
+        if (!sessionID || !props || isContinuationStepEnd(props)) break;
         const wasBusy = this.busySessions.delete(sessionID);
         if (
           wasBusy &&
@@ -160,8 +166,8 @@ export class SessionStateManager {
         ) {
           this.completedSessions.add(sessionID);
           this.showCompletionNotification(sessionID);
-          changed = true;
         }
+        changed = wasBusy || changed;
         break;
       }
       case 'session.error': {
@@ -587,6 +593,22 @@ function isAbortedErrorRecord(error: Record<string, unknown>): boolean {
     name: getString(error.name) || '',
     data: data ? { message: getString(data.message) } : undefined,
   });
+}
+
+function isContinuationStepEnd(props: Record<string, unknown>): boolean {
+  const finish = getString(props.finish)
+    ?.toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  return (
+    finish === 'tool' ||
+    finish === 'tools' ||
+    finish === 'tool_call' ||
+    finish === 'tool_calls' ||
+    finish === 'tool_use' ||
+    finish === 'tool_uses' ||
+    finish === 'function_call' ||
+    finish === 'function_calls'
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

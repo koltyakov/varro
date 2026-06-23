@@ -105,7 +105,7 @@ describe('SessionStateManager notifications', () => {
     expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
   });
 
-  it('shows a plan-ready notification for completed plan sessions', () => {
+  it('shows a plan-ready notification for completed terminal plan steps', () => {
     const manager = createManager();
 
     manager.handleServerEvent({
@@ -123,14 +123,58 @@ describe('SessionStateManager notifications', () => {
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
     manager.handleServerEvent({
-      type: 'session.idle',
-      properties: { sessionID: 'session-1' },
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'session-1', finish: 'stop' },
     });
 
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
       'Varro has a plan ready for review for "Auth cleanup".',
       'Open Chat'
     );
+  });
+
+  it('does not mark a busy session complete from idle alone', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Auth cleanup' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.idle',
+      properties: { sessionID: 'session-1' },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not mark continuation step ends complete', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.next.step.ended',
+      properties: { sessionID: 'session-1', finish: 'tool_calls' },
+    });
+    manager.handleServerEvent({
+      type: 'session.idle',
+      properties: { sessionID: 'session-1' },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
   it('marks a busy session complete from assistant completion without session.idle', () => {
