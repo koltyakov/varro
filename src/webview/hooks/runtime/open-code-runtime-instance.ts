@@ -19,7 +19,7 @@ import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
 import type { Message, Part, Permission, Session } from '../../types';
-import { getSessionTreeIds, getSessionTreeRootId } from '../../lib/state';
+import { getSessionTreeIds, getSessionTreeRootId, isSessionAwaitingInput } from '../../lib/state';
 import { startNewChatDraft } from '../../lib/new-chat-draft';
 import {
   createConnectionBootstrapOperations,
@@ -49,6 +49,12 @@ import {
   registerProviderLimitRefreshEffect,
   registerVisibleRunningSessionSyncEffect,
 } from '../session/session-effects';
+import {
+  forceReconcileIdleSessionWithDependencies,
+  reconcileStuckSessionsWithDependencies,
+  registerStuckSessionWatchdogEffect,
+  selectUnsettledLatestAssistant,
+} from '../session/session-watchdog';
 import { SessionEventHandlerOperations } from '../session/session-event-handlers';
 import {
   getDeletedSessionTreeIds,
@@ -175,6 +181,21 @@ function getUsageLimitNoticeContext(
     providers: appStore.state.providers,
     providerDefaults: appStore.state.providerDefaults,
     fallbackSelectedModel: appStore.state.selectedModel,
+  });
+}
+
+function settleLatestAssistantMessage(sessionId: string) {
+  const info = selectUnsettledLatestAssistant(appStore.state.messages, sessionId);
+  if (!info) return;
+  sessionStore.upsertMessageInfo({ ...info, time: { ...info.time, completed: Date.now() } });
+  sessionStore.finishMessageStreaming(info.id);
+}
+
+function isSessionTreeWorking(sessionId: string) {
+  const rootId = getSessionTreeRootId(sessionId) || sessionId;
+  return getSessionTreeIds(rootId).some((id) => {
+    const status = appStore.state.sessionStatus[id];
+    return status?.type === 'busy' || status?.type === 'retry';
   });
 }
 
@@ -390,12 +411,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       isDocumentVisible: documentVisible,
       isActiveSessionWorking: () => {
         const activeSessionId = appStore.state.activeSessionId;
-        if (!activeSessionId) return false;
-        const rootId = getSessionTreeRootId(activeSessionId) || activeSessionId;
-        return getSessionTreeIds(rootId).some((sessionId) => {
-          const status = appStore.state.sessionStatus[sessionId];
-          return status?.type === 'busy' || status?.type === 'retry';
-        });
+        return activeSessionId ? isSessionTreeWorking(activeSessionId) : false;
       },
       getActiveProviderSelection,
       getProviderLimit: routingStore.getProviderLimit,
@@ -418,7 +434,50 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       logError,
     });
 
+    registerStuckSessionWatchdogEffect({
+      getServerState: () => appStore.state.serverStatus.state,
+      isDocumentVisible: documentVisible,
+      hasBusySession: () =>
+        Object.values(appStore.state.sessionStatus).some(
+          (status) => status?.type === 'busy' || status?.type === 'retry'
+        ),
+      runReconcile: () => reconcileStuckSessions(),
+    });
+
     return { client };
+  }
+
+  const stuckSessionTimers = new Map<string, number>();
+
+  async function forceReconcileIdleSession(sessionId: string) {
+    await forceReconcileIdleSessionWithDependencies(
+      {
+        setSessionStatusEntry,
+        clearPendingAbort,
+        updateUsageLimitState,
+        syncSessionMessages,
+        settleLatestAssistantMessage,
+        isActiveSession: (id) => appStore.state.activeSessionId === id,
+        isTreeWorking: isSessionTreeWorking,
+        stopLoading: uiStore.stopLoading,
+        logError,
+      },
+      sessionId
+    );
+  }
+
+  async function reconcileStuckSessions() {
+    await reconcileStuckSessionsWithDependencies(
+      {
+        loadSessionStatuses: () => client.session.status(),
+        getLocalSessionStatuses: () => appStore.state.sessionStatus,
+        isAwaitingInput: isSessionAwaitingInput,
+        hasPendingAbort: (sessionId) => pendingAbortRetryAttempts.has(sessionId),
+        forceReconcileIdleSession,
+        logError,
+      },
+      stuckSessionTimers
+    );
   }
 
   async function recheckSessionStatus(sessionId: string) {
@@ -710,13 +769,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSession,
     syncSessionMessages,
     setError: uiStore.setError,
-    isSessionWorking: (sessionId) => {
-      const rootId = sessionStore.getSessionTreeRootId(sessionId) || sessionId;
-      return sessionStore.getSessionTreeIds(rootId).some((id) => {
-        const status = appStore.state.sessionStatus[id];
-        return status?.type === 'busy' || status?.type === 'retry';
-      });
-    },
+    isSessionWorking: (sessionId) => isSessionTreeWorking(sessionId),
     sendEditedMessage: (text) => sendMessage(text),
     unrevertSession: (sessionId) => client.session.unrevert(sessionId),
     upsertSession,
