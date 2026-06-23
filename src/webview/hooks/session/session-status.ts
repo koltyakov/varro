@@ -140,6 +140,7 @@ export class SessionStatusOperations {
         updateUsageLimitState: this.updateUsageLimitState,
         clearPendingAbort: this.clearPendingAbort,
         stopLoading: uiStore.stopLoading,
+        setSessionStatusEntry: sessionStore.setSessionStatusEntry,
         setSessionStatuses: sessionStore.setSessionStatuses,
         shouldResyncSessionAfterIdle: this.deps.shouldResyncSessionAfterIdle,
         syncSession: this.deps.syncSession,
@@ -300,6 +301,7 @@ export async function recheckSessionStatusWithDependencies(
     updateUsageLimitState(sessionId: string, status: SessionStatus | null | undefined): void;
     clearPendingAbort(sessionId: string | null | undefined): void;
     stopLoading(): void;
+    setSessionStatusEntry?(sessionId: string, status: SessionStatus): void;
     setSessionStatuses(
       statuses: Record<string, SessionStatus>,
       options?: SessionStatusSnapshotOptions
@@ -333,16 +335,30 @@ export async function recheckSessionStatusWithDependencies(
     }
     if (!status || status.type === 'idle') {
       deps.clearPendingAbort(sessionId);
-      const syncs: Array<Promise<void>> = [deps.syncSession(sessionId)];
-      if (deps.shouldResyncSessionAfterIdle(sessionId)) {
-        syncs.push(deps.syncSessionMessages(sessionId));
+      const syncs: Array<PromiseSettledResult<void>> = [
+        await settleVoid(deps.syncSession(sessionId)),
+      ];
+      let syncedMessages = false;
+      const shouldSyncMessages = deps.shouldResyncSessionAfterIdle(sessionId);
+      if (shouldSyncMessages) {
+        const result = await settleVoid(deps.syncSessionMessages(sessionId));
+        syncedMessages = result.status === 'fulfilled';
+        syncs.push(result);
       }
-      await Promise.allSettled(syncs);
+      logRejectedSyncs(deps, syncs);
       if (deps.isActiveSession(sessionId)) {
         const messages = deps.getMessages?.() ?? [];
         const currentStatus = deps.getCurrentSessionStatus?.(sessionId);
-        if (
-          hasUnsettledLatestTurn(messages) ||
+        if (hasUnsettledLatestTurn(messages)) {
+          deps.startLoading();
+        } else if (
+          syncedMessages &&
+          latestAssistantFinished(messages) &&
+          isRunningSessionStatus(currentStatus)
+        ) {
+          deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
+          deps.stopLoading();
+        } else if (
           isRunningSessionStatus(currentStatus) ||
           latestAssistantFinishedBeforeCurrentLoading(messages, deps.loadingStartedAt?.() ?? null)
         ) {
@@ -371,6 +387,24 @@ export async function recheckSessionStatusWithDependencies(
   }
 }
 
+async function settleVoid(promise: Promise<void>): Promise<PromiseSettledResult<void>> {
+  try {
+    await promise;
+    return { status: 'fulfilled', value: undefined };
+  } catch (reason) {
+    return { status: 'rejected', reason };
+  }
+}
+
+function logRejectedSyncs(
+  deps: { logError(context: string, err: unknown): void },
+  results: PromiseSettledResult<void>[]
+) {
+  for (const result of results) {
+    if (result.status === 'rejected') deps.logError('recheckSessionStatusSync', result.reason);
+  }
+}
+
 function hasUnsettledLatestTurn(messages: SessionMessageEntry[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
@@ -387,6 +421,10 @@ function latestAssistantFinishedBeforeLoading(
 ) {
   const finishedAt = getLatestAssistantFinishedAt(messages);
   return finishedAt !== null && (loadingStartedAt === null || loadingStartedAt <= finishedAt);
+}
+
+function latestAssistantFinished(messages: SessionMessageEntry[]) {
+  return getLatestAssistantFinishedAt(messages) !== null;
 }
 
 function latestAssistantFinishedBeforeCurrentLoading(

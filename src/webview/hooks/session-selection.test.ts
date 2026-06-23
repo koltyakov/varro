@@ -252,6 +252,7 @@ describe('session-selection helpers', () => {
   });
 
   it('stops loading when synced active messages show a completed assistant reply', async () => {
+    const setMessagesIncremental = vi.fn();
     const stopLoading = vi.fn();
     const completed = assistantMessage('assistant-1');
     completed.time.completed = 2;
@@ -264,7 +265,7 @@ describe('session-selection helpers', () => {
         loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
         updateUsageLimitState: vi.fn(),
         setSessionStatusEntry: vi.fn(),
-        setMessagesIncremental: vi.fn(),
+        setMessagesIncremental,
         stopLoading,
         syncFailedSessionsFromMessages: vi.fn(),
         handoffTodosToMessages: vi.fn(),
@@ -276,6 +277,9 @@ describe('session-selection helpers', () => {
       'session-1'
     );
 
+    expect(setMessagesIncremental).toHaveBeenCalledWith([{ info: completed, parts: [] }], {
+      preserveExtraParts: false,
+    });
     expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 

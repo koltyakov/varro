@@ -137,7 +137,7 @@ import {
 } from './session/session-event-handlers';
 import { setShowSessionPicker } from '../lib/state';
 
-type EventData = { properties?: Record<string, unknown> };
+type EventData = { properties?: Record<string, unknown>; seq?: number };
 
 function installHandlers() {
   const handlers = new Map<string, (data: EventData) => void>();
@@ -1504,6 +1504,7 @@ describe('registerSessionEventHandlers', () => {
 
     upsertPart.mockClear();
     applyMessagePartDelta.mockClear();
+    loadingStartedAt.mockReturnValueOnce(3);
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -1762,6 +1763,176 @@ describe('registerSessionEventHandlers', () => {
     expect(markLoadingActivity).not.toHaveBeenCalled();
     expect(startLoading).not.toHaveBeenCalled();
     expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles a terminal v2 step end when no idle event arrives', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const updateUsageLimitState = vi.fn();
+    const clearPendingAbort = vi.fn();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    upsertMessageInfo.mockClear();
+    upsertMessageInfo.mockImplementation((info: Message) => {
+      assistantEntry = { ...assistantEntry, info };
+    });
+    finishMessageStreaming.mockClear();
+    markLoadingActivity.mockClear();
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        setSessionStatusEntry,
+        updateUsageLimitState,
+        clearPendingAbort,
+        syncSession,
+        shouldResyncSessionAfterIdle: () => true,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.step.ended')?.({
+      seq: 1,
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        finish: 'stop',
+        timestamp: 3,
+      },
+    });
+
+    expect(upsertMessageInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-1',
+        time: { created: 1, completed: 3 },
+      })
+    );
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
+    expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(syncSession).toHaveBeenCalledWith('session-1');
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+    expect(markLoadingActivity).not.toHaveBeenCalled();
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    upsertMessageInfo.mockReset();
+  });
+
+  it('ignores replayed v2 parts after a terminal step completes the assistant message', () => {
+    const handlers = installHandlers();
+    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    upsertMessageInfo.mockClear();
+    upsertMessageInfo.mockImplementation((info: Message) => {
+      assistantEntry = { ...assistantEntry, info };
+    });
+    upsertPart.mockClear();
+    markLoadingActivity.mockClear();
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+      })
+    );
+
+    handlers.get('session.next.step.ended')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        finish: 'stop',
+        timestamp: 3,
+      },
+    });
+    upsertPart.mockClear();
+    markLoadingActivity.mockClear();
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    handlers.get('session.next.text.ended')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        textID: 'text-replay',
+        text: 'stale replay',
+      },
+    });
+
+    expect(upsertPart).not.toHaveBeenCalled();
+    expect(markLoadingActivity).not.toHaveBeenCalled();
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    upsertMessageInfo.mockReset();
+  });
+
+  it('keeps tool-call v2 step ends in progress', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        setSessionStatusEntry,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.step.ended')?.({
+      seq: 1,
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        finish: 'tool_calls',
+      },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('does not settle the latest message for a terminal step from another assistant id', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    upsertMessageInfo.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createAssistantEntry() as { info: Message; parts: Part[] }],
+        setSessionStatusEntry,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.step.ended')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-stale',
+        finish: 'stop',
+      },
+    });
+
+    expect(upsertMessageInfo).not.toHaveBeenCalled();
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('marks inactive sessions busy from progress events without active message work', () => {

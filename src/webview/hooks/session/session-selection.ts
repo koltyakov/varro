@@ -173,8 +173,9 @@ export async function syncSessionMessagesWithDependencies(
 
   deps.updateUsageLimitState(sessionId, deps.getSessionStatus(sessionId), messages);
   if (sessionId === deps.getActiveSessionId()) {
-    deps.setMessagesIncremental(messages, { preserveExtraParts: true });
-    if (latestAssistantFinishedBeforeLoading(messages, deps.loadingStartedAt())) deps.stopLoading();
+    const latestFinished = latestAssistantFinishedBeforeLoading(messages, deps.loadingStartedAt());
+    deps.setMessagesIncremental(messages, { preserveExtraParts: !latestFinished });
+    if (latestFinished) deps.stopLoading();
     deps.syncFailedSessionsFromMessages(messages);
     deps.handoffTodosToMessages(messages);
   } else if (latestAssistantFinished(messages)) {

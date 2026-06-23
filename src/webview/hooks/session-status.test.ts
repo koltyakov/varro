@@ -516,6 +516,43 @@ describe('session status helpers', () => {
     expect(stopLoadingSpy).not.toHaveBeenCalled();
   });
 
+  it('stops active loading when an idle recheck syncs a completed latest reply', async () => {
+    const stopLoadingSpy = vi.fn();
+    const startLoadingSpy = vi.fn();
+    const setSessionStatusEntry = vi.fn();
+    let messages = [{ info: userMessage(), parts: [] }];
+
+    await recheckSessionStatusWithDependencies(
+      {
+        isDocumentVisible: () => true,
+        loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
+        shouldIgnorePendingAbortStatus: () => false,
+        hasPendingAbort: () => false,
+        updateUsageLimitState: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        stopLoading: stopLoadingSpy,
+        setSessionStatusEntry,
+        setSessionStatuses: vi.fn(),
+        shouldResyncSessionAfterIdle: () => true,
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {
+          messages = [{ info: completedAssistantMessage(), parts: [] }];
+        }),
+        startLoading: startLoadingSpy,
+        loadingStartedAt: () => 3,
+        isActiveSession: () => true,
+        getCurrentSessionStatus: () => ({ type: 'busy' }),
+        getMessages: () => messages,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(stopLoadingSpy).toHaveBeenCalledTimes(1);
+    expect(startLoadingSpy).not.toHaveBeenCalled();
+  });
+
   it('replaces stale running statuses with the latest status snapshot during recheck', async () => {
     const setSessionStatuses = vi.fn();
 
