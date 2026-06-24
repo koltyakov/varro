@@ -67,6 +67,7 @@ export class SessionStateManager {
   private readonly sessionModes = new Map<string, string>();
   private readonly busyStartedAt = new Map<string, number>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
+  private readonly reconcileIdleSince = new Map<string, number>();
 
   constructor(
     private readonly persistence: Persistence,
@@ -557,6 +558,61 @@ export class SessionStateManager {
     return (
       startedAt !== undefined && completedAt + COMPLETION_NOTIFICATION_CLOCK_SKEW_MS < startedAt
     );
+  }
+
+  /**
+   * Compares locally-tracked busy sessions against server-authoritative status
+   * (REST `/session/status`). Returns IDs of sessions the server has reported
+   * idle for at least `graceMs` while we still track them as busy — strong
+   * evidence the completion event was lost (e.g. during an SSE reconnect or
+   * while the webview was hidden, where the webview-side watchdog cannot run).
+   * Clears those sessions locally (mirroring the normal completion path) so
+   * the caller can post synthetic idle events to recover the UI.
+   *
+   * The grace requirement protects against transient idle gaps between
+   * agentic steps: a session that briefly reports idle before the next step
+   * starts must remain busy. Only a sustained disagreement is reconciled.
+   */
+  reconcileStaleBusySessions(
+    serverStatuses: Record<string, unknown>,
+    graceMs: number,
+    now: number = Date.now()
+  ): string[] {
+    if (this.busySessions.size === 0) {
+      this.reconcileIdleSince.clear();
+      return [];
+    }
+    const stale: string[] = [];
+    for (const sessionID of this.busySessions) {
+      if (this.hasPendingAttentionForSession(sessionID)) continue;
+      const entry =
+        serverStatuses[sessionID] && typeof serverStatuses[sessionID] === 'object'
+          ? (serverStatuses[sessionID] as Record<string, unknown>)
+          : null;
+      const serverType = typeof entry?.type === 'string' ? entry.type : undefined;
+      if (serverType === 'busy' || serverType === 'retry') {
+        this.reconcileIdleSince.delete(sessionID);
+        continue;
+      }
+      const since = this.reconcileIdleSince.get(sessionID);
+      if (since === undefined) {
+        this.reconcileIdleSince.set(sessionID, now);
+        continue;
+      }
+      if (now - since < graceMs) continue;
+      this.reconcileIdleSince.delete(sessionID);
+      if (this.finishBusySession(sessionID, undefined)) {
+        stale.push(sessionID);
+      }
+    }
+    for (const id of this.reconcileIdleSince.keys()) {
+      if (!this.busySessions.has(id)) this.reconcileIdleSince.delete(id);
+    }
+    if (stale.length > 0) {
+      this.listener.onStatusChange();
+      void this.persist();
+    }
+    return stale;
   }
 
   private markSessionFailed(

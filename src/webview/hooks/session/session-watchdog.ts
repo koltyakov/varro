@@ -47,6 +47,12 @@ export type StuckSessionReconcileDeps = {
   logError(context: string, err: unknown): void;
   /** Loaded messages for the active tree; used to detect streamed completion. */
   getMessages(): MessageEntry[];
+  /**
+   * The active streaming buffer (partId + accumulated text). Text is kept here
+   * until the completion event commits it to the message part, so when that
+   * event is missed the watchdog must look here for evidence the turn streamed.
+   */
+  getStreamingText(): { partId: string | null; text: string };
 };
 
 /**
@@ -99,7 +105,7 @@ export async function reconcileStuckSessionsWithDependencies(
     // tools in flight, local evidence says the turn is done; collapse the grace
     // so we reconcile on the first server-idle confirmation instead of waiting
     // out the full window tuned for the no-evidence case.
-    const effectiveGrace = hasStreamedFinalResponse(messages, sessionId)
+    const effectiveGrace = hasStreamedFinalResponse(messages, sessionId, deps.getStreamingText())
       ? streamedGraceMs
       : graceMs;
     const since = stuckSince.get(sessionId);
@@ -191,15 +197,30 @@ export function selectUnsettledLatestAssistant(
  * an unsettled assistant turn that produced a non-empty text part and has no
  * tool part still pending or running. Used to shorten the watchdog grace.
  */
-export function hasStreamedFinalResponse(messages: MessageEntry[], sessionId: string): boolean {
+export function hasStreamedFinalResponse(
+  messages: MessageEntry[],
+  sessionId: string,
+  streaming?: { partId: string | null; text: string } | null
+): boolean {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const entry = messages[index];
     if (!entry || entry.info.sessionID !== sessionId) continue;
     if (entry.info.role !== 'assistant') return false;
     const info = entry.info as AssistantMessage;
     if (info.error || info.time.completed) return false;
-    const hasText = entry.parts.some((part) => part.type === 'text' && part.text.trim().length > 0);
-    if (!hasText) return false;
+    const hasCommittedText = entry.parts.some(
+      (part) => part.type === 'text' && part.text.trim().length > 0
+    );
+    // Text may still be buffered in the streaming state if the completion
+    // event that would commit it (session.next.text.ended) was missed. Treat
+    // non-empty buffered text for a part of this message as equivalent
+    // evidence — it collapses the watchdog grace for prompt recovery.
+    const hasBufferedText =
+      !!streaming &&
+      !!streaming.partId &&
+      streaming.text.trim().length > 0 &&
+      entry.parts.some((part) => part.id === streaming.partId);
+    if (!hasCommittedText && !hasBufferedText) return false;
     return !entry.parts.some(
       (part) =>
         part.type === 'tool' && (part.state.status === 'pending' || part.state.status === 'running')

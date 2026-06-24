@@ -479,6 +479,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         forceReconcileIdleSession,
         logError,
         getMessages: () => appStore.state.messages,
+        getStreamingText: () => ({
+          partId: appStore.state.streamingPartId,
+          text: appStore.state.streamingText,
+        }),
       },
       stuckSessionTimers
     );

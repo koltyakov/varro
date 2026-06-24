@@ -44,6 +44,7 @@ function baseReconcileDeps(overrides: Record<string, unknown> = {}) {
     forceReconcileIdleSession: vi.fn(async () => {}),
     logError: vi.fn(),
     getMessages: vi.fn(() => [] as MessageEntry[]),
+    getStreamingText: vi.fn(() => ({ partId: null, text: '' })),
     ...overrides,
   };
 }
@@ -210,6 +211,24 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.get('s1')).toBe(1000);
   });
+
+  it('fast-paths when text is buffered in streamingText but not yet committed', async () => {
+    // The completion event was missed, so the text part is still empty — the
+    // streamed text lives in the streaming buffer. This is strong evidence the
+    // turn finished and should collapse the grace.
+    const streamed = assistant('a1', 's1');
+    streamed.parts = [textPart('t1', 's1', '')];
+    const deps = baseReconcileDeps({
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getMessages: () => [streamed],
+      getStreamingText: () => ({ partId: 't1', text: 'The full final answer.' }),
+      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+    });
+    const timers = new Map<string, number>();
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
+    expect(timers.has('s1')).toBe(false);
+  });
 });
 
 function textPart(id: string, sessionID: string, text: string): Part {
@@ -331,6 +350,22 @@ describe('hasStreamedFinalResponse', () => {
     const msg = assistant('a1', 's1');
     msg.parts = [textPart('t1', 's1', 'Partial'), toolPart('tool-1', 's1', 'running')];
     expect(hasStreamedFinalResponse([msg], 's1')).toBe(false);
+  });
+
+  it('is true when text is only in the streaming buffer (completion event missed)', () => {
+    const msg = assistant('a1', 's1');
+    msg.parts = [textPart('t1', 's1', '')];
+    expect(hasStreamedFinalResponse([msg], 's1', { partId: 't1', text: 'Buffered answer.' })).toBe(
+      true
+    );
+  });
+
+  it('is false when buffered text belongs to a different part', () => {
+    const msg = assistant('a1', 's1');
+    msg.parts = [textPart('t1', 's1', '')];
+    expect(
+      hasStreamedFinalResponse([msg], 's1', { partId: 'other-part', text: 'Buffered answer.' })
+    ).toBe(false);
   });
 
   it('is false when the latest message is a user turn', () => {

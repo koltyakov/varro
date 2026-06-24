@@ -43,6 +43,13 @@ function createManager(shouldShow: () => boolean = () => true) {
   return new SessionStateManager(workspaceState as never, listener, { shouldShow });
 }
 
+function markBusy(manager: SessionStateManager, sessionID: string) {
+  manager.handleServerEvent({
+    type: 'session.status',
+    properties: { sessionID, status: { type: 'busy' } },
+  });
+}
+
 describe('SessionStateManager notifications', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -710,5 +717,81 @@ describe('SessionStateManager notifications', () => {
 
     expect(manager.isSessionInWorkspace('session-1', '/repo')).toBe(false);
     expect(manager.isSessionInWorkspace('session-1', null)).toBe(true);
+  });
+});
+
+describe('SessionStateManager.reconcileStaleBusySessions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const GRACE_MS = 10_000;
+
+  it('returns an empty list when nothing is busy', () => {
+    const manager = createManager();
+    const stale = manager.reconcileStaleBusySessions({}, GRACE_MS, 1000);
+    expect(stale).toEqual([]);
+  });
+
+  it('does not reconcile on the first server-idle observation (starts grace)', () => {
+    const manager = createManager();
+    markBusy(manager, 's1');
+    const stale = manager.reconcileStaleBusySessions({}, GRACE_MS, 1000);
+    expect(stale).toEqual([]);
+    expect(manager.busy.has('s1')).toBe(true);
+  });
+
+  it('reconciles after the grace window elapses with sustained server-idle', () => {
+    const manager = createManager();
+    markBusy(manager, 's1');
+    manager.reconcileStaleBusySessions({}, GRACE_MS, 1000);
+    const stale = manager.reconcileStaleBusySessions({}, GRACE_MS, 1000 + GRACE_MS);
+    expect(stale).toEqual(['s1']);
+    expect(manager.busy.has('s1')).toBe(false);
+    expect(manager.completed.has('s1')).toBe(true);
+  });
+
+  it('does not reconcile when the server still reports the session busy', () => {
+    const manager = createManager();
+    markBusy(manager, 's1');
+    manager.reconcileStaleBusySessions({ s1: { type: 'busy' } }, GRACE_MS, 1000);
+    const stale = manager.reconcileStaleBusySessions(
+      { s1: { type: 'busy' } },
+      GRACE_MS,
+      1000 + GRACE_MS
+    );
+    expect(stale).toEqual([]);
+    expect(manager.busy.has('s1')).toBe(true);
+  });
+
+  it('resets the grace timer when the server reports busy again', () => {
+    const manager = createManager();
+    markBusy(manager, 's1');
+    manager.reconcileStaleBusySessions({}, GRACE_MS, 1000);
+    manager.reconcileStaleBusySessions({ s1: { type: 'busy' } }, GRACE_MS, 2000);
+    const stale = manager.reconcileStaleBusySessions({}, GRACE_MS, 2000 + GRACE_MS - 1);
+    expect(stale).toEqual([]);
+    expect(manager.busy.has('s1')).toBe(true);
+  });
+
+  it('does not reconcile sessions awaiting input', () => {
+    const manager = createManager();
+    markBusy(manager, 's1');
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'perm-1', sessionID: 's1', title: 'Use Bash' },
+    });
+    const stale = manager.reconcileStaleBusySessions({}, GRACE_MS, 1000 + GRACE_MS + 1);
+    expect(stale).toEqual([]);
+  });
+
+  it('reconciles multiple stale sessions at once', () => {
+    const manager = createManager();
+    markBusy(manager, 's1');
+    markBusy(manager, 's2');
+    manager.reconcileStaleBusySessions({}, GRACE_MS, 1000);
+    const stale = manager.reconcileStaleBusySessions({}, GRACE_MS, 1000 + GRACE_MS);
+    expect(stale.toSorted()).toEqual(['s1', 's2']);
+    expect(manager.busy.size).toBe(0);
   });
 });

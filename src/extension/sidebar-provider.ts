@@ -30,6 +30,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
   private static readonly EXPORT_TIMEOUT_MS = 30_000;
   private static readonly RECYCLE_BIN_CLEANUP_INTERVAL_MS = 60_000;
+  private static readonly SESSION_RECONCILE_INTERVAL_MS = 10_000;
+  private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
 
   private lastStatusBarStateKey = '';
   private readonly fileSearch: FileSearchService;
@@ -52,6 +54,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private providerConfigWatcher: vscode.FileSystemWatcher | null = null;
   private providerAuthWatcher: vscode.FileSystemWatcher | null = null;
   private providerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private sessionReconcileTimer: ReturnType<typeof setInterval> | null = null;
   private providerFilesSignature = this.readProviderFilesSignature();
   private readonly contextProvider: ContextProvider;
 
@@ -270,6 +273,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       clearTimeout(this.providerRefreshTimer);
       this.providerRefreshTimer = null;
     }
+    if (this.sessionReconcileTimer) {
+      clearInterval(this.sessionReconcileTimer);
+      this.sessionReconcileTimer = null;
+    }
     await this.webviewSession.dispose();
     await this.serverEventBridge.dispose();
     this.configDisposable.dispose();
@@ -431,6 +438,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private updateStatusBarItem() {
+    this.updateSessionReconcileTimer();
     const next = this.getStatusBarState();
     const nextKey = JSON.stringify(next);
     if (nextKey === this.lastStatusBarStateKey) return;
@@ -446,6 +454,54 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     statusBarItem.backgroundColor = next.backgroundColor;
     statusBarItem.tooltip = next.tooltip;
     statusBarItem.show();
+  }
+
+  /**
+   * Starts a periodic reconciliation poll whenever the extension tracks busy
+   * sessions and the server is running. This is the fallback that recovers
+   * sessions whose completion event was lost — the webview-side watchdog only
+   * runs while the panel is visible, so a hidden webview would never recover.
+   * The poll asks the server (authoritative) which sessions are idle and, for
+   * any that disagree with our busy set past the grace window, posts a
+   * synthetic `session.idle` so the webview converges.
+   */
+  private updateSessionReconcileTimer() {
+    const shouldRun =
+      this.sessionState.busy.size > 0 && this.serverEventBridge.getStatus().state === 'running';
+    if (shouldRun && !this.sessionReconcileTimer) {
+      this.sessionReconcileTimer = setInterval(
+        () => void this.runSessionReconcile(),
+        SidebarProvider.SESSION_RECONCILE_INTERVAL_MS
+      );
+    } else if (!shouldRun && this.sessionReconcileTimer) {
+      clearInterval(this.sessionReconcileTimer);
+      this.sessionReconcileTimer = null;
+    }
+  }
+
+  private async runSessionReconcile() {
+    if (this.sessionState.busy.size === 0) return;
+    let serverStatuses: Record<string, unknown>;
+    try {
+      const result = await this.server.request('GET', '/session/status');
+      serverStatuses =
+        result && typeof result === 'object' ? (result as Record<string, unknown>) : {};
+    } catch {
+      return;
+    }
+    const stale = this.sessionState.reconcileStaleBusySessions(
+      serverStatuses,
+      SidebarProvider.SESSION_RECONCILE_GRACE_MS
+    );
+    for (const sessionID of stale) {
+      this.post({
+        type: 'server/event',
+        payload: {
+          type: 'session.idle',
+          properties: { sessionID },
+        },
+      });
+    }
   }
 
   private getStatusBarState():
