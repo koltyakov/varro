@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Message, Part, SessionStatus } from '../types';
 import {
   forceReconcileIdleSessionWithDependencies,
+  hasStreamedFinalResponse,
   reconcileStuckSessionsWithDependencies,
   registerStuckSessionWatchdogEffect,
   selectUnsettledLatestAssistant,
@@ -42,6 +43,7 @@ function baseReconcileDeps(overrides: Record<string, unknown> = {}) {
     hasPendingAbort: vi.fn(() => false),
     forceReconcileIdleSession: vi.fn(async () => {}),
     logError: vi.fn(),
+    getMessages: vi.fn(() => [] as MessageEntry[]),
     ...overrides,
   };
 }
@@ -165,7 +167,65 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
     expect(timers.size).toBe(0);
   });
+
+  it('reconciles on the first server-idle poll when the final response streamed', async () => {
+    const streamed = assistant('a1', 's1');
+    streamed.parts = [textPart('t1', 's1', 'The full final answer.')];
+    const deps = baseReconcileDeps({
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getMessages: () => [streamed],
+      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+    });
+    const timers = new Map<string, number>();
+    // First poll: server idle + streamed evidence -> reconcile at once, no grace wait.
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
+    expect(timers.has('s1')).toBe(false);
+  });
+
+  it('still waits for the grace window when only a busy status is stuck (no streamed text)', async () => {
+    const deps = baseReconcileDeps({
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getMessages: () => [],
+      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+    });
+    const timers = new Map<string, number>();
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
+    expect(timers.get('s1')).toBe(1000);
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
+    expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
+  });
+
+  it('does not fast-path when the streamed assistant turn still has a running tool', async () => {
+    const streamed = assistant('a1', 's1');
+    streamed.parts = [textPart('t1', 's1', 'Working on it.'), toolPart('tool-1', 's1', 'running')];
+    const deps = baseReconcileDeps({
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getMessages: () => [streamed],
+      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+    });
+    const timers = new Map<string, number>();
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    expect(deps.forceReconcileIdleSession).not.toHaveBeenCalled();
+    expect(timers.get('s1')).toBe(1000);
+  });
 });
+
+function textPart(id: string, sessionID: string, text: string): Part {
+  return { id, sessionID, messageID: 'a1', type: 'text', text } as Part;
+}
+
+function toolPart(id: string, sessionID: string, status: 'running' | 'pending'): Part {
+  return {
+    id,
+    sessionID,
+    messageID: 'a1',
+    type: 'tool',
+    callID: id,
+    state: { status, input: {} },
+  } as unknown as Part;
+}
 
 function baseForceDeps(overrides: Record<string, unknown> = {}) {
   return {
@@ -245,6 +305,37 @@ describe('selectUnsettledLatestAssistant', () => {
   it('ignores messages from other sessions', () => {
     const messages = [assistant('a1', 's2'), assistant('a2', 's1')];
     expect(selectUnsettledLatestAssistant(messages, 's1')?.id).toBe('a2');
+  });
+});
+
+describe('hasStreamedFinalResponse', () => {
+  it('is true when the latest unsettled assistant has text and no running tools', () => {
+    const msg = assistant('a1', 's1');
+    msg.parts = [textPart('t1', 's1', 'Final answer.')];
+    expect(hasStreamedFinalResponse([msg], 's1')).toBe(true);
+  });
+
+  it('is false when the latest assistant has completed', () => {
+    const msg = assistant('a1', 's1', { time: { created: 1, completed: 2 } });
+    msg.parts = [textPart('t1', 's1', 'Final answer.')];
+    expect(hasStreamedFinalResponse([msg], 's1')).toBe(false);
+  });
+
+  it('is false when there is no finalized text part yet', () => {
+    const msg = assistant('a1', 's1');
+    msg.parts = [textPart('t1', 's1', '')];
+    expect(hasStreamedFinalResponse([msg], 's1')).toBe(false);
+  });
+
+  it('is false when a tool part is still running', () => {
+    const msg = assistant('a1', 's1');
+    msg.parts = [textPart('t1', 's1', 'Partial'), toolPart('tool-1', 's1', 'running')];
+    expect(hasStreamedFinalResponse([msg], 's1')).toBe(false);
+  });
+
+  it('is false when the latest message is a user turn', () => {
+    const messages = [assistant('a1', 's1'), user('u2', 's1')];
+    expect(hasStreamedFinalResponse(messages, 's1')).toBe(false);
   });
 });
 

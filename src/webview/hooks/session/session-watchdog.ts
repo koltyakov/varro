@@ -13,6 +13,12 @@ export const STUCK_SESSION_WATCHDOG_INTERVAL_MS = 4_000;
 // re-marks the session busy), whereas a missed completion is permanent, so this
 // is tuned for prompt recovery with a safety margin.
 export const STUCK_SESSION_GRACE_MS = 8_000;
+// Reduced grace used when the latest assistant turn has already streamed its
+// final text with no tools in flight — strong local evidence the turn is done
+// even though the completion event was missed. The server-idle confirmation is
+// still required, but we no longer demand it persist across multiple polls, so
+// recovery happens on the first poll instead of after the full grace window.
+export const STUCK_SESSION_STREAMED_GRACE_MS = 0;
 
 function isRunningStatus(status: SessionStatus | null | undefined): boolean {
   return status?.type === 'busy' || status?.type === 'retry';
@@ -39,19 +45,24 @@ export type StuckSessionReconcileDeps = {
   hasPendingAbort(sessionId: string): boolean;
   forceReconcileIdleSession(sessionId: string): Promise<void>;
   logError(context: string, err: unknown): void;
+  /** Loaded messages for the active tree; used to detect streamed completion. */
+  getMessages(): MessageEntry[];
 };
 
 /**
  * Compares the webview's busy sessions against server-authoritative status. Any
  * session the server has reported idle/absent for at least `graceMs` while the
  * UI still shows it busy is declared stuck and force-reconciled. `stuckSince`
- * persists across calls so the grace window spans multiple polls.
+ * persists across calls so the grace window spans multiple polls. When a session
+ * shows local evidence its final response already streamed (`streamedGraceMs`),
+ * that grace collapses so recovery happens on the first server-idle poll.
  */
 export async function reconcileStuckSessionsWithDependencies(
   deps: StuckSessionReconcileDeps,
   stuckSince: Map<string, number>,
   now: number = Date.now(),
-  graceMs: number = STUCK_SESSION_GRACE_MS
+  graceMs: number = STUCK_SESSION_GRACE_MS,
+  streamedGraceMs: number = STUCK_SESSION_STREAMED_GRACE_MS
 ): Promise<void> {
   const local = deps.getLocalSessionStatuses();
   const candidates = new Set<string>(
@@ -78,18 +89,27 @@ export async function reconcileStuckSessionsWithDependencies(
     return;
   }
 
+  const messages = deps.getMessages();
   const stillTracked = new Set<string>();
   for (const sessionId of candidates) {
     if (deps.hasPendingAbort(sessionId) || deps.isAwaitingInput(sessionId)) continue;
     if (isRunningStatus(serverStatuses[sessionId])) continue;
 
+    // When the latest assistant turn already streamed its final text with no
+    // tools in flight, local evidence says the turn is done; collapse the grace
+    // so we reconcile on the first server-idle confirmation instead of waiting
+    // out the full window tuned for the no-evidence case.
+    const effectiveGrace = hasStreamedFinalResponse(messages, sessionId)
+      ? streamedGraceMs
+      : graceMs;
     const since = stuckSince.get(sessionId);
     if (since === undefined) {
-      stuckSince.set(sessionId, now);
-      stillTracked.add(sessionId);
-      continue;
-    }
-    if (now - since < graceMs) {
+      if (effectiveGrace > 0) {
+        stuckSince.set(sessionId, now);
+        stillTracked.add(sessionId);
+        continue;
+      }
+    } else if (now - since < effectiveGrace) {
       stillTracked.add(sessionId);
       continue;
     }
@@ -163,6 +183,29 @@ export function selectUnsettledLatestAssistant(
     return info;
   }
   return null;
+}
+
+/**
+ * Strong local evidence that the latest assistant turn for `sessionId` finished
+ * streaming even though its completion was never stamped: the latest message is
+ * an unsettled assistant turn that produced a non-empty text part and has no
+ * tool part still pending or running. Used to shorten the watchdog grace.
+ */
+export function hasStreamedFinalResponse(messages: MessageEntry[], sessionId: string): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const entry = messages[index];
+    if (!entry || entry.info.sessionID !== sessionId) continue;
+    if (entry.info.role !== 'assistant') return false;
+    const info = entry.info as AssistantMessage;
+    if (info.error || info.time.completed) return false;
+    const hasText = entry.parts.some((part) => part.type === 'text' && part.text.trim().length > 0);
+    if (!hasText) return false;
+    return !entry.parts.some(
+      (part) =>
+        part.type === 'tool' && (part.state.status === 'pending' || part.state.status === 'running')
+    );
+  }
+  return false;
 }
 
 export function registerStuckSessionWatchdogEffect(deps: {

@@ -478,6 +478,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         hasPendingAbort: (sessionId) => pendingAbortRetryAttempts.has(sessionId),
         forceReconcileIdleSession,
         logError,
+        getMessages: () => appStore.state.messages,
       },
       stuckSessionTimers
     );
