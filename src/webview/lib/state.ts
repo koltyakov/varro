@@ -1908,7 +1908,10 @@ export function upsertPart(part: Part) {
         if (idx === -1) return;
         const location = messageIndex.findPartLocation(msgs, nextPart.id);
         if (location && location.msgIdx === idx) {
-          msgs[idx]!.parts[location.partIdx] = nextPart;
+          msgs[idx]!.parts[location.partIdx] = mergePartUpdate(
+            msgs[idx]!.parts[location.partIdx],
+            nextPart
+          );
           return;
         }
 
@@ -1924,6 +1927,45 @@ export function upsertPart(part: Part) {
       setState('streamingText', '');
     }
   });
+}
+
+function mergePartUpdate(current: Part | undefined, incoming: Part): Part {
+  if (!current || current.type !== incoming.type) return incoming;
+  if (isStreamingTextPart(current) && isStreamingTextPart(incoming)) {
+    if (current.text.length <= incoming.text.length) return incoming;
+    if (!current.text.startsWith(incoming.text)) return incoming;
+
+    return { ...incoming, text: current.text };
+  }
+  if (current.type === 'tool' && incoming.type === 'tool') {
+    return mergeToolPartUpdate(current, incoming);
+  }
+
+  return incoming;
+}
+
+function mergeToolPartUpdate(
+  current: Extract<Part, { type: 'tool' }>,
+  incoming: Extract<Part, { type: 'tool' }>
+): Part {
+  if (current.callID !== incoming.callID) return incoming;
+  if (getToolStateProgressRank(current.state) <= getToolStateProgressRank(incoming.state)) {
+    return incoming;
+  }
+
+  return current;
+}
+
+function getToolStateProgressRank(state: Extract<Part, { type: 'tool' }>['state']) {
+  switch (state.status) {
+    case 'pending':
+      return 0;
+    case 'running':
+      return 1;
+    case 'completed':
+    case 'error':
+      return 2;
+  }
 }
 
 export function updateMessagePart(part: Part) {
@@ -2416,6 +2458,12 @@ function mergeMessageEntry(
   if (!current || !options?.preserveExtraParts || current.parts.length === 0) {
     materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
     return next;
+  }
+
+  const currentPartById = new Map(current.parts.map((part) => [part.id, part]));
+  for (let index = 0; index < next.parts.length; index += 1) {
+    const part = next.parts[index]!;
+    next.parts[index] = mergePartUpdate(currentPartById.get(part.id), part);
   }
 
   const incomingPartIds = new Set(next.parts.map((part) => part.id));

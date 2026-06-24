@@ -90,6 +90,22 @@ function toolPart(id: string): Part {
   };
 }
 
+function pendingToolPart(id: string): Part {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'tool',
+    callID: 'call-1',
+    tool: 'bash',
+    state: {
+      status: 'pending',
+      input: {},
+      raw: '',
+    },
+  };
+}
+
 function nextFrame() {
   return new Promise<void>((resolve) => {
     if (typeof requestAnimationFrame === 'function') {
@@ -166,6 +182,72 @@ describe('state streaming deltas', () => {
     });
     expect(state.streamingPartId).toBeNull();
     expect(state.streamingText).toBe('');
+  });
+
+  it('keeps committed streamed text when a stale finalized update arrives later', async () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [textPart('text-1', ''), textPart('text-2', '')],
+    });
+
+    applyMessagePartDelta('message-1', 'text-1', 'First final response part', 'session-1');
+    await nextFrame();
+    applyMessagePartDelta('message-1', 'text-2', 'Second final response part', 'session-1');
+    await nextFrame();
+
+    upsertPart(textPart('text-1', ''));
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'text-1',
+      type: 'text',
+      text: 'First final response part',
+    });
+    expect(state.streamingPartId).toBe('text-2');
+    expect(state.streamingText).toBe('Second final response part');
+  });
+
+  it('keeps projected reasoning text when an active-session refresh is stale', () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [reasoningPart('**Examining text replacement**')],
+    });
+
+    setMessagesIncremental(
+      [
+        {
+          info: assistantMessage(),
+          parts: [reasoningPart('')],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({
+      id: 'reason-1',
+      type: 'reasoning',
+      text: '**Examining text replacement**',
+    });
+  });
+
+  it('keeps projected tool progress when an active-session refresh is stale', () => {
+    upsertMessage({
+      info: assistantMessage(),
+      parts: [toolPart('tool-1')],
+    });
+
+    setMessagesIncremental(
+      [
+        {
+          info: assistantMessage(),
+          parts: [pendingToolPart('tool-1')],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    const part = state.messages[0]?.parts[0];
+    if (!part || part.type !== 'tool') throw new Error('Expected a tool part');
+    expect(part.state.status).toBe('running');
   });
 
   it('commits the previous streaming part text when another part becomes active later', async () => {
