@@ -370,26 +370,28 @@ export type Todo = {
   id: string;
 };
 
+export type ModelCapabilitiesModality = 'text' | 'audio' | 'image' | 'video' | 'pdf';
+
+type ModelCapabilitiesModalityMap = {
+  text: boolean;
+  audio: boolean;
+  image: boolean;
+  video: boolean;
+  pdf: boolean;
+};
+
+type ModelCapabilitiesModalityList = Array<ModelCapabilitiesModality | string>;
+
 export type ModelCapabilities = {
   temperature?: boolean;
   reasoning?: boolean;
   vision?: boolean;
   attachment?: boolean;
-  toolcall: boolean;
-  input?: {
-    text: boolean;
-    audio: boolean;
-    image: boolean;
-    video: boolean;
-    pdf: boolean;
-  };
-  output?: {
-    text: boolean;
-    audio: boolean;
-    image: boolean;
-    video: boolean;
-    pdf: boolean;
-  };
+  toolcall?: boolean;
+  tool_call?: boolean;
+  tools?: boolean;
+  input?: ModelCapabilitiesModalityMap | ModelCapabilitiesModalityList;
+  output?: ModelCapabilitiesModalityMap | ModelCapabilitiesModalityList;
   interleaved?: boolean | { field: 'reasoning_content' | 'reasoning_details' };
 };
 

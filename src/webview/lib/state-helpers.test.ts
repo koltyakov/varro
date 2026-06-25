@@ -903,6 +903,33 @@ describe('state helpers', () => {
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-1']);
   });
 
+  it('prunes an edited user message and later messages with restore support', async () => {
+    const stateModule = await loadState();
+    const messages = [
+      { info: userMessage('user-1', 'session-1', 1), parts: [] },
+      { info: assistantMessage('assistant-1', 'session-1', 2, 'default', 'user-1'), parts: [] },
+      { info: userMessage('user-2', 'session-1', 3), parts: [] },
+      { info: assistantMessage('assistant-2', 'session-1', 4, 'default', 'user-2'), parts: [] },
+    ];
+    stateModule.setMessagesIncremental(messages);
+
+    const restore = stateModule.pruneMessagesFrom('session-1', 'user-2');
+
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-1',
+      'assistant-1',
+    ]);
+
+    restore?.();
+
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+    ]);
+  });
+
   it('toggles local ui helpers and persists ui display preferences', async () => {
     const stateModule = await loadState();
 

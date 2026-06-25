@@ -778,6 +778,31 @@ describe('ToolCall', () => {
     });
   });
 
+  it('uses the stable read-card shell without a transient running label while reads start', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'read',
+      state: {
+        status: 'running',
+        input: {},
+        title: 'read',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-read-running-label')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+    expect(container?.textContent).not.toContain('reading');
+    expect(container?.querySelector('.file-read-card-header')).not.toBeNull();
+  });
+
   it('hides completed file-read durations under one second', () => {
     const part: ToolPart = {
       id: 'tool-1',

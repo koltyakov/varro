@@ -5,7 +5,7 @@ import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } fr
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { formatDuration } from '../lib/message-metrics';
-import { getToolFileChanges, getToolReadPath } from '../lib/tool-file-change';
+import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
 import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
@@ -235,7 +235,7 @@ export function ToolCall(props: {
   };
 
   const fileChanges = () => getToolFileChanges(tool().tool, state());
-  const isRead = () => filePath() !== null;
+  const isReadTool = () => isToolFileRead(tool().tool);
 
   const statusClass = () => {
     switch (state().status) {
@@ -311,9 +311,9 @@ export function ToolCall(props: {
       return <FileChangeCard toolState={state()} changes={fileChanges()} />;
     }
 
-    if (isRead()) {
+    if (isReadTool()) {
       return (
-        <ReadToolCard toolState={state()} filePath={filePath()!} sessionID={tool().sessionID} />
+        <ReadToolCard toolState={state()} filePath={filePath()} sessionID={tool().sessionID} />
       );
     }
 
@@ -346,12 +346,11 @@ export function ToolCall(props: {
 
 function ReadToolCard(props: {
   toolState: ToolPart['state'];
-  filePath: string;
+  filePath: string | null;
   sessionID: string;
 }) {
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
-  const isRunning = () => s().status === 'running';
   const isError = () => s().status === 'error';
   const isAborted = () => isAbortedToolError(s());
   const statusClass = () => {
@@ -378,22 +377,26 @@ function ReadToolCard(props: {
     appState.sessions.find((session) => session.id === props.sessionID)?.directory ||
     appState.editorContext.workspacePath;
 
-  const normalizedPath = () => normalizePath(props.filePath);
+  const hasFilePath = () => !!props.filePath;
+  const normalizedPath = () => (props.filePath ? normalizePath(props.filePath) : '');
   const normalizedSessionDirectory = () =>
     sessionDirectory() ? normalizePath(sessionDirectory() as string) : null;
 
   const isCurrentDirectory = () =>
     props.filePath === '.' ||
     props.filePath === './' ||
-    (normalizedSessionDirectory() !== null && normalizedPath() === normalizedSessionDirectory());
+    (!!props.filePath &&
+      normalizedSessionDirectory() !== null &&
+      normalizedPath() === normalizedSessionDirectory());
 
-  const isDirectory = () => isCurrentDirectory() || isDirectoryOutput(s());
+  const isDirectory = () => hasFilePath() && (isCurrentDirectory() || isDirectoryOutput(s()));
   const lineRange = () =>
     extractReadRange((s().input || {}) as Record<string, unknown>, metadata());
 
   const openFile = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!props.filePath) return;
     const range = lineRange();
     const directory = isDirectory();
     postMessage({
@@ -407,6 +410,7 @@ function ReadToolCard(props: {
   };
 
   const displayName = () => {
+    if (!props.filePath) return null;
     if (isCurrentDirectory()) return 'current directory';
     if (isDirectory())
       return formatDisplayPath(props.filePath, appState.editorContext.workspacePath);
@@ -424,15 +428,19 @@ function ReadToolCard(props: {
       <div class="file-read-card-header">
         <span class={`tool-status-dot ${statusClass()}`} />
         <span class="file-read-action-label">Read</span>
-        <Show
-          when={!isCurrentDirectory()}
-          fallback={<span class="file-read-target file-read-target-text">{displayName()}</span>}
-        >
-          <a href="#" class="file-path-link file-read-target" onClick={openFile}>
-            {displayName()}
-          </a>
+        <Show when={displayName()}>
+          {(name) => (
+            <Show
+              when={!isCurrentDirectory()}
+              fallback={<span class="file-read-target file-read-target-text">{name()}</span>}
+            >
+              <a href="#" class="file-path-link file-read-target" onClick={openFile}>
+                {name()}
+              </a>
+            </Show>
+          )}
         </Show>
-        <Show when={!isDirectory() && lineRange()}>
+        <Show when={hasFilePath() && !isDirectory() && lineRange()}>
           <span class="file-read-range">
             (L{lineRange()!.start}-{lineRange()!.end})
           </span>
@@ -444,9 +452,6 @@ function ReadToolCard(props: {
           <span class="tool-invocation-duration file-read-duration">
             {completedDurationLabel()}
           </span>
-        </Show>
-        <Show when={isRunning()}>
-          <span class="file-read-running-label">reading…</span>
         </Show>
         <Show when={isError()}>
           <span class={`file-read-error-label${isAborted() ? ' is-aborted' : ''}`}>

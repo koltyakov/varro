@@ -2102,6 +2102,8 @@ export function ChatInput() {
     const retryingSessionIds = treeSessionIds.filter(
       (sessionId) => state.sessionStatus[sessionId]?.type === 'retry'
     );
+    const shouldResumeActiveSession =
+      retryingSessionIds.includes(activeSessionId) && (activeRunWasRunning || !activeRun);
 
     if (activeRunWasRunning && retryingSessionIds.includes(activeSessionId)) {
       ralphStore.setStatus(activeRun.config.managerSessionId, 'paused');
@@ -2122,7 +2124,7 @@ export function ChatInput() {
       abortSession()
         .catch(() => {})
         .finally(() => {
-          if (activeRunWasRunning && retryingSessionIds.includes(activeSessionId)) {
+          if (shouldResumeActiveSession) {
             continueInterruptedSession(activeSessionId).catch(() => {});
           }
         });

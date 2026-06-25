@@ -1645,6 +1645,86 @@ describe('ChatInput', () => {
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
   });
 
+  it('continues a regular retry after switching away from the limited provider', async () => {
+    abortSessionMock.mockResolvedValue(undefined);
+    continueInterruptedSessionMock.mockResolvedValue(undefined);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-4o': {
+            id: 'gpt-4o',
+            name: 'GPT-4o',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+          },
+        },
+      },
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        source: 'api',
+        models: {
+          claude: {
+            id: 'claude',
+            name: 'Claude',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setState('sessionStatus', {
+      'session-1': { type: 'retry', attempt: 9, message: 'messages exhausted', next: 408 },
+    });
+    setState('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'messages exhausted · retry in 408s · attempt #9',
+        unit: 'messages',
+        retryAt: 408_000,
+        attempt: 9,
+        sessionID: 'session-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const switchProviderButton = Array.from(
+      container!.querySelectorAll<HTMLButtonElement>('button')
+    ).find((button) => button.textContent === 'Switch provider');
+    switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const claudeOption = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
+    ).find((button) => button.textContent?.includes('Claude'));
+    claudeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.selectedModel).toEqual({
+      providerID: 'anthropic',
+      modelID: 'claude',
+      variant: undefined,
+    });
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(continueInterruptedSessionMock).toHaveBeenCalledWith('session-1');
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+    expect(state.sessionUsageLimits['session-1']).toBeUndefined();
+    expect(container?.textContent).not.toContain('Usage limit reached');
+  });
+
   it('clears usage-limit notices across the active tree before sending a prompt', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');

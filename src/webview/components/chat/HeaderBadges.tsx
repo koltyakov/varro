@@ -1,4 +1,7 @@
 import { Show } from 'solid-js';
+import { getSpinnerPhaseDelayStyle } from './spinner-phase';
+
+const RUNNING_BADGE_SPINNER_DURATION_MS = 900;
 
 export function RunningSessionsBadge(props: { count: number; onClick: () => void }) {
   const label = () => `${props.count} running session${props.count === 1 ? '' : 's'}`;
@@ -12,7 +15,11 @@ export function RunningSessionsBadge(props: { count: number; onClick: () => void
         aria-label={label()}
         onClick={props.onClick}
       >
-        <span class="chat-header-running-spinner" aria-hidden="true" />
+        <span
+          class="chat-header-running-spinner"
+          style={getSpinnerPhaseDelayStyle(RUNNING_BADGE_SPINNER_DURATION_MS)}
+          aria-hidden="true"
+        />
         <span class="chat-header-running-count">{props.count}</span>
       </button>
     </Show>

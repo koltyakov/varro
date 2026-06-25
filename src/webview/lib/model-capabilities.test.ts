@@ -92,6 +92,60 @@ describe('model capability helpers', () => {
     expect(modelSupportsTools('openai', 'text-only', providers)).toBe(false);
   });
 
+  it('supports tool support from legacy and alternate keys', () => {
+    const providers: Provider[] = [
+      provider('openai', {
+        'v2-style': {
+          id: 'v2-style',
+          name: 'V2 Style',
+          capabilities: { tools: true, input: ['text'], output: ['text'] },
+          cost: { input: 0, output: 0 },
+        },
+        'legacy-tool-field': {
+          id: 'legacy-tool-field',
+          name: 'Legacy Tool Field',
+          capabilities: { tool_call: true, input: ['text'], output: ['text'] },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(modelSupportsTools('openai', 'v2-style', providers)).toBe(true);
+    expect(modelSupportsTools('openai', 'legacy-tool-field', providers)).toBe(true);
+  });
+
+  it('reads image support from capability modality arrays', () => {
+    const providers: Provider[] = [
+      provider('openai', {
+        'vision-list': {
+          id: 'vision-list',
+          name: 'Vision List',
+          capabilities: {
+            toolcall: true,
+            input: ['text', 'image'],
+            output: ['text'],
+          },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+      provider('openai', {
+        'text-only-list': {
+          id: 'text-only-list',
+          name: 'Text Only List',
+          capabilities: {
+            toolcall: true,
+            input: ['text'],
+            output: ['text'],
+          },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(modelSupportsVision('openai', 'vision-list', providers)).toBe(true);
+    expect(modelSupportsVision('openai', 'text-only-list', providers)).toBe(false);
+  });
+
   it('detects variants while ignoring the none placeholder', () => {
     const providers: Provider[] = [
       provider('openai', {

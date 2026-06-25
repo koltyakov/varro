@@ -214,6 +214,8 @@ export interface AppStateInstance {
   setMessageStructureVersion: Setter<number>;
   messageInfoVersion: Accessor<number>;
   setMessageInfoVersion: Setter<number>;
+  sessionUsageLimitVersion: Accessor<number>;
+  setSessionUsageLimitVersion: Setter<number>;
   defaultPermissionMode: Accessor<PermissionMode>;
   setDefaultPermissionMode: Setter<PermissionMode>;
   draftPermissionMode: Accessor<PermissionMode>;
@@ -336,6 +338,7 @@ export function createAppState(): AppStateInstance {
   const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
   const [messageStructureVersion, setMessageStructureVersion] = createSignal(0);
   const [messageInfoVersion, setMessageInfoVersion] = createSignal(0);
+  const [sessionUsageLimitVersion, setSessionUsageLimitVersion] = createSignal(0);
   const sessionTreeIndex = createSessionTreeIndex();
   const messageIndex = createMessageIndex({
     onInvalidate: () => {
@@ -405,6 +408,8 @@ export function createAppState(): AppStateInstance {
     setMessageStructureVersion,
     messageInfoVersion,
     setMessageInfoVersion,
+    sessionUsageLimitVersion,
+    setSessionUsageLimitVersion,
     defaultPermissionMode,
     setDefaultPermissionMode,
     draftPermissionMode,
@@ -482,6 +487,8 @@ export const messageStructureVersion = defaultAppState.messageStructureVersion;
 export const setMessageStructureVersion = defaultAppState.setMessageStructureVersion;
 export const messageInfoVersion = defaultAppState.messageInfoVersion;
 export const setMessageInfoVersion = defaultAppState.setMessageInfoVersion;
+const sessionUsageLimitVersion = defaultAppState.sessionUsageLimitVersion;
+const setSessionUsageLimitVersion = defaultAppState.setSessionUsageLimitVersion;
 export const defaultPermissionMode = defaultAppState.defaultPermissionMode;
 export const setDefaultPermissionModeSignal = defaultAppState.setDefaultPermissionMode;
 export const draftPermissionMode = defaultAppState.draftPermissionMode;
@@ -516,6 +523,7 @@ export function resetDefaultAppState() {
   setMessageListScrollRequestKey(next.messageListScrollRequestKey());
   setMessageStructureVersion(next.messageStructureVersion());
   setMessageInfoVersion(next.messageInfoVersion());
+  setSessionUsageLimitVersion((value) => value + 1);
   setDefaultPermissionModeSignal(next.defaultPermissionMode());
   setDraftPermissionMode(next.draftPermissionMode());
   setTheme(next.theme());
@@ -2271,6 +2279,7 @@ export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice
     delete nextLimits[sessionId];
     sessionTreeIndex.invalidate();
     setState('sessionUsageLimits', reconcile(nextLimits));
+    setSessionUsageLimitVersion((value) => value + 1);
     return;
   }
 
@@ -2279,6 +2288,7 @@ export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice
     ...state.sessionUsageLimits,
     [sessionId]: notice,
   });
+  setSessionUsageLimitVersion((value) => value + 1);
 }
 
 export function getSessionTreeIds(rootId: string | null | undefined, sessions = state.sessions) {
@@ -2294,6 +2304,7 @@ export function getSessionTreeRootId(sessionId: string | null | undefined) {
 }
 
 export function getActiveUsageLimitNotice(sessionId: string | null | undefined) {
+  sessionUsageLimitVersion();
   return sessionTreeIndex.getActiveUsageLimitNotice(
     sessionId,
     state.sessions,
@@ -2344,6 +2355,20 @@ export function replaceMessages(incoming: MessageEntry[]) {
   });
   messageIndex.invalidate();
   settleRunningSessionStatusesFromMessages(nextMessages);
+}
+
+export function pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null {
+  flushPendingStreamingDeltas();
+  const previousMessages = cloneMessageEntries(state.messages);
+  materializeStreamingText(previousMessages, getStreamingTextSnapshot());
+
+  const targetIndex = previousMessages.findIndex(
+    (entry) => entry.info.sessionID === sessionId && entry.info.id === messageId
+  );
+  if (targetIndex === -1) return null;
+
+  replaceMessages(previousMessages.slice(0, targetIndex));
+  return () => replaceMessages(previousMessages);
 }
 
 export function setMessagesIncremental(

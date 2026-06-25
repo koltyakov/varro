@@ -4780,7 +4780,6 @@ kbd {
 .file-read-range,
 .file-read-meta,
 .file-read-duration,
-.file-read-running-label,
 .file-read-error-label {
   display: inline-flex;
   align-items: center;
@@ -4798,10 +4797,6 @@ kbd {
 
 .file-read-duration {
   margin-left: auto;
-}
-
-.file-read-running-label {
-  color: var(--color-vscode-accent);
 }
 
 .file-read-error-label {

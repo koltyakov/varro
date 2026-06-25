@@ -102,6 +102,8 @@ export async function editMessageWithDependencies(
     isSessionWorking(sessionId: string): boolean;
     abortSession(): Promise<void>;
     startLoading(): void;
+    invalidateMessageSync?(): void;
+    pruneMessagesFrom?(sessionId: string, messageId: string): (() => void) | null;
     revertSession(sessionId: string, messageId: string): Promise<unknown>;
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
@@ -121,14 +123,18 @@ export async function editMessageWithDependencies(
     .find((entry) => entry.info.role === 'user' && entry.info.id === messageId);
   if (!target || target.info.sessionID !== sessionId) return;
 
+  let restorePrunedMessages: (() => void) | null = null;
   try {
     deps.startLoading();
+    deps.invalidateMessageSync?.();
+    restorePrunedMessages = deps.pruneMessagesFrom?.(sessionId, messageId) ?? null;
     if (deps.isSessionWorking(sessionId)) {
       await deps.abortSession();
     }
     await deps.revertSession(sessionId, messageId);
-    await Promise.all([deps.syncSession(sessionId), deps.syncSessionMessages(sessionId)]);
+    await deps.syncSession(sessionId);
   } catch (err) {
+    restorePrunedMessages?.();
     deps.stopLoading();
     deps.setError(err instanceof Error ? err.message : 'Failed to edit message');
     return;
@@ -232,6 +238,8 @@ type SessionControlDependencies = {
   setError(message: string): void;
   isSessionWorking(sessionId: string): boolean;
   sendEditedMessage(text: string): Promise<unknown>;
+  invalidateMessageSync(): void;
+  pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null;
   unrevertSession(sessionId: string): Promise<Session>;
   upsertSession(session: Session): void;
   clearPendingAbort(sessionId: string): void;
@@ -298,6 +306,8 @@ export class SessionControlOperations {
         isSessionWorking: this.deps.isSessionWorking,
         abortSession: this.abortSession,
         startLoading: this.deps.startLoading,
+        invalidateMessageSync: this.deps.invalidateMessageSync,
+        pruneMessagesFrom: this.deps.pruneMessagesFrom,
         revertSession: this.deps.revertSession,
         syncSession: this.deps.syncSession,
         syncSessionMessages: this.deps.syncSessionMessages,

@@ -21,6 +21,10 @@ function getBooleanCapability(value: Record<string, unknown> | null, keys: strin
   return null;
 }
 
+function getBooleanCapabilityFromRecord(value: unknown, keys: string[]) {
+  return getBooleanCapability(asRecord(value), keys);
+}
+
 function getVariantNames(model: ProviderModel | null) {
   if (!model?.variants) return [];
   return Object.keys(model.variants).filter((variant) => variant !== 'none');
@@ -31,6 +35,8 @@ function normalizeSignal(value: string) {
 }
 
 function hasImageInputSignal(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+
   if (typeof value === 'string') {
     return /\b(image|vision|multimodal)\b/.test(normalizeSignal(value));
   }
@@ -42,8 +48,13 @@ function hasImageInputSignal(value: unknown): boolean {
   const record = asRecord(value);
   if (!record) return false;
   if (typeof record.image === 'boolean') return record.image;
-  if ('input' in record) return hasImageInputSignal(record.input);
-  return false;
+  return (
+    ('input' in record && hasImageInputSignal(record.input)) ||
+    ('inputs' in record && hasImageInputSignal(record.inputs)) ||
+    ('modalities' in record && hasImageInputSignal(record.modalities)) ||
+    ('inputModalities' in record && hasImageInputSignal(record.inputModalities)) ||
+    ('supportedInputs' in record && hasImageInputSignal(record.supportedInputs))
+  );
 }
 
 const VISION_MODEL_PATTERNS = [
@@ -86,7 +97,7 @@ export function modelSupportsTools(
   providers: Provider[]
 ): boolean {
   const model = getModel(providerID, modelID, providers);
-  return !!model?.capabilities?.toolcall;
+  return !!getBooleanCapabilityFromRecord(model?.capabilities, ['toolcall', 'tool_call', 'tools']);
 }
 
 export function modelSupportsVariants(

@@ -784,16 +784,19 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
-  it('finishes streaming for partial active assistant completion updates', () => {
+  it('finishes streaming for partial active assistant completion updates without marking idle', () => {
     const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
 
     finishMessageStreaming.mockClear();
     upsertMessageInfo.mockClear();
+    stopLoading.mockClear();
 
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
         getMessages: () => [createAssistantEntry() as { info: Message; parts: Part[] }],
+        setSessionStatusEntry,
       })
     );
 
@@ -814,6 +817,8 @@ describe('registerSessionEventHandlers', () => {
       })
     );
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 
   it('resyncs active messages for partial message.part.updated payloads', () => {
@@ -1920,7 +1925,7 @@ describe('registerSessionEventHandlers', () => {
     loadingStartedAt.mockReturnValue(null);
   });
 
-  it('optimistically settles and rechecks after the final text streams with no tools in flight', () => {
+  it('rechecks status after the final text quiets without clearing active loading', () => {
     vi.useFakeTimers();
     try {
       const handlers = installHandlers();
@@ -1944,6 +1949,7 @@ describe('registerSessionEventHandlers', () => {
         assistantEntry = { ...assistantEntry, info };
       });
       finishMessageStreaming.mockClear();
+      startLoading.mockClear();
       stopLoading.mockClear();
 
       registerSessionEventHandlers(
@@ -1959,22 +1965,31 @@ describe('registerSessionEventHandlers', () => {
         properties: { sessionID: 'session-1' },
       });
 
-      // Nothing settles until the quiet window elapses.
+      // Nothing rechecks until the quiet window elapses.
       expect(finishMessageStreaming).not.toHaveBeenCalled();
       expect(recheckSessionStatus).not.toHaveBeenCalled();
+      setSessionStatusEntry.mockClear();
+      startLoading.mockClear();
 
       vi.advanceTimersByTime(600);
 
-      expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
-      expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
-      expect(stopLoading).toHaveBeenCalled();
+      expect(finishMessageStreaming).not.toHaveBeenCalled();
+      expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+      expect(stopLoading).not.toHaveBeenCalled();
       expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+
+      handlers.get('session.next.tool.called')?.({
+        properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
+      });
+
+      expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+      expect(startLoading).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('cancels the optimistic streamed-completion settle when a tool starts after the text', () => {
+  it('cancels the streamed-completion recheck when a tool starts after the text', () => {
     vi.useFakeTimers();
     try {
       const handlers = installHandlers();

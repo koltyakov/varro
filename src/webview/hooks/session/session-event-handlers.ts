@@ -529,10 +529,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   // evaluated here against committed parts and the live streaming buffer.
   const isStreamedFinalResponse = (sessionId: string) =>
     hasStreamedFinalResponse(deps.getMessages(), sessionId, currentStreamingSnapshot());
-  // Optimistic + confirm: when the final text has streamed and a brief quiet
-  // window passes with no further progress, settle the turn locally for instant
-  // "Worked for" feedback, then recheck server-authoritative status to confirm
-  // (or correct, if the model actually continued with a tool).
+  // When final text has streamed and a brief quiet window passes with no further
+  // progress, recheck server-authoritative status. Do not settle locally here:
+  // a quiet text stream can still be followed by a tool call.
   const scheduleStreamedCompletionSettle = (sessionId: string) => {
     clearStreamedCompletionTimer(sessionId);
     if (!isSessionInActiveTree(sessionId)) return;
@@ -545,9 +544,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const runStreamedCompletionSettle = (sessionId: string) => {
     if (deps.hasPendingAbort(sessionId) || !isStreamedFinalResponse(sessionId)) return;
-    settleLatestAssistantOnIdle(sessionId, Date.now());
-    setSessionStatusEntry(sessionId, { type: 'idle' });
-    if (isSessionInActiveTree(sessionId) && !isActiveTreeWorking()) uiStore.stopLoading();
     void deps
       .recheckSessionStatus?.(sessionId)
       .catch((err) => deps.logError('streamedCompletionRecheck', err));
@@ -1283,12 +1279,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         partialMessage.role === 'assistant' &&
         !partialMessage.error &&
         !!partialMessage.time?.completed;
+      const shouldMarkAssistantFinishedIdle =
+        assistantFinished && (sessionID !== deps.getActiveSessionId() || !!assistantMessage);
       const agent = (partialMessage as { agent?: unknown }).agent;
       if (typeof agent === 'string' && agent) {
         appStore.setState('sessionSelectedAgents', sessionID, agent);
       }
 
-      if (assistantFinished) {
+      if (shouldMarkAssistantFinishedIdle) {
         setSessionStatusEntry(sessionID, { type: 'idle' });
         if (assistantCompleted) {
           sessionStore.markSessionResponseCompleted(sessionID, partialMessage.time?.completed);

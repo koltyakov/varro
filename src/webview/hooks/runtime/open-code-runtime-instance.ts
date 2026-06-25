@@ -775,6 +775,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     logError,
     getMessages: () => appStore.state.messages,
     startLoading: uiStore.startLoading,
+    invalidateMessageSync: () => {
+      sessionSyncGeneration += 1;
+    },
+    pruneMessagesFrom: sessionStore.pruneMessagesFrom,
     revertSession: (sessionId, messageId) => client.session.revert(sessionId, messageId),
     syncSession,
     syncSessionMessages,

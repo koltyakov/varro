@@ -35,6 +35,7 @@ import { getMessageFileChanges } from '../../lib/tool-file-change';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatRelativeAge } from '../../lib/message-metrics';
+import { getSpinnerPhaseDelayStyle } from './spinner-phase';
 
 type SessionGroups = {
   failed: (typeof state.sessions)[number][];
@@ -84,6 +85,7 @@ export type SessionStatusIndicatorKind =
 
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
+const SESSION_RUNNING_SPINNER_DURATION_MS = 850;
 
 function getDiffSummaryKey(sessionId: string, updated: number): string {
   return `${sessionId}:${updated}`;
@@ -1165,6 +1167,11 @@ function SessionListItem(props: {
           {(kind) => (
             <span
               class={`session-item-indicator session-status-indicator ${getSessionStatusIndicatorClass(kind())}`}
+              style={
+                kind() === 'running'
+                  ? getSpinnerPhaseDelayStyle(SESSION_RUNNING_SPINNER_DURATION_MS)
+                  : undefined
+              }
               title={indicatorTitle(kind())}
               aria-label={indicatorTitle(kind())}
             />

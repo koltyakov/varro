@@ -1484,6 +1484,26 @@ describe('header status badges', () => {
     expect(indicator?.getAttribute('title')).toBe('Permission request pending');
   });
 
+  it('phases running spinners from the current clock', () => {
+    vi.setSystemTime(1_234);
+    setState('sessions', [session('session-1', 500)]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const headerSpinner = container?.querySelector(
+      '.chat-header-running-spinner'
+    ) as HTMLElement | null;
+    const indicator = container?.querySelector(
+      '.session-item .session-item-indicator'
+    ) as HTMLElement | null;
+
+    expect(headerSpinner?.style.animationDelay).toBe('-334ms');
+    expect(indicator?.classList.contains('is-running')).toBe(true);
+    expect(indicator?.style.animationDelay).toBe('-384ms');
+  });
+
   it('keeps the active session in the sessions picker after returning from chat', async () => {
     const now = Date.now();
     setState('sessions', [

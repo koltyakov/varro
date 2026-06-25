@@ -136,9 +136,27 @@ describe('session-controls helpers', () => {
   });
 
   it('edits a user message by reverting to it and resending the new text', async () => {
-    const revertSession = vi.fn(async () => {});
-    const sendEditedMessage = vi.fn(async () => {});
+    const callOrder: string[] = [];
+    const revertSession = vi.fn(async () => {
+      callOrder.push('revert');
+    });
+    const syncSession = vi.fn(async () => {
+      callOrder.push('sync-session');
+    });
+    const syncSessionMessages = vi.fn(async () => {
+      callOrder.push('sync-messages');
+    });
+    const sendEditedMessage = vi.fn(async () => {
+      callOrder.push('send');
+    });
     const abortSession = vi.fn(async () => {});
+    const invalidateMessageSync = vi.fn(() => {
+      callOrder.push('invalidate-sync');
+    });
+    const pruneMessagesFrom = vi.fn(() => {
+      callOrder.push('prune');
+      return vi.fn();
+    });
 
     await editMessageWithDependencies(
       {
@@ -149,10 +167,14 @@ describe('session-controls helpers', () => {
         ],
         isSessionWorking: () => false,
         abortSession,
-        startLoading: vi.fn(),
+        startLoading: vi.fn(() => {
+          callOrder.push('loading');
+        }),
+        invalidateMessageSync,
+        pruneMessagesFrom,
         revertSession,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
+        syncSession,
+        syncSessionMessages,
         sendEditedMessage,
         stopLoading: vi.fn(),
         setError: vi.fn(),
@@ -162,8 +184,19 @@ describe('session-controls helpers', () => {
     );
 
     expect(abortSession).not.toHaveBeenCalled();
+    expect(invalidateMessageSync).toHaveBeenCalledTimes(1);
+    expect(pruneMessagesFrom).toHaveBeenCalledWith('session-1', 'user-1');
     expect(revertSession).toHaveBeenCalledWith('session-1', 'user-1');
+    expect(syncSessionMessages).not.toHaveBeenCalled();
     expect(sendEditedMessage).toHaveBeenCalledWith('updated prompt');
+    expect(callOrder).toEqual([
+      'loading',
+      'invalidate-sync',
+      'prune',
+      'revert',
+      'sync-session',
+      'send',
+    ]);
   });
 
   it('aborts a working session before reverting the edited message', async () => {
@@ -272,6 +305,7 @@ describe('session-controls helpers', () => {
     const stopLoading = vi.fn();
     const setError = vi.fn();
     const sendEditedMessage = vi.fn(async () => {});
+    const restorePrunedMessages = vi.fn();
 
     await editMessageWithDependencies(
       {
@@ -280,6 +314,7 @@ describe('session-controls helpers', () => {
         isSessionWorking: () => false,
         abortSession: vi.fn(async () => {}),
         startLoading: vi.fn(),
+        pruneMessagesFrom: vi.fn(() => restorePrunedMessages),
         revertSession: vi.fn(async () => {
           throw new Error('revert failed');
         }),
@@ -293,6 +328,7 @@ describe('session-controls helpers', () => {
       'updated prompt'
     );
 
+    expect(restorePrunedMessages).toHaveBeenCalled();
     expect(stopLoading).toHaveBeenCalled();
     expect(setError).toHaveBeenCalledWith('revert failed');
     expect(sendEditedMessage).not.toHaveBeenCalled();
@@ -425,6 +461,8 @@ describe('session-controls helpers', () => {
       setError: vi.fn(),
       isSessionWorking: () => false,
       sendEditedMessage,
+      invalidateMessageSync: vi.fn(),
+      pruneMessagesFrom: vi.fn(),
       unrevertSession,
       upsertSession,
       clearPendingAbort,
