@@ -43,6 +43,32 @@ function assistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantM
   };
 }
 
+function toolPart(status: string, id = 'tool-1'): Part {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'assistant-1',
+    type: 'tool',
+    callID: 'call-1',
+    tool: 'bash',
+    state: { status, input: {} },
+  } as Part;
+}
+
+function textPart(id: string): Part {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'assistant-1',
+    type: 'text',
+    text: '',
+  } as Part;
+}
+
+function messageEntry(info: Message, parts: Part[] = []): MessageEntry {
+  return { info, parts };
+}
+
 describe('message metrics helpers', () => {
   it('identifies assistant messages', () => {
     const message: Message = assistantMessage();
@@ -232,43 +258,23 @@ describe('message metrics helpers', () => {
   });
 
   it('detects unsettled tool parts by status', () => {
-    const tool = (status: string, id = 'tool-1'): Part =>
-      ({
-        id,
-        sessionID: 'session-1',
-        messageID: 'assistant-1',
-        type: 'tool',
-        callID: 'call-1',
-        tool: 'bash',
-        state: { status, input: {} },
-      }) as Part;
-    const text = (id: string): Part =>
-      ({
-        id,
-        sessionID: 'session-1',
-        messageID: 'assistant-1',
-        type: 'text',
-        text: '',
-      }) as Part;
-
-    expect(hasUnsettledToolPart([tool('pending')])).toBe(true);
-    expect(hasUnsettledToolPart([tool('running')])).toBe(true);
-    expect(hasUnsettledToolPart([tool('completed')])).toBe(false);
-    expect(hasUnsettledToolPart([tool('error')])).toBe(false);
-    expect(hasUnsettledToolPart([text('text-1'), tool('completed', 'tool-2')])).toBe(false);
-    expect(hasUnsettledToolPart([text('text-1')])).toBe(false);
+    expect(hasUnsettledToolPart([toolPart('pending')])).toBe(true);
+    expect(hasUnsettledToolPart([toolPart('running')])).toBe(true);
+    expect(hasUnsettledToolPart([toolPart('completed')])).toBe(false);
+    expect(hasUnsettledToolPart([toolPart('error')])).toBe(false);
+    expect(hasUnsettledToolPart([textPart('text-1'), toolPart('completed', 'tool-2')])).toBe(false);
+    expect(hasUnsettledToolPart([textPart('text-1')])).toBe(false);
     expect(hasUnsettledToolPart([])).toBe(false);
   });
 
   it('finds the latest assistant finish timestamp from the message tail', () => {
-    const entry = (info: Message, parts: Part[] = []): MessageEntry => ({ info, parts });
-    const completed = entry(
+    const completed = messageEntry(
       assistantMessage({ id: 'a-done', time: { created: 100, completed: 500 } })
     );
-    const errored = entry(
+    const errored = messageEntry(
       assistantMessage({ id: 'a-err', time: { created: 200 }, error: { name: 'Error' } })
     );
-    const streaming = entry(assistantMessage({ id: 'a-live', time: { created: 300 } }));
+    const streaming = messageEntry(assistantMessage({ id: 'a-live', time: { created: 300 } }));
     const user: MessageEntry = {
       info: {
         id: 'user-1',
@@ -292,16 +298,14 @@ describe('message metrics helpers', () => {
   });
 
   it('reports latestAssistantFinished as a boolean over the finish timestamp', () => {
-    const entry = (info: Message): MessageEntry => ({ info, parts: [] });
-    expect(latestAssistantFinished([entry(assistantMessage())])).toBe(true);
-    expect(latestAssistantFinished([entry(assistantMessage({ time: { created: 100 } }))])).toBe(
-      false
-    );
+    expect(latestAssistantFinished([messageEntry(assistantMessage())])).toBe(true);
+    expect(
+      latestAssistantFinished([messageEntry(assistantMessage({ time: { created: 100 } }))])
+    ).toBe(false);
   });
 
   it('relates latest assistant finish to the loading window', () => {
-    const entry = (info: Message): MessageEntry => ({ info, parts: [] });
-    const finished = [entry(assistantMessage({ time: { created: 100, completed: 500 } }))];
+    const finished = [messageEntry(assistantMessage({ time: { created: 100, completed: 500 } }))];
 
     // No loading window tracked: a finished turn is finished.
     expect(latestAssistantFinishedBeforeLoading(finished, null)).toBe(true);
@@ -311,7 +315,7 @@ describe('message metrics helpers', () => {
     // Loading started after the finish: a stale busy would be re-lighting a done turn.
     expect(latestAssistantFinishedBeforeLoading(finished, 501)).toBe(false);
 
-    const streaming = [entry(assistantMessage({ time: { created: 100 } }))];
+    const streaming = [messageEntry(assistantMessage({ time: { created: 100 } }))];
     expect(latestAssistantFinishedBeforeLoading(streaming, null)).toBe(false);
   });
 });

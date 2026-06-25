@@ -6,7 +6,9 @@ import {
   resetDefaultAppState,
   setMessagesIncremental,
   setShowSessionPicker,
+  startLoading,
   state,
+  stopLoading,
 } from '../state';
 
 function createSession(id: string, parentID?: string): Session {
@@ -264,6 +266,18 @@ describe('sessionStore', () => {
     expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
     expect(state.lastSeenSessions['session-1']).toBeGreaterThanOrEqual(2);
     expect(state.completedSessionResponses['session-1']).toBeUndefined();
+  });
+
+  it('keeps active loading sessions busy when synced messages show a completed assistant step', () => {
+    sessionStore.setActiveSessionId('session-1');
+    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+    startLoading(1);
+
+    setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);
+
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+
+    stopLoading();
   });
 
   it('marks active synced completions unread when the session list is open', () => {

@@ -382,7 +382,11 @@ export async function recheckSessionStatusWithDependencies(
       const syncResult = await settleVoid(deps.syncSessionMessages(sessionId));
       logRejectedSyncs(deps, [syncResult]);
       const messages = deps.getMessages?.() ?? [];
-      if (latestAssistantFinishedBeforeLoading(messages, deps.loadingStartedAt?.() ?? null)) {
+      const currentStatus = deps.getCurrentSessionStatus?.(sessionId) ?? status;
+      if (
+        !isRunningSessionStatus(currentStatus) &&
+        latestAssistantFinishedBeforeLoading(messages, deps.loadingStartedAt?.() ?? null)
+      ) {
         deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
         deps.stopLoading();
       } else deps.startLoading();

@@ -251,7 +251,7 @@ describe('session-selection helpers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
-  it('stops loading when synced active messages show a completed assistant reply', async () => {
+  it('keeps loading when synced active messages complete while status is still busy', async () => {
     const setMessagesIncremental = vi.fn();
     const stopLoading = vi.fn();
     const completed = assistantMessage('assistant-1');
@@ -261,6 +261,38 @@ describe('session-selection helpers', () => {
       {
         getActiveSessionId: () => 'session-1',
         getSessionStatus: () => ({ type: 'busy' }) satisfies SessionStatus,
+        loadingStartedAt: () => null,
+        loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setMessagesIncremental,
+        stopLoading,
+        syncFailedSessionsFromMessages: vi.fn(),
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      },
+      'session-1'
+    );
+
+    expect(setMessagesIncremental).toHaveBeenCalledWith([{ info: completed, parts: [] }], {
+      preserveExtraParts: false,
+    });
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('stops loading when synced active messages complete after status is idle', async () => {
+    const setMessagesIncremental = vi.fn();
+    const stopLoading = vi.fn();
+    const completed = assistantMessage('assistant-1');
+    completed.time.completed = 2;
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getSessionStatus: () => ({ type: 'idle' }) satisfies SessionStatus,
         loadingStartedAt: () => null,
         loadSessionMessages: vi.fn(async () => [{ info: completed, parts: [] }]),
         updateUsageLimitState: vi.fn(),

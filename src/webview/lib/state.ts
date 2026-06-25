@@ -2475,6 +2475,7 @@ function settleRunningSessionStatusesFromMessages(messages: MessageEntry[]) {
     for (const [sessionId, message] of settledMessages) {
       const status = state.sessionStatus[sessionId];
       if (status?.type === 'busy' || status?.type === 'retry') {
+        if (state.activeSessionId === sessionId && isLoading()) continue;
         setState('sessionStatus', sessionId, { type: 'idle' });
       }
       if (message.error) continue;

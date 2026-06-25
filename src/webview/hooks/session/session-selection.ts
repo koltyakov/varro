@@ -175,15 +175,15 @@ export async function syncSessionMessagesWithDependencies(
   const messages = await deps.loadSessionMessages(sessionId);
   if (!generationRef.isCurrent(generation)) return;
 
-  deps.updateUsageLimitState(sessionId, deps.getSessionStatus(sessionId), messages);
+  const status = deps.getSessionStatus(sessionId);
+  deps.updateUsageLimitState(sessionId, status, messages);
   if (sessionId === deps.getActiveSessionId()) {
     const latestFinished = latestAssistantFinishedBeforeLoading(messages, deps.loadingStartedAt());
     deps.setMessagesIncremental(messages, { preserveExtraParts: !latestFinished });
-    if (latestFinished) deps.stopLoading();
+    if (latestFinished && status?.type !== 'busy' && status?.type !== 'retry') deps.stopLoading();
     deps.syncFailedSessionsFromMessages(messages);
     deps.handoffTodosToMessages(messages);
   } else if (latestAssistantFinished(messages)) {
-    const status = deps.getSessionStatus(sessionId);
     if (status?.type === 'busy' || status?.type === 'retry') {
       deps.syncFailedSessionsFromMessages(messages);
       deps.setSessionStatusEntry(sessionId, { type: 'idle' });

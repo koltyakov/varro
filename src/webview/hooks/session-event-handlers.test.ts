@@ -1866,7 +1866,33 @@ describe('registerSessionEventHandlers', () => {
     expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
     expect(markLoadingActivity).not.toHaveBeenCalled();
     expect(startLoading).not.toHaveBeenCalled();
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('does not mark active full assistant completion updates idle', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    finishMessageStreaming.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [],
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('message.updated')?.({
+      properties: {
+        info: createAssistantEntry({ time: { created: 1, completed: 2 } }).info,
+      },
+    });
+
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 
   it('keeps the session idle on a trailing busy status after the reply already completed', () => {
@@ -1921,6 +1947,42 @@ describe('registerSessionEventHandlers', () => {
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
     expect(startLoading).toHaveBeenCalledTimes(1);
+
+    loadingStartedAt.mockReturnValue(null);
+  });
+
+  it('keeps an already-working session busy when a completed assistant step is followed by busy status', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    let messages = [createAssistantEntry() as { info: Message; parts: Part[] }];
+
+    loadingStartedAt.mockReturnValue(1);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    setSessionStatusEntry.mockClear();
+    startLoading.mockClear();
+    messages = [createCompletedAssistantEntry(1, 2)];
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
 
     loadingStartedAt.mockReturnValue(null);
   });
@@ -2261,7 +2323,7 @@ describe('registerSessionEventHandlers', () => {
     expect(upsertPart).not.toHaveBeenCalled();
     expect(markLoadingActivity).not.toHaveBeenCalled();
     expect(startLoading).not.toHaveBeenCalled();
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
 
     upsertMessageInfo.mockReset();
   });
@@ -3021,7 +3083,7 @@ describe('registerSessionEventHandlers', () => {
       'session-1',
       'text'
     );
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 
   it('ignores late reasoning deltas after the assistant message already completed', () => {
@@ -3053,7 +3115,7 @@ describe('registerSessionEventHandlers', () => {
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(markLoadingActivity).not.toHaveBeenCalled();
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
-    expect(stopLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 
   it('tracks session lifecycle events and active status transitions', () => {

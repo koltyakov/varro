@@ -492,9 +492,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const ignoreStaleProgressAfterFinishedAssistant = (sessionId: string) => {
     if (!isStaleProgressAfterFinishedAssistant(sessionId)) return false;
-    if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) {
-      uiStore.stopLoading();
-    }
     return true;
   };
   const ignoreStaleProgressForCompletedMessage = (sessionId: string, messageId: string) => {
@@ -505,14 +502,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (finishedAt === null) return false;
     const startedAt = uiStore.loadingStartedAt();
     if (startedAt !== null && startedAt > finishedAt) return false;
-    if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) {
-      uiStore.stopLoading();
-    }
     return true;
   };
   const markSessionProgress = (sessionId: string) => {
     // Any genuine progress (more text, a tool call, reasoning) means the turn is
-    // not done — cancel a pending optimistic settle so it can't fire mid-turn.
+    // not done — cancel a pending recheck so it can't fire mid-turn.
     clearStreamedCompletionTimer(sessionId);
     setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
@@ -1196,17 +1190,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         handleSessionIdle(sessionID, abortedRetry);
         return;
       }
-      // opencode re-enters its run loop one final time after a turn completes,
-      // emitting a trailing `busy` before the closing `idle` (which can lag).
-      // When the latest assistant turn already finished within the current
-      // loading window, that busy is not new work — promoting the session to
-      // busy here would re-raise the "Thinking" spinner and suppress the
-      // "Worked for" summary until the late idle lands. Treat it as idle so the
-      // UI settles on the completed response immediately.
+      // opencode can emit a trailing `busy` after a turn already settled. Only
+      // suppress it after this handler has already observed the session leave
+      // the working set; while it is still working, a completed assistant step
+      // may be followed by a tool call or another model step.
       if (
         status.type === 'busy' &&
         sessionID === deps.getActiveSessionId() &&
-        latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt())
+        latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt()) &&
+        !workingSessionIds.has(sessionID)
       ) {
         setSessionStatusEntry(sessionID, { type: 'idle' });
         if (!isActiveTreeWorking()) uiStore.stopLoading();
@@ -1279,21 +1271,19 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         partialMessage.role === 'assistant' &&
         !partialMessage.error &&
         !!partialMessage.time?.completed;
-      const shouldMarkAssistantFinishedIdle =
-        assistantFinished && (sessionID !== deps.getActiveSessionId() || !!assistantMessage);
       const agent = (partialMessage as { agent?: unknown }).agent;
       if (typeof agent === 'string' && agent) {
         appStore.setState('sessionSelectedAgents', sessionID, agent);
       }
 
-      if (shouldMarkAssistantFinishedIdle) {
+      if (assistantFinished && !isSessionInActiveTree(sessionID)) {
         setSessionStatusEntry(sessionID, { type: 'idle' });
         if (assistantCompleted) {
           sessionStore.markSessionResponseCompleted(sessionID, partialMessage.time?.completed);
         }
         deps.syncSession(sessionID).catch(() => {});
-        if (sessionID === deps.getActiveSessionId() && !isActiveTreeWorking())
-          uiStore.stopLoading();
+      } else if (assistantFinished) {
+        deps.syncSession(sessionID).catch(() => {});
       }
 
       if (isSessionInActiveTree(sessionID)) {
