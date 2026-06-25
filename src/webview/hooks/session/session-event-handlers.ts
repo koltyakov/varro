@@ -2,6 +2,7 @@ import { isAbortedAssistantError } from '../../lib/aborted';
 import { serverEvents } from '../../lib/client';
 import { isAssistantMessage } from '../../lib/message-metrics';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
+import { hasStreamedFinalResponse } from './session-watchdog';
 import { parseUsageLimitNotice, type UsageLimitNotice } from '../../lib/usage-limit';
 import { validateFileDiffs } from '../../lib/validate-diffs';
 import { appStore } from '../../lib/stores/app-store';
@@ -159,6 +160,7 @@ type EventHandlerDependencies = {
   syncSession(sessionId: string): Promise<void>;
   shouldResyncSessionAfterIdle(sessionId: string): boolean;
   syncSessionMessages(sessionId: string): Promise<void>;
+  recheckSessionStatus?(sessionId: string): Promise<void>;
   applyUsageLimitNotice(
     sessionId: string,
     notice: UsageLimitNotice | null,
@@ -205,6 +207,7 @@ type EventHandlerOperationDependencies = {
     | 'clearUsageLimitOnResumedProgress'
     | 'updateUsageLimitState'
     | 'applyUsageLimitNotice'
+    | 'recheckSessionStatus'
   >;
   sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
   sessionApprovalOperations: Pick<
@@ -263,6 +266,12 @@ const PROJECTED_SESSION_EVENTS = new Set<string>([
   'session.next.reasoning.delta',
   'session.next.reasoning.ended',
 ]);
+
+// After the final assistant text finishes streaming with no tools in flight, we
+// optimistically settle the turn this long after the last progress event. Any
+// genuine continuation (a tool call, more text/reasoning) arrives well within
+// this window and cancels the timer, so it only fires on a real quiet period.
+const STREAMED_COMPLETION_SETTLE_DELAY_MS = 600;
 
 type ToolExecutionTime = { start?: number; end?: number };
 
@@ -409,6 +418,7 @@ export class SessionEventHandlerOperations {
       syncSession: this.deps.sessionSyncOperations.syncSession,
       shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
       syncSessionMessages: this.deps.sessionSyncOperations.syncSessionMessages,
+      recheckSessionStatus: this.deps.sessionStatusOperations.recheckSessionStatus,
       applyUsageLimitNotice: this.deps.sessionStatusOperations.applyUsageLimitNotice,
       syncTodosFromMessages: this.deps.todoSyncOperations.syncTodosFromMessages,
       syncTodosForSession: this.deps.todoSyncOperations.syncTodosForSession,
@@ -440,6 +450,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
   >();
   const toolExecutionTimes = new Map<string, ToolExecutionTime>();
+  // Per-session debounce timers for the optimistic streamed-completion settle.
+  const streamedCompletionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const pendingTerminalStepSettles = new Map<string, number>();
   // Per-session durable sequence cursor, advanced by synchronized events (ephemeral
   // `*.delta` fragments carry no `seq`). Lets us resync only when a durable event was
   // actually missed, instead of defensively on every progress event.
@@ -483,6 +496,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     activeMessageSyncs.add(sessionId);
     void deps
       .syncSessionMessages(sessionId)
+      .then(() => {
+        const completedAt = pendingTerminalStepSettles.get(sessionId);
+        if (completedAt === undefined) return;
+        pendingTerminalStepSettles.delete(sessionId);
+        if (!settleLatestAssistantOnIdle(sessionId, completedAt)) return;
+        handleSessionIdle(sessionId, deps.hasPendingAbort(sessionId));
+      })
       .catch((err) => deps.logError('syncSessionMessages', err))
       .finally(() => {
         activeMessageSyncs.delete(sessionId);
@@ -514,10 +534,50 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     return true;
   };
   const markSessionProgress = (sessionId: string) => {
+    // Any genuine progress (more text, a tool call, reasoning) means the turn is
+    // not done — cancel a pending optimistic settle so it can't fire mid-turn.
+    clearStreamedCompletionTimer(sessionId);
     setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
+    if (isSessionInActiveTree(sessionId)) uiStore.startLoading();
+  };
+  const clearStreamedCompletionTimer = (sessionId: string) => {
+    const timer = streamedCompletionTimers.get(sessionId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    streamedCompletionTimers.delete(sessionId);
+  };
+  // Strong local evidence the latest assistant turn has streamed its final text
+  // with no tools in flight: the same signal the stuck-session watchdog uses,
+  // evaluated here against committed parts and the live streaming buffer.
+  const isStreamedFinalResponse = (sessionId: string) =>
+    hasStreamedFinalResponse(deps.getMessages(), sessionId, currentStreamingSnapshot());
+  // Optimistic + confirm: when the final text has streamed and a brief quiet
+  // window passes with no further progress, settle the turn locally for instant
+  // "Worked for" feedback, then recheck server-authoritative status to confirm
+  // (or correct, if the model actually continued with a tool).
+  const scheduleStreamedCompletionSettle = (sessionId: string) => {
+    clearStreamedCompletionTimer(sessionId);
+    if (!isSessionInActiveTree(sessionId)) return;
+    if (deps.hasPendingAbort(sessionId) || !isStreamedFinalResponse(sessionId)) return;
+    const timer = setTimeout(() => {
+      streamedCompletionTimers.delete(sessionId);
+      runStreamedCompletionSettle(sessionId);
+    }, STREAMED_COMPLETION_SETTLE_DELAY_MS);
+    streamedCompletionTimers.set(sessionId, timer);
+  };
+  const runStreamedCompletionSettle = (sessionId: string) => {
+    if (deps.hasPendingAbort(sessionId) || !isStreamedFinalResponse(sessionId)) return;
+    settleLatestAssistantOnIdle(sessionId, Date.now());
+    setSessionStatusEntry(sessionId, { type: 'idle' });
+    if (isSessionInActiveTree(sessionId) && !isActiveTreeWorking()) uiStore.stopLoading();
+    void deps
+      .recheckSessionStatus?.(sessionId)
+      .catch((err) => deps.logError('streamedCompletionRecheck', err));
   };
   const handleSessionIdle = (sessionId: string, abortedRetry: boolean) => {
+    const hadActiveAssistantReply = hasActiveAssistantReply(deps.getMessages());
+    settleLatestAssistantOnIdle(sessionId, Date.now());
     deps.clearPendingAbort(sessionId);
     sessionStore.setSessionCompacting(sessionId, false);
     setSessionStatusEntry(sessionId, { type: 'idle' });
@@ -532,7 +592,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (sessionId === deps.getActiveSessionId()) {
       const activeMessages = deps.getMessages();
       const shouldResyncActiveMessages =
-        activeMessages.length === 0 || hasActiveAssistantReply(activeMessages);
+        activeMessages.length === 0 ||
+        hadActiveAssistantReply ||
+        hasActiveAssistantReply(activeMessages);
       if (!uiStore.showSessionPicker()) sessionStore.markSessionSeen(sessionId);
       const handedOffTodos = deps.handoffTodosToMessages();
       refreshSettledTodos(sessionId);
@@ -715,17 +777,42 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         ) || null
     );
   };
-  const findStepAssistantMessage = (sessionId: string, assistantMessageID?: string) => {
-    if (assistantMessageID) return findAssistantMessage(sessionId, assistantMessageID);
-    return latestAssistantMessageForSession(deps.getMessages(), sessionId);
+  const findLatestStepAssistantMessage = (sessionId: string) => {
+    const messages = deps.getMessages();
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const entry = messages[index];
+      if (!entry || entry.info.sessionID !== sessionId) continue;
+      if (!isAssistantMessage(entry.info) || entry.info.error || entry.info.time.completed) {
+        return null;
+      }
+      return { info: entry.info, parts: entry.parts };
+    }
+    return null;
+  };
+  const findStepAssistantMessage = (
+    sessionId: string,
+    assistantMessageID: string | undefined,
+    allowLatestFallback: boolean
+  ) => {
+    if (assistantMessageID) {
+      const named = findAssistantMessage(sessionId, assistantMessageID);
+      if (named) return named;
+      if (!allowLatestFallback) return null;
+    }
+    // OpenCode's v2 `assistantMessageID` is not the legacy assistant message id
+    // rendered in Varro. For terminal step events, fall back to the latest active
+    // legacy assistant in the same session so completion does not wait for polls.
+    return findLatestStepAssistantMessage(sessionId);
   };
   const settleAssistantStepCompletion = (
     sessionId: string,
     assistantMessageID: string | undefined,
-    completedAt: number
+    completedAt: number,
+    allowLatestFallback: boolean
   ) => {
-    const message = findStepAssistantMessage(sessionId, assistantMessageID);
+    const message = findStepAssistantMessage(sessionId, assistantMessageID, allowLatestFallback);
     if (!message) {
+      if (allowLatestFallback) pendingTerminalStepSettles.set(sessionId, completedAt);
       if (isSessionInActiveTree(sessionId)) scheduleActiveMessageSync(sessionId);
       return false;
     }
@@ -740,18 +827,65 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     sessionStore.finishMessageStreaming(message.info.id);
     return true;
   };
+  const latestUnsettledAssistantEntry = (sessionId: string) => {
+    return findLatestStepAssistantMessage(sessionId);
+  };
+  const settleLatestAssistantOnIdle = (sessionId: string, completedAt: number) => {
+    const message = latestUnsettledAssistantEntry(sessionId);
+    if (!message || hasUnsettledToolPart(message.parts)) return false;
+    if (message.info.time.created > completedAt) return false;
+    sessionStore.upsertMessageInfo({
+      ...message.info,
+      time: { ...message.info.time, completed: completedAt },
+    });
+    sessionStore.finishMessageStreaming(message.info.id);
+    return true;
+  };
+  const settlePartialAssistantUpdate = (
+    sessionId: string,
+    partialMessage: {
+      id?: unknown;
+      error?: AssistantMessage['error'];
+      time?: { completed?: number };
+    },
+    assistantMessage: AssistantMessage | null
+  ) => {
+    const messageId = getAssistantFinishedMessageId(
+      deps.getMessages(),
+      { sessionID: sessionId, id: partialMessage.id },
+      assistantMessage
+    );
+    if (!messageId) return null;
+
+    const local = deps.getMessages().find((entry) => entry.info.id === messageId);
+    if (local?.info.role === 'assistant') {
+      const completed = partialMessage.time?.completed;
+      sessionStore.upsertMessageInfo({
+        ...local.info,
+        ...(partialMessage.error ? { error: partialMessage.error } : {}),
+        time: {
+          ...local.info.time,
+          ...(completed !== undefined ? { completed } : {}),
+        },
+      });
+    }
+
+    sessionStore.finishMessageStreaming(messageId);
+    return messageId;
+  };
   const settleAssistantStepEnd = (sessionId: string, props: Record<string, unknown>) => {
     if (isContinuationStepEnd('session.next.step.ended', props)) return false;
     return settleAssistantStepCompletion(
       sessionId,
       getEventString(props, 'assistantMessageID'),
-      getEventTimestamp(props)
+      getEventTimestamp(props),
+      true
     );
   };
   const settleAssistantStepFinishPart = (part: Part, completedAt: number) => {
     if (part.type !== 'step-finish') return false;
     if (isContinuationStepFinish(part.reason)) return false;
-    return settleAssistantStepCompletion(part.sessionID, part.messageID, completedAt);
+    return settleAssistantStepCompletion(part.sessionID, part.messageID, completedAt, false);
   };
   const findPart = (messageID: string, partID: string): Part | null => {
     const message = deps.getMessages().find((entry) => entry.info.id === messageID);
@@ -1029,8 +1163,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(() => {
     activeMessageSyncs.clear();
+    pendingTerminalStepSettles.clear();
     pendingMissingPartDeltas.clear();
     lastSeqBySession.clear();
+    for (const timer of streamedCompletionTimers.values()) clearTimeout(timer);
+    streamedCompletionTimers.clear();
     pendingPermissionSync = false;
   });
 
@@ -1084,21 +1221,31 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         handleSessionIdle(sessionID, abortedRetry);
         return;
       }
+      // opencode re-enters its run loop one final time after a turn completes,
+      // emitting a trailing `busy` before the closing `idle` (which can lag).
+      // When the latest assistant turn already finished within the current
+      // loading window, that busy is not new work — promoting the session to
+      // busy here would re-raise the "Thinking" spinner and suppress the
+      // "Worked for" summary until the late idle lands. Treat it as idle so the
+      // UI settles on the completed response immediately.
+      if (
+        status.type === 'busy' &&
+        sessionID === deps.getActiveSessionId() &&
+        latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt())
+      ) {
+        setSessionStatusEntry(sessionID, { type: 'idle' });
+        if (!isActiveTreeWorking()) uiStore.stopLoading();
+        return;
+      }
       setSessionStatusEntry(sessionID, status);
       if (status.type === 'busy') {
         deps.clearUsageLimitOnResumedProgress(sessionID, status);
       }
       deps.updateUsageLimitState(sessionID, status);
-      if (sessionID === deps.getActiveSessionId()) {
+      if (isSessionInActiveTree(sessionID)) {
         const statusType = (status as { type: string }).type;
-        if (statusType === 'retry') {
+        if (statusType === 'retry' || statusType === 'busy') {
           uiStore.startLoading();
-        } else if (statusType === 'busy') {
-          if (
-            latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt())
-          ) {
-            uiStore.stopLoading();
-          } else uiStore.startLoading();
         } else {
           if (isActiveTreeWorking()) uiStore.startLoading();
           else uiStore.stopLoading();
@@ -1139,6 +1286,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const info = data.properties?.info;
       const partialMessage = info as
         | {
+            id?: unknown;
             sessionID?: string;
             role?: string;
             error?: AssistantMessage['error'];
@@ -1180,16 +1328,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           scheduleActiveMessageSync(sessionID);
         }
         if (assistantFinished) {
-          const messageId = getAssistantFinishedMessageId(
-            deps.getMessages(),
-            partialMessage,
-            assistantMessage
-          );
-          if (messageId) sessionStore.finishMessageStreaming(messageId);
           if (assistantMessage) {
+            sessionStore.finishMessageStreaming(assistantMessage.id);
             syncMessagePartsIfMissing(assistantMessage);
             deps.handoffTodosToMessages();
             refreshSettledTodos(sessionID);
+          } else {
+            settlePartialAssistantUpdate(sessionID, partialMessage, assistantMessage);
           }
         }
       }
@@ -1228,8 +1373,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
       if (!isSessionInActiveTree(partialPart?.sessionID)) return;
 
-      uiStore.markLoadingActivity();
       if (!isCompleteMessagePart(rawPart)) {
+        uiStore.startLoading();
         scheduleActiveMessageSync(partialPart!.sessionID!);
         return;
       }
@@ -1241,7 +1386,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (part.type === 'tool') deps.syncTodosFromMessages();
         if (settleAssistantStepFinishPart(part, getEventTimestamp(data.properties || {}))) {
           handleSessionIdle(part.sessionID, deps.hasPendingAbort(part.sessionID));
+          return;
         }
+        uiStore.startLoading();
+        if (part.type === 'text') scheduleStreamedCompletionSettle(part.sessionID);
       };
 
       if (!deps.getMessages().some((message) => message.info.id === rawPart.messageID)) {
@@ -1342,7 +1490,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
         if (!isSessionInActiveTree(sessionID)) return;
         uiStore.markLoadingActivity();
-        if (sessionID === deps.getActiveSessionId()) uiStore.startLoading();
         const projected = PROJECTED_SESSION_EVENTS.has(eventName)
           ? handleProjectedSessionEvent(eventName, p)
           : false;
@@ -1353,6 +1500,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           // not missed anything and can skip the refetch. We still resync when a gap proves
           // a durable event was missed, or when the event carries no seq (ephemeral delta).
           if (seqStatus !== 'ok') scheduleActiveMessageSync(sessionID);
+        }
+        if (eventName === 'session.next.text.ended') {
+          scheduleStreamedCompletionSettle(sessionID);
         }
       })
     );
@@ -1461,7 +1611,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       void deps
         .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
         .catch(() => {
-          permissionsStore.addPermission(permission);
+          if (!deps.shouldAutoApprovePermissions(permission.sessionID)) {
+            permissionsStore.addPermission(permission);
+          }
         });
       return;
     }
@@ -1582,6 +1734,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   );
 
   return cleanups;
+}
+
+function currentStreamingSnapshot() {
+  return { partId: appStore.state.streamingPartId, text: appStore.state.streamingText };
 }
 
 function getEventString(value: unknown, key: string): string | undefined {

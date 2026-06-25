@@ -142,7 +142,7 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
-  it('keeps a busy session in progress from idle alone', () => {
+  it('clears a busy session on session.status idle', () => {
     const manager = createManager();
 
     manager.handleServerEvent({
@@ -157,14 +157,63 @@ describe('SessionStateManager notifications', () => {
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     });
+    // The deprecated `session.idle` is published alongside the status and must
+    // be harmless once the session already settled (no re-notification).
     manager.handleServerEvent({
       type: 'session.idle',
       properties: { sessionID: 'session-1' },
     });
 
-    expect(manager.busy.has('session-1')).toBe(true);
-    expect(manager.completed.has('session-1')).toBe(false);
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
+    // Only plan sessions raise the info notification; this one isn't plan.
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('clears a busy session on the deprecated session.idle event', () => {
+    const manager = createManager();
+
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.idle',
+      properties: { sessionID: 'session-1' },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
+  });
+
+  it('markSessionBusy pre-marks a session so a finish without a busy SSE event still settles', () => {
+    // Models the ping race: the prompt is forwarded, the turn finishes so fast
+    // that the SSE `session.status { busy }` event is missed/late, and the
+    // only finish signal that arrives is `session.status { idle }`. Without the
+    // optimistic mark, finishBusySession would drop it (`!busySessions.has`)
+    // and the session would hang until the reconcile watchdog recovers it.
+    const listener = { onStatusChange: vi.fn() };
+    const manager = new SessionStateManager(
+      {
+        get: vi.fn(() => undefined),
+        set: vi.fn(() => Promise.resolve()),
+        remove: vi.fn(),
+      } as never,
+      listener,
+      { shouldShow: () => true }
+    );
+
+    manager.markSessionBusy('session-1');
+    expect(manager.busy.has('session-1')).toBe(true);
+
+    // No intervening `busy` event — idle arrives directly.
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
   });
 
   it('does not mark continuation step ends complete', () => {
@@ -178,11 +227,10 @@ describe('SessionStateManager notifications', () => {
       type: 'session.next.step.ended',
       properties: { sessionID: 'session-1', finish: 'tool_calls' },
     });
-    manager.handleServerEvent({
-      type: 'session.idle',
-      properties: { sessionID: 'session-1' },
-    });
 
+    // A tool_calls finish means the turn continues; the session stays busy
+    // until a real finish signal (step.ended stop / message completion /
+    // session.status idle) arrives.
     expect(manager.busy.has('session-1')).toBe(true);
     expect(manager.completed.has('session-1')).toBe(false);
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();

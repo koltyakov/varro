@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
-import type { PermissionRule, Provider } from '../types';
+import type { Message, Part, PermissionRule, Provider } from '../types';
 import {
   buildSessionSendBody,
   ensureSessionPermissionWithDependencies,
@@ -383,6 +383,142 @@ describe('session-send helpers', () => {
       parts: [{ type: 'text', text: 'hello' }],
     });
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-2', { type: 'busy' });
+  });
+
+  it('shows the sent user message before the remote send finishes', async () => {
+    let resolveSend: (() => void) | undefined;
+    let messageCount = 0;
+    let optimisticEntry: { info: Message; parts: Part[] } | null = null;
+    const sendAsync = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    const appendOptimisticMessage = vi.fn((entry: { info: Message; parts: Part[] }) => {
+      optimisticEntry = entry;
+      messageCount += 1;
+    });
+
+    const promise = sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        getSelectedAgent: () => 'build',
+        createSession: vi.fn(async () => 'session-1'),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: {
+            parts: [
+              { type: 'text', text: 'hello' },
+              { type: 'text', text: '[Working directory: /repo]' },
+            ],
+            model: { providerID: 'openai', modelID: 'gpt-4o' },
+          },
+          effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        appendOptimisticMessage,
+        removeOptimisticMessage: vi.fn(),
+        sendAsync,
+        getMessageCount: () => messageCount,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        setSessionStatusEntry: vi.fn(),
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'hello'
+    );
+    await Promise.resolve();
+
+    expect(appendOptimisticMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      sendAsync.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    );
+    expect(optimisticEntry?.info).toMatchObject({
+      sessionID: 'session-1',
+      role: 'user',
+      agent: 'build',
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
+    expect(optimisticEntry?.parts).toMatchObject([
+      { type: 'text', text: 'hello' },
+      { type: 'text', text: '[Working directory: /repo]' },
+    ]);
+
+    resolveSend?.();
+    await promise;
+  });
+
+  it('removes the optimistic user message when sending fails', async () => {
+    let messageCount = 0;
+    let optimisticId: string | null = null;
+    const removeOptimisticMessage = vi.fn((messageId: string) => {
+      if (messageId === optimisticId) messageCount -= 1;
+    });
+
+    const result = await sendMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getDefaultPermissionMode: () => 'default',
+        getSelectedAgent: () => 'build',
+        createSession: vi.fn(async () => 'session-1'),
+        clearPendingAbort: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        buildSendPayload: () => ({
+          body: {
+            parts: [{ type: 'text', text: 'hello' }],
+            model: { providerID: 'openai', modelID: 'gpt-4o' },
+          },
+          effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
+        }),
+        requestMessageListScrollToBottom: vi.fn(),
+        startLoading: vi.fn(),
+        setError: vi.fn(),
+        applyEffectiveModel: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearTodos: vi.fn(),
+        clearSessionUsageLimit: vi.fn(),
+        appendOptimisticMessage: vi.fn((entry: { info: Message; parts: Part[] }) => {
+          optimisticId = entry.info.id;
+          messageCount += 1;
+        }),
+        removeOptimisticMessage,
+        sendAsync: vi.fn(async () => {
+          throw new Error('network failed');
+        }),
+        getMessageCount: () => messageCount,
+        clearDroppedFiles: vi.fn(),
+        clearTerminalSelection: vi.fn(),
+        clearClipboardImages: vi.fn(),
+        postFilesClear: vi.fn(),
+        postTerminalSelectionClear: vi.fn(),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        recheckSessionStatus: vi.fn(async () => {}),
+        setSessionStatusEntry: vi.fn(),
+        stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
+      },
+      'hello'
+    );
+
+    expect(result).toBe(false);
+    expect(removeOptimisticMessage).toHaveBeenCalledWith(optimisticId);
+    expect(messageCount).toBe(0);
   });
 
   it('does not start a new loading state for steers', async () => {

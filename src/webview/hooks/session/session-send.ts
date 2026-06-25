@@ -21,7 +21,7 @@ import {
 import { modelSupportsVision } from '../../lib/model-capabilities';
 import { getPreferredVariant, normalizeModelVariant } from '../../lib/model-variants';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
-import type { PermissionRule, Provider, Session, SessionStatus } from '../../types';
+import type { Message, Part, PermissionRule, Provider, Session, SessionStatus } from '../../types';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -70,6 +70,10 @@ type StateBoundSendDependencies = {
   continueInterruptedSession(sessionId: string): Promise<void>;
   logError?(context: string, err: unknown): void;
 };
+
+type OptimisticMessageEntry = { info: Message; parts: Part[] };
+
+let optimisticMessageSequence = 0;
 
 export function getAttachmentReference(
   file: { path: string; type: 'file' | 'directory' },
@@ -309,6 +313,8 @@ export class SessionSendOperations {
         resetTodoSync: this.deps.resetTodoSync,
         clearTodos: composerStore.clearTodos,
         clearSessionUsageLimit: (sessionId) => sessionStore.setSessionUsageLimit(sessionId, null),
+        appendOptimisticMessage: appendOptimisticMessageToActiveSession,
+        removeOptimisticMessage: removeOptimisticMessageFromActiveSession,
         sendAsync: this.deps.sendAsync,
         getMessageCount: () => appStore.state.messages.length,
         clearDroppedFiles: composerStore.clearDroppedFiles,
@@ -376,6 +382,8 @@ export async function sendMessageWithDependencies(
     resetTodoSync(): void;
     clearTodos(): void;
     clearSessionUsageLimit(sessionId: string): void;
+    appendOptimisticMessage?(entry: OptimisticMessageEntry): void;
+    removeOptimisticMessage?(messageId: string): void;
     sendAsync(sessionId: string, body: SessionSendBody): Promise<unknown>;
     getMessageCount(): number;
     clearDroppedFiles(): void;
@@ -424,7 +432,6 @@ export async function sendMessageWithDependencies(
   if (!sendPayload) return false;
   const { body, effectiveModel } = sendPayload;
 
-  deps.requestMessageListScrollToBottom();
   const expectsAssistantReply = !body.noReply && body.delivery !== 'steer';
   if (expectsAssistantReply) {
     deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
@@ -438,10 +445,20 @@ export async function sendMessageWithDependencies(
   }
 
   deps.clearSessionUsageLimit(sessionId);
+  const preSendMessageCount = deps.getMessageCount();
+  const optimisticMessage = createOptimisticUserMessage(
+    sessionId,
+    body,
+    body.agent ?? deps.getSelectedAgent?.() ?? 'build',
+    effectiveModel
+  );
+  if (optimisticMessage) {
+    deps.appendOptimisticMessage?.(optimisticMessage);
+  }
+  deps.requestMessageListScrollToBottom();
 
   try {
     await deps.sendAsync(sessionId, body);
-    const preSyncMessageCount = deps.getMessageCount();
     if (deps.shouldClearComposerAfterSend()) {
       deps.clearDroppedFiles();
       deps.clearTerminalSelection();
@@ -454,7 +471,8 @@ export async function sendMessageWithDependencies(
       deps.syncSessionMessages(sessionId),
       deps.recheckSessionStatus(sessionId),
     ]);
-    if (deps.getActiveSessionId() === sessionId && deps.getMessageCount() <= preSyncMessageCount) {
+    if (deps.getActiveSessionId() === sessionId && deps.getMessageCount() <= preSendMessageCount) {
+      if (optimisticMessage) deps.appendOptimisticMessage?.(optimisticMessage);
       await retryPostSendMessageSync(deps, sessionId);
     }
     const failures = syncResults.filter(
@@ -470,6 +488,7 @@ export async function sendMessageWithDependencies(
     }
     return true;
   } catch (err) {
+    if (optimisticMessage) deps.removeOptimisticMessage?.(optimisticMessage.info.id);
     if (expectsAssistantReply) {
       deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
       deps.stopLoading();
@@ -484,6 +503,84 @@ export async function sendMessageWithDependencies(
     deps.setError(baseMessage);
     return false;
   }
+}
+
+function appendOptimisticMessageToActiveSession(entry: OptimisticMessageEntry) {
+  if (appStore.state.activeSessionId !== entry.info.sessionID) return;
+  appStore.setState('messages', (messages) => [...messages, entry]);
+  appStore.defaultAppState.messageIndex.invalidate();
+}
+
+function removeOptimisticMessageFromActiveSession(messageId: string) {
+  const nextMessages = appStore.state.messages.filter((entry) => entry.info.id !== messageId);
+  if (nextMessages.length === appStore.state.messages.length) return;
+  appStore.setState('messages', nextMessages);
+  appStore.defaultAppState.messageIndex.invalidate();
+}
+
+function createOptimisticUserMessage(
+  sessionId: string,
+  body: SessionSendBody,
+  agent: string,
+  effectiveModel: SelectedModel | null
+): OptimisticMessageEntry | null {
+  const model = body.model ?? effectiveModel;
+  if (!model) return null;
+
+  const sequence = optimisticMessageSequence++;
+  const created = Date.now();
+  const messageId = `optimistic-user-${created}-${sequence}`;
+  const parts = body.parts.flatMap((part, index): Part[] => {
+    const id = `${messageId}-part-${index}`;
+    if (part.type === 'text') {
+      return [
+        {
+          id,
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'text',
+          text: part.text ?? '',
+          synthetic: true,
+        },
+      ];
+    }
+    if (part.type === 'file' && part.mime && part.url) {
+      return [
+        {
+          id,
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'file',
+          mime: part.mime,
+          filename: part.filename,
+          url: part.url,
+        },
+      ];
+    }
+    return [];
+  });
+  if (parts.length === 0) return null;
+
+  const modelVariant =
+    'variant' in model && typeof model.variant === 'string' ? model.variant : undefined;
+  const variant = body.variant ?? modelVariant;
+  const optimisticModel = {
+    providerID: model.providerID,
+    modelID: model.modelID,
+    ...(variant ? { variant } : {}),
+  };
+
+  return {
+    info: {
+      id: messageId,
+      sessionID: sessionId,
+      role: 'user',
+      time: { created },
+      agent,
+      model: optimisticModel,
+    },
+    parts,
+  };
 }
 
 export async function ensureSessionPermissionWithDependencies(

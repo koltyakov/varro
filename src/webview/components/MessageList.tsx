@@ -223,6 +223,17 @@ function getMessageIdSet(messages: Array<{ info: Message }>) {
   return new Set(messages.map((message) => message.info.id));
 }
 
+function hasVisibleRunningToolPart(messages: Array<{ parts: Part[] }>) {
+  return messages.some((entry) =>
+    entry.parts.some(
+      (part) =>
+        part.type === 'tool' &&
+        (part.state.status === 'pending' || part.state.status === 'running') &&
+        shouldShowAssistantPartInline(part)
+    )
+  );
+}
+
 export function buildPlanImplementationPrompt(parts: Part[]) {
   void parts;
   return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
@@ -386,6 +397,10 @@ export function MessageList() {
   const visibleBlockingStreamingPart = createMemo(() => {
     const streamingText = state.streamingText;
     return hasVisibleBlockingStreamingPart(streamingPart(), streamingText);
+  });
+  const visibleRunningToolPart = createMemo(() => {
+    messageStructureVersion();
+    return untrack(() => hasVisibleRunningToolPart(messages()));
   });
   const committedTextBlocksReappear = createMemo(() => {
     messageStructureVersion();
@@ -564,7 +579,10 @@ export function MessageList() {
   );
 
   const shouldShowLoadingRow = createMemo(
-    () => loadingRowEligible() && !visibleBlockingStreamingPart() && !committedTextBlocksReappear()
+    () =>
+      loadingRowEligible() &&
+      (!visibleBlockingStreamingPart() || visibleRunningToolPart()) &&
+      (!committedTextBlocksReappear() || visibleRunningToolPart())
   );
 
   createEffect(() => {

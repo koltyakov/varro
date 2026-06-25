@@ -2645,6 +2645,25 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('shows the loading row while a visible tool is still running', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: assistantMessage('message-1'),
+        parts: [textPart('text-1', 'I will update the file.'), toolPart('tool-1')],
+      },
+    ]);
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(false);
+    expect(row?.getAttribute('aria-hidden')).toBeNull();
+  });
+
   it('does not immediately re-show the loading row during short visible-stream gaps', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([

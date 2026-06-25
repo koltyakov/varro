@@ -502,7 +502,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         await sessionApprovalOperations
           .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
           .catch(() => {
-            permissionsStore.addPermission(permission);
+            if (permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'full') {
+              permissionsStore.addPermission(permission);
+            }
           });
         continue;
       }

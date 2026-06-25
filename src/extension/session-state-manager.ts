@@ -123,6 +123,22 @@ export class SessionStateManager {
     this.listener.onStatusChange();
   }
 
+  /**
+   * Optimistically marks a session busy the moment a prompt is forwarded to
+   * the server. opencode admits a prompt and only later emits the SSE
+   * `session.status { busy }` event; on fast turns the finish (idle /
+   * step.ended) can arrive before that busy event, leaving the session
+   * untracked so `finishBusySession` drops the completion. Pre-marking here
+   * guarantees the busy marker is in place before any finish event lands,
+   * eliminating the missed-finish race for ping-style turns.
+   */
+  markSessionBusy(sessionID: string): void {
+    if (!sessionID) return;
+    this.markBusyInternal(sessionID);
+    this.listener.onStatusChange();
+    void this.persist();
+  }
+
   handleServerEvent(event: ServerEvent): void {
     const { type, properties: props } = event;
     let changed = false;
@@ -144,19 +160,23 @@ export class SessionStateManager {
         const statusType = getString(asRecord(props?.status)?.type);
         if (!sessionID || !statusType) break;
         if (statusType === 'busy' || statusType === 'retry') {
-          if (!this.busySessions.has(sessionID)) {
-            this.busyStartedAt.set(sessionID, Date.now());
-          }
-          this.busySessions.add(sessionID);
-          this.completedSessions.delete(sessionID);
-          this.failedSessions.delete(sessionID);
-          changed = true;
+          changed = this.markBusyInternal(sessionID) || changed;
+        } else if (statusType === 'idle') {
+          // `session.status { idle }` is opencode's authoritative turn-finish
+          // signal (emitted by the run-state Runner's onIdle). Treat it as a
+          // primary completion path so a fast turn whose step.ended/message
+          // events lag or are missed still settles immediately.
+          changed = this.finishBusySession(sessionID, undefined) || changed;
         }
         break;
       }
       case 'session.idle': {
+        // The deprecated `session.idle` event is published alongside
+        // `session.status { idle }` (see opencode session/status.ts) and shares
+        // the same meaning; finish on it too so either signal recovers the UI.
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
+        changed = this.finishBusySession(sessionID, undefined) || changed;
         break;
       }
       case 'session.next.step.ended': {
@@ -521,6 +541,16 @@ export class SessionStateManager {
     const wasBusy = this.busySessions.delete(sessionID);
     if (wasBusy) this.busyStartedAt.delete(sessionID);
     return wasBusy;
+  }
+
+  private markBusyInternal(sessionID: string): boolean {
+    if (!this.busySessions.has(sessionID)) {
+      this.busyStartedAt.set(sessionID, Date.now());
+    }
+    this.busySessions.add(sessionID);
+    this.completedSessions.delete(sessionID);
+    this.failedSessions.delete(sessionID);
+    return true;
   }
 
   private finishBusySession(sessionID: string, completedAt: number | undefined): boolean {

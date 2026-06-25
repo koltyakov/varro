@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Message, Part, SessionStatus } from '../types';
 import {
   forceReconcileIdleSessionWithDependencies,
+  hasLocalEvidenceTurnDone,
   hasStreamedFinalResponse,
   reconcileStuckSessionsWithDependencies,
   registerStuckSessionWatchdogEffect,
@@ -229,6 +230,25 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
     expect(timers.has('s1')).toBe(false);
   });
+
+  it('fast-paths when the latest assistant message is already completed (missed idle)', async () => {
+    // The ping case: message.updated completion arrived and settled the
+    // assistant message, but the closing session.status idle was missed, so the
+    // session is still locally busy. A settled latest assistant is the strongest
+    // local "done" signal — recover on the first server-idle poll instead of
+    // waiting out the no-evidence grace.
+    const completed = assistant('a1', 's1', { time: { created: 1, completed: 2 } });
+    completed.parts = [textPart('t1', 's1', 'Pong.')];
+    const deps = baseReconcileDeps({
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getMessages: () => [completed],
+      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+    });
+    const timers = new Map<string, number>();
+    await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
+    expect(deps.forceReconcileIdleSession).toHaveBeenCalledWith('s1');
+    expect(timers.has('s1')).toBe(false);
+  });
 });
 
 function textPart(id: string, sessionID: string, text: string): Part {
@@ -371,6 +391,35 @@ describe('hasStreamedFinalResponse', () => {
   it('is false when the latest message is a user turn', () => {
     const messages = [assistant('a1', 's1'), user('u2', 's1')];
     expect(hasStreamedFinalResponse(messages, 's1')).toBe(false);
+  });
+});
+
+describe('hasLocalEvidenceTurnDone', () => {
+  it('is true when the latest assistant is already completed', () => {
+    const msg = assistant('a1', 's1', { time: { created: 1, completed: 2 } });
+    msg.parts = [textPart('t1', 's1', 'Done.')];
+    expect(hasLocalEvidenceTurnDone([msg], 's1')).toBe(true);
+  });
+
+  it('is true when the latest assistant errored', () => {
+    const msg = assistant('a1', 's1', { error: { name: 'x', data: {} } } as Partial<Message>);
+    expect(hasLocalEvidenceTurnDone([msg], 's1')).toBe(true);
+  });
+
+  it('is true when the latest assistant streamed final text but is not yet settled', () => {
+    const msg = assistant('a1', 's1');
+    msg.parts = [textPart('t1', 's1', 'Streaming done.')];
+    expect(hasLocalEvidenceTurnDone([msg], 's1')).toBe(true);
+  });
+
+  it('is false when the latest assistant has a tool still running', () => {
+    const msg = assistant('a1', 's1');
+    msg.parts = [textPart('t1', 's1', 'Working'), toolPart('tool-1', 's1', 'running')];
+    expect(hasLocalEvidenceTurnDone([msg], 's1')).toBe(false);
+  });
+
+  it('is false when there is no assistant message for the session', () => {
+    expect(hasLocalEvidenceTurnDone([], 's1')).toBe(false);
   });
 });
 

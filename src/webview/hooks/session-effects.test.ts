@@ -26,9 +26,9 @@ describe('session effect helpers', () => {
     });
 
     try {
-      await Promise.resolve();
-      vi.advanceTimersByTime(8000);
+      await vi.advanceTimersByTimeAsync(3000);
       expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(3);
     } finally {
       dispose();
       vi.useRealTimers();

@@ -153,6 +153,7 @@ const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<
   string,
   Array<{ info: AssistantMessage; parts: Part[] }>
 >();
+const OPTIMISTIC_USER_MESSAGE_ID_PREFIX = 'optimistic-user-';
 const permissionGroupMemberCache = new WeakMap<Permission, PermissionGroupMember[]>();
 
 let cachedChildRunsByParentIdMessages: Array<{ info: Message; parts: Part[] }> | null = null;
@@ -1871,6 +1872,7 @@ export function upsertMessage(msg: { info: Message; parts: Part[] }) {
         msgs[idx] = msg;
         messageIndex.invalidate();
       } else {
+        removeReconciledOptimisticUserMessage(msgs, msg);
         msgs.push(msg);
         messageIndex.invalidate();
       }
@@ -1889,10 +1891,64 @@ export function upsertMessageInfo(info: Message) {
         messageIndex.invalidate();
         return;
       } else {
+        removeLatestOptimisticUserMessageForInfo(msgs, info);
         msgs.push({ info, parts: [] });
         messageIndex.invalidate();
       }
     })
+  );
+}
+
+function removeLatestOptimisticUserMessageForInfo(msgs: MessageEntry[], info: Message) {
+  if (info.role !== 'user' || isOptimisticUserMessageId(info.id)) return false;
+  for (let index = msgs.length - 1; index >= 0; index -= 1) {
+    const entry = msgs[index]!;
+    if (entry.info.sessionID !== info.sessionID || !isOptimisticUserMessage(entry)) continue;
+    msgs.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+function removeReconciledOptimisticUserMessage(msgs: MessageEntry[], incoming: MessageEntry) {
+  if (incoming.info.role !== 'user' || isOptimisticUserMessageId(incoming.info.id)) return false;
+
+  const incomingSignature = getUserMessageTextSignature(incoming.parts);
+  for (let index = msgs.length - 1; index >= 0; index -= 1) {
+    const entry = msgs[index]!;
+    if (entry.info.sessionID !== incoming.info.sessionID || !isOptimisticUserMessage(entry)) {
+      continue;
+    }
+    if (incomingSignature && getUserMessageTextSignature(entry.parts) !== incomingSignature) {
+      continue;
+    }
+    msgs.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+function isOptimisticUserMessage(entry: MessageEntry) {
+  return entry.info.role === 'user' && isOptimisticUserMessageId(entry.info.id);
+}
+
+function isOptimisticUserMessageId(id: string) {
+  return id.startsWith(OPTIMISTIC_USER_MESSAGE_ID_PREFIX);
+}
+
+function getUserMessageTextSignature(parts: Part[]) {
+  return parts
+    .filter((part): part is Extract<Part, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.text.trim())
+    .filter((text) => text.length > 0 && !isComposerContextText(text))
+    .join('\n');
+}
+
+function isComposerContextText(text: string) {
+  return (
+    text.startsWith('[Working directory:') ||
+    text.startsWith('[Active file:') ||
+    text.startsWith('[Selection from ')
   );
 }
 
@@ -1956,8 +2012,8 @@ function mergeToolPartUpdate(
   return current;
 }
 
-function getToolStateProgressRank(state: Extract<Part, { type: 'tool' }>['state']) {
-  switch (state.status) {
+function getToolStateProgressRank(toolState: Extract<Part, { type: 'tool' }>['state']) {
+  switch (toolState.status) {
     case 'pending':
       return 0;
     case 'running':

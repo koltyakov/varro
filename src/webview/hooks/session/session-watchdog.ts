@@ -4,20 +4,25 @@ import type { AssistantMessage, Message, Part, SessionStatus } from '../../types
 type MessageEntry = { info: Message; parts: Part[] };
 
 // How often the watchdog polls server-authoritative status while at least one
-// session looks busy locally.
-export const STUCK_SESSION_WATCHDOG_INTERVAL_MS = 4_000;
+// session looks busy locally. Tuned short so a missed finish (e.g. a fast ping
+// whose idle/step.ended events never arrived) recovers within ~one poll; this
+// mirrors opencode's stream-transport, which polls `/session/status` while a
+// turn is armed rather than relying on the SSE event alone.
+export const STUCK_SESSION_WATCHDOG_INTERVAL_MS = 1_000;
 // How long the server must *continuously* report a session idle (while the UI
-// still shows it busy) before we force a reconcile. Requiring the disagreement
-// to persist across multiple polls protects against momentary races between
-// agentic steps. A false reconcile is self-correcting (the next progress event
-// re-marks the session busy), whereas a missed completion is permanent, so this
-// is tuned for prompt recovery with a safety margin.
-export const STUCK_SESSION_GRACE_MS = 8_000;
-// Reduced grace used when the latest assistant turn has already streamed its
-// final text with no tools in flight — strong local evidence the turn is done
-// even though the completion event was missed. The server-idle confirmation is
-// still required, but we no longer demand it persist across multiple polls, so
-// recovery happens on the first poll instead of after the full grace window.
+// still shows it busy) before we force a reconcile, when there is NO local
+// evidence the turn finished (no loaded assistant message, no streamed text).
+// Requiring it to persist protects against momentary races. A false reconcile
+// is self-correcting (the next progress event re-marks the session busy),
+// whereas a missed completion is permanent, so this is tuned for prompt
+// recovery with a small safety margin.
+export const STUCK_SESSION_GRACE_MS = 2_000;
+// Reduced grace (zero) used when local evidence says the turn is already done
+// — the latest assistant message is settled (completed/errored) or it streamed
+// its final text with no tools in flight — even though the closing status
+// event was missed. The server-idle confirmation is still required, but we no
+// longer demand it persist, so recovery happens on the first poll instead of
+// after the full grace window.
 export const STUCK_SESSION_STREAMED_GRACE_MS = 0;
 
 function isRunningStatus(status: SessionStatus | null | undefined): boolean {
@@ -101,11 +106,13 @@ export async function reconcileStuckSessionsWithDependencies(
     if (deps.hasPendingAbort(sessionId) || deps.isAwaitingInput(sessionId)) continue;
     if (isRunningStatus(serverStatuses[sessionId])) continue;
 
-    // When the latest assistant turn already streamed its final text with no
-    // tools in flight, local evidence says the turn is done; collapse the grace
-    // so we reconcile on the first server-idle confirmation instead of waiting
-    // out the full window tuned for the no-evidence case.
-    const effectiveGrace = hasStreamedFinalResponse(messages, sessionId, deps.getStreamingText())
+    // When local evidence says the turn is already done (settled assistant, or
+    // streamed final text with no tools in flight), collapse the grace so we
+    // reconcile on the first server-idle confirmation instead of waiting out
+    // the full window tuned for the no-evidence case. This is the fast path for
+    // missed finishes on short turns (ping-style) whose idle/step.ended events
+    // never arrived.
+    const effectiveGrace = hasLocalEvidenceTurnDone(messages, sessionId, deps.getStreamingText())
       ? streamedGraceMs
       : graceMs;
     const since = stuckSince.get(sessionId);
@@ -225,6 +232,35 @@ export function hasStreamedFinalResponse(
       (part) =>
         part.type === 'tool' && (part.state.status === 'pending' || part.state.status === 'running')
     );
+  }
+  return false;
+}
+
+/**
+ * Strong local evidence the latest turn for `sessionId` has finished, even when
+ * its closing status event was missed: the latest assistant message is already
+ * settled (completed or errored), or — if still unsettled — it streamed its
+ * final text with no tools in flight. The watchdog uses this to collapse its
+ * grace window so a missed finish on a short turn (e.g. a ping whose idle /
+ * step.ended events never arrived) recovers on the first server-idle poll.
+ *
+ * `hasStreamedFinalResponse` alone returns false once the assistant message is
+ * settled, which would wrongly push a completed-but-still-busy session back
+ * onto the long no-evidence grace; this wrapper treats a settled latest
+ * assistant as the strongest possible "done" signal.
+ */
+export function hasLocalEvidenceTurnDone(
+  messages: MessageEntry[],
+  sessionId: string,
+  streaming?: { partId: string | null; text: string } | null
+): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const entry = messages[index];
+    if (!entry || entry.info.sessionID !== sessionId) continue;
+    if (entry.info.role !== 'assistant') return false;
+    const info = entry.info as AssistantMessage;
+    if (info.error || info.time.completed) return true;
+    return hasStreamedFinalResponse(messages, sessionId, streaming);
   }
   return false;
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AssistantMessage, Provider, UserMessage } from '../types';
+import type { AssistantMessage, Part, Provider, UserMessage } from '../types';
 
 function assistantMessage(
   id: string,
@@ -870,6 +870,37 @@ describe('state helpers', () => {
       'child-1',
       'child-2',
     ]);
+  });
+
+  it('reconciles optimistic user messages when the server user message arrives', async () => {
+    const stateModule = await loadState();
+    const optimisticParts: Part[] = [
+      {
+        id: 'optimistic-user-1-part-0',
+        sessionID: 'session-1',
+        messageID: 'optimistic-user-1',
+        type: 'text',
+        text: 'Test message',
+        synthetic: true,
+      },
+      {
+        id: 'optimistic-user-1-part-1',
+        sessionID: 'session-1',
+        messageID: 'optimistic-user-1',
+        type: 'text',
+        text: '[Working directory: /repo]',
+        synthetic: true,
+      },
+    ];
+
+    stateModule.upsertMessage({
+      info: userMessage('optimistic-user-1'),
+      parts: optimisticParts,
+    });
+
+    stateModule.upsertMessageInfo(userMessage('message-1'));
+
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-1']);
   });
 
   it('toggles local ui helpers and persists ui display preferences', async () => {

@@ -171,6 +171,7 @@ function createDefaultDeps(
     syncSession: vi.fn().mockResolvedValue(undefined),
     shouldResyncSessionAfterIdle: () => false,
     syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+    recheckSessionStatus: vi.fn().mockResolvedValue(undefined),
     applyUsageLimitNotice: vi.fn(),
     syncTodosFromMessages: vi.fn(),
     shouldAutoApprovePermissions: () => false,
@@ -291,7 +292,7 @@ describe('registerSessionEventHandlers', () => {
     });
   });
 
-  it('restores the permission prompt when auto-approval fails', async () => {
+  it('keeps full-access permission prompts hidden when auto-approval races or fails', async () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(
@@ -343,6 +344,61 @@ describe('registerSessionEventHandlers', () => {
       expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'always', {
         rethrow: true,
       });
+    });
+    expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-1' }));
+  });
+
+  it('restores the permission prompt when auto-approval fails after leaving full access', async () => {
+    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(
+        event as string,
+        handler as (data: { properties?: Record<string, unknown> }) => void
+      );
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    let fullAccess = true;
+    const respondPermission = vi.fn().mockImplementation(async () => {
+      fullAccess = false;
+      throw new Error('Permission backend unavailable');
+    });
+
+    registerSessionEventHandlers({
+      getActiveSessionId: () => null,
+      getMessages: () => [],
+      handoffTodosToMessages: vi.fn().mockReturnValue(true),
+      upsertSession: vi.fn(),
+      setSessionCompacting: vi.fn(),
+      removeDeletedSessionTree: vi.fn(),
+      shouldIgnorePendingAbortStatus: () => false,
+      hasPendingAbort: () => false,
+      clearPendingAbort: vi.fn(),
+      setSessionStatusEntry: vi.fn(),
+      clearUsageLimitOnResumedProgress: vi.fn(),
+      updateUsageLimitState: vi.fn(),
+      syncSession: vi.fn().mockResolvedValue(undefined),
+      shouldResyncSessionAfterIdle: () => false,
+      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+      applyUsageLimitNotice: vi.fn(),
+      syncTodosFromMessages: vi.fn(),
+      shouldAutoApprovePermissions: () => fullAccess,
+      respondPermission,
+      setDiffs: vi.fn(),
+    });
+
+    handlers.get('permission.asked')?.({
+      properties: {
+        id: 'perm-1',
+        sessionID: 'session-1',
+        permission: 'bash',
+        title: 'Run Bash command',
+      },
+    });
+
+    await vi.waitFor(() => {
       expect(addPermission).toHaveBeenCalledWith(
         expect.objectContaining({
           id: 'perm-1',
@@ -732,6 +788,7 @@ describe('registerSessionEventHandlers', () => {
     const handlers = installHandlers();
 
     finishMessageStreaming.mockClear();
+    upsertMessageInfo.mockClear();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -750,6 +807,12 @@ describe('registerSessionEventHandlers', () => {
       },
     });
 
+    expect(upsertMessageInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-1',
+        time: expect.objectContaining({ completed: 2 }),
+      })
+    );
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
   });
 
@@ -1193,6 +1256,7 @@ describe('registerSessionEventHandlers', () => {
 
     upsertPart.mockClear();
     markLoadingActivity.mockClear();
+    startLoading.mockClear();
 
     handlers.get('message.part.updated')?.({
       properties: {
@@ -1214,7 +1278,7 @@ describe('registerSessionEventHandlers', () => {
       },
     });
 
-    expect(markLoadingActivity).toHaveBeenCalledTimes(1);
+    expect(startLoading).toHaveBeenCalledTimes(1);
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'tool-1', sessionID: 'session-child', type: 'tool' })
     );
@@ -1265,6 +1329,7 @@ describe('registerSessionEventHandlers', () => {
 
     applyMessagePartDelta.mockClear();
     markLoadingActivity.mockClear();
+    startLoading.mockClear();
 
     handlers.get('message.part.delta')?.({
       properties: {
@@ -1277,6 +1342,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     expect(markLoadingActivity).toHaveBeenCalledTimes(1);
+    expect(startLoading).toHaveBeenCalledTimes(1);
     expect(applyMessagePartDelta).toHaveBeenCalledWith(
       'assistant-child-1',
       'reasoning-1',
@@ -1575,6 +1641,39 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
+  it('starts loading for progress events from child sessions in the active tree', () => {
+    const handlers = installHandlers();
+    const assistantEntry = createAssistantEntry({
+      id: 'assistant-child-1',
+      sessionID: 'session-child',
+    }) as { info: Message; parts: Part[] };
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-parent',
+        isSessionInActiveTree: (sessionId) =>
+          sessionId === 'session-parent' || sessionId === 'session-child',
+        getMessages: () => [assistantEntry],
+      })
+    );
+
+    startLoading.mockClear();
+    markLoadingActivity.mockClear();
+
+    handlers.get('session.next.tool.called')?.({
+      properties: {
+        sessionID: 'session-child',
+        assistantMessageID: 'assistant-child-1',
+        callID: 'call-1',
+        tool: 'bash',
+      },
+      seq: 1,
+    });
+
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(markLoadingActivity).toHaveBeenCalledTimes(1);
+  });
+
   it('skips the defensive active-message resync for in-order v2 progress events (seq present)', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
@@ -1763,6 +1862,161 @@ describe('registerSessionEventHandlers', () => {
     expect(markLoadingActivity).not.toHaveBeenCalled();
     expect(startLoading).not.toHaveBeenCalled();
     expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the session idle on a trailing busy status after the reply already completed', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    loadingStartedAt.mockReturnValue(1);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    loadingStartedAt.mockReturnValue(null);
+  });
+
+  it('marks the session busy on a fresh busy status before the reply has finished', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    loadingStartedAt.mockReturnValue(5);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        // Latest assistant finished at t=2, before the current loading window (t=5):
+        // a genuinely new turn, so the busy status must stand.
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(startLoading).toHaveBeenCalledTimes(1);
+
+    loadingStartedAt.mockReturnValue(null);
+  });
+
+  it('optimistically settles and rechecks after the final text streams with no tools in flight', () => {
+    vi.useFakeTimers();
+    try {
+      const handlers = installHandlers();
+      const setSessionStatusEntry = vi.fn();
+      const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
+      let assistantEntry = {
+        ...(createAssistantEntry() as { info: Message; parts: Part[] }),
+        parts: [
+          {
+            id: 'text-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'text',
+            text: 'Hello there',
+          },
+        ] as Part[],
+      };
+
+      upsertMessageInfo.mockClear();
+      upsertMessageInfo.mockImplementation((info: Message) => {
+        assistantEntry = { ...assistantEntry, info };
+      });
+      finishMessageStreaming.mockClear();
+      stopLoading.mockClear();
+
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => [assistantEntry],
+          setSessionStatusEntry,
+          recheckSessionStatus,
+        })
+      );
+
+      handlers.get('session.next.text.ended')?.({
+        properties: { sessionID: 'session-1' },
+      });
+
+      // Nothing settles until the quiet window elapses.
+      expect(finishMessageStreaming).not.toHaveBeenCalled();
+      expect(recheckSessionStatus).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(600);
+
+      expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+      expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
+      expect(stopLoading).toHaveBeenCalled();
+      expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels the optimistic streamed-completion settle when a tool starts after the text', () => {
+    vi.useFakeTimers();
+    try {
+      const handlers = installHandlers();
+      const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
+      const assistantEntry = {
+        ...(createAssistantEntry() as { info: Message; parts: Part[] }),
+        parts: [
+          {
+            id: 'text-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'text',
+            text: 'Working on it',
+          },
+        ] as Part[],
+      };
+
+      finishMessageStreaming.mockClear();
+
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => [assistantEntry],
+          recheckSessionStatus,
+        })
+      );
+
+      handlers.get('session.next.text.ended')?.({
+        properties: { sessionID: 'session-1' },
+      });
+      // A tool call arrives before the quiet window elapses — the turn is not done.
+      handlers.get('session.next.tool.called')?.({
+        properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
+      });
+
+      vi.advanceTimersByTime(600);
+
+      expect(finishMessageStreaming).not.toHaveBeenCalled();
+      expect(recheckSessionStatus).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('settles a terminal v2 step end when no idle event arrives', () => {
@@ -2028,17 +2282,138 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
-  it('does not settle the latest message for a terminal step from another assistant id', () => {
+  it('settles terminal v2 step ends against the latest legacy assistant when ids differ', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const updateUsageLimitState = vi.fn();
+    const clearPendingAbort = vi.fn();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    upsertMessageInfo.mockClear();
+    upsertMessageInfo.mockImplementation((info: Message) => {
+      assistantEntry = { ...assistantEntry, info };
+    });
+    finishMessageStreaming.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        setSessionStatusEntry,
+        updateUsageLimitState,
+        clearPendingAbort,
+        syncSession,
+        shouldResyncSessionAfterIdle: () => true,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.step.ended')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'v2-assistant-1',
+        finish: 'stop',
+        timestamp: 3,
+      },
+    });
+
+    expect(upsertMessageInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-1',
+        time: { created: 1, completed: 3 },
+      })
+    );
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
+    expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(syncSession).toHaveBeenCalledWith('session-1');
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    upsertMessageInfo.mockReset();
+  });
+
+  it('settles a pending terminal v2 step after the legacy assistant sync arrives', async () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const updateUsageLimitState = vi.fn();
+    const clearPendingAbort = vi.fn();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    let messages: Array<{ info: Message; parts: Part[] }> = [
+      createUserEntry() as { info: Message; parts: Part[] },
+    ];
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const syncSessionMessages = vi.fn(async () => {
+      messages = [assistantEntry];
+    });
+
+    upsertMessageInfo.mockClear();
+    upsertMessageInfo.mockImplementation((info: Message) => {
+      messages = [{ ...assistantEntry, info }];
+    });
+    finishMessageStreaming.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        setSessionStatusEntry,
+        updateUsageLimitState,
+        clearPendingAbort,
+        syncSession,
+        shouldResyncSessionAfterIdle: () => true,
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.step.ended')?.({
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'v2-assistant-1',
+        finish: 'stop',
+        timestamp: 3,
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(upsertMessageInfo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'assistant-1',
+          time: { created: 1, completed: 3 },
+        })
+      );
+    });
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
+    expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(syncSession).toHaveBeenCalledWith('session-1');
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    upsertMessageInfo.mockReset();
+  });
+
+  it('does not settle an older assistant when a newer user prompt is latest', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     upsertMessageInfo.mockClear();
+    finishMessageStreaming.mockClear();
 
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
-        getMessages: () => [createAssistantEntry() as { info: Message; parts: Part[] }],
+        getMessages: () => [
+          createAssistantEntry() as { info: Message; parts: Part[] },
+          createUserEntry({ id: 'user-2' }) as { info: Message; parts: Part[] },
+        ],
         setSessionStatusEntry,
         syncSessionMessages,
       })
@@ -2047,12 +2422,13 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.next.step.ended')?.({
       properties: {
         sessionID: 'session-1',
-        assistantMessageID: 'assistant-stale',
+        assistantMessageID: 'v2-assistant-1',
         finish: 'stop',
       },
     });
 
     expect(upsertMessageInfo).not.toHaveBeenCalled();
+    expect(finishMessageStreaming).not.toHaveBeenCalled();
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
@@ -2264,6 +2640,52 @@ describe('registerSessionEventHandlers', () => {
     expect(syncTodosForSession).toHaveBeenCalledWith('session-1', messages);
   });
 
+  it('settles the latest active assistant message when the session becomes idle', () => {
+    const handlers = installHandlers();
+
+    upsertMessageInfo.mockClear();
+    finishMessageStreaming.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createAssistantEntry() as { info: Message; parts: Part[] }],
+      })
+    );
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+    expect(upsertMessageInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-1',
+        time: expect.objectContaining({ completed: expect.any(Number) }),
+      })
+    );
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+  });
+
+  it('does not settle an older assistant when the latest session message is a user prompt', () => {
+    const handlers = installHandlers();
+
+    upsertMessageInfo.mockClear();
+    finishMessageStreaming.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [
+          createAssistantEntry() as { info: Message; parts: Part[] },
+          createUserEntry() as { info: Message; parts: Part[] },
+        ],
+      })
+    );
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+    expect(upsertMessageInfo).not.toHaveBeenCalled();
+    expect(finishMessageStreaming).not.toHaveBeenCalled();
+  });
+
   it('does not mark the active session seen on idle while the session list is open', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
@@ -2449,6 +2871,7 @@ describe('registerSessionEventHandlers', () => {
   it('keeps active parent loading when a child session is still working', () => {
     const handlers = installHandlers();
 
+    startLoading.mockClear();
     stopLoading.mockClear();
 
     registerSessionEventHandlers(
@@ -2474,12 +2897,14 @@ describe('registerSessionEventHandlers', () => {
       },
     });
 
+    expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
   it('stops active parent loading when the last working child session becomes idle', () => {
     const handlers = installHandlers();
 
+    startLoading.mockClear();
     stopLoading.mockClear();
 
     registerSessionEventHandlers(
@@ -2505,6 +2930,7 @@ describe('registerSessionEventHandlers', () => {
       },
     });
 
+    expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-child' } });

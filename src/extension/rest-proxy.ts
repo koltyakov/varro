@@ -50,7 +50,7 @@ export interface RestProxyCallbacks {
   server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
   contextProvider: Pick<ContextProvider, 'context' | 'readFile' | 'resolvePath'>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
-  sessionState: Pick<SessionStateManager, 'removeSessions'>;
+  sessionState: Pick<SessionStateManager, 'markSessionBusy' | 'removeSessions'>;
   sessionTrash: Pick<
     SessionTrashManager,
     | 'cleanupExpired'
@@ -196,6 +196,15 @@ export class RestProxy {
         return;
       }
 
+      // Optimistically mark the session busy before the prompt is admitted.
+      // opencode emits the SSE `session.status { busy }` event only after
+      // admission, and on fast turns the finish can land first; pre-marking
+      // here ensures the busy marker exists before any finish event arrives.
+      const promptSessionID = this.parsePromptSessionID(method, payload.path);
+      if (promptSessionID) {
+        this.callbacks.sessionState.markSessionBusy(promptSessionID);
+      }
+
       const data = await this.callbacks.server.request(method, payload.path, payload.body);
       this.callbacks.postApiResponse(requestGeneration, {
         id: payload.id,
@@ -235,6 +244,13 @@ export class RestProxy {
     const url = new URL(path, 'http://localhost');
     const match = url.pathname.match(/^\/session\/([^/]+)$/);
     return match ? decodeURIComponent(match[1]!) : null;
+  }
+
+  private parsePromptSessionID(method: string, path: string): string | undefined {
+    if (method.toUpperCase() !== 'POST') return undefined;
+    const url = new URL(path, 'http://localhost');
+    const match = url.pathname.match(/^\/session\/([^/]+)\/prompt(?:_async)?$/);
+    return match ? decodeURIComponent(match[1]!) : undefined;
   }
 
   private parsePermanentDeleteRequest(method: string, path: string): PermanentDeleteRequest | null {

@@ -53,7 +53,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
         })
       ),
     },
-    sessionState: { removeSessions: vi.fn() },
+    sessionState: { markSessionBusy: vi.fn(), removeSessions: vi.fn() },
     sessionTrash: {
       cleanupExpired: vi.fn(() => Promise.resolve([] as never[])),
       deletePermanently: vi.fn(() => Promise.resolve(null)),
@@ -688,5 +688,57 @@ describe('RestProxy handleRequest', () => {
       id: 24,
       data: configData,
     });
+  });
+
+  it('optimistically marks a session busy before forwarding prompt_async', async () => {
+    const order: string[] = [];
+    const serverRequest = vi.fn(() => {
+      order.push('request');
+      return Promise.resolve({ ok: true });
+    });
+    const markSessionBusy = vi.fn(() => {
+      order.push('markBusy');
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(30, 'POST', '/session/session-1/prompt_async', { parts: [] })
+    );
+
+    expect(markSessionBusy).toHaveBeenCalledWith('session-1');
+    // The busy marker must be recorded before the request is forwarded so a
+    // finish event that lands during admission cannot be dropped.
+    expect(order).toEqual(['markBusy', 'request']);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 30,
+      data: { ok: true },
+    });
+  });
+
+  it('extracts the session id from a prompt_async path', async () => {
+    const markSessionBusy = vi.fn();
+    const { proxy } = createProxy({
+      sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(31, 'POST', '/session/01J6XQT8HM2N1V9K6Q3B7Y4C0P/prompt_async')
+    );
+
+    expect(markSessionBusy).toHaveBeenCalledWith('01J6XQT8HM2N1V9K6Q3B7Y4C0P');
+  });
+
+  it('does not optimistically mark busy for non-prompt requests', async () => {
+    const markSessionBusy = vi.fn();
+    const { proxy } = createProxy({
+      sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
+    });
+
+    await proxy.handleRequest(makePayload(32, 'POST', '/session/session-1/abort'));
+
+    expect(markSessionBusy).not.toHaveBeenCalled();
   });
 });

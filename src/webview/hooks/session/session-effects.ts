@@ -7,6 +7,7 @@ type ProviderSelection = { providerID: string; modelID?: string | null };
 
 const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_MS = DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS * 1000;
 const ACTIVE_SESSION_PROVIDER_LIMIT_POLL_INTERVAL_MS = 30_000;
+const LOADING_STATUS_POLL_MS = 1_000;
 const RUNNING_SESSION_SYNC_INTERVAL_MS = 4_000;
 const RUNNING_SESSION_SYNC_KEY_SEPARATOR = '\u0000';
 
@@ -33,19 +34,24 @@ export function registerLoadingStatusPollEffect(deps: {
     const visible = deps.isDocumentVisible();
     if (!loading || !sessionId || !visible) return;
 
-    let delay = 8000;
-    const schedulePoll = () => {
-      return setTimeout(() => {
-        const activeSessionId = deps.getActiveSessionId();
-        if (!deps.isLoading() || !activeSessionId || !deps.isDocumentVisible()) return;
-        deps.recheckSessionStatus(activeSessionId);
-        delay = Math.min(delay * 2, 60_000);
-        timer = schedulePoll();
-      }, delay);
+    let inFlight = false;
+    const poll = () => {
+      if (inFlight) return;
+      const activeSessionId = deps.getActiveSessionId();
+      if (!deps.isLoading() || !activeSessionId || !deps.isDocumentVisible()) return;
+      inFlight = true;
+      try {
+        void Promise.resolve(deps.recheckSessionStatus(activeSessionId)).finally(() => {
+          inFlight = false;
+        });
+      } catch (err) {
+        inFlight = false;
+        throw err;
+      }
     };
-    let timer = schedulePoll();
+    const timer = window.setInterval(poll, LOADING_STATUS_POLL_MS);
 
-    onCleanup(() => clearTimeout(timer));
+    onCleanup(() => window.clearInterval(timer));
   });
 }
 
