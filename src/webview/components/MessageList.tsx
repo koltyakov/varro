@@ -288,7 +288,7 @@ const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 const LOADING_ROW_REAPPEAR_DELAY_MS = 180;
 const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
-const TRAILING_SUMMARY_SETTLE_DELAY_MS = 240;
+const TRAILING_SUMMARY_SETTLE_DELAY_MS = 700;
 // Only offer "jump to latest" when at least this much content is hidden
 // below the viewport; a barely-scrolled list doesn't need the button.
 const JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX = 240;

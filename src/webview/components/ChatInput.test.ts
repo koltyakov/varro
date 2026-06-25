@@ -273,6 +273,7 @@ describe('ChatInput', () => {
   });
 
   it('uses the busy placeholder while a child session is still working', async () => {
+    vi.useFakeTimers();
     setState('activeSessionId', 'session-1');
     setState('sessions', [
       {
@@ -309,6 +310,13 @@ describe('ChatInput', () => {
       'session-1': { type: 'idle' },
       'child-1': { type: 'idle' },
     });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.rich-composer')?.getAttribute('data-placeholder')).toBe(
+      'Queue a follow-up or steer'
+    );
+
+    await vi.advanceTimersByTimeAsync(700);
     await Promise.resolve();
 
     expect(container?.querySelector('.rich-composer')?.getAttribute('data-placeholder')).toBe(
@@ -1087,6 +1095,25 @@ describe('ChatInput', () => {
     expect(container?.textContent).not.toContain('Stop');
     expect(container?.querySelector('[title="Send (Enter)"]')).toBeNull();
     expect(container?.querySelector('[title="Add to queue (Enter)"]')).toBeNull();
+  });
+
+  it('keeps the stop button through a short idle gap', async () => {
+    vi.useFakeTimers();
+    setIsLoading(true);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('[title="Stop"]')).not.toBeNull();
+
+    setIsLoading(false);
+    await Promise.resolve();
+
+    expect(container?.querySelector('[title="Stop"]')).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(700);
+    await Promise.resolve();
+
+    expect(container?.querySelector('[title="Stop"]')).toBeNull();
   });
 
   it('shows send controls instead of stop while loading with sendable content', () => {

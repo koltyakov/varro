@@ -265,6 +265,7 @@ type CompletionSelection =
   | { type: 'apply-mention'; value: string; file?: DroppedFile };
 
 const SKILLS_COMMAND_NAME = 'skills';
+const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
 
 const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
   'permission',
@@ -842,6 +843,30 @@ export function ChatInput() {
     state.commands.filter((command) => command.source === 'skill')
   );
   const isComposerBusy = createMemo(() => isActiveSessionWorking());
+  const [composerBusyDisplayHold, setComposerBusyDisplayHold] =
+    createSignal(isActiveSessionWorking());
+  let composerBusyDisplayTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  const clearComposerBusyDisplayTimer = () => {
+    if (!composerBusyDisplayTimer) return;
+    clearTimeout(composerBusyDisplayTimer);
+    composerBusyDisplayTimer = 0;
+  };
+
+  createEffect(() => {
+    const busy = isComposerBusy();
+    clearComposerBusyDisplayTimer();
+    if (busy) {
+      setComposerBusyDisplayHold(true);
+      return;
+    }
+    if (!composerBusyDisplayHold()) return;
+    composerBusyDisplayTimer = setTimeout(() => {
+      composerBusyDisplayTimer = 0;
+      if (!isComposerBusy()) setComposerBusyDisplayHold(false);
+    }, COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS);
+  });
+  onCleanup(clearComposerBusyDisplayTimer);
+  const isComposerDisplayBusy = createMemo(() => isComposerBusy() || composerBusyDisplayHold());
 
   const slashCommands = createMemo(() =>
     getSlashCommands({
@@ -1906,6 +1931,9 @@ export function ChatInput() {
   const isBusyWithoutInterruption = createMemo(
     () => isComposerBusy() && !hasActiveQuestion() && !hasActivePermission()
   );
+  const isDisplayBusyWithoutInterruption = createMemo(
+    () => isComposerDisplayBusy() && !hasActiveQuestion() && !hasActivePermission()
+  );
   const showBusySendControls = createMemo(
     () => isBusyWithoutInterruption() && canSend() && !editingMessage()
   );
@@ -2182,10 +2210,10 @@ export function ChatInput() {
   const isToolbarControlVisible = (control: ToolbarControl) =>
     !isToolbarControlHidden(toolbarCompactMode(), control);
   const showStopButton = createMemo(
-    () => isBusyWithoutInterruption() && isToolbarControlVisible('stop') && !canSend()
+    () => isDisplayBusyWithoutInterruption() && isToolbarControlVisible('stop') && !canSend()
   );
   const showSendControl = createMemo(
-    () => isToolbarControlVisible('send') && (!isBusyWithoutInterruption() || canSend())
+    () => isToolbarControlVisible('send') && (!isDisplayBusyWithoutInterruption() || canSend())
   );
 
   createEffect(() => {
@@ -2357,7 +2385,7 @@ export function ChatInput() {
                 ? 'Edit your message'
                 : hasActiveQuestion() || hasActivePermission()
                   ? 'Respond to the prompt above to continue...'
-                  : isComposerBusy()
+                  : isComposerDisplayBusy()
                     ? 'Queue a follow-up or steer'
                     : 'Describe what to build'
             }

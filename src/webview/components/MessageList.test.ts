@@ -2779,7 +2779,7 @@ describe('MessageList loading row', () => {
 
     expect(container?.textContent).not.toContain('Worked for');
 
-    vi.advanceTimersByTime(240);
+    vi.advanceTimersByTime(700);
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 · ↓ 7');
