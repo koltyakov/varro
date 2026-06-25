@@ -7,7 +7,7 @@ import {
   type FileChange,
   type FileChangeKind,
 } from '../lib/tool-file-change';
-import { getMessageToolSummaryStats, getSessionSummaryStats } from './chat/SessionListView';
+import { getDiffSummaryStats, getMessageToolSummaryStats } from './chat/SessionListView';
 import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
 
 const KIND_BADGE: Record<FileChangeKind, { label: string; title: string; class: string }> = {
@@ -24,7 +24,7 @@ function getActiveSession() {
 export function ChangedFilesList() {
   let cachedSessionId: string | null = null;
   let cachedChanges: FileChange[] = [];
-  let cachedSummaryStats: ReturnType<typeof getSessionSummaryStats> = null;
+  let cachedSummaryStats: ReturnType<typeof getMessageToolSummaryStats> = null;
 
   const resetCacheForSession = (sessionId: string | null) => {
     if (cachedSessionId === sessionId) return;
@@ -33,44 +33,63 @@ export function ChangedFilesList() {
     cachedSummaryStats = null;
   };
 
-  // The file rows: prefer the session's authoritative diff summary (the source
-  // the session list counts from) so they match; fall back to scanning messages
-  // only when no summary is available. Keep authoritative summaries visible
-  // while a follow-up is running so completed file changes do not flicker away.
+  // The file rows reflect what THIS session's agent changed — the file-changing
+  // tool calls and patch parts in its own messages. The backend session summary
+  // (`session.summary.diffs`) can describe workspace-wide git changes — files
+  // edited by hand or by a sibling session — that a read-only session never
+  // touched, so it is only used to bridge the brief gap before a running
+  // session's edits stream in, never for an idle session.
   const changes = createMemo(() => {
     const session = getActiveSession();
     resetCacheForSession(session?.id ?? null);
 
-    const diffs = session?.summary?.diffs;
-    if (diffs && diffs.length > 0) {
-      cachedChanges = getDiffFileChanges(diffs);
+    const summaryDiffs = session?.summary?.diffs;
+    const messageChanges = getMessageFileChanges(state.messages, state.editorContext.workspacePath);
+
+    if (summaryDiffs && summaryDiffs.length > 0 && messageChanges.length === 0) {
+      if (isActiveSessionWorking()) {
+        cachedChanges = getDiffFileChanges(summaryDiffs);
+        return cachedChanges;
+      }
+      cachedChanges = [];
       return cachedChanges;
     }
-    if (isActiveSessionWorking() && cachedChanges.length > 0) return cachedChanges;
 
-    cachedChanges = getMessageFileChanges(state.messages, state.editorContext.workspacePath);
+    if (isActiveSessionWorking() && cachedChanges.length > 0 && messageChanges.length === 0) {
+      return cachedChanges;
+    }
+
+    cachedChanges = messageChanges;
     return cachedChanges;
   });
-  // The header counter mirrors the session list exactly: same summary
-  // resolution with the same message-derived fallback. Unlike the list, the
-  // active session's messages are already loaded, so the fallback resolves
-  // synchronously — no "0 0 0" placeholder here.
+  // The header counter tracks the same session-scoped source as the rows.
+  // Backend summary counts only stand in while a session is running and its
+  // edits have not streamed in yet; otherwise counts come from the session's
+  // own messages so unrelated git changes can't inflate them.
   const summaryStats = createMemo(() => {
     const session = getActiveSession();
     resetCacheForSession(session?.id ?? null);
     if (!session) return null;
-    const direct = getSessionSummaryStats(session);
-    if (direct && (direct.files > 0 || direct.additions > 0 || direct.deletions > 0)) {
-      cachedSummaryStats = direct;
-      return direct;
-    }
-    if (isActiveSessionWorking() && cachedSummaryStats) return cachedSummaryStats;
 
-    cachedSummaryStats = getSessionSummaryStats(
-      session,
-      getMessageToolSummaryStats(state.messages)
-    );
-    return cachedSummaryStats;
+    const messageStats = getMessageToolSummaryStats(state.messages);
+    const summaryDiffs = session.summary?.diffs;
+    const working = isActiveSessionWorking();
+
+    if (summaryDiffs && summaryDiffs.length > 0 && messageStats === null && working) {
+      const fromDiffs = getDiffSummaryStats(summaryDiffs);
+      if (
+        fromDiffs &&
+        (fromDiffs.files > 0 || fromDiffs.additions > 0 || fromDiffs.deletions > 0)
+      ) {
+        cachedSummaryStats = fromDiffs;
+        return fromDiffs;
+      }
+    }
+
+    if (working && messageStats === null && cachedSummaryStats) return cachedSummaryStats;
+
+    cachedSummaryStats = messageStats;
+    return messageStats;
   });
   const total = () => summaryStats()?.files ?? changes().length;
   const additions = () =>

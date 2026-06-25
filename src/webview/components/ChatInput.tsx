@@ -45,6 +45,7 @@ import {
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
+  getSessionTreeRootId,
   getSessionTreeIds,
   getStoredVariantForModel,
   setSessionUsageLimit,
@@ -488,6 +489,19 @@ function applyEditContext(context: MessageEditContext) {
     'terminalSelection',
     context.terminalSelection ? { ...context.terminalSelection } : null
   );
+}
+
+function getSessionTreeIdsForSession(sessionId: string | null | undefined) {
+  if (!sessionId) return [];
+  const rootId = getSessionTreeRootId(sessionId) || sessionId;
+  const treeIds = getSessionTreeIds(rootId);
+  return treeIds.length > 0 ? treeIds : [sessionId];
+}
+
+function clearUsageLimitsForSessionTree(sessionId: string | null | undefined) {
+  for (const id of getSessionTreeIdsForSession(sessionId)) {
+    setSessionUsageLimit(id, null);
+  }
 }
 
 export function ChatInput() {
@@ -1264,8 +1278,10 @@ export function ChatInput() {
       resetPastedImageIndex();
       resetMessageEditState();
       if (editTargetExists) {
+        clearUsageLimitsForSessionTree(state.activeSessionId);
         await editMessage(editing.messageId, text, { allowEmptyText: hasEditableAttachments });
       } else {
+        clearUsageLimitsForSessionTree(state.activeSessionId);
         await sendMessage(text);
       }
       if (error() && error() !== prevError) {
@@ -1316,6 +1332,7 @@ export function ChatInput() {
     const prevError = error();
     setInputText('');
     resetPastedImageIndex();
+    clearUsageLimitsForSessionTree(state.activeSessionId);
     await sendMessage(text, mode === 'steer' ? { delivery: 'steer' } : { noReply: false });
     if (error() && error() !== prevError) {
       setInputText(text);
@@ -1914,7 +1931,13 @@ export function ChatInput() {
     sumAssistantTokensFromMessageEntries(currentSessionMessageEntries())
   );
 
-  const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
+  const activeUsageLimit = createMemo(() => {
+    const activeSessionId = state.activeSessionId;
+    for (const sessionId of getSessionTreeIdsForSession(activeSessionId)) {
+      void state.sessionUsageLimits[sessionId];
+    }
+    return getActiveUsageLimitNotice(activeSessionId);
+  });
   const showProviderLimits = createMemo(
     () => providerLimitPollIntervalSeconds() !== DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS
   );
@@ -2075,7 +2098,7 @@ export function ChatInput() {
       return;
     }
 
-    const treeSessionIds = getSessionTreeIds(activeSessionId);
+    const treeSessionIds = getSessionTreeIdsForSession(activeSessionId);
     const retryingSessionIds = treeSessionIds.filter(
       (sessionId) => state.sessionStatus[sessionId]?.type === 'retry'
     );
@@ -2104,6 +2127,13 @@ export function ChatInput() {
           }
         });
     }
+  }
+
+  async function handleUsageLimitContinue() {
+    if (!state.activeSessionId) return;
+    closePopups();
+    clearUsageLimitsForSessionTree(state.activeSessionId);
+    await sendMessage('Continue', { noReply: false });
   }
 
   const queuedForSession = createMemo(() =>
@@ -2225,6 +2255,8 @@ export function ChatInput() {
         <UsageLimitBanner
           message={visibleUsageLimit()!.message}
           meta={describeUsageLimit(activeUsageLimitWindow(), visibleUsageLimit()?.attempt ?? null)}
+          primaryActionLabel="Continue"
+          onPrimaryAction={() => void handleUsageLimitContinue()}
           showStopRetrying={isComposerBusy() && !hasActiveQuestion() && !hasActivePermission()}
           onStopRetrying={() => abortSession()}
           onSwitchProvider={() => {

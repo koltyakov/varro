@@ -13,12 +13,10 @@ export type StickyUserMessagePreview = {
 
 export function StickyUserMessagePreviewCard(props: {
   preview: StickyUserMessagePreview;
-  onEdit?: (preview: StickyUserMessagePreview) => void;
   onClick?: (preview: StickyUserMessagePreview) => void;
   title?: string;
 }) {
-  const onClick = () => props.onClick ?? props.onEdit;
-  const title = () => props.title ?? (props.onEdit ? 'Click to edit message' : undefined);
+  const isClickable = () => !!props.onClick;
 
   return (
     <div class="latest-user-message-sticky-wrap" aria-hidden="true">
@@ -26,9 +24,9 @@ export function StickyUserMessagePreviewCard(props: {
         <div class="latest-user-message-sticky-top" />
         <div class="latest-user-message-sticky-shell">
           <div
-            class={`latest-user-message-sticky${onClick() ? ' latest-user-message-sticky-clickable' : ''}`}
-            title={title()}
-            onClick={() => onClick()?.(props.preview)}
+            class={`latest-user-message-sticky${isClickable() ? ' latest-user-message-sticky-clickable' : ''}`}
+            title={props.title}
+            onClick={() => props.onClick?.(props.preview)}
           >
             <div class="latest-user-message-sticky-text">{props.preview.text}</div>
             <Show when={props.preview.attachmentCount > 0 || props.preview.imageCount > 0}>

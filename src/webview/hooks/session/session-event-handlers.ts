@@ -1,7 +1,11 @@
 import { isAbortedAssistantError } from '../../lib/aborted';
 import { serverEvents } from '../../lib/client';
-import { isAssistantMessage } from '../../lib/message-metrics';
-import { normalizePermissionEvent } from '../../lib/session-event-reducer';
+import {
+  hasUnsettledToolPart,
+  isAssistantMessage,
+  latestAssistantFinishedBeforeLoading,
+} from '../../lib/message-metrics';
+import { isRunningSessionStatus, normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { hasStreamedFinalResponse } from './session-watchdog';
 import { parseUsageLimitNotice, type UsageLimitNotice } from '../../lib/usage-limit';
 import { validateFileDiffs } from '../../lib/validate-diffs';
@@ -91,10 +95,6 @@ function isCompleteMessagePart(value: unknown): value is Part {
   );
 }
 
-function isWorkingStatus(status: SessionStatus | null | undefined) {
-  return status?.type === 'busy' || status?.type === 'retry';
-}
-
 function isContinuationStepEnd(eventName: string, props: Record<string, unknown>) {
   if (eventName !== 'session.next.step.ended') return false;
   return isContinuationStepFinish(getEventString(props, 'finish'));
@@ -116,13 +116,6 @@ function isContinuationStepFinish(value: string | undefined) {
 
 function normalizeStepFinish(value: string | undefined) {
   return value?.toLowerCase().replace(/[\s-]+/g, '_');
-}
-
-function hasUnsettledToolPart(parts: Part[]) {
-  return parts.some(
-    (part) =>
-      part.type === 'tool' && (part.state.status === 'pending' || part.state.status === 'running')
-  );
 }
 
 function getPartDeltaQueueKey(messageID: string, partID: string) {
@@ -281,22 +274,6 @@ function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] 
     if (!message) continue;
     if (message.role === 'user') return false;
     return !message.error && !message.time.completed;
-  }
-
-  return false;
-}
-
-function latestAssistantFinishedBeforeLoading(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  loadingStartedAt: number | null
-) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]?.info;
-    if (!message) continue;
-    if (message.role !== 'assistant') return false;
-    const finishedAt = message.time.completed ?? (message.error ? message.time.created : null);
-    if (finishedAt === null) return false;
-    return loadingStartedAt === null || loadingStartedAt <= finishedAt;
   }
 
   return false;
@@ -476,7 +453,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     return seq === last + 1 ? 'ok' : 'gap';
   };
   const setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
-    if (isWorkingStatus(status)) workingSessionIds.add(sessionId);
+    if (isRunningSessionStatus(status)) workingSessionIds.add(sessionId);
     else workingSessionIds.delete(sessionId);
     deps.setSessionStatusEntry(sessionId, status);
   };
@@ -602,7 +579,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         (shouldResyncActiveMessages || !handedOffTodos) &&
         deps.shouldResyncSessionAfterIdle(sessionId)
       ) {
-        deps.syncSessionMessages(sessionId).catch(() => {});
+        deps
+          .syncSessionMessages(sessionId)
+          .catch((err) => deps.logError('syncSessionMessages', err));
       }
     }
   };

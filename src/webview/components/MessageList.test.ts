@@ -2250,7 +2250,7 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
-  it('restores image attachments when editing from the sticky prompt preview', async () => {
+  it('restores image attachments when editing the message reached from the sticky prompt preview', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -2282,11 +2282,15 @@ describe('MessageList sticky prompt preview', () => {
 
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    const user2Card = container?.querySelector(
+      '[data-msg-id="user-2"] .user-message-card'
+    ) as HTMLDivElement | null;
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
     expect(user2Row).toBeInstanceOf(HTMLDivElement);
+    expect(user2Card).toBeInstanceOf(HTMLDivElement);
     expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
 
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
@@ -2303,6 +2307,11 @@ describe('MessageList sticky prompt preview', () => {
     expect(sticky).toBeInstanceOf(HTMLDivElement);
 
     sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(editingMessage()).toBeNull();
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+
+    user2Card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(editingMessage()).toEqual({
       messageId: 'user-2',
@@ -2322,12 +2331,11 @@ describe('MessageList sticky prompt preview', () => {
         terminalSelection: null,
       },
     });
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
 
     animationFrames.restore();
   });
 
-  it('scrolls to and edits image-only messages from the sticky prompt preview', async () => {
+  it('scrolls to and edits image-only messages from the reached message bubble', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -2356,11 +2364,15 @@ describe('MessageList sticky prompt preview', () => {
 
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    const user2Card = container?.querySelector(
+      '[data-msg-id="user-2"] .user-message-card'
+    ) as HTMLDivElement | null;
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
     expect(user2Row).toBeInstanceOf(HTMLDivElement);
+    expect(user2Card).toBeInstanceOf(HTMLDivElement);
     expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
 
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
@@ -2378,6 +2390,11 @@ describe('MessageList sticky prompt preview', () => {
     expect(sticky?.textContent).toContain('Attachment: Image 2');
 
     sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(editingMessage()).toBeNull();
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+
+    user2Card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(editingMessage()).toEqual({
       messageId: 'user-2',
@@ -2397,7 +2414,6 @@ describe('MessageList sticky prompt preview', () => {
         terminalSelection: null,
       },
     });
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
 
     animationFrames.restore();
   });
@@ -2767,6 +2783,39 @@ describe('MessageList loading row', () => {
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 · ↓ 7');
+  });
+
+  it('does not render the loading row in a draft session when stale messages leak in', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: assistantMessage('message-1', { time: { created: 1 } }),
+        parts: [textPart('text-1', 'Generating response')],
+      },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+
+    setState('activeSessionId', null);
+    replaceMessages([]);
+    stopLoading();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
+
+    replaceMessages([
+      {
+        info: assistantMessage('stale-1', { time: { created: 1 } }),
+        parts: [textPart('stale-text-1', 'Leftover from the previous session')],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 });
 

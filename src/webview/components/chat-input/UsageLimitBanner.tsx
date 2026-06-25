@@ -3,6 +3,8 @@ import { Show } from 'solid-js';
 export function UsageLimitBanner(props: {
   message: string;
   meta: string;
+  primaryActionLabel: string;
+  onPrimaryAction: () => void;
   showStopRetrying: boolean;
   onStopRetrying: () => void;
   onSwitchProvider: () => void;
@@ -15,12 +17,19 @@ export function UsageLimitBanner(props: {
         <span class="chat-usage-limit-message">{props.message}</span>
       </div>
       <div class="chat-usage-limit-actions">
+        <button type="button" class="chat-usage-limit-action" onClick={props.onPrimaryAction}>
+          {props.primaryActionLabel}
+        </button>
         <Show when={props.showStopRetrying}>
-          <button class="chat-usage-limit-action danger" onClick={props.onStopRetrying}>
+          <button
+            type="button"
+            class="chat-usage-limit-action danger"
+            onClick={props.onStopRetrying}
+          >
             Stop retrying
           </button>
         </Show>
-        <button class="chat-usage-limit-action" onClick={props.onSwitchProvider}>
+        <button type="button" class="chat-usage-limit-action" onClick={props.onSwitchProvider}>
           Switch provider
         </button>
       </div>

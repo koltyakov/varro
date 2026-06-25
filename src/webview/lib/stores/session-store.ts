@@ -1,4 +1,5 @@
 import type { FileDiff, SessionStatus } from '../../types';
+import { isRunningSessionStatus } from '../session-event-reducer';
 import { produce } from 'solid-js/store';
 import {
   applyMessagePartDelta,
@@ -188,10 +189,6 @@ function areEqualSessionStatusRecords(
   }
 
   return true;
-}
-
-function isRunningSessionStatus(status: SessionStatus | undefined): boolean {
-  return status?.type === 'busy' || status?.type === 'retry';
 }
 
 function recordStatusCompletionTransition(

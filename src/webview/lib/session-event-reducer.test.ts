@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { isNormalizedPermission, normalizePermissionEvent } from './session-event-reducer';
+import type { SessionStatus } from '../types';
+import {
+  isNormalizedPermission,
+  isRunningSessionStatus,
+  normalizePermissionEvent,
+} from './session-event-reducer';
+
+describe('isRunningSessionStatus', () => {
+  it('treats busy and retry as running', () => {
+    const busy: SessionStatus = { type: 'busy' };
+    const retry: SessionStatus = {
+      type: 'retry',
+      attempt: 1,
+      message: 'rate limited',
+      next: 2,
+    };
+    expect(isRunningSessionStatus(busy)).toBe(true);
+    expect(isRunningSessionStatus(retry)).toBe(true);
+  });
+
+  it('treats idle and absent statuses as not running', () => {
+    expect(isRunningSessionStatus({ type: 'idle' })).toBe(false);
+    expect(isRunningSessionStatus(null)).toBe(false);
+    expect(isRunningSessionStatus(undefined)).toBe(false);
+  });
+});
 
 describe('isNormalizedPermission', () => {
   it('accepts a fully normalized permission', () => {

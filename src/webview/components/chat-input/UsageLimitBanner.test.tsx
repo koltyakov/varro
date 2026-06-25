@@ -18,7 +18,8 @@ afterEach(() => {
 });
 
 describe('UsageLimitBanner', () => {
-  it('renders the usage-limit copy and both actions when stop retrying is available', () => {
+  it('renders the usage-limit copy and all actions when stop retrying is available', () => {
+    const onPrimaryAction = vi.fn();
     const onStopRetrying = vi.fn();
     const onSwitchProvider = vi.fn();
 
@@ -27,6 +28,8 @@ describe('UsageLimitBanner', () => {
         UsageLimitBanner({
           message: 'OpenAI has temporarily rate limited requests.',
           meta: '5 requests remaining',
+          primaryActionLabel: 'Continue',
+          onPrimaryAction,
           showStopRetrying: true,
           onStopRetrying,
           onSwitchProvider,
@@ -40,6 +43,9 @@ describe('UsageLimitBanner', () => {
     expect(container?.textContent).toContain('5 requests remaining');
     expect(container?.textContent).toContain('OpenAI has temporarily rate limited requests.');
 
+    const continueButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Continue'
+    );
     const stopRetryingButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent === 'Stop retrying'
     );
@@ -47,9 +53,11 @@ describe('UsageLimitBanner', () => {
       (button) => button.textContent === 'Switch provider'
     );
 
+    continueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     stopRetryingButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
+    expect(onPrimaryAction).toHaveBeenCalledOnce();
     expect(onStopRetrying).toHaveBeenCalledOnce();
     expect(onSwitchProvider).toHaveBeenCalledOnce();
   });
@@ -60,6 +68,8 @@ describe('UsageLimitBanner', () => {
         UsageLimitBanner({
           message: 'Claude is unavailable until the window resets.',
           meta: 'Resets in 12 minutes',
+          primaryActionLabel: 'Continue',
+          onPrimaryAction: () => {},
           showStopRetrying: false,
           onStopRetrying: () => {},
           onSwitchProvider: () => {},
@@ -68,7 +78,8 @@ describe('UsageLimitBanner', () => {
     );
 
     expect(container?.textContent).not.toContain('Stop retrying');
+    expect(container?.textContent).toContain('Continue');
     expect(container?.textContent).toContain('Switch provider');
-    expect(container?.querySelectorAll('button')).toHaveLength(1);
+    expect(container?.querySelectorAll('button')).toHaveLength(2);
   });
 });

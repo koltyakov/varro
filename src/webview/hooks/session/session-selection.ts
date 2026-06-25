@@ -1,5 +1,9 @@
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
+import {
+  latestAssistantFinished,
+  latestAssistantFinishedBeforeLoading,
+} from '../../lib/message-metrics';
 import type { Message, Part, Session, SessionStatus } from '../../types';
 
 type SessionEntry = { info: Message; parts: Part[] };
@@ -193,29 +197,4 @@ export async function syncSessionWithDependencies(
 ) {
   const session = await deps.loadSession(sessionId);
   deps.upsertSession(session);
-}
-
-function latestAssistantFinished(messages: SessionEntry[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]?.info;
-    if (!message) continue;
-    if (message.role !== 'assistant') return false;
-    return !!message.error || !!message.time.completed;
-  }
-  return false;
-}
-
-function latestAssistantFinishedBeforeLoading(
-  messages: SessionEntry[],
-  loadingStartedAt: number | null
-) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]?.info;
-    if (!message) continue;
-    if (message.role !== 'assistant') return false;
-    const finishedAt = message.time.completed ?? (message.error ? message.time.created : null);
-    if (finishedAt === null) return false;
-    return loadingStartedAt === null || loadingStartedAt <= finishedAt;
-  }
-  return false;
 }

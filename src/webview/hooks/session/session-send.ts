@@ -312,7 +312,7 @@ export class SessionSendOperations {
           routingStore.setSelectedModel(model, { sessionId }),
         resetTodoSync: this.deps.resetTodoSync,
         clearTodos: composerStore.clearTodos,
-        clearSessionUsageLimit: (sessionId) => sessionStore.setSessionUsageLimit(sessionId, null),
+        clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,
         appendOptimisticMessage: appendOptimisticMessageToActiveSession,
         removeOptimisticMessage: removeOptimisticMessageFromActiveSession,
         sendAsync: this.deps.sendAsync,
@@ -345,8 +345,7 @@ export class SessionSendOperations {
         startLoading: uiStore.startLoading,
         setError: uiStore.setError,
         clearPendingAbort: this.deps.clearPendingAbort,
-        clearSessionUsageLimit: (targetSessionId) =>
-          sessionStore.setSessionUsageLimit(targetSessionId, null),
+        clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,
         setSessionFailed: sessionStore.setSessionFailed,
         continueInterruptedSession: this.deps.continueInterruptedSession,
         stopLoading: uiStore.stopLoading,
@@ -502,6 +501,14 @@ export async function sendMessageWithDependencies(
     }
     deps.setError(baseMessage);
     return false;
+  }
+}
+
+function clearSessionUsageLimitForSessionTree(sessionId: string) {
+  const rootId = sessionStore.getSessionTreeRootId(sessionId) || sessionId;
+  const sessionIds = sessionStore.getSessionTreeIds(rootId);
+  for (const id of sessionIds.length > 0 ? sessionIds : [sessionId]) {
+    sessionStore.setSessionUsageLimit(id, null);
   }
 }
 

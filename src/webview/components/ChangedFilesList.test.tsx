@@ -112,4 +112,56 @@ describe('ChangedFilesList', () => {
     expect(container?.textContent).toContain('+3');
     expect(container?.textContent).toContain('-1');
   });
+
+  it('hides backend summary files for an idle session that made no edits', () => {
+    // The backend session summary can carry workspace-wide git changes (manual
+    // edits, sibling-session writes). A read-only session must not surface them.
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session({
+        summary: {
+          additions: 9,
+          deletions: 4,
+          files: 2,
+          diffs: [
+            { file: 'src/manual.ts', before: '', after: 'x', additions: 5, deletions: 1 },
+            { file: 'src/sibling.ts', before: '', after: 'y', additions: 4, deletions: 3 },
+          ],
+        },
+      }),
+    ]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+
+    expect(container?.textContent).not.toContain('Files');
+  });
+
+  it('restricts the files board to files the session actually edited', async () => {
+    // A writing session: the agent edited src/app.ts, but the backend summary
+    // also includes a manually-edited file. Only the session's own edit shows.
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session({
+        summary: {
+          additions: 9,
+          deletions: 4,
+          files: 2,
+          diffs: [
+            { file: 'src/app.ts', before: '', after: 'x', additions: 4, deletions: 1 },
+            { file: 'src/manual.ts', before: '', after: 'y', additions: 5, deletions: 3 },
+          ],
+        },
+      }),
+    ]);
+    setState('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Files');
+    expect(container?.textContent).toContain('1');
+    expect(container?.textContent).toContain('+3');
+    expect(container?.textContent).toContain('-1');
+    expect(container?.textContent).not.toContain('+9');
+  });
 });

@@ -1645,6 +1645,72 @@ describe('ChatInput', () => {
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
   });
 
+  it('clears usage-limit notices across the active tree before sending a prompt', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_100, { parentID: 'session-1' }),
+    ]);
+    setState('sessionUsageLimits', {
+      'child-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'messages exhausted',
+        unit: 'messages',
+        retryAt: null,
+        attempt: 2,
+        sessionID: 'child-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
+    setInputText('continue');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.textContent).toContain('Usage limit reached');
+
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('continue', { noReply: false });
+    expect(state.sessionUsageLimits['child-1']).toBeUndefined();
+    expect(container?.textContent).not.toContain('Usage limit reached');
+  });
+
+  it('continues from the usage-limit banner and closes the notice', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('sessionUsageLimits', {
+      'session-1': {
+        source: 'message',
+        statusCode: 429,
+        message: '429 usage limit reached',
+        unit: 'messages',
+        retryAt: null,
+        attempt: null,
+        sessionID: 'session-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const continueButton = Array.from(
+      container!.querySelectorAll<HTMLButtonElement>('button')
+    ).find((button) => button.textContent === 'Continue');
+    continueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('Continue', { noReply: false });
+    expect(state.sessionUsageLimits['session-1']).toBeUndefined();
+    expect(container?.textContent).not.toContain('Usage limit reached');
+  });
+
   it('restores reasoning selections per model instead of carrying them across models', async () => {
     setState('providers', [
       {

@@ -34,13 +34,8 @@ import {
 } from '../lib/state';
 import { isAssistantMessage, sumAssistantTokens } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
-import {
-  getUserMessageEditContext,
-  getUserMessageEditText,
-  hasUserMessageEditableContent,
-  type AssistantFileEditStackGroup,
-} from './Message';
-import { editingMessage, startEditingMessage } from '../lib/message-edit-state';
+import type { AssistantFileEditStackGroup } from './Message';
+import { editingMessage } from '../lib/message-edit-state';
 import { recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
@@ -572,6 +567,7 @@ export function MessageList() {
 
   const loadingRowEligible = createMemo(
     () =>
+      !!state.activeSessionId &&
       (activeSessionWorking() || hasIncompleteLatestVisibleAssistantReply()) &&
       !hasActiveQuestion() &&
       !hasActivePermission() &&
@@ -1800,40 +1796,24 @@ export function MessageList() {
       return;
     }
     if (shouldVirtualize()) {
-      containerRef.scrollTop = virtualMetrics().prefix[preview.index] ?? 0;
+      const nextScrollTop = virtualMetrics().prefix[preview.index] ?? 0;
+      containerRef.scrollTop = nextScrollTop;
+      setScrollTop(nextScrollTop);
+      setStickyPreviewScrollTop(nextScrollTop);
     }
-  }
-
-  function handleStickyPreviewEdit(preview: StickyUserMessagePreview) {
-    if (activeSessionWorking()) return;
-    const entry =
-      messages()[preview.index]?.info.id === preview.id
-        ? messages()[preview.index]
-        : messages().find((candidate) => candidate.info.id === preview.id);
-    if (!entry || entry.info.role !== 'user') return;
-    if (entry.info.sessionID !== state.activeSessionId) return;
-    if (!hasUserMessageEditableContent(entry.parts)) return;
-    setAutoScroll(false);
-    scrollMessageIntoView(preview);
-    startEditingMessage(
-      entry.info.id,
-      entry.info.sessionID,
-      getUserMessageEditText(entry.parts),
-      getUserMessageEditContext(entry.parts)
-    );
   }
 
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {
-    if (activeSessionWorking()) {
-      scrollMessageIntoView(preview);
-      return;
-    }
-
-    handleStickyPreviewEdit(preview);
+    followModeLocked = false;
+    pinnedToBottom = false;
+    expectedScrollTop = -1;
+    ignoreScrollUntil = 0;
+    cancelPendingScroll();
+    if (autoScroll()) setAutoScroll(false);
+    scrollMessageIntoView(preview);
   }
 
-  const stickyPreviewTitle = () =>
-    activeSessionWorking() ? 'Click to scroll to message' : 'Click to edit message';
+  const stickyPreviewTitle = 'Click to scroll to message';
 
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
@@ -1854,7 +1834,7 @@ export function MessageList() {
             {(preview) => (
               <StickyUserMessagePreviewCard
                 preview={preview()}
-                title={stickyPreviewTitle()}
+                title={stickyPreviewTitle}
                 onClick={handleStickyPreviewClick}
               />
             )}
@@ -1916,7 +1896,7 @@ export function MessageList() {
               permissions={standalonePermissions()}
             />
           </Show>
-          <Show when={reserveLoadingRow() && !editingMessage()}>
+          <Show when={reserveLoadingRow() && !editingMessage() && !!state.activeSessionId}>
             <LoadingRow compacting={isSessionCompacting()} visible={showLoadingRow()} />
           </Show>
         </div>

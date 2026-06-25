@@ -4,6 +4,12 @@ import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-stor
 import { uiStore } from '../../lib/stores/ui-store';
 import { deriveUsageLimitNotice } from '../../lib/usage-limit';
 import type { UsageLimitNotice } from '../../lib/usage-limit';
+import {
+  getLatestAssistantFinishedAt,
+  latestAssistantFinished,
+  latestAssistantFinishedBeforeLoading,
+} from '../../lib/message-metrics';
+import { isRunningSessionStatus } from '../../lib/session-event-reducer';
 import type { Message, Part, SessionStatus } from '../../types';
 
 type SessionMessageEntry = { info: Message; parts: Part[] };
@@ -414,36 +420,10 @@ function hasUnsettledLatestTurn(messages: SessionMessageEntry[]) {
   return false;
 }
 
-function latestAssistantFinishedBeforeLoading(
-  messages: SessionMessageEntry[],
-  loadingStartedAt: number | null
-) {
-  const finishedAt = getLatestAssistantFinishedAt(messages);
-  return finishedAt !== null && (loadingStartedAt === null || loadingStartedAt <= finishedAt);
-}
-
-function latestAssistantFinished(messages: SessionMessageEntry[]) {
-  return getLatestAssistantFinishedAt(messages) !== null;
-}
-
 function latestAssistantFinishedBeforeCurrentLoading(
   messages: SessionMessageEntry[],
   loadingStartedAt: number | null
 ) {
   const finishedAt = getLatestAssistantFinishedAt(messages);
   return finishedAt !== null && loadingStartedAt !== null && loadingStartedAt > finishedAt;
-}
-
-function getLatestAssistantFinishedAt(messages: SessionMessageEntry[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]?.info;
-    if (!message) continue;
-    if (message.role !== 'assistant') return null;
-    return message.time.completed ?? (message.error ? message.time.created : null);
-  }
-  return null;
-}
-
-function isRunningSessionStatus(status: SessionStatus | null | undefined): boolean {
-  return status?.type === 'busy' || status?.type === 'retry';
 }

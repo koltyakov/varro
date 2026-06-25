@@ -1,4 +1,4 @@
-import type { Permission } from '../types';
+import type { Permission, SessionStatus } from '../types';
 
 /**
  * Pure helpers that normalize raw server-event payloads into domain shapes.
@@ -7,6 +7,15 @@ import type { Permission } from '../types';
  * spinning up SolidJS stores. Keep these dependency-free: no imports from
  * the global webview `state`, no side effects.
  */
+
+/**
+ * True when a session status represents active work (`busy` or `retry`).
+ * Centralized so every layer (store, status ops, watchdog, event handlers)
+ * agrees on what "running" means instead of re-deriving it inline.
+ */
+export function isRunningSessionStatus(status: SessionStatus | null | undefined): boolean {
+  return status?.type === 'busy' || status?.type === 'retry';
+}
 
 export function isNormalizedPermission(props: Record<string, unknown>): props is Permission {
   return (

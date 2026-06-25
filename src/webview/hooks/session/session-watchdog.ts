@@ -1,7 +1,7 @@
 import { createEffect, on, onCleanup } from 'solid-js';
-import type { AssistantMessage, Message, Part, SessionStatus } from '../../types';
-
-type MessageEntry = { info: Message; parts: Part[] };
+import { hasUnsettledToolPart, type MessageEntry } from '../../lib/message-metrics';
+import { isRunningSessionStatus } from '../../lib/session-event-reducer';
+import type { AssistantMessage, SessionStatus } from '../../types';
 
 // How often the watchdog polls server-authoritative status while at least one
 // session looks busy locally. Tuned short so a missed finish (e.g. a fast ping
@@ -24,10 +24,6 @@ export const STUCK_SESSION_GRACE_MS = 2_000;
 // longer demand it persist, so recovery happens on the first poll instead of
 // after the full grace window.
 export const STUCK_SESSION_STREAMED_GRACE_MS = 0;
-
-function isRunningStatus(status: SessionStatus | null | undefined): boolean {
-  return status?.type === 'busy' || status?.type === 'retry';
-}
 
 export type StuckSessionReconcileDeps = {
   /** Server-authoritative statuses (REST `/session/status`), independent of the SSE stream. */
@@ -77,7 +73,7 @@ export async function reconcileStuckSessionsWithDependencies(
 ): Promise<void> {
   const local = deps.getLocalSessionStatuses();
   const candidates = new Set<string>(
-    Object.keys(local).filter((sessionId) => isRunningStatus(local[sessionId]))
+    Object.keys(local).filter((sessionId) => isRunningSessionStatus(local[sessionId]))
   );
   // The active session's spinner is also driven by the global loading flag,
   // which can be left on when a completion event is missed even though no
@@ -104,7 +100,7 @@ export async function reconcileStuckSessionsWithDependencies(
   const stillTracked = new Set<string>();
   for (const sessionId of candidates) {
     if (deps.hasPendingAbort(sessionId) || deps.isAwaitingInput(sessionId)) continue;
-    if (isRunningStatus(serverStatuses[sessionId])) continue;
+    if (isRunningSessionStatus(serverStatuses[sessionId])) continue;
 
     // When local evidence says the turn is already done (settled assistant, or
     // streamed final text with no tools in flight), collapse the grace so we
@@ -228,10 +224,7 @@ export function hasStreamedFinalResponse(
       streaming.text.trim().length > 0 &&
       entry.parts.some((part) => part.id === streaming.partId);
     if (!hasCommittedText && !hasBufferedText) return false;
-    return !entry.parts.some(
-      (part) =>
-        part.type === 'tool' && (part.state.status === 'pending' || part.state.status === 'running')
-    );
+    return !hasUnsettledToolPart(entry.parts);
   }
   return false;
 }

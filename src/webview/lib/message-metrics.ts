@@ -138,3 +138,47 @@ export function formatRelativeAge(timestamp: number, now: number): string {
   if (hours > 0) return `${hours}h`;
   return `${totalMinutes}m`;
 }
+
+export type MessageEntry = { info: Message; parts: Part[] };
+
+/**
+ * Returns the timestamp at which the latest assistant message settled
+ * (`time.completed`, or `time.created` when it errored), or null when the
+ * message tail is not a settled assistant message. Scans from the end so the
+ * latest message wins.
+ */
+export function getLatestAssistantFinishedAt(messages: MessageEntry[]): number | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]?.info;
+    if (!message) continue;
+    if (message.role !== 'assistant') return null;
+    return message.time.completed ?? (message.error ? message.time.created : null);
+  }
+  return null;
+}
+
+/** True when the latest message is an assistant message that has settled. */
+export function latestAssistantFinished(messages: MessageEntry[]): boolean {
+  return getLatestAssistantFinishedAt(messages) !== null;
+}
+
+/**
+ * True when the latest assistant message settled, and either no loading window
+ * is tracked or it began at or before that finish. Guards against a stale
+ * "busy" status re-lighting the spinner after the turn already completed.
+ */
+export function latestAssistantFinishedBeforeLoading(
+  messages: MessageEntry[],
+  loadingStartedAt: number | null
+): boolean {
+  const finishedAt = getLatestAssistantFinishedAt(messages);
+  return finishedAt !== null && (loadingStartedAt === null || loadingStartedAt <= finishedAt);
+}
+
+/** True when any tool part is still pending or running (turn not yet settled). */
+export function hasUnsettledToolPart(parts: Part[]): boolean {
+  return parts.some(
+    (part) =>
+      part.type === 'tool' && (part.state.status === 'pending' || part.state.status === 'running')
+  );
+}

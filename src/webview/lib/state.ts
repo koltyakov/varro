@@ -2267,21 +2267,18 @@ export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice
 
   if (notice === null) {
     if (state.sessionUsageLimits[sessionId] === undefined) return;
-    setState(
-      'sessionUsageLimits',
-      produce((limits) => {
-        delete limits[sessionId];
-      })
-    );
+    const nextLimits = { ...state.sessionUsageLimits };
+    delete nextLimits[sessionId];
     sessionTreeIndex.invalidate();
+    setState('sessionUsageLimits', reconcile(nextLimits));
     return;
   }
 
+  sessionTreeIndex.invalidate();
   setState('sessionUsageLimits', {
     ...state.sessionUsageLimits,
     [sessionId]: notice,
   });
-  sessionTreeIndex.invalidate();
 }
 
 export function getSessionTreeIds(rootId: string | null | undefined, sessions = state.sessions) {
