@@ -2532,9 +2532,14 @@ function mergeMessageEntry(
   streamingSnapshot?: StreamingTextSnapshot
 ) {
   const next = cloneValue(incoming);
+  if (!current || current.info.id !== incoming.info.id) {
+    materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
+    return next;
+  }
+
   preserveLongerToolExecutionTimes(current, next);
   preserveCompletionState(current, next);
-  if (!current || !options?.preserveExtraParts || current.parts.length === 0) {
+  if (!options?.preserveExtraParts || current.parts.length === 0) {
     materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
     return next;
   }

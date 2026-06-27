@@ -1872,6 +1872,7 @@ describe('registerSessionEventHandlers', () => {
   it('does not mark active full assistant completion updates idle', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     finishMessageStreaming.mockClear();
     stopLoading.mockClear();
@@ -1881,6 +1882,7 @@ describe('registerSessionEventHandlers', () => {
         getActiveSessionId: () => 'session-1',
         getMessages: () => [],
         setSessionStatusEntry,
+        syncSessionMessages,
       })
     );
 
@@ -1891,6 +1893,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(stopLoading).not.toHaveBeenCalled();
   });
@@ -2133,6 +2136,14 @@ describe('registerSessionEventHandlers', () => {
         sessionID: 'session-1',
         assistantMessageID: 'assistant-1',
         finish: 'stop',
+        cost: 0.25,
+        tokens: {
+          input: 10,
+          output: 2,
+          reasoning: 1,
+          cache: { read: 3, write: 4 },
+          total: 20,
+        },
         timestamp: 3,
       },
     });
@@ -2140,6 +2151,9 @@ describe('registerSessionEventHandlers', () => {
     expect(upsertMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'assistant-1',
+        cost: 0.25,
+        finish: 'stop',
+        tokens: { input: 10, output: 2, reasoning: 1, cache: { read: 3, write: 4 }, total: 20 },
         time: { created: 1, completed: 3 },
       })
     );
@@ -2148,7 +2162,7 @@ describe('registerSessionEventHandlers', () => {
     expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(syncSession).toHaveBeenCalledWith('session-1');
-    expect(syncSessionMessages).not.toHaveBeenCalled();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(markLoadingActivity).not.toHaveBeenCalled();
     expect(startLoading).not.toHaveBeenCalled();
     expect(stopLoading).toHaveBeenCalledTimes(1);
@@ -2197,8 +2211,8 @@ describe('registerSessionEventHandlers', () => {
           messageID: 'assistant-1',
           type: 'step-finish',
           reason: 'stop',
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          cost: 0.5,
+          tokens: { input: 15, output: 3, reasoning: 2, cache: { read: 4, write: 5 } },
         },
       },
     });
@@ -2213,6 +2227,9 @@ describe('registerSessionEventHandlers', () => {
     expect(upsertMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'assistant-1',
+        cost: 0.5,
+        finish: 'stop',
+        tokens: { input: 15, output: 3, reasoning: 2, cache: { read: 4, write: 5 } },
         time: { created: 1, completed: 3 },
       })
     );
@@ -2221,7 +2238,7 @@ describe('registerSessionEventHandlers', () => {
     expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(syncSession).toHaveBeenCalledWith('session-1');
-    expect(syncSessionMessages).not.toHaveBeenCalled();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(startLoading).not.toHaveBeenCalled();
     expect(stopLoading).toHaveBeenCalledTimes(1);
 
@@ -2408,7 +2425,7 @@ describe('registerSessionEventHandlers', () => {
     expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(syncSession).toHaveBeenCalledWith('session-1');
-    expect(syncSessionMessages).not.toHaveBeenCalled();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(stopLoading).toHaveBeenCalledTimes(1);
 
     upsertMessageInfo.mockReset();

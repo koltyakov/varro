@@ -268,6 +268,12 @@ const STREAMED_COMPLETION_SETTLE_DELAY_MS = 600;
 
 type ToolExecutionTime = { start?: number; end?: number };
 
+type AssistantUsagePatch = {
+  cost?: number;
+  finish?: string;
+  tokens?: AssistantMessage['tokens'];
+};
+
 function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
@@ -277,6 +283,57 @@ function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] 
   }
 
   return false;
+}
+
+function getAssistantUsagePatchFromStepEvent(
+  props: Record<string, unknown>
+): AssistantUsagePatch | undefined {
+  const tokens = parseAssistantTokens(props.tokens);
+  const cost = getFiniteNumber(props.cost);
+  const finish = getEventString(props, 'finish');
+  if (!tokens && cost === undefined && !finish) return undefined;
+
+  return { tokens: tokens ?? undefined, cost, finish };
+}
+
+function parseAssistantTokens(value: unknown): AssistantMessage['tokens'] | null {
+  const tokens = asRecord(value);
+  if (!tokens) return null;
+
+  const cache = asRecord(tokens.cache);
+  const input = getFiniteNumber(tokens.input);
+  const output = getFiniteNumber(tokens.output);
+  const reasoning = getFiniteNumber(tokens.reasoning);
+  const cacheRead = getFiniteNumber(cache?.read);
+  const cacheWrite = getFiniteNumber(cache?.write);
+  if (
+    input === undefined ||
+    output === undefined ||
+    reasoning === undefined ||
+    cacheRead === undefined ||
+    cacheWrite === undefined
+  ) {
+    return null;
+  }
+
+  const total = getFiniteNumber(tokens.total);
+  return {
+    ...(total !== undefined ? { total } : {}),
+    input,
+    output,
+    reasoning,
+    cache: { read: cacheRead, write: cacheWrite },
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function latestAssistantMessageForSession(
@@ -777,7 +834,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     sessionId: string,
     assistantMessageID: string | undefined,
     completedAt: number,
-    allowLatestFallback: boolean
+    allowLatestFallback: boolean,
+    usage?: AssistantUsagePatch
   ) => {
     const message = findStepAssistantMessage(sessionId, assistantMessageID, allowLatestFallback);
     if (!message) {
@@ -787,13 +845,22 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
     if (message.info.role !== 'assistant') return false;
     if (hasUnsettledToolPart(message.parts)) return false;
-    if (!message.info.time.completed && !message.info.error) {
-      sessionStore.upsertMessageInfo({
-        ...message.info,
-        time: { ...message.info.time, completed: completedAt },
-      } as Message);
+    const assistantInfo = message.info;
+    let nextInfo: AssistantMessage | null = null;
+    const getNextInfo = (): AssistantMessage => {
+      nextInfo ||= { ...assistantInfo };
+      return nextInfo;
+    };
+    if (!assistantInfo.time.completed && !assistantInfo.error) {
+      const info = getNextInfo();
+      info.time = { ...info.time, completed: completedAt };
     }
-    sessionStore.finishMessageStreaming(message.info.id);
+    if (usage?.tokens) getNextInfo().tokens = usage.tokens;
+    if (usage?.cost !== undefined) getNextInfo().cost = usage.cost;
+    if (usage?.finish) getNextInfo().finish = usage.finish;
+    if (nextInfo) sessionStore.upsertMessageInfo(nextInfo as Message);
+    sessionStore.finishMessageStreaming(assistantInfo.id);
+    if (isSessionInActiveTree(sessionId)) scheduleActiveMessageSync(sessionId);
     return true;
   };
   const latestUnsettledAssistantEntry = (sessionId: string) => {
@@ -848,13 +915,18 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       sessionId,
       getEventString(props, 'assistantMessageID'),
       getEventTimestamp(props),
-      true
+      true,
+      getAssistantUsagePatchFromStepEvent(props)
     );
   };
   const settleAssistantStepFinishPart = (part: Part, completedAt: number) => {
     if (part.type !== 'step-finish') return false;
     if (isContinuationStepFinish(part.reason)) return false;
-    return settleAssistantStepCompletion(part.sessionID, part.messageID, completedAt, false);
+    return settleAssistantStepCompletion(part.sessionID, part.messageID, completedAt, false, {
+      cost: part.cost,
+      finish: part.reason,
+      tokens: part.tokens,
+    });
   };
   const findPart = (messageID: string, partID: string): Part | null => {
     const message = deps.getMessages().find((entry) => entry.info.id === messageID);
@@ -1080,9 +1152,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const localMessage = deps.getMessages().find((entry) => entry.info.id === message.id);
     if (localMessage && localMessage.parts.length > 0) return;
 
-    void deps
-      .syncSessionMessages(message.sessionID)
-      .catch((err) => deps.logError('syncSessionMessages', err));
+    scheduleActiveMessageSync(message.sessionID);
   };
   const hasMessagePart = (messageID: string, partID: string) =>
     deps
@@ -1298,6 +1368,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           if (assistantMessage) {
             sessionStore.finishMessageStreaming(assistantMessage.id);
             syncMessagePartsIfMissing(assistantMessage);
+            if (assistantCompleted) scheduleActiveMessageSync(sessionID);
             deps.handoffTodosToMessages();
             refreshSettledTodos(sessionID);
           } else {

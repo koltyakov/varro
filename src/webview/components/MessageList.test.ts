@@ -1816,6 +1816,34 @@ describe('MessageList sticky prompt preview', () => {
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 12 · ↓ 4');
   });
 
+  it('omits the token summary when input and output tokens are zero', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 11_000 },
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            ...textPart('text-assistant-1', 'Received.'),
+            messageID: 'assistant-1',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 10s');
+    expect(container?.textContent).not.toContain('Tokens');
+  });
+
   it('summarizes in and out tokens for subagent sessions parented to the root session', () => {
     const messages = [
       {

@@ -193,6 +193,10 @@ function AssistantDialogSummary(props: {
   onImplementPlan?: () => void;
   onSkipPlan?: () => void;
 }) {
+  const tokenSuffix =
+    props.summary.inputTokens > 0 || props.summary.outputTokens > 0
+      ? ` - Tokens ↑ ${formatNumber(props.summary.inputTokens)} · ↓ ${formatNumber(props.summary.outputTokens)}`
+      : '';
   const agentSuffix =
     props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
 
@@ -200,7 +204,7 @@ function AssistantDialogSummary(props: {
     <div class="model-change-indicator assistant-dialog-summary">
       <div class="assistant-dialog-summary-content">
         <span class="model-change-label">
-          {`Worked for ${formatDuration(props.summary.durationMs)} - Tokens ↑ ${formatNumber(props.summary.inputTokens)} · ↓ ${formatNumber(props.summary.outputTokens)}${agentSuffix}`}
+          {`Worked for ${formatDuration(props.summary.durationMs)}${tokenSuffix}${agentSuffix}`}
         </span>
       </div>
       <Show when={props.showImplementPlanAction}>

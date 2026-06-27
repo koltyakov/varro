@@ -903,6 +903,61 @@ describe('state helpers', () => {
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-1']);
   });
 
+  it('does not preserve optimistic user text when an incremental sync replaces it', async () => {
+    const stateModule = await loadState();
+    const optimisticParts: Part[] = [
+      {
+        id: 'optimistic-user-1-part-0',
+        sessionID: 'session-1',
+        messageID: 'optimistic-user-1',
+        type: 'text',
+        text: 'Follow-up prompt',
+        synthetic: true,
+      },
+    ];
+
+    stateModule.setMessagesIncremental([
+      { info: userMessage('user-1', 'session-1', 1), parts: [] },
+      { info: assistantMessage('assistant-1', 'session-1', 2), parts: [] },
+      { info: userMessage('optimistic-user-1', 'session-1', 3), parts: optimisticParts },
+    ]);
+
+    stateModule.setMessagesIncremental(
+      [
+        { info: userMessage('user-1', 'session-1', 1), parts: [] },
+        { info: assistantMessage('assistant-1', 'session-1', 2), parts: [] },
+        {
+          info: userMessage('message-1', 'session-1', 4),
+          parts: [
+            {
+              id: 'message-1-part-0',
+              sessionID: 'session-1',
+              messageID: 'message-1',
+              type: 'text',
+              text: 'Follow-up prompt',
+            },
+          ],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'message-1',
+    ]);
+    expect(stateModule.state.messages[2]?.parts).toEqual([
+      {
+        id: 'message-1-part-0',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'text',
+        text: 'Follow-up prompt',
+      },
+    ]);
+  });
+
   it('prunes an edited user message and later messages with restore support', async () => {
     const stateModule = await loadState();
     const messages = [

@@ -4348,13 +4348,15 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-token-stats {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--color-vscode-fg-muted) 58%, transparent);
   flex-shrink: 0;
   line-height: 1.2;
   white-space: nowrap;
+  transform: translateY(-1px);
 }
 
 .chat-tool-invocation-part .tool-invocation-error-label {
@@ -8362,10 +8364,14 @@ body.vscode-high-contrast-light
 }
 
 .ralph-iter-tokens {
+  display: inline-flex;
+  align-items: center;
   font-size: 11px;
+  line-height: 1.2;
   color: var(--color-vscode-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  transform: translateY(-1px);
 }
 
 .ralph-iter-verdicts {
