@@ -50,7 +50,10 @@ export interface RestProxyCallbacks {
   server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
   contextProvider: Pick<ContextProvider, 'context' | 'readFile' | 'resolvePath'>;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
-  sessionState: Pick<SessionStateManager, 'markSessionBusy' | 'removeSessions'>;
+  sessionState: Pick<
+    SessionStateManager,
+    'handleServerEvent' | 'isSessionInWorkspace' | 'markSessionBusy' | 'removeSessions'
+  >;
   sessionTrash: Pick<
     SessionTrashManager,
     | 'cleanupExpired'
@@ -272,8 +275,11 @@ export class RestProxy {
   private filterApiResponse(method: string, path: string, data: unknown) {
     const url = new URL(path, 'http://localhost');
     if (method === 'GET' && url.pathname === '/session' && Array.isArray(data)) {
+      this.rememberSessionList(data);
       return this.callbacks.sessionTrash.filterVisibleSessions(
-        this.callbacks.hiddenSessions.filterVisibleSessions(data as Array<{ id: string }>)
+        this.callbacks.hiddenSessions.filterVisibleSessions(
+          this.filterSessionsForCurrentWorkspace(data as Array<{ id: string; directory?: unknown }>)
+        )
       );
     }
     if (
@@ -290,24 +296,68 @@ export class RestProxy {
       typeof data === 'object'
     ) {
       return this.callbacks.sessionTrash.filterVisibleSessionStatuses(
-        this.callbacks.hiddenSessions.filterVisibleSessionStatuses(data as Record<string, unknown>)
+        this.callbacks.hiddenSessions.filterVisibleSessionStatuses(
+          this.filterSessionStatusesForCurrentWorkspace(data as Record<string, unknown>)
+        )
       );
     }
     if (method === 'GET' && url.pathname === '/question' && Array.isArray(data)) {
       return this.callbacks.sessionTrash.filterVisibleSessionRequests(
         this.callbacks.hiddenSessions.filterVisibleSessionRequests(
-          data as Array<{ sessionID: string }>
+          this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
         )
       );
     }
     if (method === 'GET' && url.pathname === '/permission' && Array.isArray(data)) {
       return this.callbacks.sessionTrash.filterVisibleSessionRequests(
         this.callbacks.hiddenSessions.filterVisibleSessionRequests(
-          data as Array<{ sessionID: string }>
+          this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
         )
       );
     }
     return data;
+  }
+
+  private rememberSessionList(sessions: unknown[]) {
+    for (const session of sessions) {
+      const info = asRecord(session);
+      if (!info) continue;
+      this.callbacks.sessionState.handleServerEvent({
+        type: 'session.updated',
+        properties: { info },
+      });
+    }
+  }
+
+  private filterSessionsForCurrentWorkspace<T extends { directory?: unknown }>(sessions: T[]) {
+    const workspacePath = this.getCurrentWorkspacePath();
+    if (!normalizeWorkspacePath(workspacePath)) return sessions;
+    return sessions.filter((session) => isDirectoryInWorkspace(session.directory, workspacePath));
+  }
+
+  private filterSessionStatusesForCurrentWorkspace<T>(statuses: Record<string, T>) {
+    const workspacePath = this.getCurrentWorkspacePath();
+    if (!normalizeWorkspacePath(workspacePath)) return statuses;
+    return Object.fromEntries(
+      Object.entries(statuses).filter(([sessionID]) =>
+        this.callbacks.sessionState.isSessionInWorkspace(sessionID, workspacePath)
+      )
+    );
+  }
+
+  private filterSessionRequestsForCurrentWorkspace<T extends { sessionID: string }>(requests: T[]) {
+    const workspacePath = this.getCurrentWorkspacePath();
+    if (!normalizeWorkspacePath(workspacePath)) return requests;
+    return requests.filter((request) =>
+      this.callbacks.sessionState.isSessionInWorkspace(request.sessionID, workspacePath)
+    );
+  }
+
+  private getCurrentWorkspacePath() {
+    return (
+      this.callbacks.contextProvider.context.workspacePath ||
+      this.callbacks.server.getWorkspaceCwd()
+    );
   }
 
   private isHiddenSession(sessionID: string | null | undefined) {
@@ -746,4 +796,23 @@ function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeRefe
     });
   }
   return references.slice(-20);
+}
+
+function isDirectoryInWorkspace(
+  directory: unknown,
+  workspacePath: string | null | undefined
+): boolean {
+  const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
+  if (!normalizedWorkspace) return true;
+  const normalizedDirectory = normalizeWorkspacePath(
+    typeof directory === 'string' ? directory : undefined
+  );
+  return normalizedDirectory === normalizedWorkspace;
+}
+
+function normalizeWorkspacePath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) return null;
+  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
 }

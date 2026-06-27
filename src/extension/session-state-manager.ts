@@ -99,11 +99,7 @@ export class SessionStateManager {
     const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
     if (!normalizedWorkspace) return true;
     const normalizedDirectory = normalizeWorkspacePath(this.sessionDirectories.get(sessionID));
-    return Boolean(
-      normalizedDirectory &&
-      (normalizedDirectory === normalizedWorkspace ||
-        normalizedDirectory.startsWith(`${normalizedWorkspace}/`))
-    );
+    return normalizedDirectory === normalizedWorkspace;
   }
 
   removeSessions(sessionIDs: Iterable<string>): void {

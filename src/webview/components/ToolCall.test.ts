@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { setExpandThinkingByDefaultPreference, setState } from '../lib/state';
-import type { Permission, QuestionRequest, ToolPart } from '../types';
+import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
 import {
   ToolCall,
   formatToolTitle,
@@ -38,6 +38,8 @@ afterEach(() => {
   setState('permissions', []);
   setState('questions', []);
   setState('sessionStatus', {});
+  setState('messages', []);
+  setState('sessions', []);
   resetToolCallExpansionState();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
@@ -53,6 +55,52 @@ function completedState(
     title,
     metadata: {},
     time: { start: 0, end: 1 },
+  };
+}
+
+function assistantMessage(id: string, overrides: Partial<AssistantMessage> = {}): AssistantMessage {
+  const base: AssistantMessage = {
+    id,
+    sessionID: 'session-1',
+    role: 'assistant',
+    time: { created: 0 },
+    parentID: 'user-1',
+    modelID: 'model-1',
+    providerID: 'provider-1',
+    mode: 'subagent',
+    path: { cwd: '/repo', root: '/repo' },
+    cost: 0,
+    tokens: {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    },
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    time: overrides.time ?? base.time,
+    path: overrides.path ?? base.path,
+    tokens: overrides.tokens ?? base.tokens,
+  };
+}
+
+function session(id: string, overrides: Partial<Session> = {}): Session {
+  const base: Session = {
+    id,
+    projectID: 'project-1',
+    directory: '/repo',
+    title: id,
+    version: '1',
+    time: { created: 0, updated: 0 },
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    time: overrides.time ?? base.time,
   };
 }
 
@@ -379,6 +427,167 @@ describe('ToolCall', () => {
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
       'Running...'
+    );
+  });
+
+  it('shows live subagent token counts for running tasks', () => {
+    setState('messages', [
+      {
+        info: assistantMessage('subagent-assistant-1', {
+          sessionID: 'subagent-session-1',
+          tokens: { input: 1_234, output: 56, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+      {
+        info: assistantMessage('other-assistant', {
+          sessionID: 'other-session',
+          tokens: { input: 9_999, output: 9_999, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+    ]);
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          prompt: 'Do something',
+        },
+        title: 'Working',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const stats = container?.querySelector('.tool-invocation-token-stats');
+    expect(stats?.textContent).toBe('↑ 1,234 · ↓ 56');
+    expect(stats?.querySelector('.diff-lines-added')).toBeNull();
+    expect(stats?.querySelector('.diff-lines-removed')).toBeNull();
+  });
+
+  it('keeps subagent token counts visible while waiting for token data', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          prompt: 'Do something',
+        },
+        title: 'Working',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 · ↓ 0');
+  });
+
+  it('uses subagent session token snapshots when message tokens are unavailable', () => {
+    setState('sessions', [
+      session('subagent-session-1', {
+        tokens: { input: 2_468, output: 135, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    ]);
+
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          prompt: 'Do something',
+        },
+        title: 'Working',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe(
+      '↑ 2,468 · ↓ 135'
+    );
+  });
+
+  it('infers the subagent session when task metadata loses the session id', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          description: 'Research Varro SDK usage',
+          prompt: 'Do something',
+        },
+        title: 'Research Varro SDK usage',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+    const otherTask: ToolPart = {
+      ...part,
+      id: 'tool-2',
+      callID: 'call-2',
+      state: {
+        ...part.state,
+        input: { description: 'Research auth flow', prompt: 'Do something else' },
+        title: 'Research auth flow',
+      },
+    };
+    setState('sessions', [
+      session('child-1', {
+        parentID: 'session-1',
+        title: 'Research Varro SDK usage (@explore subagent)',
+        tokens: { input: 321, output: 45, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 11, updated: 12 },
+      }),
+      session('child-2', {
+        parentID: 'session-1',
+        title: 'Research auth flow (@explore subagent)',
+        tokens: { input: 999, output: 999, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 12, updated: 13 },
+      }),
+    ]);
+    setState('messages', [
+      {
+        info: assistantMessage('message-1', {
+          mode: 'default',
+          sessionID: 'session-1',
+          time: { created: 10 },
+        }),
+        parts: [part, otherTask],
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe(
+      '↑ 321 · ↓ 45'
     );
   });
 

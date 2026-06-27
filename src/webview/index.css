@@ -618,8 +618,8 @@ body.vscode-high-contrast-light .interactive-session {
   max-height: calc(1.35em * 4);
   overflow-x: hidden;
   overflow-y: auto;
-  margin-right: -8px;
-  padding-right: 8px;
+  margin-right: -14px;
+  padding-right: 14px;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent) transparent;
   white-space: pre-wrap;
@@ -3094,7 +3094,7 @@ body.vscode-dark .interactive-session .chat-input-container {
   justify-content: center;
   width: 16px;
   flex-shrink: 0;
-  color: var(--color-vscode-fg-muted);
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 62%, transparent);
 }
 
 .busy-menu-label {
@@ -4347,6 +4347,16 @@ kbd {
   white-space: nowrap;
 }
 
+.chat-tool-invocation-part .tool-invocation-token-stats {
+  display: inline-block;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 58%, transparent);
+  flex-shrink: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .chat-tool-invocation-part .tool-invocation-error-label {
   font-size: 11px;
   color: var(--color-vscode-error);
@@ -5306,8 +5316,8 @@ kbd {
   max-height: min(320px, 45vh);
   overflow-y: auto;
   overscroll-behavior-y: auto;
-  margin-right: -9px;
-  padding-right: 9px;
+  margin-right: -14px;
+  padding-right: 14px;
 }
 
 .user-message-card > .rendered-markdown.user-message-content-has-image {

@@ -16,14 +16,18 @@ export class ServerEventBridge {
 
   constructor(
     private readonly server: Pick<OpenCodeServer, 'on' | 'off'>,
-    private readonly sessionState: Pick<SessionStateManager, 'handleServerEvent' | 'persist'>,
+    private readonly sessionState: Pick<
+      SessionStateManager,
+      'handleServerEvent' | 'isSessionInWorkspace' | 'persist'
+    >,
     private readonly hiddenSessions: Pick<HiddenSessionManager, 'isHidden' | 'observeEvent'>,
     private readonly providerLimitService: {
       shouldClearCache(previousStatus: ServerStatus, nextStatus: ServerStatus): boolean;
       clearCache(): void;
     },
     private readonly post: PostMessage,
-    private readonly updateStatusBarItem: () => void
+    private readonly updateStatusBarItem: () => void,
+    private readonly workspace?: { getPath(): string | null | undefined }
   ) {
     this.statusBarItem = vscode.window.createStatusBarItem(
       'varro.session-status',
@@ -58,6 +62,7 @@ export class ServerEventBridge {
       if (!parsed) return;
       this.hiddenSessions.observeEvent?.(parsed);
       if (this.shouldSuppress(parsed)) return;
+      if (this.shouldSuppressWorkspace(parsed)) return;
       this.sessionState.handleServerEvent(parsed);
       this.post({ type: 'server/event', payload: parsed });
     };
@@ -81,4 +86,40 @@ export class ServerEventBridge {
       this.hiddenSessions.isHidden(sessionID)
     );
   }
+
+  private shouldSuppressWorkspace(event: ServerEvent) {
+    const workspacePath = this.workspace?.getPath();
+    if (!normalizeWorkspacePath(workspacePath)) return false;
+
+    const info = asRecord(asRecord(event.properties)?.info);
+    const directory = typeof info?.directory === 'string' ? info.directory : undefined;
+    if (directory) return !isDirectoryInWorkspace(directory, workspacePath);
+
+    const sessionIDs = getSessionIdsForEvent(event);
+    if (sessionIDs.length === 0) return false;
+    return sessionIDs.some(
+      (sessionID) => !this.sessionState.isSessionInWorkspace(sessionID, workspacePath)
+    );
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function isDirectoryInWorkspace(
+  directory: string,
+  workspacePath: string | null | undefined
+): boolean {
+  const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
+  if (!normalizedWorkspace) return true;
+  const normalizedDirectory = normalizeWorkspacePath(directory);
+  return normalizedDirectory === normalizedWorkspace;
+}
+
+function normalizeWorkspacePath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) return null;
+  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
 }

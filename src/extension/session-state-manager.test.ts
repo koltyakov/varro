@@ -733,7 +733,7 @@ describe('SessionStateManager notifications', () => {
     expect(manager.isSessionInWorkspace('session-1', '/repo-b')).toBe(false);
   });
 
-  it('treats nested session directories as in-workspace', () => {
+  it('treats nested session directories as out of workspace', () => {
     const manager = createManager(() => false);
 
     manager.handleServerEvent({
@@ -743,7 +743,7 @@ describe('SessionStateManager notifications', () => {
       },
     });
 
-    expect(manager.isSessionInWorkspace('session-1', '/repo')).toBe(true);
+    expect(manager.isSessionInWorkspace('session-1', '/repo')).toBe(false);
     expect(manager.isSessionInWorkspace('session-1', '/other')).toBe(false);
   });
 

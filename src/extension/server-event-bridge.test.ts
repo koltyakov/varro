@@ -31,7 +31,10 @@ interface CapturedHandlers {
   event: ((event: unknown) => void) | undefined;
 }
 
-function createMocks() {
+function createMocks(options?: {
+  workspacePath?: string | null;
+  isSessionInWorkspace?: (sessionID: string, workspacePath: string | null | undefined) => boolean;
+}) {
   const handlers: CapturedHandlers = { status: undefined, event: undefined };
   const server = {
     on: vi.fn((event: string, handler: (data: unknown) => void) => {
@@ -42,6 +45,7 @@ function createMocks() {
   };
   const sessionState = {
     handleServerEvent: vi.fn(),
+    isSessionInWorkspace: vi.fn(options?.isSessionInWorkspace || (() => true)),
     persist: vi.fn(() => Promise.resolve()),
   };
   const sessionTrash = { isHidden: vi.fn(() => false) };
@@ -57,7 +61,8 @@ function createMocks() {
     sessionTrash as never,
     providerLimitService as never,
     post,
-    updateStatusBarItem
+    updateStatusBarItem,
+    options && 'workspacePath' in options ? { getPath: () => options.workspacePath } : undefined
   );
   return {
     handlers,
@@ -165,6 +170,34 @@ describe('ServerEventBridge', () => {
     mocks.parseServerEvent.mockReturnValue(parsed);
     mocks.getSessionIdsForEvent.mockReturnValue(['hidden-session']);
     sessionTrash.isHidden.mockReturnValue(true);
+    bridge.attach();
+    handlers.event!({});
+    expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('event handler suppresses session updates from nested workspace directories', () => {
+    const { bridge, handlers, post, sessionState } = createMocks({ workspacePath: '/repo' });
+    const parsed = {
+      type: 'session.updated' as const,
+      properties: { info: { id: 'nested-session', directory: '/repo/project-a' } },
+    };
+    mocks.parseServerEvent.mockReturnValue(parsed);
+    mocks.getSessionIdsForEvent.mockReturnValue(['nested-session']);
+    bridge.attach();
+    handlers.event!({});
+    expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('event handler suppresses non-metadata events for sessions outside the workspace', () => {
+    const { bridge, handlers, post, sessionState } = createMocks({
+      workspacePath: '/repo',
+      isSessionInWorkspace: () => false,
+    });
+    const parsed = { type: 'permission.asked' as const, properties: { sessionID: 'session-1' } };
+    mocks.parseServerEvent.mockReturnValue(parsed);
+    mocks.getSessionIdsForEvent.mockReturnValue(['session-1']);
     bridge.attach();
     handlers.event!({});
     expect(sessionState.handleServerEvent).not.toHaveBeenCalled();

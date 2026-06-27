@@ -188,7 +188,7 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 
-  it('keeps nested Windows sessions when workspace casing differs', () => {
+  it('filters nested Windows sessions when workspace casing differs', () => {
     const setup = createDeps({
       sessions: [
         session('session-1', 'C:\\Users\\Andrew\\Projects\\Varro\\packages\\cli', 2),
@@ -199,10 +199,10 @@ describe('session-lifecycle helpers', () => {
 
     applySessions(setup.deps, setup.current.sessions);
 
-    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+    expect(setup.current.sessions.map((item) => item.id)).toEqual([]);
   });
 
-  it('keeps sessions whose directory is nested under the active workspace', () => {
+  it('filters sessions whose directory is nested under the active workspace', () => {
     const setup = createDeps({
       sessions: [
         session('session-1', '/repo/project-a', 2),
@@ -213,7 +213,7 @@ describe('session-lifecycle helpers', () => {
 
     applySessions(setup.deps, setup.current.sessions);
 
-    expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+    expect(setup.current.sessions.map((item) => item.id)).toEqual([]);
     expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
   });
 

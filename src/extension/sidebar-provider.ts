@@ -127,7 +127,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       },
       this.providerLimitService,
       (message) => this.post(message),
-      () => this.updateStatusBarItem()
+      () => this.updateStatusBarItem(),
+      { getPath: () => this.contextProvider.context.workspacePath }
     );
 
     this.webviewSession = new WebviewSession(

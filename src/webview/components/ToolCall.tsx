@@ -1,10 +1,16 @@
 import { Show, For, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js';
-import type { QuestionRequest, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
+import type {
+  QuestionRequest,
+  Session,
+  ToolPart,
+  ToolStateCompleted,
+  ToolStateError,
+} from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
-import { formatDuration } from '../lib/message-metrics';
+import { formatDuration, formatNumber } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
 import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
@@ -94,6 +100,22 @@ export function shouldShowToolPreview(title: string, preview: ToolPreview | null
 function formatVisibleToolDuration(ms: number | null | undefined) {
   if (ms === null || ms === undefined || ms < MIN_VISIBLE_TOOL_DURATION_MS) return null;
   return formatDuration(ms) || null;
+}
+
+function getTaskSessionIdFromMetadata(metadata: Record<string, unknown> | undefined) {
+  if (typeof metadata?.sessionId === 'string') return metadata.sessionId;
+  if (typeof metadata?.sessionID === 'string') return metadata.sessionID;
+  return null;
+}
+
+function normalizeTaskMatchLabel(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function sessionMatchesTaskLabel(session: Session, taskLabel: string) {
+  if (!taskLabel) return false;
+  const title = normalizeTaskMatchLabel(session.title);
+  return title === taskLabel || title.startsWith(`${taskLabel} (`);
 }
 
 function parseIntLike(value: unknown): number | null {
@@ -630,10 +652,77 @@ function GenericToolCall(props: {
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
   const isStructuredTool = () => isStructuredToolName(props.tool.tool);
-  const taskRetryStatus = () => {
-    if (!isTask() || props.state.status !== 'running') return null;
+  const taskLabel = () => {
+    const description = props.state.input?.description;
+    return normalizeTaskMatchLabel(
+      typeof description === 'string' && description.trim() ? description : props.title
+    );
+  };
+  const inferTaskSessionId = () => {
+    const parent = appState.messages.find((entry) => entry.info.id === props.tool.messageID);
+    const parentCreated = parent?.info.time.created || 0;
+    const candidates = appState.sessions
+      .filter((session) => {
+        if (
+          session.parentID !== props.tool.sessionID &&
+          session.parentID !== props.tool.messageID
+        ) {
+          return false;
+        }
+        return parentCreated <= 0 || session.time.created >= parentCreated;
+      })
+      .toSorted((a, b) => a.time.created - b.time.created);
+    if (candidates.length === 0) return null;
+
+    const byTitle = candidates.find((session) => sessionMatchesTaskLabel(session, taskLabel()));
+    if (byTitle) return byTitle.id;
+
+    const taskParts =
+      parent?.parts.filter(
+        (part): part is ToolPart => part.type === 'tool' && normalizeToolName(part.tool) === 'task'
+      ) || [];
+    const taskIndex = taskParts.findIndex((part) => part.callID === props.tool.callID);
+    return taskIndex >= 0 ? (candidates[taskIndex]?.id ?? null) : null;
+  };
+  const taskSessionId = () => {
+    if (!isTask()) return null;
+    if (
+      props.state.status !== 'running' &&
+      props.state.status !== 'completed' &&
+      props.state.status !== 'error'
+    ) {
+      return null;
+    }
+
     const meta = props.state.metadata as Record<string, unknown> | undefined;
-    const sessionId = typeof meta?.sessionId === 'string' ? meta.sessionId : null;
+    return getTaskSessionIdFromMetadata(meta) || inferTaskSessionId();
+  };
+  const taskTokenUsage = createMemo(() => {
+    const sessionId = taskSessionId();
+    if (!sessionId) return null;
+
+    const sessionTokens = appState.sessions.find((session) => session.id === sessionId)?.tokens;
+    if (sessionTokens) {
+      return {
+        input: sessionTokens.input || 0,
+        output: sessionTokens.output || 0,
+      };
+    }
+
+    let input = 0;
+    let output = 0;
+    for (const entry of appState.messages) {
+      const info = entry.info;
+      if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
+      input += info.tokens.input || 0;
+      output += info.tokens.output || 0;
+    }
+
+    return { input, output };
+  });
+  const taskRetryStatus = () => {
+    if (props.state.status !== 'running') return null;
+    const sessionId = taskSessionId();
     if (!sessionId) return null;
     const status = appState.sessionStatus[sessionId];
     return status?.type === 'retry' ? status : null;
@@ -679,6 +768,13 @@ function GenericToolCall(props: {
       >
         <span class={`tool-status-dot ${props.statusClass}`} />
         <span class="tool-invocation-title">{props.title}</span>
+        <Show when={taskTokenUsage()}>
+          {(tokens) => (
+            <span class="tool-invocation-token-stats" title="Subagent tokens">
+              ↑ {formatNumber(tokens().input)} · ↓ {formatNumber(tokens().output)}
+            </span>
+          )}
+        </Show>
         <Show when={completedDurationLabel()}>
           <span class="tool-invocation-duration">{completedDurationLabel()}</span>
         </Show>

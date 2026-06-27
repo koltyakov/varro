@@ -53,7 +53,12 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
         })
       ),
     },
-    sessionState: { markSessionBusy: vi.fn(), removeSessions: vi.fn() },
+    sessionState: {
+      handleServerEvent: vi.fn(),
+      isSessionInWorkspace: vi.fn(() => true),
+      markSessionBusy: vi.fn(),
+      removeSessions: vi.fn(),
+    },
     sessionTrash: {
       cleanupExpired: vi.fn(() => Promise.resolve([] as never[])),
       deletePermanently: vi.fn(() => Promise.resolve(null)),
@@ -519,7 +524,7 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('forwards passthrough requests to server', async () => {
-    const serverData = [{ id: 's1' }];
+    const serverData = [{ id: 's1', directory: '/repo' }];
     const serverRequest = vi.fn(() => Promise.resolve(serverData));
     const { proxy, callbacks } = createProxy({
       server: {
@@ -536,8 +541,11 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('filters session list through sessionTrash', async () => {
-    const sessions = [{ id: 'visible' }, { id: 'hidden' }];
-    const filtered = [{ id: 'visible' }];
+    const sessions = [
+      { id: 'visible', directory: '/repo' },
+      { id: 'hidden', directory: '/repo' },
+    ];
+    const filtered = [{ id: 'visible', directory: '/repo' }];
     const serverRequest = vi.fn(() => Promise.resolve(sessions));
     const filterVisible = vi.fn(() => filtered);
     const { proxy, callbacks } = createProxy({
@@ -550,6 +558,26 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(16, 'GET', '/session'));
     expect(filterVisible).toHaveBeenCalledWith(sessions);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 16, data: filtered });
+  });
+
+  it('filters session list to the exact current workspace directory', async () => {
+    const sessions = [
+      { id: 'root', directory: '/repo' },
+      { id: 'nested', directory: '/repo/project-a' },
+      { id: 'other', directory: '/other' },
+    ];
+    const serverRequest = vi.fn(() => Promise.resolve(sessions));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(116, 'GET', '/session'));
+
+    expect(callbacks.sessionState.handleServerEvent).toHaveBeenCalledTimes(3);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 116,
+      data: [{ id: 'root', directory: '/repo' }],
+    });
   });
 
   it('sanitizes session messages', async () => {
