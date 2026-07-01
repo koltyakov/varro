@@ -679,6 +679,18 @@ export type ServerEventPropertiesByName = {
   'server.connected': ServerLifecycleEventProperties;
   'server.heartbeat': ServerLifecycleEventProperties;
   'server.instance.disposed': ServerLifecycleEventProperties;
+  'global.disposed': Record<string, unknown>;
+  'catalog.updated': Record<string, unknown>;
+  'models-dev.refreshed': Record<string, unknown>;
+  'installation.updated': Record<string, unknown>;
+  'installation.update-available': Record<string, unknown>;
+  'integration.updated': Record<string, unknown>;
+  'integration.connection.updated': Record<string, unknown>;
+  'file.edited': Record<string, unknown>;
+  'file.watcher.updated': Record<string, unknown>;
+  'reference.updated': Record<string, unknown>;
+  'plugin.added': Record<string, unknown>;
+  'project.directories.updated': Record<string, unknown>;
   'project.updated': ProjectUpdatedProperties;
   'session.created': { sessionID?: string; info: SessionEventInfo };
   'session.updated': { sessionID?: string; info: SessionEventInfo };
@@ -705,13 +717,26 @@ export type ServerEventPropertiesByName = {
   'question.v2.replied': QuestionV2ReplyProperties;
   'question.v2.rejected': QuestionV2ReplyProperties;
   'todo.updated': TodoUpdatedProperties;
+  'command.executed': Record<string, unknown>;
+  'lsp.client.diagnostics': Record<string, unknown>;
   'lsp.updated': Record<string, unknown>;
+  'ide.installed': Record<string, unknown>;
   'vcs.branch.updated': { branch?: string };
   'mcp.tools.changed': Record<string, unknown>;
   'mcp.browser.open.failed': Record<string, unknown>;
+  'pty.created': Record<string, unknown>;
+  'pty.updated': Record<string, unknown>;
+  'pty.exited': Record<string, unknown>;
+  'pty.deleted': Record<string, unknown>;
+  'tui.prompt.append': Record<string, unknown>;
+  'tui.command.execute': Record<string, unknown>;
+  'tui.toast.show': Record<string, unknown>;
+  'tui.session.select': Record<string, unknown>;
   'workspace.ready': { name?: string };
   'workspace.failed': { message?: string };
   'workspace.status': WorkspaceStatusEntry;
+  'worktree.ready': Record<string, unknown>;
+  'worktree.failed': Record<string, unknown>;
   'session.next.agent.switched': {
     timestamp?: number;
     sessionID: string;
@@ -930,5 +955,19 @@ export type ServerEventPropertiesByName = {
     text?: string;
     recent?: string;
     include?: string;
+  };
+  'session.next.revert.staged': {
+    timestamp?: number;
+    sessionID: string;
+    revert?: Record<string, unknown>;
+  };
+  'session.next.revert.cleared': {
+    timestamp?: number;
+    sessionID: string;
+  };
+  'session.next.revert.committed': {
+    timestamp?: number;
+    sessionID: string;
+    messageID?: string;
   };
 };

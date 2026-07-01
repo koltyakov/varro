@@ -1899,23 +1899,45 @@ export function upsertMessageInfo(info: Message) {
         messageIndex.invalidate();
         return;
       } else {
-        removeLatestOptimisticUserMessageForInfo(msgs, info);
-        msgs.push({ info, parts: [] });
+        const optimisticEntry = removeLatestOptimisticUserMessageForInfo(msgs, info);
+        msgs.push({
+          info,
+          parts: getOptimisticImageFilePartsForServerMessage(optimisticEntry, info),
+        });
         messageIndex.invalidate();
       }
     })
   );
 }
 
+function getOptimisticImageFilePartsForServerMessage(
+  optimisticEntry: MessageEntry | null,
+  info: Message
+): Part[] {
+  if (!optimisticEntry || info.role !== 'user') return [];
+
+  return optimisticEntry.parts.flatMap((part, index): Part[] => {
+    if (!isImageFilePart(part)) return [];
+    return [
+      {
+        ...cloneValue(part),
+        id: getOptimisticImagePartId(info.id, index),
+        sessionID: info.sessionID,
+        messageID: info.id,
+      },
+    ];
+  });
+}
+
 function removeLatestOptimisticUserMessageForInfo(msgs: MessageEntry[], info: Message) {
-  if (info.role !== 'user' || isOptimisticUserMessageId(info.id)) return false;
+  if (info.role !== 'user' || isOptimisticUserMessageId(info.id)) return null;
   for (let index = msgs.length - 1; index >= 0; index -= 1) {
     const entry = msgs[index]!;
     if (entry.info.sessionID !== info.sessionID || !isOptimisticUserMessage(entry)) continue;
     msgs.splice(index, 1);
-    return true;
+    return entry;
   }
-  return false;
+  return null;
 }
 
 function removeReconciledOptimisticUserMessage(msgs: MessageEntry[], incoming: MessageEntry) {
@@ -1979,6 +2001,7 @@ export function upsertPart(part: Part) {
           return;
         }
 
+        removeMatchingOptimisticImageFilePart(msgs[idx]!, nextPart);
         msgs[idx]!.parts.push(nextPart);
         messageIndex.appendPart(msgs, nextPart.id, {
           msgIdx: idx,
@@ -2539,6 +2562,7 @@ function mergeMessageEntry(
 
   preserveLongerToolExecutionTimes(current, next);
   preserveCompletionState(current, next);
+  preserveOptimisticImageFileParts(current, next);
   if (!options?.preserveExtraParts || current.parts.length === 0) {
     materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
     return next;
@@ -2559,6 +2583,42 @@ function mergeMessageEntry(
 
   materializeStreamingTextInEntry(next, streamingSnapshot ?? null);
   return next;
+}
+
+function preserveOptimisticImageFileParts(current: MessageEntry | undefined, next: MessageEntry) {
+  if (!current || current.info.role !== 'user' || next.info.role !== 'user') return;
+  for (const part of current.parts) {
+    if (!isOptimisticImageFilePart(part)) continue;
+    if (next.parts.some((nextPart) => areMatchingImageFileParts(part, nextPart))) continue;
+    next.parts.push(cloneValue(part));
+  }
+}
+
+function removeMatchingOptimisticImageFilePart(entry: MessageEntry, incoming: Part) {
+  if (entry.info.role !== 'user' || !isImageFilePart(incoming)) return;
+  const index = entry.parts.findIndex(
+    (part) => isOptimisticImageFilePart(part) && areMatchingImageFileParts(part, incoming)
+  );
+  if (index === -1) return;
+  entry.parts.splice(index, 1);
+  messageIndex.invalidate();
+}
+
+function isImageFilePart(part: Part): part is Extract<Part, { type: 'file' }> {
+  return part.type === 'file' && part.mime.startsWith('image/');
+}
+
+function isOptimisticImageFilePart(part: Part): part is Extract<Part, { type: 'file' }> {
+  return isImageFilePart(part) && part.id.includes('-optimistic-file-');
+}
+
+function getOptimisticImagePartId(messageId: string, index: number) {
+  return `${messageId}-optimistic-file-${index}`;
+}
+
+function areMatchingImageFileParts(left: Part, right: Part) {
+  if (!isImageFilePart(left) || !isImageFilePart(right)) return false;
+  return left.url === right.url && left.mime === right.mime && left.filename === right.filename;
 }
 
 function preserveCompletionState(current: MessageEntry | undefined, next: MessageEntry) {

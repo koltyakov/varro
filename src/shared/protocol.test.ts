@@ -262,6 +262,44 @@ describe('protocol conformance', () => {
     });
   });
 
+  it('parses latest OpenCode event names', () => {
+    expect(
+      parseServerEvent({
+        id: 'evt_1',
+        type: 'session.next.revert.staged',
+        data: {
+          timestamp: 1_234,
+          sessionID: 'session-1',
+          revert: { messageID: 'message-1' },
+        },
+      })
+    ).toEqual({
+      type: 'session.next.revert.staged',
+      properties: {
+        timestamp: 1_234,
+        sessionID: 'session-1',
+        revert: { messageID: 'message-1' },
+      },
+    });
+
+    expect(
+      parseServerEvent({
+        id: 'evt_2',
+        type: 'lsp.client.diagnostics',
+        properties: {
+          serverID: 'tsserver',
+          path: '/repo/src/app.ts',
+        },
+      })
+    ).toEqual({
+      type: 'lsp.client.diagnostics',
+      properties: {
+        serverID: 'tsserver',
+        path: '/repo/src/app.ts',
+      },
+    });
+  });
+
   it('parses OpenCode session.error events', () => {
     expect(
       parseServerEvent({

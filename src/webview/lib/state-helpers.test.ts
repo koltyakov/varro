@@ -903,6 +903,91 @@ describe('state helpers', () => {
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-1']);
   });
 
+  it('preserves optimistic user image parts when server metadata arrives first', async () => {
+    const stateModule = await loadState();
+    const optimisticParts: Part[] = [
+      {
+        id: 'optimistic-user-1-part-0',
+        sessionID: 'session-1',
+        messageID: 'optimistic-user-1',
+        type: 'text',
+        text: 'Review [image.png]',
+        synthetic: true,
+      },
+      {
+        id: 'optimistic-user-1-part-1',
+        sessionID: 'session-1',
+        messageID: 'optimistic-user-1',
+        type: 'file',
+        mime: 'image/png',
+        filename: 'image.png',
+        url: 'blob:image-1',
+      },
+    ];
+
+    stateModule.upsertMessage({
+      info: userMessage('optimistic-user-1'),
+      parts: optimisticParts,
+    });
+
+    stateModule.upsertMessageInfo(userMessage('message-1'));
+
+    expect(stateModule.state.messages).toHaveLength(1);
+    expect(stateModule.state.messages[0]?.info.id).toBe('message-1');
+    expect(stateModule.state.messages[0]?.parts).toEqual([
+      {
+        id: 'message-1-optimistic-file-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'file',
+        mime: 'image/png',
+        filename: 'image.png',
+        url: 'blob:image-1',
+      },
+    ]);
+  });
+
+  it('replaces an optimistic user image part when the server file part arrives', async () => {
+    const stateModule = await loadState();
+    stateModule.upsertMessage({
+      info: userMessage('optimistic-user-1'),
+      parts: [
+        {
+          id: 'optimistic-user-1-part-0',
+          sessionID: 'session-1',
+          messageID: 'optimistic-user-1',
+          type: 'file',
+          mime: 'image/png',
+          filename: 'image.png',
+          url: 'blob:image-1',
+        },
+      ],
+    });
+    stateModule.upsertMessageInfo(userMessage('message-1'));
+
+    stateModule.upsertPart({
+      id: 'server-file-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'file',
+      mime: 'image/png',
+      filename: 'image.png',
+      url: 'blob:image-1',
+    });
+
+    expect(stateModule.state.messages[0]?.parts).toEqual([
+      {
+        id: 'server-file-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'file',
+        mime: 'image/png',
+        filename: 'image.png',
+        url: 'blob:image-1',
+      },
+    ]);
+  });
+
   it('does not preserve optimistic user text when an incremental sync replaces it', async () => {
     const stateModule = await loadState();
     const optimisticParts: Part[] = [
