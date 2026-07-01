@@ -7,6 +7,7 @@ import {
   deleteSessionPermanentlyWithDependencies,
   deleteSessionWithDependencies,
   emptyRecycleBinWithDependencies,
+  forkSessionWithDependencies,
   restoreSessionWithDependencies,
 } from './session/session-management';
 
@@ -241,10 +242,81 @@ describe('session management helpers', () => {
     expect(setError).toHaveBeenCalledWith('create failed');
   });
 
+  it('forks a session, carries over the permission mode, and selects the fork', async () => {
+    const upsertSession = vi.fn();
+    const selectSession = vi.fn(async () => {});
+    const setPermissionModeForSession = vi.fn();
+    const forkRemoteSession = vi.fn(async () =>
+      session('session-3', { title: 'Session (fork #1)' })
+    );
+
+    const result = await forkSessionWithDependencies(
+      {
+        forkRemoteSession,
+        getPermissionModeForSession: () => 'full',
+        setPermissionModeForSession,
+        upsertSession,
+        selectSession,
+        setError: vi.fn(),
+      },
+      'session-1',
+      'message-2'
+    );
+
+    expect(result).toBe('session-3');
+    expect(forkRemoteSession).toHaveBeenCalledWith('session-1', 'message-2');
+    expect(upsertSession).toHaveBeenCalledWith(
+      session('session-3', { title: 'Session (fork #1)' })
+    );
+    expect(setPermissionModeForSession).toHaveBeenCalledWith('session-3', 'full');
+    expect(selectSession).toHaveBeenCalledWith('session-3');
+  });
+
+  it('does not write a permission mode for forks of default-mode sessions', async () => {
+    const setPermissionModeForSession = vi.fn();
+
+    await forkSessionWithDependencies(
+      {
+        forkRemoteSession: vi.fn(async () => session('session-3')),
+        getPermissionModeForSession: () => 'default',
+        setPermissionModeForSession,
+        upsertSession: vi.fn(),
+        selectSession: vi.fn(async () => {}),
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(setPermissionModeForSession).not.toHaveBeenCalled();
+  });
+
+  it('returns null and reports a fork error', async () => {
+    const setError = vi.fn();
+
+    const result = await forkSessionWithDependencies(
+      {
+        forkRemoteSession: vi.fn(async () => {
+          throw new Error('fork failed');
+        }),
+        getPermissionModeForSession: () => 'full',
+        setPermissionModeForSession: vi.fn(),
+        upsertSession: vi.fn(),
+        selectSession: vi.fn(async () => {}),
+        setError,
+      },
+      'session-1'
+    );
+
+    expect(result).toBeNull();
+    expect(setError).toHaveBeenCalledWith('fork failed');
+  });
+
   it('creates bound session-management operations from one dependency bag', async () => {
     const deps = {
       getActiveSessionId: () => null,
       createRemoteSession: vi.fn(async () => session('session-2')),
+      forkRemoteSession: vi.fn(async () => session('session-3')),
+      getPermissionModeForSession: vi.fn(() => 'default' as const),
       buildCreatePermission: () => [],
       upsertSession: vi.fn(),
       resetToolCallExpansionState: vi.fn(),
@@ -287,12 +359,14 @@ describe('session management helpers', () => {
     const operations = new SessionManagementOperations(deps);
 
     await operations.createSession();
+    await operations.forkSession('session-1');
     await operations.deleteSession('session-1');
     await operations.restoreSession('session-1');
     await operations.deleteSessionPermanently('session-1');
     await operations.emptyRecycleBin();
 
     expect(deps.createRemoteSession).toHaveBeenCalledTimes(1);
+    expect(deps.forkRemoteSession).toHaveBeenCalledWith('session-1', undefined);
     expect(deps.deleteRemoteSession).toHaveBeenCalledWith('session-1');
     expect(deps.restoreRecycleBinEntry).toHaveBeenCalledWith('session-1');
     expect(deps.deleteRecycleBinEntry).toHaveBeenCalledWith('session-1');

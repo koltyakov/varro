@@ -79,6 +79,9 @@ export const client = {
     ): Promise<Session> {
       return apiCall('PATCH', `/session/${id}`, body);
     },
+    async fork(id: string, messageID?: string): Promise<Session> {
+      return apiCall('POST', `/session/${id}/fork`, messageID ? { messageID } : undefined);
+    },
     async delete(id: string): Promise<boolean> {
       return apiCall('DELETE', `/session/${id}`);
     },
@@ -98,8 +101,12 @@ export const client = {
     async status(): Promise<Record<string, SessionStatus>> {
       return getSharedSessionStatus();
     },
-    async messages(id: string): Promise<Array<{ info: Message; parts: Part[] }>> {
-      return apiCall('GET', `/session/${id}/message`);
+    async messages(
+      id: string,
+      options?: { limit?: number }
+    ): Promise<Array<{ info: Message; parts: Part[] }>> {
+      const query = options?.limit ? `?limit=${options.limit}` : '';
+      return apiCall('GET', `/session/${id}/message${query}`);
     },
     async todos(id: string): Promise<Todo[]> {
       return apiCall('GET', `/session/${id}/todo`);

@@ -5,6 +5,8 @@ import type { PermissionRule, Session, SessionStatus } from '../../types';
 type SessionManagementDependencies = {
   getActiveSessionId(): string | null;
   createRemoteSession(body: { title?: string; permission?: PermissionRule[] }): Promise<Session>;
+  forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
+  getPermissionModeForSession(sessionId: string): PermissionMode;
   buildCreatePermission(mode: PermissionMode): PermissionRule[];
   upsertSession(session: Session): void;
   resetToolCallExpansionState(): void;
@@ -86,6 +88,21 @@ export class SessionManagementOperations {
       },
       title,
       initialPermissionMode
+    );
+  };
+
+  readonly forkSession = async (id: string, messageID?: string) => {
+    return forkSessionWithDependencies(
+      {
+        forkRemoteSession: this.deps.forkRemoteSession,
+        getPermissionModeForSession: this.deps.getPermissionModeForSession,
+        setPermissionModeForSession: this.deps.setPermissionModeForSession,
+        upsertSession: this.deps.upsertSession,
+        selectSession: this.deps.selectSession,
+        setError: this.deps.setError,
+      },
+      id,
+      messageID
     );
   };
 
@@ -222,6 +239,35 @@ export async function createSessionWithDependencies(
     return session.id;
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to create session');
+    return null;
+  }
+}
+
+export async function forkSessionWithDependencies(
+  deps: {
+    forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
+    getPermissionModeForSession(sessionId: string): PermissionMode;
+    setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
+    upsertSession(session: Session): void;
+    selectSession(sessionId: string, options?: { markSeen?: boolean }): Promise<void>;
+    setError(message: string): void;
+  },
+  id: string,
+  messageID?: string
+): Promise<string | null> {
+  try {
+    // Forks are independent roots, so the source session's permission mode
+    // must be copied over explicitly or the fork silently resets to default.
+    const permissionMode = deps.getPermissionModeForSession(id);
+    const session = await deps.forkRemoteSession(id, messageID);
+    deps.upsertSession(session);
+    if (permissionMode !== 'default') {
+      deps.setPermissionModeForSession(session.id, permissionMode);
+    }
+    await deps.selectSession(session.id);
+    return session.id;
+  } catch (err) {
+    deps.setError(err instanceof Error ? err.message : 'Failed to fork session');
     return null;
   }
 }

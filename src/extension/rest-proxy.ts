@@ -479,7 +479,26 @@ export class RestProxy {
 
   private async deleteSessionForDirectory(session: SessionDeleteTarget) {
     const path = this.buildScopedSessionPath(session.id, session.directory);
-    return this.callbacks.server.request('DELETE', path);
+    try {
+      return await this.callbacks.server.request('DELETE', path);
+    } catch (err) {
+      // Sessions can predate the server's current ID format (legacy ULIDs get
+      // a 500, not a 404), which would leave their trash entries undeletable.
+      // Only propagate the failure when the session still exists server-side.
+      if (await this.sessionExistsOnServer(session.id)) throw err;
+      return true;
+    }
+  }
+
+  private async sessionExistsOnServer(sessionID: string) {
+    try {
+      const sessions = await this.callbacks.server.request('GET', '/session');
+      return (
+        Array.isArray(sessions) && sessions.some((session) => asRecord(session)?.id === sessionID)
+      );
+    } catch {
+      return true;
+    }
   }
 
   private async lookupSessionDirectory(sessionID: string) {

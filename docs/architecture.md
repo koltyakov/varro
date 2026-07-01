@@ -185,7 +185,7 @@ Responsibilities:
 - react to extension messages such as `server/status` and `context/update`
 - subscribe to OpenCode events forwarded from the extension host
 - fetch initial data from OpenCode REST endpoints
-- send prompts, undo, abort, compact, plan handoff, and permission/question responses
+- send prompts, undo, abort, compact, fork, plan handoff, and permission/question responses
 - derive todo state from message tool parts, with `todo.updated` acting only as a resync trigger
 - synchronize per-session MCP selections with OpenCode
 - recover interrupted sessions after reload when the previous run still looks incomplete
@@ -308,6 +308,7 @@ The webview adds more derived states on top of that data.
 - File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic rather than shelling out.
 - Session lists are filtered to the active workspace path, which prevents unrelated project sessions from appearing in the sidebar.
 - Queued follow-up prompts are stored client-side and auto-dispatched once the active session becomes idle.
+- Message loads are windowed: sessions fetch only the most recent messages (`src/webview/lib/message-window.ts`), older loaded entries are stitched back in during resyncs, and a transcript banner offers loading the full history on demand.
 - Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.
 - The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.
 - Provider limits are best-effort metadata; they are not guaranteed for every provider or model.

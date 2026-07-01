@@ -42,8 +42,16 @@ export async function selectSession(id: string, options?: { markSeen?: boolean }
   await getCurrentOpenCodeRuntime().selectSession(id, options);
 }
 
+export async function loadFullSessionHistory(sessionId: string) {
+  await getCurrentOpenCodeRuntime().loadFullSessionHistory(sessionId);
+}
+
 export async function createSession(title?: string, initialPermissionMode?: PermissionMode) {
   return getCurrentOpenCodeRuntime().createSession(title, initialPermissionMode);
+}
+
+export async function forkSession(id: string, messageID?: string) {
+  return getCurrentOpenCodeRuntime().forkSession(id, messageID);
 }
 
 export async function deleteSession(id: string) {

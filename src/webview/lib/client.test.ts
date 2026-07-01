@@ -52,6 +52,8 @@ describe('client', () => {
     await client.session.list();
     await client.session.get('session-1');
     await client.session.update('session-1', { title: 'Renamed' });
+    await client.session.fork('session-1');
+    await client.session.fork('session-1', 'message-1');
     await client.session.delete('session-1');
     await client.session.abort('session-1');
     await client.session.init('session-1', {
@@ -63,6 +65,7 @@ describe('client', () => {
     await client.session.diff('session-1', 'message-1');
     await client.session.status();
     await client.session.messages('session-1');
+    await client.session.messages('session-1', { limit: 200 });
     await client.session.todos('session-1');
     await client.session.sendAsync('session-1', {
       parts: [{ type: 'text', text: 'Hello' }],
@@ -108,6 +111,8 @@ describe('client', () => {
       ['GET', '/session'],
       ['GET', '/session/session-1'],
       ['PATCH', '/session/session-1', { title: 'Renamed' }],
+      ['POST', '/session/session-1/fork', undefined],
+      ['POST', '/session/session-1/fork', { messageID: 'message-1' }],
       ['DELETE', '/session/session-1'],
       ['POST', '/session/session-1/abort'],
       [
@@ -119,6 +124,7 @@ describe('client', () => {
       ['GET', '/session/session-1/diff?messageID=message-1'],
       ['GET', '/session/status'],
       ['GET', '/session/session-1/message'],
+      ['GET', '/session/session-1/message?limit=200'],
       ['GET', '/session/session-1/todo'],
       [
         'POST',

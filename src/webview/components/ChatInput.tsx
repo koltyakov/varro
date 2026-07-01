@@ -65,6 +65,7 @@ import {
   continueInterruptedSession,
   compactSession,
   editMessage,
+  forkSession,
   initSession,
   redoSession,
   undoSession,
@@ -266,6 +267,12 @@ type CompletionSelection =
 
 const SKILLS_COMMAND_NAME = 'skills';
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
+
+function forkActiveSession() {
+  const sessionId = state.activeSessionId;
+  if (!sessionId) return Promise.resolve();
+  return forkSession(sessionId).then(() => undefined);
+}
 
 const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
   'permission',
@@ -1235,6 +1242,9 @@ export function ChatInput() {
       }
       if ((name === 'compact' || name === 'summarize') && !args) {
         return compactSession();
+      }
+      if (name === 'fork' && !args) {
+        return forkActiveSession();
       }
       if ((name === 'abort' || name === 'stop') && !args) {
         return abortSession();
@@ -2969,6 +2979,7 @@ export function getSlashCommands(props: {
     'files',
     'settings',
     'export',
+    'fork',
     'thinking',
     'reasoning',
     'compact',
@@ -3056,6 +3067,14 @@ export function getSlashCommands(props: {
       description: 'Compact conversation context',
       action: () => {
         compactSession();
+      },
+    },
+    {
+      name: 'fork',
+      aliases: [],
+      description: 'Fork the current session',
+      action: () => {
+        void forkActiveSession();
       },
     },
   ];

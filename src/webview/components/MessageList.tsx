@@ -36,7 +36,8 @@ import { isAssistantMessage, sumAssistantTokens } from '../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
 import { editingMessage } from '../lib/message-edit-state';
-import { recheckSessionStatus } from '../hooks/useOpenCode';
+import { isSessionHistoryTruncated } from '../lib/message-window';
+import { loadFullSessionHistory, recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
@@ -93,6 +94,10 @@ export {
   getStickyUserMessagePreview,
   shouldShowStickyUserMessagePreview,
 } from './message-list/sticky-preview';
+
+function showTruncatedHistoryBanner() {
+  return !editingMessage() && isSessionHistoryTruncated(state.activeSessionId);
+}
 
 function isPlanningAssistantMessage(info: AssistantMessage): boolean {
   return info.agent === 'plan';
@@ -1815,6 +1820,18 @@ export function MessageList() {
 
   const stickyPreviewTitle = 'Click to scroll to message';
 
+  const [loadingFullHistory, setLoadingFullHistory] = createSignal(false);
+  async function handleLoadFullHistory() {
+    const sessionId = state.activeSessionId;
+    if (!sessionId || loadingFullHistory()) return;
+    setLoadingFullHistory(true);
+    try {
+      await loadFullSessionHistory(sessionId);
+    } finally {
+      setLoadingFullHistory(false);
+    }
+  }
+
   return (
     <div class="interactive-list-shell min-h-0 flex-1">
       <div
@@ -1869,6 +1886,21 @@ export function MessageList() {
               </Show>
             }
           >
+            <Show when={showTruncatedHistoryBanner()}>
+              <div class="message-history-banner" role="status">
+                <span class="message-history-banner-text">
+                  Showing the most recent messages only.
+                </span>
+                <button
+                  type="button"
+                  class="message-history-banner-btn"
+                  disabled={loadingFullHistory()}
+                  onClick={() => void handleLoadFullHistory()}
+                >
+                  {loadingFullHistory() ? 'Loading…' : 'Load full history'}
+                </button>
+              </div>
+            </Show>
             <VirtualizedContent
               messages={messages()}
               modelChangeMap={modelChangeMap()}

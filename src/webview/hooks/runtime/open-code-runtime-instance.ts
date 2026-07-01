@@ -20,6 +20,13 @@ import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state
 import { applyWebviewTheme } from '../../lib/theme';
 import type { Message, Part, Permission, Session } from '../../types';
 import { getSessionTreeIds, getSessionTreeRootId, isSessionAwaitingInput } from '../../lib/state';
+import {
+  MESSAGE_HISTORY_WINDOW,
+  hasFullMessageHistory,
+  markSessionHistoryTruncated,
+  mergeWindowedHistory,
+  requestFullMessageHistory,
+} from '../../lib/message-window';
 import { startNewChatDraft } from '../../lib/new-chat-draft';
 import {
   createConnectionBootstrapOperations,
@@ -78,7 +85,9 @@ export interface OpenCodeRuntime {
   continueInterruptedSession(sessionId: string): Promise<void>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: { markSeen?: boolean }): Promise<void>;
+  loadFullSessionHistory(sessionId: string): Promise<void>;
   createSession(title?: string, initialPermissionMode?: PermissionMode): Promise<string | null>;
+  forkSession(id: string, messageID?: string): Promise<string | null>;
   deleteSession(id: string): Promise<void>;
   deleteSessionImmediately(id: string): Promise<void>;
   restoreSession(rootID: string): Promise<void>;
@@ -144,13 +153,29 @@ function isNotFoundError(err: unknown) {
   return err instanceof Error && /^404\b/.test(err.message);
 }
 
+async function fetchSessionMessages(sessionId: string): Promise<SessionEntry[]> {
+  if (hasFullMessageHistory(sessionId)) {
+    const entries = await client.session.messages(sessionId);
+    markSessionHistoryTruncated(sessionId, false);
+    return entries;
+  }
+  const incoming = await client.session.messages(sessionId, { limit: MESSAGE_HISTORY_WINDOW });
+  const current = appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId);
+  // Only the first windowed load can tell whether older history exists; later
+  // resyncs return the same tail window even after older entries were merged.
+  if (current.length === 0) {
+    markSessionHistoryTruncated(sessionId, incoming.length >= MESSAGE_HISTORY_WINDOW);
+  }
+  return mergeWindowedHistory(current, incoming);
+}
+
 async function loadSessionWithMessages(sessionId: string): Promise<{
   session: Session;
   messages: SessionEntry[];
 }> {
   const session = await client.session.get(sessionId);
   try {
-    return { session, messages: await client.session.messages(sessionId) };
+    return { session, messages: await fetchSessionMessages(sessionId) };
   } catch (err) {
     if (isNotFoundError(err)) return { session, messages: [] };
     throw err;
@@ -159,7 +184,7 @@ async function loadSessionWithMessages(sessionId: string): Promise<{
 
 async function loadSessionMessagesAllowingEmpty(sessionId: string): Promise<SessionEntry[]> {
   try {
-    return await client.session.messages(sessionId);
+    return await fetchSessionMessages(sessionId);
   } catch (err) {
     if (isNotFoundError(err)) return [];
     throw err;
@@ -854,6 +879,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const sessionManagementOperations = new SessionManagementOperations({
     getActiveSessionId: () => appStore.state.activeSessionId,
     createRemoteSession: (body) => client.session.create(body),
+    forkRemoteSession: (sessionId, messageID) => client.session.fork(sessionId, messageID),
+    getPermissionModeForSession: permissionsStore.getPermissionModeForSession,
     buildCreatePermission: (mode) => getSessionPermissionRulesForMode(mode, 'create'),
     upsertSession,
     resetToolCallExpansionState,
@@ -916,6 +943,24 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     initialPermissionMode = permissionsStore.getPermissionModeForSession(null)
   ): Promise<string | null> {
     const sessionId = await sessionManagementOperations.createSession(title, initialPermissionMode);
+    if (sessionId) sessionStore.persistLastOpenedView({ type: 'session', sessionId });
+    return sessionId;
+  }
+
+  async function loadFullSessionHistory(sessionId: string) {
+    requestFullMessageHistory(sessionId);
+    try {
+      const entries = await loadSessionMessagesAllowingEmpty(sessionId);
+      if (appStore.state.activeSessionId === sessionId) {
+        sessionStore.setMessagesIncremental(entries);
+      }
+    } catch (err) {
+      logError('loadFullSessionHistory', err);
+    }
+  }
+
+  async function forkSession(id: string, messageID?: string): Promise<string | null> {
+    const sessionId = await sessionManagementOperations.forkSession(id, messageID);
     if (sessionId) sessionStore.persistLastOpenedView({ type: 'session', sessionId });
     return sessionId;
   }
@@ -1055,7 +1100,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     continueInterruptedSession,
     applySessionMcps,
     selectSession,
+    loadFullSessionHistory,
     createSession,
+    forkSession,
     deleteSession,
     deleteSessionImmediately,
     restoreSession,

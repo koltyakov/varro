@@ -234,6 +234,7 @@ interface ApiRoute {
 
 const SESSION_ACTIONS = new Set([
   'abort',
+  'fork',
   'prompt_async',
   'revert',
   'summarize',
@@ -348,7 +349,7 @@ const API_ROUTES: ApiRoute[] = [
   ),
   route('/experimental/workspace/warp', methodsNoQuery('POST')),
   route('/session/:id/diff', ({ method, url }) => method === 'GET' && onlyQuery(url, 'messageID')),
-  route('/session/:id/message', methodsNoQuery('GET')),
+  route('/session/:id/message', ({ method, url }) => method === 'GET' && onlyQuery(url, 'limit')),
   route('/session/:id/todo', methodsNoQuery('GET')),
   route(
     '/session/:id/:action',

@@ -299,6 +299,69 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 5, data: true });
   });
 
+  it('treats trash session deletes as done when the session is gone from the server', async () => {
+    // Legacy-format session IDs make the server DELETE fail with a non-404;
+    // the delete must still succeed when the session no longer exists.
+    const removed = { sessions: [{ id: 'legacy-1' }] };
+    const deletePermanently = vi.fn(
+      async (
+        _rootID: string,
+        deleteSession: (session: { id: string; directory?: string }) => Promise<unknown>
+      ) => {
+        await deleteSession({ id: 'legacy-1', directory: '/repo' });
+        return removed;
+      }
+    );
+    const serverRequest = vi.fn((method: string) => {
+      if (method === 'DELETE') return Promise.reject(new Error('500 Unexpected server error'));
+      return Promise.resolve([{ id: 'other-session' }]);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        deletePermanently,
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(6, 'DELETE', '/varro/session-trash/legacy-1/delete'));
+    expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['legacy-1']);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 6, data: true });
+  });
+
+  it('propagates trash session delete failures when the session still exists', async () => {
+    const deletePermanently = vi.fn(
+      async (
+        _rootID: string,
+        deleteSession: (session: { id: string; directory?: string }) => Promise<unknown>
+      ) => {
+        await deleteSession({ id: 'busy-1', directory: '/repo' });
+        return { sessions: [{ id: 'busy-1' }] };
+      }
+    );
+    const serverRequest = vi.fn((method: string) => {
+      if (method === 'DELETE') return Promise.reject(new Error('500 Unexpected server error'));
+      return Promise.resolve([{ id: 'busy-1' }]);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: serverRequest,
+      } as never,
+      sessionTrash: {
+        ...createCallbacks().sessionTrash,
+        deletePermanently,
+      } as never,
+    });
+    await proxy.handleRequest(makePayload(7, 'DELETE', '/varro/session-trash/busy-1/delete'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 7,
+      error: '500 Unexpected server error',
+    });
+  });
+
   it('routes workspace file read request', async () => {
     const fileContent = 'file content here';
     const { proxy, callbacks } = createProxy({

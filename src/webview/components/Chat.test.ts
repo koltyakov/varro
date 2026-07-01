@@ -1050,6 +1050,7 @@ describe('header status badges', () => {
     expect(desktopHeader?.querySelector('.chat-header-btn[title="New chat"]')).toBeInstanceOf(
       HTMLButtonElement
     );
+    expect(desktopHeader?.querySelector('.chat-header-btn[title="Fork session"]')).toBeNull();
   });
 
   it('shows the active session subagent button beside the title and opens its sub-agent list', async () => {

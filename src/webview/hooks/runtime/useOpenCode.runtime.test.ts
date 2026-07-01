@@ -12,7 +12,9 @@ function createRuntimeMock(label: string) {
       continueInterruptedSession: vi.fn().mockResolvedValue(undefined),
       applySessionMcps: vi.fn().mockResolvedValue(undefined),
       selectSession: vi.fn().mockResolvedValue(undefined),
+      loadFullSessionHistory: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue(`${label}-session`),
+      forkSession: vi.fn().mockResolvedValue(`${label}-fork`),
       deleteSession: vi.fn().mockResolvedValue(undefined),
       deleteSessionImmediately: vi.fn().mockResolvedValue(undefined),
       restoreSession: vi.fn().mockResolvedValue(undefined),
@@ -116,6 +118,17 @@ describe('useOpenCode.runtime', () => {
         mock: installed.runtime.createSession,
         args: ['Plan session', 'full'],
         result: 'installed-session',
+      },
+      {
+        invoke: () => module.loadFullSessionHistory('session-1'),
+        mock: installed.runtime.loadFullSessionHistory,
+        args: ['session-1'],
+      },
+      {
+        invoke: () => module.forkSession('session-1', 'message-1'),
+        mock: installed.runtime.forkSession,
+        args: ['session-1', 'message-1'],
+        result: 'installed-fork',
       },
       {
         invoke: () => module.deleteSession('session-1'),

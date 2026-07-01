@@ -38,6 +38,7 @@ import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-li
 const {
   abortSessionMock,
   continueInterruptedSessionMock,
+  forkSessionMock,
   redoSessionMock,
   undoSessionMock,
   runSlashCommandByNameMock,
@@ -47,6 +48,7 @@ const {
 } = vi.hoisted(() => ({
   abortSessionMock: vi.fn(async () => {}),
   continueInterruptedSessionMock: vi.fn(async () => {}),
+  forkSessionMock: vi.fn(async () => 'forked-session'),
   redoSessionMock: vi.fn(async () => {}),
   undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
@@ -73,6 +75,7 @@ vi.mock('../hooks/useOpenCode', async () => {
     ...actual,
     abortSession: abortSessionMock,
     continueInterruptedSession: continueInterruptedSessionMock,
+    forkSession: forkSessionMock,
     redoSession: redoSessionMock,
     undoSession: undoSessionMock,
     runSlashCommandByName: runSlashCommandByNameMock,
@@ -156,6 +159,8 @@ afterEach(() => {
   runSlashCommandByNameMock.mockResolvedValue(true);
   abortSessionMock.mockReset();
   continueInterruptedSessionMock.mockReset();
+  forkSessionMock.mockReset();
+  forkSessionMock.mockResolvedValue('forked-session');
   redoSessionMock.mockReset();
   undoSessionMock.mockReset();
   vi.mocked(client.varro.resolveWorkspacePath).mockClear();
@@ -1242,6 +1247,22 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(undoSessionMock).toHaveBeenCalledTimes(1);
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('runs the built-in fork slash command on Enter', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('/fork');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(forkSessionMock).toHaveBeenCalledWith('session-1');
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
@@ -2343,6 +2364,7 @@ describe('getSlashCommands', () => {
       'compact',
       'connect',
       'export',
+      'fork',
       'init',
       'mcp',
       'models',
