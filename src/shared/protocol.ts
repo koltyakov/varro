@@ -195,7 +195,6 @@ export const SERVER_EVENT_NAMES = [
   'command.executed',
   'lsp.client.diagnostics',
   'lsp.updated',
-  'ide.installed',
   'vcs.branch.updated',
   'mcp.tools.changed',
   'mcp.browser.open.failed',
@@ -217,8 +216,6 @@ export const SERVER_EVENT_NAMES = [
   'session.next.moved',
   'session.next.prompted',
   'session.next.prompt.admitted',
-  'session.next.prompt.promoted',
-  'session.next.interrupt.requested',
   'session.next.context.updated',
   'session.next.synthetic',
   'session.next.shell.started',
@@ -295,9 +292,9 @@ function parseServerEventRecord(record: Record<string, unknown> | null): ServerE
   const properties = asRecord(
     isServerEventName(record.type) ? (record.properties ?? record.data) : record.data
   );
-  // `seq` rides along on synchronized v2 events; absent on ephemeral deltas.
-  const seq =
-    typeof record.seq === 'number' && Number.isFinite(record.seq) ? record.seq : undefined;
+  // Current `/api/event` payloads put the durable cursor under `durable.seq`;
+  // transitional/legacy sync wrappers may still expose it at the top level.
+  const seq = getServerEventSeq(record);
   const base = seq === undefined ? { type: eventType } : { type: eventType, seq };
   return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
 }
@@ -309,10 +306,15 @@ function parseSyncEventRecord(record: Record<string, unknown> | null): ServerEve
   if (!eventType) return null;
 
   const properties = asRecord(record.data);
-  const seq =
-    typeof record.seq === 'number' && Number.isFinite(record.seq) ? record.seq : undefined;
+  const seq = getServerEventSeq(record);
   const base = seq === undefined ? { type: eventType } : { type: eventType, seq };
   return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
+}
+
+function getServerEventSeq(record: Record<string, unknown>): number | undefined {
+  if (typeof record.seq === 'number' && Number.isFinite(record.seq)) return record.seq;
+  const durable = asRecord(record.durable);
+  return typeof durable?.seq === 'number' && Number.isFinite(durable.seq) ? durable.seq : undefined;
 }
 
 function getSyncServerEventName(type: unknown, name: unknown): ServerEventName | null {

@@ -303,11 +303,13 @@ export type SessionStatus =
   | { type: 'busy' };
 
 export type FileDiff = {
-  file: string;
-  before: string;
-  after: string;
+  file?: string;
+  before?: string;
+  after?: string;
+  patch?: string;
   additions: number;
   deletions: number;
+  status?: 'added' | 'deleted' | 'modified';
 };
 
 export type RepoFileStatus = {
@@ -416,17 +418,20 @@ export type Agent = {
   name: string;
   description?: string;
   mode: 'subagent' | 'primary' | 'all';
-  builtIn: boolean;
+  builtIn?: boolean;
+  native?: boolean;
   hidden?: boolean;
   color?: string;
-  permission: {
-    edit: 'ask' | 'allow' | 'deny';
-    bash: { [key: string]: 'ask' | 'allow' | 'deny' };
-    webfetch?: 'ask' | 'allow' | 'deny';
-  };
+  permission: AgentLegacyPermission | PermissionRule[];
   model?: { modelID: string; providerID: string; variant?: string };
-  tools: { [key: string]: boolean };
+  variant?: string;
+  prompt?: string;
+  tools?: { [key: string]: boolean };
+  options?: { [key: string]: unknown };
+  steps?: number;
   maxSteps?: number;
+  topP?: number;
+  temperature?: number;
 };
 
 export type Provider = {
@@ -610,6 +615,16 @@ export type ProjectUpdatedProperties = {
   sandboxes?: string[];
 };
 
+export type AgentPermissionAction = 'ask' | 'allow' | 'deny';
+
+export type AgentLegacyPermission = {
+  edit?: AgentPermissionAction;
+  bash?: { [key: string]: AgentPermissionAction };
+  webfetch?: AgentPermissionAction;
+  doom_loop?: AgentPermissionAction;
+  external_directory?: AgentPermissionAction;
+};
+
 export type ToolOutputContent =
   | { type: 'text'; text: string }
   | { type: 'file'; uri: string; mime: string; name?: string };
@@ -720,7 +735,6 @@ export type ServerEventPropertiesByName = {
   'command.executed': Record<string, unknown>;
   'lsp.client.diagnostics': Record<string, unknown>;
   'lsp.updated': Record<string, unknown>;
-  'ide.installed': Record<string, unknown>;
   'vcs.branch.updated': { branch?: string };
   'mcp.tools.changed': Record<string, unknown>;
   'mcp.browser.open.failed': Record<string, unknown>;
@@ -769,17 +783,6 @@ export type ServerEventPropertiesByName = {
     prompt?: Record<string, unknown>;
     delivery?: 'steer' | 'queue';
   };
-  'session.next.prompt.promoted': {
-    timestamp?: number;
-    sessionID: string;
-    messageID?: string;
-    prompt?: Record<string, unknown>;
-    timeCreated?: number;
-  };
-  'session.next.interrupt.requested': {
-    timestamp?: number;
-    sessionID: string;
-  };
   'session.next.context.updated': {
     timestamp?: number;
     sessionID: string;
@@ -821,6 +824,7 @@ export type ServerEventPropertiesByName = {
     cost?: number;
     tokens?: Record<string, unknown>;
     snapshot?: string;
+    files?: string[];
   };
   'session.next.step.failed': {
     timestamp?: number;
@@ -854,6 +858,7 @@ export type ServerEventPropertiesByName = {
     sessionID: string;
     assistantMessageID?: string;
     reasoningID?: string;
+    providerMetadata?: Record<string, unknown>;
   };
   'session.next.reasoning.delta': {
     timestamp?: number;
@@ -869,6 +874,7 @@ export type ServerEventPropertiesByName = {
     assistantMessageID?: string;
     reasoningID?: string;
     text?: string;
+    providerMetadata?: Record<string, unknown>;
   };
   'session.next.tool.input.started': {
     timestamp?: number;
@@ -919,6 +925,8 @@ export type ServerEventPropertiesByName = {
     output?: string;
     structured?: Record<string, unknown>;
     content?: ToolOutputContent[];
+    outputPaths?: string[];
+    result?: unknown;
     provider?: SessionNextProviderResult;
   };
   'session.next.tool.failed': {
@@ -927,6 +935,7 @@ export type ServerEventPropertiesByName = {
     assistantMessageID?: string;
     callID?: string;
     error?: string | SessionNextUnknownError;
+    result?: unknown;
     provider?: SessionNextProviderResult;
   };
   'session.next.retried': {

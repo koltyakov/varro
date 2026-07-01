@@ -249,6 +249,31 @@ describe('protocol conformance', () => {
     });
   });
 
+  it('preserves durable seq from current OpenCode event payloads', () => {
+    expect(
+      parseServerEvent({
+        id: 'evt_1',
+        type: 'session.next.text.ended',
+        durable: { aggregateID: 'session-1', seq: 8, version: 1 },
+        data: {
+          sessionID: 'session-1',
+          assistantMessageID: 'message-1',
+          textID: 'text-1',
+          text: 'done',
+        },
+      })
+    ).toEqual({
+      type: 'session.next.text.ended',
+      seq: 8,
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'message-1',
+        textID: 'text-1',
+        text: 'done',
+      },
+    });
+  });
+
   it('parses direct v2 lifecycle events', () => {
     expect(
       parseServerEvent({

@@ -87,7 +87,7 @@ export const client = {
     },
     async init(
       id: string,
-      body: { messageID?: string; providerID: string; modelID: string }
+      body: { messageID: string; providerID: string; modelID: string }
     ): Promise<boolean> {
       return apiCall('POST', `/session/${id}/init`, body);
     },

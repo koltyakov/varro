@@ -20,9 +20,10 @@ describe('validateFileDiffs', () => {
     expect(validateFileDiffs(input)).toBe(input);
   });
 
-  it('filters out entries with missing file', () => {
-    const result = validateFileDiffs([validDiff, { additions: 1, deletions: 0 }]);
-    expect(result).toEqual([validDiff]);
+  it('accepts entries with missing file', () => {
+    const diff = { additions: 1, deletions: 0 };
+    const result = validateFileDiffs([validDiff, diff]);
+    expect(result).toEqual([validDiff, diff]);
   });
 
   it('filters out entries with non-string file', () => {
@@ -59,7 +60,7 @@ describe('validateFileDiffs', () => {
         missingFile: { additions: 1, deletions: 0 },
         invalidFile: { file: 42, additions: 1, deletions: 0 },
       })
-    ).toEqual([validDiff]);
+    ).toEqual([validDiff, { additions: 1, deletions: 0 }]);
   });
 
   it('returns empty array for unsupported input', () => {

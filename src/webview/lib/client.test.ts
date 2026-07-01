@@ -59,10 +59,6 @@ describe('client', () => {
       providerID: 'openai',
       modelID: 'gpt-4.1',
     });
-    await client.session.init('session-2', {
-      providerID: 'openai',
-      modelID: 'gpt-4.1',
-    });
     await client.session.diff('session-1');
     await client.session.diff('session-1', 'message-1');
     await client.session.status();
@@ -119,7 +115,6 @@ describe('client', () => {
         '/session/session-1/init',
         { messageID: 'message-1', providerID: 'openai', modelID: 'gpt-4.1' },
       ],
-      ['POST', '/session/session-2/init', { providerID: 'openai', modelID: 'gpt-4.1' }],
       ['GET', '/session/session-1/diff'],
       ['GET', '/session/session-1/diff?messageID=message-1'],
       ['GET', '/session/status'],

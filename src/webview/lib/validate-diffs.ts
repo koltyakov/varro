@@ -4,7 +4,10 @@ function isFileDiff(value: unknown): value is FileDiff {
   if (!isRecord(value)) return false;
   const record = value;
   return (
-    typeof record.file === 'string' &&
+    (record.file === undefined || typeof record.file === 'string') &&
+    (record.before === undefined || typeof record.before === 'string') &&
+    (record.after === undefined || typeof record.after === 'string') &&
+    (record.patch === undefined || typeof record.patch === 'string') &&
     typeof record.additions === 'number' &&
     typeof record.deletions === 'number'
   );

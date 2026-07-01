@@ -146,11 +146,8 @@ export class OpenCodeTransport {
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
-    const scoped = scopeOpenCodeRequest(
-      this.options.getUrl(),
-      EVENT_STREAM_PATH,
-      this.options.getWorkspaceCwd()
-    );
+    const eventStreamUrl = new URL(EVENT_STREAM_PATH, this.options.getUrl()).toString();
+    const eventStreamDirectory = this.options.getWorkspaceCwd();
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
     const isCurrentStream = () => this.isCurrentEventStream(controller, generation);
@@ -183,11 +180,11 @@ export class OpenCodeTransport {
     }, OpenCodeTransport.EVENT_CONNECT_TIMEOUT_MS);
 
     try {
-      const res = await fetch(scoped.url, {
+      const res = await fetch(eventStreamUrl, {
         signal: controller.signal,
         headers: {
           Accept: 'text/event-stream',
-          ...getOpenCodeDirectoryHeaders(scoped.directory),
+          ...getOpenCodeDirectoryHeaders(eventStreamDirectory),
         },
       });
       clearConnectTimer();

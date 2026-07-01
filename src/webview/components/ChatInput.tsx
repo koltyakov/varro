@@ -3248,16 +3248,35 @@ export function getCompletionSelection(
 function getAgentBadgeLine(agent: Agent) {
   const badges: string[] = [];
   badges.push(agent.mode === 'subagent' ? 'Subagent' : 'Primary');
-  if (agent.permission.edit === 'allow') badges.push('Can edit');
-  else if (agent.permission.edit === 'ask') badges.push('Edits ask');
+  const editMode = getAgentPermissionMode(agent, 'edit', 'deny');
+  if (editMode === 'allow') badges.push('Can edit');
+  else if (editMode === 'ask') badges.push('Edits ask');
   else badges.push('No edits');
 
-  const bashMode = agent.permission.bash['*'] || 'allow';
+  const bashMode = getAgentPermissionMode(agent, 'bash', 'allow');
   if (bashMode === 'deny') badges.push('No bash');
   else if (bashMode === 'ask') badges.push('Bash asks');
   else badges.push('Bash allowed');
 
   return badges.join(' · ');
+}
+
+function getAgentPermissionMode(
+  agent: Agent,
+  permission: string,
+  fallback: 'ask' | 'allow' | 'deny'
+) {
+  if (Array.isArray(agent.permission)) {
+    return (
+      agent.permission.find((rule) => rule.permission === permission && rule.pattern === '*')
+        ?.action ??
+      agent.permission.find((rule) => rule.permission === permission)?.action ??
+      fallback
+    );
+  }
+  if (permission === 'edit') return agent.permission.edit ?? fallback;
+  if (permission === 'bash') return agent.permission.bash?.['*'] ?? fallback;
+  return fallback;
 }
 
 export function getMentionCompletionItems({

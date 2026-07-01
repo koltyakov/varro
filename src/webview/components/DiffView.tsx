@@ -11,12 +11,20 @@ export function DiffView(props: { diffs: FileDiff[] }) {
 }
 
 function DiffItem(props: { diff: FileDiff }) {
+  const file = () => props.diff.file;
   const openFile = () => {
-    postMessage({ type: 'vscode/open', payload: { path: props.diff.file, kind: 'file' } });
+    const path = file();
+    if (!path) return;
+    postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
   };
 
   return (
-    <button type="button" class="diff-view-item diff-view-item-button" onClick={openFile}>
+    <button
+      type="button"
+      class="diff-view-item diff-view-item-button"
+      onClick={openFile}
+      disabled={!file()}
+    >
       <svg
         class="diff-view-icon"
         width="14"
@@ -31,7 +39,7 @@ function DiffItem(props: { diff: FileDiff }) {
         <path d="M9 1H4.5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V4.5L9 1z" />
         <path d="M9 1v4h3.5" />
       </svg>
-      <span class="diff-view-filename">{props.diff.file}</span>
+      <span class="diff-view-filename">{file() || 'Unknown file'}</span>
       <span class="diff-view-stats">
         <span class="diff-lines-added">+{props.diff.additions}</span>{' '}
         <span class="diff-lines-removed">-{props.diff.deletions}</span>

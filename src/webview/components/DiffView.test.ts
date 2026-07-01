@@ -58,4 +58,25 @@ describe('DiffView', () => {
       payload: { path: 'src/webview/components/Chat.tsx', kind: 'file' },
     });
   });
+
+  it('renders unknown-file diffs without opening a file', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+
+    cleanup = render(
+      () =>
+        DiffView({
+          diffs: [{ additions: 1, deletions: 0 }],
+        }),
+      container!
+    );
+
+    const button = container?.querySelector('button.diff-view-item-button') as HTMLButtonElement;
+    expect(button.textContent).toContain('Unknown file');
+    expect(button.disabled).toBe(true);
+
+    button.click();
+
+    expect(send).not.toHaveBeenCalled();
+  });
 });

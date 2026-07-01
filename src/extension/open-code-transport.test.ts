@@ -115,6 +115,26 @@ describe('OpenCodeTransport event stream path', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/api/event');
   });
 
+  it('scopes the v2 /api/event stream with headers only', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => '/repo',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => true,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    await transport.startEventStream();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/api/event');
+    expect(scopeOpenCodeRequest).not.toHaveBeenCalled();
+    expect(getOpenCodeDirectoryHeaders).toHaveBeenCalledWith('/repo');
+  });
+
   it('tracks direct v2 permission events from properties payloads', () => {
     const transport = createTransport() as unknown as {
       observeServerEvent(event: unknown): void;
