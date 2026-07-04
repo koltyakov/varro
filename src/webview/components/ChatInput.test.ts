@@ -128,6 +128,7 @@ afterEach(() => {
   setState('selectedModel', null);
   setState('modelVariantSelections', {});
   setState('providerLimits', {});
+  setState('mcpStatus', {});
   setState('sessionStatus', reconcile({}));
   setState('sessionUsageLimits', {});
   setState('clipboardImages', []);
@@ -313,6 +314,23 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.rich-composer')?.getAttribute('data-placeholder')).toBe(
       'Describe what to build'
     );
+  });
+
+  it('shows the connected MCP count only when one or more MCPs are connected', () => {
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
+
+    setState('mcpStatus', {
+      alpha: { status: 'connected' },
+      beta: { status: 'disabled' },
+      gamma: { status: 'connected' },
+      delta: { status: 'failed' },
+    });
+
+    const mcpCount = container?.querySelector('.toolbar-mcp-count');
+    expect(mcpCount?.textContent).toContain('MCPs:');
+    expect(mcpCount?.textContent).toContain('2');
   });
 
   it('hides provider-limit UI when polling is disabled', () => {

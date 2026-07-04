@@ -118,6 +118,10 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
   showLeftPopupState: boolean;
 };
 
+type ChatInputMetaToolbarProps = ToolbarSharedProps & {
+  connectedMcpCount: number;
+};
+
 export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
   return (
     <div
@@ -203,10 +207,13 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
   );
 }
 
-export function ChatInputMetaToolbar(props: ToolbarSharedProps) {
+export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
   const hasContextControl = () => props.showContextControl && !!props.contextUsage;
   const showMetaRow = () =>
-    props.showPermissionControl || hasContextControl() || props.providerLimitBadges.length > 0;
+    props.showPermissionControl ||
+    props.connectedMcpCount > 0 ||
+    hasContextControl() ||
+    props.providerLimitBadges.length > 0;
 
   return (
     <Show when={showMetaRow()}>
@@ -228,6 +235,17 @@ export function ChatInputMetaToolbar(props: ToolbarSharedProps) {
         </div>
 
         <div class="toolbar-meta-right">
+          <Show when={props.connectedMcpCount > 0}>
+            <div
+              class="toolbar-mcp-count"
+              title={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
+              aria-label={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
+            >
+              <span class="toolbar-mcp-count-label">MCPs:</span>
+              <span class="toolbar-mcp-count-value">{props.connectedMcpCount}</span>
+            </div>
+          </Show>
+
           <Show when={props.providerLimitBadges.length > 0}>
             <div class="provider-limit-anchor" style={{ position: 'relative' }}>
               <ProviderLimitChip

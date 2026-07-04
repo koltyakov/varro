@@ -1730,6 +1730,9 @@ export function ChatInput() {
   const currentProviderLimitBadges = createMemo(() =>
     showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentCompactProviderLimit()) : []
   );
+  const connectedMcpCount = createMemo(
+    () => Object.values(state.mcpStatus).filter((status) => status.status === 'connected').length
+  );
   createEffect(() => {
     if (!showCurrentProviderLimit() && showProviderLimitPopup()) {
       setShowProviderLimitPopup(false);
@@ -2368,6 +2371,7 @@ export function ChatInput() {
         <ChatInputMetaToolbar
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
+          connectedMcpCount={connectedMcpCount()}
           showPermissionControl={!editingMessage()}
           permissionButtonRef={(el) => {
             permissionPickerRef = el;

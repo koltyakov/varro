@@ -973,6 +973,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
   font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -981,7 +982,7 @@ kbd {
 }
 
 .file-edit-duration {
-  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .file-edit-running-label {
