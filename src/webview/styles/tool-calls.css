@@ -786,7 +786,12 @@ kbd {
 }
 
 .file-change-card {
-  overflow: hidden;
+  position: relative;
+  overflow: visible;
+}
+
+.file-change-card:has(.file-edit-more-menu) {
+  z-index: 3;
 }
 
 .file-change-card-header,
@@ -835,6 +840,16 @@ kbd {
   line-height: 1.2;
 }
 
+.file-edit-summary-label {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-vscode-fg);
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .file-edit-path-link {
   display: inline-flex;
   align-items: center;
@@ -871,19 +886,87 @@ kbd {
 .file-edit-multi-list {
   display: inline-flex;
   align-items: center;
+  flex: 1 1 auto;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .file-edit-multi-list .file-edit-path-link {
-  max-width: 160px;
+  flex: 1 1 auto;
+  max-width: none;
 }
 
 .file-edit-more-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--color-vscode-fg-muted);
+  cursor: pointer;
   flex-shrink: 0;
+  font-family: inherit;
   font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.file-edit-more-count:hover,
+.file-edit-more-count[aria-expanded='true'] {
+  color: var(--color-vscode-fg);
+}
+
+.file-edit-more-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.file-edit-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 190px;
+  max-width: min(320px, calc(100vw - 32px));
+  max-height: 220px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-radius: var(--chat-radius-popover);
+  background: var(--color-vscode-surface-raised);
+  box-shadow: var(--chat-shadow-popover);
+}
+
+.file-edit-more-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--color-vscode-fg) !important;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.file-edit-more-menu-item:hover {
+  background: var(--color-vscode-hover);
+  text-decoration: none;
+}
+
+.file-edit-more-menu-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-edit-diff-stats {

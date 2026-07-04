@@ -1,4 +1,12 @@
-import { Show, For, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js';
+import {
+  Show,
+  For,
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+  onCleanup,
+} from 'solid-js';
 import type {
   QuestionRequest,
   Session,
@@ -486,6 +494,9 @@ function ReadToolCard(props: {
 }
 
 function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChange[] }) {
+  let moreButtonRef: HTMLButtonElement | undefined;
+  let moreMenuRef: HTMLDivElement | undefined;
+  const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
   const isRunning = () => s().status === 'running';
@@ -495,6 +506,36 @@ function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChan
   const change = () => changes()[0]!;
   const isMultiFile = () => changes().length > 1;
   const effectiveKind = () => (isMultiFile() ? 'edited' : change().kind);
+  const visibleMultiFileCount = () => (changes().length > 2 ? 1 : changes().length);
+  const visibleMultiFileChanges = () => changes().slice(0, visibleMultiFileCount());
+  const hiddenMultiFileChanges = () => changes().slice(visibleMultiFileCount());
+  const hiddenMultiFileCount = () => hiddenMultiFileChanges().length;
+
+  createEffect(() => {
+    if (hiddenMultiFileCount() === 0) setMoreMenuOpen(false);
+  });
+
+  createEffect(() => {
+    if (!moreMenuOpen()) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && (moreButtonRef?.contains(target) || moreMenuRef?.contains(target))) return;
+      setMoreMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMoreMenuOpen(false);
+      moreButtonRef?.focus();
+    };
+
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    onCleanup(() => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    });
+  });
 
   const action = () => {
     switch (effectiveKind()) {
@@ -560,7 +601,7 @@ function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChan
         <span class="file-edit-action-label">{action()}</span>
         <Show
           when={!isMultiFile()}
-          fallback={<span class="file-edit-path-link">{changes().length} files</span>}
+          fallback={<span class="file-edit-summary-label">{changes().length} files</span>}
         >
           <Show
             when={effectiveKind() !== 'moved'}
@@ -595,19 +636,67 @@ function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChan
         </Show>
         <Show when={isMultiFile()}>
           <span class="file-edit-multi-list">
-            <For each={changes().slice(0, 3)}>
-              {(item) => (
-                <a
-                  href="#"
-                  class="file-path-link file-edit-path-link"
-                  onClick={openFileChangePath(item.toPath || item.path)}
-                >
-                  {formatFileChangeDisplayName(item.toPath || item.path)}
-                </a>
-              )}
+            <For each={visibleMultiFileChanges()}>
+              {(item) => {
+                const displayName = () => formatFileChangeDisplayName(item.toPath || item.path);
+                return (
+                  <a
+                    href="#"
+                    class="file-path-link file-edit-path-link"
+                    title={displayName()}
+                    onClick={openFileChangePath(item.toPath || item.path)}
+                  >
+                    {displayName()}
+                  </a>
+                );
+              }}
             </For>
-            <Show when={changes().length > 3}>
-              <span class="file-edit-more-count">+{changes().length - 3} more</span>
+            <Show when={hiddenMultiFileCount() > 0}>
+              <span class="file-edit-more-wrap">
+                <button
+                  ref={(el) => (moreButtonRef = el)}
+                  type="button"
+                  class="file-edit-more-count"
+                  aria-haspopup="menu"
+                  aria-expanded={moreMenuOpen()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setMoreMenuOpen((open) => !open);
+                  }}
+                >
+                  +{hiddenMultiFileCount()} more
+                </button>
+                <Show when={moreMenuOpen()}>
+                  <div
+                    ref={(el) => (moreMenuRef = el)}
+                    class="file-edit-more-menu"
+                    role="menu"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <For each={hiddenMultiFileChanges()}>
+                      {(item) => {
+                        const path = () => item.toPath || item.path;
+                        const displayName = () => formatFileChangeDisplayName(path());
+                        return (
+                          <a
+                            href="#"
+                            class="file-edit-more-menu-item"
+                            role="menuitem"
+                            title={displayName()}
+                            onClick={(event) => {
+                              setMoreMenuOpen(false);
+                              openFileChangePath(path())(event);
+                            }}
+                          >
+                            <span class="file-edit-more-menu-path">{displayName()}</span>
+                          </a>
+                        );
+                      }}
+                    </For>
+                  </div>
+                </Show>
+              </span>
             </Show>
           </span>
         </Show>

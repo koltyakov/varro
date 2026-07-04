@@ -1264,8 +1264,9 @@ describe('FileChangeCard', () => {
       ) || []
     );
 
-    expect(container?.querySelector('.file-edit-path-link')?.textContent).toBe('2 files');
+    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
     expect(links.map((link) => link.textContent)).toEqual(['src/new.ts', 'src/app.ts']);
+    expect(container?.querySelector('.file-edit-more-count')).toBeNull();
     expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('+5');
     expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-1');
 
@@ -1275,5 +1276,71 @@ describe('FileChangeCard', () => {
       type: 'vscode/open',
       payload: { path: 'src/app.ts', kind: 'file' },
     });
+  });
+
+  it('limits crowded multi-file rows to a fixed summary, first path, and more count', () => {
+    const sendSpy = setExtensionSender();
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'apply_patch',
+      state: {
+        status: 'completed',
+        input: {},
+        output: '',
+        title: 'apply_patch',
+        metadata: {
+          files: [
+            { type: 'update', relativePath: 'src/one.ts', additions: 1, deletions: 0 },
+            { type: 'update', relativePath: 'src/two.ts', additions: 1, deletions: 0 },
+            { type: 'update', relativePath: 'src/three.ts', additions: 1, deletions: 0 },
+            { type: 'update', relativePath: 'src/four.ts', additions: 1, deletions: 0 },
+          ],
+        },
+        time: { start: 0, end: 1500 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const links = Array.from(
+      container?.querySelectorAll<HTMLAnchorElement>(
+        '.file-edit-multi-list .file-edit-path-link'
+      ) || []
+    );
+
+    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('4 files');
+    expect(links.map((link) => link.textContent)).toEqual(['src/one.ts']);
+    expect(links[0]?.getAttribute('title')).toBe('src/one.ts');
+    expect(container?.querySelector('.file-edit-more-menu')).toBeNull();
+
+    const moreButton = container?.querySelector<HTMLButtonElement>('.file-edit-more-count');
+    expect(moreButton?.textContent).toBe('+3 more');
+    expect(moreButton?.getAttribute('aria-expanded')).toBe('false');
+
+    moreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(moreButton?.getAttribute('aria-expanded')).toBe('true');
+    const hiddenLinks = Array.from(
+      container?.querySelectorAll<HTMLAnchorElement>('.file-edit-more-menu-item') || []
+    );
+
+    expect(hiddenLinks.map((link) => link.textContent)).toEqual([
+      'src/two.ts',
+      'src/three.ts',
+      'src/four.ts',
+    ]);
+    expect(hiddenLinks[1]?.getAttribute('title')).toBe('src/three.ts');
+
+    hiddenLinks[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: 'src/three.ts', kind: 'file' },
+    });
+    expect(container?.querySelector('.file-edit-more-menu')).toBeNull();
   });
 });
