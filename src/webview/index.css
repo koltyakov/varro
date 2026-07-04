@@ -126,16 +126,58 @@
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
   --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 88%, transparent);
   --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 76%, transparent);
-  --color-code-comment: #6a9955;
-  --color-code-keyword: #c586c0;
-  --color-code-string: #ce9178;
-  --color-code-title: #dcdcaa;
-  --color-code-number: #b5cea8;
-  --color-code-literal: #569cd6;
-  --color-code-built_in: #4ec9b0;
-  --color-code-attr: #9cdcfe;
-  --color-code-variable: #9cdcfe;
-  --color-code-operator: #d4d4d4;
+  /* Syntax tokens derive from the theme's terminal ANSI palette so code
+     blocks follow the active color theme (Solarized, Monokai, …) instead of
+     always looking like Dark+. Terminal colors are more saturated than
+     editor token colors, so each is softened toward the foreground. The hex
+     fallbacks are the Dark+ token colors, used where terminal variables are
+     unavailable (e.g. the standalone preview). */
+  --color-code-comment: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiGreen, #6a9955) 45%,
+    var(--color-vscode-muted)
+  );
+  --color-code-keyword: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiMagenta, #c586c0) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-string: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiRed, #ce9178) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-title: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiYellow, #dcdcaa) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-number: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiGreen, #b5cea8) 55%,
+    var(--color-vscode-fg)
+  );
+  --color-code-literal: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBlue, #569cd6) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-built_in: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiCyan, #4ec9b0) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-attr: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBrightBlue, #9cdcfe) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-variable: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBrightBlue, #9cdcfe) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-operator: var(--color-vscode-fg);
   --font-mono: var(
     --vscode-editor-font-family,
     'SF Mono',
@@ -291,15 +333,53 @@ body.vscode-high-contrast-light {
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 80%, transparent);
   --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 90%, transparent);
   --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 80%, transparent);
-  --color-code-comment: #008000;
-  --color-code-keyword: #af00db;
-  --color-code-string: #a31515;
-  --color-code-title: #795e26;
-  --color-code-number: #098658;
-  --color-code-literal: #0000ff;
-  --color-code-built_in: #267f99;
-  --color-code-attr: #001080;
-  --color-code-variable: #001080;
+  /* Same ANSI-derived tokens; only the fallback hexes change to the Light+
+     palette for hosts without terminal variables. */
+  --color-code-comment: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiGreen, #008000) 45%,
+    var(--color-vscode-muted)
+  );
+  --color-code-keyword: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiMagenta, #af00db) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-string: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiRed, #a31515) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-title: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiYellow, #795e26) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-number: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiGreen, #098658) 55%,
+    var(--color-vscode-fg)
+  );
+  --color-code-literal: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBlue, #0000ff) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-built_in: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiCyan, #267f99) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-attr: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBlue, #001080) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-variable: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBlue, #001080) 60%,
+    var(--color-vscode-fg)
+  );
   --color-code-operator: var(--color-vscode-fg);
 }
 
@@ -334,12 +414,18 @@ body.vscode-high-contrast-light
     .chat-tool-invocation-part .tool-invocation-output,
     .chat-tool-invocation-part .terminal-command-card
   ) {
-  background: #fff;
+  /* The editor background is the theme's "paper" color; hardcoding white
+     clashes on tinted light themes (Solarized Light, Quiet Light). */
+  background: var(--color-vscode-bg);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent) transparent;
+  scrollbar-color: var(
+      --vscode-scrollbarSlider-background,
+      color-mix(in srgb, var(--color-vscode-fg) 10%, transparent)
+    )
+    transparent;
 }
 
 /* Narrow scrollbars for inline widgets */
@@ -354,7 +440,11 @@ body.vscode-high-contrast-light
 .tool-invocation-output:hover,
 .toolbar-popover:hover,
 .tool-invocation-params:hover {
-  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent) transparent;
+  scrollbar-color: var(
+      --vscode-scrollbarSlider-hoverBackground,
+      color-mix(in srgb, var(--color-vscode-fg) 12%, transparent)
+    )
+    transparent;
 }
 
 input,
@@ -387,7 +477,12 @@ input:focus-visible {
   outline-offset: -1px;
 }
 ::selection {
-  background: color-mix(in srgb, var(--color-vscode-accent) 30%, transparent);
+  /* Match the editor's own selection color; the focus-border mix is only a
+     fallback for hosts that don't provide it. */
+  background: var(
+    --vscode-editor-selectionBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 30%, transparent)
+  );
 }
 
 .interactive-session {
@@ -421,11 +516,6 @@ input:focus-visible {
   .interactive-session.chat-view-entering .chat-main-shell {
     animation: none;
   }
-}
-
-body.vscode-light .interactive-session,
-body.vscode-high-contrast-light .interactive-session {
-  --chat-input-top-gradient-bg: #fff;
 }
 
 .chat-main-column {
@@ -624,7 +714,7 @@ body.vscode-high-contrast-light .interactive-session {
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent) transparent;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: var(--vscode-font-size, 13px);
   line-height: 1.35;
 }
 
@@ -1515,7 +1605,9 @@ body.vscode-light
 
 .rendered-markdown {
   line-height: 1.65;
-  font-size: 13.5px;
+  /* Track the user's editor font-size setting (accessibility); the +0.5px
+     keeps the prose slightly larger than UI chrome, as before. */
+  font-size: calc(var(--vscode-font-size, 13px) + 0.5px);
   font-family: var(--font-sans);
   color: var(--color-vscode-fg);
 }
@@ -1817,7 +1909,7 @@ body.vscode-light
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent) transparent;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
   line-height: 1.65;
   tab-size: 2;
   background: var(--color-vscode-result-editor-bg) !important;
@@ -2430,7 +2522,7 @@ body.vscode-dark .interactive-session .chat-input-container {
   resize: none;
   background: transparent;
   padding: 2px 6px;
-  font-size: 13.5px;
+  font-size: calc(var(--vscode-font-size, 13px) + 0.5px);
   line-height: 1.6;
   color: var(--color-vscode-input-fg);
   outline: none;
@@ -3865,7 +3957,7 @@ body.vscode-dark .interactive-session .chat-input-container {
   background: transparent;
   padding: 4px 4px;
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: var(--vscode-font-size, 13px);
   line-height: 1.7;
   color: var(--color-vscode-input-fg);
   outline: none;
@@ -7515,6 +7607,18 @@ body.vscode-high-contrast-light .question-custom-input {
 body.vscode-high-contrast,
 body.vscode-high-contrast-light {
   --color-vscode-widget-shadow: transparent;
+  /* High-contrast themes tune their ANSI palette for maximum legibility;
+     softening toward the foreground would undo that, so use them as-is. */
+  --color-code-comment: var(--vscode-terminal-ansiGreen, var(--color-vscode-muted));
+  --color-code-keyword: var(--vscode-terminal-ansiMagenta, var(--color-vscode-fg));
+  --color-code-string: var(--vscode-terminal-ansiRed, var(--color-vscode-fg));
+  --color-code-title: var(--vscode-terminal-ansiYellow, var(--color-vscode-fg));
+  --color-code-number: var(--vscode-terminal-ansiGreen, var(--color-vscode-fg));
+  --color-code-literal: var(--vscode-terminal-ansiBlue, var(--color-vscode-fg));
+  --color-code-built_in: var(--vscode-terminal-ansiCyan, var(--color-vscode-fg));
+  --color-code-attr: var(--vscode-terminal-ansiBrightBlue, var(--color-vscode-fg));
+  --color-code-variable: var(--vscode-terminal-ansiBrightBlue, var(--color-vscode-fg));
+  --color-code-operator: var(--color-vscode-fg);
 }
 
 body.vscode-high-contrast

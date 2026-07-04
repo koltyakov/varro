@@ -334,6 +334,7 @@ export function MessageList() {
   let pendingStickyPreviewViewportHeight = 0;
   let lastScrollbarInset = -1;
   let lastContainerOffsetWidth = -1;
+  let lastContainerFontSize = -1;
   let lastAutoScrolledTrackHeight = 0;
   let lastAutoScrolledBottomScrollTop = 0;
   let lastWheelAt = Number.NEGATIVE_INFINITY;
@@ -1406,6 +1407,7 @@ export function MessageList() {
     if (!containerRef) return;
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
     lastContainerOffsetWidth = containerRef.offsetWidth;
+    lastContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
     updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
     setScrollTop(containerRef.scrollTop);
@@ -1458,8 +1460,17 @@ export function MessageList() {
     const observer = new ResizeObserver(() => {
       if (!containerRef) return;
       const currentContainerOffsetWidth = containerRef.offsetWidth;
-      if (currentContainerOffsetWidth !== lastContainerOffsetWidth) {
+      // Chat text tracks --vscode-font-size, so a live font-size setting
+      // change re-wraps every row without changing the container width.
+      // Cached heights of unmounted virtualized rows would go stale, so it
+      // must invalidate exactly like a width change.
+      const currentContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
+      if (
+        currentContainerOffsetWidth !== lastContainerOffsetWidth ||
+        currentContainerFontSize !== lastContainerFontSize
+      ) {
         lastContainerOffsetWidth = currentContainerOffsetWidth;
+        lastContainerFontSize = currentContainerFontSize;
         if (shouldMeasureRows()) {
           measuredHeights.clear();
           setMeasurementVersion((version) => version + 1);
