@@ -9,11 +9,9 @@ import {
   untrack,
 } from 'solid-js';
 import {
-  getPermissionGroupMembers,
   isSessionAwaitingInput,
   state,
   isLoading,
-  isSkippedPlanSession,
   stopLoading,
   hasActiveQuestion,
   hasActivePermission,
@@ -22,18 +20,16 @@ import {
   loadingLastActivityAt,
   messageListScrollRequestKey,
   requestMessageListScrollToBottom,
-  getChildRunsByParentId,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
   getSessionTreeRootId,
-  getSessionTreeIds,
   messageStructureVersion,
   messageInfoVersion,
   showStickyUserPrompt,
   showModelPicker,
 } from '../lib/state';
-import { isAssistantMessage, sumAssistantTokens } from '../lib/message-metrics';
-import type { AssistantMessage, Message, Part, Permission, QuestionRequest } from '../types';
+import { isAssistantMessage } from '../lib/message-metrics';
+import type { AssistantMessage, Part } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
 import { editingMessage } from '../lib/message-edit-state';
 import { isSessionHistoryTruncated } from '../lib/message-window';
@@ -41,7 +37,6 @@ import { loadFullSessionHistory, recheckSessionStatus } from '../hooks/useOpenCo
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
-import { shouldShowAssistantPartInline } from '../lib/part-utils';
 import {
   buildPermissionRequestLookup,
   buildQuestionRequestLookup,
@@ -79,212 +74,29 @@ import {
   restoreExpansionScrollAnchor as restoreExpansionScrollAnchorFromState,
   type ExpansionScrollAnchor,
 } from './message-list/scrolling';
-import type { AssistantDialogSummaryInfo } from './message-list/MessageRows';
 import { VirtualizedContent } from './message-list/VirtualizedContent';
-
-export {
-  calculateVirtualRange,
-  calculateVirtualRangeFromMetrics,
-  getFirstVisibleMessageIndexFromVirtualMetrics,
-  pruneMeasuredHeights,
-} from './message-list/virtualization';
-
-export {
-  getNextVisibleUserMessageTopMap,
-  getStickyUserMessagePreview,
-  shouldShowStickyUserMessagePreview,
-} from './message-list/sticky-preview';
+import {
+  getLinkedToolCallKeys,
+  getStandalonePermissionPrompts,
+  getStandaloneQuestionPrompts,
+} from './message-list/pending-prompts';
+import {
+  getMessageIdSet,
+  getRenderedMessages,
+  getVisibleThreadMessages,
+  hasVisibleRunningToolPart,
+} from './message-list/thread-visibility';
+import {
+  buildPlanDocumentContent,
+  buildPlanImplementationPrompt,
+  getLatestPlanImplementationMessageId,
+  isPlanningAssistantMessage,
+  shouldShowPlanImplementationAction,
+} from './message-list/plan-actions';
+import { getAssistantDialogSummaryMap } from './message-list/assistant-dialog';
 
 function showTruncatedHistoryBanner() {
   return !editingMessage() && isSessionHistoryTruncated(state.activeSessionId);
-}
-
-function isPlanningAssistantMessage(info: AssistantMessage): boolean {
-  return info.agent === 'plan';
-}
-
-function getLinkedToolCallKey(
-  sessionId: string,
-  messageId: string | null | undefined,
-  callId: string | null | undefined
-) {
-  if (!messageId || !callId) return null;
-
-  return `${sessionId}\u0000${messageId}\u0000${callId}`;
-}
-
-function getLinkedToolCallKeys(messages: Array<{ info: Message; parts: Part[] }>) {
-  const keys = new Set<string>();
-
-  for (const entry of messages) {
-    const messageId = entry.info.id;
-    const sessionId = entry.info.sessionID;
-    for (const part of entry.parts) {
-      if (
-        part.type !== 'tool' ||
-        part.messageID !== messageId ||
-        !shouldShowAssistantPartInline(part)
-      ) {
-        continue;
-      }
-      const key = getLinkedToolCallKey(sessionId, messageId, part.callID);
-      if (key) keys.add(key);
-    }
-  }
-
-  return keys;
-}
-
-function hasLinkedToolCall(
-  linkedToolCalls: ReadonlySet<string>,
-  sessionId: string,
-  messageId: string | null | undefined,
-  callId: string | null | undefined
-) {
-  const key = getLinkedToolCallKey(sessionId, messageId, callId);
-  if (!key) return false;
-
-  return linkedToolCalls.has(key);
-}
-
-export function getStandalonePermissionPrompts(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  permissions: Permission[],
-  activeSessionId: string | null,
-  linkedToolCalls = getLinkedToolCallKeys(messages)
-) {
-  if (!activeSessionId) return [];
-
-  const rootId = getSessionTreeRootId(activeSessionId) || activeSessionId;
-  const sessionIds = new Set(getSessionTreeIds(rootId));
-
-  return permissions.filter(
-    (permission) =>
-      sessionIds.has(permission.sessionID) &&
-      !getPermissionGroupMembers(permission).some((member) =>
-        hasLinkedToolCall(linkedToolCalls, member.sessionID, member.messageID, member.callID)
-      )
-  );
-}
-
-export function getStandaloneQuestionPrompts(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  questions: QuestionRequest[],
-  activeSessionId: string | null,
-  linkedToolCalls = getLinkedToolCallKeys(messages)
-) {
-  if (!activeSessionId) return [];
-
-  const rootId = getSessionTreeRootId(activeSessionId) || activeSessionId;
-  const sessionIds = new Set(getSessionTreeIds(rootId));
-
-  return questions.filter(
-    (question) =>
-      sessionIds.has(question.sessionID) &&
-      !hasLinkedToolCall(
-        linkedToolCalls,
-        question.sessionID,
-        question.tool?.messageID,
-        question.tool?.callID
-      )
-  );
-}
-
-function getRenderedMessages(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  range: { start: number; end: number },
-  shouldVirtualize: boolean
-) {
-  return shouldVirtualize ? messages.slice(range.start, range.end) : messages;
-}
-
-function shouldHideThreadMessage(
-  entry: { info: Message; parts: Part[] },
-  activeSessionId: string | null
-) {
-  if (!activeSessionId) return false;
-
-  const activeTreeIds = new Set(getSessionTreeIds(activeSessionId));
-  if (!activeTreeIds.has(entry.info.sessionID)) return true;
-  if (entry.info.sessionID === activeSessionId) return false;
-
-  const session = state.sessions.find((item) => item.id === entry.info.sessionID);
-  return !!session?.parentID;
-}
-
-export function getVisibleThreadMessages(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  activeSessionId = state.activeSessionId
-) {
-  return messages.filter((entry) => !shouldHideThreadMessage(entry, activeSessionId));
-}
-
-function getMessageIdSet(messages: Array<{ info: Message }>) {
-  return new Set(messages.map((message) => message.info.id));
-}
-
-function hasVisibleRunningToolPart(messages: Array<{ parts: Part[] }>) {
-  return messages.some((entry) =>
-    entry.parts.some(
-      (part) =>
-        part.type === 'tool' &&
-        (part.state.status === 'pending' || part.state.status === 'running') &&
-        shouldShowAssistantPartInline(part)
-    )
-  );
-}
-
-export function buildPlanImplementationPrompt(parts: Part[]) {
-  void parts;
-  return 'Implement the plan from your last response in the current workspace. Make the code changes instead of revising the plan.';
-}
-
-export function buildPlanDocumentContent(parts: Part[]) {
-  return parts
-    .filter(
-      (part): part is Extract<Part, { type: 'text' }> =>
-        part.type === 'text' && !part.synthetic && !part.ignored
-    )
-    .map((part) => part.text.trim())
-    .filter(Boolean)
-    .join('\n\n')
-    .trim();
-}
-
-export function getLatestPlanImplementationMessageId(
-  messages: Array<{ info: Message }>
-): string | null {
-  const lastMessage = messages[messages.length - 1]?.info;
-  if (
-    !lastMessage ||
-    !isAssistantMessage(lastMessage) ||
-    !isPlanningAssistantMessage(lastMessage)
-  ) {
-    return null;
-  }
-
-  return lastMessage.id;
-}
-
-export function shouldShowPlanImplementationAction(args: {
-  hasBuildAgent: boolean;
-  info: Message;
-  latestPlanImplementationMessageId: string | null;
-}) {
-  if (
-    !args.hasBuildAgent ||
-    !isAssistantMessage(args.info) ||
-    !isPlanningAssistantMessage(args.info) ||
-    !!args.info.error
-  ) {
-    return false;
-  }
-  if (args.info.id !== args.latestPlanImplementationMessageId) {
-    return false;
-  }
-
-  const session = state.sessions.find((item) => item.id === args.info.sessionID);
-  return !session || !isSkippedPlanSession(args.info.sessionID, session.time.updated);
 }
 
 const VIRTUALIZE_THRESHOLD = 50;
@@ -1966,174 +1778,6 @@ export function MessageList() {
       </Show>
     </div>
   );
-}
-
-export function getAssistantDialogSummaryMap(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  targetMessageIds?: ReadonlySet<string>,
-  options?: { suppressTrailingSummary?: boolean }
-) {
-  const result = new Map<string, AssistantDialogSummaryInfo>();
-  let childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> | null =
-    null;
-  let currentMessages: AssistantMessage[] = [];
-  let currentPrimaryMessageIds: string[] = [];
-  let currentSubagentHandoffCount = 0;
-  let currentUserRequestCreated: number | null = null;
-
-  const flush = (args?: { trailing?: boolean }) => {
-    if (currentMessages.length === 0) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
-      return;
-    }
-
-    const lastMessage = currentMessages[currentMessages.length - 1];
-    if (!lastMessage?.time.completed) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
-      return;
-    }
-
-    if (args?.trailing && options?.suppressTrailingSummary) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
-      return;
-    }
-
-    if (targetMessageIds && !targetMessageIds.has(lastMessage.id)) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
-      return;
-    }
-
-    const lastEntry = messages.find((entry) => entry.info.id === lastMessage.id);
-    if (lastEntry?.parts.some((part) => part.type === 'tool' && part.state.status === 'running')) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
-      return;
-    }
-
-    childRunsByParentId ||= getChildRunsByParentId(messages);
-
-    const aggregateMessages = collectAssistantDialogMessages(
-      currentMessages,
-      childRunsByParentId,
-      new Set(currentMessages.map((message) => message.sessionID))
-    );
-    const completedMessages = aggregateMessages.filter((message) => !!message.time.completed);
-    const end = Math.max(...completedMessages.map((message) => message.time.completed || 0));
-    const tokens = sumAssistantTokens(aggregateMessages);
-    const childRunCount = countAssistantDialogChildRuns(
-      currentPrimaryMessageIds,
-      childRunsByParentId
-    );
-    const agentCount = Math.max(childRunCount, currentSubagentHandoffCount);
-    result.set(lastMessage.id, {
-      durationMs: Math.max(
-        0,
-        end - (currentUserRequestCreated ?? currentMessages[0]!.time.created)
-      ),
-      inputTokens: tokens.input,
-      outputTokens: tokens.output,
-      agentCount,
-    });
-
-    currentMessages = [];
-    currentPrimaryMessageIds = [];
-    currentSubagentHandoffCount = 0;
-    currentUserRequestCreated = null;
-  };
-
-  for (const entry of messages) {
-    if (!isAssistantMessage(entry.info)) {
-      flush();
-      if (entry.info.role === 'user') {
-        currentUserRequestCreated = entry.info.time.created;
-      }
-      continue;
-    }
-
-    const assistant = entry.info as AssistantMessage;
-    if (assistant.mode === 'subagent') continue;
-
-    currentMessages.push(assistant);
-    currentPrimaryMessageIds.push(assistant.id);
-    for (const part of entry.parts) {
-      if (part.type === 'agent' && part.name.trim()) {
-        currentSubagentHandoffCount++;
-        continue;
-      }
-
-      if (part.type === 'subtask') {
-        currentSubagentHandoffCount++;
-      }
-    }
-  }
-
-  flush({ trailing: true });
-  return result;
-}
-
-function collectAssistantDialogMessages(
-  messages: AssistantMessage[],
-  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>,
-  parentSessionIds: ReadonlySet<string>
-) {
-  const result: AssistantMessage[] = [];
-  const visited = new Set<string>();
-  const pending = [...messages];
-
-  while (pending.length > 0) {
-    const message = pending.shift();
-    if (!message || visited.has(message.id)) continue;
-    visited.add(message.id);
-    result.push(message);
-
-    for (const child of childRunsByParentId.get(message.id) || []) {
-      pending.push(child.info);
-    }
-
-    if (!parentSessionIds.has(message.sessionID)) continue;
-    for (const child of childRunsByParentId.get(message.sessionID) || []) {
-      pending.push(child.info);
-    }
-  }
-
-  return result;
-}
-
-function countAssistantDialogChildRuns(
-  rootMessageIds: string[],
-  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>
-) {
-  let count = 0;
-  const visited = new Set<string>();
-  const pending = [...rootMessageIds];
-
-  while (pending.length > 0) {
-    const messageId = pending.shift();
-    if (!messageId) continue;
-
-    for (const child of childRunsByParentId.get(messageId) || []) {
-      if (visited.has(child.info.id)) continue;
-      visited.add(child.info.id);
-      count++;
-      pending.push(child.info.id);
-    }
-  }
-
-  return count;
 }
 
 function LoadingRow(props: { compacting: boolean; visible: boolean }) {

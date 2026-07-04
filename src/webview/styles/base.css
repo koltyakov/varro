@@ -1,0 +1,427 @@
+@theme {
+  --color-vscode-bg: var(--vscode-editor-background, #1e1e1e);
+  --color-vscode-fg: var(--vscode-editor-foreground, #cccccc);
+  --color-vscode-sidebar: var(--vscode-sideBar-background, #252526);
+  --color-vscode-input-bg: var(--vscode-input-background, #3c3c3c);
+  --color-vscode-input-border: var(--vscode-input-border, #3c3c3c);
+  --color-vscode-input-fg: var(--vscode-input-foreground, #cccccc);
+  --color-vscode-button-bg: var(--vscode-button-background, #0e639c);
+  --color-vscode-button-fg: var(--vscode-button-foreground, #ffffff);
+  --color-vscode-button-hover: var(--vscode-button-hoverBackground, #1177bb);
+  --color-vscode-button-separator: var(--vscode-button-separator, rgba(255, 255, 255, 0.2));
+  --color-vscode-button-secondary-bg: var(--vscode-button-secondaryBackground, #3a3d41);
+  --color-vscode-button-secondary-fg: var(--vscode-button-secondaryForeground, #ffffff);
+  --color-vscode-button-secondary-hover: var(--vscode-button-secondaryHoverBackground, #45494e);
+  --color-vscode-border: var(--vscode-panel-border, #474747);
+  --color-vscode-contrast-border: var(--vscode-contrastBorder, transparent);
+  --color-vscode-contrast-active-border: var(--vscode-contrastActiveBorder, transparent);
+  --color-vscode-link: var(--vscode-textLink-foreground, #3794ff);
+  --color-vscode-link-active: var(--vscode-textLink-activeForeground, #4ca0ff);
+  --color-vscode-muted: var(--vscode-descriptionForeground, #8b8b8b);
+  --color-vscode-accent: var(--vscode-focusBorder, #007fd4);
+  --color-vscode-error: var(--vscode-errorForeground, #f44747);
+  --color-vscode-warning: var(--vscode-editorWarning-foreground, #cca700);
+  --color-vscode-success: var(--vscode-charts-green, #73c991);
+  --color-vscode-card: var(--vscode-editorWidget-background, #252526);
+  --color-vscode-hover: var(--vscode-list-hoverBackground, #2a2d2e);
+  --color-vscode-list-bg: var(
+    --vscode-chat-list-background,
+    var(--vscode-sideBar-background, #252526)
+  );
+  --color-vscode-request-border: var(--vscode-chat-requestBorder, #474747);
+  --color-vscode-request-bubble: var(--vscode-chat-requestBubbleBackground, #2a2d2e);
+  --color-vscode-request-bubble-hover: var(--vscode-chat-requestBubbleHoverBackground, #2f3233);
+  --color-vscode-result-editor-bg: var(
+    --vscode-interactive-result-editor-background-color,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-preformat-fg: var(--vscode-textPreformat-foreground, #d67a00);
+  --color-vscode-preformat-bg: var(--vscode-textPreformat-background, rgba(255, 255, 255, 0.1));
+  --color-vscode-preformat-border: var(--vscode-textPreformat-border, rgba(255, 255, 255, 0.12));
+  --color-vscode-blockquote-bg: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, 0.1));
+  --color-vscode-blockquote-border: var(--vscode-textBlockQuote-border, rgba(0, 122, 204, 0.5));
+  --color-vscode-toolbar-hover: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+  --color-vscode-icon-fg: var(--vscode-icon-foreground, #c5c5c5);
+  --color-vscode-widget-border: var(--vscode-widget-border, #474747);
+  --color-vscode-widget-bg: var(--vscode-editorWidget-background, #252526);
+  --color-vscode-widget-shadow: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.24));
+  --color-vscode-lines-add: var(--vscode-chat-linesAddedForeground, #73c991);
+  --color-vscode-lines-del: var(--vscode-chat-linesRemovedForeground, #c74e39);
+  --color-vscode-thinking-shimmer: var(--vscode-chat-thinkingShimmer, rgba(255, 255, 255, 0.6));
+  --color-vscode-avatar-bg: var(--vscode-chat-avatarBackground, #37373d);
+  --color-vscode-avatar-fg: var(--vscode-chat-avatarForeground, #c5c5c5);
+  --color-vscode-session-fg: var(
+    --vscode-interactive-session-foreground,
+    var(--vscode-editor-foreground, #333333)
+  );
+  --color-vscode-diff-add: var(
+    --vscode-diffEditor-insertedTextBackground,
+    rgba(156, 204, 156, 0.2)
+  );
+  --color-vscode-diff-del: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.2));
+  --color-vscode-surface-soft: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 2.5%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-softer: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 1.5%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-hover: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 8%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-raised: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 5%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-inset: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 2%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-surface-subtle: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 2%,
+    var(--color-vscode-list-bg)
+  );
+  --color-vscode-surface-subtle-alt: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 2%,
+    var(--color-vscode-list-bg)
+  );
+  --color-vscode-chat-scrollbar-thumb: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 3%,
+    var(--color-vscode-list-bg)
+  );
+  --color-vscode-chat-scrollbar-thumb-desktop: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 10%,
+    var(--color-vscode-list-bg)
+  );
+  --color-vscode-input-surface: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 4%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-input-surface-hover: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 9%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-chat-input-toolbar-surface: color-mix(
+    in srgb,
+    var(--color-vscode-input-bg) 84%,
+    black 16%
+  );
+  --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-border) 28%, transparent);
+  --color-vscode-border-default: color-mix(in srgb, var(--color-vscode-border) 50%, transparent);
+  --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 88%, transparent);
+  --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 76%, transparent);
+  /* Syntax tokens derive from the theme's terminal ANSI palette so code
+     blocks follow the active color theme (Solarized, Monokai, …) instead of
+     always looking like Dark+. Terminal colors are more saturated than
+     editor token colors, so each is softened toward the foreground. The hex
+     fallbacks are the Dark+ token colors, used where terminal variables are
+     unavailable (e.g. the standalone preview). */
+  --color-code-comment: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiGreen, #6a9955) 45%,
+    var(--color-vscode-muted)
+  );
+  --color-code-keyword: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiMagenta, #c586c0) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-string: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiRed, #ce9178) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-title: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiYellow, #dcdcaa) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-number: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiGreen, #b5cea8) 55%,
+    var(--color-vscode-fg)
+  );
+  --color-code-literal: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBlue, #569cd6) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-built_in: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiCyan, #4ec9b0) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-attr: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBrightBlue, #9cdcfe) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-variable: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBrightBlue, #9cdcfe) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-operator: var(--color-vscode-fg);
+  --font-mono: var(
+    --vscode-editor-font-family,
+    'SF Mono',
+    'Menlo',
+    'Monaco',
+    'Consolas',
+    monospace
+  );
+  --font-sans: var(
+    --vscode-font-family,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif
+  );
+  --animate-fade-in: fade-in 0.12s ease-out;
+  --animate-pulse-soft: pulse-soft 1.5s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes ellipsis {
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75% {
+    content: '...';
+  }
+  100% {
+    content: '';
+  }
+}
+
+@keyframes chat-thinking-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.4;
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-sidebar);
+  -webkit-font-smoothing: antialiased;
+}
+
+body.chat-read-mode-open,
+body.chat-image-preview-open {
+  overflow: hidden;
+}
+
+body.vscode-light,
+body.vscode-high-contrast-light {
+  --color-vscode-session-fg: var(--color-vscode-fg);
+  --color-vscode-request-bubble: var(
+    --vscode-chat-requestBubbleBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 10%, var(--color-vscode-widget-bg))
+  );
+  --color-vscode-request-bubble-hover: var(
+    --vscode-chat-requestBubbleHoverBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 14%, var(--color-vscode-widget-bg))
+  );
+  --color-vscode-surface-soft: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 4%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-softer: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 3%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-hover: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 10%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-subtle: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 3.25%,
+    var(--color-vscode-list-bg)
+  );
+  --color-vscode-surface-subtle-alt: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 3%,
+    var(--color-vscode-list-bg)
+  );
+  --color-vscode-input-surface: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 5.5%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-input-surface-hover: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 10%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-chat-input-toolbar-surface: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 4.5%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
+  --color-vscode-border-default: color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
+  --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-border) 80%, transparent);
+  --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 90%, transparent);
+  --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 80%, transparent);
+  /* Same ANSI-derived tokens; only the fallback hexes change to the Light+
+     palette for hosts without terminal variables. */
+  --color-code-comment: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiGreen, #008000) 45%,
+    var(--color-vscode-muted)
+  );
+  --color-code-keyword: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiMagenta, #af00db) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-string: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiRed, #a31515) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-title: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiYellow, #795e26) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-number: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiGreen, #098658) 55%,
+    var(--color-vscode-fg)
+  );
+  --color-code-literal: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBlue, #0000ff) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-built_in: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiCyan, #267f99) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-attr: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBlue, #001080) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-variable: color-mix(
+    in srgb,
+    var(--vscode-terminal-ansiBlue, #001080) 60%,
+    var(--color-vscode-fg)
+  );
+  --color-code-operator: var(--color-vscode-fg);
+}
+
+body.vscode-light
+  :is(.assistant-turn-content, .todo-block, .chat-tool-invocation-part, .chat-thinking-box) {
+  background: color-mix(in srgb, var(--color-vscode-fg) 1.25%, var(--color-vscode-sidebar));
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 7%, var(--color-vscode-sidebar));
+}
+
+body.vscode-light .assistant-turn-content.assistant-turn-content-highlighted,
+body.vscode-light .assistant-turn-content.assistant-turn-content-planning {
+  border: none;
+  box-shadow: none;
+}
+
+body.vscode-light .assistant-turn-content {
+  box-shadow: none;
+}
+
+body.vscode-light .chat-compaction-notice,
+body.vscode-high-contrast-light .chat-compaction-notice {
+  background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-sidebar));
+}
+
+body.vscode-light
+  :is(
+    .chat-tool-invocation-part .tool-invocation-output,
+    .chat-tool-invocation-part .terminal-command-card
+  ),
+body.vscode-high-contrast-light
+  :is(
+    .chat-tool-invocation-part .tool-invocation-output,
+    .chat-tool-invocation-part .terminal-command-card
+  ) {
+  /* The editor background is the theme's "paper" color; hardcoding white
+     clashes on tinted light themes (Solarized Light, Quiet Light). */
+  background: var(--color-vscode-bg);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(
+      --vscode-scrollbarSlider-background,
+      color-mix(in srgb, var(--color-vscode-fg) 10%, transparent)
+    )
+    transparent;
+}

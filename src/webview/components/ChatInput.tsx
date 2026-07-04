@@ -32,8 +32,6 @@ import {
   addContextFile,
   clearContextFiles,
   removeContextFile,
-  showThinking,
-  toggleThinking,
   enqueueMessage,
   removeQueuedMessage,
   getPermissionModeForSession,
@@ -55,8 +53,7 @@ import {
   replaceContextFiles,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
-import { startNewChatDraft } from '../lib/new-chat-draft';
-import { client, serverEvents } from '../lib/client';
+import { serverEvents } from '../lib/client';
 import { openProviderSetup } from '../lib/provider-setup';
 import {
   applySessionMcps,
@@ -65,12 +62,10 @@ import {
   continueInterruptedSession,
   compactSession,
   editMessage,
-  forkSession,
   initSession,
   redoSession,
   undoSession,
   reviewSession,
-  runSlashCommandByName,
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
 import {
@@ -95,30 +90,18 @@ import {
   getPrimaryProviderLimitWindow,
 } from '../lib/format';
 import { getPreferredVariant } from '../lib/model-variants';
-import {
-  isAssistantMessage,
-  getContextWindow,
-  getAssistantTotalTokens,
-  type TokenUsage,
-} from '../lib/message-metrics';
+import { getContextWindow } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
 import {
   getClipboardImageAttachmentSequence,
   getContextFileAttachmentSequence,
 } from '../lib/attachment-order';
-import {
-  getLeafPathName,
-  getWorkspaceRelativePath,
-  isAbsolutePath,
-  normalizePath,
-} from '../lib/path-display';
+import { getLeafPathName } from '../lib/path-display';
 import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
-  mergeContextFile,
-  parseSelectionReference,
 } from '../../shared/context-files';
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
 import {
@@ -136,240 +119,59 @@ import { RichComposerArea, type RichComposerChip } from './chat-input/RichCompos
 import { DropOverlay } from './chat-input/DropOverlay';
 import { QueuedMessages } from './chat-input/QueuedMessages';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
-import type {
-  CompletionItem,
-  MentionCompletionItem,
-  SlashCommand,
-} from './chat-input/CompletionMenu';
-import type { Agent, AssistantMessage, Command, Message, Part, TextPart } from '../types';
-import type { DroppedFile, ExtensionMessage, ProviderLimitStatus } from '../../shared/protocol';
+import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
+import {
+  getLatestAssistantMessageInfo,
+  getLatestAssistantMessageInfoWithTokens,
+  getMessageEntriesForSession,
+  getUserMessageHistoryText,
+  sumAssistantTokensFromMessageEntries,
+} from './chat-input/message-usage';
+import {
+  TOOLBAR_COMPACT_MODES,
+  filterCompactProviderLimitForModel,
+  isToolbarControlCompacted,
+  isToolbarControlHidden,
+  type ToolbarCompactMode,
+  type ToolbarControl,
+} from './chat-input/toolbar-compact';
+import {
+  SKILLS_COMMAND_NAME,
+  createMentionCompletionSource,
+  getActiveCompletion,
+  getAgentBadgeLine,
+  getCompletionSelection,
+  getInlineInsertionSuffix,
+  getLeadingSlashCommand,
+  getMentionCompletionItems,
+  getMentionInsertionTrailingSpace,
+  shouldPadInlineInsertion,
+  shouldRequestMentionFileSearch,
+} from './chat-input/completion';
+import { forkActiveSession, getSlashCommands } from './chat-input/slash-commands';
+import {
+  collectDroppedPaths,
+  parseDroppedText,
+  readFileAsBase64,
+  readFileAsDataUrl,
+  readItemByType,
+} from './chat-input/drop-paths';
+import {
+  addPastedMentionContextFiles,
+  getPastedContextFiles,
+  getPromptTextWithoutContextReferences,
+} from './chat-input/pasted-context';
+import {
+  acceptQueuedSteer,
+  failedSteerQueuedMessageIds,
+  getPromptEventText,
+  sendQueuedAsSteer,
+  steeringQueuedMessageIds,
+} from './chat-input/queued-steer';
 
-type ToolbarControl =
-  | 'permission'
-  | 'attachments'
-  | 'send'
-  | 'reasoning'
-  | 'agent'
-  | 'stop'
-  | 'context';
-type ToolbarCompactMode =
-  | 'full'
-  | 'compact-provider-limit'
-  | 'compact-stop'
-  | 'compact-agent'
-  | 'compact-reasoning'
-  | 'truncate-model'
-  | 'hide-permission'
-  | 'hide-attachments'
-  | 'hide-send'
-  | 'hide-reasoning'
-  | 'hide-agent'
-  | 'hide-stop'
-  | 'hide-context'
-  | 'tight';
-
-type MentionCompletionMeta = {
-  showFileSearchHint: boolean;
-};
-
-type AgentMentionCompletionItem = Extract<MentionCompletionItem, { type: 'agent' }>;
-type FileMentionCompletionItem = Extract<MentionCompletionItem, { type: 'file' }>;
-
-type MentionAgentEntry = {
-  item: AgentMentionCompletionItem;
-  normalizedName: string;
-  normalizedDescription: string;
-};
-
-type MentionFileEntry = {
-  item: FileMentionCompletionItem;
-  normalizedPath: string;
-};
-
-type MentionCompletionSource = {
-  agentEntries: MentionAgentEntry[];
-  fileEntries: MentionFileEntry[];
-  exactAgentNames: ReadonlySet<string>;
-  exactFilePaths: ReadonlySet<string>;
-};
-
-type MessageInfoEntry = { info: Message };
-
-type AssistantMessageLookupOptions = {
-  includeSubagents?: boolean;
-};
-
-export function getMessageEntriesForSession(
-  messages: readonly MessageInfoEntry[],
-  sessionId: string | null
-): MessageInfoEntry[] {
-  if (!sessionId) return [];
-  return messages.filter((entry) => entry.info.sessionID === sessionId);
-}
-
-export function getLatestAssistantMessageInfo(
-  messages: readonly MessageInfoEntry[]
-): AssistantMessage | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const info = messages[index]?.info;
-    if (!info || !isAssistantMessage(info)) continue;
-    if (info.mode === 'subagent') continue;
-    return info;
-  }
-  return null;
-}
-
-export function getLatestAssistantMessageInfoWithTokens(
-  messages: readonly MessageInfoEntry[],
-  options?: AssistantMessageLookupOptions
-): AssistantMessage | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const info = messages[index]?.info;
-    if (!info || !isAssistantMessage(info)) continue;
-    if (!options?.includeSubagents && info.mode === 'subagent') continue;
-    if ((info.tokens.input || 0) + (info.tokens.output || 0) > 0) return info;
-  }
-  return null;
-}
-
-export function sumAssistantTokensFromMessageEntries(
-  messages: readonly MessageInfoEntry[]
-): TokenUsage {
-  const result: TokenUsage = {
-    total: 0,
-    input: 0,
-    output: 0,
-    reasoning: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-  };
-
-  for (const entry of messages) {
-    const info = entry.info;
-    if (!isAssistantMessage(info)) continue;
-    result.total += getAssistantTotalTokens(info);
-    result.input += info.tokens.input || 0;
-    result.output += info.tokens.output || 0;
-    result.reasoning += info.tokens.reasoning || 0;
-    result.cacheRead += info.tokens.cache?.read || 0;
-    result.cacheWrite += info.tokens.cache?.write || 0;
-  }
-
-  return result;
-}
-
-type CompletionSelection =
-  | { type: 'set-slash'; value: string }
-  | { type: 'run-slash'; value: string }
-  | { type: 'apply-mention'; value: string; file?: DroppedFile };
-
-const SKILLS_COMMAND_NAME = 'skills';
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
-
-function forkActiveSession() {
-  const sessionId = state.activeSessionId;
-  if (!sessionId) return Promise.resolve();
-  return forkSession(sessionId).then(() => undefined);
-}
-
-const TOOLBAR_HIDE_ORDER: ToolbarControl[] = [
-  'permission',
-  'attachments',
-  'send',
-  'reasoning',
-  'agent',
-  'stop',
-  'context',
-];
-
-const TOOLBAR_COMPACT_MODES: ToolbarCompactMode[] = [
-  'full',
-  'compact-provider-limit',
-  'compact-stop',
-  'compact-agent',
-  'compact-reasoning',
-  'truncate-model',
-  'hide-permission',
-  'hide-attachments',
-  'hide-send',
-  'hide-reasoning',
-  'hide-agent',
-  'hide-stop',
-  'hide-context',
-  'tight',
-];
-
-export function isToolbarControlHidden(mode: ToolbarCompactMode, control: ToolbarControl) {
-  const hiddenControlCount =
-    mode === 'hide-permission'
-      ? 1
-      : mode === 'hide-attachments'
-        ? 2
-        : mode === 'hide-send'
-          ? 3
-          : mode === 'hide-reasoning'
-            ? 4
-            : mode === 'hide-agent'
-              ? 5
-              : mode === 'hide-stop'
-                ? 6
-                : mode === 'hide-context' || mode === 'tight'
-                  ? 7
-                  : 0;
-  const hiddenControlIndex = TOOLBAR_HIDE_ORDER.indexOf(control);
-  return hiddenControlIndex !== -1 && hiddenControlIndex < hiddenControlCount;
-}
-
-export function isToolbarControlCompacted(
-  mode: ToolbarCompactMode,
-  control: 'agent' | 'reasoning' | 'stop'
-) {
-  if (control === 'agent')
-    return !['full', 'compact-provider-limit', 'compact-stop'].includes(mode);
-  if (control === 'reasoning')
-    return !['full', 'compact-provider-limit', 'compact-stop', 'compact-agent'].includes(mode);
-  return [
-    'compact-provider-limit',
-    'compact-stop',
-    'compact-agent',
-    'compact-reasoning',
-    'truncate-model',
-    'hide-permission',
-    'hide-attachments',
-    'hide-send',
-    'hide-reasoning',
-    'hide-agent',
-    'hide-stop',
-    'hide-context',
-    'tight',
-  ].includes(mode);
-}
-
-function filterCompactProviderLimitForModel(
-  limit: ProviderLimitStatus | null | undefined,
-  modelID: string | null | undefined,
-  modelName: string | null | undefined
-): ProviderLimitStatus | null {
-  if (!limit || limit.status !== 'available') return limit ?? null;
-
-  const isSparkModel = isCodexSparkModelLabel(modelID) || isCodexSparkModelLabel(modelName);
-  const windows = limit.windows.filter((window) => {
-    const isSparkWindow = window.id.toLowerCase().includes('spark');
-    return isSparkModel ? isSparkWindow : !isSparkWindow;
-  });
-
-  return {
-    ...limit,
-    windows,
-  };
-}
-
-function isCodexSparkModelLabel(value: string | null | undefined) {
-  const normalized = value?.toLowerCase() ?? '';
-  return normalized.includes('codex') && normalized.includes('spark');
-}
 
 function composerFiles() {
   return state.droppedFiles;
@@ -393,85 +195,6 @@ function composerActiveFile() {
 
 function activeContextEnabled() {
   return getCurrentDocumentEnabled(state.activeSessionId);
-}
-
-const [steeringQueuedMessageIds, setSteeringQueuedMessageIds] = createSignal<ReadonlySet<string>>(
-  new Set()
-);
-const [failedSteerQueuedMessageIds, setFailedSteerQueuedMessageIds] = createSignal<
-  ReadonlySet<string>
->(new Set());
-
-function updateQueuedSteerId(
-  setter: typeof setSteeringQueuedMessageIds,
-  id: string,
-  active: boolean
-) {
-  setter((ids) => {
-    const next = new Set(ids);
-    if (active) {
-      next.add(id);
-    } else {
-      next.delete(id);
-    }
-    return next;
-  });
-}
-
-function getPromptEventText(prompt: unknown) {
-  if (!prompt || typeof prompt !== 'object') return null;
-  const text = (prompt as { text?: unknown }).text;
-  return typeof text === 'string' ? text : null;
-}
-
-function matchesQueuedPromptText(itemText: string, promptText: string | null) {
-  const text = itemText.trim();
-  if (!text) return true;
-  const prompt = promptText?.trim();
-  return !!prompt && (prompt === text || prompt.startsWith(`${text}\n`));
-}
-
-function acceptQueuedSteer(sessionId: string, promptText: string | null) {
-  const steeringIds = steeringQueuedMessageIds();
-  const item = state.queuedMessages.find(
-    (queued) =>
-      queued.sessionId === sessionId &&
-      steeringIds.has(queued.id) &&
-      matchesQueuedPromptText(queued.text, promptText)
-  );
-  if (!item) return;
-  updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, false);
-  updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, false);
-  removeQueuedMessage(item.id);
-}
-
-async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
-  if (steeringQueuedMessageIds().has(item.id)) return;
-  updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, true);
-  updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, false);
-  let sent = false;
-  try {
-    sent =
-      (await sendMessage(item.text, {
-        delivery: 'steer',
-        queuedAttachments: {
-          droppedFiles: item.droppedFiles,
-          clipboardImages: item.clipboardImages,
-          terminalSelection: item.terminalSelection,
-        },
-        preserveComposer: true,
-      })) !== false;
-  } catch {
-    sent = false;
-  } finally {
-    updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, false);
-  }
-  if (sent) {
-    removeQueuedMessage(item.id);
-    return;
-  }
-  if (!state.queuedMessages.some((queued) => queued.id === item.id)) return;
-  updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, true);
 }
 
 function openContextFileInEditor(file: DroppedFile) {
@@ -510,6 +233,33 @@ function clearUsageLimitsForSessionTree(sessionId: string | null | undefined) {
   for (const id of getSessionTreeIdsForSession(sessionId)) {
     setSessionUsageLimit(id, null);
   }
+}
+
+async function sendDroppedContent(droppedFiles: File[]) {
+  if (droppedFiles.length === 0) return;
+  const MAX_BYTES = 25 * 1024 * 1024;
+  const MAX_FILES = 20;
+
+  const payloads: Array<{ name: string; content: string; size: number }> = [];
+  for (const file of droppedFiles.slice(0, MAX_FILES)) {
+    if (file.size > MAX_BYTES) continue;
+    try {
+      const base64 = await readFileAsBase64(file);
+      payloads.push({ name: file.name, content: base64, size: file.size });
+    } catch (err) {
+      postMessage({
+        type: 'log',
+        payload: {
+          msg: 'sendDroppedContent:readFailed',
+          error: err instanceof Error ? err.message : String(err),
+          level: 'warn',
+        },
+      });
+    }
+  }
+
+  if (payloads.length === 0) return;
+  postMessage({ type: 'files/drop-content', payload: { files: payloads } });
 }
 
 export function ChatInput() {
@@ -1620,33 +1370,6 @@ export function ChatInput() {
     // Final fallback: no paths extractable (e.g. Finder drop on Electron 32+,
     // where File.path is stripped). Read the file bytes and ship the content.
     await sendDroppedContent(droppedFiles);
-  }
-
-  async function sendDroppedContent(droppedFiles: File[]) {
-    if (droppedFiles.length === 0) return;
-    const MAX_BYTES = 25 * 1024 * 1024;
-    const MAX_FILES = 20;
-
-    const payloads: Array<{ name: string; content: string; size: number }> = [];
-    for (const file of droppedFiles.slice(0, MAX_FILES)) {
-      if (file.size > MAX_BYTES) continue;
-      try {
-        const base64 = await readFileAsBase64(file);
-        payloads.push({ name: file.name, content: base64, size: file.size });
-      } catch (err) {
-        postMessage({
-          type: 'log',
-          payload: {
-            msg: 'sendDroppedContent:readFailed',
-            error: err instanceof Error ? err.message : String(err),
-            level: 'warn',
-          },
-        });
-      }
-    }
-
-    if (payloads.length === 0) return;
-    postMessage({ type: 'files/drop-content', payload: { files: payloads } });
   }
 
   async function handlePaste(e: ClipboardEvent) {
@@ -2812,358 +2535,6 @@ export function ChatInput() {
   );
 }
 
-function getPastedContextFiles(text: string, workspacePath: string | null): DroppedFile[] {
-  if (!text.trim()) return [];
-
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const files = new Map<string, DroppedFile>();
-
-  for (const line of lines) {
-    const selectionRef = parseSelectionReference(line);
-    if (selectionRef) {
-      const file = createDroppedFileFromReference(selectionRef.path!, workspacePath, false);
-      if (!file) continue;
-      addOrMergePastedContextFile(files, { ...file, lineRanges: selectionRef.lineRanges });
-      continue;
-    }
-
-    const activeFileMatch = line.match(/^\[Active file: (.+?)\]$/);
-    if (activeFileMatch) {
-      const file = createDroppedFileFromReference(activeFileMatch[1]!, workspacePath, false);
-      if (file) addOrMergePastedContextFile(files, file);
-    }
-  }
-
-  return Array.from(files.values());
-}
-
-async function addPastedMentionContextFiles(text: string) {
-  if (!text.trim()) return;
-
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const files = new Map<string, DroppedFile>();
-
-  for (const line of lines) {
-    for (const mention of extractPastedFileMentions(line)) {
-      const file = await resolveDroppedFileReference(mention.path, mention.isDirectory);
-      if (file) addOrMergePastedContextFile(files, file);
-    }
-  }
-
-  for (const file of files.values()) {
-    addContextFile(file);
-  }
-}
-
-function getPromptTextWithoutContextReferences(text: string) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => {
-      if (!line) return false;
-      if (parseSelectionReference(line)) return false;
-      if (/^\[Active file: .+\]$/.test(line)) return false;
-      return (
-        extractPastedFileMentions(line).length === 0 ||
-        line.replace(/(^|[\s(])@([^\s@]+?\/?)(?=$|[\s),.:;!?])/g, '$1').trim().length > 0
-      );
-    })
-    .join('\n')
-    .trim();
-}
-
-function extractPastedFileMentions(line: string): Array<{ path: string; isDirectory: boolean }> {
-  const matches = line.matchAll(/(^|[\s(])@([^\s@)]+?\/?)(?=$|[\s),:;!?])/g);
-  const mentions: Array<{ path: string; isDirectory: boolean }> = [];
-
-  for (const match of matches) {
-    const rawPath = match[2]?.trim();
-    const isDirectory = rawPath?.endsWith('/') ?? false;
-    if (!rawPath || !isLikelyFileMentionPath(rawPath, isDirectory)) continue;
-    mentions.push({
-      path: rawPath.replace(/\/+$/, ''),
-      isDirectory,
-    });
-  }
-
-  return mentions;
-}
-
-function isLikelyFileMentionPath(value: string, isDirectory = false) {
-  const normalized = normalizePath(value.replace(/^\.\//, ''));
-  if (!normalized) return false;
-  if (normalized === '.' || normalized === '..') return false;
-  if (isDirectory) return true;
-  if (normalized.includes('/')) return true;
-  return /\.[A-Za-z0-9_-]{1,16}$/.test(normalized);
-}
-
-async function resolveDroppedFileReference(
-  referencePath: string,
-  isDirectory: boolean
-): Promise<DroppedFile | null> {
-  const normalizedReference = normalizePath(referencePath);
-  if (!normalizedReference) return null;
-
-  const resolved = await client.varro.resolveWorkspacePath(normalizedReference);
-  if (!resolved) return null;
-  if (isDirectory && resolved.type !== 'directory') return null;
-
-  return resolved;
-}
-
-function createDroppedFileFromReference(
-  referencePath: string,
-  workspacePath: string | null,
-  isDirectory: boolean
-): DroppedFile | null {
-  const normalizedReference = normalizePath(referencePath);
-  if (!normalizedReference) return null;
-
-  const relativePath = isAbsolutePath(normalizedReference)
-    ? (getWorkspaceRelativePath(normalizedReference, workspacePath) ?? normalizedReference)
-    : normalizedReference;
-  const absolutePath = isAbsolutePath(normalizedReference)
-    ? normalizedReference
-    : workspacePath
-      ? `${normalizePath(workspacePath).replace(/\/+$/, '')}/${normalizedReference.replace(/^\.\//, '')}`
-      : normalizedReference;
-
-  return {
-    path: absolutePath,
-    relativePath,
-    type: isDirectory ? 'directory' : 'file',
-  };
-}
-
-function addOrMergePastedContextFile(files: Map<string, DroppedFile>, file: DroppedFile) {
-  const current = files.get(file.path);
-  if (!current) {
-    files.set(file.path, file);
-    return;
-  }
-
-  files.set(file.path, mergeContextFile(current, file));
-}
-
-export function getSlashCommands(props: {
-  isBusy: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
-  canInit: boolean;
-  onConnectProvider: () => void;
-  onOpenSessions: () => void;
-  onOpenModels: () => void;
-  onOpenMcps: () => void;
-  onOpenFiles: () => void;
-  onOpenSettings: () => void;
-  onExportSession: () => void;
-  customCommands: Command[];
-}): SlashCommand[] {
-  const reservedBuiltInNames = new Set([
-    'new',
-    'agents',
-    'models',
-    'mcp',
-    'mcps',
-    'connect',
-    'attach',
-    'files',
-    'settings',
-    'export',
-    'fork',
-    'thinking',
-    'reasoning',
-    'compact',
-    'summarize',
-    'init',
-    'undo',
-    'revert',
-    'redo',
-    'review',
-    'abort',
-    'stop',
-    'ralph',
-  ]);
-
-  const commands: SlashCommand[] = [
-    {
-      name: SKILLS_COMMAND_NAME,
-      aliases: [],
-      description: 'Browse available skills',
-      action: () => {},
-    },
-    {
-      name: 'new',
-      aliases: ['clear'],
-      description: 'Start a new chat session',
-      action: () => {
-        startNewChatDraft();
-      },
-    },
-    {
-      name: 'sessions',
-      aliases: ['resume'],
-      description: 'Open the session list',
-      action: () => props.onOpenSessions(),
-    },
-    {
-      name: 'models',
-      aliases: [],
-      description: 'Open the model picker',
-      action: () => props.onOpenModels(),
-    },
-    {
-      name: 'mcp',
-      aliases: ['mcps'],
-      description: 'Open the MCP picker for this session',
-      action: () => props.onOpenMcps(),
-    },
-    {
-      name: 'connect',
-      aliases: [],
-      description: 'Open provider login in the terminal',
-      action: () => props.onConnectProvider(),
-    },
-    {
-      name: 'attach',
-      aliases: ['files'],
-      description: 'Pick files or folders to attach',
-      action: () => props.onOpenFiles(),
-    },
-    {
-      name: 'settings',
-      aliases: [],
-      description: 'Open VS Code settings for Varro',
-      action: () => props.onOpenSettings(),
-    },
-    {
-      name: 'export',
-      aliases: [],
-      description: 'Export the current session',
-      action: () => {
-        props.onExportSession();
-      },
-    },
-    {
-      name: 'thinking',
-      aliases: ['reasoning'],
-      description: showThinking() ? 'Hide thinking blocks' : 'Show thinking blocks',
-      action: () => {
-        toggleThinking();
-      },
-    },
-    {
-      name: 'compact',
-      aliases: ['summarize'],
-      description: 'Compact conversation context',
-      action: () => {
-        compactSession();
-      },
-    },
-    {
-      name: 'fork',
-      aliases: [],
-      description: 'Fork the current session',
-      action: () => {
-        void forkActiveSession();
-      },
-    },
-  ];
-
-  if (props.canInit) {
-    commands.push({
-      name: 'init',
-      aliases: [],
-      description: 'Analyze the project and create AGENTS.md',
-      action: () => {
-        initSession();
-      },
-    });
-  }
-
-  /*
-   * Keep these registrations handy, but do not expose `/undo`, `/revert`, or
-   * `/redo` in slash-command completion for now. Direct submission still works
-   * through the built-in handling in `handleSubmit`.
-   *
-   * if (props.canUndo) {
-   *   commands.push({
-   *     name: 'undo',
-   *     aliases: ['revert'],
-   *     description: 'Undo the last assistant response',
-   *     action: () => {
-   *       undoSession();
-   *     },
-   *   });
-   * }
-   *
-   * if (props.canRedo) {
-   *   commands.push({
-   *     name: 'redo',
-   *     aliases: [],
-   *     description: 'Redo the last undone response',
-   *     action: () => {
-   *       redoSession();
-   *     },
-   *   });
-   * }
-   */
-
-  commands.push({
-    name: 'review',
-    aliases: [],
-    description: 'Review current code changes',
-    action: () => {
-      reviewSession();
-    },
-  });
-
-  commands.push({
-    name: 'ralph',
-    aliases: [],
-    description: 'Start a Ralph loop on a plan document',
-    action: () => {
-      ralphStore.setShowRalphForm(true);
-    },
-  });
-
-  if (props.isBusy) {
-    commands.push({
-      name: 'abort',
-      aliases: ['stop'],
-      description: 'Stop the current run',
-      action: () => {
-        abortSession();
-      },
-    });
-  }
-
-  for (const command of props.customCommands) {
-    if (command.source === 'skill') continue;
-    if (reservedBuiltInNames.has(command.name)) continue;
-    commands.push({
-      name: command.name,
-      aliases: [],
-      description: command.description || command.template,
-      source: command.source,
-      action: (args) => {
-        void runSlashCommandByName(command.name, args);
-      },
-    });
-  }
-
-  return commands.toSorted((a, b) => a.name.localeCompare(b.name));
-}
-
 function describeUsageLimit(
   window: ReturnType<typeof getPrimaryProviderLimitWindow>,
   attempt: number | null
@@ -3180,584 +2551,6 @@ function describeUsageLimit(
     parts.push(`attempt #${attempt}`);
   }
   return parts.join(' · ');
-}
-
-export function getActiveCompletion(text: string, cursor: number) {
-  if (cursor < 0 || cursor > text.length) return null;
-
-  const prefix = text.slice(0, cursor);
-  const slashMatch = prefix.match(/^\/([^\s]*)$/);
-  if (slashMatch) {
-    return {
-      type: 'slash' as const,
-      query: slashMatch[1] || '',
-      start: 0,
-      end: cursor,
-    };
-  }
-
-  const skillMatch = prefix.match(new RegExp(`^/${SKILLS_COMMAND_NAME}(?:\\s+([^\\s]*))?$`, 'i'));
-  if (skillMatch) {
-    return {
-      type: 'slash' as const,
-      query: prefix.slice(1),
-      start: 0,
-      end: cursor,
-    };
-  }
-
-  const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
-  const token = prefix.slice(tokenStart);
-  if (!token.startsWith('@')) return null;
-
-  return {
-    type: 'mention' as const,
-    query: token.slice(1),
-    start: tokenStart,
-    end: cursor,
-  };
-}
-
-export function getLeadingSlashCommand(text: string) {
-  const trimmed = text.trim();
-  const match = trimmed.match(/^\/([^\s]+)(?:\s+(.*))?$/);
-  if (!match) return null;
-
-  return {
-    name: match[1]!.toLowerCase(),
-    args: match[2]?.trim() || '',
-  };
-}
-
-export function getCompletionSelection(
-  completion: ReturnType<typeof getActiveCompletion> | null,
-  item: CompletionItem | undefined,
-  confirm = false
-): CompletionSelection | null {
-  if (!completion || !item) return null;
-
-  if (completion.type === 'slash') {
-    if (!('name' in item)) return null;
-    if (completion.query.toLowerCase().startsWith(`${SKILLS_COMMAND_NAME} `)) {
-      return {
-        type: 'set-slash',
-        value: `/${item.name}`,
-      };
-    }
-    if (item.name === SKILLS_COMMAND_NAME) {
-      return { type: 'set-slash', value: `/${SKILLS_COMMAND_NAME} ` };
-    }
-    return {
-      type: confirm ? 'run-slash' : 'set-slash',
-      value: `/${item.name}`,
-    };
-  }
-
-  if (!('value' in item)) return null;
-
-  const file = item.type === 'file' ? item.file : undefined;
-
-  return {
-    type: 'apply-mention',
-    value: item.value,
-    file,
-  };
-}
-
-function getAgentBadgeLine(agent: Agent) {
-  const badges: string[] = [];
-  badges.push(agent.mode === 'subagent' ? 'Subagent' : 'Primary');
-  const editMode = getAgentPermissionMode(agent, 'edit', 'deny');
-  if (editMode === 'allow') badges.push('Can edit');
-  else if (editMode === 'ask') badges.push('Edits ask');
-  else badges.push('No edits');
-
-  const bashMode = getAgentPermissionMode(agent, 'bash', 'allow');
-  if (bashMode === 'deny') badges.push('No bash');
-  else if (bashMode === 'ask') badges.push('Bash asks');
-  else badges.push('Bash allowed');
-
-  return badges.join(' · ');
-}
-
-function getAgentPermissionMode(
-  agent: Agent,
-  permission: string,
-  fallback: 'ask' | 'allow' | 'deny'
-) {
-  if (Array.isArray(agent.permission)) {
-    return (
-      agent.permission.find((rule) => rule.permission === permission && rule.pattern === '*')
-        ?.action ??
-      agent.permission.find((rule) => rule.permission === permission)?.action ??
-      fallback
-    );
-  }
-  if (permission === 'edit') return agent.permission.edit ?? fallback;
-  if (permission === 'bash') return agent.permission.bash?.['*'] ?? fallback;
-  return fallback;
-}
-
-export function getMentionCompletionItems({
-  rawQuery,
-  agents,
-  files,
-  source,
-  meta,
-}: {
-  rawQuery: string;
-  agents?: Agent[];
-  files?: DroppedFile[];
-  source?: MentionCompletionSource;
-  meta?: MentionCompletionMeta;
-}): MentionCompletionItem[] {
-  const mentionSource =
-    source ?? createMentionCompletionSource({ agents: agents ?? [], files: files ?? [] });
-  const query = rawQuery.toLowerCase();
-  const exactAgentMatch = mentionSource.exactAgentNames.has(query);
-  const exactFileMatch = mentionSource.exactFilePaths.has(normalizeMentionPath(rawQuery));
-  if (query && (exactAgentMatch || exactFileMatch)) return [];
-
-  const agentItems = mentionSource.agentEntries
-    .filter((agent) => {
-      if (!query) return true;
-      return agent.normalizedName.includes(query) || agent.normalizedDescription.includes(query);
-    })
-    .map((agent) => agent.item);
-
-  const fileItems = (rawQuery ? mentionSource.fileEntries : []).map((file) => file.item);
-
-  if (!rawQuery && !meta?.showFileSearchHint) {
-    return agentItems.slice(0, 10);
-  }
-
-  return [...fileItems, ...agentItems].slice(0, 10);
-}
-
-function createMentionCompletionSource({
-  agents,
-  files,
-}: {
-  agents: Agent[];
-  files: DroppedFile[];
-}): MentionCompletionSource {
-  const exactAgentNames = new Set<string>();
-  const exactFilePaths = new Set<string>();
-
-  const agentEntries = agents.map((agent) => {
-    const normalizedName = agent.name.toLowerCase();
-    exactAgentNames.add(normalizedName);
-
-    return {
-      item: {
-        key: `agent:${agent.name}`,
-        type: 'agent',
-        label: `@${agent.name}`,
-        detail: agent.description || getAgentBadgeLine(agent),
-        value: `@${agent.name} `,
-      },
-      normalizedName,
-      normalizedDescription: agent.description?.toLowerCase() || '',
-    } satisfies MentionAgentEntry;
-  });
-
-  const fileEntries = files.map((file) => {
-    const normalizedPath = normalizeMentionPath(file.relativePath);
-    exactFilePaths.add(normalizedPath);
-
-    return {
-      item: {
-        key: `file:${file.path}`,
-        type: 'file',
-        label: `@${file.relativePath}`,
-        detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
-        value:
-          file.type === 'directory'
-            ? `@${formatMentionPath(file.relativePath)}/`
-            : `@${formatMentionPath(file.relativePath)} `,
-        file,
-      },
-      normalizedPath,
-    } satisfies MentionFileEntry;
-  });
-
-  return {
-    agentEntries,
-    fileEntries,
-    exactAgentNames,
-    exactFilePaths,
-  };
-}
-
-export function shouldRequestMentionFileSearch(previousQuery: string, nextQuery: string) {
-  return previousQuery !== nextQuery;
-}
-
-function normalizeMentionPath(value: string) {
-  return value.replace(/^@/, '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-}
-
-function formatMentionPath(value: string) {
-  return value.replace(/^@/, '').replace(/\\/g, '/').replace(/\/+$/, '');
-}
-
-function getUserMessageHistoryText(parts: Part[]) {
-  const text = parts
-    .filter((part): part is TextPart => part.type === 'text')
-    .filter((part) => !part.synthetic && !part.ignored)
-    .map((part) => part.text.trim())
-    .filter(
-      (value) =>
-        value.length > 0 &&
-        !value.startsWith('[Working directory:') &&
-        !value.startsWith('[Selection from') &&
-        !value.startsWith('[Active file:')
-    )
-    .join('\n\n')
-    .trim();
-
-  return text.length > 0 ? text : null;
-}
-
-async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<string[]> {
-  if (!dataTransfer) return [];
-
-  const paths = new Set<string>();
-
-  const knownTypes = [
-    'CodeEditors',
-    'CodeFiles',
-    'text/uri-list',
-    'ResourceURLs',
-    'application/vnd.code.uri-list',
-    'text/plain',
-  ];
-  const allTypes = Array.from(dataTransfer.types || []);
-  for (const t of allTypes) {
-    if (t.startsWith('application/vnd.code.') || !knownTypes.includes(t)) {
-      knownTypes.push(t);
-    }
-  }
-
-  for (const path of collectVSCodeDroppedPaths(dataTransfer)) {
-    paths.add(path);
-  }
-
-  for (const type of knownTypes) {
-    try {
-      const data = dataTransfer.getData(type);
-      for (const path of parseDroppedText(data)) {
-        paths.add(path);
-      }
-    } catch {}
-  }
-
-  for (const file of Array.from(dataTransfer.files)) {
-    const path = (file as File & { path?: string }).path;
-    if (path) paths.add(path);
-  }
-
-  for (const item of Array.from(dataTransfer.items)) {
-    const file = item.getAsFile() as (File & { path?: string }) | null;
-    if (file?.path) paths.add(file.path);
-  }
-
-  if (paths.size === 0) {
-    // Fall back to async string reading from ALL DataTransferItems
-    const stringItems = Array.from(dataTransfer.items).filter((item) => item.kind === 'string');
-
-    const itemText = await Promise.all(stringItems.map(readDroppedItem));
-
-    for (const value of itemText) {
-      for (const path of parseDroppedText(value)) {
-        paths.add(path);
-      }
-    }
-  }
-
-  return Array.from(paths);
-}
-
-function collectVSCodeDroppedPaths(dataTransfer: DataTransfer): string[] {
-  const paths = new Set<string>();
-
-  for (const path of parseCodeEditorsDrop(dataTransfer.getData('CodeEditors'))) {
-    paths.add(path);
-  }
-
-  for (const path of parseCodeFilesDrop(dataTransfer.getData('CodeFiles'))) {
-    paths.add(path);
-  }
-
-  for (const path of parseResourceListDrop(dataTransfer.getData('ResourceURLs'))) {
-    paths.add(path);
-  }
-
-  for (const path of parseUriListDrop(dataTransfer.getData('application/vnd.code.uri-list'))) {
-    paths.add(path);
-  }
-
-  return Array.from(paths);
-}
-
-function parseCodeEditorsDrop(value: string): string[] {
-  if (!value) return [];
-
-  try {
-    const parsed = JSON.parse(value) as unknown[];
-    const paths = new Set<string>();
-    for (const item of parsed) {
-      if (!item) continue;
-      if (typeof item === 'string') {
-        const decoded = decodeDroppedCandidate(item);
-        if (decoded) paths.add(decoded);
-        continue;
-      }
-      if (typeof item !== 'object') continue;
-      const resource = 'resource' in item ? (item.resource as string | undefined) : undefined;
-      const uri = resource ? decodeDroppedCandidate(resource) : null;
-      if (uri) paths.add(uri);
-    }
-    return Array.from(paths);
-  } catch {
-    return [];
-  }
-}
-
-function parseCodeFilesDrop(value: string): string[] {
-  if (!value) return [];
-
-  try {
-    const parsed = JSON.parse(value) as unknown[];
-    const paths = new Set<string>();
-    for (const item of parsed) {
-      if (typeof item !== 'string') continue;
-      const decoded = decodeDroppedCandidate(item);
-      if (decoded) paths.add(decoded);
-    }
-    return Array.from(paths);
-  } catch {
-    return [];
-  }
-}
-
-function parseResourceListDrop(value: string): string[] {
-  if (!value) return [];
-
-  try {
-    const parsed = JSON.parse(value) as unknown[];
-    const paths = new Set<string>();
-    for (const item of parsed) {
-      if (typeof item !== 'string') continue;
-      const decoded = decodeDroppedCandidate(item);
-      if (decoded) paths.add(decoded);
-    }
-    return Array.from(paths);
-  } catch {
-    return parseUriListDrop(value);
-  }
-}
-
-function parseUriListDrop(value: string): string[] {
-  if (!value) return [];
-  const paths = new Set<string>();
-  for (const entry of value.split(/\r?\n/)) {
-    const decoded = decodeDroppedCandidate(entry.trim());
-    if (decoded) paths.add(decoded);
-  }
-  return Array.from(paths);
-}
-
-function readItemByType(dataTransfer: DataTransfer, type: string): Promise<string> {
-  return new Promise((resolve) => {
-    const item = Array.from(dataTransfer.items).find((i) => i.type === type && i.kind === 'string');
-    if (!item) {
-      resolve(dataTransfer.getData(type) || '');
-      return;
-    }
-    item.getAsString((value) => resolve(value || ''));
-  });
-}
-
-function readDroppedItem(item: DataTransferItem): Promise<string> {
-  return new Promise((resolve) => {
-    item.getAsString((value) => resolve(value || ''));
-  });
-}
-
-export function parseDroppedText(value: string): string[] {
-  if (!value) return [];
-  const paths = new Set<string>();
-
-  for (const line of value.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const decoded = decodeDroppedCandidate(trimmed);
-    if (decoded) paths.add(decoded);
-  }
-
-  for (const candidate of extractPathsFromStructuredDrop(value)) {
-    paths.add(candidate);
-  }
-
-  return Array.from(paths);
-}
-
-function decodeDroppedCandidate(value: string): string | null {
-  return decodeDroppedPath(value) || decodeWorkspaceRelativePath(value);
-}
-
-function decodeDroppedPath(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('/')) return trimmed;
-  if (/^[A-Za-z]:[\\/]/.test(trimmed)) return trimmed;
-
-  try {
-    const url = new URL(trimmed);
-    let pathname = decodeURIComponent(url.pathname);
-
-    if (url.protocol === 'vscode-file:') {
-      pathname = pathname.replace(/^\/vscode-app(?=\/|$)/, '');
-    }
-
-    if (
-      url.protocol === 'vscode-resource:' &&
-      url.hostname === 'file' &&
-      pathname.startsWith('///')
-    ) {
-      pathname = pathname.slice(2);
-    }
-
-    if (url.protocol === 'file:' && url.hostname && !/^\/[A-Za-z]:\//.test(pathname)) {
-      pathname = `//${url.hostname}${pathname}`;
-    }
-
-    return normalizeDroppedPath(pathname);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeDroppedPath(pathname: string): string | null {
-  if (!pathname) return null;
-  if (/^\/[A-Za-z]:\//.test(pathname)) return pathname.slice(1);
-  if (/^[A-Za-z]:[\\/]/.test(pathname)) return pathname;
-  return pathname.startsWith('/') || pathname.startsWith('//') ? pathname : null;
-}
-
-function decodeWorkspaceRelativePath(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null;
-  if (trimmed.startsWith('/') || trimmed.startsWith('//')) return null;
-  if (/^[A-Za-z]:[\\/]/.test(trimmed)) return null;
-  if (/\s/.test(trimmed)) return null;
-
-  const normalized = trimmed.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
-  if (!normalized || normalized === '.' || normalized === '..') return null;
-
-  const looksPathLike =
-    trimmed.startsWith('./') ||
-    trimmed.startsWith('../') ||
-    trimmed.includes('/') ||
-    trimmed.includes('\\') ||
-    trimmed.startsWith('.') ||
-    /^[^/\\]+\.[^/\\]+$/.test(trimmed);
-
-  return looksPathLike ? normalized : null;
-}
-
-function extractPathsFromStructuredDrop(value: string): string[] {
-  const trimmed = value.trim();
-  if (!trimmed || !/^[[{"]/.test(trimmed)) return [];
-
-  try {
-    const parsed = JSON.parse(trimmed);
-    const paths = new Set<string>();
-    collectStructuredDropPaths(parsed, paths);
-    return Array.from(paths);
-  } catch {
-    return [];
-  }
-}
-
-function collectStructuredDropPaths(value: unknown, paths: Set<string>, keyHint = '') {
-  if (typeof value === 'string') {
-    const looksPathLike =
-      !keyHint ||
-      /(path|uri|url|resource)/i.test(keyHint) ||
-      value.startsWith('/') ||
-      value.startsWith('./') ||
-      value.startsWith('../') ||
-      /^[A-Za-z]:[\\/]/.test(value) ||
-      value.includes('/') ||
-      value.includes('\\') ||
-      /^[^/\\]+\.[^/\\]+$/.test(value) ||
-      /^[a-z][a-z0-9+.-]*:/i.test(value);
-
-    if (!looksPathLike) return;
-
-    for (const candidate of value.split(/\r?\n/)) {
-      const decoded = decodeDroppedCandidate(candidate);
-      if (decoded) paths.add(decoded);
-    }
-    return;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectStructuredDropPaths(item, paths, keyHint);
-    }
-    return;
-  }
-
-  if (!value || typeof value !== 'object') return;
-
-  for (const [key, entry] of Object.entries(value)) {
-    collectStructuredDropPaths(entry, paths, key);
-  }
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', () => resolve(String(reader.result || '')));
-    reader.addEventListener('error', () =>
-      reject(reader.error || new Error('Failed to read clipboard image'))
-    );
-    reader.readAsDataURL(file);
-  });
-}
-
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      const result = reader.result;
-      if (typeof result !== 'string') {
-        reject(new Error('Unexpected FileReader result'));
-        return;
-      }
-      const comma = result.indexOf(',');
-      resolve(comma >= 0 ? result.slice(comma + 1) : '');
-    });
-    reader.addEventListener('error', () => reject(reader.error || new Error('FileReader failed')));
-    reader.readAsDataURL(file);
-  });
-}
-
-export function shouldPadInlineInsertion(value: string | undefined) {
-  return !!value && !/\s/.test(value);
-}
-
-export function getInlineInsertionSuffix(text: string, selectionEnd: number) {
-  return selectionEnd >= text.length || shouldPadInlineInsertion(text[selectionEnd]) ? ' ' : '';
-}
-
-export function getMentionInsertionTrailingSpace(value: string, after: string | undefined) {
-  if (value.endsWith(' ') || value.endsWith('\n')) return '';
-  return !after || (after !== ' ' && after !== '\n') ? ' ' : '';
 }
 
 function getPastedImageFilename(index: number) {

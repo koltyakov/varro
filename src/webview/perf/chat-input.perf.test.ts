@@ -4,7 +4,7 @@ import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
   sumAssistantTokensFromMessageEntries,
-} from '../components/ChatInput';
+} from '../components/chat-input/message-usage';
 import type { AssistantMessage, Message } from '../types';
 
 function userMessage(id: string): Message {

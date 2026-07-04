@@ -1,0 +1,537 @@
+/* Narrow scrollbars for inline widgets */
+.tool-invocation-output,
+.toolbar-popover,
+.tool-invocation-params {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable;
+}
+
+.tool-invocation-output:hover,
+.toolbar-popover:hover,
+.tool-invocation-params:hover {
+  scrollbar-color: var(
+      --vscode-scrollbarSlider-hoverBackground,
+      color-mix(in srgb, var(--color-vscode-fg) 12%, transparent)
+    )
+    transparent;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  transition:
+    background-color 0.1s,
+    color 0.1s,
+    opacity 0.1s;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: -1px;
+}
+::selection {
+  /* Match the editor's own selection color; the focus-border mix is only a
+     fallback for hosts that don't provide it. */
+  background: var(
+    --vscode-editor-selectionBackground,
+    color-mix(in srgb, var(--color-vscode-accent) 30%, transparent)
+  );
+}
+
+.interactive-session {
+  --chat-horizontal-padding: 14px;
+  --interactive-list-scrollbar-inset: 0px;
+  --chat-content-max-width: 960px;
+  --chat-sidebar-width: 380px;
+  --chat-input-top-gradient-bg: var(--color-vscode-bg);
+  --chat-radius-control: 8px;
+  --chat-radius-card: 15px;
+  --chat-radius-popover: 10px;
+  --chat-focus-ring: 0 0 0 2px color-mix(in srgb, var(--color-vscode-accent) 36%, transparent);
+  --chat-shadow-card: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
+  --chat-shadow-popover: 0 12px 28px
+    color-mix(in srgb, var(--color-vscode-widget-shadow) 92%, transparent);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+.interactive-session.chat-view-entering .chat-header-chat-layout,
+.interactive-session.chat-view-entering .chat-workspace,
+.interactive-session.chat-view-entering .chat-main-shell {
+  animation: fade-in 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .interactive-session.chat-view-entering .chat-header-chat-layout,
+  .interactive-session.chat-view-entering .chat-workspace,
+  .interactive-session.chat-view-entering .chat-main-shell {
+    animation: none;
+  }
+}
+
+.chat-main-column {
+  width: min(100%, var(--chat-content-max-width));
+  margin-inline: auto;
+}
+
+.chat-main-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-header-chat-desktop {
+  display: none;
+}
+
+.chat-main-column-shell {
+  width: min(100%, var(--chat-content-max-width));
+  min-width: 0;
+  min-height: 0;
+  margin-inline: auto;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.chat-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.chat-session-sidebar {
+  display: none;
+  flex-direction: column;
+  width: var(--chat-sidebar-width);
+  min-width: var(--chat-sidebar-width);
+  flex-shrink: 0;
+  border-right: 1px solid color-mix(in srgb, var(--color-vscode-border) 26%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-sidebar) 90%, var(--color-vscode-widget-bg));
+}
+
+.chat-workspace-pane-right .chat-session-sidebar {
+  border-right: none;
+  border-left: 1px solid color-mix(in srgb, var(--color-vscode-border) 26%, transparent);
+}
+
+.chat-session-sidebar-header {
+  padding: 0;
+}
+
+.chat-session-sidebar-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+}
+
+.chat-session-sidebar-title {
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-vscode-muted);
+}
+
+.interactive-list-shell {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.interactive-list {
+  overflow: hidden;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+  padding: 0 0 8px 0;
+  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+}
+
+.interactive-list.showing-model-picker {
+  border-bottom-left-radius: var(--chat-radius-card);
+  border-bottom-right-radius: var(--chat-radius-card);
+}
+
+.interactive-list-track {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 14px
+    max(0px, calc(var(--chat-horizontal-padding) - var(--interactive-list-scrollbar-inset))) 24px
+    var(--chat-horizontal-padding);
+}
+
+.latest-user-message-sticky-wrap {
+  --latest-user-message-sticky-gap: 8px;
+  --latest-user-message-sticky-bottom-solid-gap: var(--latest-user-message-sticky-gap);
+  --latest-user-message-sticky-bottom-gap: calc(var(--latest-user-message-sticky-gap) * 2);
+  position: sticky;
+  overflow-anchor: none;
+  top: 0;
+  z-index: 4;
+  height: 0;
+  pointer-events: none;
+  width: 100%;
+  padding: 0;
+  box-sizing: border-box;
+  isolation: isolate;
+}
+
+.latest-user-message-sticky-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  contain: paint;
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.latest-user-message-sticky-top,
+.latest-user-message-sticky-bottom-solid,
+.latest-user-message-sticky-bottom-fade,
+.latest-user-message-sticky-shell {
+  width: 100%;
+  pointer-events: none;
+}
+
+.latest-user-message-sticky-top {
+  height: var(--latest-user-message-sticky-gap);
+  background: var(--color-vscode-list-bg);
+}
+
+.latest-user-message-sticky-shell {
+  background: var(--color-vscode-list-bg);
+  transform: translateZ(0);
+}
+
+.latest-user-message-sticky-bottom-solid {
+  height: var(--latest-user-message-sticky-bottom-solid-gap);
+  background: var(--color-vscode-list-bg);
+}
+
+.latest-user-message-sticky-bottom-fade {
+  height: var(--latest-user-message-sticky-bottom-gap);
+  background: linear-gradient(to bottom, var(--color-vscode-list-bg), transparent);
+}
+
+.latest-user-message-sticky {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 15px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
+  background: var(--color-vscode-request-bubble);
+  box-shadow: none;
+  color: var(--color-vscode-fg);
+  pointer-events: auto;
+  box-sizing: border-box;
+  opacity: 1;
+  contain: paint;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.latest-user-message-sticky-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-height: calc(1.35em * 4);
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin-right: -14px;
+  padding-right: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent) transparent;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.35;
+}
+
+.latest-user-message-sticky:hover .latest-user-message-sticky-text {
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent) transparent;
+}
+
+.latest-user-message-sticky-text::-webkit-scrollbar {
+  width: 10px;
+}
+
+.latest-user-message-sticky-text::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.latest-user-message-sticky-text::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.latest-user-message-sticky:hover .latest-user-message-sticky-text::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
+}
+
+.latest-user-message-sticky-meta {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.latest-user-message-sticky-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--color-vscode-fg) 65%, transparent);
+}
+
+.latest-user-message-sticky-meta-item svg {
+  flex: 0 0 auto;
+}
+
+/* Overlay control anchored to the list shell, never inside the scroll track:
+   it must not contribute height to any measured row or shift the prefix-sum
+   virtualization math. */
+.jump-to-latest-button {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 55%, transparent);
+  background: var(--color-vscode-widget-bg);
+  color: var(--color-vscode-fg);
+  box-shadow: var(--chat-shadow-card);
+  cursor: pointer;
+  animation: jump-to-latest-in 120ms ease-out;
+}
+
+.jump-to-latest-button:hover {
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 80%, var(--color-vscode-fg) 8%);
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 60%, transparent);
+}
+
+.jump-to-latest-button:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 1px;
+}
+
+@keyframes jump-to-latest-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.interactive-list-bottom-fade-wrap {
+  --interactive-list-bottom-fade-gap: 16px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  height: var(--interactive-list-bottom-fade-gap);
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.interactive-list-bottom-fade-overlay {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+  contain: paint;
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.interactive-list-bottom-fade-gradient {
+  width: 100%;
+  pointer-events: none;
+}
+
+.interactive-list-bottom-fade-gradient {
+  height: var(--interactive-list-bottom-fade-gap);
+  background: linear-gradient(to top, var(--color-vscode-list-bg), transparent);
+}
+
+.interactive-item-container {
+  /* Unified vertical rhythm: every row contributes 6px top + 6px bottom so
+     any two adjacent rows produce the same 12px gap as
+     `.assistant-turn-content-plain .assistant-message-flow { gap: 12px }`
+     used between parts inside a turn. */
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--color-vscode-fg);
+  cursor: default;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.interactive-list-track.virtualized .interactive-item-container {
+  contain: layout style paint;
+  flex: 0 0 auto;
+}
+
+.interactive-list-track.virtualized .virtual-spacer {
+  flex: 0 0 auto;
+  min-height: 0;
+  pointer-events: none;
+  overflow-anchor: none;
+}
+
+/* An empty message row (no rendered content) must not contribute any
+   vertical space — otherwise it inflates the gap between two adjacent
+   non-empty rows from the canonical 12px to ~24px. */
+.interactive-item-container:empty {
+  padding: 0;
+}
+
+.interactive-item-container.interactive-request {
+  align-items: flex-end;
+}
+
+.interactive-item-container.interactive-response {
+  align-items: stretch;
+}
+
+.chat-turn {
+  width: 100%;
+}
+
+.chat-turn-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chat-turn-content {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.chat-turn-user .chat-turn-content {
+  width: auto;
+}
+
+.chat-turn-card {
+  max-width: min(78%, 720px);
+  border-radius: var(--chat-radius-card);
+  padding: 12px 15px;
+  background: var(--color-vscode-request-bubble);
+  color: var(--color-vscode-fg);
+}
+
+.user-message-card {
+  border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
+  box-shadow: var(--chat-shadow-card);
+}
+
+.user-message-card-editable {
+  cursor: pointer;
+}
+
+.user-message-card-editable:hover {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 50%, transparent);
+}
+
+.composer-edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 35%, var(--color-vscode-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-vscode-accent) 8%, var(--color-vscode-surface-softer));
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+}
+
+.composer-edit-banner-icon {
+  flex-shrink: 0;
+  color: var(--color-vscode-accent);
+}
+
+.composer-edit-banner-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-edit-banner-cancel {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.composer-edit-banner-cancel:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
+}

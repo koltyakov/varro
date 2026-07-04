@@ -21,17 +21,19 @@ import type {
   QuestionRequest,
   UserMessage,
 } from '../types';
+import { MessageList } from './MessageList';
+import {
+  getStandalonePermissionPrompts,
+  getStandaloneQuestionPrompts,
+} from './message-list/pending-prompts';
+import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
-  getAssistantDialogSummaryMap,
-  getStandalonePermissionPrompts,
-  getStandaloneQuestionPrompts,
   getLatestPlanImplementationMessageId,
-  getVisibleThreadMessages,
-  MessageList,
   shouldShowPlanImplementationAction,
-} from './MessageList';
+} from './message-list/plan-actions';
+import { getAssistantDialogSummaryMap } from './message-list/assistant-dialog';
 import * as toolCallMatching from '../lib/tool-call-matching';
 import {
   getNextVisibleUserMessageTopMap,

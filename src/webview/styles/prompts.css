@@ -1,0 +1,525 @@
+/* Question Prompt */
+.question-prompt {
+  margin: 0;
+  padding: 0;
+}
+
+.question-prompt-card {
+  padding: 0;
+}
+
+.question-prompt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 6px;
+}
+
+.question-prompt-header-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.question-prompt-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-vscode-accent);
+  margin-top: 2px;
+}
+
+.question-prompt-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0;
+}
+
+.question-prompt-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-vscode-fg);
+}
+
+.question-prompt-step {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+}
+
+.question-prompt-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.question-prompt-text {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-vscode-fg);
+  padding: 0 12px;
+}
+
+.question-prompt-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-vscode-fg-muted);
+  padding: 3px 12px 8px;
+}
+
+.question-prompt-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+}
+
+.question-option {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  text-align: left;
+  cursor: pointer;
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  border-radius: 0;
+  transition:
+    background-color 0.1s,
+    border-color 0.1s,
+    color 0.1s;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.question-option-input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.question-option + .question-option {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 10%, transparent);
+}
+
+.question-option:hover {
+  background: color-mix(in srgb, var(--color-vscode-hover) 84%, transparent);
+}
+
+.question-option.selected {
+  border-left-color: var(--color-vscode-accent);
+  background: color-mix(in srgb, var(--color-vscode-accent) 8%, var(--color-vscode-list-bg));
+}
+
+.question-option:focus-within {
+  outline: none;
+}
+
+.question-option-input:focus-visible {
+  outline: none;
+}
+
+.question-radio,
+.question-checkbox {
+  display: flex;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.question-radio {
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--color-vscode-muted) 58%, transparent);
+  transition:
+    border-color 0.1s,
+    background-color 0.1s;
+}
+
+.question-radio.checked {
+  border-color: var(--color-vscode-accent);
+  background: color-mix(in srgb, var(--color-vscode-accent) 10%, transparent);
+}
+
+.question-option:hover .question-radio {
+  border-color: color-mix(in srgb, var(--color-vscode-muted) 78%, transparent);
+}
+
+.question-radio-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-vscode-accent);
+}
+
+.question-checkbox {
+  border-radius: 3px;
+  border: 1.5px solid color-mix(in srgb, var(--color-vscode-muted) 58%, transparent);
+  transition:
+    border-color 0.1s,
+    background-color 0.1s;
+}
+
+.question-checkbox.checked {
+  border-color: var(--color-vscode-accent);
+  background: var(--color-vscode-accent);
+}
+
+.question-option:hover .question-checkbox {
+  border-color: color-mix(in srgb, var(--color-vscode-muted) 78%, transparent);
+}
+
+.question-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.question-option-label {
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--color-vscode-fg);
+  word-break: break-word;
+}
+
+.question-option.selected .question-option-label {
+  color: var(--color-vscode-fg);
+  font-weight: 600;
+}
+
+.question-option-desc {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-vscode-fg-muted);
+  word-break: break-word;
+}
+
+.question-option-custom {
+  cursor: text;
+}
+
+.question-option-custom:hover,
+.question-option-custom:focus-within {
+  background: color-mix(in srgb, var(--color-vscode-hover) 84%, transparent);
+}
+
+.question-option-custom:focus-within {
+  outline: none;
+}
+
+.question-custom-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.question-custom-input {
+  flex: 1;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-vscode-input-border, transparent);
+  background: var(--color-vscode-input-bg);
+  outline: none;
+  box-shadow: none;
+  border-radius: 6px;
+  font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
+  line-height: 1.35;
+  color: var(--color-vscode-fg);
+  min-width: 0;
+  transition:
+    border-color 0.1s,
+    background-color 0.1s;
+}
+
+body.vscode-light .question-custom-input,
+body.vscode-high-contrast-light .question-custom-input {
+  border-color: color-mix(in srgb, var(--color-vscode-border) 26%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-fg) 1.5%, var(--color-vscode-input-bg));
+}
+
+.question-option-custom:hover .question-custom-input,
+.question-custom-input:focus {
+  background: var(--color-vscode-input-bg);
+}
+
+.question-custom-input:focus {
+  border-color: var(--color-vscode-accent);
+  outline: none;
+  box-shadow: none;
+}
+
+.question-custom-input::placeholder {
+  color: color-mix(in srgb, var(--color-vscode-input-fg) 52%, transparent);
+}
+
+.question-prompt-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+}
+
+.question-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  min-height: 28px;
+  padding: 4px 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    opacity 0.1s,
+    background-color 0.1s,
+    color 0.1s,
+    border-color 0.1s;
+}
+
+.question-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.question-btn:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 1px;
+}
+
+.question-btn-secondary {
+  background: var(--color-vscode-button-secondary-bg);
+  color: var(--color-vscode-button-secondary-fg);
+}
+
+.question-btn-secondary:hover:not(:disabled) {
+  background: var(--color-vscode-button-secondary-hover);
+}
+
+.question-btn-tertiary {
+  background: transparent;
+  color: var(--color-vscode-fg-muted);
+}
+
+.question-btn-tertiary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-hover) 84%, transparent);
+  color: var(--color-vscode-fg);
+}
+
+.server-status-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  background: var(--color-vscode-button-bg);
+  color: var(--color-vscode-button-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+}
+
+.server-status-action-button:hover:not(:disabled) {
+  background: var(--color-vscode-button-hover);
+}
+
+.server-status-action-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.question-btn-primary {
+  background: var(--color-vscode-accent);
+  color: var(--color-vscode-button-fg);
+}
+
+.question-btn-primary:hover:not(:disabled) {
+  background: var(--color-vscode-button-hover);
+}
+
+@media (max-width: 560px) {
+  .question-prompt-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --color-vscode-widget-shadow: transparent;
+  /* High-contrast themes tune their ANSI palette for maximum legibility;
+     softening toward the foreground would undo that, so use them as-is. */
+  --color-code-comment: var(--vscode-terminal-ansiGreen, var(--color-vscode-muted));
+  --color-code-keyword: var(--vscode-terminal-ansiMagenta, var(--color-vscode-fg));
+  --color-code-string: var(--vscode-terminal-ansiRed, var(--color-vscode-fg));
+  --color-code-title: var(--vscode-terminal-ansiYellow, var(--color-vscode-fg));
+  --color-code-number: var(--vscode-terminal-ansiGreen, var(--color-vscode-fg));
+  --color-code-literal: var(--vscode-terminal-ansiBlue, var(--color-vscode-fg));
+  --color-code-built_in: var(--vscode-terminal-ansiCyan, var(--color-vscode-fg));
+  --color-code-attr: var(--vscode-terminal-ansiBrightBlue, var(--color-vscode-fg));
+  --color-code-variable: var(--vscode-terminal-ansiBrightBlue, var(--color-vscode-fg));
+  --color-code-operator: var(--color-vscode-fg);
+}
+
+body.vscode-high-contrast
+  :is(
+    .assistant-turn-content,
+    .todo-block,
+    .chat-tool-invocation-part,
+    .diff-view-widget,
+    .composer-completion-menu,
+    .toolbar-popover,
+    .dropdown-menu,
+    .provider-limit-popup,
+    .context-popup
+  ),
+body.vscode-high-contrast-light
+  :is(
+    .assistant-turn-content,
+    .todo-block,
+    .chat-tool-invocation-part,
+    .diff-view-widget,
+    .composer-completion-menu,
+    .toolbar-popover,
+    .dropdown-menu,
+    .provider-limit-popup,
+    .context-popup
+  ) {
+  border-color: var(--color-vscode-contrast-border);
+  box-shadow: none;
+}
+
+body.vscode-high-contrast
+  :is(
+    .toolbar-picker,
+    .chat-send-button.enabled,
+    .send-mode-options,
+    .question-btn,
+    .chat-stop-button,
+    .question-option,
+    .server-status-action-button
+  ),
+body.vscode-high-contrast-light
+  :is(
+    .toolbar-picker,
+    .chat-send-button.enabled,
+    .send-mode-options,
+    .question-btn,
+    .chat-stop-button,
+    .question-option,
+    .server-status-action-button
+  ) {
+  outline: 1px solid var(--color-vscode-contrast-border);
+  outline-offset: -1px;
+}
+
+body.vscode-high-contrast :is(button:focus-visible, input:focus-visible, textarea:focus-visible),
+body.vscode-high-contrast-light
+  :is(button:focus-visible, input:focus-visible, textarea:focus-visible) {
+  outline: 2px solid var(--color-vscode-contrast-active-border);
+}
+
+/* Permission Prompt */
+.permission-prompt {
+  margin: 0;
+  padding: 10px 12px 6px;
+}
+
+.permission-prompt-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.permission-prompt-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-vscode-warning);
+}
+
+.permission-prompt-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-vscode-warning);
+}
+
+.permission-prompt-count {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-vscode-warning) 22%, transparent);
+  color: var(--color-vscode-warning);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.permission-prompt-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-vscode-fg);
+  padding: 4px 0 8px;
+}
+
+.permission-prompt-meta {
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.permission-meta-entry {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.permission-meta-key {
+  color: var(--color-vscode-muted);
+  flex-shrink: 0;
+}
+
+.permission-meta-key::after {
+  content: ':';
+}
+
+.permission-meta-value {
+  color: var(--color-vscode-fg);
+  word-break: break-all;
+}
+
+.permission-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
