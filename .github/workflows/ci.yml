@@ -43,7 +43,7 @@ jobs:
         run: npm run build
 
       - name: Package
-        run: npm pack
+        run: npx vsce package --no-dependencies
 
   windows:
     runs-on: windows-latest
@@ -70,6 +70,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Build
+        run: npm run build
 
   e2e:
     runs-on: ubuntu-latest

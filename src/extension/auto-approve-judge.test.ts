@@ -1,13 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  logger: { warn: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn() },
 }));
 
 vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import { AutoApproveJudge } from './auto-approve-judge';
 import { HiddenSessionManager } from './hidden-session-manager';
+
+const cargoBuildPermission = (id: string) => ({
+  id,
+  type: 'bash',
+  sessionID: 'session-1',
+  title: 'Run command: cargo build',
+  metadata: { command: 'cargo build' },
+});
 
 describe('AutoApproveJudge', () => {
   it('allows workspace file edits without creating a judge session', async () => {
@@ -348,5 +356,105 @@ describe('AutoApproveJudge', () => {
       })
     );
     expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
+  });
+
+  it('reuses an allow verdict for an identical permission without a second judge session', async () => {
+    let sessionCount = 0;
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') {
+        sessionCount += 1;
+        return { id: `judge-session-${sessionCount}` };
+      }
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path.endsWith('/message')) {
+        return { info: { structured_output: { decision: 'allow', reason: 'Local build.' } } };
+      }
+      if (method === 'DELETE') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(judge.judge({ permission: cargoBuildPermission('perm-1') })).resolves.toEqual({
+      decision: 'allow',
+      reason: 'Local build.',
+    });
+    await expect(judge.judge({ permission: cargoBuildPermission('perm-2') })).resolves.toEqual({
+      decision: 'allow',
+      reason: 'Local build.',
+    });
+    expect(sessionCount).toBe(1);
+  });
+
+  it('does not reuse ask verdicts or allow verdicts across different prior approvals', async () => {
+    let sessionCount = 0;
+    let decision: 'allow' | 'ask' = 'ask';
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') {
+        sessionCount += 1;
+        return { id: `judge-session-${sessionCount}` };
+      }
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path.endsWith('/message')) {
+        return { info: { structured_output: { decision, reason: 'Judged.' } } };
+      }
+      if (method === 'DELETE') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+    const permission = {
+      id: 'perm-1',
+      type: 'bash',
+      sessionID: 'session-1',
+      title: 'Run command: npm install left-pad',
+      metadata: { command: 'npm install left-pad' },
+    };
+
+    await expect(judge.judge({ permission })).resolves.toEqual({
+      decision: 'ask',
+      reason: 'Judged.',
+    });
+    await expect(judge.judge({ permission })).resolves.toEqual({
+      decision: 'ask',
+      reason: 'Judged.',
+    });
+    expect(sessionCount).toBe(2);
+
+    decision = 'allow';
+    await expect(judge.judge({ permission })).resolves.toEqual({
+      decision: 'allow',
+      reason: 'Judged.',
+    });
+    await expect(
+      judge.judge({
+        permission,
+        approvedReferences: [{ type: 'bash', title: 'bash npm ci', response: 'once' }],
+      })
+    ).resolves.toEqual({ decision: 'allow', reason: 'Judged.' });
+    expect(sessionCount).toBe(4);
+  });
+
+  it('writes an audit line for every auto-approve decision', async () => {
+    mocks.logger.info.mockClear();
+    const request = vi.fn();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => '/repo' } as never,
+      new HiddenSessionManager()
+    );
+
+    await judge.judge({
+      permission: {
+        id: 'perm-edit',
+        type: 'edit',
+        sessionID: 'session-1',
+        title: 'edit src/app.ts',
+        metadata: { filepath: '/repo/src/app.ts' },
+      },
+    });
+
+    expect(mocks.logger.info).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /\[auto-approve\] allow \(local-rule\) edit ".*\/repo\/src\/app\.ts.*" session=session-1/
+      )
+    );
   });
 });

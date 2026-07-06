@@ -13,6 +13,7 @@ import { MessageRouter } from './message-router';
 import { getOpenCodeConfigPath } from './open-code-process';
 import { readExtensionConfigState } from './provider-limit-config';
 import { ProviderLimitService } from './provider-limit-service';
+import { RalphHost } from './ralph-host';
 import { RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
 import { ServerEventBridge } from './server-event-bridge';
@@ -39,6 +40,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionTrash: SessionTrashManager;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly autoApproveJudge: AutoApproveJudge;
+  private readonly ralphHost: RalphHost;
   private readonly messageRouter: MessageRouter;
   private readonly restProxy: RestProxy;
   public readonly sessionExportService: SessionExportService;
@@ -173,6 +175,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.webviewSession.postApiResponse(payload, requestGeneration),
     });
 
+    this.ralphHost = new RalphHost({
+      server,
+      contextProvider,
+      persistence,
+      ensureServerStarted: () => this.runtime.ensureServerStarted(),
+      broadcastState: (payload) => this.post({ type: 'ralph/state', payload }),
+    });
+
     this.messageRouter = new MessageRouter(
       createSidebarProviderActions({
         contextProvider,
@@ -195,6 +205,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         pickFiles: () => this.pickFiles(),
         searchFiles: (requestId, query, limit) => this.searchFiles(requestId, query, limit),
         runInTerminal: (command, title) => this.runInTerminal(command, title),
+        handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
       })
     );
 

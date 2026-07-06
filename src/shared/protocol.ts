@@ -1,5 +1,6 @@
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
 import type { WebviewConfigUpdatePayload } from './provider-limit-config';
+import type { RalphConfig, RalphRun, RalphSelectedModel } from './ralph';
 import { asRecord } from './type-utils';
 
 export interface EditorContext {
@@ -352,6 +353,17 @@ export type InitialWebviewState = {
   recycleBinEntries?: RecycleBinEntry[];
 };
 
+/**
+ * Full snapshot of Ralph orchestration state owned by the extension host.
+ * Broadcast to the webview after every change; the webview's ralph store is
+ * a render mirror of this payload.
+ */
+export type RalphStatePayload = {
+  runs: Record<string, RalphRun>;
+  /** Manager session ids whose loop is currently executing on the host. */
+  activeIds: string[];
+};
+
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
   | { type: 'server/event'; payload: ServerEvent }
@@ -377,7 +389,8 @@ export type ExtensionMessage =
   | { type: 'command/new-session' }
   | { type: 'command/focus-input' }
   | { type: 'command/open-attention-sessions' }
-  | { type: 'command/abort' };
+  | { type: 'command/abort' }
+  | { type: 'ralph/state'; payload: RalphStatePayload };
 
 export type WebviewMessage =
   | { type: 'context/request' }
@@ -409,6 +422,23 @@ export type WebviewMessage =
     }
   | { type: 'ready' }
   | { type: 'api/request'; payload: { id: number; method: string; path: string; body?: unknown } }
+  | { type: 'ralph/start'; payload: { config: RalphConfig } }
+  | { type: 'ralph/stop'; payload: { managerSessionId: string } }
+  | { type: 'ralph/pause'; payload: { managerSessionId: string } }
+  | { type: 'ralph/resume'; payload: { managerSessionId: string } }
+  | {
+      type: 'ralph/update-model';
+      payload: { managerSessionId: string; model: RalphSelectedModel | null };
+    }
+  | {
+      /**
+       * Webview requests the current Ralph state. `legacyRuns` carries runs
+       * persisted by older builds in webview localStorage so the host can
+       * adopt them into its own persistence once.
+       */
+      type: 'ralph/sync';
+      payload: { legacyRuns?: Record<string, RalphRun> };
+    }
   | {
       type: 'log';
       payload: { msg: string; data?: string; error?: string; level?: 'info' | 'warn' | 'error' };

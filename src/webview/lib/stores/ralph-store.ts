@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { createStore, produce } from 'solid-js/store';
+import { createStore, produce, reconcile } from 'solid-js/store';
 import type {
   RalphConfig,
   RalphIteration,
@@ -8,23 +8,22 @@ import type {
   RalphStatus,
   RalphStopReason,
 } from '../../../shared/ralph';
+import { postMessage } from '../bridge';
 import { readStored, writeStored } from '../state-storage';
 
-const STORAGE_KEY = 'varro.ralph.runs';
+const LEGACY_STORAGE_KEY = 'varro.ralph.runs';
 
 type RalphRunsRecord = Record<string, RalphRun>;
 
-const [runs, setRuns] = createStore<RalphRunsRecord>(loadInitial());
+/**
+ * Render mirror of Ralph state owned by the extension host. Mutation helpers
+ * apply optimistic local updates so the dashboard reacts immediately; the
+ * host's `ralph/state` broadcasts (applied via {@link applyHostState}) are
+ * authoritative and reconcile the mirror.
+ */
+const [runs, setRuns] = createStore<RalphRunsRecord>({});
 const [showRalphForm, setShowRalphForm] = createSignal(false);
-
-function loadInitial(): RalphRunsRecord {
-  const stored = readStored<RalphRunsRecord>(STORAGE_KEY);
-  return stored ? { ...stored } : {};
-}
-
-function persist(record: RalphRunsRecord) {
-  writeStored(STORAGE_KEY, record);
-}
+const [activeRunnerIds, setActiveRunnerIds] = createSignal<string[]>([]);
 
 export const ralphStore = {
   runs,
@@ -34,6 +33,11 @@ export const ralphStore = {
   isRalphSession(sessionId: string | null | undefined): boolean {
     if (!sessionId) return false;
     return !!runs[sessionId];
+  },
+
+  isRunnerActive(sessionId: string | null | undefined): boolean {
+    if (!sessionId) return false;
+    return activeRunnerIds().includes(sessionId);
   },
 
   /**
@@ -63,6 +67,23 @@ export const ralphStore = {
     return Object.values(runs);
   },
 
+  /** Replace the mirror with the host's authoritative snapshot. */
+  applyHostState(nextRuns: RalphRunsRecord, activeIds: string[]) {
+    setRuns(reconcile(nextRuns, { merge: true }));
+    setActiveRunnerIds(activeIds);
+  },
+
+  /**
+   * One-time migration: older builds persisted runs in webview localStorage.
+   * Hand them to the host (via ralph/sync) and clear the legacy key.
+   */
+  consumeLegacyRuns(): RalphRunsRecord | undefined {
+    const stored = readStored<RalphRunsRecord>(LEGACY_STORAGE_KEY);
+    if (!stored || Object.keys(stored).length === 0) return undefined;
+    writeStored(LEGACY_STORAGE_KEY, null);
+    return stored;
+  },
+
   startRun(config: RalphConfig) {
     const now = Date.now();
     const run: RalphRun = {
@@ -73,7 +94,6 @@ export const ralphStore = {
       updatedAt: now,
     };
     setRuns(config.managerSessionId, run);
-    persist({ ...runs, [config.managerSessionId]: run });
   },
 
   setStatus(sessionId: string, status: RalphStatus, stopReason?: RalphStopReason) {
@@ -86,7 +106,6 @@ export const ralphStore = {
       // Clear any prior terminal stop reason when leaving a terminal state.
       setRuns(sessionId, 'stopReason', undefined);
     }
-    persist({ ...runs });
   },
 
   addIterations(sessionId: string, count: number) {
@@ -98,7 +117,6 @@ export const ralphStore = {
         draft.updatedAt = Date.now();
       })
     );
-    persist({ ...runs });
   },
 
   updateRunModel(sessionId: string, model: RalphSelectedModel | null) {
@@ -110,7 +128,7 @@ export const ralphStore = {
         draft.updatedAt = Date.now();
       })
     );
-    persist({ ...runs });
+    postMessage({ type: 'ralph/update-model', payload: { managerSessionId: sessionId, model } });
   },
 
   upsertIteration(sessionId: string, iteration: RalphIteration) {
@@ -126,7 +144,6 @@ export const ralphStore = {
         draft.updatedAt = Date.now();
       })
     );
-    persist({ ...runs });
   },
 
   removeRun(sessionId: string) {
@@ -136,7 +153,6 @@ export const ralphStore = {
         delete draft[sessionId];
       })
     );
-    persist({ ...runs });
   },
 };
 

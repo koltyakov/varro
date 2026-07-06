@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RalphConfig, RalphIteration } from '../../../shared/ralph';
+import type { RalphConfig, RalphIteration, RalphRun } from '../../../shared/ralph';
 
-const STORAGE_KEY = 'varro.ralph.runs';
+const LEGACY_STORAGE_KEY = 'varro.ralph.runs';
+
+const { postMessage } = vi.hoisted(() => ({ postMessage: vi.fn() }));
+
+vi.mock('../bridge', () => ({ postMessage }));
 
 function createConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {
   return {
@@ -35,6 +39,17 @@ function createIteration(index: number, overrides: Partial<RalphIteration> = {})
   };
 }
 
+function createRun(config: RalphConfig, overrides: Partial<RalphRun> = {}): RalphRun {
+  return {
+    config,
+    status: 'running',
+    currentIteration: 0,
+    iterations: [],
+    updatedAt: 1_000,
+    ...overrides,
+  };
+}
+
 async function loadRalphStore() {
   return import('./ralph-store');
 }
@@ -43,36 +58,55 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
   window.localStorage.clear();
+  postMessage.mockReset();
 });
 
-describe('ralph store persistence', () => {
-  it('persists a started run and reloads it on boot', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(1_000);
-
+describe('ralph store host-state mirror', () => {
+  it('replaces the mirror with the host snapshot and tracks active runner ids', async () => {
     const { ralphStore } = await loadRalphStore();
     const config = createConfig();
-    const expectedRun = {
-      config,
-      status: 'running' as const,
-      currentIteration: 0,
-      iterations: [],
-      updatedAt: 1_000,
-    };
+    const staleConfig = createConfig({ managerSessionId: 'manager-stale' });
 
-    ralphStore.startRun(config);
+    ralphStore.startRun(staleConfig);
+    ralphStore.applyHostState(
+      { [config.managerSessionId]: createRun(config, { status: 'paused' }) },
+      [config.managerSessionId]
+    );
 
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}')).toEqual({
-      [config.managerSessionId]: expectedRun,
-    });
-
-    vi.resetModules();
-    const { ralphStore: reloadedStore } = await loadRalphStore();
-
-    expect(reloadedStore.isRalphSession(config.managerSessionId)).toBe(true);
-    expect(reloadedStore.getRun(config.managerSessionId)).toEqual(expectedRun);
+    expect(ralphStore.isRalphSession(config.managerSessionId)).toBe(true);
+    expect(ralphStore.isRalphSession(staleConfig.managerSessionId)).toBe(false);
+    expect(ralphStore.getRun(config.managerSessionId)?.status).toBe('paused');
+    expect(ralphStore.isRunnerActive(config.managerSessionId)).toBe(true);
+    expect(ralphStore.isRunnerActive(staleConfig.managerSessionId)).toBe(false);
   });
 
-  it('round-trips iteration updates and persisted removal', async () => {
+  it('does not persist mutations to localStorage', async () => {
+    const { ralphStore } = await loadRalphStore();
+    const config = createConfig();
+
+    ralphStore.startRun(config);
+    ralphStore.upsertIteration(config.managerSessionId, createIteration(1));
+    ralphStore.setStatus(config.managerSessionId, 'paused');
+
+    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
+  });
+
+  it('consumes legacy localStorage runs exactly once', async () => {
+    const config = createConfig({ managerSessionId: 'manager-legacy' });
+    window.localStorage.setItem(
+      LEGACY_STORAGE_KEY,
+      JSON.stringify({ [config.managerSessionId]: createRun(config) })
+    );
+
+    const { ralphStore } = await loadRalphStore();
+    const legacy = ralphStore.consumeLegacyRuns();
+
+    expect(legacy?.[config.managerSessionId]?.config.managerSessionId).toBe('manager-legacy');
+    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
+    expect(ralphStore.consumeLegacyRuns()).toBeUndefined();
+  });
+
+  it('applies iteration and status mutations optimistically', async () => {
     const now = vi.spyOn(Date, 'now');
     now.mockReturnValue(1_000);
 
@@ -100,40 +134,40 @@ describe('ralph store persistence', () => {
     now.mockReturnValue(4_000);
     ralphStore.setStatus(config.managerSessionId, 'paused');
 
-    const expectedRun = {
+    expect(ralphStore.getRun(config.managerSessionId)).toEqual({
       config,
-      status: 'paused' as const,
+      status: 'paused',
       currentIteration: 2,
       iterations: [firstIteration, secondIteration],
       updatedAt: 4_000,
-    };
-
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}')).toEqual({
-      [config.managerSessionId]: expectedRun,
     });
 
-    vi.resetModules();
-    const { ralphStore: reloadedStore } = await loadRalphStore();
-
-    expect(reloadedStore.getRun(config.managerSessionId)).toEqual(expectedRun);
-
-    reloadedStore.removeRun(config.managerSessionId);
-
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(JSON.stringify({}));
-
-    vi.resetModules();
-    const { ralphStore: afterRemovalStore } = await loadRalphStore();
-
-    expect(afterRemovalStore.isRalphSession(config.managerSessionId)).toBe(false);
-    expect(afterRemovalStore.getAllRuns()).toEqual([]);
+    ralphStore.removeRun(config.managerSessionId);
+    expect(ralphStore.isRalphSession(config.managerSessionId)).toBe(false);
+    expect(ralphStore.getAllRuns()).toEqual([]);
   });
 
-  it('persists added iterations for an existing run', async () => {
+  it('updates the run model locally and notifies the host', async () => {
+    const { ralphStore } = await loadRalphStore();
+    const config = createConfig({ managerSessionId: 'manager-3' });
+    const model = { providerID: 'openai', modelID: 'gpt-5' };
+
+    ralphStore.startRun(config);
+    ralphStore.updateRunModel(config.managerSessionId, model);
+
+    expect(ralphStore.getRun(config.managerSessionId)?.config.model).toEqual(model);
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'ralph/update-model',
+      payload: { managerSessionId: config.managerSessionId, model },
+    });
+  });
+
+  it('grows the iteration budget with addIterations', async () => {
     const now = vi.spyOn(Date, 'now');
     now.mockReturnValue(1_000);
 
     const { ralphStore } = await loadRalphStore();
-    const config = createConfig({ managerSessionId: 'manager-3', iterations: 5 });
+    const config = createConfig({ managerSessionId: 'manager-4', iterations: 5 });
 
     ralphStore.startRun(config);
 
@@ -146,16 +180,6 @@ describe('ralph store persistence', () => {
       currentIteration: 0,
       iterations: [],
       updatedAt: 2_000,
-    });
-
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}')).toEqual({
-      [config.managerSessionId]: {
-        config: { ...config, iterations: 10 },
-        status: 'running',
-        currentIteration: 0,
-        iterations: [],
-        updatedAt: 2_000,
-      },
     });
   });
 });

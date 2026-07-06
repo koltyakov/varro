@@ -124,7 +124,23 @@ export class ProviderLimitService {
   private async load(providerID: string, modelID: string | null): Promise<ProviderLimitLoadResult> {
     const cacheKey = `${providerID}:${modelID || ''}`;
     const checkedAt = Date.now();
-    const providers = await this.getProviderMetadata();
+    // Provider limits are best-effort metadata: no failure in this subsystem
+    // may surface as a rejected request. Metadata and adapter errors are
+    // contained into `error` statuses so callers always get a renderable
+    // result and last-known-good fallback still applies.
+    let providers: ProviderMetadata[];
+    try {
+      providers = await this.getProviderMetadata();
+    } catch (err) {
+      return createProviderLimitLoadResult({
+        providerID,
+        modelID,
+        status: 'error',
+        source: 'opencode',
+        checkedAt,
+        note: `Failed to load provider metadata: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
     const provider = providers.find((item) => item.id === providerID);
 
     if (!provider) {
@@ -149,15 +165,27 @@ export class ProviderLimitService {
     }
 
     const providerLimitConfig = readProviderLimitConfig();
-    const providerLimit = await fetchProviderLimitFromAdapter(
-      {
-        provider,
-        authStore,
+    let providerLimit: ProviderLimitStatus | null;
+    try {
+      providerLimit = await fetchProviderLimitFromAdapter(
+        {
+          provider,
+          authStore,
+          modelID,
+          checkedAt,
+        },
+        { enabledAdapterIDs: providerLimitConfig.enabledAdapters }
+      );
+    } catch (err) {
+      providerLimit = {
+        providerID,
         modelID,
+        status: 'error',
+        source: 'provider',
         checkedAt,
-      },
-      { enabledAdapterIDs: providerLimitConfig.enabledAdapters }
-    );
+        note: `Provider limit adapter failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
     if (providerLimit && isAuthFailureProviderStatus(providerLimit)) {
       this.providerAuthFailureCache.set(provider.id, {
         credentialFingerprint,

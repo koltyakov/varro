@@ -36,6 +36,7 @@ export interface SidebarProviderActionDeps {
   pickFiles(): Promise<void>;
   searchFiles(requestId: number, query: string, limit?: number): void;
   runInTerminal(command: string, title?: string): void;
+  handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
 }
 
 export function createSidebarProviderActions(
@@ -61,6 +62,7 @@ export function createSidebarProviderActions(
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);
     },
     runInTerminal: (command, title) => deps.runInTerminal(command, title),
+    handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
     openSettings: async (query) => {
       await vscode.commands.executeCommand(

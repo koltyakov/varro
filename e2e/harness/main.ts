@@ -2896,6 +2896,54 @@ function sendApiResponse(id: number, payload: { data?: unknown; error?: string }
   });
 }
 
+// The harness plays the extension host's role for Ralph orchestration: this
+// localStorage key emulates the host's Memento persistence (the webview no
+// longer reads it directly - it only mirrors `ralph/state` broadcasts).
+const RALPH_RUNS_KEY = 'varro.ralph.runs';
+
+type HarnessRalphRun = {
+  config: { managerSessionId: string; iterations: number; model?: unknown };
+  status: string;
+  stopReason?: string;
+  currentIteration: number;
+  iterations: unknown[];
+  updatedAt: number;
+};
+
+function readRalphRuns(): Record<string, HarnessRalphRun> {
+  try {
+    return JSON.parse(window.localStorage.getItem(RALPH_RUNS_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writeRalphRuns(runs: Record<string, HarnessRalphRun>) {
+  window.localStorage.setItem(RALPH_RUNS_KEY, JSON.stringify(runs));
+}
+
+function broadcastRalphState() {
+  const runs = readRalphRuns();
+  dispatchToWebview({
+    type: 'ralph/state',
+    payload: {
+      runs,
+      activeIds: Object.keys(runs).filter((id) => runs[id]?.status === 'running'),
+    },
+  });
+}
+
+function mutateRalphRun(managerSessionId: string, mutate: (run: HarnessRalphRun) => void) {
+  const runs = readRalphRuns();
+  const run = runs[managerSessionId];
+  if (run) {
+    mutate(run);
+    run.updatedAt = Date.now();
+    writeRalphRuns(runs);
+  }
+  broadcastRalphState();
+}
+
 async function handleApiRequest(
   state: ScenarioState,
   method: string,
@@ -3434,6 +3482,53 @@ function installBridge(state: ScenarioState) {
       case 'files/drop-content':
       case 'file/read':
       case 'config/update':
+        return;
+      case 'ralph/sync': {
+        const runs = readRalphRuns();
+        for (const [id, run] of Object.entries(webviewMessage.payload.legacyRuns || {})) {
+          if (!runs[id]) runs[id] = run as unknown as HarnessRalphRun;
+        }
+        writeRalphRuns(runs);
+        broadcastRalphState();
+        return;
+      }
+      case 'ralph/start': {
+        const runs = readRalphRuns();
+        const config = webviewMessage.payload.config;
+        runs[config.managerSessionId] = {
+          config,
+          status: 'running',
+          currentIteration: 0,
+          iterations: [],
+          updatedAt: Date.now(),
+        };
+        writeRalphRuns(runs);
+        broadcastRalphState();
+        return;
+      }
+      case 'ralph/stop':
+        mutateRalphRun(webviewMessage.payload.managerSessionId, (run) => {
+          run.status = 'stopped';
+          run.stopReason = 'manual_stop';
+        });
+        return;
+      case 'ralph/pause':
+        mutateRalphRun(webviewMessage.payload.managerSessionId, (run) => {
+          run.status = 'paused';
+          delete run.stopReason;
+        });
+        return;
+      case 'ralph/resume':
+        mutateRalphRun(webviewMessage.payload.managerSessionId, (run) => {
+          if (run.status === 'incomplete') run.config.iterations += 5;
+          run.status = 'running';
+          delete run.stopReason;
+        });
+        return;
+      case 'ralph/update-model':
+        mutateRalphRun(webviewMessage.payload.managerSessionId, (run) => {
+          run.config.model = webviewMessage.payload.model;
+        });
         return;
       case 'session/export':
         harnessWindow.__varroE2E?.exportSessionIds?.push(webviewMessage.payload.sessionId);

@@ -53,9 +53,9 @@ When the active file is also attached explicitly, Varro avoids duplicating overl
 
 Use any of these flows to add more context.
 
-- Right-click a file or folder in Explorer and choose `Varro: Add to Context`.
-- With an editor selection, use the editor context menu entry that also appears as `Varro: Add to Context`.
-- Select terminal text and choose `Varro: Add to Context` from the terminal context menu.
+- Right-click a file or folder in Explorer and choose `Varro: Add to Context`, or run `Varro: Add to Context` from the Command Palette to add the active file.
+- With an editor selection, use the editor context menu entry that also appears as `Varro: Add to Context`, or press `Cmd+Shift+K` / `Ctrl+Shift+K`.
+- Select terminal text and choose `Varro: Add to Context` from the terminal context menu, or press `Cmd+Shift+K` / `Ctrl+Shift+K`.
 - Drag files or folders into the composer.
 - Use the composer attachment flow from `/attach`.
 - Paste an image into the composer.
@@ -254,8 +254,8 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - `Varro: New Session`
 - `Varro: Abort Session`
 - `Varro: Restart Server`
-- `Varro: Add to Context` from Explorer, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the editor is focused
-- `Varro: Add to Context` from the editor selection context menu
+- `Varro: Add to Context` from Explorer, from the Command Palette (adds the active file), or `Cmd+Shift+K` / `Ctrl+Shift+K` when focus is outside the editor and terminal
+- `Varro: Add to Context` from the editor selection context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` with an editor selection. Without a selection the key keeps its VS Code default (`Delete Line`)
 - `Varro: Add to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused
 
 ## Settings

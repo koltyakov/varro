@@ -9,6 +9,18 @@ type DroppedContentFile = Extract<
 >['payload']['files'][number];
 type LogPayload = Extract<WebviewMessage, { type: 'log' }>['payload'];
 type OpenPathPayload = Extract<WebviewMessage, { type: 'vscode/open' }>['payload'];
+type RalphMessage = Extract<
+  WebviewMessage,
+  {
+    type:
+      | 'ralph/start'
+      | 'ralph/stop'
+      | 'ralph/pause'
+      | 'ralph/resume'
+      | 'ralph/update-model'
+      | 'ralph/sync';
+  }
+>;
 
 export interface MessageRouterCallbacks {
   ready(): Promise<void>;
@@ -32,6 +44,7 @@ export interface MessageRouterCallbacks {
   openExternal(url: string): Promise<void>;
   updateConfig(payload: ConfigUpdatePayload): Promise<void>;
   handleApiRequest(payload: ApiRequestPayload): Promise<void>;
+  handleRalphMessage(msg: RalphMessage): void;
   log(payload: LogPayload): void;
 }
 
@@ -100,6 +113,14 @@ export class MessageRouter {
           break;
         case 'api/request':
           await this.handleApiRequestMessage(msg);
+          break;
+        case 'ralph/start':
+        case 'ralph/stop':
+        case 'ralph/pause':
+        case 'ralph/resume':
+        case 'ralph/update-model':
+        case 'ralph/sync':
+          this.callbacks.handleRalphMessage(msg);
           break;
         case 'log':
           this.handleLogMessage(msg);

@@ -223,6 +223,10 @@ export class SessionStateManager {
         }
         break;
       }
+      // `permission.updated` is OpenCode's legacy name for a pending
+      // permission request; the webview treats it as an ask, so track it
+      // here too to keep host and webview attention state in agreement.
+      case 'permission.updated':
       case 'permission.asked':
       case 'permission.v2.asked': {
         const propsRecord = asRecord(props);

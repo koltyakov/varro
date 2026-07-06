@@ -47,6 +47,16 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('"emptyStateLogoUri":"\\u003C/script\\u003E\\u0026\\u2028\\u2029"');
   });
 
+  it('restricts image sources to the webview and data URIs', () => {
+    const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
+      scriptContent: '',
+      cssContent: '',
+    });
+    const imgSrc = html.match(/img-src ([^;]+);/)?.[1];
+
+    expect(imgSrc).toBe('vscode-webview-resource: data:');
+  });
+
   it('reuses the same nonce in the CSP and both inline script tags', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
       scriptContent: 'console.log("ready")',

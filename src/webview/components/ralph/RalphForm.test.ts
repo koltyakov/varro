@@ -67,7 +67,7 @@ vi.mock('./ralph-runner', () => ({
   },
 }));
 
-vi.mock('./ralph-prompts', () => ({
+vi.mock('../../../shared/ralph-prompts', () => ({
   buildAnchorMessage: vi.fn(() => 'anchor'),
   getDefaultPromptTemplate: vi.fn(() => 'template'),
 }));

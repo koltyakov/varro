@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RalphConfig, RalphIteration } from '../../../shared/ralph';
+import type { RalphConfig, RalphIteration } from './ralph';
 import {
   buildAnchorMessage,
   buildIterationPrompt,

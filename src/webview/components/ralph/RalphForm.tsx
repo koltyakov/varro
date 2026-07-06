@@ -8,7 +8,7 @@ import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
 import type { RalphConfig, RalphSelectedModel } from '../../../shared/ralph';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { ralphRunner } from './ralph-runner';
-import { buildAnchorMessage, getDefaultPromptTemplate } from './ralph-prompts';
+import { buildAnchorMessage, getDefaultPromptTemplate } from '../../../shared/ralph-prompts';
 import { ModelPicker, getVariantsForModel } from '../ModelPicker';
 import { ModelPickerButton, VariantPicker } from '../chat-input/ToolbarPickers';
 import { getPreferredVariant } from '../../lib/model-variants';

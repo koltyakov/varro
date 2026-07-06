@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.19.8",
+  "version": "0.19.9",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -13,6 +13,10 @@
     "chat",
     "opencode"
   ],
+  "homepage": "https://github.com/koltyakov/varro#readme",
+  "bugs": {
+    "url": "https://github.com/koltyakov/varro/issues"
+  },
   "license": "MIT",
   "repository": "https://github.com/koltyakov/varro",
   "publisher": "koltyakov",
@@ -143,7 +147,7 @@
       "commandPalette": [
         {
           "command": "varro.chat.addToContext",
-          "when": "false"
+          "when": "editorIsOpen"
         },
         {
           "command": "varro.chat.addSelectionToContext",
@@ -157,19 +161,21 @@
     },
     "keybindings": [
       {
-        "command": "varro.chat.addToContext",
-        "key": "cmd+shift+k",
+        "command": "varro.chat.addSelectionToContext",
+        "key": "ctrl+shift+k",
         "mac": "cmd+shift+k",
-        "win": "ctrl+shift+k",
-        "linux": "ctrl+shift+k",
-        "when": "!terminalFocus"
+        "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "varro.chat.addToContext",
+        "key": "ctrl+shift+k",
+        "mac": "cmd+shift+k",
+        "when": "!terminalFocus && !editorTextFocus"
       },
       {
         "command": "varro.chat.addTerminalSelectionToContext",
-        "key": "cmd+shift+k",
+        "key": "ctrl+shift+k",
         "mac": "cmd+shift+k",
-        "win": "ctrl+shift+k",
-        "linux": "ctrl+shift+k",
         "when": "terminalFocus"
       }
     ],
@@ -298,6 +304,10 @@
     "onCommand:varro.chat.statusBarClick"
   ],
   "icon": "assets/icon.png",
+  "galleryBanner": {
+    "color": "#24160f",
+    "theme": "dark"
+  },
   "engines": {
     "node": "^22.12.0 || >=24.0.0",
     "vscode": "^1.120.0"

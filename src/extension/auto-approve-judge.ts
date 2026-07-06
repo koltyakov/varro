@@ -14,6 +14,8 @@ type OpenCodeRequest = Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
 
 const JUDGE_TIMEOUT_MS = 30_000;
 const JUDGE_TITLE_PREFIX = 'Varro permission judge';
+const VERDICT_CACHE_TTL_MS = 15 * 60_000;
+const VERDICT_CACHE_LIMIT = 200;
 const DENY_ALL_PERMISSION_NAMES = [
   'read',
   'edit',
@@ -50,6 +52,8 @@ const SAFE_GIT_INSPECTION_COMMANDS = new Set([
 const SAFE_GIT_BRANCH_FLAGS = new Set(['--show-current', '--list', '-a', '-r', '-v', '-vv']);
 
 export class AutoApproveJudge {
+  private readonly verdictCache = new Map<string, { reason?: string; expiresAt: number }>();
+
   constructor(
     private readonly server: OpenCodeRequest,
     private readonly hiddenSessions: HiddenSessionManager
@@ -62,15 +66,65 @@ export class AutoApproveJudge {
       return { decision: 'ask', reason: 'Permission request lacks enough detail to judge safely.' };
     }
     const localDecision = this.judgeLocally(permission);
-    if (localDecision) return localDecision;
+    if (localDecision) {
+      this.audit('local-rule', permission, localDecision);
+      return localDecision;
+    }
 
-    return this.withTimeout(
-      this.runJudge(permission, request.model, request.approvedReferences || []),
+    const approvedReferences = request.approvedReferences || [];
+    const cacheKey = buildVerdictCacheKey(permission, approvedReferences);
+    const cached = this.readCachedVerdict(cacheKey);
+    if (cached) {
+      this.audit('cache', permission, cached);
+      return cached;
+    }
+
+    const decision = await this.withTimeout(
+      this.runJudge(permission, request.model, approvedReferences),
       JUDGE_TIMEOUT_MS
-    ).catch((err) => {
+    ).catch((err): AutoApproveJudgeResponse => {
       logger.warn(`Auto-approve judge failed: ${err instanceof Error ? err.message : String(err)}`);
       return { decision: 'ask', reason: 'Judge failed; asking user.' };
     });
+    if (decision.decision === 'allow') this.storeCachedVerdict(cacheKey, decision);
+    this.audit('judge', permission, decision);
+    return decision;
+  }
+
+  private readCachedVerdict(key: string): AutoApproveJudgeResponse | null {
+    const entry = this.verdictCache.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+      this.verdictCache.delete(key);
+      return null;
+    }
+    this.verdictCache.delete(key);
+    this.verdictCache.set(key, entry);
+    return { decision: 'allow', ...(entry.reason ? { reason: entry.reason } : {}) };
+  }
+
+  private storeCachedVerdict(key: string, decision: AutoApproveJudgeResponse) {
+    this.verdictCache.set(key, {
+      ...(decision.reason ? { reason: decision.reason } : {}),
+      expiresAt: Date.now() + VERDICT_CACHE_TTL_MS,
+    });
+    if (this.verdictCache.size > VERDICT_CACHE_LIMIT) {
+      const oldest = this.verdictCache.keys().next().value;
+      if (oldest) this.verdictCache.delete(oldest);
+    }
+  }
+
+  private audit(
+    source: 'local-rule' | 'cache' | 'judge',
+    permission: NormalizedJudgePermission,
+    response: AutoApproveJudgeResponse
+  ) {
+    const subject = describePermissionSubject(permission);
+    logger.info(
+      `[auto-approve] ${response.decision} (${source}) ${permission.type} "${subject}" session=${permission.sessionID}${
+        response.reason ? ` — ${response.reason}` : ''
+      }`
+    );
   }
 
   private async runJudge(
@@ -358,6 +412,41 @@ function extractCommand(permission: NormalizedJudgePermission) {
     .replace(/^run\s+command:\s*/i, '')
     .replace(/^(?:bash|shell)\s+/i, '')
     .trim();
+}
+
+/**
+ * Cache key for judge verdicts. Keyed on what the permission actually does
+ * (command text, edit paths, or pattern/title) plus the prior-approval
+ * references the judge saw, so a verdict is only reused while the judge
+ * would receive the same inputs. Session and request IDs are deliberately
+ * excluded: identical actions repeat across sessions in agent loops.
+ */
+function buildVerdictCacheKey(
+  permission: NormalizedJudgePermission,
+  approvedReferences: AutoApproveJudgeReference[]
+) {
+  const subject =
+    permission.type === 'bash' || permission.type === 'shell'
+      ? extractCommand(permission)
+      : isEditPermissionType(permission)
+        ? collectPermissionPaths(permission).toSorted().join('\n')
+        : JSON.stringify([permission.pattern ?? null, permission.title]);
+  const references = approvedReferences
+    .map((reference) => JSON.stringify(reference))
+    .toSorted()
+    .join('\n');
+  return [permission.type, subject, references].join('\u0000');
+}
+
+function describePermissionSubject(permission: NormalizedJudgePermission) {
+  if (permission.type === 'bash' || permission.type === 'shell') {
+    return extractCommand(permission) || permission.title;
+  }
+  if (isEditPermissionType(permission)) {
+    const paths = collectPermissionPaths(permission);
+    if (paths.length > 0) return paths.join(', ');
+  }
+  return permission.title;
 }
 
 function buildJudgeSystemPrompt() {

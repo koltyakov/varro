@@ -20,7 +20,7 @@ export function renderWebviewHtml(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; img-src ${cspSource} data: https:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
+    content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
   <title>Varro</title>
   <style>${assets.cssContent}</style>
 </head>

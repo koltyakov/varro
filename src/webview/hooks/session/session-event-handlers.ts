@@ -135,6 +135,14 @@ function getPermissionReplyId(props: Record<string, unknown>) {
   return (source.id || source.permissionID || source.requestID) as string | undefined;
 }
 
+// Accept `id` as a fallback for `requestID`, matching the extension host's
+// SessionStateManager so both sides clear question attention on the same
+// event shapes.
+function getQuestionReplyId(props: Record<string, unknown> | undefined) {
+  const requestID = props?.requestID || props?.id;
+  return typeof requestID === 'string' ? requestID : undefined;
+}
+
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
   isSessionInActiveTree?(sessionId: string): boolean;
@@ -1727,28 +1735,28 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('question.replied', (data) => {
-      const requestID = data.properties?.requestID as string | undefined;
+      const requestID = getQuestionReplyId(data.properties);
       if (requestID) permissionsStore.removeQuestion(requestID);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.rejected', (data) => {
-      const requestID = data.properties?.requestID as string | undefined;
+      const requestID = getQuestionReplyId(data.properties);
       if (requestID) permissionsStore.removeQuestion(requestID);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.v2.replied', (data) => {
-      const requestID = data.properties?.requestID as string | undefined;
+      const requestID = getQuestionReplyId(data.properties);
       if (requestID) permissionsStore.removeQuestion(requestID);
     })
   );
 
   cleanups.push(
     serverEvents.on('question.v2.rejected', (data) => {
-      const requestID = data.properties?.requestID as string | undefined;
+      const requestID = getQuestionReplyId(data.properties);
       if (requestID) permissionsStore.removeQuestion(requestID);
     })
   );

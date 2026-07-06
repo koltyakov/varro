@@ -2,6 +2,7 @@ import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
 import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
 import { permissionsStore } from '../lib/stores/permissions-store';
+import { ralphStore } from '../lib/stores/ralph-store';
 import { sessionStore } from '../lib/stores/session-store';
 import { uiStore } from '../lib/stores/ui-store';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
@@ -200,6 +201,9 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'providers/refresh':
       deps.refreshProviders();
+      break;
+    case 'ralph/state':
+      ralphStore.applyHostState(msg.payload.runs, msg.payload.activeIds);
       break;
   }
 }

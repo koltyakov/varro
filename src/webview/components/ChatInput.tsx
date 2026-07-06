@@ -78,6 +78,7 @@ import {
 import { ModelPicker, getVariantsForModel } from './ModelPicker';
 import { McpPicker } from './McpPicker';
 import { ralphStore } from '../lib/stores/ralph-store';
+import { ralphRunner } from './ralph/ralph-runner';
 import type { RalphSelectedModel } from '../../shared/ralph';
 import {
   formatAgentInitial,
@@ -1870,7 +1871,7 @@ export function ChatInput() {
       retryingSessionIds.includes(activeSessionId) && (activeRunWasRunning || !activeRun);
 
     if (activeRunWasRunning && retryingSessionIds.includes(activeSessionId)) {
-      ralphStore.setStatus(activeRun.config.managerSessionId, 'paused');
+      ralphRunner.pause(activeRun.config.managerSessionId);
     }
 
     if (retryingSessionIds.length > 0) {

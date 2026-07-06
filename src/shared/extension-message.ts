@@ -6,6 +6,7 @@ import {
   type EditorContext,
   type ExtensionMessage,
   type PermissionMode,
+  type RalphStatePayload,
   type ServerStatus,
   type WebviewThemeKind,
 } from './protocol';
@@ -31,6 +32,7 @@ const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'command/focus-input',
   'command/open-attention-sessions',
   'command/abort',
+  'ralph/state',
 ]);
 
 /**
@@ -175,6 +177,19 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
           id: payload.id,
           ...(payload.error !== undefined ? { error: String(payload.error) } : {}),
           ...(payload.data !== undefined ? { data: payload.data } : {}),
+        },
+      };
+    }
+
+    case 'ralph/state': {
+      const payload = asRecord(record.payload);
+      const runs = asRecord(payload?.runs);
+      if (!payload || !runs || !Array.isArray(payload.activeIds)) return null;
+      return {
+        type,
+        payload: {
+          runs: runs as RalphStatePayload['runs'],
+          activeIds: payload.activeIds.filter((id): id is string => typeof id === 'string'),
         },
       };
     }

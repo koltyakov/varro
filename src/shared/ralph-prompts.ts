@@ -1,4 +1,4 @@
-import type { RalphConfig, RalphIteration } from '../../../shared/ralph';
+import type { RalphConfig, RalphIteration } from './ralph';
 
 /**
  * Verification names are intentionally NOT hardcoded. Each project decides

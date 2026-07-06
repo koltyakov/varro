@@ -174,7 +174,7 @@ It stores:
 
 Several pieces are persisted in `localStorage`, including selected model, hidden models, permission mode preferences, and last active session ID.
 
-Ralph loop state is tracked separately in `src/webview/lib/stores/ralph-store.ts`, keyed by manager session ID and persisted in browser storage so manager dashboards and iteration history survive webview reloads.
+Ralph loop state is owned by the extension host (`src/extension/ralph-host.ts`, persisted in the workspace Memento). `src/webview/lib/stores/ralph-store.ts` is a render mirror fed by `ralph/state` broadcasts, with optimistic local updates for immediate dashboard feedback.
 
 #### OpenCode integration
 
@@ -210,11 +210,13 @@ Key components:
 
 ## Ralph Loop Flow
 
-Ralph is a plan-driven orchestration layer that runs inside the webview.
+Ralph is a plan-driven orchestration layer that runs on the extension host, so in-flight loops keep executing while the sidebar is hidden and resume after a window reload without waiting for the webview.
 
 - `src/shared/ralph.ts` defines Ralph run, iteration, model-selection, token-summary, and stop-reason types.
-- `/ralph` opens `RalphForm`, which creates a manager session, sends an anchor message with the loop config, and starts the runner.
-- `src/webview/components/ralph/ralph-runner.ts` creates one child session per iteration under the manager session, builds the iteration prompt from the plan document plus the previous iteration summary, and waits for the child to go idle.
+- `src/shared/ralph-runner-core.ts` contains the host-agnostic loop; all environment access (OpenCode requests, idle events, plan reads, run store) goes through injected ports so the same loop runs on the extension host, in the e2e harness, and against fakes in unit tests.
+- `src/extension/ralph-host.ts` instantiates the loop over `OpenCodeServer`, persists runs in the workspace Memento, reattaches persisted running loops on activation, and broadcasts `ralph/state` snapshots to the webview.
+- `/ralph` opens `RalphForm`, which creates a manager session, sends an anchor message with the loop config, and starts the runner. `src/webview/components/ralph/ralph-runner.ts` is a thin proxy that forwards start/stop/pause/resume to the host via `ralph/*` messages and applies optimistic mirror updates.
+- The loop creates one child session per iteration under the manager session, builds the iteration prompt from the plan document plus the previous iteration summary, and waits for the child to go idle.
 - Verification is intentionally split into a second turn. After the main work settles, the manager sends a dedicated verification prompt and parses `<name>: PASS|FAIL|SKIPPED` lines back out of the final assistant report.
 - If verification fails, the runner can spawn up to two repair child sessions for that iteration. Repair sessions stay under the same manager session so their history does not pollute the original iteration session.
 - Stop conditions come from both plan content and run history: `DONE` marker, consecutive passing iterations with a clean checklist, manual stop, iteration error, or iteration limit. Reaching the limit while the plan still has unchecked items or failed verification marks the run as `incomplete` (not `done`, and not the harder `failed` reserved for true iteration errors).
@@ -312,5 +314,5 @@ The webview adds more derived states on top of that data.
 - Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.
 - The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.
 - Provider limits are best-effort metadata; they are not guaranteed for every provider or model.
-- Ralph runs persist separately from normal session state and can reattach to in-flight manager sessions after a reload.
+- Ralph runs persist in the extension host's workspace Memento and reattach on activation, independent of webview lifetime; runs persisted by older builds in webview localStorage are migrated to the host through `ralph/sync`.
 - Server startup is lazy and workspace-scoped, which keeps activation lightweight and helps multi-project use against a shared OpenCode instance.

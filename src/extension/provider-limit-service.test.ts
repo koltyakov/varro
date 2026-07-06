@@ -617,4 +617,58 @@ describe('ProviderLimitService', () => {
     });
     expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(2);
   });
+
+  it('contains adapter exceptions into an error status instead of rejecting', async () => {
+    mocks.fetchProviderLimitFromAdapterMock.mockRejectedValueOnce(
+      new Error('adapter blew up on a provider deploy')
+    );
+    const service = new ProviderLimitService(createServer());
+
+    await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      status: 'error',
+      source: 'provider',
+      note: 'Provider limit adapter failed: adapter blew up on a provider deploy',
+    });
+  });
+
+  it('serves the last successful snapshot when the adapter later throws', async () => {
+    vi.useFakeTimers();
+    try {
+      const available = createStatus('available');
+      mocks.fetchProviderLimitFromAdapterMock.mockResolvedValueOnce(available);
+      const service = new ProviderLimitService(createServer());
+
+      await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({
+        status: 'available',
+      });
+
+      vi.advanceTimersByTime(6 * 60_000);
+      mocks.fetchProviderLimitFromAdapterMock.mockRejectedValueOnce(new Error('boom'));
+      await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({
+        status: 'available',
+        note: expect.stringContaining('Showing the last successful quota snapshot'),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('contains provider metadata failures into an error status instead of rejecting', async () => {
+    const server = {
+      request: vi.fn(async () => {
+        throw new Error('OpenCode server unreachable');
+      }),
+    };
+    const service = new ProviderLimitService(server);
+
+    await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      status: 'error',
+      source: 'opencode',
+      note: 'Failed to load provider metadata: OpenCode server unreachable',
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import pkg from 'esbuild';
-import { resolve, dirname } from 'path';
+import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const { build, context } = pkg;
@@ -8,8 +8,8 @@ const isWatch = process.argv.includes('--watch');
 
 const common = {
   entryPoints: [resolve(__dirname, 'src/extension/extension.ts')],
-  bundle: true,
   outfile: resolve(__dirname, 'dist/extension/extension.js'),
+  bundle: true,
   external: ['vscode'],
   format: 'cjs',
   platform: 'node',
