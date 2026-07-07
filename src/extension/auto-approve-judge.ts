@@ -500,7 +500,10 @@ function judgeOutputFormat() {
 function normalizeJudgeResponse(value: unknown): AutoApproveJudgeResponse {
   const record = asRecord(value);
   const info = asRecord(record?.info);
-  const structured = asRecord(info?.structured_output) || asRecord(info?.structuredOutput);
+  const structured =
+    asRecord(info?.structured) ||
+    asRecord(info?.structured_output) ||
+    asRecord(info?.structuredOutput);
   const directDecision = parseJudgeDecision(structured);
   if (directDecision) return directDecision;
 

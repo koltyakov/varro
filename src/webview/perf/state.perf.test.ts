@@ -10,7 +10,7 @@ import {
   removeMessagePart,
   upsertPart,
 } from '../lib/state';
-import type { AssistantMessage, FileDiff, Part, Todo } from '../types';
+import type { AssistantMessage, FileDiff, NormalizedTodo, Part } from '../types';
 import { respondPermissionWithDependencies } from '../hooks/session/session-approvals';
 import { createPerfRoot, settlePerfEffects } from './harness';
 
@@ -45,7 +45,7 @@ function createTextPart(id: string, messageID: string, text: string): Part {
   };
 }
 
-function createTodo(id: string): Todo {
+function createTodo(id: string): NormalizedTodo {
   return {
     id,
     content: 'Check batching',

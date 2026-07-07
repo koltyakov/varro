@@ -160,15 +160,13 @@ export class RalphHost {
     this.runner = createRalphRunner({
       store: this.store,
       createSession: async ({ title, permission, parentID }) => {
-        // opencode 1.16 dropped `permission` from the create body; create
-        // with title/parentID only, then apply rules via update (mirrors the
-        // webview client).
-        const session = await this.request('POST', '/session', { title, parentID });
+        const session = await this.request('POST', '/session', {
+          title,
+          parentID,
+          ...(permission.length > 0 ? { permission } : {}),
+        });
         const sessionID = getString(asRecord(session)?.id);
         if (!sessionID) throw new Error('Ralph child session was not created');
-        if (permission.length > 0) {
-          await this.request('PATCH', `/session/${encodeURIComponent(sessionID)}`, { permission });
-        }
         return sessionID;
       },
       sendPrompt: async (sessionId, body) => {

@@ -9,7 +9,7 @@ import type {
   Permission,
   PermissionGroupMember,
   QuestionRequest,
-  Todo,
+  NormalizedTodo,
   SessionStatus,
   FileDiff,
   Agent,
@@ -101,7 +101,7 @@ export interface AppState {
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
   messages: Array<{ info: Message; parts: Part[] }>;
-  todos: Todo[];
+  todos: NormalizedTodo[];
   permissions: Permission[];
   questions: QuestionRequest[];
   diffs: FileDiff[];

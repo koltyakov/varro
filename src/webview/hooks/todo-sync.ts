@@ -1,5 +1,5 @@
 import { appStore } from '../lib/stores/app-store';
-import type { AssistantMessage, Message, Part, Todo } from '../types';
+import type { AssistantMessage, Message, NormalizedTodo, Part } from '../types';
 
 const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
 type SessionEntry = { info: Message; parts: Part[] };
@@ -11,7 +11,7 @@ export function resetTodoSync() {
   appStore.setState('todos', []);
 }
 
-function setStateTodos(todos: Todo[], options?: { preserveAdvancedStatuses?: boolean }) {
+function setStateTodos(todos: NormalizedTodo[], options?: { preserveAdvancedStatuses?: boolean }) {
   const nextTodos = options?.preserveAdvancedStatuses
     ? preserveAdvancedTodoStatuses(todos, appStore.state.todos)
     : todos;
@@ -106,7 +106,7 @@ function advanceTodosFromMessages(messages: SessionEntry[]) {
   return true;
 }
 
-function isStaleSettledNativeTodoSnapshot(todos: Todo[], messages: SessionEntry[]) {
+function isStaleSettledNativeTodoSnapshot(todos: NormalizedTodo[], messages: SessionEntry[]) {
   if (todos.length === 0 || todos.some((todo) => todo.status === 'completed')) return false;
   if (deriveTodosFromMessages(messages).length > 0) return false;
 
@@ -114,9 +114,9 @@ function isStaleSettledNativeTodoSnapshot(todos: Todo[], messages: SessionEntry[
   return !!latestAssistant?.info.time.completed && !latestAssistant.info.error;
 }
 
-export function extractTodos(raw: unknown): Todo[] | null {
+export function extractTodos(raw: unknown): NormalizedTodo[] | null {
   if (Array.isArray(raw)) {
-    return raw.map(normalizeTodo).filter((todo): todo is Todo => Boolean(todo));
+    return raw.map(normalizeTodo).filter((todo): todo is NormalizedTodo => Boolean(todo));
   }
 
   if (!raw || typeof raw !== 'object') return null;
@@ -130,7 +130,7 @@ export function extractTodos(raw: unknown): Todo[] | null {
   return null;
 }
 
-export function deriveTodosFromMessages(messages: SessionEntry[]): Todo[] {
+export function deriveTodosFromMessages(messages: SessionEntry[]): NormalizedTodo[] {
   let lastUserMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]!.info.role === 'user') {
@@ -157,7 +157,7 @@ export function deriveTodosFromMessages(messages: SessionEntry[]): Todo[] {
 }
 
 export function syncTodosFromMessages(
-  setTodos: (todos: Todo[]) => void,
+  setTodos: (todos: NormalizedTodo[]) => void,
   messages: SessionEntry[],
   latestEventPayload?: unknown
 ) {
@@ -166,7 +166,10 @@ export function syncTodosFromMessages(
   setTodos(mergeTodoEventAdvance(messageTodos, eventTodos));
 }
 
-export function mergeTodoEventAdvance(messageTodos: Todo[], eventTodos: Todo[] | null): Todo[] {
+export function mergeTodoEventAdvance(
+  messageTodos: NormalizedTodo[],
+  eventTodos: NormalizedTodo[] | null
+): NormalizedTodo[] {
   if (!eventTodos || messageTodos.length === 0 || messageTodos.length !== eventTodos.length) {
     return messageTodos;
   }
@@ -179,7 +182,10 @@ export function mergeTodoEventAdvance(messageTodos: Todo[], eventTodos: Todo[] |
   });
 }
 
-export function preserveAdvancedTodoStatuses(nextTodos: Todo[], currentTodos: Todo[]): Todo[] {
+export function preserveAdvancedTodoStatuses(
+  nextTodos: NormalizedTodo[],
+  currentTodos: NormalizedTodo[]
+): NormalizedTodo[] {
   if (nextTodos.length === 0 || nextTodos.length !== currentTodos.length) return nextTodos;
 
   return nextTodos.map((nextTodo, index) => {
@@ -191,8 +197,8 @@ export function preserveAdvancedTodoStatuses(nextTodos: Todo[], currentTodos: To
 }
 
 export function handoffTodosToMessages(
-  currentTodos: Todo[],
-  setTodos: (todos: Todo[]) => void,
+  currentTodos: NormalizedTodo[],
+  setTodos: (todos: NormalizedTodo[]) => void,
   messages: Array<{ info: Message; parts: Part[] }>
 ): boolean {
   const nextTodos = deriveTodosFromMessages(messages);
@@ -230,7 +236,7 @@ export function handoffTodosToMessages(
   return true;
 }
 
-function extractTodosFromParallelTool(raw: unknown): Todo[] | null {
+function extractTodosFromParallelTool(raw: unknown): NormalizedTodo[] | null {
   if (!raw || typeof raw !== 'object') return null;
 
   const toolUses = (raw as Record<string, unknown>).tool_uses;
@@ -251,7 +257,7 @@ function extractTodosFromParallelTool(raw: unknown): Todo[] | null {
   return null;
 }
 
-function normalizeTodo(raw: unknown): Todo | null {
+function normalizeTodo(raw: unknown): NormalizedTodo | null {
   if (!raw || typeof raw !== 'object') return null;
 
   const record = raw as Record<string, unknown>;
@@ -275,7 +281,7 @@ function normalizeTodo(raw: unknown): Todo | null {
   };
 }
 
-function isSameTodo(left: Todo, right: Todo) {
+function isSameTodo(left: NormalizedTodo, right: NormalizedTodo) {
   return left.id === right.id && left.content === right.content;
 }
 
@@ -295,7 +301,7 @@ function isTodoToolName(name: string) {
   return TODO_TOOL_NAMES.has(normalized) || TODO_TOOL_NAMES.has(bareName);
 }
 
-function extractTodosFromPart(part: Part): Todo[] | null {
+function extractTodosFromPart(part: Part): NormalizedTodo[] | null {
   if (part.type !== 'tool') return null;
 
   const toolName = part.tool.trim().toLowerCase();
@@ -320,7 +326,7 @@ function extractTodosFromPart(part: Part): Todo[] | null {
   );
 }
 
-function extractTodosFromOutput(raw: unknown): Todo[] | null {
+function extractTodosFromOutput(raw: unknown): NormalizedTodo[] | null {
   if (typeof raw !== 'string') return extractTodos(raw);
 
   try {
@@ -330,7 +336,7 @@ function extractTodosFromOutput(raw: unknown): Todo[] | null {
   }
 }
 
-function areTodosEqual(left: Todo[], right: Todo[]) {
+function areTodosEqual(left: NormalizedTodo[], right: NormalizedTodo[]) {
   if (left === right) return true;
   if (left.length !== right.length) return false;
 

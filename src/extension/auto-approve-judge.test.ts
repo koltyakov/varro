@@ -358,6 +358,26 @@ describe('AutoApproveJudge', () => {
     expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
   });
 
+  it('reads structured judge output from current OpenCode responses', async () => {
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        return { info: { structured: { decision: 'allow', reason: 'Current field.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge({ permission: cargoBuildPermission('perm-structured') })
+    ).resolves.toEqual({
+      decision: 'allow',
+      reason: 'Current field.',
+    });
+  });
+
   it('reuses an allow verdict for an identical permission without a second judge session', async () => {
     let sessionCount = 0;
     const request = vi.fn(async (method: string, path: string) => {

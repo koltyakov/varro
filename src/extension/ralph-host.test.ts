@@ -146,11 +146,10 @@ describe('RalphHost', () => {
     });
 
     expect(ensureServerStarted).toHaveBeenCalled();
-    // Child session created via POST /session with permission applied via PATCH.
-    expect(server.request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    // Child session created with its permission rules in the create body.
     expect(server.request).toHaveBeenCalledWith(
-      'PATCH',
-      expect.stringContaining('/session/child-1'),
+      'POST',
+      '/session',
       expect.objectContaining({ permission: expect.any(Array) })
     );
     const run = host.getStatePayload().runs[config.managerSessionId];

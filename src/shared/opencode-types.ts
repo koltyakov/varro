@@ -369,8 +369,9 @@ export type Todo = {
   content: string;
   status: string;
   priority: string;
-  id: string;
 };
+
+export type NormalizedTodo = Todo & { id: string };
 
 export type ModelCapabilitiesModality = 'text' | 'audio' | 'image' | 'video' | 'pdf';
 

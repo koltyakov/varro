@@ -63,15 +63,7 @@ export const client = {
       permission?: PermissionRule[];
       parentID?: string;
     }): Promise<Session> {
-      // opencode 1.16 dropped `permission` from the create body (POST /session
-      // 400s if it's present). Create with title/parentID only, then apply the
-      // permission rules via the update endpoint, which still accepts them.
-      const { permission, ...createBody } = body || {};
-      const session = await apiCall<Session>('POST', '/session', createBody);
-      if (permission && permission.length > 0) {
-        return apiCall<Session>('PATCH', `/session/${session.id}`, { permission });
-      }
-      return session;
+      return apiCall<Session>('POST', '/session', body || {});
     },
     async update(
       id: string,

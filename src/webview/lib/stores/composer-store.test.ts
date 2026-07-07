@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EditorContext } from '../../../shared/protocol';
-import type { Todo } from '../../types';
+import type { NormalizedTodo } from '../../types';
 import { composerStore } from './composer-store';
 import { resetDefaultAppState, setState, state } from '../state';
 
@@ -49,7 +49,7 @@ describe('composerStore', () => {
   });
 
   it('clears dropped files and todos', () => {
-    const todo: Todo = {
+    const todo: NormalizedTodo = {
       id: 'todo-1',
       content: 'Ship tests',
       status: 'pending',

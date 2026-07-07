@@ -8,6 +8,7 @@ import type {
   Agent,
   AssistantMessage,
   Message,
+  NormalizedTodo,
   Part,
   Provider,
   QuestionRequest,
@@ -555,7 +556,7 @@ function makeTodoToolPart(
   sessionId: string,
   messageId: string,
   id: string,
-  todos: Array<{ id: string; content: string; status: string; priority: string }>
+  todos: NormalizedTodo[]
 ): Extract<Part, { type: 'tool' }> {
   return {
     id,
@@ -2813,7 +2814,6 @@ function normalizeTodo(value: unknown): Todo | null {
     content,
     status: typeof record.status === 'string' ? record.status : 'pending',
     priority: typeof record.priority === 'string' ? record.priority : 'medium',
-    id: typeof record.id === 'string' || typeof record.id === 'number' ? String(record.id) : content,
   };
 }
 

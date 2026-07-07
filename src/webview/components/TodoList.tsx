@@ -1,6 +1,6 @@
 import { For, createEffect, createSignal } from 'solid-js';
 import { useAppState } from '../lib/app-state-context';
-import type { Todo } from '../types';
+import type { NormalizedTodo } from '../types';
 
 export function TodoList() {
   const appState = useAppState();
@@ -72,7 +72,7 @@ export function TodoList() {
   );
 }
 
-function TodoItem(props: { todo: Todo }) {
+function TodoItem(props: { todo: NormalizedTodo }) {
   const icon = () => {
     switch (props.todo.status) {
       case 'completed':

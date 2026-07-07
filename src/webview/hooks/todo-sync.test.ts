@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
-import type { AssistantMessage, Part, Todo, UserMessage } from '../types';
+import type { AssistantMessage, NormalizedTodo, Part, UserMessage } from '../types';
 
 const { setState, state } = vi.hoisted(() => ({
   setState: vi.fn(),
   state: {
-    todos: [] as Todo[],
+    todos: [] as NormalizedTodo[],
     messages: [] as Array<{ info: UserMessage | AssistantMessage; parts: Part[] }>,
     activeSessionId: 'session-1' as string | null,
     sessionStatus: {} as Record<string, { type: 'idle' | 'busy' | 'retry'; attempt?: number }>,
@@ -72,7 +72,7 @@ function assistantMessage(id: string, overrides?: Partial<AssistantMessage>): As
   };
 }
 
-function todoToolPart(todos: Todo[]): Part {
+function todoToolPart(todos: NormalizedTodo[]): Part {
   return {
     id: 'part-1',
     sessionID: 'session-1',
