@@ -16,10 +16,16 @@ vi.mock('./logger', () => ({
 
 vi.mock('./util/opencode-request', () => ({
   getOpenCodeDirectoryHeaders: vi.fn(() => ({})),
-  scopeOpenCodeRequest: vi.fn((baseUrl: string, path: string, directory?: string) => ({
-    url: new URL(path, baseUrl).toString(),
-    directory,
-  })),
+  scopeOpenCodeRequest: vi.fn((baseUrl: string, path: string, directory?: string) => {
+    const url = new URL(path, baseUrl);
+    if (directory) {
+      url.searchParams.set('directory', directory);
+      if (url.pathname.startsWith('/api/')) {
+        url.searchParams.set('location[directory]', directory);
+      }
+    }
+    return { url: url.toString(), directory };
+  }),
 }));
 
 import { OpenCodeTransport } from './open-code-transport';
@@ -115,7 +121,7 @@ describe('OpenCodeTransport event stream path', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/api/event');
   });
 
-  it('scopes the v2 /api/event stream with headers only', async () => {
+  it('scopes the v2 /api/event stream with SDK-compatible query params and headers', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -130,8 +136,14 @@ describe('OpenCodeTransport event stream path', () => {
 
     await transport.startEventStream();
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/api/event');
-    expect(scopeOpenCodeRequest).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'http://localhost:4096/api/event?directory=%2Frepo&location%5Bdirectory%5D=%2Frepo'
+    );
+    expect(scopeOpenCodeRequest).toHaveBeenCalledWith(
+      'http://localhost:4096',
+      '/api/event',
+      '/repo'
+    );
     expect(getOpenCodeDirectoryHeaders).toHaveBeenCalledWith('/repo');
   });
 

@@ -111,6 +111,15 @@ describe('scopeOpenCodeRequest', () => {
     expect(result.directory).toBe('/workspace');
   });
 
+  it('adds current API location directory query params for /api paths', () => {
+    const result = scopeOpenCodeRequest('http://127.0.0.1:4096', '/api/event', '/repo');
+
+    expect(result.url).toBe(
+      'http://127.0.0.1:4096/api/event?directory=%2Frepo&location%5Bdirectory%5D=%2Frepo'
+    );
+    expect(result.directory).toBe('/repo');
+  });
+
   it('normalizes Windows directory scoping for session requests', () => {
     const result = scopeOpenCodeRequest(
       'http://127.0.0.1:4096',

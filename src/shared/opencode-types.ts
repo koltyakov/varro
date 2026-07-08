@@ -1,8 +1,25 @@
+export type OutputFormatText = {
+  type: 'text';
+};
+
+export type JsonSchema = {
+  [key: string]: unknown;
+};
+
+export type OutputFormatJsonSchema = {
+  type: 'json_schema';
+  schema: JsonSchema;
+  retryCount?: number;
+};
+
+export type OutputFormat = OutputFormatText | OutputFormatJsonSchema;
+
 export type UserMessage = {
   id: string;
   sessionID: string;
   role: 'user';
   time: { created: number };
+  format?: OutputFormat;
   summary?: { title?: string; body?: string; diffs: FileDiff[] };
   agent: string;
   model: { providerID: string; modelID: string; variant?: string };
@@ -20,12 +37,75 @@ export type OpenCodeModelRouting = {
   agentModels: Record<string, OpenCodeModelRoute>;
 };
 
+export type ProviderAuthError = {
+  name: 'ProviderAuthError';
+  data: { providerID: string; message: string };
+};
+
+export type UnknownError = {
+  name: 'UnknownError';
+  data: { message: string; ref?: string };
+};
+
+export type MessageOutputLengthError = {
+  name: 'MessageOutputLengthError';
+  data: { message?: string; [key: string]: unknown };
+};
+
+export type MessageAbortedError = {
+  name: 'MessageAbortedError';
+  data: { message: string };
+};
+
+export type StructuredOutputError = {
+  name: 'StructuredOutputError';
+  data: { message: string; retries: number };
+};
+
+export type ContextOverflowError = {
+  name: 'ContextOverflowError';
+  data: { message: string; responseBody?: string };
+};
+
+export type ContentFilterError = {
+  name: 'ContentFilterError';
+  data: { message: string };
+};
+
+export type ApiError = {
+  name: 'APIError';
+  data: {
+    message: string;
+    statusCode?: number;
+    isRetryable?: boolean;
+    responseHeaders?: { [key: string]: string };
+    responseBody?: string;
+    metadata?: { [key: string]: string };
+  };
+};
+
+export type LegacyAssistantError = {
+  name: string;
+  data?: { message?: string; [key: string]: unknown };
+};
+
+export type AssistantMessageError =
+  | ProviderAuthError
+  | UnknownError
+  | MessageOutputLengthError
+  | MessageAbortedError
+  | StructuredOutputError
+  | ContextOverflowError
+  | ContentFilterError
+  | ApiError
+  | LegacyAssistantError;
+
 export type AssistantMessage = {
   id: string;
   sessionID: string;
   role: 'assistant';
   time: { created: number; completed?: number };
-  error?: { name: string; data?: { message?: string } };
+  error?: AssistantMessageError;
   parentID: string;
   modelID: string;
   providerID: string;
@@ -41,6 +121,7 @@ export type AssistantMessage = {
     reasoning: number;
     cache: { read: number; write: number };
   };
+  structured?: unknown;
   variant?: string;
   finish?: string;
 };
@@ -206,7 +287,7 @@ export type RetryPart = {
   messageID: string;
   type: 'retry';
   attempt: number;
-  error: { name: string; data: { message: string } };
+  error: ApiError | { name: string; data: { message: string; [key: string]: unknown } };
   time: { created: number };
 };
 
@@ -268,6 +349,7 @@ export type Session = {
   agent?: string;
   model?: { id: string; providerID: string; variant?: string };
   version: string;
+  metadata?: { [key: string]: unknown };
   time: { created: number; updated: number; compacting?: number; archived?: number };
   permission?: PermissionRule[];
   revert?: { messageID: string; partID?: string; snapshot?: string; diff?: string };

@@ -9,8 +9,14 @@ export function scopeOpenCodeRequest(baseUrl: string, path: string, directory?: 
   const explicitDirectory = hasExplicitDirectory
     ? normalizeOpenCodeDirectory(url.searchParams.get('directory') || undefined)
     : undefined;
+  const hasExplicitLocationDirectory = url.searchParams.has('location[directory]');
+  const explicitLocationDirectory = hasExplicitLocationDirectory
+    ? normalizeOpenCodeDirectory(url.searchParams.get('location[directory]') || undefined)
+    : undefined;
+  const isGlobalPath = url.pathname.startsWith('/global/');
+  const isApiPath = url.pathname.startsWith('/api/');
 
-  if (!url.pathname.startsWith('/global/')) {
+  if (!isGlobalPath) {
     if (explicitDirectory) {
       url.searchParams.set('directory', explicitDirectory);
     } else if (hasExplicitDirectory) {
@@ -18,10 +24,21 @@ export function scopeOpenCodeRequest(baseUrl: string, path: string, directory?: 
     } else if (normalizedDirectory) {
       url.searchParams.set('directory', normalizedDirectory);
     }
+
+    if (isApiPath) {
+      if (explicitLocationDirectory) {
+        url.searchParams.set('location[directory]', explicitLocationDirectory);
+      } else if (hasExplicitLocationDirectory) {
+        url.searchParams.delete('location[directory]');
+      } else {
+        const locationDirectory = explicitDirectory ?? normalizedDirectory;
+        if (locationDirectory) url.searchParams.set('location[directory]', locationDirectory);
+      }
+    }
   }
 
-  const scopedDirectory = !url.pathname.startsWith('/global/')
-    ? (explicitDirectory ?? normalizedDirectory)
+  const scopedDirectory = !isGlobalPath
+    ? (explicitLocationDirectory ?? explicitDirectory ?? normalizedDirectory)
     : normalizedDirectory;
 
   return { url: url.toString(), directory: scopedDirectory };
