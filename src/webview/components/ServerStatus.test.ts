@@ -92,6 +92,22 @@ describe('ServerStatus', () => {
     });
   });
 
+  it('shows actionable guidance when OpenCode must be updated', () => {
+    setState('serverStatus', {
+      state: 'error',
+      message:
+        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the running server is 1.15.13.',
+    });
+
+    renderServerStatus();
+
+    expect(container?.textContent).toContain('OpenCode update required');
+    expect(container?.textContent).toContain('the running server is 1.15.13');
+    expect(container?.textContent).toContain('opencode upgrade');
+    expect(container?.textContent).toContain('Varro: Restart Server');
+    expect(container?.textContent).not.toContain('OpenCode could not start');
+  });
+
   it('shows provider setup actions when the server is running without configured providers', () => {
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
     setState('providersLoaded', true);

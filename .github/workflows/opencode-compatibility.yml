@@ -1,0 +1,52 @@
+name: OpenCode Compatibility
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      count:
+        description: Number of newest stable OpenCode releases to test
+        required: false
+        default: '12'
+  pull_request:
+    paths:
+      - '.github/workflows/opencode-compatibility.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/opencode-compatibility/**'
+      - 'src/extension/open-code-transport.ts'
+      - 'src/extension/server.ts'
+      - 'src/shared/opencode-compatibility.ts'
+      - 'src/webview/lib/client.ts'
+
+concurrency:
+  group: opencode-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      OPENCODE_COMPAT_COUNT: ${{ inputs.count || '12' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Probe published OpenCode releases in Docker
+        run: npm run test:compatibility -- --count "$OPENCODE_COMPAT_COUNT"
+
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: opencode-compatibility
+          path: artifacts/opencode-compatibility.json
+          if-no-files-found: warn

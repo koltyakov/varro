@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as FsModule from 'fs';
 import type * as FsPromisesModule from 'fs/promises';
+import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
@@ -1087,13 +1088,153 @@ describe('OpenCodeServer maintenance', () => {
   });
 });
 
+describe('OpenCodeServer compatibility gate', () => {
+  it('blocks an outdated running server when automatic updates are disabled', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      syncInjectedConfigFile: () => Promise<void>;
+    };
+    api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
+
+    await expect(server.start()).rejects.toThrow('OpenCode update required');
+
+    expect(server.status).toEqual(
+      expect.objectContaining({
+        state: 'error',
+        message: expect.stringContaining(
+          `Varro requires OpenCode ${MINIMUM_SUPPORTED_OPENCODE_VERSION} or newer`
+        ),
+      })
+    );
+    expect(server.status).toEqual(
+      expect.objectContaining({
+        message: expect.stringContaining('Automatic updates are disabled'),
+      })
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('does not replace an outdated server while it has active sessions', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const upgradeRunningServer = vi.fn().mockResolvedValue(true);
+    const api = server as unknown as {
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      syncInjectedConfigFile: () => Promise<void>;
+      hasActiveSessions: () => Promise<boolean>;
+      stopServerForRestart: () => Promise<void>;
+      upgradeRunningServer: () => Promise<boolean>;
+    };
+    api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(true);
+    api.stopServerForRestart = stopServerForRestart;
+    api.upgradeRunningServer = upgradeRunningServer;
+
+    await expect(server.start()).rejects.toThrow('has active sessions');
+
+    expect(upgradeRunningServer).not.toHaveBeenCalled();
+    expect(stopServerForRestart).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('updates and replaces an idle outdated server before reporting success', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true, 'opencode');
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const upgradeRunningServer = vi.fn().mockResolvedValue(false);
+    const upgradeCli = vi.fn().mockResolvedValue(undefined);
+    const readInstalledCliVersion = vi
+      .fn<() => Promise<string | null>>()
+      .mockResolvedValueOnce('1.15.13')
+      .mockResolvedValue(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    const api = server as unknown as {
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      syncInjectedConfigFile: () => Promise<void>;
+      hasActiveSessions: () => Promise<boolean>;
+      stopServerForRestart: () => Promise<void>;
+      upgradeRunningServer: () => Promise<boolean>;
+      readInstalledCliVersion: () => Promise<string | null>;
+      pollHealth: (
+        startAttemptId: number,
+        disposeGeneration: number,
+        resolve: (url: string) => void,
+        reject: (err: Error) => void
+      ) => void;
+      processManager: { upgradeCli: () => Promise<void> };
+    };
+    api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.stopServerForRestart = stopServerForRestart;
+    api.upgradeRunningServer = upgradeRunningServer;
+    api.readInstalledCliVersion = readInstalledCliVersion;
+    api.processManager.upgradeCli = upgradeCli;
+    api.pollHealth = (_startAttemptId, _disposeGeneration, resolve) => resolve(server.url);
+    spawnMock.mockReturnValue({
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    } as never);
+
+    await expect(server.start()).resolves.toBe(server.url);
+
+    expect(upgradeRunningServer).toHaveBeenCalledWith(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    expect(stopServerForRestart).toHaveBeenCalledOnce();
+    expect(upgradeCli).toHaveBeenCalledOnce();
+    expect(spawnMock).toHaveBeenCalledOnce();
+  });
+
+  it('shows actionable recovery when the required automatic update fails', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      syncInjectedConfigFile: () => Promise<void>;
+      hasActiveSessions: () => Promise<boolean>;
+      stopServerForRestart: () => Promise<void>;
+      upgradeRunningServer: () => Promise<boolean>;
+      readInstalledCliVersion: () => Promise<string | null>;
+      processManager: { upgradeCli: () => Promise<void> };
+    };
+    api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    api.upgradeRunningServer = vi.fn().mockResolvedValue(false);
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.15.13');
+    api.processManager.upgradeCli = vi.fn().mockRejectedValue(new Error('permission denied'));
+
+    await expect(server.start()).rejects.toThrow('The automatic update failed: permission denied');
+
+    expect(server.status).toEqual(
+      expect.objectContaining({
+        state: 'error',
+        message: expect.stringContaining('Run "opencode upgrade"'),
+      })
+    );
+  });
+});
+
 describe('OpenCodeServer startup health polling', () => {
   it('keeps the original pollHealth callbacks across recursive retries', async () => {
     const server = new OpenCodeServer(4096, false);
     const resolved = vi.fn();
     const rejected = vi.fn();
     const api = server as unknown as {
-      checkHealth: () => Promise<boolean>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
       pollHealth: (
         startAttemptId: number,
         disposeGeneration: number,
@@ -1105,10 +1246,10 @@ describe('OpenCodeServer startup health polling', () => {
       disposeGeneration: number;
     };
 
-    api.checkHealth = vi
-      .fn<() => Promise<boolean>>()
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    api.readHealthInfo = vi
+      .fn<() => Promise<{ healthy: boolean; version?: string }>>()
+      .mockResolvedValueOnce({ healthy: false })
+      .mockResolvedValueOnce({ healthy: true, version: MINIMUM_SUPPORTED_OPENCODE_VERSION });
     api.startAttemptId = 1;
     api.disposeGeneration = 0;
 

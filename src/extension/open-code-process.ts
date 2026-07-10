@@ -300,6 +300,10 @@ export class OpenCodeProcess {
     return this.autoStart;
   }
 
+  get isAutoUpdateEnabled(): boolean {
+    return vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true);
+  }
+
   get isSimulatingMissingCli(): boolean {
     return this.simulateMissingCli;
   }
@@ -787,7 +791,11 @@ export class OpenCodeProcess {
   }
 
   private isBackgroundCliAutoUpdateEnabled() {
-    return vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', false);
+    return this.isAutoUpdateEnabled;
+  }
+
+  async upgradeCli() {
+    await this.runCliCommand(['upgrade'], OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS);
   }
 
   private async runBackgroundCliUpgrade(
@@ -804,7 +812,7 @@ export class OpenCodeProcess {
       );
       return;
     }
-    await this.runCliCommand(['upgrade'], OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS);
+    await this.upgradeCli();
     logger.info(`Updated OpenCode CLI to ${latestCliVersion} in background`);
   }
 

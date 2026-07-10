@@ -1,11 +1,20 @@
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import {
+  MINIMUM_SUPPORTED_OPENCODE_VERSION,
+  OPENCODE_UPDATE_REQUIRED_PREFIX,
+} from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
 import { OpenCodeProcess, type OpenCodeCompactionSettings } from './open-code-process';
 import { OpenCodeTransport, type OpenCodeRequestOptions } from './open-code-transport';
 import { logger } from './logger';
 import { ServerLifecycleStateMachine } from './server-lifecycle';
-import { isPortInUseMessage, normalizeRunningStatus } from './server-utils';
+import {
+  compareVersions,
+  extractVersion,
+  isPortInUseMessage,
+  normalizeRunningStatus,
+} from './server-utils';
 
 export type { OpenCodeCompactionSettings };
 
@@ -36,6 +45,17 @@ function getUpgradeErrorMessage(value: unknown) {
   if (!value || typeof value !== 'object') return '';
   const error = (value as { error?: unknown }).error;
   return typeof error === 'string' ? error : '';
+}
+
+function isSupportedOpenCodeVersion(version: string | undefined): boolean {
+  const normalized = typeof version === 'string' ? extractVersion(version) : null;
+  return (
+    normalized !== null && compareVersions(normalized, MINIMUM_SUPPORTED_OPENCODE_VERSION) >= 0
+  );
+}
+
+function createUpdateRequiredMessage(observed: string, reason: string): string {
+  return `${OPENCODE_UPDATE_REQUIRED_PREFIX} Varro requires OpenCode ${MINIMUM_SUPPORTED_OPENCODE_VERSION} or newer, but ${observed}. ${reason} Run "opencode upgrade", stop any running OpenCode server, then run "Varro: Restart Server".`;
 }
 
 export class OpenCodeServer extends EventEmitter {
@@ -203,20 +223,25 @@ export class OpenCodeServer extends EventEmitter {
 
       await this.syncInjectedConfigFile();
 
-      const healthy = await this.checkHealth();
+      const health = await this.readHealthInfo();
       this.throwIfStartCancelled(disposeGeneration);
-      if (healthy) {
-        logger.info(`Found existing OpenCode server at ${this.url}`);
-        this.processManager.prepareForHealthyExistingServer();
-        if (this.hasInjectedCompactionOverride()) {
-          logger.warn(
-            'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
-          );
+      if (health.healthy) {
+        if (isSupportedOpenCodeVersion(health.version)) {
+          logger.info(`Found existing OpenCode server at ${this.url}`);
+          this.processManager.prepareForHealthyExistingServer();
+          if (this.hasInjectedCompactionOverride()) {
+            logger.warn(
+              'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
+            );
+          }
+          this.setRunningStatus(this.url, 'healthy');
+          this.startEventStream();
+          this.requestMaintenanceCheck();
+          return this.url;
         }
-        this.setRunningStatus(this.url, 'healthy');
-        this.startEventStream();
-        this.requestMaintenanceCheck();
-        return this.url;
+
+        await this.replaceIncompatibleServer(health.version);
+        this.throwIfStartCancelled(disposeGeneration);
       }
 
       if (!this.processManager.isAutoStartEnabled) {
@@ -230,6 +255,9 @@ export class OpenCodeServer extends EventEmitter {
             : 'server not running'
         );
       }
+
+      await this.ensureCompatibleCliForLaunch();
+      this.throwIfStartCancelled(disposeGeneration);
 
       return new Promise((resolve, reject) => {
         this.setStatus({ state: 'starting' });
@@ -274,9 +302,20 @@ export class OpenCodeServer extends EventEmitter {
 
         const recoverOrFailStartup = async (fallback: string) => {
           if (isStaleAttempt()) return;
-          const healthyNow = await this.checkHealth();
+          const healthNow = await this.readHealthInfo();
           if (isStaleAttempt()) return;
-          if (healthyNow) {
+          if (healthNow.healthy && !isSupportedOpenCodeVersion(healthNow.version)) {
+            failStartup(
+              createUpdateRequiredMessage(
+                healthNow.version
+                  ? `the running server is ${healthNow.version}`
+                  : 'the running server version could not be determined',
+                'The server that started is not compatible.'
+              )
+            );
+            return;
+          }
+          if (healthNow.healthy) {
             this.setRunningStatus(this.url, 'healthy');
             this.processManager.resetRetryCount();
             this.startEventStream();
@@ -418,11 +457,21 @@ export class OpenCodeServer extends EventEmitter {
       if (startAttemptId !== this.startAttemptId || disposeGeneration !== this.disposeGeneration) {
         return;
       }
-      const healthy = await this.checkHealth();
+      const health = await this.readHealthInfo();
       if (startAttemptId !== this.startAttemptId || disposeGeneration !== this.disposeGeneration) {
         return;
       }
-      if (healthy) {
+      if (health.healthy && !isSupportedOpenCodeVersion(health.version)) {
+        this.cancelPollHealth();
+        const message = createUpdateRequiredMessage(
+          health.version
+            ? `the running server is ${health.version}`
+            : 'the running server version could not be determined',
+          'The server that started is not compatible.'
+        );
+        this.setStatus({ state: 'error', message });
+        reject(new Error(message));
+      } else if (health.healthy) {
         this.cancelPollHealth();
         this.setRunningStatus(this.url, 'healthy');
         this.processManager.resetRetryCount();
@@ -433,11 +482,6 @@ export class OpenCodeServer extends EventEmitter {
         this.pollHealth(startAttemptId, disposeGeneration, resolve, reject, attempt + 1);
       }
     }, 200);
-  }
-
-  private async checkHealth(): Promise<boolean> {
-    const data = await this.readHealthInfo();
-    return data.healthy === true;
   }
 
   async request(
@@ -520,6 +564,102 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
+  private async replaceIncompatibleServer(serverVersion: string | undefined) {
+    const observed = serverVersion
+      ? `the running server is ${serverVersion}`
+      : 'the running server version could not be determined';
+
+    if (!this.processManager.isAutoUpdateEnabled) {
+      this.failForRequiredUpdate(observed, 'Automatic updates are disabled.');
+    }
+    if (!this.processManager.isAutoStartEnabled) {
+      this.failForRequiredUpdate(
+        observed,
+        'Varro server auto-start is disabled, so Varro cannot safely replace the running server.'
+      );
+    }
+
+    let activeSessions: boolean;
+    try {
+      activeSessions = await this.hasActiveSessions();
+    } catch (err) {
+      this.failForRequiredUpdate(
+        observed,
+        `Varro could not verify that the old server is idle: ${err instanceof Error ? err.message : String(err)}.`
+      );
+    }
+    if (activeSessions) {
+      this.failForRequiredUpdate(
+        observed,
+        'The old server has active sessions and was not stopped to avoid interrupting work.'
+      );
+    }
+
+    logger.info(
+      `OpenCode server ${serverVersion || 'unknown'} is older than required ${MINIMUM_SUPPORTED_OPENCODE_VERSION}; attempting a safe update`
+    );
+    await this.upgradeRunningServer(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    await this.stopServerForRestart();
+    await this.ensureCompatibleCliForLaunch(observed);
+  }
+
+  private async ensureCompatibleCliForLaunch(observedServer?: string) {
+    let installedVersion: string | null;
+    try {
+      installedVersion = await this.readInstalledCliVersion();
+    } catch (err) {
+      logger.warn(
+        `Could not verify the installed OpenCode CLI version before startup: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return;
+    }
+
+    if (!installedVersion || isSupportedOpenCodeVersion(installedVersion)) return;
+
+    const observed = observedServer || `the installed CLI is ${installedVersion}`;
+    if (!this.processManager.isAutoUpdateEnabled) {
+      this.failForRequiredUpdate(observed, 'Automatic updates are disabled.');
+    }
+
+    logger.info(
+      `Updating OpenCode CLI ${installedVersion} to meet Varro's minimum ${MINIMUM_SUPPORTED_OPENCODE_VERSION}`
+    );
+    try {
+      await this.processManager.upgradeCli();
+    } catch (err) {
+      this.failForRequiredUpdate(
+        observed,
+        `The automatic update failed: ${err instanceof Error ? err.message : String(err)}.`
+      );
+    }
+
+    let updatedVersion: string | null;
+    try {
+      updatedVersion = await this.readInstalledCliVersion();
+    } catch (err) {
+      this.failForRequiredUpdate(
+        observed,
+        `The update finished, but Varro could not verify it: ${err instanceof Error ? err.message : String(err)}.`
+      );
+    }
+    if (!updatedVersion || !isSupportedOpenCodeVersion(updatedVersion)) {
+      this.failForRequiredUpdate(
+        observed,
+        `The automatic update did not install a compatible CLI${updatedVersion ? ` (found ${updatedVersion})` : ''}.`
+      );
+    }
+
+    logger.info(`OpenCode CLI updated successfully to ${updatedVersion}`);
+  }
+
+  private failForRequiredUpdate(observed: string, reason: string): never {
+    const message = createUpdateRequiredMessage(observed, reason);
+    this.cancelPollHealth();
+    this.stopEventStream();
+    this.setStatus({ state: 'error', message });
+    throw new Error(message);
+  }
+
   private async restartServerForCliUpdate(serverVersion: string, installedCliVersion: string) {
     await this.processManager.restartServerForCliUpdate(serverVersion, installedCliVersion, {
       beginManagedRestart: () => this.lifecycle.beginManagedRestart(),
@@ -589,7 +729,6 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async upgradeRunningServer(targetVersion: string) {
-    if (this._status.state !== 'running') return false;
     try {
       const result = await this.request('POST', '/global/upgrade', { target: targetVersion });
       if (isSuccessfulUpgradeResult(result)) {

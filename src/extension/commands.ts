@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
+import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer, OpenCodeServerInfo } from './server';
@@ -181,6 +182,7 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     '',
     '## OpenCode',
     `- SDK version: ${sdkVersion}`,
+    `- Minimum supported version: ${MINIMUM_SUPPORTED_OPENCODE_VERSION}`,
     `- CLI version: ${cliVersion}`,
     `- Server status: ${status}`,
     `- Server URL: ${serverInfo.url}`,

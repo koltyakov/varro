@@ -1,4 +1,5 @@
 import { Show } from 'solid-js';
+import { OPENCODE_UPDATE_REQUIRED_PREFIX } from '../../shared/opencode-compatibility';
 import { postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
 import { useAppState } from '../lib/app-state-context';
@@ -19,6 +20,8 @@ export function ServerStatus() {
     return currentStatus.state === 'error' ? currentStatus.message.trim() : '';
   };
   const isMissingCliError = () => serverErrorMessage().includes('OpenCode CLI not found');
+  const isUpdateRequiredError = () =>
+    serverErrorMessage().startsWith(OPENCODE_UPDATE_REQUIRED_PREFIX);
 
   return (
     <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center">
@@ -51,7 +54,14 @@ export function ServerStatus() {
       <Show when={status().state === 'error'}>
         <Show
           when={isMissingCliError()}
-          fallback={<GenericErrorState message={serverErrorMessage()} />}
+          fallback={
+            <Show
+              when={isUpdateRequiredError()}
+              fallback={<GenericErrorState message={serverErrorMessage()} />}
+            >
+              <UpdateRequiredState message={serverErrorMessage()} />
+            </Show>
+          }
         >
           <div class="flex w-full max-w-62.5 flex-col items-center gap-4 text-center">
             <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-warning/10">
@@ -163,6 +173,43 @@ export function ServerStatus() {
           </button>
         </div>
       </Show>
+    </div>
+  );
+}
+
+function UpdateRequiredState(props: { message: string }) {
+  return (
+    <div class="flex w-full max-w-75 flex-col items-center gap-4 text-center">
+      <div class="flex h-10 w-10 items-center justify-center rounded-full bg-vscode-warning/10">
+        <svg
+          class="h-5 w-5 text-vscode-warning"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 21h14" />
+        </svg>
+      </div>
+      <div class="flex flex-col gap-1.5 px-4">
+        <p class="text-[13px] font-medium text-vscode-fg">OpenCode update required</p>
+        <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
+      </div>
+      <div class="w-full px-4">
+        <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
+          <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">Update</p>
+          <code class="mt-1 block font-mono text-[12px] text-vscode-fg">opencode upgrade</code>
+        </div>
+      </div>
+      <p class="px-4 text-[11px] leading-normal text-vscode-muted/80">
+        Then run <span class="font-medium text-vscode-fg">Varro: Restart Server</span> from the
+        Command Palette.
+      </p>
     </div>
   );
 }
