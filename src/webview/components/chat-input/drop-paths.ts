@@ -193,17 +193,18 @@ function readDroppedItem(item: DataTransferItem): Promise<string> {
 
 export function parseDroppedText(value: string): string[] {
   if (!value) return [];
+
+  const structuredPaths = extractPathsFromStructuredDrop(value);
+  if (structuredPaths.length > 0) return structuredPaths;
+
   const paths = new Set<string>();
 
   for (const line of value.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const decoded = decodeDroppedCandidate(trimmed);
-    if (decoded) paths.add(decoded);
-  }
-
-  for (const candidate of extractPathsFromStructuredDrop(value)) {
-    paths.add(candidate);
+    if (!decoded) return [];
+    paths.add(decoded);
   }
 
   return Array.from(paths);

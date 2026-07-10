@@ -11,16 +11,21 @@ export function TodoList() {
   const allDone = () => total() > 0 && completed() === total();
   const [collapsed, setCollapsed] = createSignal(allDone());
   let previousTodoIds = new Set(todos().map((todo) => todo.id));
+  let previousUserMessageCount = userMessageCount();
 
   createEffect(() => {
     const nextTodoIds = new Set(todos().map((todo) => todo.id));
     const hasNewTodo = todos().some((todo) => !previousTodoIds.has(todo.id));
+    const nextUserMessageCount = userMessageCount();
 
     if (hasNewTodo) {
       setCollapsed(false);
+    } else if (nextUserMessageCount > previousUserMessageCount && allDone()) {
+      setCollapsed(true);
     }
 
     previousTodoIds = nextTodoIds;
+    previousUserMessageCount = nextUserMessageCount;
   });
 
   return (
@@ -157,4 +162,8 @@ function TodoItem(props: { todo: NormalizedTodo }) {
 
 function isResolvedTodoStatus(status: string) {
   return status === 'completed' || status === 'cancelled' || status === 'canceled';
+}
+
+function userMessageCount() {
+  return defaultAppState.state.messages.filter((message) => message.info.role === 'user').length;
 }

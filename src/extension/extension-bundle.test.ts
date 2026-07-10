@@ -1,4 +1,3 @@
-import { builtinModules } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import { verifyExtensionBundleMetafile } from '../../scripts/verify-extension-bundle.mjs';
 
@@ -30,17 +29,16 @@ describe('extension bundle verification', () => {
   });
 
   it('preserves builtins that are only available with the node prefix', () => {
-    const nodeOnly = builtinModules.find((name) => name.startsWith('node:'));
-    expect(nodeOnly).toBeTruthy();
+    const nodeOnly = 'node:test';
 
     expect(() =>
       verifyExtensionBundleMetafile(
-        metafile([{ path: nodeOnly!, kind: 'require-call', external: true }])
+        metafile([{ path: nodeOnly, kind: 'require-call', external: true }])
       )
     ).not.toThrow();
     expect(() =>
       verifyExtensionBundleMetafile(
-        metafile([{ path: nodeOnly!.slice('node:'.length), kind: 'require-call', external: true }])
+        metafile([{ path: nodeOnly.slice('node:'.length), kind: 'require-call', external: true }])
       )
     ).toThrow('Extension bundle is not self-contained');
   });

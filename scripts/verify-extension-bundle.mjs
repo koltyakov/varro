@@ -1,13 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { builtinModules, createRequire } from 'node:module';
+import { createRequire, isBuiltin } from 'node:module';
 import { dirname } from 'node:path';
 import vm from 'node:vm';
-
-const ALLOWED_RUNTIME_MODULES = new Set(['vscode']);
-for (const name of builtinModules) {
-  ALLOWED_RUNTIME_MODULES.add(name);
-  if (!name.startsWith('node:')) ALLOWED_RUNTIME_MODULES.add(`node:${name}`);
-}
 
 export function verifyExtensionBundleMetafile(metafile) {
   if (!metafile?.outputs || Object.keys(metafile.outputs).length === 0) {
@@ -21,7 +15,7 @@ export function verifyExtensionBundleMetafile(metafile) {
         rejected.push(`${outputPath}: ${imported.kind} ${imported.path} (separate output)`);
         continue;
       }
-      if (!ALLOWED_RUNTIME_MODULES.has(imported.path)) {
+      if (imported.path !== 'vscode' && !isBuiltin(imported.path)) {
         const reason =
           imported.kind === 'dynamic-import' ? 'unresolved dynamic import' : 'external';
         rejected.push(`${outputPath}: ${imported.kind} ${imported.path} (${reason})`);

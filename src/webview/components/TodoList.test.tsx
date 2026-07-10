@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
 import { TodoList } from './TodoList';
 import { resetDefaultAppState, setState } from '../lib/state';
+import type { UserMessage } from '../types';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -109,4 +110,42 @@ describe('TodoList', () => {
     expect(container?.querySelectorAll('li.todo-block-item')).toHaveLength(3);
     expect(container?.textContent).toContain('2/3');
   });
+
+  it('collapses completed todos for a new prompt and expands when a new todo arrives', async () => {
+    setState('todos', [
+      { id: 'todo-1', content: 'Done task', status: 'completed', priority: 'medium' },
+    ]);
+
+    cleanup = render(() => TodoList(), container!);
+
+    const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
+    toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+
+    setState('messages', [{ info: userMessage('user-1'), parts: [] }]);
+    await Promise.resolve();
+
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('ul.todo-block-list')).toBeNull();
+
+    setState('todos', (todos) => [
+      ...todos,
+      { id: 'todo-2', content: 'New task', status: 'pending', priority: 'high' },
+    ]);
+    await Promise.resolve();
+
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelectorAll('li.todo-block-item')).toHaveLength(2);
+  });
 });
+
+function userMessage(id: string): UserMessage {
+  return {
+    id,
+    sessionID: 'session-1',
+    role: 'user',
+    time: { created: 1 },
+    agent: 'build',
+    model: { providerID: 'openai', modelID: 'gpt-5.4' },
+  };
+}

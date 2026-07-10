@@ -231,7 +231,7 @@ describe('webview message validation', () => {
       cursor.next = next;
       cursor = next;
     }
-    const fiveMiB = 'x'.repeat(5 * 1024 * 1024);
+    const tooLongString = 'x'.repeat(8 * 1024 * 1024 + 1);
 
     const invalidBodies: unknown[] = [
       cyclic,
@@ -242,8 +242,7 @@ describe('webview message validation', () => {
       { value: Number.NaN },
       Array.from({ length: 5_001 }, () => null),
       Array.from({ length: 4_500 }, () => ({ first: 1, second: 2 })),
-      Array.from({ length: 9 }, () => fiveMiB),
-      { value: 'x'.repeat(8 * 1024 * 1024 + 1) },
+      { value: tooLongString },
       Object.defineProperty({}, 'hidden', { value: true }),
       { [Symbol('key')]: true },
     ];

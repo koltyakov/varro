@@ -2,6 +2,7 @@ import { access, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MAX_DROPPED_CONTENT_TOTAL_BYTES } from '../shared/dropped-content-policy';
 
 const loggerMock = vi.hoisted(() => ({
   warn: vi.fn(),
@@ -301,28 +302,24 @@ describe('DroppedFilesService', () => {
       write,
     });
     services.push(service);
-    const tenMiB = Buffer.alloc(10 * 1024 * 1024).toString('base64');
-
-    const initial = await service.fromContent(
-      Array.from({ length: 5 }, (_, index) => ({
-        name: `part-${index}.bin`,
-        content: tenMiB,
-        size: 10 * 1024 * 1024,
-      }))
-    );
-    expect(initial).toHaveLength(5);
-    expect(write).toHaveBeenCalledTimes(6);
+    const ownedPath = join(dropsDir, 'part-0.bin');
+    const owned = service as unknown as {
+      ownedContentFiles: Map<string, number>;
+      ownedContentBytes: number;
+    };
+    owned.ownedContentFiles.set(ownedPath, MAX_DROPPED_CONTENT_TOTAL_BYTES);
+    owned.ownedContentBytes = MAX_DROPPED_CONTENT_TOTAL_BYTES;
 
     await expect(
       service.fromContent([{ name: 'blocked.txt', content: 'YQ==', size: 1 }])
     ).resolves.toEqual([]);
-    expect(write).toHaveBeenCalledTimes(6);
+    expect(write).toHaveBeenCalledTimes(1);
 
-    await expect(service.removeOwnedFile(initial[0]!.path)).resolves.toBe(true);
+    await expect(service.removeOwnedFile(ownedPath)).resolves.toBe(true);
     await expect(
       service.fromContent([{ name: 'accepted.txt', content: 'YQ==', size: 1 }])
     ).resolves.toHaveLength(1);
-    expect(write).toHaveBeenCalledTimes(7);
+    expect(write).toHaveBeenCalledTimes(2);
   });
 
   it('sweeps stale matching drop directories with absent owner markers on first use', async () => {

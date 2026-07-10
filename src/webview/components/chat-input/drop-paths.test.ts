@@ -27,6 +27,21 @@ describe('parseDroppedText', () => {
       )
     ).toEqual(['/tmp/from-resource.ts', 'src/test.ts', '../docs/guide.md']);
   });
+
+  it('does not treat path-like fragments in test output as dropped files', () => {
+    expect(
+      parseDroppedText(
+        [
+          '⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯',
+          'FAIL  src/extension/dropped-files-service.test.ts > DroppedFilesService',
+          '❯ src/extension/dropped-files-service.test.ts:293:3',
+          '⎯⎯⎯⎯⎯[1/2]⎯',
+          '❯ src/extension/util/webview-message.test.ts:224:3',
+          '⎯⎯⎯⎯⎯[2/2]⎯',
+        ].join('\n')
+      )
+    ).toEqual([]);
+  });
 });
 
 describe('collectDroppedPaths', () => {
