@@ -616,7 +616,8 @@ describe('session status helpers', () => {
     const startLoadingSpy = vi.fn();
     const setSessionStatusEntry = vi.fn();
     let messages = [{ info: userMessage(), parts: [] }];
-    const syncSessionMessages = vi.fn(async () => {
+    const syncSessionMessages = vi.fn(async () => {});
+    const syncBusySessionMessages = vi.fn(async () => {
       messages = [{ info: completedAssistantMessage(), parts: [] }];
     });
 
@@ -634,6 +635,7 @@ describe('session status helpers', () => {
         shouldResyncSessionAfterIdle: () => false,
         syncSession: vi.fn(async () => {}),
         syncSessionMessages,
+        syncBusySessionMessages,
         startLoading: startLoadingSpy,
         loadingStartedAt: () => 1,
         isActiveSession: () => true,
@@ -643,7 +645,8 @@ describe('session status helpers', () => {
       'session-1'
     );
 
-    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+    expect(syncBusySessionMessages).toHaveBeenCalledWith('session-1');
+    expect(syncSessionMessages).not.toHaveBeenCalled();
     expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(startLoadingSpy).toHaveBeenCalledTimes(1);
     expect(stopLoadingSpy).not.toHaveBeenCalled();

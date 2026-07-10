@@ -6,6 +6,9 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
     error: vi.fn(),
   },
   vscodeMock: {
+    env: {
+      remoteName: undefined as string | undefined,
+    },
     window: {
       onDidChangeActiveColorTheme: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
       createOutputChannel: vi.fn(() => ({
@@ -165,6 +168,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
 describe('WebviewSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vscodeMock.env.remoteName = undefined;
   });
 
   it('queues focus and attention commands until the webview is visible and ready', async () => {
@@ -239,6 +243,19 @@ describe('WebviewSession', () => {
     );
   });
 
+  it('marks the initial state when the extension host is remote', async () => {
+    vscodeMock.env.remoteName = 'ssh-remote';
+    const { session, bridge } = createSession();
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ remoteExtensionHost: true })
+    );
+  });
+
   it('omits hidden judge blocking requests from the initial webview state', async () => {
     const { session, bridge, sessionState, hiddenSessions } = createSession();
     const view = createWebviewView(true);
@@ -287,6 +304,31 @@ describe('WebviewSession', () => {
     expect(deps.handleMessage).toHaveBeenCalledOnce();
     expect(deps.handleMessage).toHaveBeenCalledWith({ type: 'ready' });
     expect(loggerMock.warn).toHaveBeenCalledWith('Ignoring invalid webview message');
+  });
+
+  it('forwards a parsed Ralph start message to the message handler', async () => {
+    const { session, deps } = createSession();
+    const view = createWebviewView(true);
+    const message = {
+      type: 'ralph/start',
+      payload: {
+        config: {
+          managerSessionId: 'manager-1',
+          planDocPath: 'RALPH.md',
+          iterations: 5,
+          promptTemplate: 'Follow the plan',
+          permissionMode: 'full',
+          model: { providerID: 'openai', modelID: 'gpt-5' },
+          agent: null,
+          createdAt: 100,
+        },
+      },
+    };
+
+    await session.resolve(view as never);
+    view.listeners.message?.(message);
+
+    expect(deps.handleMessage).toHaveBeenCalledWith(message);
   });
 
   it('replays boot state and clears interrupted sessions when the webview becomes ready', async () => {

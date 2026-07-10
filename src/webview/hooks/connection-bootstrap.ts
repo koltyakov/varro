@@ -1,5 +1,5 @@
+import { normalizeModelVariant } from '../../shared/model-variant';
 import type { Message, Part, SessionStatus } from '../types';
-import { normalizeModelVariant } from '../lib/model-variants';
 
 type SessionEntry = { info: Message; parts: Part[] };
 

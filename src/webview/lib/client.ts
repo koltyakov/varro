@@ -23,9 +23,11 @@ import type {
   RecycleBinEntry,
   ServerEvent,
   ServerEventName,
+  SessionDiffSummary,
   SessionTitleFallbackResponse,
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
+import { buildVarroSessionEndpoint, VARRO_API_ENDPOINTS } from '../../shared/protocol';
 import type {
   ProviderAuthAuthorization,
   ProviderAuthMethodsByProvider,
@@ -187,7 +189,7 @@ export const client = {
     async providerLimit(providerID: string, modelID?: string | null): Promise<ProviderLimitStatus> {
       const params = new URLSearchParams({ providerID });
       if (modelID) params.set('modelID', modelID);
-      return apiCall('GET', `/varro/provider-limit?${params.toString()}`);
+      return apiCall('GET', `${VARRO_API_ENDPOINTS.providerLimit}?${params.toString()}`);
     },
     async providerAuth(): Promise<ProviderAuthMethodsByProvider> {
       return apiCall('GET', '/provider/auth');
@@ -210,24 +212,24 @@ export const client = {
   varro: {
     session: {
       async deleteImmediately(sessionID: string): Promise<boolean> {
-        return apiCall('DELETE', `/varro/session/${encodeURIComponent(sessionID)}/delete`);
+        return apiCall('DELETE', buildVarroSessionEndpoint(sessionID, 'delete'));
+      },
+      async diffSummary(sessionID: string): Promise<SessionDiffSummary> {
+        return apiCall('GET', buildVarroSessionEndpoint(sessionID, 'diff-summary'));
       },
       async renameIfUntitled(sessionID: string): Promise<SessionTitleFallbackResponse> {
-        return apiCall(
-          'POST',
-          `/varro/session/${encodeURIComponent(sessionID)}/rename-if-untitled`
-        );
+        return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'rename-if-untitled'));
       },
     },
     async openPlan(content: string): Promise<{ path: string }> {
-      return apiCall('POST', '/varro/plan/open', { content });
+      return apiCall('POST', VARRO_API_ENDPOINTS.planOpen, { content });
     },
     async pickWorkspaceFile(): Promise<string | null> {
-      return apiCall('GET', '/varro/workspace-file/pick');
+      return apiCall('GET', VARRO_API_ENDPOINTS.workspaceFilePick);
     },
     async readWorkspaceFile(path: string): Promise<string | null> {
       const params = new URLSearchParams({ path });
-      return apiCall('GET', `/varro/workspace-file?${params.toString()}`);
+      return apiCall('GET', `${VARRO_API_ENDPOINTS.workspaceFile}?${params.toString()}`);
     },
     async resolveWorkspacePath(path: string): Promise<{
       path: string;
@@ -235,10 +237,10 @@ export const client = {
       type: 'file' | 'directory';
     } | null> {
       const params = new URLSearchParams({ path });
-      return apiCall('GET', `/varro/workspace-path/resolve?${params.toString()}`);
+      return apiCall('GET', `${VARRO_API_ENDPOINTS.workspacePathResolve}?${params.toString()}`);
     },
     async openCodeConfig(): Promise<OpenCodeModelRouting> {
-      return apiCall('GET', '/varro/opencode-config');
+      return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfig);
     },
     async saveModelRouting(body: {
       target: 'small_model' | 'agent';
@@ -246,23 +248,29 @@ export const client = {
       modelID: string;
       agentName?: string;
     }): Promise<OpenCodeModelRouting> {
-      return apiCall('POST', '/varro/opencode-config/model-routing', body);
+      return apiCall('POST', VARRO_API_ENDPOINTS.openCodeConfigModelRouting, body);
     },
     async judgePermission(body: AutoApproveJudgeRequest): Promise<AutoApproveJudgeResponse> {
-      return apiCall('POST', '/varro/permission/judge', body);
+      return apiCall('POST', VARRO_API_ENDPOINTS.permissionJudge, body);
     },
     recycleBin: {
       async list(): Promise<RecycleBinEntry[]> {
-        return normalizeRecycleBinEntries(await apiCall('GET', '/varro/session-trash'));
+        return normalizeRecycleBinEntries(await apiCall('GET', VARRO_API_ENDPOINTS.sessionTrash));
       },
       async restore(rootID: string): Promise<boolean> {
-        return apiCall('POST', `/varro/session-trash/${encodeURIComponent(rootID)}/restore`);
+        return apiCall(
+          'POST',
+          `${VARRO_API_ENDPOINTS.sessionTrash}/${encodeURIComponent(rootID)}/restore`
+        );
       },
       async delete(rootID: string): Promise<boolean> {
-        return apiCall('DELETE', `/varro/session-trash/${encodeURIComponent(rootID)}/delete`);
+        return apiCall(
+          'DELETE',
+          `${VARRO_API_ENDPOINTS.sessionTrash}/${encodeURIComponent(rootID)}/delete`
+        );
       },
       async empty(): Promise<boolean> {
-        return apiCall('DELETE', '/varro/session-trash');
+        return apiCall('DELETE', VARRO_API_ENDPOINTS.sessionTrash);
       },
     },
   },

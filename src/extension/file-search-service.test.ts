@@ -96,6 +96,58 @@ describe('FileSearchService', () => {
     });
 
     expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(1);
+    expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledWith(
+      '**/*',
+      false,
+      true,
+      false
+    );
+    service.dispose();
+  });
+
+  it('ignores content changes when maintaining the file-name cache', async () => {
+    vscodeMock.workspace.findFiles.mockResolvedValue([{ fsPath: '/repo/src/first.ts' }]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const firstResult = vi.fn();
+    const secondResult = vi.fn();
+
+    service.search(1, '', 10, firstResult);
+    await vi.waitFor(() => expect(firstResult).toHaveBeenCalledTimes(1));
+
+    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
+      fireChange: () => void;
+    };
+    watcher.fireChange();
+    service.search(2, '', 10, secondResult);
+    await vi.waitFor(() => expect(secondResult).toHaveBeenCalledTimes(1));
+
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(1);
+    service.dispose();
+  });
+
+  it('disposes an inactive watcher and recreates it on the next search', async () => {
+    vi.useFakeTimers();
+    vscodeMock.workspace.findFiles.mockResolvedValue([]);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const firstResult = vi.fn();
+
+    service.search(1, '', 10, firstResult);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(firstResult).toHaveBeenCalledTimes(1);
+    const firstWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
+      dispose: ReturnType<typeof vi.fn>;
+    };
+
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(firstWatcher.dispose).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(firstWatcher.dispose).toHaveBeenCalledTimes(1);
+
+    service.search(2, '', 10, vi.fn());
+    expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(2);
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
     service.dispose();
   });
 
@@ -238,11 +290,9 @@ describe('FileSearchService', () => {
     const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
       fireCreate: () => void;
       fireDelete: () => void;
-      fireChange: () => void;
     };
     watcher.fireCreate();
     watcher.fireDelete();
-    watcher.fireChange();
 
     service.search(2, '', 10, secondResult);
     await vi.waitFor(() => {
@@ -272,7 +322,7 @@ describe('FileSearchService', () => {
 
     const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
       fireCreate: () => void;
-      fireChange: () => void;
+      fireDelete: () => void;
     };
 
     watcher.fireCreate();
@@ -282,7 +332,7 @@ describe('FileSearchService', () => {
       expect(secondResult).toHaveBeenCalledTimes(1);
     });
 
-    watcher.fireChange();
+    watcher.fireDelete();
 
     await vi.advanceTimersByTimeAsync(100);
 

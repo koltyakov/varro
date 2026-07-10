@@ -53,6 +53,7 @@
     "@opencode-ai/sdk": "^1.17.18",
     "dompurify": "^3.4.11",
     "highlight.js": "11.11.1",
+    "jsonc-parser": "^3.3.1",
     "marked": "18.0.6",
     "solid-js": "1.9.14"
   },
@@ -197,7 +198,7 @@
         "varro.server.autoUpdate": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically run OpenCode CLI updates in the background when Varro detects a newer version. If the background update fails, Varro falls back to the normal upgrade prompt"
+          "description": "Automatically install OpenCode CLI updates only through Varro's tested compatibility ceiling. Newer untested releases are shown as an upgrade prompt instead"
         },
         "varro.chat.expandThinkingByDefault": {
           "type": "boolean",
@@ -310,6 +311,9 @@
     "onCommand:varro.chat.focus",
     "onCommand:varro.chat.statusBarClick"
   ],
+  "extensionKind": [
+    "workspace"
+  ],
   "icon": "assets/icon.png",
   "galleryBanner": {
     "color": "#24160f",
@@ -322,5 +326,14 @@
   "volta": {
     "node": "24.16.0",
     "npm": "10.9.8"
+  },
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": false
+    },
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Varro starts a local OpenCode process and grants it access to the workspace."
+    }
   }
 }

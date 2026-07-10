@@ -19,8 +19,13 @@ import { uiStore } from '../../lib/stores/ui-store';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
-import type { Message, Part, Permission, Session } from '../../types';
-import { getSessionTreeIds, getSessionTreeRootId, isSessionAwaitingInput } from '../../lib/state';
+import type { Message, Part, Permission, Session, SessionStatus } from '../../types';
+import {
+  getSessionTreeIds,
+  getSessionTreeRootId,
+  isSessionAwaitingInput,
+  isSessionTreeStatusWorking,
+} from '../../lib/state';
 import {
   getSessionHistoryCursor,
   MESSAGE_HISTORY_WINDOW,
@@ -52,6 +57,7 @@ import { SessionActionOperations } from '../session/session-actions';
 import { SessionApprovalOperations } from '../session/session-approvals';
 import { SessionControlOperations } from '../session/session-controls';
 import {
+  createSessionMessageSyncCoordinator,
   registerLoadingStatusPollEffect,
   registerEventStreamRecoveryEffect,
   registerProviderLimitRefreshEffect,
@@ -148,7 +154,117 @@ function isCurrentGeneration(current: number, expected: number) {
   return current === expected;
 }
 
+const POLLED_STATUS_SNAPSHOT_FRESHNESS_MS = 100;
+
 type SessionEntry = { info: Message; parts: Part[] };
+export type SessionStatusSnapshot = {
+  statuses: Record<string, SessionStatus>;
+  startedAt: number;
+};
+
+export function createSessionStatusSnapshotCoordinator(
+  loadSessionStatuses: () => Promise<Record<string, SessionStatus>>,
+  freshnessMs = POLLED_STATUS_SNAPSHOT_FRESHNESS_MS
+) {
+  let generation = 0;
+  let inFlight: Promise<SessionStatusSnapshot> | null = null;
+  let latest: { snapshot: SessionStatusSnapshot; completedAt: number } | null = null;
+
+  const load = (): Promise<SessionStatusSnapshot> => {
+    if (inFlight) return inFlight;
+    if (latest && Date.now() - latest.completedAt < freshnessMs) {
+      return Promise.resolve(latest.snapshot);
+    }
+
+    const requestGeneration = generation;
+    const request = Promise.resolve().then(async () => {
+      const startedAt = Date.now();
+      const statuses = await loadSessionStatuses();
+      return { statuses, startedAt };
+    });
+    const tracked: Promise<SessionStatusSnapshot> = request.then(
+      (snapshot) => {
+        if (requestGeneration === generation) {
+          latest = { snapshot, completedAt: Date.now() };
+        }
+        if (inFlight === tracked) inFlight = null;
+        return snapshot;
+      },
+      (err: unknown) => {
+        if (inFlight === tracked) inFlight = null;
+        throw err;
+      }
+    );
+    inFlight = tracked;
+    return tracked;
+  };
+
+  const clear = () => {
+    generation += 1;
+    inFlight = null;
+    latest = null;
+  };
+
+  return { load, clear };
+}
+
+export function createPerSessionMessageSyncGenerations() {
+  type SyncAttempt = { sessionId: string; token?: number; applied: boolean };
+
+  let nextToken = 0;
+  let activeAttempt: SyncAttempt | null = null;
+  const currentTokenBySession = new Map<string, number>();
+  const attemptsByToken = new Map<number, SyncAttempt>();
+
+  const next = () => {
+    if (!activeAttempt) throw new Error('Message sync generation requested outside a sync');
+    const token = ++nextToken;
+    activeAttempt.token = token;
+    attemptsByToken.set(token, activeAttempt);
+    currentTokenBySession.set(activeAttempt.sessionId, token);
+    return token;
+  };
+
+  const isCurrent = (token: number) => {
+    const attempt = attemptsByToken.get(token);
+    if (!attempt) return false;
+    const current = currentTokenBySession.get(attempt.sessionId) === token;
+    attempt.applied = current;
+    return current;
+  };
+
+  const run = (sessionId: string, operation: () => Promise<void>): Promise<boolean> => {
+    const attempt: SyncAttempt = { sessionId, applied: false };
+    const previousAttempt = activeAttempt;
+    activeAttempt = attempt;
+    let request: Promise<void>;
+    try {
+      // SessionSyncOperations allocates its generation synchronously before its first await.
+      request = operation();
+    } catch (err) {
+      activeAttempt = previousAttempt;
+      return Promise.reject(err);
+    }
+    activeAttempt = previousAttempt;
+    return request
+      .then(() => attempt.applied)
+      .finally(() => {
+        if (attempt.token !== undefined) attemptsByToken.delete(attempt.token);
+      });
+  };
+
+  const invalidate = (sessionId: string) => {
+    currentTokenBySession.set(sessionId, ++nextToken);
+  };
+
+  const clear = () => {
+    activeAttempt = null;
+    currentTokenBySession.clear();
+    attemptsByToken.clear();
+  };
+
+  return { next, isCurrent, run, invalidate, clear };
+}
 
 function isNotFoundError(err: unknown) {
   return err instanceof Error && /^404\b/.test(err.message);
@@ -210,14 +326,6 @@ function settleLatestAssistantMessage(sessionId: string) {
   sessionStore.finishMessageStreaming(info.id);
 }
 
-function isSessionTreeWorking(sessionId: string) {
-  const rootId = getSessionTreeRootId(sessionId) || sessionId;
-  return getSessionTreeIds(rootId).some((id) => {
-    const status = appStore.state.sessionStatus[id];
-    return status?.type === 'busy' || status?.type === 'retry';
-  });
-}
-
 function getDefaultPrimaryAgentNameFromState() {
   return getDefaultPrimaryAgentName(appStore.state.agents);
 }
@@ -271,9 +379,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let connectionGeneration = 0;
   let sessionSelectionGeneration = 0;
   let approvedPermissionReferences: AutoApproveJudgeReference[] = [];
-  let sessionSyncGeneration = 0;
+  let permissionSyncGeneration = 0;
+  let latestPermissionSyncGeneration = 0;
+  let permissionSnapshotGeneration = 0;
   const fullHistoryLoads = new Map<string, Promise<void>>();
   const pendingAbortRetryAttempts = new Map<string, number | null>();
+  const statusSnapshotStartedAt = new WeakMap<Record<string, SessionStatus>, number>();
+  const statusSnapshots = createSessionStatusSnapshotCoordinator(() => client.session.status());
+  const messageSyncGenerations = createPerSessionMessageSyncGenerations();
+  const sessionMessageSyncCoordinator = createSessionMessageSyncCoordinator((sessionId) =>
+    runSessionMessageSync(sessionId)
+  );
   const [documentVisible, setDocumentVisible] = createSignal(
     document.visibilityState === 'visible'
   );
@@ -292,7 +408,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
     syncSession: (sessionId) => syncSession(sessionId),
     syncSessionMessages: (sessionId) => syncSessionMessages(sessionId),
-    loadSessionStatuses: () => client.session.status(),
+    syncBusySessionMessages: (sessionId) => syncPolledSessionMessages(sessionId),
+    loadSessionStatuses: loadSessionStatusesFromSnapshot,
+    loadSessionStatusSnapshot: statusSnapshots.load,
     isActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
     getMessages: () => appStore.state.messages,
     logError,
@@ -352,9 +470,21 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       todoSyncOperations,
       sessionLifecycleOperations,
       sessionStatusOperations,
-      sessionSyncOperations,
+      sessionSyncOperations: {
+        syncSession: sessionSyncOperations.syncSession,
+        syncSessionMessages,
+      },
       repairSessionTitle,
-      sessionApprovalOperations,
+      sessionApprovalOperations: {
+        respondPermission: sessionApprovalOperations.respondPermission,
+        judgePermission: (permission) => {
+          const snapshotGeneration = permissionSnapshotGeneration;
+          return judgeAndRespondPermission(
+            permission,
+            () => snapshotGeneration === permissionSnapshotGeneration
+          );
+        },
+      },
       syncPendingPermissions,
       reconcileServerState,
       abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
@@ -426,8 +556,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         currentWorkspacePath = null;
         connectionGeneration = 0;
         sessionSelectionGeneration = 0;
-        sessionSyncGeneration = 0;
+        permissionSyncGeneration = 0;
+        latestPermissionSyncGeneration = 0;
+        permissionSnapshotGeneration = 0;
         pendingAbortRetryAttempts.clear();
+        statusSnapshots.clear();
+        messageSyncGenerations.clear();
         setDocumentVisible(document.visibilityState === 'visible');
       });
     });
@@ -436,9 +570,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       isLoading: uiStore.isLoading,
       getActiveSessionId: () => appStore.state.activeSessionId,
       isDocumentVisible: documentVisible,
-      recheckSessionStatus: (sessionId) => {
-        void recheckSessionStatus(sessionId);
-      },
+      getEventStreamState: () =>
+        appStore.state.serverStatus.state === 'running'
+          ? appStore.state.serverStatus.eventStream
+          : undefined,
+      recheckSessionStatus,
+      logError,
     });
 
     registerEventStreamRecoveryEffect({
@@ -448,9 +585,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           : undefined,
       isLoading: uiStore.isLoading,
       getActiveSessionId: () => appStore.state.activeSessionId,
-      recheckSessionStatus: (sessionId) => {
-        void recheckSessionStatus(sessionId);
-      },
+      recheckSessionStatus,
       logError,
     });
 
@@ -460,7 +595,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       isDocumentVisible: documentVisible,
       isActiveSessionWorking: () => {
         const activeSessionId = appStore.state.activeSessionId;
-        return activeSessionId ? isSessionTreeWorking(activeSessionId) : false;
+        return activeSessionId ? isSessionTreeStatusWorking(activeSessionId) : false;
       },
       getActiveProviderSelection,
       getProviderLimit: routingStore.getProviderLimit,
@@ -473,13 +608,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     registerVisibleRunningSessionSyncEffect({
       getServerState: () => appStore.state.serverStatus.state,
       isDocumentVisible: documentVisible,
+      getEventStreamState: () =>
+        appStore.state.serverStatus.state === 'running'
+          ? appStore.state.serverStatus.eventStream
+          : undefined,
       getActiveSessionId: () => appStore.state.activeSessionId,
       getSessionStatuses: () => appStore.state.sessionStatus,
       loadSessions,
-      hydrateSessionStatuses,
+      hydrateSessionStatuses: hydratePolledSessionStatuses,
       loadQuestions,
       loadPendingPermissions: syncPendingPermissions,
-      syncSessionMessages,
+      syncSessionMessages: syncPolledSessionMessages,
       logError,
     });
 
@@ -508,7 +647,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         syncSessionMessages,
         settleLatestAssistantMessage,
         isActiveSession: (id) => appStore.state.activeSessionId === id,
-        isTreeWorking: isSessionTreeWorking,
+        isTreeWorking: isSessionTreeStatusWorking,
         stopLoading: uiStore.stopLoading,
         logError,
       },
@@ -519,7 +658,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   async function reconcileStuckSessions() {
     await reconcileStuckSessionsWithDependencies(
       {
-        loadSessionStatuses: () => client.session.status(),
+        loadSessionStatuses: loadSessionStatusesFromSnapshot,
         getLocalSessionStatuses: () => appStore.state.sessionStatus,
         getActiveSessionId: () => appStore.state.activeSessionId,
         isLoading: uiStore.isLoading,
@@ -537,35 +676,75 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     );
   }
 
-  async function recheckSessionStatus(sessionId: string) {
-    await recheckSessionStatusWithState(sessionId);
+  async function loadSessionStatusesFromSnapshot(): Promise<Record<string, SessionStatus>> {
+    const snapshot = await statusSnapshots.load();
+    statusSnapshotStartedAt.set(snapshot.statuses, snapshot.startedAt);
+    return snapshot.statuses;
   }
 
-  async function syncPendingPermissions() {
-    const pendingPermissions = await client.permission.list();
-    for (const item of pendingPermissions) {
-      const permission = normalizePermissionEvent(item);
-      if (!permission) continue;
-      const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
-      if (mode === 'full') {
-        await sessionApprovalOperations
-          .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
-          .catch(() => {
-            if (permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'full') {
-              permissionsStore.addPermission(permission);
-            }
-          });
-        continue;
+  async function hydratePolledSessionStatuses(): Promise<void> {
+    try {
+      const snapshot = await statusSnapshots.load();
+      sessionStore.setSessionStatuses(snapshot.statuses, {
+        snapshotStartedAt: snapshot.startedAt,
+      });
+      for (const session of appStore.state.sessions) {
+        updateUsageLimitState(session.id, snapshot.statuses[session.id], []);
       }
-      if (mode === 'auto') {
-        await judgeAndRespondPermission(permission);
-        continue;
-      }
-      permissionsStore.addPermission(permission);
+    } catch (err) {
+      logError('session.status', err);
     }
   }
 
-  async function judgeAndRespondPermission(permission: Permission) {
+  function recheckSessionStatus(sessionId: string): Promise<void> {
+    return recheckSessionStatusWithState(sessionId);
+  }
+
+  async function syncPendingPermissions() {
+    const syncGeneration = ++permissionSyncGeneration;
+    const reconciliation = permissionsStore.beginPermissionReconciliation();
+    try {
+      const pendingPermissions = await client.permission.list();
+      if (syncGeneration < latestPermissionSyncGeneration) return;
+      latestPermissionSyncGeneration = syncGeneration;
+      const snapshotGeneration = ++permissionSnapshotGeneration;
+      const isCurrent = () => snapshotGeneration === permissionSnapshotGeneration;
+      const visiblePermissions: Permission[] = [];
+
+      for (const item of pendingPermissions) {
+        if (!isCurrent()) return;
+        const permission = normalizePermissionEvent(item);
+        if (!permission) continue;
+        const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
+        if (mode === 'full') {
+          await sessionApprovalOperations
+            .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
+            .catch(() => {
+              if (
+                isCurrent() &&
+                permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'full'
+              ) {
+                permissionsStore.addPermission(permission);
+              }
+            });
+          continue;
+        }
+        if (mode === 'auto') {
+          await judgeAndRespondPermission(permission, isCurrent);
+          continue;
+        }
+        visiblePermissions.push(permission);
+      }
+
+      if (isCurrent()) {
+        permissionsStore.reconcilePermissions(visiblePermissions, reconciliation);
+      }
+    } finally {
+      permissionsStore.finishPermissionReconciliation(reconciliation);
+    }
+  }
+
+  async function judgeAndRespondPermission(permission: Permission, isCurrent = () => true) {
     try {
       const model = resolvePermissionJudgeModel(permission.sessionID);
       const response = await client.varro.judgePermission({
@@ -573,6 +752,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         approvedReferences: approvedPermissionReferences,
         ...(model ? { model } : {}),
       });
+      if (!isCurrent()) return;
       if (response.decision === 'allow') {
         await sessionApprovalOperations.respondPermission(
           permission.sessionID,
@@ -587,7 +767,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     } catch (err) {
       logError('autoApproveJudge', err);
     }
-    permissionsStore.addPermission(permission);
+    if (isCurrent()) permissionsStore.addPermission(permission);
   }
 
   function initConnection() {
@@ -638,6 +818,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const sessionMcpOperations = new SessionMcpOperations({
     getSelectedMcpsForSession: routingStore.getSelectedMcpsForSession,
+    getRequiredMcpSessionIds: (targetSessionId) => [
+      targetSessionId,
+      ...Object.entries(appStore.state.sessionStatus)
+        .filter(([, status]) => status?.type === 'busy' || status?.type === 'retry')
+        .map(([sessionId]) => sessionId),
+    ],
     getMcpStatus: () => appStore.state.mcpStatus,
     loadMcps,
     getAvailableMcpNames: routingStore.getAvailableMcpNames,
@@ -809,9 +995,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       loadQuestions: async () => {
         await loadQuestions().catch((err) => logError('loadQuestions', err));
       },
-      loadSessionStatuses: async () => client.session.status(),
+      loadSessionStatuses: loadSessionStatusesFromSnapshot,
       mergeSessionStatuses: (statuses, options) =>
-        sessionStore.setSessionStatuses(statuses, options),
+        sessionStore.setSessionStatuses(statuses, {
+          snapshotStartedAt: statusSnapshotStartedAt.get(statuses) ?? options?.snapshotStartedAt,
+        }),
       updateUsageLimitState,
       setSessionStatusEntry,
       startLoading: uiStore.startLoading,
@@ -825,8 +1013,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     },
     {
       nextSelection: () => ++sessionSelectionGeneration,
-      nextSync: () => ++sessionSyncGeneration,
-      isCurrentSync: (generation) => isCurrentGeneration(generation, sessionSyncGeneration),
+      nextSync: messageSyncGenerations.next,
+      isCurrentSync: messageSyncGenerations.isCurrent,
     }
   );
 
@@ -849,14 +1037,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getMessages: () => appStore.state.messages,
     startLoading: uiStore.startLoading,
     invalidateMessageSync: () => {
-      sessionSyncGeneration += 1;
+      const sessionId = appStore.state.activeSessionId;
+      if (sessionId) messageSyncGenerations.invalidate(sessionId);
     },
     pruneMessagesFrom: sessionStore.pruneMessagesFrom,
     revertSession: (sessionId, messageId) => client.session.revert(sessionId, messageId),
     syncSession,
     syncSessionMessages,
     setError: uiStore.setError,
-    isSessionWorking: (sessionId) => isSessionTreeWorking(sessionId),
+    isSessionWorking: (sessionId) => isSessionTreeStatusWorking(sessionId),
     sendEditedMessage: (text) => sendMessage(text),
     unrevertSession: (sessionId) => client.session.unrevert(sessionId),
     upsertSession,
@@ -978,8 +1167,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   }
 
-  async function syncSessionMessages(sessionId: string) {
-    await sessionSyncOperations.syncSessionMessages(sessionId);
+  function runSessionMessageSync(sessionId: string): Promise<boolean> {
+    return messageSyncGenerations.run(sessionId, () =>
+      sessionSyncOperations.syncSessionMessages(sessionId)
+    );
+  }
+
+  function syncSessionMessages(sessionId: string): Promise<void> {
+    return sessionMessageSyncCoordinator.sync(sessionId);
+  }
+
+  function syncPolledSessionMessages(sessionId: string): Promise<void> {
+    return sessionMessageSyncCoordinator.syncIfStale(sessionId);
   }
 
   async function syncSession(sessionId: string) {

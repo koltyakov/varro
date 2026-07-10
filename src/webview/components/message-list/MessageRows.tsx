@@ -1,6 +1,6 @@
 import { For, Show, createMemo, onCleanup, onMount } from 'solid-js';
+import { isAbortedAssistantError } from '../../../shared/error-classification';
 import { implementPlan, openPlan } from '../../hooks/useOpenCode';
-import { isAbortedAssistantError } from '../../lib/aborted';
 import {
   editingMessage,
   registerInlineEditMount,

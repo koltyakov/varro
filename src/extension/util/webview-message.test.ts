@@ -1,6 +1,50 @@
 import { describe, expect, it } from 'vitest';
 import { isAllowedApiRequest, isAllowedExternalUrl, parseWebviewMessage } from './webview-message';
 
+function createRalphConfig() {
+  return {
+    managerSessionId: 'manager-1',
+    planDocPath: 'RALPH.md',
+    iterations: 5,
+    promptTemplate: 'Follow the plan',
+    permissionMode: 'full',
+    model: { providerID: 'openai', modelID: 'gpt-5', variant: 'high' },
+    agent: null,
+    createdAt: 100,
+  };
+}
+
+function createRalphRun() {
+  return {
+    config: createRalphConfig(),
+    status: 'paused',
+    currentIteration: 1,
+    iterations: [
+      {
+        index: 1,
+        childSessionId: 'child-1',
+        status: 'passed',
+        startedAt: 101,
+        endedAt: 102,
+        filesChanged: ['src/app.ts'],
+        verification: { lint: 'pass', test: 'skipped' },
+        tokens: {
+          input: 1,
+          output: 2,
+          reasoning: 3,
+          cacheRead: 4,
+          cacheWrite: 5,
+          total: 6,
+        },
+        cost: 0.1,
+        note: 'Implemented the next item.',
+        repairSessionIds: ['repair-1'],
+      },
+    ],
+    updatedAt: 103,
+  };
+}
+
 describe('webview message validation', () => {
   it('accepts known API routes used by the webview client', () => {
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);
@@ -27,6 +71,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/opencode-config')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/rename-if-untitled')).toBe(true);
     expect(isAllowedApiRequest('DELETE', '/varro/session/session-1/delete')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session-trash')).toBe(true);
@@ -61,6 +106,11 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/opencode-config')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config/model-routing')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/permission/judge')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/session/session-1/diff-summary')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary?messageID=1')).toBe(
+      false
+    );
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary/extra')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/session/session-1/rename-if-untitled')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/plan/open')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/delete')).toBe(false);
@@ -146,6 +196,67 @@ describe('webview message validation', () => {
     ).toEqual({ type: 'api/request', payload: { id: 1, method: 'GET', path: '/session' } });
   });
 
+  it('sanitizes bounded JSON-compatible API request bodies', () => {
+    const body = {
+      parts: [{ type: 'text', text: 'Implement the next item' }],
+      model: { providerID: 'openai', modelID: 'gpt-5' },
+      noReply: false,
+      metadata: null,
+      variant: undefined,
+    };
+
+    const parsed = parseWebviewMessage({
+      type: 'api/request',
+      payload: { id: 1, method: 'POST', path: '/session/session-1/prompt_async', body },
+    });
+
+    expect(parsed).toEqual({
+      type: 'api/request',
+      payload: { id: 1, method: 'POST', path: '/session/session-1/prompt_async', body },
+    });
+    if (parsed?.type === 'api/request') {
+      expect(parsed.payload.body).not.toBe(body);
+      expect(Object.hasOwn(parsed.payload.body as object, 'variant')).toBe(false);
+    }
+  });
+
+  it('rejects unsafe or structurally excessive API request bodies', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const deep: Record<string, unknown> = {};
+    let cursor = deep;
+    for (let index = 0; index < 30; index += 1) {
+      const next: Record<string, unknown> = {};
+      cursor.next = next;
+      cursor = next;
+    }
+    const fiveMiB = 'x'.repeat(5 * 1024 * 1024);
+
+    const invalidBodies: unknown[] = [
+      cyclic,
+      deep,
+      { value: () => true },
+      { value: Symbol('nope') },
+      { value: 1n },
+      { value: Number.NaN },
+      Array.from({ length: 5_001 }, () => null),
+      Array.from({ length: 4_500 }, () => ({ first: 1, second: 2 })),
+      Array.from({ length: 9 }, () => fiveMiB),
+      { value: 'x'.repeat(8 * 1024 * 1024 + 1) },
+      Object.defineProperty({}, 'hidden', { value: true }),
+      { [Symbol('key')]: true },
+    ];
+
+    for (const body of invalidBodies) {
+      expect(
+        parseWebviewMessage({
+          type: 'api/request',
+          payload: { id: 1, method: 'POST', path: '/session', body },
+        })
+      ).toBeNull();
+    }
+  });
+
   it('accepts a request to open filtered VS Code settings', () => {
     expect(
       parseWebviewMessage({
@@ -184,6 +295,225 @@ describe('webview message validation', () => {
     expect(parseWebviewMessage({ type: 'session/export', payload: {} })).toBeNull();
   });
 
+  it('parses every Ralph command and reconstructs nested legacy runs', () => {
+    const config = createRalphConfig();
+    const run = createRalphRun();
+
+    expect(
+      parseWebviewMessage({ type: 'ralph/start', payload: { config, ignored: true } })
+    ).toEqual({ type: 'ralph/start', payload: { config } });
+
+    for (const type of ['ralph/stop', 'ralph/pause', 'ralph/resume'] as const) {
+      expect(parseWebviewMessage({ type, payload: { managerSessionId: 'manager-1' } })).toEqual({
+        type,
+        payload: { managerSessionId: 'manager-1' },
+      });
+    }
+
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/update-model',
+        payload: {
+          managerSessionId: 'manager-1',
+          model: { providerID: 'anthropic', modelID: 'claude', variant: 'max' },
+        },
+      })
+    ).toEqual({
+      type: 'ralph/update-model',
+      payload: {
+        managerSessionId: 'manager-1',
+        model: { providerID: 'anthropic', modelID: 'claude', variant: 'max' },
+      },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/update-model',
+        payload: { managerSessionId: 'manager-1', model: null },
+      })
+    ).toEqual({
+      type: 'ralph/update-model',
+      payload: { managerSessionId: 'manager-1', model: null },
+    });
+
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/sync',
+        payload: { legacyRuns: { 'manager-1': run } },
+      })
+    ).toEqual({
+      type: 'ralph/sync',
+      payload: { legacyRuns: { 'manager-1': run } },
+    });
+    expect(parseWebviewMessage({ type: 'ralph/sync', payload: {} })).toEqual({
+      type: 'ralph/sync',
+      payload: {},
+    });
+  });
+
+  it('rejects malformed or unbounded Ralph command payloads', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/start',
+        payload: { config: { ...createRalphConfig(), iterations: 501 } },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/start',
+        payload: {
+          config: {
+            ...createRalphConfig(),
+            model: { providerID: 'openai', modelID: '' },
+          },
+        },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/stop',
+        payload: { managerSessionId: 'x'.repeat(513) },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/update-model',
+        payload: { managerSessionId: 'manager-1', model: {} },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/sync',
+        payload: {
+          legacyRuns: {
+            'manager-1': { ...createRalphRun(), status: 'unknown' },
+          },
+        },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/sync',
+        payload: {
+          legacyRuns: Object.fromEntries(
+            Array.from({ length: 101 }, (_, index) => [
+              `manager-${index}`,
+              {
+                ...createRalphRun(),
+                config: { ...createRalphConfig(), managerSessionId: `manager-${index}` },
+              },
+            ])
+          ),
+        },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects reserved Ralph manager, legacy record, and nested session IDs', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/start',
+        payload: { config: { ...createRalphConfig(), managerSessionId: 'constructor' } },
+      })
+    ).toBeNull();
+
+    for (const type of ['ralph/stop', 'ralph/pause', 'ralph/resume'] as const) {
+      expect(parseWebviewMessage({ type, payload: { managerSessionId: 'prototype' } })).toBeNull();
+    }
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/update-model',
+        payload: { managerSessionId: '__proto__', model: null },
+      })
+    ).toBeNull();
+
+    const reservedRun = {
+      ...createRalphRun(),
+      config: { ...createRalphConfig(), managerSessionId: '__proto__' },
+    };
+    const legacyRuns = JSON.parse(`{"__proto__":${JSON.stringify(reservedRun)}}`) as Record<
+      string,
+      unknown
+    >;
+    expect(parseWebviewMessage({ type: 'ralph/sync', payload: { legacyRuns } })).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/sync',
+        payload: {
+          legacyRuns: {
+            'manager-1': {
+              ...createRalphRun(),
+              iterations: [{ ...createRalphRun().iterations[0], childSessionId: 'constructor' }],
+            },
+          },
+        },
+      })
+    ).toBeNull();
+  });
+
+  it('enforces cumulative Ralph string, node, and path-entry budgets', () => {
+    const sharedPrompt = 'x'.repeat(90_000);
+    const stringHeavyRuns = Object.fromEntries(
+      Array.from({ length: 100 }, (_, index) => {
+        const managerSessionId = `manager-${index}`;
+        return [
+          managerSessionId,
+          {
+            config: {
+              ...createRalphConfig(),
+              managerSessionId,
+              promptTemplate: sharedPrompt,
+            },
+            status: 'paused',
+            currentIteration: 0,
+            iterations: [],
+            updatedAt: 100,
+          },
+        ];
+      })
+    );
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/sync',
+        payload: { legacyRuns: stringHeavyRuns },
+      })
+    ).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/start',
+        payload: {
+          config: {
+            ...createRalphConfig(),
+            ignored: Array.from({ length: 100_001 }, () => null),
+          },
+        },
+      })
+    ).toBeNull();
+
+    const filesChanged = Array.from({ length: 21 }, (_, index) => `src/file-${index}.ts`);
+    const pathHeavyRun = {
+      ...createRalphRun(),
+      config: { ...createRalphConfig(), iterations: 1_000 },
+      currentIteration: 1_000,
+      iterations: Array.from({ length: 1_000 }, (_, index) => ({
+        index: index + 1,
+        childSessionId: `child-${index}`,
+        status: 'passed',
+        startedAt: 100 + index,
+        endedAt: 101 + index,
+        filesChanged,
+        verification: {},
+      })),
+    };
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/sync',
+        payload: { legacyRuns: { 'manager-1': pathHeavyRun } },
+      })
+    ).toBeNull();
+  });
+
   it('rejects malformed payloads for typed messages', () => {
     expect(parseWebviewMessage({ type: 'webview/focus', payload: { focused: 'yes' } })).toBeNull();
     expect(parseWebviewMessage({ type: 'providers/watch', payload: { active: 'yes' } })).toBeNull();
@@ -199,7 +529,7 @@ describe('webview message validation', () => {
       parseWebviewMessage({
         type: 'files/drop-content',
         payload: {
-          files: [{ name: 'note.txt', content: 'Zm9v', size: 25 * 1024 * 1024 + 1 }],
+          files: [{ name: 'note.txt', content: 'Zm9v', size: 10 * 1024 * 1024 + 1 }],
         },
       })
     ).toBeNull();
@@ -218,6 +548,45 @@ describe('webview message validation', () => {
 
     expect(
       parseWebviewMessage({ type: 'log', payload: { msg: 'hello', level: 'debug' } })
+    ).toBeNull();
+  });
+
+  it('validates dropped-content encoding, declared sizes, and aggregate limits', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'files/drop-content',
+        payload: { files: [{ name: 'note.txt', content: 'aGVsbG8=', size: 5 }] },
+      })
+    ).toEqual({
+      type: 'files/drop-content',
+      payload: { files: [{ name: 'note.txt', content: 'aGVsbG8=', size: 5 }] },
+    });
+
+    expect(
+      parseWebviewMessage({
+        type: 'files/drop-content',
+        payload: { files: [{ name: 'note.txt', content: 'aGVsbG8=', size: 4 }] },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'files/drop-content',
+        payload: { files: [{ name: 'note.txt', content: '!!!!', size: 3 }] },
+      })
+    ).toBeNull();
+
+    const threeMiB = Buffer.alloc(3 * 1024 * 1024).toString('base64');
+    expect(
+      parseWebviewMessage({
+        type: 'files/drop-content',
+        payload: {
+          files: Array.from({ length: 17 }, (_, index) => ({
+            name: `part-${index}.bin`,
+            content: threeMiB,
+            size: 3 * 1024 * 1024,
+          })),
+        },
+      })
     ).toBeNull();
   });
 

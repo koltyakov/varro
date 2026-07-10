@@ -1,18 +1,11 @@
 import type { Provider } from '../types';
+import { normalizeModelVariant } from '../../shared/model-variant';
 
 function normalizeVariantName(variantName: string) {
   return variantName.toLowerCase().replace(/[-_]+/g, ' ');
 }
 
 type VariantKind = 'low' | 'medium' | 'high';
-
-export function normalizeModelVariant(
-  modelID: string | null | undefined,
-  variant: string | null | undefined
-) {
-  if (modelID === 'gpt-5.5' && variant === 'minimal') return 'low';
-  return variant || null;
-}
 
 function getVariantKind(variantName: string): VariantKind | null {
   const normalized = normalizeVariantName(variantName);

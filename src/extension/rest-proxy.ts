@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
+import { existsSync } from 'fs';
+import { basename, dirname, join, resolve } from 'path';
+import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
+import { VARRO_API_ENDPOINTS } from '../shared/protocol';
 import type {
   AutoApproveJudgeReference,
   AutoApproveJudgeRequest,
   OpenCodeModelRouting,
   ServerStatus,
+  SessionDiffSummary,
   WebviewMessage,
 } from '../shared/protocol';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { AutoApproveJudge } from './auto-approve-judge';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { isAllowedApiRequest } from './util/webview-message';
@@ -157,6 +163,16 @@ export class RestProxy {
       }
       await this.callbacks.cleanupExpiredRecycleBin();
 
+      const diffSummarySessionID = this.parseSessionDiffSummaryRequest(method, payload.path);
+      if (diffSummarySessionID) {
+        if (this.isHiddenSession(diffSummarySessionID)) {
+          throw new Error('404 Session not found');
+        }
+        const data = await this.readSessionDiffSummary(diffSummarySessionID);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
       const judgePermissionRequest = this.parseJudgePermissionRequest(
         method,
         payload.path,
@@ -245,7 +261,7 @@ export class RestProxy {
 
   private parseRecycleBinRequest(method: string, path: string): RecycleBinRequest | null {
     const url = new URL(path, 'http://localhost');
-    if (url.pathname === '/varro/session-trash') {
+    if (url.pathname === VARRO_API_ENDPOINTS.sessionTrash) {
       if (method === 'GET') return { kind: 'list' };
       if (method === 'DELETE') return { kind: 'empty' };
       return null;
@@ -301,6 +317,24 @@ export class RestProxy {
     const match = url.pathname.match(/^\/varro\/session\/([^/]+)\/delete$/);
     if (!match) return null;
     return { sessionID: decodeURIComponent(match[1]!) };
+  }
+
+  private parseSessionDiffSummaryRequest(method: string, path: string) {
+    if (method !== 'GET') return null;
+    const url = new URL(path, 'http://localhost');
+    if (url.search) return null;
+    const prefix = `${VARRO_API_ENDPOINTS.session}/`;
+    if (!url.pathname.startsWith(prefix)) return null;
+    const match = url.pathname.slice(prefix.length).match(/^([^/]+)\/diff-summary$/);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  }
+
+  private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
+    const diffs = await this.callbacks.server.request(
+      'GET',
+      `/session/${encodeURIComponent(sessionID)}/diff`
+    );
+    return summarizeSessionDiff(diffs);
   }
 
   private getHiddenSessionIdFromPath(path: string) {
@@ -370,13 +404,13 @@ export class RestProxy {
 
   private filterSessionsForCurrentWorkspace<T extends { directory?: unknown }>(sessions: T[]) {
     const workspacePath = this.getCurrentWorkspacePath();
-    if (!normalizeWorkspacePath(workspacePath)) return sessions;
+    if (!normalizeWorkspaceIdentity(workspacePath)) return sessions;
     return sessions.filter((session) => isDirectoryInWorkspace(session.directory, workspacePath));
   }
 
   private filterSessionStatusesForCurrentWorkspace<T>(statuses: Record<string, T>) {
     const workspacePath = this.getCurrentWorkspacePath();
-    if (!normalizeWorkspacePath(workspacePath)) return statuses;
+    if (!normalizeWorkspaceIdentity(workspacePath)) return statuses;
     return Object.fromEntries(
       Object.entries(statuses).filter(([sessionID]) =>
         this.callbacks.sessionState.isSessionInWorkspace(sessionID, workspacePath)
@@ -386,7 +420,7 @@ export class RestProxy {
 
   private filterSessionRequestsForCurrentWorkspace<T extends { sessionID: string }>(requests: T[]) {
     const workspacePath = this.getCurrentWorkspacePath();
-    if (!normalizeWorkspacePath(workspacePath)) return requests;
+    if (!normalizeWorkspaceIdentity(workspacePath)) return requests;
     return requests.filter((request) =>
       this.callbacks.sessionState.isSessionInWorkspace(request.sessionID, workspacePath)
     );
@@ -557,7 +591,7 @@ export class RestProxy {
     if (method !== 'GET') return null;
 
     const url = new URL(path, 'http://localhost');
-    if (url.pathname !== '/varro/provider-limit') return null;
+    if (url.pathname !== VARRO_API_ENDPOINTS.providerLimit) return null;
 
     const providerID = url.searchParams.get('providerID')?.trim();
     if (!providerID) return null;
@@ -572,7 +606,7 @@ export class RestProxy {
     if (method !== 'GET') return null;
 
     const url = new URL(path, 'http://localhost');
-    if (url.pathname !== '/varro/workspace-file') return null;
+    if (url.pathname !== VARRO_API_ENDPOINTS.workspaceFile) return null;
 
     const filePath = url.searchParams.get('path')?.trim();
     if (!filePath) {
@@ -583,14 +617,14 @@ export class RestProxy {
   }
 
   private isWorkspaceFilePickRequest(method: string, path: string) {
-    return method === 'GET' && path === '/varro/workspace-file/pick';
+    return method === 'GET' && path === VARRO_API_ENDPOINTS.workspaceFilePick;
   }
 
   private parseWorkspaceResolveRequest(method: string, path: string) {
     if (method !== 'GET') return null;
 
     const url = new URL(path, 'http://localhost');
-    if (url.pathname !== '/varro/workspace-path/resolve') return null;
+    if (url.pathname !== VARRO_API_ENDPOINTS.workspacePathResolve) return null;
 
     const filePath = url.searchParams.get('path')?.trim();
     if (!filePath) {
@@ -615,7 +649,7 @@ export class RestProxy {
   }
 
   private parsePlanOpenRequest(method: string, path: string, body: unknown) {
-    if (method !== 'POST' || path !== '/varro/plan/open') return null;
+    if (method !== 'POST' || path !== VARRO_API_ENDPOINTS.planOpen) return null;
 
     const payload = asRecord(body);
     const content = typeof payload?.content === 'string' ? payload.content : '';
@@ -634,11 +668,11 @@ export class RestProxy {
     path: string,
     body: unknown
   ): OpenCodeConfigRequest | null {
-    if (method === 'GET' && path === '/varro/opencode-config') {
+    if (method === 'GET' && path === VARRO_API_ENDPOINTS.openCodeConfig) {
       return { kind: 'get' };
     }
 
-    if (method !== 'POST' || path !== '/varro/opencode-config/model-routing') return null;
+    if (method !== 'POST' || path !== VARRO_API_ENDPOINTS.openCodeConfigModelRouting) return null;
 
     const payload = asRecord(body);
     const target = typeof payload?.target === 'string' ? payload.target : null;
@@ -669,7 +703,7 @@ export class RestProxy {
     path: string,
     body: unknown
   ): AutoApproveJudgeRequest | null {
-    if (method !== 'POST' || path !== '/varro/permission/judge') return null;
+    if (method !== 'POST' || path !== VARRO_API_ENDPOINTS.permissionJudge) return null;
     const payload = asRecord(body);
     const permission = asRecord(payload?.permission);
     if (!permission) throw new Error('Permission context is required');
@@ -699,34 +733,58 @@ export class RestProxy {
     return match?.[1] ? decodeURIComponent(match[1]) : null;
   }
 
-  private getOpenCodeConfigUri() {
+  private getOpenCodeWorkspacePath() {
     const workspacePath =
       this.callbacks.contextProvider.context.workspacePath ||
       this.callbacks.server.getWorkspaceCwd();
     if (!workspacePath) {
-      throw new Error('Open a workspace folder before editing project opencode.json');
+      throw new Error('Open a workspace folder before editing project OpenCode config');
     }
-    return vscode.Uri.file(`${workspacePath}/opencode.json`);
+    return resolve(workspacePath);
   }
 
   private async readOpenCodeConfigObject() {
-    const uri = this.getOpenCodeConfigUri();
-
-    try {
-      const bytes = await vscode.workspace.fs.readFile(uri);
-      const raw = new TextDecoder().decode(bytes).trim();
-      if (!raw) return { uri, config: {} as Record<string, unknown>, existed: true };
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('Project opencode.json must contain a JSON object');
+    const workspacePath = this.getOpenCodeWorkspacePath();
+    const files: Array<{
+      path: string;
+      uri: vscode.Uri;
+      raw: string;
+      config: Record<string, unknown>;
+    }> = [];
+    const candidates = resolveOpenCodeProjectConfigPaths(workspacePath, (path) =>
+      basename(path) === '.git' ? existsSync(path) : true
+    );
+    for (const path of candidates) {
+      const uri = vscode.Uri.file(path);
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        const raw = new TextDecoder().decode(bytes);
+        files.push({ path, uri, raw, config: parseOpenCodeConfig(raw, path) });
+      } catch (err) {
+        if (
+          err &&
+          typeof err === 'object' &&
+          'code' in err &&
+          (err.code === 'FileNotFound' || err.code === 'ENOENT')
+        ) {
+          continue;
+        }
+        throw err;
       }
-      return { uri, config: parsed as Record<string, unknown>, existed: true };
-    } catch (err) {
-      if (err && typeof err === 'object' && 'code' in err && err.code === 'FileNotFound') {
-        return { uri, config: {} as Record<string, unknown>, existed: false };
-      }
-      throw err;
     }
+
+    const config = files.reduce<Record<string, unknown>>(
+      (merged, file) => mergeOpenCodeConfig(merged, file.config),
+      {}
+    );
+    const localFiles = files.filter((file) => dirname(file.path) === workspacePath);
+    const target = localFiles.at(-1) || {
+      path: join(workspacePath, 'opencode.json'),
+      uri: vscode.Uri.file(join(workspacePath, 'opencode.json')),
+      raw: '{}\n',
+      config: {} as Record<string, unknown>,
+    };
+    return { workspacePath, files, config, target };
   }
 
   private normalizeOpenCodeModelRouting(config: Record<string, unknown>): OpenCodeModelRouting {
@@ -755,46 +813,66 @@ export class RestProxy {
   private async updateOpenCodeModelRouting(
     request: Extract<OpenCodeConfigRequest, { kind: 'update' }>
   ): Promise<OpenCodeModelRouting> {
-    const { uri, config } = await this.readOpenCodeConfigObject();
+    const { files, target } = await this.readOpenCodeConfigObject();
+    const { uri } = target;
+    const dirtyDocument = vscode.workspace.textDocuments.find(
+      (document) =>
+        document.isDirty &&
+        (document.uri.toString() === uri.toString() ||
+          isSameWorkspacePath(document.uri.fsPath, uri.fsPath))
+    );
+    if (dirtyDocument) {
+      throw new Error(
+        `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} has unsaved changes; save or revert the document before updating model routing`
+      );
+    }
     const initialStat = await this.readConfigStat(uri);
-    const next = { ...config };
-    if (typeof next.$schema !== 'string' || !next.$schema.trim()) {
-      next.$schema = 'https://opencode.ai/config.json';
+    let nextRaw = target.raw.trim() ? target.raw : '{}\n';
+    if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
+      nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
     }
 
     const modelRef = `${request.providerID}/${request.modelID}`;
     if (request.target === 'small_model') {
-      next.small_model = modelRef;
+      nextRaw = applyJsoncChange(nextRaw, ['small_model'], modelRef);
     } else {
       const agentName = request.agentName;
       if (!agentName) {
         throw new Error('Agent name is required');
       }
-      const existingAgents = asRecord(next.agent);
-      const existingAgentConfig = asRecord(existingAgents?.[agentName]);
-      next.agent = {
-        ...existingAgents,
-        [agentName]: {
-          ...existingAgentConfig,
-          model: modelRef,
-        },
-      };
+      nextRaw = applyJsoncChange(nextRaw, ['agent', agentName, 'model'], modelRef);
     }
 
-    const encoded = new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`);
+    const nextTargetConfig = parseOpenCodeConfig(nextRaw, target.path);
+    const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
     const latestStat = await this.readConfigStat(uri);
     if (!this.areConfigStatsEqual(initialStat, latestStat)) {
-      throw new Error('Project opencode.json changed while updating model routing; please retry');
+      throw new Error(
+        `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating model routing; please retry`
+      );
     }
     await vscode.workspace.fs.writeFile(uri, encoded);
-    return this.normalizeOpenCodeModelRouting(next);
+    let effectiveConfig = files.reduce<Record<string, unknown>>(
+      (merged, file) =>
+        mergeOpenCodeConfig(merged, file.path === target.path ? nextTargetConfig : file.config),
+      {}
+    );
+    if (!files.some((file) => file.path === target.path)) {
+      effectiveConfig = mergeOpenCodeConfig(effectiveConfig, nextTargetConfig);
+    }
+    return this.normalizeOpenCodeModelRouting(effectiveConfig);
   }
 
   private async readConfigStat(uri: vscode.Uri) {
     try {
       return await vscode.workspace.fs.stat(uri);
     } catch (err) {
-      if (err && typeof err === 'object' && 'code' in err && err.code === 'FileNotFound') {
+      if (
+        err &&
+        typeof err === 'object' &&
+        'code' in err &&
+        (err.code === 'FileNotFound' || err.code === 'ENOENT')
+      ) {
         return null;
       }
       throw err;
@@ -833,6 +911,107 @@ export class RestProxy {
   }
 }
 
+export function resolveOpenCodeProjectConfigPaths(
+  directory: string,
+  pathExists: (path: string) => boolean = existsSync
+) {
+  const files: string[] = [];
+  let current = resolve(directory);
+  while (true) {
+    for (const name of ['opencode.jsonc', 'opencode.json']) {
+      const candidate = join(current, name);
+      if (pathExists(candidate)) files.push(candidate);
+    }
+    if (pathExists(join(current, '.git'))) break;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return files.toReversed();
+}
+
+function parseOpenCodeConfig(raw: string, path: string): Record<string, unknown> {
+  if (!raw.trim()) return {};
+  const errors: ParseError[] = [];
+  const parsed = parse(raw, errors, { allowTrailingComma: true });
+  if (errors.length > 0) {
+    throw new Error(`Invalid OpenCode config at ${path}: ${printParseErrorCode(errors[0]!.error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`OpenCode config at ${path} must contain a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function mergeOpenCodeConfig(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>
+): Record<string, unknown> {
+  const merged = { ...target };
+  for (const [key, value] of Object.entries(source)) {
+    const current = asRecord(merged[key]);
+    const incoming = asRecord(value);
+    merged[key] = current && incoming ? mergeOpenCodeConfig(current, incoming) : value;
+  }
+  return merged;
+}
+
+function applyJsoncChange(raw: string, path: (string | number)[], value: unknown) {
+  return applyEdits(
+    raw,
+    modify(raw, path, value, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    })
+  );
+}
+
+function summarizeSessionDiff(value: unknown): SessionDiffSummary {
+  const record = asRecord(value);
+  const candidates = Array.isArray(value)
+    ? value
+    : record && isDiffRecord(record)
+      ? [record]
+      : Object.values(record ?? {});
+  const files = new Set<string>();
+  let validDiffs = 0;
+  let additions = 0;
+  let deletions = 0;
+
+  for (const candidate of candidates) {
+    const diff = asRecord(candidate);
+    if (!diff || !isDiffRecord(diff)) continue;
+    validDiffs += 1;
+    if (typeof diff.file === 'string' && diff.file) files.add(diff.file);
+    additions += readDiffLineCount(diff.additions, diff.added);
+    deletions += readDiffLineCount(diff.deletions, diff.removed);
+  }
+
+  return {
+    files: files.size || validDiffs,
+    additions,
+    deletions,
+  };
+}
+
+function isDiffRecord(value: Record<string, unknown>) {
+  return (
+    typeof value.file === 'string' ||
+    isDiffLineCount(value.additions) ||
+    isDiffLineCount(value.deletions) ||
+    isDiffLineCount(value.added) ||
+    isDiffLineCount(value.removed)
+  );
+}
+
+function readDiffLineCount(primary: unknown, fallback: unknown) {
+  if (isDiffLineCount(primary)) return primary;
+  return isDiffLineCount(fallback) ? fallback : 0;
+}
+
+function isDiffLineCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeReference[] {
   if (!Array.isArray(value)) return [];
   const references: AutoApproveJudgeReference[] = [];
@@ -866,17 +1045,6 @@ function isDirectoryInWorkspace(
   directory: unknown,
   workspacePath: string | null | undefined
 ): boolean {
-  const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
-  if (!normalizedWorkspace) return true;
-  const normalizedDirectory = normalizeWorkspacePath(
-    typeof directory === 'string' ? directory : undefined
-  );
-  return normalizedDirectory === normalizedWorkspace;
-}
-
-function normalizeWorkspacePath(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!normalized) return null;
-  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+  if (!normalizeWorkspaceIdentity(workspacePath)) return true;
+  return isSameWorkspacePath(typeof directory === 'string' ? directory : undefined, workspacePath);
 }

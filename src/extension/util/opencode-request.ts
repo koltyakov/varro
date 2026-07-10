@@ -49,7 +49,7 @@ export function getOpenCodeDirectoryHeaders(directory?: string): Record<string, 
   return { 'x-opencode-directory': directory };
 }
 
-function normalizeOpenCodeDirectory(directory: string | undefined) {
+export function normalizeOpenCodeDirectory(directory: string | undefined) {
   if (!directory) return undefined;
   const trimmed = directory.trim();
   if (!trimmed) return undefined;
@@ -57,6 +57,12 @@ function normalizeOpenCodeDirectory(directory: string | undefined) {
   // Windows have regressed when Varro rewrote drive casing or path separators.
   // We only trim trailing separators so equivalent user input stays stable
   // without changing the underlying path identity.
+  if (
+    /^[A-Za-z]:[\\/]+$/.test(trimmed) ||
+    /^(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+[\\/]*$/.test(trimmed)
+  ) {
+    return trimmed;
+  }
   const normalized = trimmed.replace(/[\\/]+$/, '');
   return normalized || trimmed;
 }

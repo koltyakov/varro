@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { statSync } from 'fs';
+import { createHash } from 'crypto';
+import { readFileSync } from 'fs';
 import { basename, dirname } from 'path';
 import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
 import { AutoApproveJudge } from './auto-approve-judge';
@@ -10,7 +11,7 @@ import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
 import { logger } from './logger';
 import { MessageRouter } from './message-router';
-import { getOpenCodeConfigPath } from './open-code-process';
+import { getOpenCodeConfigPaths } from './open-code-process';
 import { readExtensionConfigState } from './provider-limit-config';
 import { ProviderLimitService } from './provider-limit-service';
 import { RalphHost } from './ralph-host';
@@ -34,6 +35,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly RECYCLE_BIN_CLEANUP_INTERVAL_MS = 60_000;
   private static readonly SESSION_RECONCILE_INTERVAL_MS = 10_000;
   private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
+  private static readonly PROVIDER_REFRESH_RETRY_MS = 1_000;
+  private static readonly PROVIDER_REFRESH_MAX_RETRIES = 5;
 
   private lastStatusBarStateKey = '';
   private readonly fileSearch: FileSearchService;
@@ -55,12 +58,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly droppedFilesService: DroppedFilesService;
   private readonly configDisposable: vscode.Disposable;
   private readonly windowStateDisposable: vscode.Disposable;
-  private providerConfigWatcher: vscode.FileSystemWatcher | null = null;
+  private providerConfigWatchers: vscode.FileSystemWatcher[] = [];
   private providerAuthWatcher: vscode.FileSystemWatcher | null = null;
   private providerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private providerRefreshGeneration = 0;
   private sessionReconcileTimer: ReturnType<typeof setInterval> | null = null;
   private providerFilesSignature = this.readProviderFilesSignature();
   private readonly contextProvider: ContextProvider;
+  private disposed = false;
 
   get view() {
     return this.bridge.getView();
@@ -289,6 +294,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose() {
+    this.disposed = true;
+    this.providerRefreshGeneration += 1;
     if (this.providerRefreshTimer) {
       clearTimeout(this.providerRefreshTimer);
       this.providerRefreshTimer = null;
@@ -298,6 +305,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.sessionReconcileTimer = null;
     }
     await this.webviewSession.dispose();
+    await this.ralphHost.dispose();
     await this.serverEventBridge.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();
@@ -318,8 +326,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private setProviderWatchActive(active: boolean) {
     if (active) {
-      if (this.providerConfigWatcher || this.providerAuthWatcher) return;
-      this.providerConfigWatcher = this.createProviderFileWatcher(getOpenCodeConfigPath());
+      if (this.providerConfigWatchers.length > 0 || this.providerAuthWatcher) return;
+      this.providerConfigWatchers = getOpenCodeConfigPaths().map((path) =>
+        this.createProviderFileWatcher(path)
+      );
       this.providerAuthWatcher = this.createProviderFileWatcher(getOpenCodeAuthFilePath());
       if (this.providerFilesSignature !== this.readProviderFilesSignature()) {
         void this.refreshProviderState();
@@ -333,45 +343,173 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private disposeProviderFileWatchers() {
+    this.providerRefreshGeneration += 1;
     if (this.providerRefreshTimer) {
       clearTimeout(this.providerRefreshTimer);
       this.providerRefreshTimer = null;
     }
-    this.providerConfigWatcher?.dispose();
+    for (const watcher of this.providerConfigWatchers) watcher.dispose();
     this.providerAuthWatcher?.dispose();
-    this.providerConfigWatcher = null;
+    this.providerConfigWatchers = [];
     this.providerAuthWatcher = null;
   }
 
   private scheduleProviderRefresh() {
+    const generation = ++this.providerRefreshGeneration;
     if (this.providerRefreshTimer) clearTimeout(this.providerRefreshTimer);
     this.providerRefreshTimer = setTimeout(() => {
       this.providerRefreshTimer = null;
-      void this.refreshProviderState();
+      void this.refreshProviderState(generation, true);
     }, 250);
   }
 
-  private async refreshProviderState() {
+  private async refreshProviderState(
+    generation = ++this.providerRefreshGeneration,
+    requireSignatureChange = false
+  ) {
+    if (this.disposed || generation !== this.providerRefreshGeneration) return;
+    const signature = this.readProviderFilesSignature();
+    if (requireSignatureChange && signature === this.providerFilesSignature) return;
     this.providerLimitService.clearCache();
-    if (this.server.status.state === 'running') {
-      try {
-        await this.server.restart();
-      } catch (err) {
-        logger.warn(
-          `Provider refresh restart failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    }
-    this.providerFilesSignature = this.readProviderFilesSignature();
+    this.providerFilesSignature = signature;
     this.post({ type: 'providers/refresh' });
+    await this.maybeRestartForProviderRefresh(generation, 0);
+  }
+
+  private async maybeRestartForProviderRefresh(
+    generation: number,
+    retryCount: number,
+    managedProcessConfirmed = false
+  ) {
+    if (this.disposed || generation !== this.providerRefreshGeneration) return;
+    if (this.server.status.state === 'starting') {
+      this.scheduleProviderRestartRetry(generation, retryCount, false, managedProcessConfirmed);
+      return;
+    }
+    if (this.server.status.state !== 'running') return;
+
+    if (!managedProcessConfirmed) {
+      const managedProcess = await this.readManagedProviderServerState();
+      if (managedProcess === null) {
+        this.scheduleProviderRestartRetry(generation, retryCount);
+        return;
+      }
+      if (!managedProcess) return;
+      managedProcessConfirmed = true;
+    }
+    if (this.hasLocallyActiveProviderWork()) {
+      this.scheduleProviderRestartRetry(generation, retryCount, false, managedProcessConfirmed);
+      return;
+    }
+
+    const idle = await this.isServerIdleForProviderRefresh();
+    if (idle === false) {
+      this.scheduleProviderRestartRetry(generation, retryCount, false, managedProcessConfirmed);
+      return;
+    }
+    if (idle === null) {
+      this.scheduleProviderRestartRetry(generation, retryCount, true, managedProcessConfirmed);
+      return;
+    }
+    if (
+      this.disposed ||
+      generation !== this.providerRefreshGeneration ||
+      this.server.status.state !== 'running' ||
+      this.hasLocallyActiveProviderWork()
+    ) {
+      return;
+    }
+    const stillManaged = await this.readManagedProviderServerState();
+    if (stillManaged !== true) {
+      if (stillManaged === null) {
+        this.scheduleProviderRestartRetry(generation, retryCount, true, managedProcessConfirmed);
+      }
+      return;
+    }
+
+    try {
+      await this.server.restart();
+      if (this.disposed || generation !== this.providerRefreshGeneration) return;
+      this.providerLimitService.clearCache();
+      this.post({ type: 'providers/refresh' });
+    } catch (err) {
+      logger.warn(
+        `Provider refresh restart failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      this.scheduleProviderRestartRetry(generation, retryCount, true, managedProcessConfirmed);
+    }
+  }
+
+  private hasLocallyActiveProviderWork() {
+    return (
+      this.sessionState.busy.size > 0 ||
+      this.sessionState.pending.size > 0 ||
+      this.ralphHost.getStatePayload().activeIds.length > 0
+    );
+  }
+
+  private async readManagedProviderServerState(): Promise<boolean | null> {
+    try {
+      const info = await this.server.readServerInfo();
+      return typeof info.managedProcess === 'boolean' ? info.managedProcess : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async isServerIdleForProviderRefresh(): Promise<boolean | null> {
+    try {
+      const [statuses, questions] = await Promise.all([
+        this.server.request('GET', '/session/status'),
+        this.server.request('GET', '/question'),
+      ]);
+      if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return null;
+      if (!Array.isArray(questions)) return null;
+      for (const value of Object.values(statuses)) {
+        if (!value || typeof value !== 'object') continue;
+        const type = (value as Record<string, unknown>).type;
+        if (type === 'busy' || type === 'retry') return false;
+      }
+      return questions.length === 0 && !this.hasLocallyActiveProviderWork();
+    } catch {
+      return null;
+    }
+  }
+
+  private scheduleProviderRestartRetry(
+    generation: number,
+    retryCount: number,
+    bounded = true,
+    managedProcessConfirmed = false
+  ) {
+    if (
+      this.disposed ||
+      generation !== this.providerRefreshGeneration ||
+      (this.providerConfigWatchers.length === 0 && !this.providerAuthWatcher)
+    ) {
+      return;
+    }
+    if (bounded && retryCount >= SidebarProvider.PROVIDER_REFRESH_MAX_RETRIES) {
+      logger.info('Provider refresh restart remained deferred after bounded retries');
+      return;
+    }
+    if (this.providerRefreshTimer) clearTimeout(this.providerRefreshTimer);
+    this.providerRefreshTimer = setTimeout(() => {
+      this.providerRefreshTimer = null;
+      void this.maybeRestartForProviderRefresh(
+        generation,
+        bounded ? retryCount + 1 : 0,
+        managedProcessConfirmed
+      );
+    }, SidebarProvider.PROVIDER_REFRESH_RETRY_MS);
   }
 
   private readProviderFilesSignature() {
-    return [getOpenCodeConfigPath(), getOpenCodeAuthFilePath()]
+    return [...getOpenCodeConfigPaths(), getOpenCodeAuthFilePath()]
       .map((path) => {
         try {
-          const stat = statSync(path);
-          return `${path}:${stat.mtimeMs}:${stat.size}`;
+          const digest = createHash('sha256').update(readFileSync(path)).digest('hex');
+          return `${path}:${digest}`;
         } catch {
           return `${path}:missing`;
         }

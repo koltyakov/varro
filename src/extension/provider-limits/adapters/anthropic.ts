@@ -53,6 +53,7 @@ type AnthropicCredentials = {
   accessToken: string;
   refreshToken: string | null;
   credentialsFilePath: string | null;
+  origin: 'opencode-auth' | 'claude-credentials';
 };
 
 export function createAnthropicAdapter(): ProviderLimitAdapter {
@@ -302,7 +303,8 @@ function shouldRefreshAnthropicCredentials(
   credentials: AnthropicCredentials
 ): credentials is AnthropicCredentials & { refreshToken: string; credentialsFilePath: string } {
   return (
-    (responseStatus === 401 || responseStatus === 429) &&
+    responseStatus === 401 &&
+    credentials.origin === 'claude-credentials' &&
     Boolean(credentials.refreshToken) &&
     Boolean(credentials.credentialsFilePath)
   );
@@ -526,15 +528,16 @@ function buildAnthropicStatuslineWindow(
 async function resolveAnthropicCredentials(
   authStore: Record<string, ProviderAuthRecord>
 ): Promise<AnthropicCredentials | null> {
-  const fileCredentials = await readAnthropicCredentialsFromClaudeCredentials();
   const auth = authStore.anthropic;
-  if (auth?.type !== 'oauth') return fileCredentials;
-
-  return {
-    accessToken: auth.access,
-    refreshToken: fileCredentials?.refreshToken ?? null,
-    credentialsFilePath: fileCredentials?.credentialsFilePath ?? null,
-  };
+  if (auth?.type === 'oauth') {
+    return {
+      accessToken: auth.access,
+      refreshToken: null,
+      credentialsFilePath: null,
+      origin: 'opencode-auth',
+    };
+  }
+  return readAnthropicCredentialsFromClaudeCredentials();
 }
 
 async function readAnthropicCredentialsFromClaudeCredentials(): Promise<AnthropicCredentials | null> {
@@ -571,6 +574,7 @@ function parseAnthropicCredentials(
       accessToken,
       refreshToken,
       credentialsFilePath,
+      origin: 'claude-credentials',
     };
   } catch {
     return null;

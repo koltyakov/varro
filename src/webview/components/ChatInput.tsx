@@ -120,7 +120,7 @@ import { RichComposerArea, type RichComposerChip } from './chat-input/RichCompos
 import { DropOverlay } from './chat-input/DropOverlay';
 import { QueuedMessages } from './chat-input/QueuedMessages';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
-import type { DroppedFile, ExtensionMessage } from '../../shared/protocol';
+import type { DroppedFile, ExtensionMessage, InitialWebviewState } from '../../shared/protocol';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
 import {
@@ -173,6 +173,16 @@ import {
 } from './chat-input/queued-steer';
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
+const MAX_DROPPED_CONTENT_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_DROPPED_CONTENT_TOTAL_BYTES = 50 * 1024 * 1024;
+const MAX_DROPPED_CONTENT_FILES = 20;
+
+function isRemoteExtensionHost() {
+  return (
+    (window as typeof window & { __initialWebviewState?: Partial<InitialWebviewState> })
+      .__initialWebviewState?.remoteExtensionHost === true
+  );
+}
 
 function composerFiles() {
   return state.droppedFiles;
@@ -236,17 +246,31 @@ function clearUsageLimitsForSessionTree(sessionId: string | null | undefined) {
   }
 }
 
-async function sendDroppedContent(droppedFiles: File[]) {
+export async function sendDroppedContent(droppedFiles: File[]) {
   if (droppedFiles.length === 0) return;
-  const MAX_BYTES = 25 * 1024 * 1024;
-  const MAX_FILES = 20;
 
-  const payloads: Array<{ name: string; content: string; size: number }> = [];
-  for (const file of droppedFiles.slice(0, MAX_FILES)) {
-    if (file.size > MAX_BYTES) continue;
+  const acceptedFiles: File[] = [];
+  let totalSize = 0;
+  for (const file of droppedFiles.slice(0, MAX_DROPPED_CONTENT_FILES)) {
+    if (
+      !Number.isSafeInteger(file.size) ||
+      file.size < 0 ||
+      file.size > MAX_DROPPED_CONTENT_FILE_BYTES ||
+      totalSize + file.size > MAX_DROPPED_CONTENT_TOTAL_BYTES
+    ) {
+      continue;
+    }
+    totalSize += file.size;
+    acceptedFiles.push(file);
+  }
+
+  for (const file of acceptedFiles) {
     try {
       const base64 = await readFileAsBase64(file);
-      payloads.push({ name: file.name, content: base64, size: file.size });
+      postMessage({
+        type: 'files/drop-content',
+        payload: { files: [{ name: file.name, content: base64, size: file.size }] },
+      });
     } catch (err) {
       postMessage({
         type: 'log',
@@ -258,9 +282,6 @@ async function sendDroppedContent(droppedFiles: File[]) {
       });
     }
   }
-
-  if (payloads.length === 0) return;
-  postMessage({ type: 'files/drop-content', payload: { files: payloads } });
 }
 
 export function ChatInput() {
@@ -1330,10 +1351,18 @@ export function ChatInput() {
     // Snapshot File objects now - DataTransfer is invalidated after the drop
     // event returns, so FileReader fallback later wouldn't see them otherwise.
     const droppedFiles = Array.from(dataTransfer.files || []);
+    const preferFileContent = isRemoteExtensionHost() && droppedFiles.length > 0;
 
-    const paths = await collectDroppedPaths(dataTransfer);
+    const paths = await collectDroppedPaths(dataTransfer, {
+      includeFilePaths: !preferFileContent,
+      preferFileContent,
+    });
     if (paths.length > 0) {
       postMessage({ type: 'files/drop', payload: { paths } });
+      return;
+    }
+    if (preferFileContent) {
+      await sendDroppedContent(droppedFiles);
       return;
     }
 

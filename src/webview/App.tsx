@@ -1,7 +1,7 @@
 import { ErrorBoundary, Show, onCleanup, onMount } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
 import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
-import { AppStateProvider, useAppState } from './lib/app-state-context';
+import { defaultAppState } from './lib/state';
 import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
 import { RalphForm } from './components/ralph/RalphForm';
@@ -14,12 +14,12 @@ export function AppRoot() {
     restoreOpenCodeRuntime();
   });
 
-  return (
-    <AppStateProvider>
-      <App />
-    </AppStateProvider>
-  );
+  return <App />;
 }
+
+const showChat = () =>
+  defaultAppState.state.serverStatus.state === 'running' &&
+  !(defaultAppState.state.providersLoaded && defaultAppState.state.providers.length === 0);
 
 function renderErrorFallback(err: Error) {
   return <ErrorFallback err={err} />;
@@ -27,11 +27,6 @@ function renderErrorFallback(err: Error) {
 
 export function App() {
   useOpenCode();
-  const appState = useAppState();
-
-  const showChat = () =>
-    appState.state.serverStatus.state === 'running' &&
-    !(appState.state.providersLoaded && appState.state.providers.length === 0);
 
   onMount(() => {
     ralphRunner.reattachAll();
@@ -45,12 +40,12 @@ export function App() {
         </Show>
       </ErrorBoundary>
       <RalphForm />
-      <Show when={appState.error()}>
+      <Show when={defaultAppState.error()}>
         <div class="flex items-start justify-between gap-2 border-t border-vscode-error/30 bg-vscode-error/6 px-4 py-2 text-[11px] text-vscode-error">
-          <span class="break-words leading-relaxed">{appState.error()}</span>
+          <span class="break-words leading-relaxed">{defaultAppState.error()}</span>
           <button
             class="shrink-0 px-1 text-vscode-error/60 transition-colors hover:text-vscode-error"
-            onClick={() => appState.setError(null)}
+            onClick={() => defaultAppState.setError(null)}
             title="Dismiss"
           >
             <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">

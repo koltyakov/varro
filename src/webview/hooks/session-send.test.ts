@@ -338,6 +338,7 @@ describe('session-send helpers', () => {
 
   it('creates a session when needed and sends the built payload', async () => {
     const sendAsync = vi.fn(async () => {});
+    const syncSessionMcps = vi.fn(async () => {});
     const applyEffectiveModel = vi.fn();
     const setSessionStatusEntry = vi.fn();
 
@@ -347,7 +348,7 @@ describe('session-send helpers', () => {
         getDefaultPermissionMode: () => 'default',
         createSession: vi.fn(async () => 'session-2'),
         clearPendingAbort: vi.fn(),
-        syncSessionMcps: vi.fn(async () => {}),
+        syncSessionMcps,
         buildSendPayload: () => ({
           body: { parts: [{ type: 'text', text: 'hello' }] },
           effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
@@ -383,6 +384,10 @@ describe('session-send helpers', () => {
       parts: [{ type: 'text', text: 'hello' }],
     });
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-2', { type: 'busy' });
+    expect(syncSessionMcps).toHaveBeenCalledWith('session-2');
+    expect(syncSessionMcps.mock.invocationCallOrder[0]).toBeLessThan(
+      sendAsync.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    );
   });
 
   it('shows the sent user message before the remote send finishes', async () => {

@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { normalizeModelVariant } from '../../shared/model-variant';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
 import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
@@ -7,7 +8,6 @@ import {
   modelSupportsVariants,
   modelSupportsVision,
 } from '../lib/model-capabilities';
-import { normalizeModelVariant } from '../lib/model-variants';
 
 interface ModelSelection {
   providerID?: string;

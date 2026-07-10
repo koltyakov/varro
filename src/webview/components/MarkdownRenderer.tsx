@@ -87,6 +87,16 @@ type MarkdownHydrationFlags = {
 
 type RenderMarkdownContext = {
   disableCodeHighlighting: boolean;
+  disableCache: boolean;
+};
+
+type MarkdownStringCache = Map<string, MarkdownCacheEntry>;
+
+type MarkdownCacheEntry = {
+  cache: MarkdownStringCache;
+  key: string;
+  value: string;
+  bytes: number;
 };
 
 type IdleSchedulerGlobal = typeof globalThis & {
@@ -209,14 +219,15 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'y1',
   'y2',
 ];
-const CODE_BLOCK_CACHE_LIMIT = 100;
-const RENDERED_MARKDOWN_CACHE_LIMIT = 100;
+const MARKDOWN_CACHE_ENTRY_LIMIT = 100;
+const MARKDOWN_CACHE_BYTE_BUDGET = 2 * 1024 * 1024;
 const MAX_COPY_TEXT_LENGTH = 20_000;
-const codeBlockHtmlCache = new Map<string, string>();
-const highlightedCodeCache = new Map<string, string>();
-const renderedMarkdownCache = new Map<string, string>();
-const SANITIZE_CACHE_LIMIT = 100;
-const sanitizeHtmlCache = new Map<string, string>();
+const codeBlockHtmlCache: MarkdownStringCache = new Map();
+const highlightedCodeCache: MarkdownStringCache = new Map();
+const renderedMarkdownCache: MarkdownStringCache = new Map();
+const sanitizeHtmlCache: MarkdownStringCache = new Map();
+const markdownCacheLru = new Map<MarkdownCacheEntry, true>();
+let markdownCacheBytes = 0;
 const CODE_LANGUAGE_ALIASES = new Map<string, string>([
   ['console', 'bash'],
   ['html', 'xml'],
@@ -255,20 +266,70 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#39;');
 }
 
-function setCachedValue(cache: Map<string, string>, key: string, value: string) {
-  cache.set(key, value);
-  if (cache.size > CODE_BLOCK_CACHE_LIMIT) {
-    const oldest = cache.keys().next().value;
-    if (oldest) cache.delete(oldest);
+function getUtf8ByteLength(value: string) {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
   }
+  return bytes;
 }
 
-function setRenderedMarkdownCacheValue(key: string, value: string) {
-  renderedMarkdownCache.set(key, value);
-  if (renderedMarkdownCache.size > RENDERED_MARKDOWN_CACHE_LIMIT) {
-    const oldest = renderedMarkdownCache.keys().next().value;
-    if (oldest) renderedMarkdownCache.delete(oldest);
+function deleteMarkdownCacheEntry(entry: MarkdownCacheEntry) {
+  if (entry.cache.get(entry.key) === entry) {
+    entry.cache.delete(entry.key);
   }
+  markdownCacheLru.delete(entry);
+  markdownCacheBytes -= entry.bytes;
+}
+
+function getCachedValue(cache: MarkdownStringCache, key: string) {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+
+  cache.delete(key);
+  cache.set(key, entry);
+  markdownCacheLru.delete(entry);
+  markdownCacheLru.set(entry, true);
+  return entry.value;
+}
+
+function setCachedValue(cache: MarkdownStringCache, key: string, value: string) {
+  const existing = cache.get(key);
+  if (existing) deleteMarkdownCacheEntry(existing);
+
+  const bytes = getUtf8ByteLength(key) + getUtf8ByteLength(value);
+  if (bytes > MARKDOWN_CACHE_BYTE_BUDGET) return;
+
+  while (cache.size >= MARKDOWN_CACHE_ENTRY_LIMIT) {
+    const oldest = cache.values().next().value;
+    if (!oldest) break;
+    deleteMarkdownCacheEntry(oldest);
+  }
+  while (markdownCacheBytes + bytes > MARKDOWN_CACHE_BYTE_BUDGET) {
+    const oldest = markdownCacheLru.keys().next().value;
+    if (!oldest) break;
+    deleteMarkdownCacheEntry(oldest);
+  }
+
+  const entry = { cache, key, value, bytes } satisfies MarkdownCacheEntry;
+  cache.set(key, entry);
+  markdownCacheLru.set(entry, true);
+  markdownCacheBytes += bytes;
 }
 
 function hashContent(value: string) {
@@ -292,13 +353,16 @@ function resolveCodeLanguage(lang?: string) {
   return hljs.getLanguage(normalized) ? normalized : undefined;
 }
 
-export function renderHighlightedCodeHtml(text: string, lang?: string): string {
-  const cacheKey = `${lang || ''}\u0000${text}`;
-  const cached = highlightedCodeCache.get(cacheKey);
-  if (cached) {
-    highlightedCodeCache.delete(cacheKey);
-    highlightedCodeCache.set(cacheKey, cached);
-    return cached;
+export function renderHighlightedCodeHtml(
+  text: string,
+  lang?: string,
+  disableCache = false
+): string {
+  let cacheKey: string | null = null;
+  if (!disableCache) {
+    cacheKey = `${lang || ''}\u0000${text}`;
+    const cached = getCachedValue(highlightedCodeCache, cacheKey);
+    if (cached !== undefined) return cached;
   }
 
   const resolvedLanguage = resolveCodeLanguage(lang);
@@ -311,7 +375,7 @@ export function renderHighlightedCodeHtml(text: string, lang?: string): string {
     }
   })();
 
-  setCachedValue(highlightedCodeCache, cacheKey, highlighted);
+  if (cacheKey !== null) setCachedValue(highlightedCodeCache, cacheKey, highlighted);
   return highlighted;
 }
 
@@ -322,25 +386,22 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
   const showCopyButton = params.showCopyButton !== false;
   const disableHighlighting = params.disableHighlighting === true;
   const disableCache = params.disableCache === true;
-  const cacheKey = [
-    className || '',
-    lang || '',
-    showCopyButton ? 'copy' : 'nocopy',
-    params.text,
-    copyText,
-  ].join('\u0000');
+  let cacheKey: string | null = null;
   if (!disableCache) {
-    const cached = codeBlockHtmlCache.get(cacheKey);
-    if (cached) {
-      codeBlockHtmlCache.delete(cacheKey);
-      codeBlockHtmlCache.set(cacheKey, cached);
-      return cached;
-    }
+    cacheKey = [
+      className || '',
+      lang || '',
+      showCopyButton ? 'copy' : 'nocopy',
+      params.text,
+      copyText,
+    ].join('\u0000');
+    const cached = getCachedValue(codeBlockHtmlCache, cacheKey);
+    if (cached !== undefined) return cached;
   }
 
   const highlighted = disableHighlighting
     ? escapeHtml(params.text)
-    : renderHighlightedCodeHtml(params.text, lang);
+    : renderHighlightedCodeHtml(params.text, lang, disableCache);
   const langLabel = lang ? `<span class="code-block-lang">${escapeHtml(lang)}</span>` : '';
   const copyBtn = showCopyButton
     ? `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${encodeCopyPayload(copyText)}" aria-label="Copy code" title="Copy code">${copySvg}</button>`
@@ -351,9 +412,7 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
   const classAttr = ['interactive-result-code-block', className].filter(Boolean).join(' ');
   const html = `<div class="${classAttr}"${langAttr}>${header}<pre class="code-block"><code class="hljs">${highlighted}</code></pre></div>`;
 
-  if (!disableCache) {
-    setCachedValue(codeBlockHtmlCache, cacheKey, html);
-  }
+  if (cacheKey !== null) setCachedValue(codeBlockHtmlCache, cacheKey, html);
   return html;
 }
 
@@ -444,7 +503,7 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
     lang,
     copyText: normalizedText,
     disableHighlighting: renderMarkdownContext?.disableCodeHighlighting,
-    disableCache: renderMarkdownContext?.disableCodeHighlighting,
+    disableCache: renderMarkdownContext?.disableCache,
   });
 };
 
@@ -548,12 +607,10 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   anchor.removeAttribute('data-external');
 }
 
-function sanitizeHtml(html: string): string {
-  const cached = sanitizeHtmlCache.get(html);
-  if (cached !== undefined) {
-    sanitizeHtmlCache.delete(html);
-    sanitizeHtmlCache.set(html, cached);
-    return cached;
+function sanitizeHtml(html: string, disableCache: boolean): string {
+  if (!disableCache) {
+    const cached = getCachedValue(sanitizeHtmlCache, html);
+    if (cached !== undefined) return cached;
   }
 
   const sanitized = DOMPurify.sanitize(html, {
@@ -574,25 +631,29 @@ function sanitizeHtml(html: string): string {
     result = template.innerHTML;
   }
 
-  sanitizeHtmlCache.set(html, result);
-  if (sanitizeHtmlCache.size > SANITIZE_CACHE_LIMIT) {
-    const oldest = sanitizeHtmlCache.keys().next().value;
-    if (oldest) sanitizeHtmlCache.delete(oldest);
-  }
+  if (!disableCache) setCachedValue(sanitizeHtmlCache, html, result);
   return result;
 }
 
 function renderMarkdownHtml(
   content: string,
-  options?: { disablePathLinkify?: boolean; disableCodeHighlighting?: boolean }
+  options?: {
+    disablePathLinkify?: boolean;
+    disableCodeHighlighting?: boolean;
+    disableCache?: boolean;
+  }
 ): string {
   const previousRenderMarkdownContext = renderMarkdownContext;
   renderMarkdownContext = {
     disableCodeHighlighting: options?.disableCodeHighlighting === true,
+    disableCache: options?.disableCache === true,
   };
   try {
     const parsed = marked.parse(content) as string;
-    return sanitizeHtml(options?.disablePathLinkify ? parsed : linkifyPaths(parsed));
+    return sanitizeHtml(
+      options?.disablePathLinkify ? parsed : linkifyPaths(parsed),
+      options?.disableCache === true
+    );
   } catch {
     return `<p>${escapeHtml(content)}</p>`;
   } finally {
@@ -758,27 +819,49 @@ function getMarkdownRenderSegments(
   return getStreamingMarkdownSegments(content, previousScanState);
 }
 
+function isAppendOnlySafeMarkdown(content: string) {
+  for (const line of content.split(/\r?\n/)) {
+    if (!line) continue;
+    if (/^\s/.test(line)) return false;
+    if (/[\\`*_~<>[\]|]/.test(line)) return false;
+    if (/^(?:#{1,6}(?:\s|$)|>|[-+]\s|\d+[.)]\s|(?:=+|-+)\s*$)/.test(line)) return false;
+  }
+  return true;
+}
+
+function getAppendOnlyStableDelta(
+  previousContent: string,
+  nextContent: string,
+  previousContentWasSafe: boolean
+) {
+  if (!previousContent || !previousContentWasSafe || !nextContent.startsWith(previousContent)) {
+    return null;
+  }
+
+  const suffix = nextContent.slice(previousContent.length);
+  if (!/^(?:\r?\n){2,}/.test(suffix)) return null;
+  const delta = suffix.replace(/^(?:\r?\n)+/, '');
+  return delta && isAppendOnlySafeMarkdown(delta) ? delta : null;
+}
+
 function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
   if (!options.cacheByContent) {
     return renderMarkdownHtml(content, {
       disablePathLinkify: options.disablePathLinkify,
       disableCodeHighlighting: options.disableCodeHighlighting,
+      disableCache: true,
     });
   }
 
   const cacheKey = getRenderedMarkdownCacheKey(content);
-  const cached = renderedMarkdownCache.get(cacheKey);
-  if (cached) {
-    renderedMarkdownCache.delete(cacheKey);
-    renderedMarkdownCache.set(cacheKey, cached);
-    return cached;
-  }
+  const cached = getCachedValue(renderedMarkdownCache, cacheKey);
+  if (cached !== undefined) return cached;
 
   const html = renderMarkdownHtml(content, {
     disablePathLinkify: options.disablePathLinkify,
     disableCodeHighlighting: options.disableCodeHighlighting,
   });
-  setRenderedMarkdownCacheValue(cacheKey, html);
+  setCachedValue(renderedMarkdownCache, cacheKey, html);
   return html;
 }
 
@@ -798,6 +881,16 @@ export function __resetMarkdownCachesForTests() {
   highlightedCodeCache.clear();
   renderedMarkdownCache.clear();
   sanitizeHtmlCache.clear();
+  markdownCacheLru.clear();
+  markdownCacheBytes = 0;
+}
+
+export function getMarkdownCacheStatsForTests() {
+  return {
+    bytes: markdownCacheBytes,
+    byteBudget: MARKDOWN_CACHE_BYTE_BUDGET,
+    entries: markdownCacheLru.size,
+  };
 }
 
 function linkifyPaths(html: string): string {
@@ -924,7 +1017,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let lastAppliedTailContent = initialSegments.tailContent;
   let lastAppliedStableHtml = initialSegments.stableContent
     ? parseMarkdown(initialSegments.stableContent, {
-        cacheByContent: true,
+        cacheByContent: false,
         disablePathLinkify: lw(),
         disableCodeHighlighting: lw(),
       })
@@ -936,6 +1029,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
   });
   let lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(lastAppliedStableHtml);
   let lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(lastAppliedTailHtml);
+  let lastAppliedStableContentWasAppendOnlySafe = isAppendOnlySafeMarkdown(
+    initialSegments.stableContent
+  );
 
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
@@ -984,15 +1080,29 @@ export function MarkdownRenderer(props: MarkdownProps) {
       const tailContentChanged =
         workspacePath !== lastAppliedWorkspacePath ||
         segments.tailContent !== lastAppliedTailContent;
+      const appendOnlyStableDelta =
+        workspacePath === lastAppliedWorkspacePath
+          ? getAppendOnlyStableDelta(
+              lastAppliedStableContent,
+              segments.stableContent,
+              lastAppliedStableContentWasAppendOnlySafe
+            )
+          : null;
       const nextStableHtml =
         segments.stableContent.length === 0
           ? ''
           : stableContentChanged
-            ? parseMarkdown(segments.stableContent, {
-                cacheByContent: true,
-                disablePathLinkify: isLightweight,
-                disableCodeHighlighting: isLightweight,
-              })
+            ? appendOnlyStableDelta
+              ? `${lastAppliedStableHtml}${parseMarkdown(appendOnlyStableDelta, {
+                  cacheByContent: false,
+                  disablePathLinkify: isLightweight,
+                  disableCodeHighlighting: isLightweight,
+                })}`
+              : parseMarkdown(segments.stableContent, {
+                  cacheByContent: false,
+                  disablePathLinkify: isLightweight,
+                  disableCodeHighlighting: isLightweight,
+                })
             : lastAppliedStableHtml;
       const shouldDeferTailHighlight =
         !isLightweight &&
@@ -1015,10 +1125,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (stableChanged) {
         lastAppliedStableContent = segments.stableContent;
         lastAppliedStableHtml = nextStableHtml;
+        lastAppliedStableContentWasAppendOnlySafe = appendOnlyStableDelta
+          ? true
+          : isAppendOnlySafeMarkdown(segments.stableContent);
         lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(nextStableHtml);
         setStableHtml(nextStableHtml);
       } else if (stableContentChanged) {
         lastAppliedStableContent = segments.stableContent;
+        lastAppliedStableContentWasAppendOnlySafe = isAppendOnlySafeMarkdown(
+          segments.stableContent
+        );
       }
       if (tailChanged) {
         lastAppliedTailContent = segments.tailContent;

@@ -7,7 +7,7 @@ const RESULT_PREFIX = 'VARRO_COMPAT_RESULT=';
 const DEFAULT_SCAN_COUNT = 12;
 const ROOT = resolve(import.meta.dirname, '../..');
 const DOCKERFILE = resolve(import.meta.dirname, 'Dockerfile');
-const FLOOR_FILE = resolve(ROOT, 'src/shared/opencode-compatibility.ts');
+const COMPATIBILITY_FILE = resolve(ROOT, 'src/shared/opencode-compatibility.ts');
 
 function parseArguments(argv) {
   const options = {
@@ -44,11 +44,14 @@ function compareVersions(left, right) {
   return 0;
 }
 
-async function readDeclaredFloor() {
-  const source = await readFile(FLOOR_FILE, 'utf8');
-  const match = source.match(/MINIMUM_SUPPORTED_OPENCODE_VERSION\s*=\s*'([^']+)'/);
-  if (!match) throw new Error(`Could not read compatibility floor from ${FLOOR_FILE}`);
-  return match[1];
+async function readDeclaredCompatibilityRange() {
+  const source = await readFile(COMPATIBILITY_FILE, 'utf8');
+  const floor = source.match(/MINIMUM_SUPPORTED_OPENCODE_VERSION\s*=\s*'([^']+)'/)?.[1];
+  const ceiling = source.match(/MAXIMUM_TESTED_OPENCODE_VERSION\s*=\s*'([^']+)'/)?.[1];
+  if (!floor || !ceiling) {
+    throw new Error(`Could not read compatibility range from ${COMPATIBILITY_FILE}`);
+  }
+  return { floor, ceiling };
 }
 
 async function readPublishedVersions() {
@@ -60,7 +63,7 @@ async function readPublishedVersions() {
     .sort((left, right) => compareVersions(right, left));
 }
 
-function selectPublishedVersions(allVersions, count, declaredFloor, anchorFloor) {
+function selectPublishedVersions(allVersions, count, declaredFloor, declaredCeiling, anchorFloor) {
   if (allVersions.length < count) {
     throw new Error(`npm registry returned only ${allVersions.length} stable versions`);
   }
@@ -70,7 +73,13 @@ function selectPublishedVersions(allVersions, count, declaredFloor, anchorFloor)
     if (floorIndex < 0) {
       throw new Error(`Declared floor ${declaredFloor} is not a published stable OpenCode version`);
     }
+    if (!allVersions.includes(declaredCeiling)) {
+      throw new Error(
+        `Declared tested ceiling ${declaredCeiling} is not a published stable OpenCode version`
+      );
+    }
     selected.push(declaredFloor);
+    selected.push(declaredCeiling);
     const predecessor = allVersions[floorIndex + 1];
     if (predecessor) selected.push(predecessor);
   }
@@ -163,13 +172,14 @@ async function writeReport(path, report) {
 
 const options = parseArguments(process.argv.slice(2));
 assertDockerAvailable();
-const declaredFloor = await readDeclaredFloor();
+const { floor: declaredFloor, ceiling: declaredCeiling } = await readDeclaredCompatibilityRange();
 const versions = options.versions
   ? options.versions.sort((left, right) => compareVersions(right, left))
   : selectPublishedVersions(
       await readPublishedVersions(),
       options.count,
       declaredFloor,
+      declaredCeiling,
       options.checkFloor
     );
 
@@ -177,6 +187,7 @@ process.stdout.write(
   `Testing ${versions.length} OpenCode releases from ${versions[0]} through ${versions.at(-1)}.\n`
 );
 process.stdout.write(`Declared Varro compatibility floor: ${declaredFloor}.\n`);
+process.stdout.write(`Declared Varro tested ceiling: ${declaredCeiling}.\n`);
 
 const results = [];
 try {
@@ -191,6 +202,7 @@ const analysis = analyze(results);
 const report = {
   generatedAt: new Date().toISOString(),
   declaredFloor,
+  declaredCeiling,
   testedVersions: versions,
   ...analysis,
   results,

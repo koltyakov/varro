@@ -2,21 +2,21 @@ import { Show } from 'solid-js';
 import { OPENCODE_UPDATE_REQUIRED_PREFIX } from '../../shared/opencode-compatibility';
 import { postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
-import { useAppState } from '../lib/app-state-context';
+import { defaultAppState } from '../lib/state';
 
 function openExternal(url: string) {
   postMessage({ type: 'vscode/open-external', payload: { url } });
 }
 
+const serverStatus = () => defaultAppState.state.serverStatus;
+
 export function ServerStatus() {
-  const appState = useAppState();
-  const status = () => appState.state.serverStatus;
   const noProvidersConfigured = () =>
-    status().state === 'running' &&
-    appState.state.providersLoaded &&
-    appState.state.providers.length === 0;
+    serverStatus().state === 'running' &&
+    defaultAppState.state.providersLoaded &&
+    defaultAppState.state.providers.length === 0;
   const serverErrorMessage = () => {
-    const currentStatus = status();
+    const currentStatus = serverStatus();
     return currentStatus.state === 'error' ? currentStatus.message.trim() : '';
   };
   const isMissingCliError = () => serverErrorMessage().includes('OpenCode CLI not found');
@@ -25,7 +25,7 @@ export function ServerStatus() {
 
   return (
     <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center">
-      <Show when={status().state === 'starting'}>
+      <Show when={serverStatus().state === 'starting'}>
         <div class="flex items-center gap-2">
           <span class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft" />
           <span
@@ -43,7 +43,7 @@ export function ServerStatus() {
         </div>
       </Show>
 
-      <Show when={status().state === 'stopped'}>
+      <Show when={serverStatus().state === 'stopped'}>
         <div class="h-1.5 w-1.5 rounded-full bg-vscode-muted/30" />
         <div>
           <p class="text-[13px] font-medium text-vscode-fg">Server not running</p>
@@ -51,7 +51,7 @@ export function ServerStatus() {
         </div>
       </Show>
 
-      <Show when={status().state === 'error'}>
+      <Show when={serverStatus().state === 'error'}>
         <Show
           when={isMissingCliError()}
           fallback={

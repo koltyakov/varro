@@ -271,6 +271,27 @@ describe('todo-sync', () => {
     expect(setState).not.toHaveBeenCalled();
   });
 
+  it('does not let id-less native events downgrade completed snapshots', async () => {
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(async () => [
+        { content: 'sync', status: 'completed', priority: 'medium' },
+      ]),
+    });
+
+    await operations.syncTodosForSession('session-1', []);
+    expect(setState).toHaveBeenCalledWith('todos', [
+      { id: 'sync', content: 'sync', status: 'completed', priority: 'medium' },
+    ]);
+
+    state.todos = [{ id: 'sync', content: 'sync', status: 'completed', priority: 'medium' }];
+    setState.mockClear();
+    operations.syncTodosFromMessages([], {
+      todos: [{ content: 'sync', status: 'in_progress', priority: 'medium' }],
+    });
+
+    expect(setState).not.toHaveBeenCalled();
+  });
+
   it('uses message todos to advance stale native session todos', async () => {
     const operations = createTodoSyncOperations({
       loadSessionTodos: vi.fn(async () => [

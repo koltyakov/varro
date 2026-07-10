@@ -121,4 +121,73 @@ describe('permissionsStore', () => {
     expect(state.permissions[0]).not.toHaveProperty('duplicateIDs');
     expect(state.permissions[0]).not.toHaveProperty('groupMembers');
   });
+
+  it('replaces stale permissions with an authoritative server snapshot', () => {
+    permissionsStore.addPermission(createPermission('permission-stale', 1));
+    const reconciliation = permissionsStore.beginPermissionReconciliation();
+
+    permissionsStore.reconcilePermissions([], reconciliation);
+
+    expect(state.permissions).toEqual([]);
+  });
+
+  it('does not restore a permission removed while its server snapshot was loading', () => {
+    const permission = createPermission('permission-1', 1);
+    permissionsStore.addPermission(permission);
+    const reconciliation = permissionsStore.beginPermissionReconciliation();
+
+    permissionsStore.removePermission(permission.id);
+    permissionsStore.reconcilePermissions([permission], reconciliation);
+
+    expect(state.permissions).toEqual([]);
+  });
+
+  it('preserves a permission added while its server snapshot was loading', () => {
+    const reconciliation = permissionsStore.beginPermissionReconciliation();
+    const permission = createPermission('permission-new', 1);
+
+    permissionsStore.addPermission(permission);
+    permissionsStore.reconcilePermissions([], reconciliation);
+
+    expect(state.permissions).toEqual([expect.objectContaining({ id: permission.id })]);
+  });
+
+  it('releases metadata for thousands of resolved permission IDs', () => {
+    for (let index = 0; index < 5_000; index += 1) {
+      const reconciliation = permissionsStore.beginPermissionReconciliation();
+      permissionsStore.removePermission(`permission-resolved-${index}`);
+      permissionsStore.reconcilePermissions([], reconciliation);
+    }
+
+    expect(permissionsStore.getPermissionReconciliationMetadataSize()).toEqual({
+      activeReconciliations: 0,
+      retainedPermissionIds: 0,
+    });
+  });
+
+  it('retains tombstones only until every active reconciliation finishes', () => {
+    const first = permissionsStore.beginPermissionReconciliation();
+    const second = permissionsStore.beginPermissionReconciliation();
+    const permission = createPermission('permission-race', 1);
+
+    permissionsStore.removePermission(permission.id);
+    expect(permissionsStore.getPermissionReconciliationMetadataSize()).toEqual({
+      activeReconciliations: 2,
+      retainedPermissionIds: 2,
+    });
+
+    permissionsStore.reconcilePermissions([permission], first);
+    expect(state.permissions).toEqual([]);
+    expect(permissionsStore.getPermissionReconciliationMetadataSize()).toEqual({
+      activeReconciliations: 1,
+      retainedPermissionIds: 1,
+    });
+
+    permissionsStore.reconcilePermissions([permission], second);
+    expect(state.permissions).toEqual([]);
+    expect(permissionsStore.getPermissionReconciliationMetadataSize()).toEqual({
+      activeReconciliations: 0,
+      retainedPermissionIds: 0,
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import { isAbortedAssistantError } from '../../lib/aborted';
+import { isAbortedAssistantError } from '../../../shared/error-classification';
 import { serverEvents } from '../../lib/client';
 import {
   hasUnsettledToolPart,
@@ -13,6 +13,7 @@ import { appStore } from '../../lib/stores/app-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
+import { isSessionTreeStatusWorking } from '../../lib/state';
 import type {
   AssistantMessage,
   FileDiff,
@@ -145,6 +146,8 @@ function getQuestionReplyId(props: Record<string, unknown> | undefined) {
 
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
+  getSessionStatus(sessionId: string): SessionStatus | null | undefined;
+  isSessionTreeStatusWorking(sessionId: string): boolean;
   isSessionInActiveTree?(sessionId: string): boolean;
   getMessages(): Array<{ info: Message; parts: Part[] }>;
   handoffTodosToMessages(messages?: Array<{ info: Message; parts: Part[] }>): boolean;
@@ -438,6 +441,8 @@ export class SessionEventHandlerOperations {
   readonly registerSessionEventHandlers = () => {
     return registerSessionEventHandlers({
       getActiveSessionId: () => appStore.state.activeSessionId,
+      getSessionStatus: (sessionId) => appStore.state.sessionStatus[sessionId],
+      isSessionTreeStatusWorking,
       isSessionInActiveTree: (sessionId) => {
         const activeSessionId = appStore.state.activeSessionId;
         if (!activeSessionId) return false;
@@ -487,7 +492,6 @@ export class SessionEventHandlerOperations {
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
   const activeMessageSyncs = new Set<string>();
-  const workingSessionIds = new Set<string>();
   const autoJudgingPermissionIds = new Set<string>();
   const pendingMissingPartDeltas = new Map<
     string,
@@ -524,18 +528,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     lastSeqBySession.set(sessionId, seq);
     return seq === last + 1 ? 'ok' : 'gap';
   };
-  const setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
-    if (isRunningSessionStatus(status)) workingSessionIds.add(sessionId);
-    else workingSessionIds.delete(sessionId);
-    deps.setSessionStatusEntry(sessionId, status);
-  };
   const isSessionInActiveTree = (sessionId: string | null | undefined) => {
     if (!sessionId) return false;
     if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
     return sessionId === deps.getActiveSessionId();
   };
-  const isActiveTreeWorking = () =>
-    [...workingSessionIds].some((sessionId) => isSessionInActiveTree(sessionId));
+  const isActiveTreeWorking = () => {
+    const activeSessionId = deps.getActiveSessionId();
+    return activeSessionId ? deps.isSessionTreeStatusWorking(activeSessionId) : false;
+  };
   const isStaleProgressAfterFinishedAssistant = (sessionId: string) =>
     isSessionInActiveTree(sessionId) &&
     latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt());
@@ -580,7 +581,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     // Any genuine progress (more text, a tool call, reasoning) means the turn is
     // not done — cancel a pending recheck so it can't fire mid-turn.
     clearStreamedCompletionTimer(sessionId);
-    setSessionStatusEntry(sessionId, { type: 'busy' });
+    deps.setSessionStatusEntry(sessionId, { type: 'busy' });
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
     if (isSessionInActiveTree(sessionId)) uiStore.startLoading();
   };
@@ -619,7 +620,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     settleLatestAssistantOnIdle(sessionId, Date.now());
     deps.clearPendingAbort(sessionId);
     sessionStore.setSessionCompacting(sessionId, false);
-    setSessionStatusEntry(sessionId, { type: 'idle' });
+    deps.setSessionStatusEntry(sessionId, { type: 'idle' });
     if (!abortedRetry) deps.updateUsageLimitState(sessionId, { type: 'idle' });
     if (sessionId === deps.getActiveSessionId()) {
       if (isActiveTreeWorking()) uiStore.startLoading();
@@ -705,7 +706,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
   };
   const markSessionError = (sessionId: string, error: AssistantMessage['error'] | undefined) => {
-    setSessionStatusEntry(sessionId, { type: 'idle' });
+    deps.setSessionStatusEntry(sessionId, { type: 'idle' });
     deps.clearPendingAbort(sessionId);
     if (error && isAbortedAssistantError(error)) {
       sessionStore.setSessionFailed(sessionId, false);
@@ -744,7 +745,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
     const alreadyPending = deps.hasPendingAbort(info.id);
     deps.markPendingAbort(info.id);
-    setSessionStatusEntry(info.id, { type: 'idle' });
+    deps.setSessionStatusEntry(info.id, { type: 'idle' });
     if (alreadyPending) return;
 
     void deps.abortRemoteSession(info.id).catch((err) => {
@@ -1290,20 +1291,19 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         return;
       }
       // opencode can emit a trailing `busy` after a turn already settled. Only
-      // suppress it after this handler has already observed the session leave
-      // the working set; while it is still working, a completed assistant step
-      // may be followed by a tool call or another model step.
+      // suppress it once canonical status says this session is no longer working;
+      // a completed assistant step may still be followed by another tool/model step.
       if (
         status.type === 'busy' &&
         sessionID === deps.getActiveSessionId() &&
         latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt()) &&
-        !workingSessionIds.has(sessionID)
+        !isRunningSessionStatus(deps.getSessionStatus(sessionID))
       ) {
-        setSessionStatusEntry(sessionID, { type: 'idle' });
+        deps.setSessionStatusEntry(sessionID, { type: 'idle' });
         if (!isActiveTreeWorking()) uiStore.stopLoading();
         return;
       }
-      setSessionStatusEntry(sessionID, status);
+      deps.setSessionStatusEntry(sessionID, status);
       if (status.type === 'busy') {
         deps.clearUsageLimitOnResumedProgress(sessionID, status);
       }
@@ -1376,7 +1376,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
 
       if (assistantFinished && !isSessionInActiveTree(sessionID)) {
-        setSessionStatusEntry(sessionID, { type: 'idle' });
+        deps.setSessionStatusEntry(sessionID, { type: 'idle' });
         if (assistantCompleted) {
           sessionStore.markSessionResponseCompleted(sessionID, partialMessage.time?.completed);
         }

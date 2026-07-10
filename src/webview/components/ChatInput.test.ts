@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
-import type { ProviderLimitStatus } from '../../shared/protocol';
+import type { ProviderLimitStatus, WebviewMessage } from '../../shared/protocol';
 import type { Session } from '../types';
-import { ChatInput } from './ChatInput';
+import { ChatInput, sendDroppedContent } from './ChatInput';
 import {
   state,
   inputText,
@@ -255,6 +255,109 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
+  it('sends at most 20 dropped content files in individual messages', async () => {
+    const originalFileReader = globalThis.FileReader;
+    const bridgeWindow = window as typeof window & {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const readFiles: File[] = [];
+    const sent: WebviewMessage[] = [];
+
+    class MockFileReader {
+      result: string | ArrayBuffer | null = null;
+      error: DOMException | null = null;
+      private loadListener: (() => void) | undefined;
+
+      addEventListener(type: string, listener: () => void) {
+        if (type === 'load') this.loadListener = listener;
+      }
+
+      readAsDataURL(file: File) {
+        readFiles.push(file);
+        this.result = 'data:application/octet-stream;base64,';
+        this.loadListener?.();
+      }
+    }
+
+    globalThis.FileReader = MockFileReader as unknown as typeof FileReader;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      const files = Array.from({ length: 21 }, (_, index) => ({
+        name: `file-${index}.txt`,
+        size: 0,
+      })) as File[];
+
+      await sendDroppedContent(files);
+
+      expect(readFiles).toHaveLength(20);
+      expect(sent).toHaveLength(20);
+      expect(
+        sent.every(
+          (message) => message.type === 'files/drop-content' && message.payload.files.length === 1
+        )
+      ).toBe(true);
+    } finally {
+      globalThis.FileReader = originalFileReader;
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('rejects per-file and aggregate dropped content limits before FileReader work', async () => {
+    const originalFileReader = globalThis.FileReader;
+    const bridgeWindow = window as typeof window & {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const readFiles: File[] = [];
+    const sent: WebviewMessage[] = [];
+
+    class MockFileReader {
+      result: string | ArrayBuffer | null = null;
+      error: DOMException | null = null;
+      private loadListener: (() => void) | undefined;
+
+      addEventListener(type: string, listener: () => void) {
+        if (type === 'load') this.loadListener = listener;
+      }
+
+      readAsDataURL(file: File) {
+        readFiles.push(file);
+        this.result = 'data:application/octet-stream;base64,QQ==';
+        this.loadListener?.();
+      }
+    }
+
+    globalThis.FileReader = MockFileReader as unknown as typeof FileReader;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      const tenMiB = 10 * 1024 * 1024;
+      const files = [
+        { name: 'oversized.bin', size: tenMiB + 1 },
+        ...Array.from({ length: 6 }, (_, index) => ({
+          name: `part-${index}.bin`,
+          size: tenMiB,
+        })),
+      ] as File[];
+
+      await sendDroppedContent(files);
+
+      expect(readFiles.map((file) => file.name)).toEqual([
+        'part-0.bin',
+        'part-1.bin',
+        'part-2.bin',
+        'part-3.bin',
+        'part-4.bin',
+      ]);
+      expect(sent).toHaveLength(5);
+    } finally {
+      globalThis.FileReader = originalFileReader;
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('renders while loading before the current model memo is initialized', () => {
     setInputText('Ask the sub-agent');
     setIsLoading(true);

@@ -48,8 +48,8 @@ import {
   readProviderLimitThresholdPercent,
 } from '../../shared/provider-limit-config';
 import { mergeContextFile } from '../../shared/context-files';
+import { isAbortedAssistantError } from '../../shared/error-classification';
 import type { UsageLimitNotice } from './usage-limit';
-import { isAbortedAssistantError } from './aborted';
 import {
   clearClipboardImageAttachmentSequences,
   clearContextFileAttachmentSequences,
@@ -155,6 +155,10 @@ const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<
 >();
 const OPTIMISTIC_USER_MESSAGE_ID_PREFIX = 'optimistic-user-';
 const permissionGroupMemberCache = new WeakMap<Permission, PermissionGroupMember[]>();
+export type PermissionReconciliation = {
+  readonly changedPermissionIds: Set<string>;
+};
+const activePermissionReconciliations = new Set<PermissionReconciliation>();
 
 let cachedChildRunsByParentIdMessages: Array<{ info: Message; parts: Part[] }> | null = null;
 let cachedChildRunsByParentIdVersion = -1;
@@ -501,6 +505,9 @@ const messageIndex = defaultAppState.messageIndex;
 const streamingDeltaQueue = defaultAppState.streamingDeltaQueue;
 
 export function resetDefaultAppState() {
+  for (const reconciliation of activePermissionReconciliations) {
+    finishPermissionReconciliation(reconciliation);
+  }
   const next = createAppState();
   setState(reconcile(next.state));
   setShowThinking(next.showThinking());
@@ -2174,6 +2181,7 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
 }
 
 export function addPermission(permission: Permission) {
+  markPermissionMutations([permission.id]);
   setState(
     'permissions',
     produce((perms) => {
@@ -2223,6 +2231,17 @@ export function addPermission(permission: Permission) {
 }
 
 export function removePermission(permissionId: string, options?: { removeGroup?: boolean }) {
+  const matchedPermission = state.permissions.find(
+    (item) =>
+      item.id === permissionId ||
+      item.duplicateIDs?.includes(permissionId) ||
+      item.groupMembers?.some((member) => member.id === permissionId)
+  );
+  markPermissionMutations(
+    options?.removeGroup && matchedPermission
+      ? getPermissionGroupMembers(matchedPermission).map((member) => member.id)
+      : [permissionId]
+  );
   setState(
     'permissions',
     produce((perms) => {
@@ -2257,6 +2276,66 @@ export function removePermission(permissionId: string, options?: { removeGroup?:
         groupMembers.length > 1 ? groupMembers.map((member) => member.id) : undefined;
     })
   );
+}
+
+export function beginPermissionReconciliation() {
+  const reconciliation: PermissionReconciliation = { changedPermissionIds: new Set() };
+  activePermissionReconciliations.add(reconciliation);
+  return reconciliation;
+}
+
+export function finishPermissionReconciliation(reconciliation: PermissionReconciliation) {
+  activePermissionReconciliations.delete(reconciliation);
+  reconciliation.changedPermissionIds.clear();
+}
+
+export function reconcilePermissions(
+  permissions: Permission[],
+  reconciliation: PermissionReconciliation
+) {
+  if (!activePermissionReconciliations.has(reconciliation)) return;
+
+  try {
+    const changedIds = reconciliation.changedPermissionIds;
+    const nextPermissions = permissions.filter((permission) => !changedIds.has(permission.id));
+
+    for (const current of state.permissions) {
+      for (const member of getPermissionGroupMembers(current)) {
+        if (!changedIds.has(member.id)) continue;
+        nextPermissions.push({
+          ...current,
+          id: member.id,
+          sessionID: member.sessionID,
+          messageID: member.messageID,
+          callID: member.callID,
+          duplicateIDs: undefined,
+          groupMembers: undefined,
+        });
+      }
+    }
+
+    setState('permissions', groupPermissions(nextPermissions));
+  } finally {
+    finishPermissionReconciliation(reconciliation);
+  }
+}
+
+export function getPermissionReconciliationMetadataSize() {
+  return {
+    activeReconciliations: activePermissionReconciliations.size,
+    retainedPermissionIds: [...activePermissionReconciliations].reduce(
+      (total, reconciliation) => total + reconciliation.changedPermissionIds.size,
+      0
+    ),
+  };
+}
+
+function markPermissionMutations(permissionIds: string[]) {
+  for (const reconciliation of activePermissionReconciliations) {
+    for (const permissionId of permissionIds) {
+      reconciliation.changedPermissionIds.add(permissionId);
+    }
+  }
 }
 
 export function clearStreamingState() {

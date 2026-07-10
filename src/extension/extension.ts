@@ -4,8 +4,11 @@ import { SidebarProvider } from './sidebar-provider';
 import { ContextProvider } from './context-provider';
 import { registerCommands } from './commands';
 import { logger } from './logger';
+import { sweepStaleInjectedConfigDirectories } from './open-code-process';
 
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
+const CONTEXT_RESCOPE_RETRY_MS = 50;
+const CONTEXT_RESTART_GRACE_MS = 3000;
 
 function readCompactionSettings(config: vscode.WorkspaceConfiguration) {
   const rawReserved = config.get<number | null>(
@@ -24,6 +27,7 @@ function readCompactionSettings(config: vscode.WorkspaceConfiguration) {
 let server: OpenCodeServer | null = null;
 let contextProvider: ContextProvider | null = null;
 let sidebarProvider: SidebarProvider | null = null;
+let contextUpdateGeneration = 0;
 
 async function disposeSafe(fn: () => PromiseLike<void> | void, label: string) {
   try {
@@ -35,6 +39,7 @@ async function disposeSafe(fn: () => PromiseLike<void> | void, label: string) {
 
 export async function activate(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
+  await sweepStaleInjectedConfigDirectories();
 
   const config = vscode.workspace.getConfiguration('varro');
   const port = config.get<number>('server.port', 4096);
@@ -46,7 +51,37 @@ export async function activate(context: vscode.ExtensionContext) {
 
   server = new OpenCodeServer(port, autoStart, command, simulateMissingCli, compactionSettings);
   contextProvider = new ContextProvider((ctx) => {
-    sidebarProvider?.post({ type: 'context/update', payload: ctx });
+    const generation = ++contextUpdateGeneration;
+    void (async () => {
+      let restartGraceDeadline = 0;
+      for (;;) {
+        if (generation !== contextUpdateGeneration) return;
+        try {
+          const result = await server?.rescopeEventStream(ctx.workspacePath || undefined);
+          if (generation !== contextUpdateGeneration || result?.state === 'superseded') return;
+          if (result?.state === 'cancelled') {
+            restartGraceDeadline ||= Date.now() + CONTEXT_RESTART_GRACE_MS;
+            await new Promise((resolve) => setTimeout(resolve, CONTEXT_RESCOPE_RETRY_MS));
+            continue;
+          }
+          if (
+            result?.state === 'inactive' &&
+            restartGraceDeadline > 0 &&
+            Date.now() < restartGraceDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, CONTEXT_RESCOPE_RETRY_MS));
+            continue;
+          }
+        } catch (err) {
+          logger.warn(
+            `Failed to rescope OpenCode event stream: ${err instanceof Error ? err.message : String(err)}`
+          );
+          return;
+        }
+        sidebarProvider?.post({ type: 'context/update', payload: ctx });
+        return;
+      }
+    })();
   });
 
   sidebarProvider = new SidebarProvider(
@@ -83,6 +118,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
+  contextUpdateGeneration += 1;
   await disposeSafe(() => sidebarProvider?.dispose(), 'sidebarProvider dispose');
   await disposeSafe(() => contextProvider?.dispose(), 'contextProvider dispose');
   await disposeSafe(() => server?.disconnect(), 'server disconnect');

@@ -99,7 +99,7 @@ beforeEach(() => {
 });
 
 describe('HostRalphStore', () => {
-  it('persists every mutation and reloads runs from persistence', () => {
+  it('persists every mutation and reloads runs from persistence', async () => {
     const { persistence, storage } = createMemoryPersistence();
     const onChange = vi.fn();
     const store = new HostRalphStore(persistence, onChange);
@@ -107,6 +107,7 @@ describe('HostRalphStore', () => {
 
     store.startRun(config);
     store.setStatus(config.managerSessionId, 'paused');
+    await store.flush();
 
     expect(onChange).toHaveBeenCalledTimes(2);
     const persisted = storage.get(RALPH_RUNS_KEY) as Record<string, RalphRun>;
@@ -114,6 +115,206 @@ describe('HostRalphStore', () => {
 
     const reloaded = new HostRalphStore(persistence, vi.fn());
     expect(reloaded.getRun(config.managerSessionId)?.status).toBe('paused');
+  });
+
+  it('serializes delayed persistence writes and flushes the latest snapshot', async () => {
+    const writes: Array<Record<string, RalphRun>> = [];
+    const releases: Array<() => void> = [];
+    const persistence: Persistence = {
+      get: () => undefined,
+      set: (_key, value) =>
+        new Promise<void>((resolve) => {
+          writes.push(value as Record<string, RalphRun>);
+          releases.push(resolve);
+        }),
+      remove: () => undefined,
+    };
+    const store = new HostRalphStore(persistence, vi.fn());
+    const config = createConfig();
+
+    store.startRun(config);
+    store.setStatus(config.managerSessionId, 'paused');
+
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]?.[config.managerSessionId]?.status).toBe('running');
+    releases.shift()?.();
+    await vi.waitFor(() => expect(writes).toHaveLength(2));
+    expect(writes[1]?.[config.managerSessionId]?.status).toBe('paused');
+    releases.shift()?.();
+    await store.flush();
+  });
+
+  it('continues persisting after a queued write rejects', async () => {
+    let persisted: Record<string, RalphRun> | undefined;
+    const persistence: Persistence = {
+      get: () => undefined,
+      set: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('write failed'))
+        .mockImplementation((_key, value) => {
+          persisted = value as Record<string, RalphRun>;
+        }),
+      remove: () => undefined,
+    };
+    const store = new HostRalphStore(persistence, vi.fn());
+    const config = createConfig();
+
+    store.startRun(config);
+    store.setStatus(config.managerSessionId, 'paused');
+
+    await expect(store.flush()).resolves.toBeUndefined();
+    expect(persistence.set).toHaveBeenCalledTimes(2);
+    expect(persisted?.[config.managerSessionId]?.status).toBe('paused');
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to persist Ralph runs: write failed')
+    );
+  });
+
+  it('ignores malformed persisted run containers', () => {
+    const persistence: Persistence = {
+      get: () => [],
+      set: () => undefined,
+      remove: () => undefined,
+    };
+
+    const store = new HostRalphStore(persistence, vi.fn());
+
+    expect(store.snapshot()).toEqual({});
+    expect(store.getAllRuns()).toEqual([]);
+  });
+
+  it('filters malformed runs, mismatched IDs, and unsafe persisted keys', () => {
+    const config = createConfig();
+    const validRun: RalphRun = {
+      config,
+      status: 'paused',
+      currentIteration: 0,
+      iterations: [],
+      updatedAt: 1,
+    };
+    const stored = Object.create(null) as Record<string, unknown>;
+    stored[config.managerSessionId] = validRun;
+    stored.broken = { ...validRun, iterations: null };
+    stored.mismatched = validRun;
+    stored.constructor = {
+      ...validRun,
+      config: { ...config, managerSessionId: 'constructor' },
+    };
+    stored.__proto__ = {
+      ...validRun,
+      config: { ...config, managerSessionId: '__proto__' },
+    };
+    stored.toString = {
+      ...validRun,
+      config: { ...config, managerSessionId: 'toString' },
+    };
+    const persistence: Persistence = {
+      get: () => stored,
+      set: () => undefined,
+      remove: () => undefined,
+    };
+
+    const store = new HostRalphStore(persistence, vi.fn());
+
+    expect(store.snapshot()).toEqual({ [config.managerSessionId]: validRun });
+    expect(Object.getPrototypeOf(store.snapshot())).toBe(Object.prototype);
+    store.setStatus('toString', 'failed', 'iteration_error');
+    expect(Object.prototype.hasOwnProperty.call(store.snapshot(), 'toString')).toBe(false);
+  });
+
+  it('evicts the oldest terminal run at the run limit without evicting active runs', async () => {
+    const { persistence } = createMemoryPersistence();
+    const store = new HostRalphStore(persistence, vi.fn());
+    const terminalConfig = createConfig({ managerSessionId: 'terminal-oldest' });
+    store.adoptRun({
+      config: terminalConfig,
+      status: 'done',
+      currentIteration: 0,
+      iterations: [],
+      updatedAt: 1,
+    });
+    for (let index = 0; index < 99; index += 1) {
+      const config = createConfig({ managerSessionId: `active-${index}` });
+      store.adoptRun({
+        config,
+        status: 'running',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: index + 2,
+      });
+    }
+
+    const newConfig = createConfig({ managerSessionId: 'new-run' });
+    store.startRun(newConfig);
+    await store.flush();
+
+    expect(store.getAllRuns()).toHaveLength(100);
+    expect(store.getRun(terminalConfig.managerSessionId)).toBeNull();
+    expect(store.getRun('active-0')?.status).toBe('running');
+    expect(store.getRun(newConfig.managerSessionId)?.status).toBe('running');
+
+    const overflowConfig = createConfig({ managerSessionId: 'overflow' });
+    store.startRun(overflowConfig);
+    expect(store.getAllRuns()).toHaveLength(100);
+    expect(store.getRun(overflowConfig.managerSessionId)).toBeNull();
+  });
+
+  it('examines persisted entries beyond the cap to preserve a later active run', () => {
+    const stored: Record<string, RalphRun> = {};
+    for (let index = 0; index < 100; index += 1) {
+      const config = createConfig({ managerSessionId: `terminal-${index}` });
+      stored[config.managerSessionId] = {
+        config,
+        status: 'done',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: index + 1,
+      };
+    }
+    const activeConfig = createConfig({ managerSessionId: 'active-late' });
+    stored[activeConfig.managerSessionId] = {
+      config: activeConfig,
+      status: 'running',
+      currentIteration: 0,
+      iterations: [],
+      updatedAt: 101,
+    };
+    const persistence: Persistence = {
+      get: () => stored,
+      set: () => undefined,
+      remove: () => undefined,
+    };
+
+    const store = new HostRalphStore(persistence, vi.fn());
+
+    expect(store.getAllRuns()).toHaveLength(100);
+    expect(store.getRun('terminal-0')).toBeNull();
+    expect(store.getRun(activeConfig.managerSessionId)?.status).toBe('running');
+  });
+
+  it('caps config growth and rejects iterations outside the persisted limit', () => {
+    const { persistence } = createMemoryPersistence();
+    const store = new HostRalphStore(persistence, vi.fn());
+    const cappedConfig = createConfig({ iterations: 5_000 });
+    store.startRun(cappedConfig);
+
+    expect(store.getRun(cappedConfig.managerSessionId)?.config.iterations).toBe(1_000);
+
+    store.upsertIteration(cappedConfig.managerSessionId, {
+      index: 1_001,
+      childSessionId: 'child-too-far',
+      status: 'passed',
+      startedAt: 1,
+      endedAt: 2,
+      filesChanged: [],
+      verification: {},
+    });
+    expect(store.getRun(cappedConfig.managerSessionId)?.iterations).toEqual([]);
+
+    const growingConfig = createConfig({ managerSessionId: 'growing', iterations: 998 });
+    store.startRun(growingConfig);
+    store.addIterations(growingConfig.managerSessionId, 5);
+    expect(store.getRun(growingConfig.managerSessionId)?.config.iterations).toBe(1_000);
   });
 
   it('adopts legacy runs only when unknown', () => {
@@ -135,6 +336,53 @@ describe('HostRalphStore', () => {
 });
 
 describe('RalphHost', () => {
+  it('does not reattach malformed persisted running runs', () => {
+    const persistence: Persistence = {
+      get: () => ({
+        broken: {
+          config: { managerSessionId: 'broken' },
+          status: 'running',
+          currentIteration: 0,
+          iterations: null,
+          updatedAt: 1,
+        },
+      }),
+      set: () => undefined,
+      remove: () => undefined,
+    };
+
+    const { host, ensureServerStarted } = createHost({ persistence });
+
+    expect(host.getStatePayload().runs).toEqual({});
+    expect(ensureServerStarted).not.toHaveBeenCalled();
+  });
+
+  it('shuts down active loops, removes listeners, and preserves running state', async () => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    server.request.mockImplementation(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'child-shutdown' };
+      if (method === 'POST' && path.endsWith('/prompt_async')) return {};
+      if (method === 'POST' && path.endsWith('/abort')) return {};
+      if (method === 'GET' && path === '/session') return [];
+      if (method === 'GET' && path.endsWith('/message')) return [];
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() => expect(server.listenerCount('event')).toBe(1));
+
+    await host.dispose();
+
+    const run = host.getStatePayload().runs[config.managerSessionId];
+    expect(run?.status).toBe('running');
+    expect(run?.stopReason).toBeUndefined();
+    expect(run?.iterations[0]?.status).toBe('running');
+    expect(host.getStatePayload().activeIds).toEqual([]);
+    expect(server.listenerCount('event')).toBe(0);
+    expect(server.request).toHaveBeenCalledWith('POST', '/session/child-shutdown/abort', undefined);
+  });
+
   it('runs a loop to completion from a ralph/start message', async () => {
     const { host, server, broadcasts, ensureServerStarted } = createHost();
     const config = createConfig();
@@ -163,7 +411,7 @@ describe('RalphHost', () => {
 
   it('adopts legacy runs from ralph/sync and broadcasts state', async () => {
     const { host, broadcasts } = createHost();
-    const config = createConfig({ managerSessionId: 'manager-legacy' });
+    const config = createConfig({ managerSessionId: 'manager-legacy', iterations: 3 });
     const legacyRun: RalphRun = {
       config,
       status: 'paused',

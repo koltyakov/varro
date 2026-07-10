@@ -23,6 +23,8 @@ import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 type DroppedFilesServiceLike = {
   fromContent: ReturnType<typeof vi.fn>;
   fromPaths: ReturnType<typeof vi.fn>;
+  removeOwnedFile: ReturnType<typeof vi.fn>;
+  removeOwnedFiles: ReturnType<typeof vi.fn>;
 };
 
 type PostDroppedFileInput = Parameters<SidebarProviderContextFiles['postDroppedFiles']>[0][number];
@@ -31,6 +33,8 @@ function createService() {
   const droppedFilesService: DroppedFilesServiceLike = {
     fromContent: vi.fn(),
     fromPaths: vi.fn(),
+    removeOwnedFile: vi.fn(),
+    removeOwnedFiles: vi.fn(),
   };
   const service = new SidebarProviderContextFiles(droppedFilesService as never);
   const onContextFilesChanged = vi.fn();
@@ -189,7 +193,7 @@ describe('SidebarProviderContextFiles', () => {
   });
 
   it('removes a context file and posts the removal event', () => {
-    const { service, onContextFilesChanged, post } = createService();
+    const { service, droppedFilesService, onContextFilesChanged, post } = createService();
 
     service.postDroppedFiles([{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }], post);
 
@@ -199,7 +203,27 @@ describe('SidebarProviderContextFiles', () => {
     service.removeContextFile('/repo/a.ts', post);
 
     expect(service.getContextFiles()).toEqual([]);
+    expect(droppedFilesService.removeOwnedFile).toHaveBeenCalledWith('/repo/a.ts');
     expect(post).toHaveBeenCalledWith({ type: 'files/removed', payload: { path: '/repo/a.ts' } });
     expect(onContextFilesChanged).toHaveBeenCalledOnce();
+  });
+
+  it('cleans up owned content files when context is cleared', () => {
+    const { service, droppedFilesService, post } = createService();
+    service.postDroppedFiles(
+      [
+        { path: '/tmp/drop-a.ts', relativePath: 'a.ts', type: 'file' },
+        { path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' },
+      ],
+      post
+    );
+
+    service.clearContextFiles();
+
+    expect(service.getContextFiles()).toEqual([]);
+    expect(droppedFilesService.removeOwnedFiles).toHaveBeenCalledWith([
+      '/tmp/drop-a.ts',
+      '/repo/b.ts',
+    ]);
   });
 });

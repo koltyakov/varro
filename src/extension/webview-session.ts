@@ -214,6 +214,7 @@ export class WebviewSession {
       terminalSelection: this.contextProvider.terminalSelection,
       droppedFiles: this.contextFilesState.getContextFiles(),
       emptyStateLogoUri: this.bridge.emptyStateLogoUri() || '',
+      remoteExtensionHost: Boolean(vscode.env?.remoteName),
       expandThinkingByDefault: config.expandThinkingByDefault,
       showStickyUserPrompt: config.showStickyUserPrompt,
       desktopSessionPaneSide: config.desktopSessionPaneSide,

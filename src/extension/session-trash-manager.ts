@@ -10,10 +10,12 @@ const SESSION_TRASH_KEY = 'varro.sessionTrash';
 export const SESSION_TRASH_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export class SessionTrashManager {
-  private readonly entries = new Map<string, RecycleBinEntry>();
+  private entries = new Map<string, RecycleBinEntry>();
+  private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly persistence: Persistence) {
-    const stored = persistence.get<RecycleBinEntry[]>(SESSION_TRASH_KEY) || [];
+    const value = persistence.get<unknown>(SESSION_TRASH_KEY);
+    const stored = Array.isArray(value) ? value : [];
     for (const entry of stored) {
       const normalized = normalizeEntry(entry);
       if (normalized) this.entries.set(normalized.rootID, normalized);
@@ -55,83 +57,115 @@ export class SessionTrashManager {
   }
 
   async moveToTrash(sessionID: string, sessions: unknown[], now = Date.now()) {
-    if (this.isHidden(sessionID)) return this.entries.get(sessionID) || null;
-    const normalized = sessions
-      .map(normalizeSession)
-      .filter((session): session is RecycleBinSession => !!session);
-    const root = normalized.find((session) => session.id === sessionID);
-    if (!root) return null;
-    const tree = collectSessionTree(sessionID, normalized);
-    if (tree.length === 0) return null;
+    return this.mutate(async () => {
+      if (this.isHidden(sessionID)) return this.entries.get(sessionID) || null;
+      const normalized = sessions
+        .map(normalizeSession)
+        .filter((session): session is RecycleBinSession => !!session);
+      const root = normalized.find((session) => session.id === sessionID);
+      if (!root) return null;
+      const tree = collectSessionTree(sessionID, normalized);
+      if (tree.length === 0) return null;
 
-    const entry: RecycleBinEntry = {
-      rootID: sessionID,
-      deletedAt: now,
-      expiresAt: now + SESSION_TRASH_RETENTION_MS,
-      root: cloneSession(root),
-      sessions: tree.map(cloneSession),
-    };
-    this.entries.set(entry.rootID, entry);
-    await this.persist();
-    return entry;
+      const entry: RecycleBinEntry = {
+        rootID: sessionID,
+        deletedAt: now,
+        expiresAt: now + SESSION_TRASH_RETENTION_MS,
+        root: cloneSession(root),
+        sessions: tree.map(cloneSession),
+      };
+      const next = new Map(this.entries);
+      next.set(entry.rootID, entry);
+      await this.persist(next);
+      this.entries = next;
+      return entry;
+    });
   }
 
   async restore(rootID: string) {
-    const entry = this.entries.get(rootID) || null;
-    if (!entry) return null;
-    this.entries.delete(rootID);
-    await this.persist();
-    return entry;
+    return this.mutate(async () => {
+      const entry = this.entries.get(rootID) || null;
+      if (!entry) return null;
+      const next = new Map(this.entries);
+      next.delete(rootID);
+      await this.persist(next);
+      this.entries = next;
+      return entry;
+    });
   }
 
   async deletePermanently(
     rootID: string,
     deleteSession: (target: SessionDeleteTarget) => Promise<unknown>
   ) {
-    const entry = this.entries.get(rootID) || null;
-    if (!entry) return null;
-    await deleteEntrySessions(entry, deleteSession);
-    this.entries.delete(rootID);
-    await this.persist();
-    return entry;
+    return this.mutate(async () => {
+      const entry = this.entries.get(rootID) || null;
+      if (!entry) return null;
+      await deleteEntrySessions(entry, deleteSession);
+      const next = new Map(this.entries);
+      next.delete(rootID);
+      await this.persist(next);
+      this.entries = next;
+      return entry;
+    });
   }
 
   async cleanupExpired(
     deleteSession: (target: SessionDeleteTarget) => Promise<unknown>,
     now = Date.now()
   ) {
-    const removed: RecycleBinEntry[] = [];
-    for (const entry of this.list()) {
-      if (entry.expiresAt > now) continue;
-      try {
-        await deleteEntrySessions(entry, deleteSession);
-        this.entries.delete(entry.rootID);
-        removed.push(entry);
-      } catch {
-        // Keep failed cleanup entries so the next maintenance pass can retry.
+    return this.mutate(async () => {
+      const removed: RecycleBinEntry[] = [];
+      const next = new Map(this.entries);
+      for (const entry of this.list()) {
+        if (entry.expiresAt > now) continue;
+        try {
+          await deleteEntrySessions(entry, deleteSession);
+          next.delete(entry.rootID);
+          removed.push(entry);
+        } catch {
+          // Keep failed cleanup entries so the next maintenance pass can retry.
+        }
       }
-    }
 
-    if (removed.length > 0) {
-      await this.persist();
-    }
-    return removed;
+      if (removed.length > 0) {
+        await this.persist(next);
+        this.entries = next;
+      }
+      return removed;
+    });
   }
 
   async empty(deleteSession: (target: SessionDeleteTarget) => Promise<unknown>) {
-    const removed: RecycleBinEntry[] = [];
-    for (const entry of this.list()) {
-      await deleteEntrySessions(entry, deleteSession);
-      this.entries.delete(entry.rootID);
-      removed.push(entry);
-    }
-    await this.persist();
-    return removed;
+    return this.mutate(async () => {
+      const removed: RecycleBinEntry[] = [];
+      for (const entry of this.list()) {
+        await deleteEntrySessions(entry, deleteSession);
+        removed.push(entry);
+      }
+      const next = new Map<string, RecycleBinEntry>();
+      await this.persist(next);
+      this.entries = next;
+      return removed;
+    });
   }
 
-  private async persist() {
-    await this.persistence.set(SESSION_TRASH_KEY, this.list());
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutationQueue.then(operation);
+    this.mutationQueue = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
   }
+
+  private async persist(entries: ReadonlyMap<string, RecycleBinEntry>) {
+    await this.persistence.set(SESSION_TRASH_KEY, listEntries(entries));
+  }
+}
+
+function listEntries(entries: ReadonlyMap<string, RecycleBinEntry>) {
+  return [...entries.values()].toSorted((left, right) => right.deletedAt - left.deletedAt);
 }
 
 function collectSessionTree(rootID: string, sessions: RecycleBinSession[]) {

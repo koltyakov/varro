@@ -1,5 +1,3 @@
-import type { AssistantMessage, ToolStateError } from '../types';
-
 const FRIENDLY_ERROR_NAMES: Record<string, string> = {
   MessageOutputLengthError: 'Output length exceeded',
   ContextOverflowError: 'Context window overflow',
@@ -17,7 +15,9 @@ function normalizeAbortText(value: string | null | undefined) {
   return value?.trim().toLowerCase() || '';
 }
 
-export function isAbortedAssistantError(error: AssistantMessage['error'] | undefined) {
+export function isAbortedAssistantError(
+  error: { name?: string | null; data?: { message?: string | null } } | undefined
+) {
   const name = normalizeAbortText(error?.name);
   const message = normalizeAbortText(error?.data?.message);
   return (
@@ -28,8 +28,8 @@ export function isAbortedAssistantError(error: AssistantMessage['error'] | undef
   );
 }
 
-export function isAbortedToolError(state: { status: string; error?: string } | ToolStateError) {
+export function isAbortedToolError(state: { status: string; error?: string }) {
   if (state.status !== 'error') return false;
-  const error = normalizeAbortText('error' in state ? state.error : undefined);
+  const error = normalizeAbortText(state.error);
   return error === 'aborted' || error === 'aborterror' || error.includes('aborted');
 }

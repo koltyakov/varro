@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
 import {
+  __resetMarkdownCachesForTests,
   MarkdownRenderer,
   renderHighlightedCodeHtml,
   splitStreamingMarkdownContent,
@@ -19,6 +20,7 @@ let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
 beforeEach(() => {
+  __resetMarkdownCachesForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
   delete window.__sendToExtension;
@@ -288,7 +290,7 @@ describe('MarkdownRenderer', () => {
     expect(sanitizeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses cached sanitization on re-mount when content is unchanged', async () => {
+  it('does not cache transient sanitization across remounts', async () => {
     const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
     const content = 'Streaming cache bypass test `d9q2p`';
 
@@ -307,7 +309,7 @@ describe('MarkdownRenderer', () => {
     cleanup = render(() => MarkdownRenderer({ content }), container!);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(sanitizeSpy.mock.calls.length).toBe(callsAfterFirstMount);
+    expect(sanitizeSpy.mock.calls.length).toBe(callsAfterFirstMount + 1);
   });
 
   it('renders streaming content in stable and tail segments', async () => {
@@ -325,20 +327,25 @@ describe('MarkdownRenderer', () => {
   });
 
   it('does not reparse the stable streaming segment when only the tail grows', async () => {
-    let content = 'First paragraph\n\nSecond';
+    const [content, setContent] = createSignal('First paragraph\n\nSecond');
     const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
 
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     const stableSegment = container?.querySelector('[data-markdown-segment="stable"]');
     const initialStableHtml = stableSegment?.innerHTML;
     const initialSanitizeCalls = sanitizeSpy.mock.calls.length;
 
-    content = 'First paragraph\n\nSecond paragraph extended';
-    cleanup?.();
-    container!.innerHTML = '';
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    setContent('First paragraph\n\nSecond paragraph extended');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(container?.querySelector('[data-markdown-segment="stable"]')?.innerHTML).toBe(

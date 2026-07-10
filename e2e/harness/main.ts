@@ -1145,7 +1145,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       ]
     );
     state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
+    state.sessionStatuses[session.id] = { type: 'idle' };
     state.messagesBySessionId[session.id] = [user, assistant];
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 70;

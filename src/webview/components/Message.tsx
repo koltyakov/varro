@@ -1,6 +1,6 @@
 import { Show, createMemo, createResource } from 'solid-js';
+import { friendlyErrorName, isAbortedAssistantError } from '../../shared/error-classification';
 import { retryMessage } from '../hooks/useOpenCode';
-import { friendlyErrorName, isAbortedAssistantError } from '../lib/aborted';
 import { client } from '../lib/client';
 import { editingMessageId, startEditingMessage } from '../lib/message-edit-state';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';

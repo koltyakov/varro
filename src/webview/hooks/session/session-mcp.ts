@@ -2,6 +2,7 @@ import type { McpStatus } from '../../../shared/protocol';
 
 type SessionMcpDependencies = {
   getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
+  getRequiredMcpSessionIds?(targetSessionId: string): string[];
   getMcpStatus(): Record<string, McpStatus>;
   loadMcps(): Promise<void>;
   getAvailableMcpNames(): string[];
@@ -13,22 +14,33 @@ type SessionMcpDependencies = {
 };
 
 export class SessionMcpOperations {
+  private reconciliationGeneration = 0;
+  private reconciliationQueue = Promise.resolve();
+
   constructor(private readonly deps: SessionMcpDependencies) {}
 
-  readonly syncSessionMcps = async (sessionId: string) => {
-    await syncSessionMcpsWithDependencies(
-      {
-        getSelectedMcpsForSession: this.deps.getSelectedMcpsForSession,
-        getMcpStatus: this.deps.getMcpStatus,
-        loadMcps: this.deps.loadMcps,
-        getAvailableMcpNames: this.deps.getAvailableMcpNames,
-        connectMcp: this.deps.connectMcp,
-        authenticateMcp: this.deps.authenticateMcp,
-        disconnectMcp: this.deps.disconnectMcp,
-        logError: this.deps.logError,
-      },
-      sessionId
-    );
+  readonly syncSessionMcps = (sessionId: string): Promise<void> => {
+    const generation = ++this.reconciliationGeneration;
+    const reconciliation = this.reconciliationQueue.then(async () => {
+      if (generation !== this.reconciliationGeneration) return;
+      await syncSessionMcpsWithDependencies(
+        {
+          getSelectedMcpsForSession: this.deps.getSelectedMcpsForSession,
+          getRequiredMcpSessionIds: this.deps.getRequiredMcpSessionIds,
+          getMcpStatus: this.deps.getMcpStatus,
+          loadMcps: this.deps.loadMcps,
+          getAvailableMcpNames: this.deps.getAvailableMcpNames,
+          connectMcp: this.deps.connectMcp,
+          authenticateMcp: this.deps.authenticateMcp,
+          disconnectMcp: this.deps.disconnectMcp,
+          logError: this.deps.logError,
+        },
+        sessionId,
+        () => generation === this.reconciliationGeneration
+      );
+    });
+    this.reconciliationQueue = reconciliation.catch(() => {});
+    return reconciliation;
   };
 
   readonly applySessionMcps = async (names: string[], sessionId: string | null | undefined) => {
@@ -46,6 +58,7 @@ export class SessionMcpOperations {
 export async function syncSessionMcpsWithDependencies(
   deps: {
     getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
+    getRequiredMcpSessionIds?(targetSessionId: string): string[];
     getMcpStatus(): Record<string, McpStatus>;
     loadMcps(): Promise<void>;
     getAvailableMcpNames(): string[];
@@ -54,17 +67,26 @@ export async function syncSessionMcpsWithDependencies(
     disconnectMcp(name: string): Promise<unknown>;
     logError(context: string, err: unknown): void;
   },
-  sessionId: string
+  sessionId: string,
+  isCurrent: () => boolean = () => true
 ) {
-  let desired = deps.getSelectedMcpsForSession(sessionId);
-  if (!desired || Object.keys(deps.getMcpStatus()).length === 0) {
+  if (!deps.getSelectedMcpsForSession(sessionId) || Object.keys(deps.getMcpStatus()).length === 0) {
     await deps.loadMcps();
-    desired = deps.getSelectedMcpsForSession(sessionId);
   }
-  if (!desired) return;
+  if (!isCurrent()) return;
 
   const available = new Set(deps.getAvailableMcpNames());
-  const desiredSet = new Set(desired.filter((name) => available.has(name)));
+  const requiredSessionIds = new Set([
+    sessionId,
+    ...(deps.getRequiredMcpSessionIds?.(sessionId) || []),
+  ]);
+  const desiredSet = new Set(
+    [...requiredSessionIds].flatMap(
+      (id) => deps.getSelectedMcpsForSession(id)?.filter((name) => available.has(name)) || []
+    )
+  );
+  if (!deps.getSelectedMcpsForSession(sessionId)) return;
+
   const statuses = deps.getMcpStatus();
   const connected = Object.entries(statuses)
     .filter(([, value]) => value?.status === 'connected')
@@ -76,6 +98,7 @@ export async function syncSessionMcpsWithDependencies(
   );
   const disconnect = connected.filter((name) => !desiredSet.has(name));
   if (connect.length === 0 && authenticate.length === 0 && disconnect.length === 0) return;
+  if (!isCurrent()) return;
 
   try {
     await Promise.all([

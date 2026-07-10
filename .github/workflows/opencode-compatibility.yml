@@ -15,8 +15,12 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/opencode-compatibility/**'
+      - 'src/extension/extension.ts'
+      - 'src/extension/open-code-process.ts'
       - 'src/extension/open-code-transport.ts'
+      - 'src/extension/rest-proxy.ts'
       - 'src/extension/server.ts'
+      - 'src/extension/util/opencode-request.ts'
       - 'src/shared/opencode-compatibility.ts'
       - 'src/webview/lib/client.ts'
 

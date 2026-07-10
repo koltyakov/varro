@@ -7,6 +7,7 @@ import {
   createUniqueId,
   onCleanup,
 } from 'solid-js';
+import { isAbortedToolError } from '../../shared/error-classification';
 import type {
   QuestionRequest,
   Session,
@@ -25,7 +26,6 @@ import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expan
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
-import { isAbortedToolError } from '../lib/aborted';
 
 export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 

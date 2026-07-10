@@ -1,14 +1,18 @@
 import type { PermissionMode } from '../../../shared/protocol';
 import {
   addPermission,
+  beginPermissionReconciliation,
   draftPermissionMode,
+  finishPermissionReconciliation,
   getPermissionGroupMembers,
   getPermissionModeForSession,
+  getPermissionReconciliationMetadataSize,
   getPermissionSignature,
   groupPermissions,
   removePermission,
   removePermissionModeForSession,
   removeQuestion,
+  reconcilePermissions,
   resetDraftPermissionMode,
   saveProjectPermissionMode,
   setDefaultPermissionModePreference,
@@ -37,6 +41,10 @@ export const permissionsStore = {
   removeQuestion,
   addPermission,
   removePermission,
+  beginPermissionReconciliation,
+  finishPermissionReconciliation,
+  reconcilePermissions,
+  getPermissionReconciliationMetadataSize,
 };
 
 export type PermissionsStore = typeof permissionsStore;

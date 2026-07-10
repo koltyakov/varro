@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createComponent, render } from 'solid-js/web';
-import { AppStateProvider } from '../lib/app-state-context';
-import { defaultAppState, setState } from '../lib/state';
+import { setState } from '../lib/state';
 import type { QuestionRequest } from '../types';
 import { QuestionPrompt } from './QuestionPrompt';
 
@@ -23,16 +22,7 @@ function request(id = 'question-1'): QuestionRequest {
 }
 
 function renderQuestionPrompt(activeRequest: QuestionRequest) {
-  cleanup = render(
-    () =>
-      createComponent(AppStateProvider, {
-        value: defaultAppState,
-        get children() {
-          return createComponent(QuestionPrompt, { request: activeRequest });
-        },
-      }),
-    container!
-  );
+  cleanup = render(() => createComponent(QuestionPrompt, { request: activeRequest }), container!);
 }
 
 beforeEach(() => {

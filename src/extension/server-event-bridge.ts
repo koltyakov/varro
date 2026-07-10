@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { ExtensionMessage, ServerEvent, ServerStatus } from '../shared/protocol';
 import { parseServerEvent } from '../shared/protocol';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import type { SessionStateManager } from './session-state-manager';
@@ -18,7 +19,7 @@ export class ServerEventBridge {
     private readonly server: Pick<OpenCodeServer, 'on' | 'off'>,
     private readonly sessionState: Pick<
       SessionStateManager,
-      'handleServerEvent' | 'isSessionInWorkspace' | 'persist'
+      'handleServerEvent' | 'isSessionInWorkspace' | 'persist' | 'flush'
     >,
     private readonly hiddenSessions: Pick<HiddenSessionManager, 'isHidden' | 'observeEvent'>,
     private readonly providerLimitService: {
@@ -73,11 +74,12 @@ export class ServerEventBridge {
   }
 
   async dispose() {
-    await this.sessionState.persist();
     if (this.serverStatusHandler) this.server.off('status', this.serverStatusHandler);
     if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
     this.serverStatusHandler = undefined;
     this.serverEventHandler = undefined;
+    void this.sessionState.persist();
+    await this.sessionState.flush();
     this.statusBarItem.dispose();
   }
 
@@ -89,7 +91,7 @@ export class ServerEventBridge {
 
   private shouldSuppressWorkspace(event: ServerEvent) {
     const workspacePath = this.workspace?.getPath();
-    if (!normalizeWorkspacePath(workspacePath)) return false;
+    if (!normalizeWorkspaceIdentity(workspacePath)) return false;
 
     const info = asRecord(asRecord(event.properties)?.info);
     const directory = typeof info?.directory === 'string' ? info.directory : undefined;
@@ -111,15 +113,6 @@ function isDirectoryInWorkspace(
   directory: string,
   workspacePath: string | null | undefined
 ): boolean {
-  const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
-  if (!normalizedWorkspace) return true;
-  const normalizedDirectory = normalizeWorkspacePath(directory);
-  return normalizedDirectory === normalizedWorkspace;
-}
-
-function normalizeWorkspacePath(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!normalized) return null;
-  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+  if (!normalizeWorkspaceIdentity(workspacePath)) return true;
+  return isSameWorkspacePath(directory, workspacePath);
 }

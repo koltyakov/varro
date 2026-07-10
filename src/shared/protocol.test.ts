@@ -26,6 +26,7 @@ describe('protocol conformance', () => {
       'command/focus-input': true,
       'command/open-attention-sessions': true,
       'command/abort': true,
+      'ralph/state': true,
     };
 
     // If a new ExtensionMessage type is added, the Record literal above will
@@ -57,6 +58,12 @@ describe('protocol conformance', () => {
       'config/update': true,
       ready: true,
       'api/request': true,
+      'ralph/start': true,
+      'ralph/stop': true,
+      'ralph/pause': true,
+      'ralph/resume': true,
+      'ralph/update-model': true,
+      'ralph/sync': true,
       log: true,
     };
 

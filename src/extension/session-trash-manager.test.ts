@@ -16,7 +16,7 @@ function session(id: string, updated: number, overrides: Record<string, unknown>
 }
 
 const mementoState = {
-  stored: [] as StoredEntry[],
+  stored: [] as unknown,
 };
 
 const workspaceState = {
@@ -112,6 +112,41 @@ describe('SessionTrashManager', () => {
     expect(manager.list()).toEqual([]);
   });
 
+  it('does not hide or unhide sessions when persistence fails', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    workspaceState.set.mockRejectedValueOnce(new Error('write failed'));
+
+    await expect(manager.moveToTrash('root', [session('root', 1_000)], 5_000)).rejects.toThrow(
+      'write failed'
+    );
+    expect(manager.list()).toEqual([]);
+
+    const entry = await manager.moveToTrash('root', [session('root', 1_000)], 5_000);
+    workspaceState.set.mockRejectedValueOnce(new Error('write failed'));
+    await expect(manager.restore('root')).rejects.toThrow('write failed');
+    expect(manager.list()).toEqual([entry]);
+    expect(manager.isHidden('root')).toBe(true);
+  });
+
+  it('keeps a recoverable trash entry when persistence fails after remote deletion', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    await manager.moveToTrash('root', [session('root', 1_000)], 5_000);
+    const deleteSession = vi
+      .fn(async () => undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('404 Session not found'));
+    workspaceState.set.mockRejectedValueOnce(new Error('write failed'));
+
+    await expect(manager.deletePermanently('root', deleteSession)).rejects.toThrow('write failed');
+    expect(manager.list()).toMatchObject([{ rootID: 'root' }]);
+
+    await expect(manager.deletePermanently('root', deleteSession)).resolves.toMatchObject({
+      rootID: 'root',
+    });
+    expect(deleteSession).toHaveBeenCalledTimes(2);
+    expect(manager.list()).toEqual([]);
+  });
+
   it('cleans up only expired entries and retries failed evictions later', async () => {
     const manager = new SessionTrashManager(workspaceState as never);
     await manager.moveToTrash('expired', [session('expired', 1_000)], 10_000);
@@ -165,5 +200,12 @@ describe('SessionTrashManager', () => {
         sessions: [{ id: 'root' }],
       },
     ]);
+  });
+
+  it('ignores a malformed persisted recycle-bin container', () => {
+    mementoState.stored = { rootID: 'not-an-array' };
+
+    expect(() => new SessionTrashManager(workspaceState as never)).not.toThrow();
+    expect(new SessionTrashManager(workspaceState as never).list()).toEqual([]);
   });
 });

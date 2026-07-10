@@ -1,7 +1,12 @@
-export async function collectDroppedPaths(dataTransfer: DataTransfer | null): Promise<string[]> {
+export async function collectDroppedPaths(
+  dataTransfer: DataTransfer | null,
+  options: { includeFilePaths?: boolean; preferFileContent?: boolean } = {}
+): Promise<string[]> {
   if (!dataTransfer) return [];
 
   const paths = new Set<string>();
+  const preferFileContent =
+    options.preferFileContent === true && Array.from(dataTransfer.files).length > 0;
 
   const knownTypes = [
     'CodeEditors',
@@ -23,6 +28,8 @@ export async function collectDroppedPaths(dataTransfer: DataTransfer | null): Pr
   }
 
   for (const type of knownTypes) {
+    if (isCollectedVSCodeDropType(type)) continue;
+    if (preferFileContent && !isVSCodeDropType(type)) continue;
     try {
       const data = dataTransfer.getData(type);
       for (const path of parseDroppedText(data)) {
@@ -31,17 +38,19 @@ export async function collectDroppedPaths(dataTransfer: DataTransfer | null): Pr
     } catch {}
   }
 
-  for (const file of Array.from(dataTransfer.files)) {
-    const path = (file as File & { path?: string }).path;
-    if (path) paths.add(path);
+  if (options.includeFilePaths !== false) {
+    for (const file of Array.from(dataTransfer.files)) {
+      const path = (file as File & { path?: string }).path;
+      if (path) paths.add(path);
+    }
+
+    for (const item of Array.from(dataTransfer.items)) {
+      const file = item.getAsFile() as (File & { path?: string }) | null;
+      if (file?.path) paths.add(file.path);
+    }
   }
 
-  for (const item of Array.from(dataTransfer.items)) {
-    const file = item.getAsFile() as (File & { path?: string }) | null;
-    if (file?.path) paths.add(file.path);
-  }
-
-  if (paths.size === 0) {
+  if (paths.size === 0 && !preferFileContent) {
     // Fall back to async string reading from ALL DataTransferItems
     const stringItems = Array.from(dataTransfer.items).filter((item) => item.kind === 'string');
 
@@ -55,6 +64,24 @@ export async function collectDroppedPaths(dataTransfer: DataTransfer | null): Pr
   }
 
   return Array.from(paths);
+}
+
+function isCollectedVSCodeDropType(type: string) {
+  return (
+    type === 'CodeEditors' ||
+    type === 'CodeFiles' ||
+    type === 'ResourceURLs' ||
+    type === 'application/vnd.code.uri-list'
+  );
+}
+
+function isVSCodeDropType(type: string) {
+  return (
+    type === 'CodeEditors' ||
+    type === 'CodeFiles' ||
+    type === 'ResourceURLs' ||
+    type.startsWith('application/vnd.code.')
+  );
 }
 
 function collectVSCodeDroppedPaths(dataTransfer: DataTransfer): string[] {

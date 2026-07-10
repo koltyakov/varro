@@ -14,7 +14,12 @@ export type OpenCodeRequestOptions = {
   captureNextCursor?: boolean;
 };
 
-// OpenCode's v2 event stream. Current servers emit direct `{ id, type, properties }`
+export type OpenCodeRescopeResult = {
+  state: 'connected' | 'degraded' | 'unchanged' | 'inactive' | 'cancelled' | 'superseded';
+  directory: string | undefined;
+};
+
+// OpenCode's v2 event stream. Servers emit direct `{ id, type, data|properties }`
 // events plus heartbeat messages, scoped by the `x-opencode-directory` header.
 const EVENT_STREAM_PATH = '/api/event';
 
@@ -36,6 +41,7 @@ export class OpenCodeTransport {
   private static readonly EVENT_MAX_PAYLOAD_CHARS = 250_000;
   private static readonly EVENT_RECONNECT_WARNING_THRESHOLD = 10;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
+  private static readonly RESCOPE_WAIT_TIMEOUT_MS = 3000;
 
   private readonly options: OpenCodeTransportOptions;
   private eventController: AbortController | null = null;
@@ -43,11 +49,22 @@ export class OpenCodeTransport {
   private eventReconnectDelay = 1000;
   private eventReconnectCount = 0;
   private eventStreamGeneration = 0;
+  private requestWorkspaceDirectory: string | undefined;
+  private eventStreamDirectory: string | undefined;
+  private pendingScopeChange:
+    | {
+        directory: string | undefined;
+        promise: Promise<OpenCodeRescopeResult>;
+        resolve: (result: OpenCodeRescopeResult) => void;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
   private readonly requestControllers = new Set<AbortController>();
   private readonly pendingAttentionRequests = new Map<string, string>();
 
   constructor(options: OpenCodeTransportOptions) {
     this.options = options;
+    this.requestWorkspaceDirectory = options.getWorkspaceCwd();
   }
 
   async request(
@@ -113,10 +130,10 @@ export class OpenCodeTransport {
     // differ in separators, casing, or other formatting. Keep this Windows-only
     // so macOS/Linux retain their narrower backend scoping.
     if (normalizedMethod === 'POST' && pathname === '/session') {
-      return this.options.getWorkspaceCwd();
+      return this.requestWorkspaceDirectory;
     }
     if (normalizedMethod === 'POST' && /^\/session\/[^/]+\/prompt_async$/.test(pathname)) {
-      return this.options.getWorkspaceCwd();
+      return this.requestWorkspaceDirectory;
     }
     if (
       useUnscopedSessionReads &&
@@ -127,18 +144,18 @@ export class OpenCodeTransport {
       return undefined;
     }
     if (pathname === '/session') {
-      return this.options.getWorkspaceCwd();
+      return this.requestWorkspaceDirectory;
     }
     if (
       normalizedMethod === 'GET' &&
       (/^\/session\/[^/]+$/.test(pathname) || /^\/session\/[^/]+\/message$/.test(pathname))
     ) {
-      return this.options.getWorkspaceCwd();
+      return this.requestWorkspaceDirectory;
     }
     if (pathname === '/session/status' || pathname.startsWith('/session/')) {
       return undefined;
     }
-    return this.options.getWorkspaceCwd();
+    return this.requestWorkspaceDirectory;
   }
 
   async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {
@@ -158,13 +175,19 @@ export class OpenCodeTransport {
     return data.healthy === true;
   }
 
-  async startEventStream() {
-    this.stopEventStream();
+  async startEventStream(
+    eventStreamDirectory = this.options.getWorkspaceCwd(),
+    promoteDirectoryImmediately = true
+  ) {
+    this.resetEventStream(false);
+    this.eventStreamDirectory = eventStreamDirectory;
+    if (promoteDirectoryImmediately) {
+      this.requestWorkspaceDirectory = eventStreamDirectory;
+    }
     const generation = ++this.eventStreamGeneration;
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
-    const eventStreamDirectory = this.options.getWorkspaceCwd();
     const eventStreamRequest = scopeOpenCodeRequest(
       this.options.getUrl(),
       EVENT_STREAM_PATH,
@@ -212,6 +235,13 @@ export class OpenCodeTransport {
       clearConnectTimer();
       if (!isCurrentStream()) return;
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
+      this.requestWorkspaceDirectory = eventStreamDirectory;
+      if (this.pendingScopeChange && this.pendingScopeChange.directory === eventStreamDirectory) {
+        const pending = this.pendingScopeChange;
+        this.pendingScopeChange = undefined;
+        clearTimeout(pending.timer);
+        pending.resolve({ state: 'connected', directory: eventStreamDirectory });
+      }
       this.eventReconnectDelay = 1000;
       this.eventReconnectCount = 0;
       this.options.updateEventStreamState('healthy');
@@ -286,13 +316,61 @@ export class OpenCodeTransport {
             return;
           }
           this.eventReconnectTimer = null;
-          void this.startEventStream();
+          void this.startEventStream(eventStreamDirectory, false);
         }, delay);
       }
     }
   }
 
+  rescopeEventStream(directory: string | undefined): Promise<OpenCodeRescopeResult> {
+    if (this.pendingScopeChange && this.pendingScopeChange.directory === directory) {
+      return this.pendingScopeChange.promise;
+    }
+    if (
+      !this.pendingScopeChange &&
+      this.requestWorkspaceDirectory === directory &&
+      this.eventStreamDirectory === directory
+    ) {
+      return Promise.resolve({ state: 'unchanged', directory });
+    }
+
+    if (this.pendingScopeChange) {
+      const superseded = this.pendingScopeChange;
+      this.pendingScopeChange = undefined;
+      clearTimeout(superseded.timer);
+      superseded.resolve({ state: 'superseded', directory: superseded.directory });
+    }
+    let resolveChange!: (result: OpenCodeRescopeResult) => void;
+    const promise = new Promise<OpenCodeRescopeResult>((resolve) => {
+      resolveChange = resolve;
+    });
+    const timer = setTimeout(() => {
+      if (this.pendingScopeChange !== pending) return;
+      this.pendingScopeChange = undefined;
+      this.requestWorkspaceDirectory = directory;
+      resolveChange({ state: 'degraded', directory });
+    }, OpenCodeTransport.RESCOPE_WAIT_TIMEOUT_MS);
+    const pending: NonNullable<OpenCodeTransport['pendingScopeChange']> = {
+      directory,
+      promise,
+      resolve: resolveChange,
+      timer,
+    };
+    this.pendingScopeChange = pending;
+    this.options.updateEventStreamState('degraded');
+    void this.startEventStream(directory, false);
+    return promise;
+  }
+
+  getWorkspaceDirectory() {
+    return this.requestWorkspaceDirectory;
+  }
+
   stopEventStream() {
+    this.resetEventStream(true);
+  }
+
+  private resetEventStream(cancelPendingScopeChange: boolean) {
     this.eventStreamGeneration += 1;
     if (this.eventReconnectTimer) {
       clearTimeout(this.eventReconnectTimer);
@@ -301,6 +379,12 @@ export class OpenCodeTransport {
     if (this.eventController) {
       this.eventController.abort();
       this.eventController = null;
+    }
+    if (cancelPendingScopeChange && this.pendingScopeChange) {
+      const pending = this.pendingScopeChange;
+      this.pendingScopeChange = undefined;
+      clearTimeout(pending.timer);
+      pending.resolve({ state: 'cancelled', directory: pending.directory });
     }
   }
 

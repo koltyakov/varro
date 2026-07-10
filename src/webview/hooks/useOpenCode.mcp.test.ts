@@ -62,4 +62,31 @@ describe('useOpenCode mcp flows', () => {
     expect(clientMocks.mcpConnect).toHaveBeenCalledWith('beta');
     expect(stateModule.getSelectedMcpsForSession('session-1')).toEqual(['beta']);
   });
+
+  it('unions a background running session into global MCP reconciliation', async () => {
+    clientMocks.mcpStatus.mockResolvedValue({
+      alpha: { status: 'connected' },
+      beta: { status: 'connected' },
+    });
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setSelectedMcpsForSession('session-a', ['alpha']);
+    stateModule.setSelectedMcpsForSession('session-b', ['beta']);
+    stateModule.setState('activeSessionId', 'session-b');
+    stateModule.setState('sessionStatus', {
+      'session-a': { type: 'busy' },
+      'session-b': { type: 'idle' },
+    });
+    stateModule.setState('mcpStatus', {
+      alpha: { status: 'connected' },
+      beta: { status: 'disabled' },
+    });
+
+    await hookModule.applySessionMcps(['beta'], 'session-b');
+
+    expect(clientMocks.mcpConnect).toHaveBeenCalledWith('beta');
+    expect(clientMocks.mcpDisconnect).not.toHaveBeenCalledWith('alpha');
+    expect(stateModule.getSelectedMcpsForSession('session-a')).toEqual(['alpha']);
+    expect(stateModule.getSelectedMcpsForSession('session-b')).toEqual(['beta']);
+  });
 });

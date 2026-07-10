@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
 import { AppRoot } from './App';
-import { setError, setState, state } from './lib/state';
+import { resetDefaultAppState, setError, setState, state } from './lib/state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -12,6 +12,7 @@ function mountAppRoot() {
 
 describe('AppRoot', () => {
   beforeEach(() => {
+    resetDefaultAppState();
     container = document.createElement('div');
     document.body.appendChild(container);
   });
@@ -21,9 +22,10 @@ describe('AppRoot', () => {
     cleanup = undefined;
     container?.remove();
     container = null;
+    resetDefaultAppState();
   });
 
-  it('creates fresh webview state for each mount', () => {
+  it('does not reset singleton state during render', () => {
     mountAppRoot();
 
     setState('serverStatus', { state: 'error', message: 'boom' });
@@ -50,8 +52,8 @@ describe('AppRoot', () => {
     cleanup();
     mountAppRoot();
 
-    expect(state.serverStatus).toEqual({ state: 'stopped' });
-    expect(state.activeSessionId).toBeNull();
-    expect(state.messages).toEqual([]);
+    expect(state.serverStatus).toEqual({ state: 'error', message: 'boom' });
+    expect(state.activeSessionId).toBe('session-1');
+    expect(state.messages).toHaveLength(1);
   });
 });

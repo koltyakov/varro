@@ -1,10 +1,11 @@
 import type { ChildProcess } from 'child_process';
 import { spawn } from 'child_process';
-import { existsSync } from 'fs';
-import { readFile } from 'fs/promises';
-import { homedir } from 'os';
-import { join, win32 } from 'path';
+import { existsSync, writeFileSync } from 'fs';
+import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises';
+import { homedir, tmpdir } from 'os';
+import { dirname, join, win32 } from 'path';
 import * as vscode from 'vscode';
+import { MAXIMUM_TESTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
 import { logger } from './logger';
 import {
@@ -16,18 +17,37 @@ import {
 import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv, getServerPathEntries } from './util/server-path';
 
+export function getOpenCodeConfigDirectory(
+  env: NodeJS.ProcessEnv = process.env,
+  home = homedir(),
+  platform = process.platform
+) {
+  const configured = env.XDG_CONFIG_HOME?.trim();
+  if (platform === 'win32') {
+    return win32.join(configured || win32.join(home, '.config'), 'opencode');
+  }
+
+  return join(configured || join(home, '.config'), 'opencode');
+}
+
+export function getOpenCodeConfigPaths(
+  env: NodeJS.ProcessEnv = process.env,
+  home = homedir(),
+  platform = process.platform
+) {
+  const directory = getOpenCodeConfigDirectory(env, home, platform);
+  const pathJoin = platform === 'win32' ? win32.join : join;
+  return ['config.json', 'opencode.json', 'opencode.jsonc'].map((name) =>
+    pathJoin(directory, name)
+  );
+}
+
 export function getOpenCodeConfigPath(
   env: NodeJS.ProcessEnv = process.env,
   home = homedir(),
   platform = process.platform
 ) {
-  if (platform === 'win32') {
-    const base = env.APPDATA?.trim() || win32.join(home, 'AppData', 'Roaming');
-    return win32.join(base, 'opencode', 'opencode.json');
-  }
-
-  const base = env.XDG_CONFIG_HOME?.trim() || join(home, '.config');
-  return join(base, 'opencode', 'opencode.json');
+  return getOpenCodeConfigPaths(env, home, platform)[1]!;
 }
 
 export interface OpenCodeCompactionSettings {
@@ -71,13 +91,6 @@ interface MaybeSuggestCliUpdateCallbacks {
   prepareForWindowsCliUpgrade: () => Promise<void>;
 }
 
-interface RestartCallbacks {
-  beginManagedRestart: () => number | null;
-  finishManagedRestart: () => void;
-  stopManagedProcessForRestart: () => Promise<void>;
-  start: () => Promise<string>;
-}
-
 interface UpdateCompactionSettingsCallbacks {
   status: ServerStatus;
   request: (method: string, path: string, body?: unknown) => Promise<unknown>;
@@ -100,6 +113,10 @@ type CommandResult = {
 
 const PROCESS_COMMAND_TIMEOUT_MS = 2000;
 const PROCESS_STOP_TIMEOUT_MS = 5000;
+const INJECTED_CONFIG_DIRECTORY_PREFIX = 'varro-opencode-config-';
+const INJECTED_CONFIG_OWNER_FILE = 'owner.json';
+const STALE_INJECTED_CONFIG_AGE_MS = 7 * 24 * 60 * 60_000;
+let staleConfigSweep: Promise<void> = Promise.resolve();
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -202,6 +219,14 @@ async function waitForPortListenersToExit(port: number, timeoutMs: number) {
 }
 
 async function stopOpenCodeListenerOnPort(port: number) {
+  if (process.platform === 'win32') {
+    const pids = await findListeningPids(port);
+    if (pids.length === 0) return false;
+    throw new Error(
+      `Port ${port} is occupied by a process Varro does not own; stop it explicitly before restarting`
+    );
+  }
+
   const pids = await findOpenCodeListenerPids(port);
   if (pids.length === 0) return false;
 
@@ -225,6 +250,60 @@ async function stopOpenCodeListenerOnPort(port: number) {
   return true;
 }
 
+function getEnvironmentValue(env: NodeJS.ProcessEnv, name: string) {
+  const key = Object.keys(env).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+  return key ? env[key] : undefined;
+}
+
+function setEnvironmentValue(env: NodeJS.ProcessEnv, name: string, value: string) {
+  for (const key of Object.keys(env)) {
+    if (key !== name && key.toLowerCase() === name.toLowerCase()) delete env[key];
+  }
+  env[name] = value;
+}
+
+function isProcessAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
+export function sweepStaleInjectedConfigDirectories(now = Date.now()): Promise<void> {
+  const sweep = async () => {
+    let entries;
+    try {
+      entries = await readdir(tmpdir(), { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (!entry.isDirectory() || !entry.name.startsWith(INJECTED_CONFIG_DIRECTORY_PREFIX))
+          return;
+        const directory = join(tmpdir(), entry.name);
+        try {
+          const info = await lstat(directory);
+          if (!info.isDirectory() || now - info.mtimeMs < STALE_INJECTED_CONFIG_AGE_MS) return;
+          try {
+            const owner = JSON.parse(
+              await readFile(join(directory, INJECTED_CONFIG_OWNER_FILE), 'utf-8')
+            ) as { pid?: unknown };
+            if (typeof owner.pid === 'number' && isProcessAlive(owner.pid)) return;
+          } catch {}
+          await rm(directory, { recursive: true, force: true });
+        } catch {}
+      })
+    );
+  };
+  staleConfigSweep = staleConfigSweep.then(sweep, sweep);
+  return staleConfigSweep;
+}
+
+// Owns OpenCode spawn and termination mechanics; OpenCodeServer owns lifecycle and retry policy.
 export class OpenCodeProcess {
   static readonly MISSING_CLI_MESSAGE =
     'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
@@ -236,20 +315,16 @@ export class OpenCodeProcess {
   private static readonly VERSION_CHECK_INTERVAL_MS = 5 * 60_000;
   private static readonly CLI_UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60_000;
   private static readonly CLI_REGISTRY_TIMEOUT_MS = 10_000;
-  private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private static readonly PORT_FALLBACK_MAX_OFFSET = 10;
 
   private _process: ChildProcess | null = null;
   private _port: number;
   private readonly originalPort: number;
-  private retries = 0;
-  private readonly maxRetries = 3;
   private portFallbackAttempts = 0;
   private portInUseDetected = false;
   private readonly autoStart: boolean;
   private readonly command: string;
   private readonly simulateMissingCli: boolean;
-  private _restartTimer: ReturnType<typeof setTimeout> | null = null;
   private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private maintenanceInFlight = false;
   private _managedProcess = false;
@@ -267,7 +342,9 @@ export class OpenCodeProcess {
     | null = null;
   private _processErrorHandler: ((err: Error) => void) | null = null;
   private compactionSettings: OpenCodeCompactionSettings;
-  private injectedConfigContent = '{}\n';
+  private injectedConfigPath: string | null = null;
+  private injectedConfigOwnerPid: number | null = null;
+  private injectedConfigOperation: Promise<void> = Promise.resolve();
 
   constructor(
     port: number,
@@ -324,14 +401,6 @@ export class OpenCodeProcess {
     this._managedProcess = value;
   }
 
-  get restartTimer(): ReturnType<typeof setTimeout> | null {
-    return this._restartTimer;
-  }
-
-  set restartTimer(value: ReturnType<typeof setTimeout> | null) {
-    this._restartTimer = value;
-  }
-
   get processStdoutHandler(): ((data: Buffer) => void) | null {
     return this._processStdoutHandler;
   }
@@ -366,34 +435,11 @@ export class OpenCodeProcess {
     this._processErrorHandler = value;
   }
 
-  getRetryCount(): number {
-    return this.retries;
-  }
-
-  resetRetryCount() {
-    this.retries = 0;
-  }
-
-  incrementRetryCount(): number {
-    this.retries += 1;
-    return this.retries;
-  }
-
-  getMaxRetries(): number {
-    return this.maxRetries;
-  }
-
-  clearRestartTimer() {
-    if (this._restartTimer) {
-      clearTimeout(this._restartTimer);
-      this._restartTimer = null;
-    }
-  }
-
-  prepareForHealthyExistingServer() {
+  async prepareForHealthyExistingServer() {
     this._managedProcess = false;
     this.portFallbackAttempts = 0;
     this.portInUseDetected = false;
+    await this.cleanupInjectedConfigFile();
   }
 
   resetPortRetryState() {
@@ -416,15 +462,35 @@ export class OpenCodeProcess {
     return true;
   }
 
-  getRestartDelay(attempt: number) {
-    return Math.min(
-      1000 * 2 ** Math.max(0, attempt - 1),
-      OpenCodeProcess.MAX_EVENT_RECONNECT_DELAY_MS
-    );
-  }
-
   async syncInjectedConfigFile() {
-    this.injectedConfigContent = await this.serializeInjectedConfig();
+    await this.runInjectedConfigOperation(async () => {
+      await sweepStaleInjectedConfigDirectories();
+      if (!this.hasInjectedCompactionOverride()) {
+        await this.removeInjectedConfigFile(this.injectedConfigPath);
+        return;
+      }
+      if (getEnvironmentValue(process.env, 'OPENCODE_CONFIG')?.trim()) {
+        await this.removeInjectedConfigFile(this.injectedConfigPath);
+        logger.warn(
+          'Preserving caller-provided OPENCODE_CONFIG; Varro compaction settings are not injected for this managed server'
+        );
+        return;
+      }
+
+      if (this.injectedConfigPath && !this._process && !this.injectedConfigOwnerPid) {
+        await this.removeInjectedConfigFile(this.injectedConfigPath);
+      }
+      const directory = await mkdtemp(join(tmpdir(), INJECTED_CONFIG_DIRECTORY_PREFIX));
+      const configPath = join(directory, 'opencode.json');
+      try {
+        await writeFile(configPath, await this.serializeInjectedConfig(), 'utf-8');
+        this.injectedConfigPath = configPath;
+        this.injectedConfigOwnerPid = null;
+      } catch (err) {
+        await rm(directory, { recursive: true, force: true }).catch(() => {});
+        throw err;
+      }
+    });
   }
 
   async serializeInjectedConfig() {
@@ -434,32 +500,46 @@ export class OpenCodeProcess {
         ? { reserved: this.compactionSettings.reserved }
         : {}),
     };
-    const config = {
-      ...(await this.readBaseConfig()),
-      $schema: 'https://opencode.ai/config.json',
-      ...(Object.keys(compaction).length > 0 ? { compaction } : {}),
-    };
+    const config = Object.keys(compaction).length > 0 ? { compaction } : {};
     return `${JSON.stringify(config, null, 2)}\n`;
   }
 
-  private async readBaseConfig() {
-    const configPath = getOpenCodeConfigPath();
-    try {
-      const raw = await readFile(configPath, 'utf-8');
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        logger.warn(`Ignoring invalid OpenCode config at ${configPath}: expected an object`);
-        return {};
-      }
-      return parsed as Record<string, unknown>;
-    } catch (err) {
-      const nodeErr = err as NodeJS.ErrnoException;
-      if (nodeErr?.code === 'ENOENT') return {};
-      logger.warn(
-        `Failed to read OpenCode config at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
-      );
-      return {};
+  async cleanupPreparedInjectedConfigFile() {
+    await this.cleanupInjectedConfigFile();
+  }
+
+  private cleanupInjectedConfigFile(configPath = this.injectedConfigPath) {
+    return this.runInjectedConfigOperation(() => this.removeInjectedConfigFile(configPath));
+  }
+
+  private async removeInjectedConfigFile(configPath: string | null) {
+    if (!configPath) return;
+    if (this.injectedConfigPath === configPath) {
+      this.injectedConfigPath = null;
+      this.injectedConfigOwnerPid = null;
     }
+    try {
+      await rm(dirname(configPath), { recursive: true, force: true });
+    } catch (err) {
+      logger.warn(
+        `Failed to clean up temporary OpenCode config: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  private runInjectedConfigOperation(operation: () => Promise<void>) {
+    const result = this.injectedConfigOperation.then(operation, operation);
+    this.injectedConfigOperation = result.catch(() => {});
+    return result;
+  }
+
+  private async rewriteInjectedConfigFile() {
+    const configPath = this.injectedConfigPath;
+    if (!configPath) return;
+    await this.runInjectedConfigOperation(async () => {
+      if (this.injectedConfigPath !== configPath) return;
+      await writeFile(configPath, await this.serializeInjectedConfig(), 'utf-8');
+    });
   }
 
   hasInjectedCompactionOverride() {
@@ -473,7 +553,7 @@ export class OpenCodeProcess {
     const next = normalizeCompactionSettings(value);
     const changed = !areCompactionSettingsEqual(this.compactionSettings, next);
     this.compactionSettings = next;
-    await this.syncInjectedConfigFile();
+    await this.rewriteInjectedConfigFile();
     if (!changed || callbacks.status.state !== 'running') return;
     await this.reapplyCompactionSettings(callbacks);
   }
@@ -502,24 +582,61 @@ export class OpenCodeProcess {
     const launch = resolveServerLaunch(command, args);
     logger.info(`Starting OpenCode server with command: ${command}`);
 
-    this._process = spawn(launch.command, launch.args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: false,
-      cwd: callbacks.getWorkspaceCwd(),
-      env: this.buildServerEnv(),
-      windowsHide: true,
-      ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-    });
+    const configPath = this.injectedConfigPath;
+    try {
+      this._process = spawn(launch.command, launch.args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+        cwd: callbacks.getWorkspaceCwd(),
+        env: this.buildServerEnv(configPath),
+        windowsHide: true,
+        ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+      });
+    } catch (err) {
+      void this.cleanupInjectedConfigFile(configPath);
+      throw err;
+    }
+    try {
+      this.bindInjectedConfigOwner(configPath, this._process);
+    } catch (err) {
+      const proc = this._process;
+      this._process = null;
+      if (proc && proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
+      void this.cleanupInjectedConfigFile(configPath);
+      throw err;
+    }
     this._managedProcess = true;
 
     this._processStdoutHandler = callbacks.onStdout;
     this._processStderrHandler = callbacks.onStderr;
+    if (configPath) {
+      this._process.once('exit', () => void this.cleanupInjectedConfigFile(configPath));
+    }
     this._processExitHandler = callbacks.onExit;
-    this._processErrorHandler = callbacks.onError;
+    this._processErrorHandler = (err) => {
+      if (!configPath) {
+        callbacks.onError(err);
+        return;
+      }
+      void this.cleanupInjectedConfigFile(configPath).then(() => callbacks.onError(err));
+    };
     this._process.stdout?.on('data', this._processStdoutHandler);
     this._process.stderr?.on('data', this._processStderrHandler);
     this._process.on('exit', this._processExitHandler);
     this._process.on('error', this._processErrorHandler);
+  }
+
+  private bindInjectedConfigOwner(configPath: string | null, proc: ChildProcess) {
+    if (!configPath) return;
+    if (!proc.pid) {
+      throw new Error('Failed to bind temporary OpenCode config to the managed child process');
+    }
+    writeFileSync(
+      join(dirname(configPath), INJECTED_CONFIG_OWNER_FILE),
+      `${JSON.stringify({ pid: proc.pid, createdAt: Date.now() })}\n`,
+      'utf-8'
+    );
+    if (this.injectedConfigPath === configPath) this.injectedConfigOwnerPid = proc.pid;
   }
 
   detachProcessListeners(proc: ChildProcess | null) {
@@ -543,24 +660,48 @@ export class OpenCodeProcess {
   }
 
   async stopManagedProcessForRestart() {
-    this.clearRestartTimer();
     const proc = this._process;
+    const configPath = this.injectedConfigPath;
     this._process = null;
     this._managedProcess = false;
-    if (!proc) return;
+    if (!proc) {
+      await this.cleanupInjectedConfigFile(configPath);
+      return;
+    }
     this.detachProcessListeners(proc);
+    try {
+      await this.terminateManagedProcess(proc);
+    } finally {
+      await this.cleanupInjectedConfigFile(configPath);
+    }
+  }
 
+  private async terminateManagedProcess(proc: ChildProcess) {
     if (proc.exitCode === null && proc.signalCode === null) {
       proc.kill('SIGTERM');
     }
-    const exited = await waitForProcessExit(proc, 5000);
-    if (!exited && proc.exitCode === null && proc.signalCode === null) {
-      proc.kill('SIGKILL');
+    const exited = await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS);
+    if (process.platform !== 'win32') {
+      if (!exited && proc.exitCode === null && proc.signalCode === null) {
+        proc.kill('SIGKILL');
+      }
+      return;
+    }
+
+    if (!exited && proc.pid) {
+      await runProcess(
+        'taskkill.exe',
+        ['/PID', String(proc.pid), '/T', '/F'],
+        PROCESS_STOP_TIMEOUT_MS
+      );
+    }
+
+    if (!(await waitForPortListenersToExit(this._port, PROCESS_STOP_TIMEOUT_MS))) {
+      throw new Error(`Port ${this._port} is still occupied after stopping managed OpenCode`);
     }
   }
 
   async stopServerForRestart() {
-    this.clearRestartTimer();
     const ports = [...new Set([this._port, this.originalPort])];
     if (this._process && this._managedProcess) {
       await this.stopManagedProcessForRestart();
@@ -574,6 +715,7 @@ export class OpenCodeProcess {
       try {
         await stopOpenCodeListenerOnPort(port);
       } catch (err) {
+        if (process.platform === 'win32') throw err;
         logger.warn(
           `Failed to stop OpenCode listener on port ${port}: ${err instanceof Error ? err.message : String(err)}`
         );
@@ -593,20 +735,23 @@ export class OpenCodeProcess {
     }
     if (options.stopProcess && this._process) {
       const proc = this._process;
+      const configPath = this.injectedConfigPath;
       this._process = null;
       this._managedProcess = false;
       this.detachProcessListeners(proc);
-      if (proc.exitCode === null && proc.signalCode === null) {
-        proc.kill('SIGTERM');
-      }
-      const exited = await waitForProcessExit(proc, 5000);
-      if (!exited && proc.exitCode === null && proc.signalCode === null) {
-        proc.kill('SIGKILL');
+      try {
+        await this.terminateManagedProcess(proc);
+      } finally {
+        await this.cleanupInjectedConfigFile(configPath);
       }
     } else if (!options.stopProcess && this._process) {
       this.detachProcessListeners(this._process);
       this._process = null;
       this._managedProcess = false;
+    } else if (!options.stopProcess && this.injectedConfigOwnerPid) {
+      return;
+    } else {
+      await this.cleanupInjectedConfigFile();
     }
   }
 
@@ -676,34 +821,6 @@ export class OpenCodeProcess {
     }
   }
 
-  async restartServerForCliUpdate(
-    serverVersion: string,
-    installedCliVersion: string,
-    callbacks: RestartCallbacks & { stopServerForRestart: () => Promise<void> }
-  ) {
-    if (callbacks.beginManagedRestart() === null) return;
-    try {
-      logger.info(
-        `Restarting OpenCode server to use CLI ${installedCliVersion} instead of server ${serverVersion}`
-      );
-      await callbacks.stopServerForRestart();
-      await callbacks.start();
-    } finally {
-      callbacks.finishManagedRestart();
-    }
-  }
-
-  async restartManagedServerForCompactionSettings(callbacks: RestartCallbacks) {
-    if (callbacks.beginManagedRestart() === null) return;
-    try {
-      logger.info('Restarting managed OpenCode server to apply updated Varro compaction settings');
-      await callbacks.stopManagedProcessForRestart();
-      await callbacks.start();
-    } finally {
-      callbacks.finishManagedRestart();
-    }
-  }
-
   async maybeSuggestCliUpdate(
     installedCliVersion: string | null,
     callbacks: MaybeSuggestCliUpdateCallbacks
@@ -721,7 +838,13 @@ export class OpenCodeProcess {
       return null;
     }
 
-    if (this.isBackgroundCliAutoUpdateEnabled() && process.platform !== 'win32') {
+    const exceedsTestedCeiling =
+      compareVersions(latestCliVersion, MAXIMUM_TESTED_OPENCODE_VERSION) > 0;
+    if (
+      !exceedsTestedCeiling &&
+      this.isBackgroundCliAutoUpdateEnabled() &&
+      process.platform !== 'win32'
+    ) {
       if (this.lastSuggestedCliVersion === latestCliVersion) {
         return null;
       }
@@ -742,7 +865,9 @@ export class OpenCodeProcess {
     this.lastSuggestedCliVersion = latestCliVersion;
 
     const upgradeCommand = OpenCodeProcess.CLI_UPGRADE_COMMAND;
-    const message = `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${upgradeCommand}`;
+    const message = exceedsTestedCeiling
+      ? `OpenCode CLI ${latestCliVersion} is available, but Varro has only been tested through ${MAXIMUM_TESTED_OPENCODE_VERSION}. Review compatibility before updating with: ${upgradeCommand}`
+      : `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${upgradeCommand}`;
     logger.info(message);
     void vscode.window
       .showInformationMessage(message, OpenCodeProcess.CLI_UPGRADE_ACTION)
@@ -794,8 +919,11 @@ export class OpenCodeProcess {
     return this.isAutoUpdateEnabled;
   }
 
-  async upgradeCli() {
-    await this.runCliCommand(['upgrade'], OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS);
+  async upgradeCli(targetVersion: string) {
+    await this.runCliCommand(
+      ['upgrade', targetVersion],
+      OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS
+    );
   }
 
   private async runBackgroundCliUpgrade(
@@ -812,7 +940,7 @@ export class OpenCodeProcess {
       );
       return;
     }
-    await this.upgradeCli();
+    await this.upgradeCli(latestCliVersion);
     logger.info(`Updated OpenCode CLI to ${latestCliVersion} in background`);
   }
 
@@ -851,12 +979,11 @@ export class OpenCodeProcess {
     return fallback;
   }
 
-  private buildServerEnv(): NodeJS.ProcessEnv {
+  private buildServerEnv(configPath = this.injectedConfigPath): NodeJS.ProcessEnv {
     const env = buildServerEnv();
-    for (const key of Object.keys(env)) {
-      if (key.toLowerCase() === 'opencode_config') delete env[key];
+    if (configPath) {
+      setEnvironmentValue(env, 'OPENCODE_CONFIG', configPath);
     }
-    env.OPENCODE_CONFIG_CONTENT = this.injectedConfigContent;
     return env;
   }
 

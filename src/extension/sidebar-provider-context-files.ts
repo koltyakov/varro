@@ -23,7 +23,9 @@ export class SidebarProviderContextFiles {
   }
 
   clearContextFiles() {
+    const paths = this.contextFiles.map((file) => file.path);
     this.contextFiles = [];
+    void this.droppedFilesService.removeOwnedFiles(paths);
   }
 
   async handleDroppedContent(
@@ -47,6 +49,7 @@ export class SidebarProviderContextFiles {
     const nextFiles = this.contextFiles.filter((f) => f.path !== path);
     if (nextFiles.length === this.contextFiles.length) return;
     this.contextFiles = nextFiles;
+    void this.droppedFilesService.removeOwnedFile(path);
     post({ type: 'files/removed', payload: { path } });
     this.onContextFilesChanged?.();
   }

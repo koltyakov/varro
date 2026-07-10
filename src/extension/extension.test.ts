@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type ConfigChangeEvent = { affectsConfiguration: (key: string) => boolean };
 type ConfigChangeListener = (event: ConfigChangeEvent) => void;
@@ -36,6 +36,7 @@ const {
 
 const {
   contextProviderMock,
+  contextChangeCallback,
   latestContextProviderInstance,
   latestServerInstance,
   latestSidebarProviderInstance,
@@ -45,10 +46,21 @@ const {
   sidebarProviderMock,
 } = vi.hoisted(() => ({
   contextProviderMock: vi.fn(),
+  contextChangeCallback: {
+    current: null as
+      | null
+      | ((context: {
+          workspacePath: string | null;
+          activeFile: null;
+          selection: null;
+          diagnostics: never[];
+        }) => void),
+  },
   latestContextProviderInstance: { current: null as null | { dispose: ReturnType<typeof vi.fn> } },
   latestServerInstance: {
     current: null as null | {
       disconnect: ReturnType<typeof vi.fn>;
+      rescopeEventStream: ReturnType<typeof vi.fn>;
       updateCompactionSettings: ReturnType<typeof vi.fn>;
     },
   },
@@ -61,6 +73,7 @@ const {
   loggerMock: {
     info: vi.fn(),
     error: vi.fn(),
+    warn: vi.fn(),
     dispose: vi.fn(),
   },
   openCodeServerMock: vi.fn(),
@@ -85,15 +98,20 @@ vi.mock('./server', () => ({
   OpenCodeServer: class {
     updateCompactionSettings = vi.fn(() => Promise.resolve());
     disconnect = vi.fn(() => Promise.resolve());
+    rescopeEventStream = vi.fn(() => Promise.resolve({ state: 'inactive', directory: undefined }));
 
     constructor(...args: unknown[]) {
       latestServerInstance.current = {
         updateCompactionSettings: this.updateCompactionSettings,
         disconnect: this.disconnect,
+        rescopeEventStream: this.rescopeEventStream,
       };
       openCodeServerMock(...args);
     }
   },
+}));
+vi.mock('./open-code-process', () => ({
+  sweepStaleInjectedConfigDirectories: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('./sidebar-provider', () => ({
   SidebarProvider: class {
@@ -118,6 +136,7 @@ vi.mock('./context-provider', () => ({
       latestContextProviderInstance.current = {
         dispose: this.dispose,
       };
+      contextChangeCallback.current = args[0] as typeof contextChangeCallback.current;
       contextProviderMock(...args);
     }
   },
@@ -130,8 +149,13 @@ describe('extension activation', () => {
     vi.resetModules();
     vi.clearAllMocks();
     latestContextProviderInstance.current = null;
+    contextChangeCallback.current = null;
     latestServerInstance.current = null;
     latestSidebarProviderInstance.current = null;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('passes compaction settings into OpenCodeServer', async () => {
@@ -244,6 +268,171 @@ describe('extension activation', () => {
     expect(registerCommandsMock.mock.calls[0]?.[3]).toMatchObject(latestServerInstance.current!);
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:activated', true);
     expect(context.subscriptions).toHaveLength(2);
+  });
+
+  it('posts a changed workspace only after the event stream is rescoped', async () => {
+    let finishRescope!: () => void;
+    const rescope = new Promise<{ state: 'connected'; directory: string }>((resolve) => {
+      finishRescope = () => resolve({ state: 'connected', directory: '/repo-b' });
+    });
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    latestServerInstance.current?.rescopeEventStream.mockReturnValueOnce(rescope);
+    const nextContext = {
+      workspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [] as never[],
+    };
+
+    contextChangeCallback.current?.(nextContext);
+    expect(latestServerInstance.current?.rescopeEventStream).toHaveBeenCalledWith('/repo-b');
+    expect(latestSidebarProviderInstance.current?.post).not.toHaveBeenCalled();
+
+    finishRescope();
+    await rescope;
+    await Promise.resolve();
+    expect(latestSidebarProviderInstance.current?.post).toHaveBeenCalledWith({
+      type: 'context/update',
+      payload: nextContext,
+    });
+  });
+
+  it('publishes a changed workspace after a degraded rescope timeout', async () => {
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    latestServerInstance.current?.rescopeEventStream.mockResolvedValueOnce({
+      state: 'degraded',
+      directory: '/repo-b',
+    });
+    const nextContext = {
+      workspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [] as never[],
+    };
+
+    contextChangeCallback.current?.(nextContext);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(latestSidebarProviderInstance.current?.post).toHaveBeenCalledWith({
+      type: 'context/update',
+      payload: nextContext,
+    });
+  });
+
+  it('retries and publishes the latest context after restart cancellation', async () => {
+    vi.useFakeTimers();
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    latestServerInstance.current?.rescopeEventStream
+      .mockResolvedValueOnce({ state: 'cancelled', directory: '/repo-b' })
+      .mockResolvedValueOnce({ state: 'inactive', directory: '/repo-b' })
+      .mockResolvedValueOnce({ state: 'connected', directory: '/repo-b' });
+    const nextContext = {
+      workspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [] as never[],
+    };
+
+    contextChangeCallback.current?.(nextContext);
+    await Promise.resolve();
+    expect(latestSidebarProviderInstance.current?.post).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(latestServerInstance.current?.rescopeEventStream).toHaveBeenCalledTimes(3);
+    expect(latestSidebarProviderInstance.current?.post).toHaveBeenCalledWith({
+      type: 'context/update',
+      payload: nextContext,
+    });
+    vi.useRealTimers();
+  });
+
+  it('publishes only C during rapid A to B to C rescoping', async () => {
+    let resolveB!: (value: { state: 'superseded'; directory: string }) => void;
+    const scopeB = new Promise<{ state: 'superseded'; directory: string }>((resolve) => {
+      resolveB = resolve;
+    });
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    latestServerInstance.current?.rescopeEventStream
+      .mockReturnValueOnce(scopeB)
+      .mockResolvedValueOnce({ state: 'connected', directory: '/repo-c' });
+    const contextB = {
+      workspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [] as never[],
+    };
+    const contextC = { ...contextB, workspacePath: '/repo-c' };
+
+    contextChangeCallback.current?.(contextB);
+    contextChangeCallback.current?.(contextC);
+    await Promise.resolve();
+    await Promise.resolve();
+    resolveB({ state: 'superseded', directory: '/repo-b' });
+    await scopeB;
+    await Promise.resolve();
+
+    expect(latestServerInstance.current?.rescopeEventStream.mock.calls).toEqual([
+      ['/repo-b'],
+      ['/repo-c'],
+    ]);
+    expect(latestSidebarProviderInstance.current?.post).toHaveBeenCalledTimes(1);
+    expect(latestSidebarProviderInstance.current?.post).toHaveBeenCalledWith({
+      type: 'context/update',
+      payload: contextC,
+    });
+  });
+
+  it('does not publish a workspace scope when event stream rescoping fails', async () => {
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    latestServerInstance.current?.rescopeEventStream.mockRejectedValueOnce(
+      new Error('stream failed')
+    );
+
+    contextChangeCallback.current?.({
+      workspacePath: '/repo-b',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(latestSidebarProviderInstance.current?.post).not.toHaveBeenCalled();
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Failed to rescope OpenCode event stream: stream failed'
+    );
   });
 
   it('disposes the sidebar, context provider, and server during deactivation', async () => {

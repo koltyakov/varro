@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
+import { friendlyErrorName, isAbortedAssistantError } from '../shared/error-classification';
 import type { Persistence } from '../shared/persistence';
 import type { ExtensionMessage, ServerEvent } from '../shared/protocol';
 import type { PermissionEventProperties, QuestionRequest } from '../shared/opencode-types';
 import { normalizeSessionTitle } from '../shared/session-title';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
-import { friendlyErrorName, isAbortedAssistantError } from '../webview/lib/aborted';
 
 export type PendingAttentionKind = 'permission' | 'question';
 
@@ -68,6 +69,7 @@ export class SessionStateManager {
   private readonly busyStartedAt = new Map<string, number>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
   private readonly reconcileIdleSince = new Map<string, number>();
+  private persistenceQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly persistence: Persistence,
@@ -96,10 +98,9 @@ export class SessionStateManager {
   }
 
   isSessionInWorkspace(sessionID: string, workspacePath: string | null | undefined): boolean {
-    const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
+    const normalizedWorkspace = normalizeWorkspaceIdentity(workspacePath);
     if (!normalizedWorkspace) return true;
-    const normalizedDirectory = normalizeWorkspacePath(this.sessionDirectories.get(sessionID));
-    return normalizedDirectory === normalizedWorkspace;
+    return isSameWorkspacePath(this.sessionDirectories.get(sessionID), workspacePath);
   }
 
   removeSessions(sessionIDs: Iterable<string>): void {
@@ -268,45 +269,69 @@ export class SessionStateManager {
     }
   }
 
-  async persist(): Promise<void> {
-    const results = await Promise.allSettled([
-      this.persistInterruptedSessions(),
-      this.persistBlockingRequests(),
-    ]);
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        logger.warn(
-          `Failed to persist session state: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
-        );
+  persist(): Promise<void> {
+    const interruptedSessions = this.getInterruptedSessionSnapshots();
+    const blockingRequests = this.getBlockingRequestSnapshots();
+    return this.enqueuePersistence(async () => {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() =>
+          this.persistence.set(INTERRUPTED_SESSIONS_KEY, interruptedSessions)
+        ),
+        Promise.resolve().then(() => this.persistence.set(BLOCKING_REQUESTS_KEY, blockingRequests)),
+      ]);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          logger.warn(
+            `Failed to persist session state: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+          );
+        }
       }
-    }
+    });
   }
 
-  async consumeInterruptedSessions(): Promise<InterruptedSessionSnapshot[]> {
-    const snapshots =
-      this.persistence.get<InterruptedSessionSnapshot[]>(INTERRUPTED_SESSIONS_KEY) || [];
-    await this.persistence.remove(INTERRUPTED_SESSIONS_KEY);
-    return snapshots.filter(
-      (item) =>
-        typeof item?.id === 'string' &&
-        item.id.trim().length > 0 &&
-        !isSubagentSessionTitle(item.title)
-    );
+  flush(): Promise<void> {
+    return this.persistenceQueue;
   }
 
-  async consumeBlockingRequests(): Promise<BlockingRequestSnapshot[]> {
-    const snapshots = this.persistence.get<BlockingRequestSnapshot[]>(BLOCKING_REQUESTS_KEY) || [];
-    await this.persistence.remove(BLOCKING_REQUESTS_KEY);
-    return snapshots.filter(
-      (item) =>
-        typeof item?.id === 'string' &&
-        item.id.trim().length > 0 &&
-        typeof item?.sessionID === 'string' &&
-        item.sessionID.trim().length > 0 &&
-        (item.kind === 'permission' || item.kind === 'question') &&
-        item.props &&
-        typeof item.props === 'object'
+  consumeInterruptedSessions(): Promise<InterruptedSessionSnapshot[]> {
+    return this.enqueuePersistence(async () => {
+      const stored = this.persistence.get<unknown>(INTERRUPTED_SESSIONS_KEY);
+      const snapshots = Array.isArray(stored) ? stored : [];
+      await this.persistence.remove(INTERRUPTED_SESSIONS_KEY);
+      return snapshots.filter(
+        (item) =>
+          typeof item?.id === 'string' &&
+          item.id.trim().length > 0 &&
+          !isSubagentSessionTitle(item.title)
+      );
+    });
+  }
+
+  consumeBlockingRequests(): Promise<BlockingRequestSnapshot[]> {
+    return this.enqueuePersistence(async () => {
+      const stored = this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY);
+      const snapshots = Array.isArray(stored) ? stored : [];
+      await this.persistence.remove(BLOCKING_REQUESTS_KEY);
+      return snapshots.filter(
+        (item) =>
+          typeof item?.id === 'string' &&
+          item.id.trim().length > 0 &&
+          typeof item?.sessionID === 'string' &&
+          item.sessionID.trim().length > 0 &&
+          (item.kind === 'permission' || item.kind === 'question') &&
+          item.props &&
+          typeof item.props === 'object'
+      );
+    });
+  }
+
+  private enqueuePersistence<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.persistenceQueue.then(operation);
+    this.persistenceQueue = result.then(
+      () => undefined,
+      () => undefined
     );
+    return result;
   }
 
   /**
@@ -413,8 +438,8 @@ export class SessionStateManager {
     return title ? ` for "${title}"` : '';
   }
 
-  private async persistInterruptedSessions() {
-    const snapshots = [...this.busySessions]
+  private getInterruptedSessionSnapshots(): InterruptedSessionSnapshot[] {
+    return [...this.busySessions]
       .filter((id) => !this.isIgnoredBackgroundSession(id))
       .toSorted()
       .slice(0, MAX_PERSISTED_INTERRUPTED_SESSIONS)
@@ -422,11 +447,10 @@ export class SessionStateManager {
         id,
         title: trimOptionalString(this.sessionTitles.get(id)?.trim() || undefined),
       }));
-    await this.persistence.set(INTERRUPTED_SESSIONS_KEY, snapshots);
   }
 
-  private async persistBlockingRequests() {
-    const snapshots = [...this.pendingAttention.entries()]
+  private getBlockingRequestSnapshots(): BlockingRequestSnapshot[] {
+    return [...this.pendingAttention.entries()]
       .map(([id, request]) => ({
         id,
         sessionID: request.sessionID,
@@ -438,7 +462,6 @@ export class SessionStateManager {
       }))
       .toSorted((a, b) => a.id.localeCompare(b.id))
       .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
-    await this.persistence.set(BLOCKING_REQUESTS_KEY, snapshots);
   }
 
   private serializeBlockingRequestProps(
@@ -901,11 +924,4 @@ function isPersistableMetadataValue(value: unknown): value is string | number | 
 
 function trimMetadataValue(value: string | number | boolean): string | number | boolean {
   return typeof value === 'string' ? trimRequiredString(value) : value;
-}
-
-function normalizeWorkspacePath(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!normalized) return null;
-  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
 }

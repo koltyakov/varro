@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { friendlyErrorName, isAbortedAssistantError, isAbortedToolError } from './aborted';
+import {
+  friendlyErrorName,
+  isAbortedAssistantError,
+  isAbortedToolError,
+} from './error-classification';
 
 describe('friendlyErrorName', () => {
   it('maps known opencode error names to human-readable labels', () => {

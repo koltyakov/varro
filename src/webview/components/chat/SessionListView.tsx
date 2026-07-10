@@ -19,6 +19,7 @@ import {
   createEffect,
   createMemo,
   on,
+  untrack,
 } from 'solid-js';
 import {
   selectSession,
@@ -85,6 +86,8 @@ export type SessionStatusIndicatorKind =
 
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
+const SESSION_DIFF_SUMMARY_QUEUE_LIMIT = 100;
+const SESSION_DIFF_SUMMARY_CACHE_LIMIT = 200;
 const SESSION_RUNNING_SPINNER_DURATION_MS = 850;
 
 function getDiffSummaryKey(sessionId: string, updated: number): string {
@@ -101,29 +104,80 @@ const [sessionDiffSummaryCache, setSessionDiffSummaryCache] = createSignal<
 let activeDiffSummaryRequests = 0;
 const diffSummaryQueue: SessionDiffSummaryRequest[] = [];
 const queuedDiffSummaryKeys = new Set<string>();
+const activeDiffSummaryKeys = new Set<string>();
+const diffSummaryCacheOrder: string[] = [];
+const relevantDiffSummarySessionsByOwner = new Map<symbol, Set<string>>();
+let relevantDiffSummarySessionIds = new Set<string>();
+
+function setDiffSummaryCacheEntry(sessionId: string, entry: SessionDiffSummaryCacheEntry) {
+  const previousOrderIndex = diffSummaryCacheOrder.indexOf(sessionId);
+  if (previousOrderIndex !== -1) diffSummaryCacheOrder.splice(previousOrderIndex, 1);
+  diffSummaryCacheOrder.push(sessionId);
+
+  const evictedSessionIds: string[] = [];
+  while (diffSummaryCacheOrder.length > SESSION_DIFF_SUMMARY_CACHE_LIMIT) {
+    const evicted = diffSummaryCacheOrder.shift();
+    if (evicted) evictedSessionIds.push(evicted);
+  }
+
+  setSessionDiffSummaryCache((cache) => {
+    const next = { ...cache, [sessionId]: entry };
+    for (const evictedSessionId of evictedSessionIds) delete next[evictedSessionId];
+    return next;
+  });
+}
+
+function updateRelevantDiffSummarySessions(owner: symbol, sessionIds: Set<string> | null) {
+  if (sessionIds) relevantDiffSummarySessionsByOwner.set(owner, sessionIds);
+  else relevantDiffSummarySessionsByOwner.delete(owner);
+
+  relevantDiffSummarySessionIds = new Set(
+    Array.from(relevantDiffSummarySessionsByOwner.values()).flatMap((ids) => Array.from(ids))
+  );
+
+  for (let index = diffSummaryQueue.length - 1; index >= 0; index -= 1) {
+    const request = diffSummaryQueue[index]!;
+    if (relevantDiffSummarySessionIds.has(request.sessionId)) continue;
+    diffSummaryQueue.splice(index, 1);
+    queuedDiffSummaryKeys.delete(getDiffSummaryKey(request.sessionId, request.updated));
+  }
+}
+
+function isCurrentDiffSummaryRequest(request: SessionDiffSummaryRequest) {
+  const current = state.sessions.find((session) => session.id === request.sessionId);
+  return (
+    relevantDiffSummarySessionIds.has(request.sessionId) &&
+    current?.time.updated === request.updated
+  );
+}
 
 function enqueueDiffSummaryRequest(session: Session) {
   if (!shouldLoadSessionDiffSummary(session)) return;
 
-  const cached = sessionDiffSummaryCache()[session.id];
-  // Already resolved for this exact revision — nothing to do. Stale or errored
-  // entries fall through and refresh.
-  if (cached?.updated === session.time.updated && cached.status === 'ready') return;
+  const cache = untrack(sessionDiffSummaryCache);
+  const cached = cache[session.id];
+  // A matching failure is settled for this revision. Retrying from this reactive
+  // effect would otherwise form a tight request loop until the server recovers.
+  if (
+    cached?.updated === session.time.updated &&
+    (cached.status === 'ready' || cached.status === 'error')
+  ) {
+    return;
+  }
 
   const key = getDiffSummaryKey(session.id, session.time.updated);
-  if (queuedDiffSummaryKeys.has(key)) return;
+  if (queuedDiffSummaryKeys.has(key) || activeDiffSummaryKeys.has(key)) return;
+  if (diffSummaryQueue.length >= SESSION_DIFF_SUMMARY_QUEUE_LIMIT) return;
 
   queuedDiffSummaryKeys.add(key);
   diffSummaryQueue.push({ sessionId: session.id, updated: session.time.updated });
-  setSessionDiffSummaryCache((cache) => ({
-    ...cache,
+  const previousStats = cache[session.id]?.stats ?? null;
+  setDiffSummaryCacheEntry(session.id, {
     // Keep showing the previous numbers while the refresh is in flight.
-    [session.id]: {
-      status: 'loading',
-      updated: session.time.updated,
-      stats: cache[session.id]?.stats ?? null,
-    },
-  }));
+    status: 'loading',
+    updated: session.time.updated,
+    stats: previousStats,
+  });
   pumpDiffSummaryQueue();
 }
 
@@ -133,41 +187,58 @@ function pumpDiffSummaryQueue() {
     diffSummaryQueue.length > 0
   ) {
     const request = diffSummaryQueue.shift()!;
-    queuedDiffSummaryKeys.delete(getDiffSummaryKey(request.sessionId, request.updated));
+    const requestKey = getDiffSummaryKey(request.sessionId, request.updated);
+    queuedDiffSummaryKeys.delete(requestKey);
 
-    const current = state.sessions.find((session) => session.id === request.sessionId);
-    if (!current || current.time.updated !== request.updated) continue;
+    if (!isCurrentDiffSummaryRequest(request)) continue;
 
     activeDiffSummaryRequests += 1;
-    void client.session
-      .messages(request.sessionId)
-      .then((messages) => {
-        const latest = state.sessions.find((session) => session.id === request.sessionId);
-        if (!latest || latest.time.updated !== request.updated) return;
-        setSessionDiffSummaryCache((cache) => ({
-          ...cache,
-          [request.sessionId]: {
-            status: 'ready',
-            updated: request.updated,
-            stats: getMessageToolSummaryStats(messages),
-          },
-        }));
+    activeDiffSummaryKeys.add(requestKey);
+    void client.varro.session
+      .diffSummary(request.sessionId)
+      .then((summary) => {
+        if (!isCurrentDiffSummaryRequest(request)) return;
+        setDiffSummaryCacheEntry(request.sessionId, {
+          status: 'ready',
+          updated: request.updated,
+          stats: summary,
+        });
       })
       .catch(() => {
-        setSessionDiffSummaryCache((cache) => ({
-          ...cache,
-          [request.sessionId]: {
-            status: 'error',
-            updated: request.updated,
-            stats: cache[request.sessionId]?.stats ?? null,
-          },
-        }));
+        if (!isCurrentDiffSummaryRequest(request)) return;
+        setDiffSummaryCacheEntry(request.sessionId, {
+          status: 'error',
+          updated: request.updated,
+          stats: sessionDiffSummaryCache()[request.sessionId]?.stats ?? null,
+        });
       })
       .finally(() => {
         activeDiffSummaryRequests -= 1;
+        activeDiffSummaryKeys.delete(requestKey);
         pumpDiffSummaryQueue();
       });
   }
+}
+
+export function getSessionDiffSummaryStateForTests() {
+  return {
+    active: activeDiffSummaryRequests,
+    queued: diffSummaryQueue.length,
+    cached: Object.keys(sessionDiffSummaryCache()).length,
+    queueLimit: SESSION_DIFF_SUMMARY_QUEUE_LIMIT,
+    cacheLimit: SESSION_DIFF_SUMMARY_CACHE_LIMIT,
+  };
+}
+
+export function resetSessionDiffSummaryStateForTests() {
+  activeDiffSummaryRequests = 0;
+  diffSummaryQueue.length = 0;
+  queuedDiffSummaryKeys.clear();
+  activeDiffSummaryKeys.clear();
+  diffSummaryCacheOrder.length = 0;
+  relevantDiffSummarySessionsByOwner.clear();
+  relevantDiffSummarySessionIds.clear();
+  setSessionDiffSummaryCache({});
 }
 
 export type SessionListFilter = 'running' | 'attention' | 'failed' | 'plan-ready' | 'completed';
@@ -588,6 +659,7 @@ export function SessionListView(props: {
   embedded?: boolean;
   class?: string;
 }) {
+  const diffSummaryOwner = Symbol('session-list');
   const [now, setNow] = createSignal(Date.now());
   const clock = setInterval(() => setNow(Date.now()), 60_000);
   onCleanup(() => clearInterval(clock));
@@ -730,10 +802,16 @@ export function SessionListView(props: {
   });
 
   createEffect(() => {
-    for (const session of visibleSessions()) {
+    const sessions = visibleSessions();
+    updateRelevantDiffSummarySessions(
+      diffSummaryOwner,
+      new Set(sessions.map((session) => session.id))
+    );
+    for (const session of sessions) {
       enqueueDiffSummaryRequest(session);
     }
   });
+  onCleanup(() => updateRelevantDiffSummarySessions(diffSummaryOwner, null));
 
   createEffect(
     on(

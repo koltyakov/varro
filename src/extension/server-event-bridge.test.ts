@@ -47,6 +47,7 @@ function createMocks(options?: {
     handleServerEvent: vi.fn(),
     isSessionInWorkspace: vi.fn(options?.isSessionInWorkspace || (() => true)),
     persist: vi.fn(() => Promise.resolve()),
+    flush: vi.fn(() => Promise.resolve()),
   };
   const sessionTrash = { isHidden: vi.fn(() => false) };
   const providerLimitService = {
@@ -190,6 +191,23 @@ describe('ServerEventBridge', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it('accepts UNC session metadata with equivalent casing and separators', () => {
+    const { bridge, handlers, post, sessionState } = createMocks({
+      workspacePath: '\\\\BuildServer\\Projects\\Varro',
+    });
+    const parsed = {
+      type: 'session.updated' as const,
+      properties: { info: { id: 'unc-session', directory: '//buildserver/PROJECTS/varro/' } },
+    };
+    mocks.parseServerEvent.mockReturnValue(parsed);
+    mocks.getSessionIdsForEvent.mockReturnValue(['unc-session']);
+    bridge.attach();
+    handlers.event!({});
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledWith(parsed);
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
+  });
+
   it('event handler suppresses non-metadata events for sessions outside the workspace', () => {
     const { bridge, handlers, post, sessionState } = createMocks({
       workspacePath: '/repo',
@@ -231,6 +249,28 @@ describe('ServerEventBridge', () => {
     bridge.attach();
     await bridge.dispose();
     expect(sessionState.persist).toHaveBeenCalledOnce();
+    expect(sessionState.flush).toHaveBeenCalledOnce();
+  });
+
+  it('dispose waits for the latest queued session-state write', async () => {
+    const { bridge, sessionState } = createMocks();
+    let releaseFlush: (() => void) | undefined;
+    sessionState.flush.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFlush = resolve;
+        })
+    );
+    const item = bridge.getStatusBarItem();
+    bridge.attach();
+
+    const disposing = bridge.dispose();
+    await vi.waitFor(() => expect(sessionState.flush).toHaveBeenCalledOnce());
+    expect(item.dispose).not.toHaveBeenCalled();
+    releaseFlush?.();
+    await disposing;
+
+    expect(item.dispose).toHaveBeenCalledOnce();
   });
 
   it('dispose unregisters both server handlers', async () => {

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
 
 const TESTED_VERSION = process.env.TESTED_OPENCODE_VERSION || 'unknown';
 const BASE_URL = 'http://127.0.0.1:4096';
@@ -6,12 +7,27 @@ const DIRECTORY = '/workspace';
 const RESULT_PREFIX = 'VARRO_COMPAT_RESULT=';
 const START_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const BASE_CONFIG_PATH = '/tmp/varro-opencode-base.json';
+const INLINE_CONFIG_CONTENT = JSON.stringify({ compaction: { reserved: 3333 } });
 
 const checks = [];
 let serverOutput = '';
 
+await writeFile(
+  BASE_CONFIG_PATH,
+  `${JSON.stringify({ compaction: { auto: false, reserved: 1111 } }, null, 2)}\n`
+);
+await writeFile(
+  `${DIRECTORY}/opencode.jsonc`,
+  '{\n  // Project config must override Varro\'s pre-project layer.\n  "compaction": { "auto": true, "reserved": 2222 },\n}\n'
+);
+
 const server = spawn('opencode', ['serve', '--hostname', '0.0.0.0', '--port', '4096'], {
-  env: process.env,
+  env: {
+    ...process.env,
+    OPENCODE_CONFIG: BASE_CONFIG_PATH,
+    OPENCODE_CONFIG_CONTENT: INLINE_CONFIG_CONTENT,
+  },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
@@ -108,8 +124,73 @@ async function request(name, method, path, options = {}) {
   }
 }
 
+async function requestExpectedMissingRequest(name, method, path, requestKind, options = {}) {
+  const startedAt = Date.now();
+  try {
+    const headers = { 'x-opencode-directory': DIRECTORY };
+    const init = { method, headers };
+    if (options.body !== undefined) {
+      headers['content-type'] = 'application/json';
+      init.body = JSON.stringify(options.body);
+    }
+    const response = await fetchWithTimeout(scopedUrl(path), init);
+    const text = await response.text();
+    if (response.status !== 400 && response.status !== 404) {
+      throw new Error(`expected 400/404 for a missing request, received ${response.status}`);
+    }
+    const normalized = text.toLowerCase();
+    if (
+      response.status === 404 &&
+      !normalized.includes(requestKind) &&
+      !normalized.includes('varro-missing')
+    ) {
+      throw new Error(
+        `404 did not identify a missing ${requestKind} request: ${text.slice(0, 300)}`
+      );
+    }
+    checks.push({ name, ok: true, required: false, durationMs: Date.now() - startedAt });
+  } catch (error) {
+    checks.push({
+      name,
+      ok: false,
+      required: false,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function readFirstSsePayload(response) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('event stream response has no body');
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      let match = /\r?\n\r?\n/.exec(buffer);
+      while (match) {
+        const chunk = buffer.slice(0, match.index);
+        buffer = buffer.slice(match.index + match[0].length);
+        const data = chunk
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n');
+        if (data) return JSON.parse(data);
+        match = /\r?\n\r?\n/.exec(buffer);
+      }
+
+      const { value, done } = await reader.read();
+      if (done) throw new Error('event stream closed before its first payload');
+      buffer += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
+
 async function checkEventStream() {
-  const name = 'GET /api/event provides SSE';
+  const name = 'GET /api/event provides direct server.connected SSE payload';
   const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -126,7 +207,21 @@ async function checkEventStream() {
     if (!contentType.includes('text/event-stream')) {
       throw new Error(`unexpected content-type: ${contentType || 'missing'}`);
     }
-    await response.body?.cancel();
+    const payload = await readFirstSsePayload(response);
+    const properties = isRecord(payload?.properties)
+      ? payload.properties
+      : isRecord(payload?.data)
+        ? payload.data
+        : null;
+    if (
+      !isRecord(payload) ||
+      typeof payload.id !== 'string' ||
+      payload.type !== 'server.connected' ||
+      !properties ||
+      'payload' in payload
+    ) {
+      throw new Error(`unexpected SSE payload: ${JSON.stringify(payload).slice(0, 300)}`);
+    }
     checks.push({ name, ok: true, durationMs: Date.now() - startedAt });
   } catch (error) {
     checks.push({
@@ -155,6 +250,13 @@ async function runProbe() {
   await request('GET /config/providers', 'GET', '/config/providers', {
     validate: (value) =>
       isRecord(value) && Array.isArray(value.providers) && isRecord(value.default),
+  });
+  await request('GET /config honors custom, project, then inline precedence', 'GET', '/config', {
+    validate: (value) =>
+      isRecord(value) &&
+      isRecord(value.compaction) &&
+      value.compaction.auto === true &&
+      value.compaction.reserved === 3333,
   });
   await request('GET /provider/auth', 'GET', '/provider/auth', { validate: isRecord });
   await request('GET /command', 'GET', '/command', { validate: Array.isArray });
@@ -196,6 +298,35 @@ async function runProbe() {
       await request('GET /session/:id/diff', 'GET', `/session/${encodedID}/diff`, {
         validate: Array.isArray,
       });
+      await request(
+        'POST /session/:id/prompt_async noReply',
+        'POST',
+        `/session/${encodedID}/prompt_async`,
+        {
+          body: {
+            noReply: true,
+            parts: [{ type: 'text', text: 'Varro compatibility probe' }],
+          },
+          validate: (value) => value === null,
+        }
+      );
+      await request('POST /session/:id/abort', 'POST', `/session/${encodedID}/abort`, {
+        validate: (value) => value === true,
+      });
+      await requestExpectedMissingRequest(
+        'POST /permission/:id/reply accepts reply payload (advisory)',
+        'POST',
+        '/permission/varro-missing-permission/reply',
+        'permission',
+        { body: { reply: 'reject' } }
+      );
+      await requestExpectedMissingRequest(
+        'POST /question/:id/reply accepts answers payload (advisory)',
+        'POST',
+        '/question/varro-missing-question/reply',
+        'question',
+        { body: { answers: [['No']] } }
+      );
     }
   } finally {
     if (sessionID) {
@@ -208,7 +339,7 @@ async function runProbe() {
   return {
     requestedVersion: TESTED_VERSION,
     serverVersion: isRecord(health) && typeof health.version === 'string' ? health.version : null,
-    compatible: checks.every((check) => check.ok),
+    compatible: checks.every((check) => check.required === false || check.ok),
     checks,
   };
 }

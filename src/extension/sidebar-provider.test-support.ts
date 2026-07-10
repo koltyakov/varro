@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
     },
     workspace: {
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
+      textDocuments: [] as Array<{ isDirty: boolean; uri: { fsPath: string; toString(): string } }>,
       createFileSystemWatcher: vi.fn(() => ({
         onDidCreate: vi.fn(() => ({ dispose: vi.fn() })),
         onDidDelete: vi.fn(() => ({ dispose: vi.fn() })),
@@ -166,6 +167,8 @@ export function createServer(
     off: ReturnType<typeof vi.fn>;
     start: ReturnType<typeof vi.fn>;
     request: ReturnType<typeof vi.fn>;
+    restart: ReturnType<typeof vi.fn>;
+    readServerInfo: ReturnType<typeof vi.fn>;
     getWorkspaceCwd: ReturnType<typeof vi.fn>;
     resolveCommand: ReturnType<typeof vi.fn>;
   }> = {}
@@ -176,6 +179,8 @@ export function createServer(
     off: vi.fn(),
     start: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
     request: vi.fn(),
+    restart: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
+    readServerInfo: vi.fn(() => Promise.resolve({ managedProcess: true })),
     getWorkspaceCwd: vi.fn(() => '/repo'),
     resolveCommand: vi.fn(() => 'opencode'),
     ...overrides,
@@ -261,6 +266,7 @@ beforeEach(() => {
 
   mocks.vscode.workspace.asRelativePath.mockReset();
   mocks.vscode.workspace.asRelativePath.mockImplementation((uri: { fsPath: string }) => uri.fsPath);
+  mocks.vscode.workspace.textDocuments = [];
   mocks.vscode.workspace.getWorkspaceFolder.mockReset();
   mocks.vscode.workspace.getWorkspaceFolder.mockReturnValue(undefined);
   mocks.vscode.workspace.fs.readFile.mockReset();

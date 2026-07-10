@@ -35,6 +35,42 @@ describe('ServerLifecycleStateMachine', () => {
     expect(lifecycle.phase).toBe('idle');
   });
 
+  it('aborts a start but waits for its underlying work to settle', async () => {
+    const lifecycle = new ServerLifecycleStateMachine();
+    let finishWork!: () => void;
+    const work = new Promise<void>((resolve) => {
+      finishWork = resolve;
+    });
+    let operationSignal: AbortSignal | undefined;
+    const start = lifecycle.setStartPromise(async (signal) => {
+      operationSignal = signal;
+      lifecycle.beginStart();
+      await work;
+      if (signal.aborted) throw signal.reason;
+      return 'started';
+    });
+    const result = start.then(
+      () => null,
+      (err: unknown) => err
+    );
+
+    lifecycle.beginDispose('cancelled');
+    let settled = false;
+    void result.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(settled).toBe(false);
+
+    finishWork();
+
+    expect(await result).toEqual(expect.objectContaining({ message: 'cancelled' }));
+    await lifecycle.waitForOperationsSettlement();
+    expect(settled).toBe(true);
+  });
+
   it('marks managed restarts explicitly and resets when finished', () => {
     const lifecycle = new ServerLifecycleStateMachine();
 

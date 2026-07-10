@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'events';
 import type * as FsModule from 'fs';
 import type * as FsPromisesModule from 'fs/promises';
-import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
+import { dirname } from 'path';
+import {
+  MAXIMUM_TESTED_OPENCODE_VERSION,
+  MINIMUM_SUPPORTED_OPENCODE_VERSION,
+} from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
@@ -57,6 +62,69 @@ import { OpenCodeServer } from './server';
 
 function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve());
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+type MockChildProcess = EventEmitter & {
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  kill: ReturnType<typeof vi.fn>;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+};
+
+function createMockChildProcess(): MockChildProcess {
+  return Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: vi.fn(),
+    exitCode: null,
+    signalCode: null,
+  });
+}
+
+function configureManagedStartup(server: OpenCodeServer, resolveHealth = true) {
+  const children: MockChildProcess[] = [];
+  const api = server as unknown as {
+    syncInjectedConfigFile: () => Promise<void>;
+    readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+    readInstalledCliVersion: () => Promise<string | null>;
+    startEventStream: () => Promise<void>;
+    requestMaintenanceCheck: () => void;
+    pollHealth: (
+      startAttemptId: number,
+      disposeGeneration: number,
+      resolve: (url: string) => void,
+      reject: (err: Error) => void,
+      attempt?: number
+    ) => void;
+  };
+  api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
+  api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+  api.readInstalledCliVersion = vi.fn().mockResolvedValue(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+  api.startEventStream = vi.fn().mockResolvedValue(undefined);
+  api.requestMaintenanceCheck = vi.fn();
+  if (resolveHealth) {
+    api.pollHealth = (_startAttemptId, _disposeGeneration, resolve) => {
+      setRunning(server);
+      resolve(server.url);
+    };
+  }
+  spawnMock.mockImplementation(() => {
+    const child = createMockChildProcess();
+    children.push(child);
+    return child as never;
+  });
+  return { api, children };
 }
 
 function waitForAbort(signal: AbortSignal): Promise<never> {
@@ -164,6 +232,8 @@ function maybeSuggestCliUpdate(server: OpenCodeServer, installedCliVersion: stri
 }
 
 const originalPlatform = process.platform;
+const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
+const originalOpenCodeConfigContent = process.env.OPENCODE_CONFIG_CONTENT;
 
 function stubPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, 'platform', {
@@ -173,6 +243,8 @@ function stubPlatform(platform: NodeJS.Platform) {
 }
 
 beforeEach(() => {
+  delete process.env.OPENCODE_CONFIG;
+  delete process.env.OPENCODE_CONFIG_CONTENT;
   vi.useFakeTimers();
   vi.clearAllMocks();
   vi.stubGlobal('fetch', vi.fn());
@@ -192,6 +264,10 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   stubPlatform(originalPlatform);
+  if (originalOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
+  else process.env.OPENCODE_CONFIG = originalOpenCodeConfig;
+  if (originalOpenCodeConfigContent === undefined) delete process.env.OPENCODE_CONFIG_CONTENT;
+  else process.env.OPENCODE_CONFIG_CONTENT = originalOpenCodeConfigContent;
 });
 
 describe('OpenCodeServer event stream', () => {
@@ -492,7 +568,10 @@ describe('OpenCodeServer event stream', () => {
 });
 
 describe('OpenCodeServer compaction config injection', () => {
-  it('injects OPENCODE_CONFIG_CONTENT for managed server startup', async () => {
+  it('injects a temporary OPENCODE_CONFIG layer for managed server startup', async () => {
+    const inheritedContent =
+      '{\n  // inherited content\n  "provider": { "example": { "name": "Example" } },\n}\n';
+    process.env.OPENCODE_CONFIG_CONTENT = inheritedContent;
     const server = new OpenCodeServer(4096, true, 'opencode', false, {
       auto: false,
       reserved: 1234,
@@ -501,16 +580,19 @@ describe('OpenCodeServer compaction config injection', () => {
     const stderrOn = vi.fn();
     const processOn = vi.fn();
     spawnMock.mockReturnValue({
+      pid: 43212,
       stdout: { on: stdoutOn },
       stderr: { on: stderrOn },
       on: processOn,
+      once: processOn,
       kill: vi.fn(),
       exitCode: null,
       signalCode: null,
     } as never);
 
     const api = server as unknown as {
-      checkHealth: ReturnType<typeof vi.fn>;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      readInstalledCliVersion: ReturnType<typeof vi.fn>;
       pollHealth: (
         startAttemptId: number,
         disposeGeneration: number,
@@ -519,7 +601,8 @@ describe('OpenCodeServer compaction config injection', () => {
         attempt?: number
       ) => void;
     };
-    api.checkHealth = vi.fn().mockResolvedValue(false);
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue(MINIMUM_SUPPORTED_OPENCODE_VERSION);
     api.pollHealth = (_startAttemptId, _disposeGeneration, resolve) => {
       resolve(server.url);
     };
@@ -533,12 +616,48 @@ describe('OpenCodeServer compaction config injection', () => {
     ).serializeInjectedConfig();
     expect(String(configText)).toContain('"auto": false');
     expect(String(configText)).toContain('"reserved": 1234');
+    expect(String(configText)).not.toContain('"example"');
 
-    const spawnCall = spawnMock.mock.calls[0];
+    const spawnCall = spawnMock.mock.calls.find((call) =>
+      (call[1] as string[] | undefined)?.includes('serve')
+    );
     expect(spawnCall).toBeTruthy();
     const options = spawnCall?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
-    expect(options?.env?.OPENCODE_CONFIG_CONTENT).toBe(configText);
-    expect(options?.env?.OPENCODE_CONFIG).toBeUndefined();
+    const configPath = options?.env?.OPENCODE_CONFIG;
+    expect(configPath).toContain('varro-opencode-config-');
+    expect(configPath).toMatch(/opencode\.json$/);
+    expect(options?.env?.OPENCODE_CONFIG_CONTENT).toBe(inheritedContent);
+    const actualFs = await vi.importActual<typeof FsPromisesModule>('fs/promises');
+    expect(await actualFs.readFile(configPath!, 'utf-8')).toBe(configText);
+    await actualFs.rm(dirname(configPath!), { recursive: true, force: true });
+  });
+
+  it('preserves a caller-provided OPENCODE_CONFIG path', async () => {
+    const previous = process.env.OPENCODE_CONFIG;
+    process.env.OPENCODE_CONFIG = '/caller/opencode.jsonc';
+    try {
+      const server = new OpenCodeServer(4096, true, 'opencode', false, {
+        auto: true,
+        reserved: 2345,
+      });
+      const processManager = (
+        server as unknown as {
+          processManager: {
+            syncInjectedConfigFile(): Promise<void>;
+            buildServerEnv(): NodeJS.ProcessEnv;
+          };
+        }
+      ).processManager;
+      await processManager.syncInjectedConfigFile();
+
+      expect(processManager.buildServerEnv().OPENCODE_CONFIG).toBe('/caller/opencode.jsonc');
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        'Preserving caller-provided OPENCODE_CONFIG; Varro compaction settings are not injected for this managed server'
+      );
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_CONFIG;
+      else process.env.OPENCODE_CONFIG = previous;
+    }
   });
 
   it('reapplies changed settings by disposing OpenCode instances', async () => {
@@ -931,8 +1050,30 @@ describe('OpenCodeServer maintenance', () => {
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
     expect(spawnMock).toHaveBeenCalledWith(
       expect.any(String),
-      expect.arrayContaining(['upgrade']),
+      expect.arrayContaining(['upgrade', '1.14.22']),
       expect.any(Object)
+    );
+  });
+
+  it('prompts instead of auto-updating beyond the tested compatibility ceiling', async () => {
+    stubPlatform('linux');
+    const server = new OpenCodeServer(4096, false);
+    const nextUntestedVersion = '1.17.19';
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    api.readLatestCliVersion = vi.fn().mockResolvedValue(nextUntestedVersion);
+
+    await maybeSuggestCliUpdate(server, MAXIMUM_TESTED_OPENCODE_VERSION);
+    await flushMicrotasks();
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      `OpenCode CLI ${nextUntestedVersion} is available, but Varro has only been tested through ${MAXIMUM_TESTED_OPENCODE_VERSION}. Review compatibility before updating with: opencode upgrade`,
+      'Run Upgrade'
     );
   });
 
@@ -1062,6 +1203,7 @@ describe('OpenCodeServer maintenance', () => {
       } | null;
       managedProcess: boolean;
       request: ReturnType<typeof vi.fn>;
+      stopManagedProcessForRestart: ReturnType<typeof vi.fn>;
     };
 
     api.readLatestCliVersion = readLatestCliVersion;
@@ -1074,6 +1216,10 @@ describe('OpenCodeServer maintenance', () => {
       off: vi.fn(),
     };
     api.managedProcess = true;
+    api.stopManagedProcessForRestart = vi.fn(async () => {
+      api.process = null;
+      api.managedProcess = false;
+    });
     setRunning(server);
     vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
     vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
@@ -1168,7 +1314,7 @@ describe('OpenCodeServer compatibility gate', () => {
         resolve: (url: string) => void,
         reject: (err: Error) => void
       ) => void;
-      processManager: { upgradeCli: () => Promise<void> };
+      processManager: { upgradeCli: (targetVersion: string) => Promise<void> };
     };
     api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
@@ -1191,7 +1337,7 @@ describe('OpenCodeServer compatibility gate', () => {
 
     expect(upgradeRunningServer).toHaveBeenCalledWith(MINIMUM_SUPPORTED_OPENCODE_VERSION);
     expect(stopServerForRestart).toHaveBeenCalledOnce();
-    expect(upgradeCli).toHaveBeenCalledOnce();
+    expect(upgradeCli).toHaveBeenCalledWith(MINIMUM_SUPPORTED_OPENCODE_VERSION);
     expect(spawnMock).toHaveBeenCalledOnce();
   });
 
@@ -1207,7 +1353,7 @@ describe('OpenCodeServer compatibility gate', () => {
       stopServerForRestart: () => Promise<void>;
       upgradeRunningServer: () => Promise<boolean>;
       readInstalledCliVersion: () => Promise<string | null>;
-      processManager: { upgradeCli: () => Promise<void> };
+      processManager: { upgradeCli: (targetVersion: string) => Promise<void> };
     };
     api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
@@ -1262,5 +1408,252 @@ describe('OpenCodeServer startup health polling', () => {
     expect(resolved).toHaveBeenCalledWith(server.url);
     expect(resolved).toHaveBeenCalledTimes(1);
     expect(rejected).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpenCodeServer managed process lifecycle', () => {
+  it('updates status and restarts when a managed child exits after startup', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+
+    await expect(server.start()).resolves.toBe(server.url);
+    expect(children).toHaveLength(1);
+
+    children[0]!.emit('exit', 1, null);
+
+    expect(server.status.state).toBe('stopped');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+
+    expect(children).toHaveLength(2);
+    expect(server.status.state).toBe('running');
+  });
+
+  it('rejects a start when dispose cancels health polling', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server, false);
+    const startPromise = server.start();
+    const startResult = expect(startPromise).rejects.toThrow('Server start was cancelled');
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(children).toHaveLength(1);
+    children[0]!.exitCode = 0;
+
+    await server.dispose();
+
+    await startResult;
+    expect(server.status.state).toBe('stopped');
+  });
+
+  it('awaits cancelled pre-spawn config work without late status mutation', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const configWork = deferred<void>();
+    const statuses: ServerStatus[] = [];
+    server.on('status', (status) => statuses.push(status));
+    const disposeProcess = vi.fn().mockResolvedValue(undefined);
+    const readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    const api = server as unknown as {
+      syncInjectedConfigFile: () => Promise<void>;
+      readHealthInfo: typeof readHealthInfo;
+      readInstalledCliVersion: () => Promise<string | null>;
+      processManager: {
+        disposeProcess: typeof disposeProcess;
+      };
+    };
+    api.syncInjectedConfigFile = vi.fn(() => configWork.promise);
+    api.readHealthInfo = readHealthInfo;
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    api.processManager.disposeProcess = disposeProcess;
+
+    const startResult = server.start().then(
+      () => null,
+      (err: unknown) => err
+    );
+    await flushMicrotasks();
+
+    let disposeSettled = false;
+    const disposePromise = server.dispose().then(() => {
+      disposeSettled = true;
+    });
+    await flushMicrotasks();
+
+    expect(disposeSettled).toBe(false);
+    expect(disposeProcess).not.toHaveBeenCalled();
+    expect(readHealthInfo).toHaveBeenCalledTimes(1);
+
+    configWork.resolve();
+
+    expect(await startResult).toEqual(
+      expect.objectContaining({ message: 'Server start was cancelled' })
+    );
+    await disposePromise;
+    await vi.runAllTimersAsync();
+    expect(disposeProcess).toHaveBeenCalledTimes(1);
+    expect(readHealthInfo).toHaveBeenCalledTimes(1);
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(statuses.map((status) => status.state)).toEqual(['stopped']);
+    expect(server.status.state).toBe('stopped');
+  });
+
+  it('cancels an in-flight start before restarting', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureManagedStartup(server, false);
+    let pollCount = 0;
+    api.pollHealth = (_startAttemptId, _disposeGeneration, resolve) => {
+      pollCount += 1;
+      if (pollCount === 1) return;
+      setRunning(server);
+      resolve(server.url);
+    };
+    const processManager = (
+      server as unknown as {
+        processManager: {
+          process: MockChildProcess | null;
+          managedProcess: boolean;
+          stopServerForRestart: () => Promise<void>;
+        };
+      }
+    ).processManager;
+    processManager.stopServerForRestart = vi.fn(async () => {
+      processManager.process = null;
+      processManager.managedProcess = false;
+    });
+
+    const startPromise = server.start();
+    const startResult = expect(startPromise).rejects.toThrow('Server start was cancelled');
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(children).toHaveLength(1);
+
+    const restartPromise = server.restart();
+
+    await startResult;
+    await expect(restartPromise).resolves.toBe(server.url);
+    expect(processManager.stopServerForRestart).toHaveBeenCalledTimes(1);
+    expect(children).toHaveLength(2);
+    expect(server.status.state).toBe('running');
+  });
+
+  it('waits for cancelled CLI work to settle before stopping for restart', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureManagedStartup(server);
+    const upgradeWork = deferred<void>();
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    api.readInstalledCliVersion = vi
+      .fn<() => Promise<string | null>>()
+      .mockResolvedValueOnce('1.15.13')
+      .mockResolvedValue(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    const processManager = (
+      server as unknown as {
+        processManager: {
+          upgradeCli: () => Promise<void>;
+          stopServerForRestart: typeof stopServerForRestart;
+        };
+      }
+    ).processManager;
+    processManager.upgradeCli = vi.fn(() => upgradeWork.promise);
+    processManager.stopServerForRestart = stopServerForRestart;
+
+    const startResult = server.start().then(
+      () => null,
+      (err: unknown) => err
+    );
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(processManager.upgradeCli).toHaveBeenCalledTimes(1);
+
+    const restartPromise = server.restart();
+    await flushMicrotasks();
+
+    expect(stopServerForRestart).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+
+    upgradeWork.resolve();
+
+    expect(await startResult).toEqual(
+      expect.objectContaining({ message: 'Server start was cancelled' })
+    );
+    await expect(restartPromise).resolves.toBe(server.url);
+    expect(stopServerForRestart).toHaveBeenCalledTimes(1);
+    expect(children).toHaveLength(1);
+    expect(server.status.state).toBe('running');
+  });
+
+  it('returns the same operation for concurrent restarts', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    let finishStopping!: () => void;
+    const stopping = new Promise<void>((resolve) => {
+      finishStopping = resolve;
+    });
+    const start = vi.fn().mockResolvedValue(server.url);
+    const stopServerForRestart = vi.fn(() => stopping);
+    const api = server as unknown as {
+      start: typeof start;
+      processManager: { stopServerForRestart: typeof stopServerForRestart };
+    };
+    api.start = start;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+
+    const first = server.restart();
+    const second = server.restart();
+
+    expect(first).toBe(second);
+    await flushMicrotasks();
+    expect(stopServerForRestart).toHaveBeenCalledTimes(1);
+    expect(start).not.toHaveBeenCalled();
+
+    finishStopping();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([server.url, server.url]);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives isolated crashes a fresh retry budget after the stability window', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    await server.start();
+
+    children[0]!.emit('exit', 1, null);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+    expect(children).toHaveLength(2);
+    expect(server.status.state).toBe('running');
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    children[1]!.emit('exit', 1, null);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(children).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await flushMicrotasks();
+
+    expect(children).toHaveLength(3);
+    expect(server.status.state).toBe('running');
+  });
+
+  it('enters error after an immediate crash loop exhausts runtime restart attempts', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    await server.start();
+
+    for (const delay of [1_000, 2_000, 4_000]) {
+      children[children.length - 1]!.emit('exit', 1, null);
+      expect(server.status.state).toBe('stopped');
+      await vi.advanceTimersByTimeAsync(delay);
+      await flushMicrotasks();
+      expect(server.status.state).toBe('running');
+    }
+
+    children[children.length - 1]!.emit('exit', 1, null);
+
+    expect(server.status).toEqual({
+      state: 'error',
+      message:
+        'OpenCode server stopped unexpectedly (code 1). Restart attempts (3) were exhausted.',
+    });
+    expect(children).toHaveLength(4);
   });
 });

@@ -42,6 +42,26 @@ function createTransport() {
   });
 }
 
+function createPendingEventResponse(signal: AbortSignal) {
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        return {
+          read: () =>
+            new Promise<never>((_, reject) => {
+              signal.addEventListener(
+                'abort',
+                () => reject(signal.reason instanceof Error ? signal.reason : new Error('aborted')),
+                { once: true }
+              );
+            }),
+        };
+      },
+    },
+  } as unknown as Response;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -177,6 +197,27 @@ describe('OpenCodeTransport event stream path', () => {
     expect(transport.hasPendingAttentionRequests()).toBe(false);
   });
 
+  it('tracks direct v2 permission events from data payloads', () => {
+    const transport = createTransport() as unknown as {
+      observeServerEvent(event: unknown): void;
+      hasPendingAttentionRequests(): boolean;
+    };
+
+    transport.observeServerEvent({
+      id: 'evt_1',
+      type: 'permission.asked',
+      data: { id: 'permission-1', sessionID: 'session-1' },
+    });
+    expect(transport.hasPendingAttentionRequests()).toBe(true);
+
+    transport.observeServerEvent({
+      id: 'evt_2',
+      type: 'permission.replied',
+      data: { requestID: 'permission-1', sessionID: 'session-1' },
+    });
+    expect(transport.hasPendingAttentionRequests()).toBe(false);
+  });
+
   it('clears direct v2 attention requests when a session is deleted', () => {
     const transport = createTransport() as unknown as {
       observeServerEvent(event: unknown): void;
@@ -197,6 +238,181 @@ describe('OpenCodeTransport event stream path', () => {
     });
 
     expect(transport.hasPendingAttentionRequests()).toBe(false);
+  });
+
+  it('keeps REST on the connected scope until a replacement stream connects', async () => {
+    let resolveReplacement!: (response: Response) => void;
+    let replacementSignal: AbortSignal | undefined;
+    let eventRequests = 0;
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname !== '/api/event') {
+        return Promise.resolve({ ok: true, text: async () => '{}' } as Response);
+      }
+      eventRequests += 1;
+      if (eventRequests === 1) {
+        return Promise.resolve(createPendingEventResponse(init!.signal as AbortSignal));
+      }
+      replacementSignal = init!.signal as AbortSignal;
+      return new Promise<Response>((resolve) => {
+        resolveReplacement = resolve;
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => '/repo-a',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    void transport.startEventStream();
+    await vi.waitFor(() => expect(eventRequests).toBe(1));
+    const rescope = transport.rescopeEventStream('/repo-b');
+    await vi.waitFor(() => expect(eventRequests).toBe(2));
+
+    await transport.request('POST', '/session', {});
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session',
+      '/repo-a'
+    );
+
+    resolveReplacement(createPendingEventResponse(replacementSignal!));
+    await expect(rescope).resolves.toEqual({ state: 'connected', directory: '/repo-b' });
+    await transport.request('POST', '/session', {});
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session',
+      '/repo-b'
+    );
+    transport.stopEventStream();
+  });
+
+  it('commits the new REST scope after a bounded degraded wait', async () => {
+    vi.useFakeTimers();
+    let eventRequests = 0;
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname !== '/api/event') {
+        return Promise.resolve({ ok: true, text: async () => '{}' } as Response);
+      }
+      eventRequests += 1;
+      if (eventRequests === 1) {
+        return Promise.resolve(createPendingEventResponse(init!.signal as AbortSignal));
+      }
+      return new Promise<Response>((_, reject) => {
+        const signal = init!.signal as AbortSignal;
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => '/repo-a',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    void transport.startEventStream();
+    await vi.waitFor(() => expect(eventRequests).toBe(1));
+    const rescope = transport.rescopeEventStream('/repo-b');
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    await expect(rescope).resolves.toEqual({ state: 'degraded', directory: '/repo-b' });
+    await transport.request('POST', '/session', {});
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session',
+      '/repo-b'
+    );
+    transport.stopEventStream();
+  });
+
+  it('cancels a pending scope without moving REST when the stream stops', async () => {
+    let eventRequests = 0;
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname !== '/api/event') {
+        return Promise.resolve({ ok: true, text: async () => '{}' } as Response);
+      }
+      eventRequests += 1;
+      if (eventRequests === 1) {
+        return Promise.resolve(createPendingEventResponse(init!.signal as AbortSignal));
+      }
+      return new Promise<Response>((_, reject) => {
+        const signal = init!.signal as AbortSignal;
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => '/repo-a',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    void transport.startEventStream();
+    await vi.waitFor(() => expect(eventRequests).toBe(1));
+    const rescope = transport.rescopeEventStream('/repo-b');
+    transport.stopEventStream();
+
+    await expect(rescope).resolves.toEqual({ state: 'cancelled', directory: '/repo-b' });
+    await transport.request('POST', '/session', {});
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session',
+      '/repo-a'
+    );
+  });
+
+  it('supersedes B and commits only C during rapid scope changes', async () => {
+    let eventRequests = 0;
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname !== '/api/event') {
+        return Promise.resolve({ ok: true, text: async () => '{}' } as Response);
+      }
+      eventRequests += 1;
+      if (eventRequests === 1 || eventRequests === 3) {
+        return Promise.resolve(createPendingEventResponse(init!.signal as AbortSignal));
+      }
+      return new Promise<Response>((_, reject) => {
+        const signal = init!.signal as AbortSignal;
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => '/repo-a',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    });
+
+    void transport.startEventStream();
+    await vi.waitFor(() => expect(eventRequests).toBe(1));
+    const scopeB = transport.rescopeEventStream('/repo-b');
+    const scopeC = transport.rescopeEventStream('/repo-c');
+
+    await expect(scopeB).resolves.toEqual({ state: 'superseded', directory: '/repo-b' });
+    await expect(scopeC).resolves.toEqual({ state: 'connected', directory: '/repo-c' });
+    await transport.request('POST', '/session', {});
+    expect(scopeOpenCodeRequest).toHaveBeenLastCalledWith(
+      'http://localhost:4096',
+      '/session',
+      '/repo-c'
+    );
+    transport.stopEventStream();
   });
 });
 

@@ -63,6 +63,12 @@ export type SessionTitleFallbackResponse = {
   title: string;
 } | null;
 
+export type SessionDiffSummary = {
+  files: number;
+  additions: number;
+  deletions: number;
+};
+
 export type ProviderLimitUnit = 'requests' | 'tokens' | 'messages' | 'credits' | 'usd' | 'unknown';
 
 export type ProviderLimitWindow = {
@@ -144,15 +150,26 @@ export type WorkspaceStatusEventSummary = {
 export const VARRO_API_NAMESPACE = '/varro' as const;
 
 export const VARRO_API_ENDPOINTS = {
-  providerLimit: '/varro/provider-limit',
-  planOpen: '/varro/plan/open',
-  openCodeConfig: '/varro/opencode-config',
-  openCodeConfigModelRouting: '/varro/opencode-config/model-routing',
-  sessionTrash: '/varro/session-trash',
-  providerAuth: '/provider/auth',
-  providerAuthorize: '/provider',
-  workspaceStatus: '/experimental/workspace/status',
+  providerLimit: `${VARRO_API_NAMESPACE}/provider-limit`,
+  planOpen: `${VARRO_API_NAMESPACE}/plan/open`,
+  openCodeConfig: `${VARRO_API_NAMESPACE}/opencode-config`,
+  openCodeConfigModelRouting: `${VARRO_API_NAMESPACE}/opencode-config/model-routing`,
+  session: `${VARRO_API_NAMESPACE}/session`,
+  sessionTrash: `${VARRO_API_NAMESPACE}/session-trash`,
+  workspaceFile: `${VARRO_API_NAMESPACE}/workspace-file`,
+  workspaceFilePick: `${VARRO_API_NAMESPACE}/workspace-file/pick`,
+  workspacePathResolve: `${VARRO_API_NAMESPACE}/workspace-path/resolve`,
+  permissionJudge: `${VARRO_API_NAMESPACE}/permission/judge`,
 } as const;
+
+export type VarroSessionEndpointAction = 'delete' | 'diff-summary' | 'rename-if-untitled';
+
+export function buildVarroSessionEndpoint(
+  sessionID: string,
+  action: VarroSessionEndpointAction
+): string {
+  return `${VARRO_API_ENDPOINTS.session}/${encodeURIComponent(sessionID)}/${action}`;
+}
 
 export type { OpenCodeModelRoute, OpenCodeModelRouting } from './opencode-types';
 
@@ -345,6 +362,7 @@ export type InitialWebviewState = {
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
   emptyStateLogoUri: string;
+  remoteExtensionHost?: boolean;
   expandThinkingByDefault?: boolean;
   showStickyUserPrompt?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;

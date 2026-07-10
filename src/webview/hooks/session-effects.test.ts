@@ -1,11 +1,20 @@
 import { createRoot, createSignal } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createSessionMessageSyncCoordinator,
   registerEventStreamRecoveryEffect,
   registerLoadingStatusPollEffect,
   registerProviderLimitRefreshEffect,
   registerVisibleRunningSessionSyncEffect,
 } from './session/session-effects';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 describe('session effect helpers', () => {
   it('polls active session status while loading and visible', async () => {
@@ -13,13 +22,14 @@ describe('session effect helpers', () => {
     const [loading] = createSignal(true);
     const [activeSessionId] = createSignal<string | null>('session-1');
     const [visible] = createSignal(true);
-    const recheckSessionStatus = vi.fn();
+    const recheckSessionStatus = vi.fn(async () => {});
 
     const dispose = createRoot((cleanup) => {
       registerLoadingStatusPollEffect({
         isLoading: loading,
         getActiveSessionId: activeSessionId,
         isDocumentVisible: visible,
+        getEventStreamState: () => 'degraded',
         recheckSessionStatus,
       });
       return cleanup;
@@ -29,6 +39,106 @@ describe('session effect helpers', () => {
       await vi.advanceTimersByTimeAsync(3000);
       expect(recheckSessionStatus).toHaveBeenCalledWith('session-1');
       expect(recheckSessionStatus).toHaveBeenCalledTimes(3);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not overlap loading status polls while a recheck is in flight', async () => {
+    vi.useFakeTimers();
+    const pendingRecheck = deferred<void>();
+    const recheckSessionStatus = vi.fn(() => pendingRecheck.promise);
+
+    const dispose = createRoot((cleanup) => {
+      registerLoadingStatusPollEffect({
+        isLoading: () => true,
+        getActiveSessionId: () => 'session-1',
+        isDocumentVisible: () => true,
+        getEventStreamState: () => 'degraded',
+        recheckSessionStatus,
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(1);
+
+      pendingRecheck.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(999);
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(2);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('backs off loading status polls while the event stream is healthy', async () => {
+    vi.useFakeTimers();
+    const recheckSessionStatus = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerLoadingStatusPollEffect({
+        isLoading: () => true,
+        getActiveSessionId: () => 'session-1',
+        isDocumentVisible: () => true,
+        getEventStreamState: () => 'healthy',
+        recheckSessionStatus,
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(3_999);
+      expect(recheckSessionStatus).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(7_999);
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(2);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns to frequent polling when the event stream degrades', async () => {
+    vi.useFakeTimers();
+    const [eventStreamState, setEventStreamState] = createSignal<'healthy' | 'degraded'>('healthy');
+    const recheckSessionStatus = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerLoadingStatusPollEffect({
+        isLoading: () => true,
+        getActiveSessionId: () => 'session-1',
+        isDocumentVisible: () => true,
+        getEventStreamState: eventStreamState,
+        recheckSessionStatus,
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(3_999);
+      expect(recheckSessionStatus).not.toHaveBeenCalled();
+
+      setEventStreamState('degraded');
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(999);
+      expect(recheckSessionStatus).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(1);
     } finally {
       dispose();
       vi.useRealTimers();
@@ -47,6 +157,7 @@ describe('session effect helpers', () => {
       registerVisibleRunningSessionSyncEffect({
         getServerState: () => 'running',
         isDocumentVisible: () => true,
+        getEventStreamState: () => 'degraded',
         getActiveSessionId: () => 'session-1',
         getSessionStatuses: () => ({ 'session-1': { type: 'busy' } }),
         loadSessions,
@@ -89,6 +200,7 @@ describe('session effect helpers', () => {
       registerVisibleRunningSessionSyncEffect({
         getServerState: () => 'running',
         isDocumentVisible: () => true,
+        getEventStreamState: () => 'degraded',
         getActiveSessionId: () => 'session-1',
         getSessionStatuses: () => ({
           'session-1': { type: 'busy' },
@@ -126,6 +238,7 @@ describe('session effect helpers', () => {
       registerVisibleRunningSessionSyncEffect({
         getServerState: () => 'running',
         isDocumentVisible: () => true,
+        getEventStreamState: () => 'degraded',
         getActiveSessionId: () => 'session-1',
         getSessionStatuses: statuses,
         loadSessions,
@@ -171,6 +284,7 @@ describe('session effect helpers', () => {
       registerVisibleRunningSessionSyncEffect({
         getServerState: () => 'running',
         isDocumentVisible: () => true,
+        getEventStreamState: () => 'degraded',
         getActiveSessionId: () => 'session-1',
         getSessionStatuses: () => ({}),
         loadSessions,
@@ -194,11 +308,189 @@ describe('session effect helpers', () => {
     }
   });
 
+  it('uses the running-session sync as a low-frequency safety net for a healthy stream', async () => {
+    vi.useFakeTimers();
+    const hydrateSessionStatuses = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getEventStreamState: () => 'healthy',
+        getActiveSessionId: () => 'session-1',
+        getSessionStatuses: () => ({ 'session-1': { type: 'busy' } }),
+        loadSessions: vi.fn(async () => {}),
+        hydrateSessionStatuses,
+        loadQuestions: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(15_999);
+      expect(hydrateSessionStatuses).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(hydrateSessionStatuses).toHaveBeenCalledTimes(1);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not duplicate active message sync when loading and running polls share a cycle', async () => {
+    vi.useFakeTimers();
+    const loadMessages = vi.fn(async () => {});
+    const messageSync = createSessionMessageSyncCoordinator(loadMessages);
+    const recheckSessionStatus = vi.fn(async () => {
+      if (Date.now() >= 4_000) await messageSync.syncIfStale('session-1');
+    });
+
+    const dispose = createRoot((cleanup) => {
+      registerLoadingStatusPollEffect({
+        isLoading: () => true,
+        getActiveSessionId: () => 'session-1',
+        isDocumentVisible: () => true,
+        getEventStreamState: () => 'degraded',
+        recheckSessionStatus,
+      });
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getEventStreamState: () => 'degraded',
+        getActiveSessionId: () => 'session-1',
+        getSessionStatuses: () => ({ 'session-1': { type: 'busy' } }),
+        loadSessions: vi.fn(async () => {}),
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        loadQuestions: vi.fn(async () => {}),
+        syncSessionMessages: messageSync.syncIfStale,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      expect(recheckSessionStatus).toHaveBeenCalledTimes(4);
+      expect(loadMessages).toHaveBeenCalledTimes(1);
+      expect(loadMessages).toHaveBeenCalledWith('session-1');
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not mark an unapplied message response as fresh', async () => {
+    vi.useFakeTimers();
+    const loadMessages = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const messageSync = createSessionMessageSyncCoordinator(loadMessages);
+
+    try {
+      await messageSync.syncIfStale('session-1');
+      await messageSync.syncIfStale('session-1');
+
+      expect(loadMessages).toHaveBeenCalledTimes(2);
+
+      await messageSync.syncIfStale('session-1');
+      expect(loadMessages).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runs one trailing refresh before forced callers behind an active poll resolve', async () => {
+    vi.useFakeTimers();
+    const staleRequest = deferred<void>();
+    const freshRequest = deferred<void>();
+    const loadMessages = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(staleRequest.promise)
+      .mockReturnValueOnce(freshRequest.promise);
+    const messageSync = createSessionMessageSyncCoordinator(loadMessages);
+
+    try {
+      const poll = messageSync.syncIfStale('session-1');
+      await Promise.resolve();
+      expect(loadMessages).toHaveBeenCalledTimes(1);
+
+      let forcedCallersSettled = false;
+      const forced = Promise.all([
+        messageSync.sync('session-1'),
+        messageSync.sync('session-1'),
+      ]).then(() => {
+        forcedCallersSettled = true;
+      });
+
+      staleRequest.resolve();
+      await poll;
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(loadMessages).toHaveBeenCalledTimes(2);
+      expect(forcedCallersSettled).toBe(false);
+
+      freshRequest.resolve();
+      await forced;
+
+      expect(loadMessages).toHaveBeenCalledTimes(2);
+      expect(forcedCallersSettled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runs one trailing refresh for forced callers arriving during an active forced sync', async () => {
+    vi.useFakeTimers();
+    const staleRequest = deferred<void>();
+    const freshRequest = deferred<void>();
+    const loadMessages = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(staleRequest.promise)
+      .mockReturnValueOnce(freshRequest.promise);
+    const messageSync = createSessionMessageSyncCoordinator(loadMessages);
+
+    try {
+      const firstForced = messageSync.sync('session-1');
+      await Promise.resolve();
+      expect(loadMessages).toHaveBeenCalledTimes(1);
+
+      let trailingCallersSettled = false;
+      const trailingForced = Promise.all([
+        messageSync.sync('session-1'),
+        messageSync.sync('session-1'),
+      ]).then(() => {
+        trailingCallersSettled = true;
+      });
+
+      staleRequest.resolve();
+      await firstForced;
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(loadMessages).toHaveBeenCalledTimes(2);
+      expect(trailingCallersSettled).toBe(false);
+
+      freshRequest.resolve();
+      await trailingForced;
+
+      expect(loadMessages).toHaveBeenCalledTimes(2);
+      expect(trailingCallersSettled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rechecks active session status when the event stream recovers from degraded while loading', async () => {
     const [eventStreamState, setEventStreamState] = createSignal<
       'healthy' | 'degraded' | undefined
     >('healthy');
-    const recheckSessionStatus = vi.fn();
+    const recheckSessionStatus = vi.fn(async () => {});
 
     const dispose = createRoot((cleanup) => {
       registerEventStreamRecoveryEffect({
@@ -229,7 +521,7 @@ describe('session effect helpers', () => {
     const [eventStreamState, setEventStreamState] = createSignal<
       'healthy' | 'degraded' | undefined
     >('degraded');
-    const recheckSessionStatus = vi.fn();
+    const recheckSessionStatus = vi.fn(async () => {});
 
     const dispose = createRoot((cleanup) => {
       registerEventStreamRecoveryEffect({

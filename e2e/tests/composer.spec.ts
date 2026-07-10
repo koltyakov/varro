@@ -101,7 +101,6 @@ test('preserves completed todos against stale native todo update events', async 
             sessionID: 'session-todo-completion',
             todos: [
               {
-                id: 'todo-1',
                 content: 'Patch stale incremental message equivalence and add regression coverage',
                 status: 'in_progress',
                 priority: 'high',
@@ -129,7 +128,6 @@ test('preserves completed todos against stale native todo update events', async 
             sessionID: 'session-todo-completion',
             todos: [
               {
-                id: 'todo-1',
                 content: 'Patch stale incremental message equivalence and add regression coverage',
                 status: 'completed',
                 priority: 'high',

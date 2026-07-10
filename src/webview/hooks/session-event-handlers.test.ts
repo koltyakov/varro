@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
-import type { Message, Part } from '../types';
+import type { Message, Part, SessionStatus } from '../types';
 
 const {
   serverEventsOn,
@@ -154,8 +154,22 @@ function installHandlers() {
 function createDefaultDeps(
   overrides: Partial<Parameters<typeof registerSessionEventHandlers>[0]> = {}
 ): Parameters<typeof registerSessionEventHandlers>[0] {
+  const statuses: Record<string, SessionStatus> = {};
+  const { setSessionStatusEntry: setSessionStatusOverride, ...rest } = overrides;
+  const setSessionStatusEntry = vi.fn((sessionId: string, status: SessionStatus) => {
+    statuses[sessionId] = status;
+    setSessionStatusOverride?.(sessionId, status);
+  });
   return {
     getActiveSessionId: () => null,
+    getSessionStatus: (sessionId) => statuses[sessionId],
+    isSessionTreeStatusWorking: (sessionId) =>
+      Object.entries(statuses).some(
+        ([candidateSessionId, status]) =>
+          (candidateSessionId === sessionId ||
+            overrides.isSessionInActiveTree?.(candidateSessionId) === true) &&
+          (status.type === 'busy' || status.type === 'retry')
+      ),
     getMessages: () => [],
     handoffTodosToMessages: vi.fn().mockReturnValue(true),
     upsertSession: vi.fn(),
@@ -165,7 +179,7 @@ function createDefaultDeps(
     hasPendingAbort: () => false,
     markPendingAbort: vi.fn(),
     clearPendingAbort: vi.fn(),
-    setSessionStatusEntry: vi.fn(),
+    setSessionStatusEntry,
     clearUsageLimitOnResumedProgress: vi.fn(),
     updateUsageLimitState: vi.fn(),
     syncSession: vi.fn().mockResolvedValue(undefined),
@@ -179,7 +193,7 @@ function createDefaultDeps(
     setDiffs: vi.fn(),
     abortRemoteSession: vi.fn().mockResolvedValue(true),
     logError: vi.fn(),
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -2605,6 +2619,8 @@ describe('registerSessionEventHandlers', () => {
 
     registerSessionEventHandlers({
       getActiveSessionId: () => 'session-1',
+      getSessionStatus: () => undefined,
+      isSessionTreeStatusWorking: () => false,
       getMessages: () => [
         {
           info: {
@@ -2678,6 +2694,8 @@ describe('registerSessionEventHandlers', () => {
 
     registerSessionEventHandlers({
       getActiveSessionId: () => 'session-1',
+      getSessionStatus: () => undefined,
+      isSessionTreeStatusWorking: () => false,
       getMessages: () => [
         {
           info: {
@@ -2833,6 +2851,8 @@ describe('registerSessionEventHandlers', () => {
 
     registerSessionEventHandlers({
       getActiveSessionId: () => 'session-1',
+      getSessionStatus: () => undefined,
+      isSessionTreeStatusWorking: () => false,
       getMessages: () => [
         {
           info: {
@@ -2915,6 +2935,8 @@ describe('registerSessionEventHandlers', () => {
 
     registerSessionEventHandlers({
       getActiveSessionId: () => 'session-1',
+      getSessionStatus: () => undefined,
+      isSessionTreeStatusWorking: () => false,
       getMessages: () => [
         {
           info: {
@@ -3041,6 +3063,40 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-child' } });
+
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses snapshot status changes when checking whether the active tree is working', () => {
+    const handlers = installHandlers();
+    const statuses: Record<string, SessionStatus> = {
+      'session-child': { type: 'busy' },
+    };
+    const activeTreeIds = new Set(['session-parent', 'session-child']);
+
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-parent',
+        getSessionStatus: (sessionId) => statuses[sessionId],
+        isSessionInActiveTree: (sessionId) => activeTreeIds.has(sessionId),
+        isSessionTreeStatusWorking: () =>
+          [...activeTreeIds].some((sessionId) => {
+            const status = statuses[sessionId];
+            return status?.type === 'busy' || status?.type === 'retry';
+          }),
+      })
+    );
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-parent' } });
+
+    expect(startLoading).toHaveBeenCalledTimes(1);
+    expect(stopLoading).not.toHaveBeenCalled();
+
+    statuses['session-child'] = { type: 'idle' };
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-parent' } });
 
     expect(stopLoading).toHaveBeenCalledTimes(1);
   });

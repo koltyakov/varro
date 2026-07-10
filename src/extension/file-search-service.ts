@@ -15,6 +15,10 @@ export type FileSearchResult = {
   files: DroppedFile[];
 };
 
+const WORKSPACE_FILE_GLOB = '**/*';
+const WORKSPACE_FILE_EXCLUDE_GLOB =
+  '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}';
+
 /**
  * Owns workspace-file discovery and fuzzy ranking for the `@file` picker.
  *
@@ -36,6 +40,7 @@ export class FileSearchService {
   private workspaceFileCacheGeneration = 0;
   private fileSearchCts: vscode.CancellationTokenSource | null = null;
   private cacheInvalidationDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private watcherInactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private hasPendingWorkspaceFileCacheClear = false;
 
   /**
@@ -49,6 +54,7 @@ export class FileSearchService {
     onResult: (result: FileSearchResult) => void
   ): void {
     this.ensureWorkspaceWatcher();
+    this.resetWatcherInactivityTimer();
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = new vscode.CancellationTokenSource();
@@ -60,8 +66,7 @@ export class FileSearchService {
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = null;
-    this.workspaceWatcher?.dispose();
-    this.workspaceWatcher = null;
+    this.disposeWorkspaceWatcher();
     if (this.cacheInvalidationDebounceTimer) {
       clearTimeout(this.cacheInvalidationDebounceTimer);
       this.cacheInvalidationDebounceTimer = null;
@@ -73,11 +78,33 @@ export class FileSearchService {
   private ensureWorkspaceWatcher() {
     if (this.workspaceWatcher) return;
 
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*');
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      WORKSPACE_FILE_GLOB,
+      false,
+      true,
+      false
+    );
     watcher.onDidCreate(() => this.scheduleWorkspaceFileCacheClear());
     watcher.onDidDelete(() => this.scheduleWorkspaceFileCacheClear());
-    watcher.onDidChange(() => this.scheduleWorkspaceFileCacheClear());
     this.workspaceWatcher = watcher;
+  }
+
+  private resetWatcherInactivityTimer() {
+    if (this.watcherInactivityTimer) clearTimeout(this.watcherInactivityTimer);
+    this.watcherInactivityTimer = setTimeout(() => {
+      this.watcherInactivityTimer = null;
+      this.disposeWorkspaceWatcher();
+      this.clearWorkspaceFileCache();
+    }, FileSearchService.CACHE_TTL_MS);
+  }
+
+  private disposeWorkspaceWatcher() {
+    if (this.watcherInactivityTimer) {
+      clearTimeout(this.watcherInactivityTimer);
+      this.watcherInactivityTimer = null;
+    }
+    this.workspaceWatcher?.dispose();
+    this.workspaceWatcher = null;
   }
 
   private scheduleWorkspaceFileCacheClear() {
@@ -148,8 +175,8 @@ export class FileSearchService {
     const cacheGeneration = this.workspaceFileCacheGeneration;
     const promise = Promise.resolve(
       vscode.workspace.findFiles(
-        '**/*',
-        '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}',
+        WORKSPACE_FILE_GLOB,
+        WORKSPACE_FILE_EXCLUDE_GLOB,
         FileSearchService.MAX_CANDIDATES,
         token
       )

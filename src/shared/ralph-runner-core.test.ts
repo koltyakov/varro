@@ -91,9 +91,12 @@ type Harness = {
   createSession: ReturnType<typeof vi.fn>;
   sendPrompt: ReturnType<typeof vi.fn>;
   abortSession: ReturnType<typeof vi.fn>;
+  listSessions: ReturnType<typeof vi.fn>;
   listMessages: ReturnType<typeof vi.fn>;
   readWorkspaceFile: ReturnType<typeof vi.fn>;
+  logError: ReturnType<typeof vi.fn>;
   emitIdle: (sessionID: string) => void;
+  idleListenerCount: () => number;
 };
 
 function createHarness(overrides: Partial<RalphRunnerPorts> = {}): Harness {
@@ -102,15 +105,17 @@ function createHarness(overrides: Partial<RalphRunnerPorts> = {}): Harness {
   const createSession = vi.fn();
   const sendPrompt = vi.fn(async () => {});
   const abortSession = vi.fn(async () => {});
+  const listSessions = vi.fn(async () => []);
   const listMessages = vi.fn(async () => [] as RalphMessageEntry[]);
   const readWorkspaceFile = vi.fn(async () => '# Plan\n- [ ] next chunk');
+  const logError = vi.fn();
 
   const ports: RalphRunnerPorts = {
     store,
     createSession,
     sendPrompt,
     abortSession,
-    listSessions: async () => [],
+    listSessions,
     listMessages,
     onSessionIdle: (listener) => {
       idleListeners.add(listener);
@@ -118,7 +123,7 @@ function createHarness(overrides: Partial<RalphRunnerPorts> = {}): Harness {
     },
     readWorkspaceFile,
     normalizeVariant: (_modelID, variant) => variant,
-    logError: vi.fn(),
+    logError,
     ...overrides,
   };
   return {
@@ -128,11 +133,14 @@ function createHarness(overrides: Partial<RalphRunnerPorts> = {}): Harness {
     createSession,
     sendPrompt,
     abortSession,
+    listSessions,
     listMessages,
     readWorkspaceFile,
+    logError,
     emitIdle: (sessionID) => {
       for (const listener of idleListeners) listener(sessionID);
     },
+    idleListenerCount: () => idleListeners.size,
   };
 }
 
@@ -152,7 +160,22 @@ function assistantReport(text: string): RalphMessageEntry[] {
   return [{ info: { role: 'assistant' }, parts: [{ type: 'text', text }] }];
 }
 
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+}
+
 beforeEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -352,6 +375,269 @@ describe('ralph runner stop conditions', () => {
 
     expect(harness.store.getRun(config.managerSessionId)?.status).toBe('failed');
     expect(harness.createSession).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ralph runner cancellation', () => {
+  it('shuts down active loops without changing their resumable running state', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    harness.createSession.mockResolvedValueOnce('child-1');
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.idleListenerCount()).toBe(1));
+
+    await harness.runner.shutdown();
+    await runPromise;
+
+    const run = harness.store.getRun(config.managerSessionId);
+    expect(run?.status).toBe('running');
+    expect(run?.stopReason).toBeUndefined();
+    expect(run?.iterations[0]?.status).toBe('running');
+    expect(harness.abortSession).toHaveBeenCalledWith('child-1');
+    expect(harness.idleListenerCount()).toBe(0);
+    expect(harness.runner.activeIds()).toEqual([]);
+  });
+
+  it('stops without sending work when child creation finishes after cancellation', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    const childCreation = createDeferred<string>();
+    harness.createSession.mockReturnValueOnce(childCreation.promise);
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.createSession).toHaveBeenCalledTimes(1));
+
+    harness.runner.stop(config.managerSessionId);
+    childCreation.resolve('child-1');
+    await runPromise;
+
+    const run = harness.store.getRun(config.managerSessionId);
+    expect(run?.status).toBe('stopped');
+    expect(run?.stopReason).toBe('manual_stop');
+    expect(run?.iterations[0]?.status).toBe('aborted');
+    expect(harness.abortSession).toHaveBeenCalledTimes(1);
+    expect(harness.abortSession).toHaveBeenCalledWith('child-1');
+    expect(harness.sendPrompt).not.toHaveBeenCalled();
+    expect(harness.listMessages).not.toHaveBeenCalled();
+    expect(harness.logError).not.toHaveBeenCalled();
+  });
+
+  it('stops after a plan read used to build the primary prompt', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    const promptPlanRead = createDeferred<string | null>();
+    harness.createSession.mockResolvedValueOnce('child-1');
+    harness.readWorkspaceFile
+      .mockResolvedValueOnce('# Plan\n- [ ] next chunk')
+      .mockReturnValueOnce(promptPlanRead.promise);
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.readWorkspaceFile).toHaveBeenCalledTimes(2));
+
+    harness.runner.stop(config.managerSessionId);
+    promptPlanRead.resolve('# Plan\n- [ ] next chunk');
+    await runPromise;
+
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('stopped');
+    expect(harness.store.getRun(config.managerSessionId)?.iterations[0]?.status).toBe('aborted');
+    expect(harness.sendPrompt).not.toHaveBeenCalled();
+    expect(harness.abortSession).toHaveBeenCalledTimes(1);
+    expect(harness.abortSession).toHaveBeenCalledWith('child-1');
+  });
+
+  it('stops after an in-flight primary prompt send without starting verification', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    const promptSend = createDeferred();
+    harness.createSession.mockResolvedValueOnce('child-1');
+    harness.sendPrompt.mockReturnValueOnce(promptSend.promise);
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.sendPrompt).toHaveBeenCalledTimes(1));
+
+    harness.runner.stop(config.managerSessionId);
+    promptSend.resolve();
+    await runPromise;
+
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('stopped');
+    expect(harness.store.getRun(config.managerSessionId)?.iterations[0]?.status).toBe('aborted');
+    expect(harness.sendPrompt).toHaveBeenCalledTimes(1);
+    expect(harness.listMessages).not.toHaveBeenCalled();
+    expect(harness.abortSession).toHaveBeenCalledWith('child-1');
+  });
+
+  it('cancels an idle wait immediately on stop', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    harness.createSession.mockResolvedValueOnce('child-1');
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.sendPrompt).toHaveBeenCalledTimes(1));
+
+    harness.runner.stop(config.managerSessionId);
+    await runPromise;
+
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('stopped');
+    expect(harness.sendPrompt).toHaveBeenCalledTimes(1);
+    expect(harness.listMessages).not.toHaveBeenCalled();
+    expect(harness.runner.isActive(config.managerSessionId)).toBe(false);
+  });
+
+  it('stops during verification without summarizing or launching repair work', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    harness.createSession.mockResolvedValueOnce('child-1');
+    let sendCount = 0;
+    harness.sendPrompt.mockImplementation(async (sessionId: string) => {
+      sendCount += 1;
+      if (sendCount === 1) harness.emitIdle(sessionId);
+    });
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.sendPrompt).toHaveBeenCalledTimes(2));
+
+    harness.runner.stop(config.managerSessionId);
+    await runPromise;
+
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('stopped');
+    expect(harness.store.getRun(config.managerSessionId)?.iterations[0]?.status).toBe('aborted');
+    expect(harness.listMessages).not.toHaveBeenCalled();
+    expect(harness.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops while the primary iteration summary is being read', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    const sessionList = createDeferred<[]>();
+    harness.createSession.mockResolvedValueOnce('child-1');
+    harness.listSessions.mockReturnValueOnce(sessionList.promise);
+    settlePromptsViaIdle(harness);
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.listSessions).toHaveBeenCalledTimes(1));
+
+    harness.runner.stop(config.managerSessionId);
+    sessionList.resolve([]);
+    await runPromise;
+
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('stopped');
+    expect(harness.listMessages).not.toHaveBeenCalled();
+    expect(harness.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops when repair child creation finishes after cancellation', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    const repairCreation = createDeferred<string>();
+    harness.createSession
+      .mockResolvedValueOnce('child-1')
+      .mockReturnValueOnce(repairCreation.promise);
+    harness.listMessages.mockResolvedValue(
+      assistantReport('Still broken.\nlint: PASS\ntypecheck: FAIL\ntest: PASS')
+    );
+    settlePromptsViaIdle(harness);
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.createSession).toHaveBeenCalledTimes(2));
+
+    harness.runner.stop(config.managerSessionId);
+    repairCreation.resolve('repair-1');
+    await runPromise;
+
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('stopped');
+    expect(harness.sendPrompt).toHaveBeenCalledTimes(2);
+    expect(harness.sendPrompt.mock.calls.every(([sessionId]) => sessionId === 'child-1')).toBe(
+      true
+    );
+    expect(harness.abortSession.mock.calls.map(([sessionId]) => sessionId)).toEqual([
+      'child-1',
+      'repair-1',
+    ]);
+    expect(harness.logError).not.toHaveBeenCalled();
+  });
+
+  it('stops during repair execution without sending repair verification', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    const repairSend = createDeferred();
+    harness.createSession.mockResolvedValueOnce('child-1').mockResolvedValueOnce('repair-1');
+    harness.listMessages.mockResolvedValue(
+      assistantReport('Still broken.\nlint: PASS\ntypecheck: FAIL\ntest: PASS')
+    );
+    harness.sendPrompt.mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'repair-1') return repairSend.promise;
+      setTimeout(() => harness.emitIdle(sessionId), 0);
+    });
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.sendPrompt).toHaveBeenCalledTimes(3));
+
+    harness.runner.stop(config.managerSessionId);
+    repairSend.resolve();
+    await runPromise;
+
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('stopped');
+    expect(harness.sendPrompt).toHaveBeenCalledTimes(3);
+    expect(harness.abortSession).toHaveBeenCalledWith('repair-1');
+    expect(harness.createSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops during repair verification without starting another repair', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    harness.createSession.mockResolvedValueOnce('child-1').mockResolvedValueOnce('repair-1');
+    harness.listMessages.mockResolvedValue(
+      assistantReport('Still broken.\nlint: PASS\ntypecheck: FAIL\ntest: PASS')
+    );
+    let sendCount = 0;
+    harness.sendPrompt.mockImplementation(async (sessionId: string) => {
+      sendCount += 1;
+      if (sendCount < 4) harness.emitIdle(sessionId);
+    });
+
+    const runPromise = harness.runner.start(config);
+    await vi.waitFor(() => expect(harness.sendPrompt).toHaveBeenCalledTimes(4));
+
+    harness.runner.stop(config.managerSessionId);
+    await runPromise;
+
+    expect(harness.store.getRun(config.managerSessionId)?.status).toBe('stopped');
+    expect(harness.sendPrompt).toHaveBeenCalledTimes(4);
+    expect(harness.createSession).toHaveBeenCalledTimes(2);
+    expect(harness.abortSession).toHaveBeenCalledWith('repair-1');
+  });
+
+  it('fails with session context when the idle event is lost', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ idleTimeoutMs: 25 });
+    const config = createConfig({ iterations: 1 });
+    harness.createSession.mockResolvedValueOnce('child-1');
+
+    const runPromise = harness.runner.start(config);
+    await flushMicrotasks();
+    expect(harness.sendPrompt).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(25);
+    await runPromise;
+
+    const run = harness.store.getRun(config.managerSessionId);
+    expect(run?.status).toBe('failed');
+    expect(run?.stopReason).toBe('iteration_error');
+    expect(harness.abortSession).toHaveBeenCalledTimes(1);
+    expect(harness.abortSession).toHaveBeenCalledWith('child-1');
+    expect(run?.iterations[0]).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        note: expect.stringContaining(
+          'Ralph session child-1 did not become idle within 25ms after a prompt'
+        ),
+      })
+    );
+    expect(harness.logError).toHaveBeenCalledWith(
+      'iteration 1 failed',
+      expect.objectContaining({ message: expect.stringContaining('child-1') })
+    );
   });
 });
 

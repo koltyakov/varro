@@ -5,6 +5,7 @@ import {
   hasExplicitContextForPath,
   subtractContextLineRanges,
 } from '../../../shared/context-files';
+import { normalizeModelVariant } from '../../../shared/model-variant';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
@@ -19,7 +20,7 @@ import {
   getContextFileAttachmentSequence,
 } from '../../lib/attachment-order';
 import { modelSupportsVision } from '../../lib/model-capabilities';
-import { getPreferredVariant, normalizeModelVariant } from '../../lib/model-variants';
+import { getPreferredVariant } from '../../lib/model-variants';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
 import type { Message, Part, PermissionRule, Provider, Session, SessionStatus } from '../../types';
 

@@ -6,7 +6,11 @@ import {
 } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
 import { OpenCodeProcess, type OpenCodeCompactionSettings } from './open-code-process';
-import { OpenCodeTransport, type OpenCodeRequestOptions } from './open-code-transport';
+import {
+  OpenCodeTransport,
+  type OpenCodeRequestOptions,
+  type OpenCodeRescopeResult,
+} from './open-code-transport';
 import { logger } from './logger';
 import { ServerLifecycleStateMachine } from './server-lifecycle';
 import {
@@ -60,12 +64,19 @@ function createUpdateRequiredMessage(observed: string, reason: string): string {
 
 export class OpenCodeServer extends EventEmitter {
   private static readonly START_DISPOSED_MESSAGE = 'Server start was cancelled';
+  private static readonly MAX_RETRIES = 3;
+  private static readonly MAX_RESTART_DELAY_MS = 30_000;
+  private static readonly CRASH_STABILITY_WINDOW_MS = 30_000;
 
   private readonly lifecycle = new ServerLifecycleStateMachine();
   private readonly processManager: OpenCodeProcess;
   private readonly transport: OpenCodeTransport;
   private _status: ServerStatus = { state: 'stopped' };
   private pollHealthTimer: ReturnType<typeof setTimeout> | null = null;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryResetTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryCount = 0;
+  private restartReadyToStart = false;
 
   constructor(
     port: number,
@@ -84,7 +95,7 @@ export class OpenCodeServer extends EventEmitter {
     );
     this.transport = new OpenCodeTransport({
       getUrl: () => this.url,
-      getWorkspaceCwd: () => this.getWorkspaceCwd(),
+      getWorkspaceCwd: () => this.processManager.getWorkspaceCwd(),
       getStatus: () => this._status,
       isDisposing: () => this.isDisposing,
       updateEventStreamState: (eventStream) => this.updateEventStreamState(eventStream),
@@ -126,14 +137,6 @@ export class OpenCodeServer extends EventEmitter {
 
   private set process(value: ChildProcess | null) {
     this.processManager.process = value;
-  }
-
-  private get restartTimer(): ReturnType<typeof setTimeout> | null {
-    return this.processManager.restartTimer;
-  }
-
-  private set restartTimer(value: ReturnType<typeof setTimeout> | null) {
-    this.processManager.restartTimer = value;
   }
 
   private get managedProcess(): boolean {
@@ -202,18 +205,27 @@ export class OpenCodeServer extends EventEmitter {
     this.setRunningStatus(this._status.url, eventStream);
   }
 
-  private setStartPromise(factory: () => Promise<string>): Promise<string> {
+  private setStartPromise(factory: (signal: AbortSignal) => Promise<string>): Promise<string> {
     return this.lifecycle.setStartPromise(factory);
   }
 
-  private clearStartPromise() {
-    this.lifecycle.clearStartPromise();
+  start(): Promise<string> {
+    if (!this.restartReadyToStart) {
+      const restartPromise = this.lifecycle.getRestartPromise<string>();
+      if (restartPromise) return restartPromise;
+    }
+    return this.startOperation(false);
   }
 
-  async start(): Promise<string> {
-    return this.setStartPromise(async () => {
+  private startOperation(preserveRetryCount: boolean): Promise<string> {
+    return this.setStartPromise(async (signal) => {
       this.clearRestartTimer();
       const disposeGeneration = this.lifecycle.beginStart();
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      if (!preserveRetryCount) {
+        this.clearRetryResetTimer();
+        this.retryCount = 0;
+      }
       if (this.processManager.isSimulatingMissingCli) {
         this.stopEventStream();
         this.cancelPollHealth();
@@ -221,14 +233,14 @@ export class OpenCodeServer extends EventEmitter {
         throw new Error(OpenCodeProcess.MISSING_CLI_MESSAGE);
       }
 
-      await this.syncInjectedConfigFile();
-
+      this.throwIfStartCancelled(disposeGeneration, signal);
       const health = await this.readHealthInfo();
-      this.throwIfStartCancelled(disposeGeneration);
+      this.throwIfStartCancelled(disposeGeneration, signal);
       if (health.healthy) {
         if (isSupportedOpenCodeVersion(health.version)) {
           logger.info(`Found existing OpenCode server at ${this.url}`);
-          this.processManager.prepareForHealthyExistingServer();
+          await this.processManager.prepareForHealthyExistingServer();
+          this.throwIfStartCancelled(disposeGeneration, signal);
           if (this.hasInjectedCompactionOverride()) {
             logger.warn(
               'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
@@ -240,8 +252,8 @@ export class OpenCodeServer extends EventEmitter {
           return this.url;
         }
 
-        await this.replaceIncompatibleServer(health.version);
-        this.throwIfStartCancelled(disposeGeneration);
+        await this.replaceIncompatibleServer(health.version, disposeGeneration, signal);
+        this.throwIfStartCancelled(disposeGeneration, signal);
       }
 
       if (!this.processManager.isAutoStartEnabled) {
@@ -256,178 +268,290 @@ export class OpenCodeServer extends EventEmitter {
         );
       }
 
-      await this.ensureCompatibleCliForLaunch();
-      this.throwIfStartCancelled(disposeGeneration);
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      await this.ensureCompatibleCliForLaunch(undefined, disposeGeneration, signal);
+      this.throwIfStartCancelled(disposeGeneration, signal);
 
-      return new Promise((resolve, reject) => {
-        this.setStatus({ state: 'starting' });
-        const attemptId = this.lifecycle.beginStartAttempt();
-        const stderrLines: string[] = [];
-        let settled = false;
+      return this.launchManagedServer(disposeGeneration, preserveRetryCount, signal);
+    });
+  }
 
-        const isStaleAttempt = () =>
-          settled || !this.lifecycle.isCurrentStartAttempt(attemptId, disposeGeneration);
+  private async launchManagedServer(
+    disposeGeneration: number,
+    preserveRetryCount: boolean,
+    signal: AbortSignal
+  ): Promise<string> {
+    this.throwIfStartCancelled(disposeGeneration, signal);
+    await this.syncInjectedConfigFile();
+    try {
+      this.throwIfStartCancelled(disposeGeneration, signal);
+    } catch (err) {
+      await this.processManager.cleanupPreparedInjectedConfigFile();
+      throw err;
+    }
+    return this.launchPreparedManagedServer(disposeGeneration, preserveRetryCount, signal);
+  }
 
-        const rememberStderr = (text: string) => {
-          for (const line of text
-            .split(/\r?\n/)
-            .map((item) => item.trim())
-            .filter(Boolean)) {
-            stderrLines.push(line);
-          }
-          if (stderrLines.length > 8) {
-            stderrLines.splice(0, stderrLines.length - 8);
-          }
-        };
+  private launchPreparedManagedServer(
+    disposeGeneration: number,
+    preserveRetryCount: boolean,
+    signal: AbortSignal
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        reject(this.getCancellationError(signal));
+        return;
+      }
 
-        const describeStartupFailure = (fallback: string) => {
-          const recent = stderrLines[stderrLines.length - 1];
-          return recent ? `${fallback}: ${recent}` : fallback;
-        };
+      this.setStatus({ state: 'starting' });
+      const attemptId = this.lifecycle.beginStartAttempt();
+      const stderrLines: string[] = [];
+      let attemptFinished = false;
+      let operationSettled = false;
+      let awaitedBoundaries = 0;
 
-        const failStartup = (message: string, err?: Error) => {
-          if (isStaleAttempt()) return;
-          settled = true;
-          this.cancelPollHealth();
-          this.setStatus({ state: 'error', message });
-          reject(err || new Error(message));
-        };
+      const isInvalidAttempt = () =>
+        signal.aborted || !this.lifecycle.isCurrentStartAttempt(attemptId, disposeGeneration);
 
-        const finishStartup = (url: string) => {
-          if (isStaleAttempt()) return;
-          settled = true;
-          this.cancelPollHealth();
-          resolve(url);
-        };
+      const cleanup = () => {
+        signal.removeEventListener('abort', handleAbort);
+      };
 
-        const recoverOrFailStartup = async (fallback: string) => {
-          if (isStaleAttempt()) return;
-          const healthNow = await this.readHealthInfo();
-          if (isStaleAttempt()) return;
-          if (healthNow.healthy && !isSupportedOpenCodeVersion(healthNow.version)) {
-            failStartup(
-              createUpdateRequiredMessage(
-                healthNow.version
-                  ? `the running server is ${healthNow.version}`
-                  : 'the running server version could not be determined',
-                'The server that started is not compatible.'
-              )
-            );
-            return;
-          }
-          if (healthNow.healthy) {
-            this.setRunningStatus(this.url, 'healthy');
-            this.processManager.resetRetryCount();
-            this.startEventStream();
-            finishStartup(this.url);
-            return;
-          }
+      const resolveOperation = (url: string) => {
+        if (operationSettled) return;
+        operationSettled = true;
+        cleanup();
+        resolve(url);
+      };
 
-          if (this.processManager.hasPortInUseDetected() && this.tryAdvancePort()) {
-            logger.warn(
-              `Port ${this.processManager.port - 1} in use by another process; retrying on ${this.processManager.port}`
-            );
-            this.processManager.setPortInUseDetected(false);
-            this.clearStartPromise();
-            this.restartTimer = setTimeout(() => {
-              this.restartTimer = null;
-              if (isStaleAttempt()) return;
-              this.start().then(resolve).catch(reject);
-            }, 100);
-            return;
-          }
+      const rejectOperation = (err: Error) => {
+        if (operationSettled) return;
+        operationSettled = true;
+        cleanup();
+        reject(err);
+      };
 
-          if (this.processManager.getRetryCount() < this.processManager.getMaxRetries()) {
-            const retryAttempt = this.processManager.incrementRetryCount();
-            const delay = this.getRestartDelay(retryAttempt);
-            logger.warn(`Retrying server startup in ${delay}ms (attempt ${retryAttempt})`);
-            this.clearStartPromise();
-            this.restartTimer = setTimeout(() => {
-              this.restartTimer = null;
-              if (isStaleAttempt()) return;
-              this.start().then(resolve).catch(reject);
-            }, delay);
-            return;
-          }
+      const rejectCancelledAttempt = () => {
+        attemptFinished = true;
+        this.cancelPollHealth();
+        this.clearRestartTimer();
+        rejectOperation(this.getCancellationError(signal));
+      };
 
-          failStartup(describeStartupFailure(fallback));
-        };
+      const handleAbort = () => {
+        this.cancelPollHealth();
+        this.clearRestartTimer();
+        if (awaitedBoundaries === 0) {
+          rejectCancelledAttempt();
+        }
+      };
 
+      const awaitBoundary = async <T>(operation: Promise<T>): Promise<T> => {
+        awaitedBoundaries += 1;
         try {
-          this.processManager.launchServer({
-            getWorkspaceCwd: () => this.getWorkspaceCwd(),
-            onStdout: (data) => {
-              logger.info(`[server] ${data.toString().trim()}`);
-            },
-            onStderr: (data) => {
-              const text = data.toString().trim();
-              rememberStderr(text);
-              if (isPortInUseMessage(text)) {
-                this.processManager.setPortInUseDetected(true);
-              }
-              logger.error(`[server] ${text}`);
-            },
-            onExit: (code, signal) => {
-              this.detachProcessListeners(this.process);
-              logger.info(`Server process exited with code ${code}`);
-              this.process = null;
-              this.managedProcess = false;
-              this.stopEventStream();
-              if (this.isDisposing) {
-                return;
-              }
-              if (isStaleAttempt()) return;
-              if (this._status.state === 'running') {
-                this.setStatus({ state: 'stopped' });
-                if (this.processManager.getRetryCount() < this.processManager.getMaxRetries()) {
-                  const retryAttempt = this.processManager.incrementRetryCount();
-                  const delay = this.getRestartDelay(retryAttempt);
-                  logger.info(`Restarting server in ${delay}ms (attempt ${retryAttempt})`);
-                  this.clearStartPromise();
-                  this.restartTimer = setTimeout(() => {
-                    this.restartTimer = null;
-                    if (isStaleAttempt()) return;
-                    this.start().then(resolve).catch(reject);
-                  }, delay);
-                  return;
-                }
-                const runtimeFailure = `OpenCode server stopped unexpectedly${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}. Restart attempts (${this.processManager.getMaxRetries()}) were exhausted.`;
-                this.setStatus({ state: 'error', message: runtimeFailure });
-                return;
-              }
+          const result = await operation;
+          this.throwIfStartCancelled(disposeGeneration, signal);
+          return result;
+        } finally {
+          awaitedBoundaries -= 1;
+          if (signal.aborted && awaitedBoundaries === 0) {
+            rejectCancelledAttempt();
+          }
+        }
+      };
 
-              void recoverOrFailStartup(
-                `OpenCode server exited during startup${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}`
-              );
-            },
-            onError: (err) => {
-              this.detachProcessListeners(this.process);
-              logger.error(`Server process error: ${err.message}`);
-              if (err.message.includes('ENOENT')) {
-                failStartup(OpenCodeProcess.MISSING_CLI_MESSAGE);
-                return;
-              }
+      signal.addEventListener('abort', handleAbort, { once: true });
 
-              void recoverOrFailStartup(`OpenCode server failed to spawn: ${err.message}`);
-            },
-          });
+      const rememberStderr = (text: string) => {
+        for (const line of text
+          .split(/\r?\n/)
+          .map((item) => item.trim())
+          .filter(Boolean)) {
+          stderrLines.push(line);
+        }
+        if (stderrLines.length > 8) {
+          stderrLines.splice(0, stderrLines.length - 8);
+        }
+      };
+
+      const describeStartupFailure = (fallback: string) => {
+        const recent = stderrLines[stderrLines.length - 1];
+        return recent ? `${fallback}: ${recent}` : fallback;
+      };
+
+      const failStartup = (message: string, err?: Error) => {
+        if (attemptFinished || operationSettled) return;
+        if (isInvalidAttempt()) {
+          rejectCancelledAttempt();
+          return;
+        }
+        attemptFinished = true;
+        this.cancelPollHealth();
+        this.setStatus({ state: 'error', message });
+        void this.processManager.cleanupPreparedInjectedConfigFile().finally(() => {
+          rejectOperation(err || new Error(message));
+        });
+      };
+
+      const finishStartup = (url: string) => {
+        if (attemptFinished || operationSettled) return;
+        if (isInvalidAttempt()) {
+          rejectCancelledAttempt();
+          return;
+        }
+        attemptFinished = true;
+        this.cancelPollHealth();
+        this.scheduleRetryBudgetReset(attemptId, disposeGeneration);
+        resolveOperation(url);
+      };
+
+      const scheduleStartupRetry = (delay: number) => {
+        if (attemptFinished || operationSettled) return;
+        if (isInvalidAttempt()) {
+          rejectCancelledAttempt();
+          return;
+        }
+        attemptFinished = true;
+        this.cancelPollHealth();
+        this.restartTimer = setTimeout(() => {
+          this.restartTimer = null;
+          if (isInvalidAttempt()) {
+            rejectCancelledAttempt();
+            return;
+          }
+          cleanup();
+          this.launchManagedServer(disposeGeneration, preserveRetryCount, signal)
+            .then(resolveOperation)
+            .catch((err: unknown) =>
+              rejectOperation(err instanceof Error ? err : new Error(String(err)))
+            );
+        }, delay);
+      };
+
+      const recoverOrFailStartup = async (fallback: string) => {
+        if (attemptFinished || operationSettled) return;
+        if (isInvalidAttempt()) {
+          rejectCancelledAttempt();
+          return;
+        }
+        let healthNow: { healthy: boolean; version?: string };
+        try {
+          healthNow = await awaitBoundary(this.readHealthInfo());
         } catch (err) {
-          failStartup(String(err), err instanceof Error ? err : new Error(String(err)));
+          if (isInvalidAttempt()) {
+            rejectCancelledAttempt();
+          } else {
+            failStartup(fallback, err instanceof Error ? err : new Error(String(err)));
+          }
+          return;
+        }
+        if (attemptFinished || operationSettled) return;
+        if (isInvalidAttempt()) {
+          rejectCancelledAttempt();
+          return;
+        }
+        if (healthNow.healthy && !isSupportedOpenCodeVersion(healthNow.version)) {
+          failStartup(
+            createUpdateRequiredMessage(
+              healthNow.version
+                ? `the running server is ${healthNow.version}`
+                : 'the running server version could not be determined',
+              'The server that started is not compatible.'
+            )
+          );
+          return;
+        }
+        if (healthNow.healthy) {
+          this.setRunningStatus(this.url, 'healthy');
+          this.processManager.resetPortRetryState();
+          this.startEventStream();
+          finishStartup(this.url);
           return;
         }
 
-        this.pollHealth(
-          attemptId,
-          disposeGeneration,
-          (url) => {
-            this.processManager.resetRetryCount();
-            finishStartup(url);
+        if (this.processManager.hasPortInUseDetected() && this.tryAdvancePort()) {
+          logger.warn(
+            `Port ${this.processManager.port - 1} in use by another process; retrying on ${this.processManager.port}`
+          );
+          this.processManager.setPortInUseDetected(false);
+          scheduleStartupRetry(100);
+          return;
+        }
+
+        if (this.retryCount < OpenCodeServer.MAX_RETRIES) {
+          const retryAttempt = ++this.retryCount;
+          const delay = this.getRestartDelay(retryAttempt);
+          logger.warn(`Retrying server startup in ${delay}ms (attempt ${retryAttempt})`);
+          scheduleStartupRetry(delay);
+          return;
+        }
+
+        failStartup(describeStartupFailure(fallback));
+      };
+
+      try {
+        this.processManager.launchServer({
+          getWorkspaceCwd: () => this.getWorkspaceCwd(),
+          onStdout: (data) => {
+            logger.info(`[server] ${data.toString().trim()}`);
           },
-          (err) => {
-            failStartup(describeStartupFailure(err.message), err);
-          }
-        );
-      });
+          onStderr: (data) => {
+            const text = data.toString().trim();
+            rememberStderr(text);
+            if (isPortInUseMessage(text)) {
+              this.processManager.setPortInUseDetected(true);
+            }
+            logger.error(`[server] ${text}`);
+          },
+          onExit: (code, exitSignal) => {
+            this.detachProcessListeners(this.process);
+            logger.info(`Server process exited with code ${code}`);
+            this.process = null;
+            this.managedProcess = false;
+            this.stopEventStream();
+            if (isInvalidAttempt()) return;
+            if (this._status.state === 'running') {
+              this.handleRuntimeProcessExit(code, exitSignal, attemptId, disposeGeneration);
+              return;
+            }
+
+            this.cancelPollHealth();
+            void recoverOrFailStartup(
+              `OpenCode server exited during startup${exitSignal ? ` (${exitSignal})` : code !== null ? ` (code ${code})` : ''}`
+            );
+          },
+          onError: (err) => {
+            this.detachProcessListeners(this.process);
+            logger.error(`Server process error: ${err.message}`);
+            if (err.message.includes('ENOENT')) {
+              failStartup(OpenCodeProcess.MISSING_CLI_MESSAGE);
+              return;
+            }
+
+            this.cancelPollHealth();
+            void recoverOrFailStartup(`OpenCode server failed to spawn: ${err.message}`);
+          },
+        });
+      } catch (err) {
+        void this.processManager.cleanupPreparedInjectedConfigFile().finally(() => {
+          failStartup(String(err), err instanceof Error ? err : new Error(String(err)));
+        });
+        return;
+      }
+
+      this.pollHealth(
+        attemptId,
+        disposeGeneration,
+        (url) => {
+          finishStartup(url);
+        },
+        (err) => {
+          failStartup(describeStartupFailure(err.message), err);
+        },
+        0,
+        signal,
+        () => awaitBoundary(this.readHealthInfo())
+      );
     });
   }
 
@@ -438,13 +562,48 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
+  private handleRuntimeProcessExit(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    startAttemptId: number,
+    disposeGeneration: number
+  ) {
+    this.clearRetryResetTimer();
+    this.setStatus({ state: 'stopped' });
+    if (this.retryCount >= OpenCodeServer.MAX_RETRIES) {
+      const runtimeFailure = `OpenCode server stopped unexpectedly${signal ? ` (${signal})` : code !== null ? ` (code ${code})` : ''}. Restart attempts (${OpenCodeServer.MAX_RETRIES}) were exhausted.`;
+      this.setStatus({ state: 'error', message: runtimeFailure });
+      return;
+    }
+
+    const retryAttempt = ++this.retryCount;
+    const delay = this.getRestartDelay(retryAttempt);
+    logger.info(`Restarting server in ${delay}ms (attempt ${retryAttempt})`);
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (!this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)) return;
+      void this.startOperation(true).catch(() => {
+        // Startup reports its own error status; this catch only owns the background promise.
+      });
+    }, delay);
+  }
+
   private pollHealth(
     startAttemptId: number,
     disposeGeneration: number,
     resolve: (url: string) => void,
     reject: (err: Error) => void,
-    attempt = 0
+    attempt = 0,
+    signal?: AbortSignal,
+    readHealth: () => Promise<{ healthy: boolean; version?: string }> = () => this.readHealthInfo()
   ) {
+    if (
+      signal?.aborted ||
+      !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
+    ) {
+      reject(this.getCancellationError(signal));
+      return;
+    }
     if (attempt > 50) {
       this.cancelPollHealth();
       this.setStatus({ state: 'error', message: 'Server failed to start within timeout' });
@@ -454,11 +613,25 @@ export class OpenCodeServer extends EventEmitter {
 
     this.pollHealthTimer = setTimeout(async () => {
       this.pollHealthTimer = null;
-      if (startAttemptId !== this.startAttemptId || disposeGeneration !== this.disposeGeneration) {
+      if (
+        signal?.aborted ||
+        !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
+      ) {
+        reject(this.getCancellationError(signal));
         return;
       }
-      const health = await this.readHealthInfo();
-      if (startAttemptId !== this.startAttemptId || disposeGeneration !== this.disposeGeneration) {
+      let health: { healthy: boolean; version?: string };
+      try {
+        health = await readHealth();
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
+      if (
+        signal?.aborted ||
+        !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
+      ) {
+        reject(this.getCancellationError(signal));
         return;
       }
       if (health.healthy && !isSupportedOpenCodeVersion(health.version)) {
@@ -474,12 +647,19 @@ export class OpenCodeServer extends EventEmitter {
       } else if (health.healthy) {
         this.cancelPollHealth();
         this.setRunningStatus(this.url, 'healthy');
-        this.processManager.resetRetryCount();
         this.processManager.resetPortRetryState();
         this.startEventStream();
         resolve(this.url);
       } else {
-        this.pollHealth(startAttemptId, disposeGeneration, resolve, reject, attempt + 1);
+        this.pollHealth(
+          startAttemptId,
+          disposeGeneration,
+          resolve,
+          reject,
+          attempt + 1,
+          signal,
+          readHealth
+        );
       }
     }, 200);
   }
@@ -491,6 +671,11 @@ export class OpenCodeServer extends EventEmitter {
     options?: OpenCodeRequestOptions
   ): Promise<unknown> {
     return this.transport.request(method, path, body, options);
+  }
+
+  async rescopeEventStream(directory?: string): Promise<OpenCodeRescopeResult> {
+    if (this._status.state !== 'running') return { state: 'inactive', directory };
+    return this.transport.rescopeEventStream(directory);
   }
 
   async readServerInfo(): Promise<OpenCodeServerInfo> {
@@ -527,7 +712,25 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private clearRestartTimer() {
-    this.processManager.clearRestartTimer();
+    if (!this.restartTimer) return;
+    clearTimeout(this.restartTimer);
+    this.restartTimer = null;
+  }
+
+  private clearRetryResetTimer() {
+    if (!this.retryResetTimer) return;
+    clearTimeout(this.retryResetTimer);
+    this.retryResetTimer = null;
+  }
+
+  private scheduleRetryBudgetReset(startAttemptId: number, disposeGeneration: number) {
+    this.clearRetryResetTimer();
+    this.retryResetTimer = setTimeout(() => {
+      this.retryResetTimer = null;
+      if (this._status.state !== 'running') return;
+      if (!this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)) return;
+      this.retryCount = 0;
+    }, OpenCodeServer.CRASH_STABILITY_WINDOW_MS);
   }
 
   private detachProcessListeners(proc: ChildProcess | null) {
@@ -564,7 +767,11 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
-  private async replaceIncompatibleServer(serverVersion: string | undefined) {
+  private async replaceIncompatibleServer(
+    serverVersion: string | undefined,
+    disposeGeneration: number,
+    signal: AbortSignal
+  ) {
     const observed = serverVersion
       ? `the running server is ${serverVersion}`
       : 'the running server version could not be determined';
@@ -581,8 +788,11 @@ export class OpenCodeServer extends EventEmitter {
 
     let activeSessions: boolean;
     try {
+      this.throwIfStartCancelled(disposeGeneration, signal);
       activeSessions = await this.hasActiveSessions();
+      this.throwIfStartCancelled(disposeGeneration, signal);
     } catch (err) {
+      this.throwIfStartCancelled(disposeGeneration, signal);
       this.failForRequiredUpdate(
         observed,
         `Varro could not verify that the old server is idle: ${err instanceof Error ? err.message : String(err)}.`
@@ -598,16 +808,27 @@ export class OpenCodeServer extends EventEmitter {
     logger.info(
       `OpenCode server ${serverVersion || 'unknown'} is older than required ${MINIMUM_SUPPORTED_OPENCODE_VERSION}; attempting a safe update`
     );
+    this.throwIfStartCancelled(disposeGeneration, signal);
     await this.upgradeRunningServer(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    this.throwIfStartCancelled(disposeGeneration, signal);
     await this.stopServerForRestart();
-    await this.ensureCompatibleCliForLaunch(observed);
+    this.throwIfStartCancelled(disposeGeneration, signal);
+    await this.ensureCompatibleCliForLaunch(observed, disposeGeneration, signal);
+    this.throwIfStartCancelled(disposeGeneration, signal);
   }
 
-  private async ensureCompatibleCliForLaunch(observedServer?: string) {
+  private async ensureCompatibleCliForLaunch(
+    observedServer: string | undefined,
+    disposeGeneration: number,
+    signal: AbortSignal
+  ) {
     let installedVersion: string | null;
     try {
+      this.throwIfStartCancelled(disposeGeneration, signal);
       installedVersion = await this.readInstalledCliVersion();
+      this.throwIfStartCancelled(disposeGeneration, signal);
     } catch (err) {
+      this.throwIfStartCancelled(disposeGeneration, signal);
       logger.warn(
         `Could not verify the installed OpenCode CLI version before startup: ${err instanceof Error ? err.message : String(err)}`
       );
@@ -625,8 +846,11 @@ export class OpenCodeServer extends EventEmitter {
       `Updating OpenCode CLI ${installedVersion} to meet Varro's minimum ${MINIMUM_SUPPORTED_OPENCODE_VERSION}`
     );
     try {
-      await this.processManager.upgradeCli();
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      await this.processManager.upgradeCli(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+      this.throwIfStartCancelled(disposeGeneration, signal);
     } catch (err) {
+      this.throwIfStartCancelled(disposeGeneration, signal);
       this.failForRequiredUpdate(
         observed,
         `The automatic update failed: ${err instanceof Error ? err.message : String(err)}.`
@@ -635,8 +859,11 @@ export class OpenCodeServer extends EventEmitter {
 
     let updatedVersion: string | null;
     try {
+      this.throwIfStartCancelled(disposeGeneration, signal);
       updatedVersion = await this.readInstalledCliVersion();
+      this.throwIfStartCancelled(disposeGeneration, signal);
     } catch (err) {
+      this.throwIfStartCancelled(disposeGeneration, signal);
       this.failForRequiredUpdate(
         observed,
         `The update finished, but Varro could not verify it: ${err instanceof Error ? err.message : String(err)}.`
@@ -661,17 +888,17 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async restartServerForCliUpdate(serverVersion: string, installedCliVersion: string) {
-    await this.processManager.restartServerForCliUpdate(serverVersion, installedCliVersion, {
-      beginManagedRestart: () => this.lifecycle.beginManagedRestart(),
-      finishManagedRestart: () => this.lifecycle.finishManagedRestart(),
-      stopManagedProcessForRestart: () => this.stopManagedProcessForRestart(),
-      stopServerForRestart: () => this.stopServerForRestart(),
-      start: () => this.start(),
+    await this.runRestart(async () => {
+      logger.info(
+        `Restarting OpenCode server to use CLI ${installedCliVersion} instead of server ${serverVersion}`
+      );
+      await this.stopServerForRestart();
     });
   }
 
   private async stopManagedProcessForRestart() {
     this.clearRestartTimer();
+    this.clearRetryResetTimer();
     this.cancelPollHealth();
     this.stopEventStream();
     this.transport.abortRequests();
@@ -680,6 +907,7 @@ export class OpenCodeServer extends EventEmitter {
 
   private async stopServerForRestart() {
     this.clearRestartTimer();
+    this.clearRetryResetTimer();
     this.cancelPollHealth();
     this.stopEventStream();
     this.transport.abortRequests();
@@ -785,9 +1013,8 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
-  async restart(): Promise<string> {
-    if (this.lifecycle.beginManagedRestart() === null) return this.start();
-    try {
+  restart(): Promise<string> {
+    return this.runRestart(async () => {
       this.clearRestartTimer();
       this.stopMaintenanceLoop();
       this.cancelPollHealth();
@@ -796,26 +1023,44 @@ export class OpenCodeServer extends EventEmitter {
       this.transport.abortRequests();
       await this.processManager.stopServerForRestart();
       this.setStatus({ state: 'stopped' });
-      return await this.start();
-    } finally {
-      this.lifecycle.finishManagedRestart();
-    }
+    });
+  }
+
+  private runRestart(stop: () => Promise<void>): Promise<string> {
+    this.clearRetryResetTimer();
+    return this.lifecycle.setRestartPromise(async (signal) => {
+      this.throwIfOperationCancelled(signal);
+      await stop();
+      this.throwIfOperationCancelled(signal);
+      this.restartReadyToStart = true;
+      try {
+        const url = await this.start();
+        this.throwIfOperationCancelled(signal);
+        return url;
+      } finally {
+        this.restartReadyToStart = false;
+      }
+    }, OpenCodeServer.START_DISPOSED_MESSAGE);
   }
 
   private async disposeResources(options: { stopProcess: boolean }) {
-    this.lifecycle.beginDispose();
+    this.lifecycle.beginDispose(OpenCodeServer.START_DISPOSED_MESSAGE);
     this.clearRestartTimer();
+    this.clearRetryResetTimer();
     this.stopMaintenanceLoop();
     this.cancelPollHealth();
     this.stopEventStream();
     this.transport.clearPendingAttentionRequests();
     this.transport.abortRequests();
+    await this.lifecycle.waitForOperationsSettlement();
     await this.processManager.disposeProcess(options);
     this.setStatus({ state: 'stopped' });
   }
 
   getWorkspaceCwd(): string | undefined {
-    return this.processManager.getWorkspaceCwd();
+    return this._status.state === 'running'
+      ? this.transport.getWorkspaceDirectory()
+      : this.processManager.getWorkspaceCwd();
   }
 
   resolveCommand(): string {
@@ -831,11 +1076,9 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async restartManagedServerForCompactionSettings() {
-    await this.processManager.restartManagedServerForCompactionSettings({
-      beginManagedRestart: () => this.lifecycle.beginManagedRestart(),
-      finishManagedRestart: () => this.lifecycle.finishManagedRestart(),
-      stopManagedProcessForRestart: () => this.stopManagedProcessForRestart(),
-      start: () => this.start(),
+    await this.runRestart(async () => {
+      logger.info('Restarting managed OpenCode server to apply updated Varro compaction settings');
+      await this.stopManagedProcessForRestart();
     });
   }
 
@@ -843,12 +1086,24 @@ export class OpenCodeServer extends EventEmitter {
     return this.processManager.hasInjectedCompactionOverride();
   }
 
-  private throwIfStartCancelled(disposeGeneration: number) {
+  private throwIfStartCancelled(disposeGeneration: number, signal: AbortSignal) {
+    this.throwIfOperationCancelled(signal);
     this.lifecycle.throwIfStartCancelled(disposeGeneration, OpenCodeServer.START_DISPOSED_MESSAGE);
   }
 
+  private throwIfOperationCancelled(signal: AbortSignal) {
+    if (!signal.aborted) return;
+    throw this.getCancellationError(signal);
+  }
+
+  private getCancellationError(signal?: AbortSignal) {
+    return signal?.reason instanceof Error
+      ? signal.reason
+      : new Error(OpenCodeServer.START_DISPOSED_MESSAGE);
+  }
+
   private getRestartDelay(attempt: number) {
-    return this.processManager.getRestartDelay(attempt);
+    return Math.min(1000 * 2 ** Math.max(0, attempt - 1), OpenCodeServer.MAX_RESTART_DELAY_MS);
   }
 
   private tryAdvancePort(): boolean {

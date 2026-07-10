@@ -439,7 +439,7 @@ describe('createAnthropicAdapter', () => {
     });
   });
 
-  it('refreshes file-backed OAuth credentials and retries after a 429 response', async () => {
+  it('does not refresh or write credentials after a 429 response', async () => {
     vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
     vi.mocked(readFile).mockResolvedValue(
       JSON.stringify({
@@ -451,30 +451,7 @@ describe('createAnthropicAdapter', () => {
         },
       })
     );
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(new Response('{}', { status: 429 }))
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            access_token: 'anthropic-refreshed-access-token',
-            refresh_token: 'anthropic-refreshed-refresh-token',
-            expires_in: 3600,
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            five_hour: {
-              utilization: 33,
-              resets_at: '2026-03-04T10:00:00Z',
-              is_enabled: true,
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
-      );
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{}', { status: 429 }));
 
     const status = await adapter.fetch({
       provider,
@@ -483,8 +460,7 @@ describe('createAnthropicAdapter', () => {
       checkedAt: 1_000,
     });
 
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
+    expect(fetch).toHaveBeenCalledWith(
       'https://api.anthropic.com/api/oauth/usage',
       expect.objectContaining({
         headers: expect.objectContaining({
@@ -492,60 +468,49 @@ describe('createAnthropicAdapter', () => {
         }),
       })
     );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      'https://console.anthropic.com/v1/oauth/token',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          grant_type: 'refresh_token',
-          refresh_token: 'anthropic-refresh-token',
-          client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-        }),
-      })
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      3,
-      'https://api.anthropic.com/api/oauth/usage',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer anthropic-refreshed-access-token',
-        }),
-      })
-    );
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
-      expect.stringContaining('anthropic-refreshed-access-token'),
-      { encoding: 'utf-8', mode: 0o600 }
-    );
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
-      expect.stringContaining('anthropic-refreshed-refresh-token'),
-      { encoding: 'utf-8', mode: 0o600 }
-    );
-    expect(rename).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude[\\/]\.credentials\.json\..*\.tmp$/),
-      expect.stringMatching(/\.claude[\\/]\.credentials\.json$/)
-    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
     expect(status).toEqual({
       providerID: 'anthropic',
       modelID: null,
-      status: 'available',
+      status: 'error',
       source: 'provider',
       checkedAt: 1_000,
-      note: 'Polled Anthropic OAuth usage endpoint after refreshing OAuth token',
-      windows: [
-        {
-          id: 'five_hour',
-          label: '5-Hour Limit',
-          unit: 'unknown',
-          remaining: 67,
-          limit: 100,
-          resetAt: Date.parse('2026-03-04T10:00:00Z'),
-          percent: 33,
-        },
-      ],
+      note: 'Anthropic usage endpoint returned 429',
     });
+  });
+
+  it('does not pair an OpenCode access token with Claude file refresh credentials', async () => {
+    vi.mocked(stat).mockRejectedValue(new Error('missing statusline file'));
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'anthropic-file-token',
+          refreshToken: 'anthropic-file-refresh-token',
+        },
+      })
+    );
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{}', { status: 401 }));
+
+    const status = await adapter.fetch({
+      provider,
+      authStore: { anthropic: { type: 'oauth', access: 'opencode-access-token' } },
+      modelID: null,
+      checkedAt: 1_000,
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(readFile).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.anthropic.com/api/oauth/usage',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer opencode-access-token' }),
+      })
+    );
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
+    expect(status.status).toBe('unsupported');
   });
 
   it('refreshes file-backed OAuth credentials and retries after a 401 response', async () => {
@@ -606,7 +571,7 @@ describe('createAnthropicAdapter', () => {
       })
     );
     vi.mocked(fetch)
-      .mockResolvedValueOnce(new Response('{}', { status: 429 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 401 }))
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({

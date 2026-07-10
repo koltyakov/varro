@@ -581,6 +581,213 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
+  it('serializes snapshots so a delayed older write cannot overwrite newer state', async () => {
+    let releaseFirstWrite: (() => void) | undefined;
+    const interruptedSnapshots: unknown[] = [];
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn(() => undefined),
+      set: vi.fn((key: string, value: unknown) => {
+        if (key !== 'varro.interruptedSessions') return Promise.resolve();
+        interruptedSnapshots.push(value);
+        if (interruptedSnapshots.length > 1) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          releaseFirstWrite = resolve;
+        });
+      }),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    markBusy(manager, 'session-1');
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    await vi.waitFor(() => expect(interruptedSnapshots).toHaveLength(1));
+    expect(interruptedSnapshots[0]).toEqual([{ id: 'session-1', title: undefined }]);
+    releaseFirstWrite?.();
+    await manager.flush();
+
+    expect(interruptedSnapshots).toEqual([[{ id: 'session-1', title: undefined }], []]);
+  });
+
+  it('continues persisting and flushes newer state after a write rejects', async () => {
+    const interruptedSnapshots: unknown[] = [];
+    let firstInterruptedWrite = true;
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn(() => undefined),
+      set: vi.fn((key: string, value: unknown) => {
+        if (key !== 'varro.interruptedSessions') return Promise.resolve();
+        interruptedSnapshots.push(value);
+        if (firstInterruptedWrite) {
+          firstInterruptedWrite = false;
+          return Promise.reject(new Error('write failed'));
+        }
+        return Promise.resolve();
+      }),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    markBusy(manager, 'session-1');
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    await expect(manager.flush()).resolves.toBeUndefined();
+    expect(interruptedSnapshots).toEqual([[{ id: 'session-1', title: undefined }], []]);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to persist session state: write failed')
+    );
+  });
+
+  it('serializes interrupted-session consume between overlapping writes', async () => {
+    const storage = new Map<string, unknown>();
+    const events: string[] = [];
+    let releaseFirstWrite: (() => void) | undefined;
+    let interruptedWriteCount = 0;
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) => {
+        if (key === 'varro.interruptedSessions') events.push('get');
+        return storage.get(key);
+      }),
+      set: vi.fn((key: string, value: unknown) => {
+        if (key !== 'varro.interruptedSessions') {
+          storage.set(key, value);
+          return Promise.resolve();
+        }
+        interruptedWriteCount += 1;
+        events.push(`set-${interruptedWriteCount}-start`);
+        if (interruptedWriteCount > 1) {
+          storage.set(key, value);
+          events.push(`set-${interruptedWriteCount}-finish`);
+          return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => {
+          releaseFirstWrite = () => {
+            storage.set(key, value);
+            events.push('set-1-finish');
+            resolve();
+          };
+        });
+      }),
+      remove: vi.fn((key: string) => {
+        if (key === 'varro.interruptedSessions') events.push('remove');
+        storage.delete(key);
+        return Promise.resolve();
+      }),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    markBusy(manager, 'session-1');
+    const consumed = manager.consumeInterruptedSessions();
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    await vi.waitFor(() => expect(releaseFirstWrite).toBeDefined());
+    expect(events).toEqual(['set-1-start']);
+    releaseFirstWrite?.();
+
+    await expect(consumed).resolves.toEqual([{ id: 'session-1', title: undefined }]);
+    await manager.flush();
+    expect(events).toEqual([
+      'set-1-start',
+      'set-1-finish',
+      'get',
+      'remove',
+      'set-2-start',
+      'set-2-finish',
+    ]);
+    expect(storage.get('varro.interruptedSessions')).toEqual([]);
+  });
+
+  it('serializes blocking-request consume between overlapping writes', async () => {
+    const storage = new Map<string, unknown>();
+    const events: string[] = [];
+    let releaseFirstWrite: (() => void) | undefined;
+    let blockingWriteCount = 0;
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) => {
+        if (key === 'varro.blockingRequests') events.push('get');
+        return storage.get(key);
+      }),
+      set: vi.fn((key: string, value: unknown) => {
+        if (key !== 'varro.blockingRequests') {
+          storage.set(key, value);
+          return Promise.resolve();
+        }
+        blockingWriteCount += 1;
+        events.push(`set-${blockingWriteCount}-start`);
+        if (blockingWriteCount > 1) {
+          storage.set(key, value);
+          events.push(`set-${blockingWriteCount}-finish`);
+          return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => {
+          releaseFirstWrite = () => {
+            storage.set(key, value);
+            events.push('set-1-finish');
+            resolve();
+          };
+        });
+      }),
+      remove: vi.fn((key: string) => {
+        if (key === 'varro.blockingRequests') events.push('remove');
+        storage.delete(key);
+        return Promise.resolve();
+      }),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-1', sessionID: 'session-1', title: 'Use Bash' },
+    });
+    const consumed = manager.consumeBlockingRequests();
+    manager.handleServerEvent({
+      type: 'permission.replied',
+      properties: { id: 'permission-1', sessionID: 'session-1' },
+    });
+
+    await vi.waitFor(() => expect(releaseFirstWrite).toBeDefined());
+    expect(events).toEqual(['set-1-start']);
+    releaseFirstWrite?.();
+
+    await expect(consumed).resolves.toMatchObject([
+      { id: 'permission-1', sessionID: 'session-1', kind: 'permission' },
+    ]);
+    await manager.flush();
+    expect(events).toEqual([
+      'set-1-start',
+      'set-1-finish',
+      'get',
+      'remove',
+      'set-2-start',
+      'set-2-finish',
+    ]);
+    expect(storage.get('varro.blockingRequests')).toEqual([]);
+  });
+
   it('consumes persisted interrupted sessions and filters invalid snapshots', async () => {
     const workspaceState: WorkspaceStateMock = {
       get: vi.fn((key: string) => {
@@ -689,6 +896,22 @@ describe('SessionStateManager notifications', () => {
     expect(workspaceState.remove).toHaveBeenCalledWith('varro.blockingRequests');
   });
 
+  it('treats malformed persisted snapshot containers as empty', async () => {
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn(() => ({ malformed: true })),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    await expect(manager.consumeInterruptedSessions()).resolves.toEqual([]);
+    await expect(manager.consumeBlockingRequests()).resolves.toEqual([]);
+  });
+
   it('evicts old session metadata entries as new sessions arrive', () => {
     const manager = createManager(() => false);
 
@@ -731,6 +954,21 @@ describe('SessionStateManager notifications', () => {
 
     expect(manager.isSessionInWorkspace('session-1', '/repo-a///')).toBe(true);
     expect(manager.isSessionInWorkspace('session-1', '/repo-b')).toBe(false);
+  });
+
+  it('matches UNC workspace identity case-insensitively', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: {
+        info: {
+          id: 'session-unc',
+          directory: '\\\\BuildServer\\Projects\\Varro',
+        },
+      },
+    });
+
+    expect(manager.isSessionInWorkspace('session-unc', '//buildserver/PROJECTS/varro/')).toBe(true);
   });
 
   it('treats nested session directories as out of workspace', () => {

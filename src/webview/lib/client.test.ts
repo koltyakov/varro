@@ -645,6 +645,21 @@ describe('client', () => {
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith('DELETE', '/varro/session/sess-1/delete');
   });
 
+  it('requests the aggregate session diff summary through the canonical encoded route', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue({ files: 2, additions: 6, deletions: 4 });
+
+    await expect(client.varro.session.diffSummary('session with space')).resolves.toEqual({
+      files: 2,
+      additions: 6,
+      deletions: 4,
+    });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'GET',
+      '/varro/session/session%20with%20space/diff-summary'
+    );
+  });
+
   it('filters out entries with partial summary (missing fields)', async () => {
     const { client } = await loadClient();
     const session = {

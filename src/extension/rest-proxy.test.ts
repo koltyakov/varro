@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
       showTextDocument: vi.fn(() => Promise.resolve()),
     },
     workspace: {
+      textDocuments: [],
       getWorkspaceFolder: vi.fn(() => undefined),
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
       fs: {
@@ -27,7 +28,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock('vscode', () => mocks.vscode);
 vi.mock('./logger', () => ({ logger: mocks.logger }));
 
-import { RestProxy, getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './rest-proxy';
+import {
+  RestProxy,
+  getOpenCodeDirectoryHeaders,
+  resolveOpenCodeProjectConfigPaths,
+  scopeOpenCodeRequest,
+} from './rest-proxy';
 import type { RestProxyCallbacks } from './rest-proxy';
 
 function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxyCallbacks {
@@ -148,6 +154,15 @@ describe('scopeOpenCodeRequest', () => {
     expect(result.directory).toBe('C:\\Users\\Andrew\\Projects\\Varro');
   });
 
+  it('preserves Windows drive and UNC roots', () => {
+    expect(scopeOpenCodeRequest('http://127.0.0.1:4096', '/session', 'C:\\').directory).toBe(
+      'C:\\'
+    );
+    expect(
+      scopeOpenCodeRequest('http://127.0.0.1:4096', '/session', '\\\\server\\share\\').directory
+    ).toBe('\\\\server\\share\\');
+  });
+
   it('prefers an explicit directory query over the fallback workspace directory', () => {
     const result = scopeOpenCodeRequest(
       'http://127.0.0.1:4096',
@@ -194,6 +209,22 @@ describe('scopeOpenCodeRequest', () => {
     expect(() => scopeOpenCodeRequest('http://127.0.0.1:4096', 'http://evil.com/session')).toThrow(
       'Unsupported OpenCode API path'
     );
+  });
+});
+
+describe('resolveOpenCodeProjectConfigPaths', () => {
+  it('loads ancestors first, lets JSONC win, and stops at the worktree', () => {
+    const existing = new Set([
+      '/repo/.git',
+      '/repo/opencode.json',
+      '/repo/opencode.jsonc',
+      '/repo/packages/app/opencode.jsonc',
+      '/opencode.json',
+    ]);
+
+    expect(
+      resolveOpenCodeProjectConfigPaths('/repo/packages/app', (path) => existing.has(path))
+    ).toEqual(['/repo/opencode.json', '/repo/opencode.jsonc', '/repo/packages/app/opencode.jsonc']);
   });
 });
 
@@ -473,6 +504,42 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('returns only aggregate session diff data to the webview', async () => {
+    const serverRequest = vi.fn(() =>
+      Promise.resolve([
+        {
+          file: 'src/a.ts',
+          additions: 4,
+          deletions: 1,
+          before: 'FULL_BEFORE_TEXT',
+          after: 'FULL_AFTER_TEXT',
+          patch: 'FULL_PATCH_TEXT',
+        },
+        {
+          file: 'src/b.ts',
+          additions: 2,
+          deletions: 3,
+          before: 'OTHER_BEFORE_TEXT',
+          after: 'OTHER_AFTER_TEXT',
+        },
+      ])
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(82, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/session-1/diff');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 82,
+      data: { files: 2, additions: 6, deletions: 4 },
+    });
+    const response = (callbacks.postApiResponse as ReturnType<typeof vi.fn>).mock.calls[0]?.[1];
+    expect(JSON.stringify(response)).not.toContain('FULL_');
+    expect(JSON.stringify(response)).not.toContain('OTHER_');
+  });
+
   it('simulates no providers when flag is set', async () => {
     const { proxy, callbacks } = createProxy({ simulateNoProviders: true });
     await proxy.handleRequest(makePayload(9, 'GET', '/config/providers'));
@@ -670,6 +737,35 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 116,
       data: [{ id: 'root', directory: '/repo' }],
+    });
+  });
+
+  it('filters UNC sessions using case-insensitive Windows identity', async () => {
+    const sessions = [
+      { id: 'same', directory: '//buildserver/PROJECTS/varro/' },
+      { id: 'other', directory: '//buildserver/Projects/other' },
+    ];
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: '\\\\BuildServer\\Projects\\Varro',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      } as never,
+      server: {
+        ...createCallbacks().server,
+        request: vi.fn(() => Promise.resolve(sessions)),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(117, 'GET', '/session'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 117,
+      data: [{ id: 'same', directory: '//buildserver/PROJECTS/varro/' }],
     });
   });
 

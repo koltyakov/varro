@@ -13,6 +13,10 @@ import { isRunningSessionStatus } from '../../lib/session-event-reducer';
 import type { Message, Part, SessionStatus } from '../../types';
 
 type SessionMessageEntry = { info: Message; parts: Part[] };
+type SessionStatusSnapshot = {
+  statuses: Record<string, SessionStatus>;
+  startedAt: number;
+};
 
 type SessionStatusDependencies = {
   pendingAbortRetryAttempts: Map<string, number | null>;
@@ -25,13 +29,17 @@ type SessionStatusDependencies = {
   shouldResyncSessionAfterIdle(sessionId: string): boolean;
   syncSession(sessionId: string): Promise<void>;
   syncSessionMessages(sessionId: string): Promise<void>;
+  syncBusySessionMessages?(sessionId: string): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
+  loadSessionStatusSnapshot?(): Promise<SessionStatusSnapshot>;
   isActiveSession(sessionId: string): boolean;
   getMessages?(): SessionMessageEntry[];
   logError(context: string, err: unknown): void;
 };
 
 export class SessionStatusOperations {
+  private readonly rechecks = new Map<string, Promise<void>>();
+
   constructor(private readonly deps: SessionStatusDependencies) {}
 
   readonly setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
@@ -136,11 +144,15 @@ export class SessionStatusOperations {
     );
   };
 
-  readonly recheckSessionStatus = async (sessionId: string) => {
-    await recheckSessionStatusWithDependencies(
+  readonly recheckSessionStatus = (sessionId: string): Promise<void> => {
+    const existing = this.rechecks.get(sessionId);
+    if (existing) return existing;
+
+    const recheck = recheckSessionStatusWithDependencies(
       {
         isDocumentVisible: this.deps.isDocumentVisible,
         loadSessionStatuses: this.deps.loadSessionStatuses,
+        loadSessionStatusSnapshot: this.deps.loadSessionStatusSnapshot,
         shouldIgnorePendingAbortStatus: this.shouldIgnorePendingAbortStatus,
         hasPendingAbort: this.hasPendingAbort,
         updateUsageLimitState: this.updateUsageLimitState,
@@ -151,6 +163,7 @@ export class SessionStatusOperations {
         shouldResyncSessionAfterIdle: this.deps.shouldResyncSessionAfterIdle,
         syncSession: this.deps.syncSession,
         syncSessionMessages: this.deps.syncSessionMessages,
+        syncBusySessionMessages: this.deps.syncBusySessionMessages,
         startLoading: uiStore.startLoading,
         loadingStartedAt: uiStore.loadingStartedAt,
         isActiveSession: this.deps.isActiveSession,
@@ -159,7 +172,11 @@ export class SessionStatusOperations {
         logError: this.deps.logError,
       },
       sessionId
-    );
+    ).finally(() => {
+      this.rechecks.delete(sessionId);
+    });
+    this.rechecks.set(sessionId, recheck);
+    return recheck;
   };
 }
 
@@ -299,6 +316,7 @@ export async function recheckSessionStatusWithDependencies(
   deps: {
     isDocumentVisible(): boolean;
     loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
+    loadSessionStatusSnapshot?(): Promise<SessionStatusSnapshot>;
     shouldIgnorePendingAbortStatus(
       sessionId: string,
       status: SessionStatus | null | undefined
@@ -315,6 +333,7 @@ export async function recheckSessionStatusWithDependencies(
     shouldResyncSessionAfterIdle(sessionId: string): boolean;
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
+    syncBusySessionMessages?(sessionId: string): Promise<void>;
     startLoading(): void;
     loadingStartedAt?(): number | null;
     isActiveSession(sessionId: string): boolean;
@@ -326,13 +345,16 @@ export async function recheckSessionStatusWithDependencies(
 ) {
   if (!deps.isDocumentVisible()) return;
   try {
-    const snapshotStartedAt = Date.now();
-    const statuses = await deps.loadSessionStatuses();
+    const fallbackStartedAt = Date.now();
+    const snapshot = deps.loadSessionStatusSnapshot
+      ? await deps.loadSessionStatusSnapshot()
+      : { statuses: await deps.loadSessionStatuses(), startedAt: fallbackStartedAt };
+    const { statuses } = snapshot;
     const status = statuses[sessionId];
     if (deps.shouldIgnorePendingAbortStatus(sessionId, status)) return;
     deps.setSessionStatuses(
       { ...statuses, [sessionId]: status ?? { type: 'idle' } },
-      { snapshotStartedAt }
+      { snapshotStartedAt: snapshot.startedAt }
     );
 
     const abortedRetry = deps.hasPendingAbort(sessionId);
@@ -379,7 +401,9 @@ export async function recheckSessionStatusWithDependencies(
     if (status.type === 'retry' && deps.isActiveSession(sessionId)) {
       deps.startLoading();
     } else if (status.type === 'busy' && deps.isActiveSession(sessionId)) {
-      const syncResult = await settleVoid(deps.syncSessionMessages(sessionId));
+      const syncResult = await settleVoid(
+        (deps.syncBusySessionMessages ?? deps.syncSessionMessages)(sessionId)
+      );
       logRejectedSyncs(deps, [syncResult]);
       const messages = deps.getMessages?.() ?? [];
       const currentStatus = deps.getCurrentSessionStatus?.(sessionId) ?? status;
