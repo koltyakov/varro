@@ -24,7 +24,7 @@
   width: min(100%, calc(var(--chat-content-max-width) + var(--settings-scrollbar-inset)));
   min-width: 0;
   margin-inline: auto;
-  padding: 0 calc(6px + var(--settings-scrollbar-inset)) 0 6px;
+  padding: 0 calc(10px + var(--settings-scrollbar-inset)) 0 6px;
 }
 
 .settings-header-left {
@@ -132,7 +132,7 @@
 @media (max-width: 959px) {
   .settings-header-inner {
     width: 100%;
-    padding-right: 6px;
+    padding-right: 10px;
   }
 
   .settings-toolbar-inner {

@@ -1577,8 +1577,18 @@ export function MessageList() {
       activeStatusType === 'busy' ||
       activeStatusType === 'retry' ||
       !trailingSummarySettled();
+    const sessions = state.sessions.map((session) => ({
+      id: session.id,
+      parentID: session.parentID,
+      title: session.title,
+      time: { created: session.time.created },
+      tokens: session.tokens
+        ? { input: session.tokens.input, output: session.tokens.output }
+        : undefined,
+    }));
     return untrack(() =>
       getAssistantDialogSummaryMap(state.messages, renderedMessageIds(), {
+        sessions,
         suppressTrailingSummary,
       })
     );

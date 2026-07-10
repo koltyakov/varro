@@ -8,13 +8,7 @@ import {
   onCleanup,
 } from 'solid-js';
 import { isAbortedToolError } from '../../shared/error-classification';
-import type {
-  QuestionRequest,
-  Session,
-  ToolPart,
-  ToolStateCompleted,
-  ToolStateError,
-} from '../types';
+import type { QuestionRequest, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
@@ -24,6 +18,7 @@ import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool
 import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
+import { resolveTaskSessionId } from '../lib/task-session';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 
@@ -108,22 +103,6 @@ export function shouldShowToolPreview(title: string, preview: ToolPreview | null
 function formatVisibleToolDuration(ms: number | null | undefined) {
   if (ms === null || ms === undefined || ms < MIN_VISIBLE_TOOL_DURATION_MS) return null;
   return formatDuration(ms) || null;
-}
-
-function getTaskSessionIdFromMetadata(metadata: Record<string, unknown> | undefined) {
-  if (typeof metadata?.sessionId === 'string') return metadata.sessionId;
-  if (typeof metadata?.sessionID === 'string') return metadata.sessionID;
-  return null;
-}
-
-function normalizeTaskMatchLabel(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-function sessionMatchesTaskLabel(session: Session, taskLabel: string) {
-  if (!taskLabel) return false;
-  const title = normalizeTaskMatchLabel(session.title);
-  return title === taskLabel || title.startsWith(`${taskLabel} (`);
 }
 
 function parseIntLike(value: unknown): number | null {
@@ -741,38 +720,6 @@ function GenericToolCall(props: {
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
   const isStructuredTool = () => isStructuredToolName(props.tool.tool);
-  const taskLabel = () => {
-    const description = props.state.input?.description;
-    return normalizeTaskMatchLabel(
-      typeof description === 'string' && description.trim() ? description : props.title
-    );
-  };
-  const inferTaskSessionId = () => {
-    const parent = appState.messages.find((entry) => entry.info.id === props.tool.messageID);
-    const parentCreated = parent?.info.time.created || 0;
-    const candidates = appState.sessions
-      .filter((session) => {
-        if (
-          session.parentID !== props.tool.sessionID &&
-          session.parentID !== props.tool.messageID
-        ) {
-          return false;
-        }
-        return parentCreated <= 0 || session.time.created >= parentCreated;
-      })
-      .toSorted((a, b) => a.time.created - b.time.created);
-    if (candidates.length === 0) return null;
-
-    const byTitle = candidates.find((session) => sessionMatchesTaskLabel(session, taskLabel()));
-    if (byTitle) return byTitle.id;
-
-    const taskParts =
-      parent?.parts.filter(
-        (part): part is ToolPart => part.type === 'tool' && normalizeToolName(part.tool) === 'task'
-      ) || [];
-    const taskIndex = taskParts.findIndex((part) => part.callID === props.tool.callID);
-    return taskIndex >= 0 ? (candidates[taskIndex]?.id ?? null) : null;
-  };
   const taskSessionId = () => {
     if (!isTask()) return null;
     if (
@@ -783,8 +730,7 @@ function GenericToolCall(props: {
       return null;
     }
 
-    const meta = props.state.metadata as Record<string, unknown> | undefined;
-    return getTaskSessionIdFromMetadata(meta) || inferTaskSessionId();
+    return resolveTaskSessionId(props.tool, appState.messages, appState.sessions);
   };
   const taskTokenUsage = createMemo(() => {
     const sessionId = taskSessionId();

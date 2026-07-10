@@ -19,6 +19,7 @@ import type {
   Part,
   Permission,
   QuestionRequest,
+  Session,
   UserMessage,
 } from '../types';
 import { MessageList } from './MessageList';
@@ -193,6 +194,18 @@ function assistantMessage(
       cache: { read: 0, write: 0 },
     },
     variant: options?.variant,
+  };
+}
+
+function session(id: string, options: Partial<Session> = {}): Session {
+  return {
+    id,
+    projectID: 'project-1',
+    directory: '/workspace',
+    title: id,
+    version: '1',
+    time: { created: 1, updated: 1 },
+    ...options,
   };
 }
 
@@ -1738,6 +1751,16 @@ describe('MessageList sticky prompt preview', () => {
 
   it('summarizes elapsed time and tokens across nested agent children', async () => {
     setState('activeSessionId', 'session-1');
+    setSessions([
+      session('child-1', {
+        parentID: 'session-1',
+        tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+      session('child-2', {
+        parentID: 'child-1',
+        tokens: { input: 2_000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    ]);
     replaceMessages([
       {
         info: { ...userMessage('user-1'), time: { created: 1_000 } },
@@ -1785,6 +1808,145 @@ describe('MessageList sticky prompt preview', () => {
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 · ↓ 310 - Agents 2');
+  });
+
+  it('includes nested subagent session snapshots when their messages are not loaded', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessions([
+      session('session-1'),
+      session('child-1', {
+        parentID: 'session-1',
+        time: { created: 2_500, updated: 8_000 },
+        tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+      session('child-2', {
+        parentID: 'child-1',
+        time: { created: 3_000, updated: 11_000 },
+        tokens: { input: 2_000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    ]);
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 5_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            id: 'agent-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'agent',
+            name: 'explore',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 3,100 · ↓ 310');
+  });
+
+  it('keeps subagent session tokens scoped to the turn that launched them', () => {
+    const messages = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt 1')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 3_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            id: 'task-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'tool' as const,
+            callID: 'call-1',
+            tool: 'task',
+            state: {
+              status: 'completed' as const,
+              input: {},
+              output: '',
+              title: 'First task',
+              metadata: { sessionId: 'child-1' },
+              time: { start: 2_000, end: 3_000 },
+            },
+          },
+        ],
+      },
+      {
+        info: assistantMessage('assistant-child-1', {
+          mode: 'subagent',
+          parentID: 'session-1',
+          sessionID: 'child-1',
+          time: { created: 2_500, completed: 3_000 },
+          tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+      {
+        info: { ...userMessage('user-2'), time: { created: 4_000 } },
+        parts: [textPart('text-2', 'Prompt 2')],
+      },
+      {
+        info: assistantMessage('assistant-2', {
+          time: { created: 5_000, completed: 6_000 },
+          tokens: { input: 200, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            id: 'task-2',
+            sessionID: 'session-1',
+            messageID: 'assistant-2',
+            type: 'tool' as const,
+            callID: 'call-2',
+            tool: 'task',
+            state: {
+              status: 'completed' as const,
+              input: {},
+              output: '',
+              title: 'Second task',
+              metadata: { sessionId: 'child-2' },
+              time: { start: 5_000, end: 6_000 },
+            },
+          },
+        ],
+      },
+      {
+        info: assistantMessage('assistant-child-2', {
+          mode: 'subagent',
+          parentID: 'session-1',
+          sessionID: 'child-2',
+          time: { created: 5_500, completed: 6_000 },
+          tokens: { input: 2_000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+    ];
+    const sessions = [
+      session('child-1', {
+        parentID: 'session-1',
+        tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+      session('child-2', {
+        parentID: 'session-1',
+        tokens: { input: 2_000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    ];
+
+    const summaries = getAssistantDialogSummaryMap(messages, undefined, { sessions });
+
+    expect(summaries.get('assistant-1')).toMatchObject({ inputTokens: 1_100, outputTokens: 110 });
+    expect(summaries.get('assistant-2')).toMatchObject({ inputTokens: 2_200, outputTokens: 220 });
   });
 
   it('keeps stopped assistant turns out of final answer formatting while preserving the summary', async () => {
