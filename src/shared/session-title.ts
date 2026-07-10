@@ -10,3 +10,8 @@ export function normalizeSessionTitle(title: string | null | undefined): string 
   if (GENERATED_NEW_SESSION_TITLE.test(trimmed)) return 'New Chat';
   return trimmed;
 }
+
+export function isPlaceholderSessionTitle(title: string | null | undefined): boolean {
+  const normalized = normalizeSessionTitle(title).toLowerCase();
+  return !normalized || normalized === 'new chat';
+}

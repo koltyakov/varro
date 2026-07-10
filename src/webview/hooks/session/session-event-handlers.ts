@@ -159,6 +159,7 @@ type EventHandlerDependencies = {
   clearUsageLimitOnResumedProgress(sessionId: string, status?: SessionStatus | null): void;
   updateUsageLimitState(sessionId: string, status: SessionStatus | null | undefined): void;
   syncSession(sessionId: string): Promise<void>;
+  repairSessionTitle?(sessionId: string): Promise<void>;
   shouldResyncSessionAfterIdle(sessionId: string): boolean;
   syncSessionMessages(sessionId: string): Promise<void>;
   recheckSessionStatus?(sessionId: string): Promise<void>;
@@ -179,6 +180,7 @@ type EventHandlerDependencies = {
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   judgePermission?(permission: Permission): Promise<void>;
   syncPendingPermissions?(): Promise<void>;
+  reconcileServerState?(): Promise<void>;
   respondPermission(
     sessionId: string,
     permissionId: string,
@@ -211,11 +213,13 @@ type EventHandlerOperationDependencies = {
     | 'recheckSessionStatus'
   >;
   sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
+  repairSessionTitle?: EventHandlerDependencies['repairSessionTitle'];
   sessionApprovalOperations: Pick<
     EventHandlerDependencies,
     'respondPermission' | 'judgePermission'
   >;
   syncPendingPermissions?: EventHandlerDependencies['syncPendingPermissions'];
+  reconcileServerState?: EventHandlerDependencies['reconcileServerState'];
   abortRemoteSession: EventHandlerDependencies['abortRemoteSession'];
   logError: EventHandlerDependencies['logError'];
 };
@@ -458,6 +462,7 @@ export class SessionEventHandlerOperations {
         this.deps.sessionStatusOperations.clearUsageLimitOnResumedProgress,
       updateUsageLimitState: this.deps.sessionStatusOperations.updateUsageLimitState,
       syncSession: this.deps.sessionSyncOperations.syncSession,
+      repairSessionTitle: this.deps.repairSessionTitle,
       shouldResyncSessionAfterIdle: (sessionId) => appStore.state.activeSessionId === sessionId,
       syncSessionMessages: this.deps.sessionSyncOperations.syncSessionMessages,
       recheckSessionStatus: this.deps.sessionStatusOperations.recheckSessionStatus,
@@ -470,6 +475,7 @@ export class SessionEventHandlerOperations {
         permissionsStore.getPermissionModeForSession(sessionId) === 'auto',
       judgePermission: this.deps.sessionApprovalOperations.judgePermission,
       syncPendingPermissions: this.deps.syncPendingPermissions,
+      reconcileServerState: this.deps.reconcileServerState,
       respondPermission: this.deps.sessionApprovalOperations.respondPermission,
       setDiffs: sessionStore.setDiffs,
       abortRemoteSession: this.deps.abortRemoteSession,
@@ -500,6 +506,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   // actually missed, instead of defensively on every progress event.
   const lastSeqBySession = new Map<string, number>();
   let pendingPermissionSync = false;
+  let serverReconciliation: Promise<void> | null = null;
   // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta — caller
   // keeps its default behavior), 'ok' when the event is in order or a duplicate, or 'gap'
   // when at least one durable event was skipped (a targeted resync is warranted).
@@ -621,6 +628,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       uiStore.stopLoading();
     }
     deps.syncSession(sessionId).catch(() => {});
+    deps.repairSessionTitle?.(sessionId).catch((err) => deps.logError('repairSessionTitle', err));
     if (sessionId === deps.getActiveSessionId()) {
       const activeMessages = deps.getMessages();
       const shouldResyncActiveMessages =
@@ -1216,7 +1224,20 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     for (const timer of streamedCompletionTimers.values()) clearTimeout(timer);
     streamedCompletionTimers.clear();
     pendingPermissionSync = false;
+    serverReconciliation = null;
   });
+
+  cleanups.push(
+    serverEvents.on('server.connected', () => {
+      if (!deps.reconcileServerState || serverReconciliation) return;
+      serverReconciliation = deps
+        .reconcileServerState()
+        .catch((err) => deps.logError('reconcileServerState', err))
+        .finally(() => {
+          serverReconciliation = null;
+        });
+    })
+  );
 
   cleanups.push(
     serverEvents.on('session.created', (data) => {

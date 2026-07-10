@@ -13,7 +13,9 @@ import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { OpenCodeServer } from './server';
+import type { OpenCodeResponseMetadata } from './open-code-transport';
 import type { SessionStateManager } from './session-state-manager';
+import type { SessionTitleFallback } from './session-title-fallback';
 import type { SessionDeleteTarget, SessionTrashManager } from './session-trash-manager';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
 import {
@@ -75,6 +77,7 @@ export interface RestProxyCallbacks {
     | 'isHidden'
   >;
   autoApproveJudge: Pick<AutoApproveJudge, 'judge'>;
+  sessionTitleFallback: Pick<SessionTitleFallback, 'renameIfUntitled'>;
   simulateNoProviders: boolean;
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
@@ -165,6 +168,13 @@ export class RestProxy {
         return;
       }
 
+      const renameSessionID = this.parseRenameIfUntitledRequest(method, payload.path);
+      if (renameSessionID) {
+        const data = await this.callbacks.sessionTitleFallback.renameIfUntitled(renameSessionID);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
       const providerLimitRequest = this.parseProviderLimitRequest(method, payload.path);
       if (providerLimitRequest) {
         const data = await this.callbacks.providerLimitService.get(
@@ -208,10 +218,22 @@ export class RestProxy {
         this.callbacks.sessionState.markSessionBusy(promptSessionID);
       }
 
-      const data = await this.callbacks.server.request(method, payload.path, payload.body);
+      const paginatedMessages = this.isPaginatedMessagesRequest(method, payload.path);
+      const response = paginatedMessages
+        ? await this.callbacks.server.request(method, payload.path, payload.body, {
+            captureNextCursor: true,
+          })
+        : await this.callbacks.server.request(method, payload.path, payload.body);
+      const data = paginatedMessages
+        ? this.formatPaginatedMessagesResponse(
+            method,
+            payload.path,
+            response as OpenCodeResponseMetadata
+          )
+        : this.filterApiResponse(method, payload.path, response);
       this.callbacks.postApiResponse(requestGeneration, {
         id: payload.id,
-        data: this.filterApiResponse(method, payload.path, data),
+        data,
       });
     } catch (err) {
       this.callbacks.postApiResponse(requestGeneration, {
@@ -254,6 +276,23 @@ export class RestProxy {
     const url = new URL(path, 'http://localhost');
     const match = url.pathname.match(/^\/session\/([^/]+)\/prompt(?:_async)?$/);
     return match ? decodeURIComponent(match[1]!) : undefined;
+  }
+
+  private isPaginatedMessagesRequest(method: string, path: string) {
+    if (method !== 'GET') return false;
+    const url = new URL(path, 'http://localhost');
+    return /^\/session\/[^/]+\/message$/.test(url.pathname) && url.searchParams.has('limit');
+  }
+
+  private formatPaginatedMessagesResponse(
+    method: string,
+    path: string,
+    response: OpenCodeResponseMetadata
+  ) {
+    return {
+      items: this.filterApiResponse(method, path, response.data),
+      ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
+    };
   }
 
   private parsePermanentDeleteRequest(method: string, path: string): PermanentDeleteRequest | null {
@@ -652,6 +691,12 @@ export class RestProxy {
         : {}),
       approvedReferences: parseApprovedPermissionReferences(payload?.approvedReferences),
     };
+  }
+
+  private parseRenameIfUntitledRequest(method: string, path: string) {
+    if (method !== 'POST') return null;
+    const match = path.match(/^\/varro\/session\/([^/?#]+)\/rename-if-untitled$/);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
   }
 
   private getOpenCodeConfigUri() {

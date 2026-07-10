@@ -45,7 +45,7 @@ afterEach(() => {
 describe('client', () => {
   it('forwards health, session, config, agent, and question requests to the api bridge', async () => {
     const { client } = await loadClient();
-    bridgeMocks.apiCall.mockResolvedValue(undefined);
+    bridgeMocks.apiCall.mockResolvedValue([]);
 
     await client.health();
     await client.command.list();
@@ -97,6 +97,7 @@ describe('client', () => {
     await client.config.providerAuth();
     await client.config.authorizeProvider({ providerID: 'openai', method: 0 });
     await client.config.workspaceStatus();
+    await client.mcp.authenticate('browser server');
     await client.agent.list();
     await client.question.list();
     await client.permission.list();
@@ -167,6 +168,7 @@ describe('client', () => {
       ['GET', '/provider/auth'],
       ['POST', '/provider/openai/oauth/authorize', { method: 0 }],
       ['GET', '/experimental/workspace/status'],
+      ['POST', '/mcp/browser%20server/auth/authenticate'],
       ['GET', '/agent'],
       ['GET', '/question'],
       ['GET', '/permission'],
@@ -175,6 +177,24 @@ describe('client', () => {
       ['GET', '/varro/workspace-path/resolve?path=package.json'],
       ['GET', '/varro/workspace-file/pick'],
     ]);
+  });
+
+  it('unwraps cursor-paginated message responses', async () => {
+    const { client } = await loadClient();
+    const items = [{ info: { id: 'message-1' }, parts: [] }];
+    bridgeMocks.apiCall.mockResolvedValue({ items, nextCursor: 'cursor with spaces' });
+
+    const result = await client.session.messages('session-1', {
+      limit: 200,
+      before: 'previous/cursor',
+    });
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'GET',
+      '/session/session-1/message?limit=200&before=previous%2Fcursor'
+    );
+    expect(result).toBe(items);
+    expect(result.nextCursor).toBe('cursor with spaces');
   });
 
   it('creates sessions with an empty body when none is provided', async () => {

@@ -80,6 +80,9 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     autoApproveJudge: {
       judge: vi.fn(() => Promise.resolve({ decision: 'ask' as const, reason: 'test' })),
     },
+    sessionTitleFallback: {
+      renameIfUntitled: vi.fn(() => Promise.resolve(null)),
+    },
     simulateNoProviders: false,
     getRequestGeneration: vi.fn(() => 1),
     getStatus: vi.fn(() => ({ state: 'running' as const, url: 'http://127.0.0.1:4096' })),
@@ -452,6 +455,24 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 81, data: judgeResult });
   });
 
+  it('routes session title fallback requests after server startup', async () => {
+    const { proxy, callbacks } = createProxy({
+      sessionTitleFallback: {
+        renameIfUntitled: vi.fn(() => Promise.resolve({ id: 'session-1', title: 'Fix build' })),
+      },
+    });
+
+    await proxy.handleRequest(
+      makePayload(1, 'POST', '/varro/session/session-1/rename-if-untitled')
+    );
+
+    expect(callbacks.sessionTitleFallback.renameIfUntitled).toHaveBeenCalledWith('session-1');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      data: { id: 'session-1', title: 'Fix build' },
+    });
+  });
+
   it('simulates no providers when flag is set', async () => {
     const { proxy, callbacks } = createProxy({ simulateNoProviders: true });
     await proxy.handleRequest(makePayload(9, 'GET', '/config/providers'));
@@ -678,6 +699,34 @@ describe('RestProxy handleRequest', () => {
     expect(response.data).toHaveLength(1);
     expect(response.data[0].info.id).toBe('m1');
     expect(response.data[0].parts).toHaveLength(1);
+  });
+
+  it('preserves pagination cursors while sanitizing session messages', async () => {
+    const messages = [
+      {
+        info: {
+          id: 'm1',
+          sessionID: 's1',
+          role: 'user',
+          time: { created: 1234567890 },
+        },
+        parts: [{ id: 'p1', messageID: 'm1', sessionID: 's1', type: 'text', text: 'hello' }],
+      },
+    ];
+    const serverRequest = vi.fn(() => Promise.resolve({ data: messages, nextCursor: 'cursor-2' }));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(117, 'GET', '/session/s1/message?limit=200'));
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/s1/message?limit=200', undefined, {
+      captureNextCursor: true,
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 117,
+      data: { items: messages, nextCursor: 'cursor-2' },
+    });
   });
 
   it('filters malformed parts within valid entries', async () => {

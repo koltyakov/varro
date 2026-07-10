@@ -5,6 +5,7 @@ import type {
   PermissionMode,
   WebviewThemeKind,
 } from '../../../shared/protocol';
+import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { onMessage, postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
 import type { QueuedMessage } from '../../lib/app-state-types';
@@ -21,11 +22,11 @@ import { applyWebviewTheme } from '../../lib/theme';
 import type { Message, Part, Permission, Session } from '../../types';
 import { getSessionTreeIds, getSessionTreeRootId, isSessionAwaitingInput } from '../../lib/state';
 import {
+  getSessionHistoryCursor,
   MESSAGE_HISTORY_WINDOW,
-  hasFullMessageHistory,
-  markSessionHistoryTruncated,
+  mergeOlderHistory,
   mergeWindowedHistory,
-  requestFullMessageHistory,
+  setSessionHistoryCursor,
 } from '../../lib/message-window';
 import { startNewChatDraft } from '../../lib/new-chat-draft';
 import {
@@ -154,17 +155,10 @@ function isNotFoundError(err: unknown) {
 }
 
 async function fetchSessionMessages(sessionId: string): Promise<SessionEntry[]> {
-  if (hasFullMessageHistory(sessionId)) {
-    const entries = await client.session.messages(sessionId);
-    markSessionHistoryTruncated(sessionId, false);
-    return entries;
-  }
   const incoming = await client.session.messages(sessionId, { limit: MESSAGE_HISTORY_WINDOW });
   const current = appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId);
-  // Only the first windowed load can tell whether older history exists; later
-  // resyncs return the same tail window even after older entries were merged.
   if (current.length === 0) {
-    markSessionHistoryTruncated(sessionId, incoming.length >= MESSAGE_HISTORY_WINDOW);
+    setSessionHistoryCursor(sessionId, incoming.nextCursor);
   }
   return mergeWindowedHistory(current, incoming);
 }
@@ -278,6 +272,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let sessionSelectionGeneration = 0;
   let approvedPermissionReferences: AutoApproveJudgeReference[] = [];
   let sessionSyncGeneration = 0;
+  const fullHistoryLoads = new Map<string, Promise<void>>();
   const pendingAbortRetryAttempts = new Map<string, number | null>();
   const [documentVisible, setDocumentVisible] = createSignal(
     document.visibilityState === 'visible'
@@ -322,6 +317,33 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const { applySessions, clearDeletedSessionState, hideDeletedSessionTree, upsertSession } =
     sessionLifecycleOperations;
+  const sessionTitleFallbackAttempts = new Map<string, number>();
+  const sessionTitleFallbacks = new Map<string, Promise<void>>();
+
+  function repairSessionTitle(sessionId: string): Promise<void> {
+    const inFlight = sessionTitleFallbacks.get(sessionId);
+    if (inFlight) return inFlight;
+    const existing = appStore.state.sessions.find((session) => session.id === sessionId);
+    if (existing && !isPlaceholderSessionTitle(existing.title)) return Promise.resolve();
+    const attempts = sessionTitleFallbackAttempts.get(sessionId) ?? 0;
+    if (attempts >= 2) return Promise.resolve();
+    sessionTitleFallbackAttempts.set(sessionId, attempts + 1);
+
+    const fallback = (async () => {
+      const renamed = await client.varro.session.renameIfUntitled(sessionId);
+      if (!renamed) return;
+      const current = appStore.state.sessions.find((session) => session.id === sessionId);
+      if (current) {
+        upsertSession({ ...current, title: renamed.title });
+        return;
+      }
+      await syncSession(sessionId);
+    })().finally(() => {
+      sessionTitleFallbacks.delete(sessionId);
+    });
+    sessionTitleFallbacks.set(sessionId, fallback);
+    return fallback;
+  }
 
   function ensureSessionEventHandlersRegistered() {
     if (eventHandlerCleanups.length > 0) return;
@@ -331,8 +353,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       sessionLifecycleOperations,
       sessionStatusOperations,
       sessionSyncOperations,
+      repairSessionTitle,
       sessionApprovalOperations,
       syncPendingPermissions,
+      reconcileServerState,
       abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
       logError,
     });
@@ -593,12 +617,32 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await dataLoaders.refreshRoutingState();
   }
 
+  async function reconcileServerState() {
+    const activeSessionId = appStore.state.activeSessionId;
+    const results = await Promise.allSettled([
+      loadSessions(),
+      loadRecycleBin(),
+      hydrateSessionStatuses(),
+      loadQuestions(),
+      syncPendingPermissions(),
+      loadMcps(),
+      loadCommands(),
+      refreshRoutingState(),
+      loadCompatibilityState(),
+      ...(activeSessionId ? [syncSession(activeSessionId)] : []),
+    ]);
+    for (const result of results) {
+      if (result.status === 'rejected') logError('reconcileServerState', result.reason);
+    }
+  }
+
   const sessionMcpOperations = new SessionMcpOperations({
     getSelectedMcpsForSession: routingStore.getSelectedMcpsForSession,
     getMcpStatus: () => appStore.state.mcpStatus,
     loadMcps,
     getAvailableMcpNames: routingStore.getAvailableMcpNames,
     connectMcp: (name) => client.mcp.connect(name),
+    authenticateMcp: (name) => client.mcp.authenticate(name),
     disconnectMcp: (name) => client.mcp.disconnect(name),
     logError,
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
@@ -686,7 +730,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     clearPendingAbort,
     resetTodoSync,
     syncSessionMcps,
-    sendAsync: (sessionId, body) => client.session.sendAsync(sessionId, body),
+    sendAsync: async (sessionId, body) => {
+      const response = await client.session.sendAsync(sessionId, body);
+      void repairSessionTitle(sessionId).catch((err) => logError('repairSessionTitle', err));
+      return response;
+    },
     syncSession,
     syncSessionMessages,
     recheckSessionStatus,
@@ -948,15 +996,33 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function loadFullSessionHistory(sessionId: string) {
-    requestFullMessageHistory(sessionId);
-    try {
-      const entries = await loadSessionMessagesAllowingEmpty(sessionId);
-      if (appStore.state.activeSessionId === sessionId) {
-        sessionStore.setMessagesIncremental(entries);
+    const existing = fullHistoryLoads.get(sessionId);
+    if (existing) return existing;
+
+    const load = (async () => {
+      try {
+        let cursor = getSessionHistoryCursor(sessionId);
+        while (cursor && appStore.state.activeSessionId === sessionId) {
+          const page = await client.session.messages(sessionId, {
+            limit: MESSAGE_HISTORY_WINDOW,
+            before: cursor,
+          });
+          if (appStore.state.activeSessionId !== sessionId) return;
+          const current = appStore.state.messages.filter(
+            (entry) => entry.info.sessionID === sessionId
+          );
+          sessionStore.setMessagesIncremental(mergeOlderHistory(current, page));
+          cursor = page.nextCursor;
+          setSessionHistoryCursor(sessionId, cursor);
+        }
+      } catch (err) {
+        logError('loadFullSessionHistory', err);
       }
-    } catch (err) {
-      logError('loadFullSessionHistory', err);
-    }
+    })().finally(() => {
+      fullHistoryLoads.delete(sessionId);
+    });
+    fullHistoryLoads.set(sessionId, load);
+    return load;
   }
 
   async function forkSession(id: string, messageID?: string): Promise<string | null> {

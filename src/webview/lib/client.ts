@@ -23,6 +23,7 @@ import type {
   RecycleBinEntry,
   ServerEvent,
   ServerEventName,
+  SessionTitleFallbackResponse,
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
 import type {
@@ -45,6 +46,9 @@ type RecycleBinSessionRecord = {
   version: string;
   time: { created: number; updated: number; compacting?: number };
 };
+
+type SessionMessageEntry = { info: Message; parts: Part[] };
+export type SessionMessagePage = SessionMessageEntry[] & { nextCursor?: string };
 
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
@@ -95,10 +99,19 @@ export const client = {
     },
     async messages(
       id: string,
-      options?: { limit?: number }
-    ): Promise<Array<{ info: Message; parts: Part[] }>> {
-      const query = options?.limit ? `?limit=${options.limit}` : '';
-      return apiCall('GET', `/session/${id}/message${query}`);
+      options?: { limit?: number; before?: string }
+    ): Promise<SessionMessagePage> {
+      const params = new URLSearchParams();
+      if (options?.limit) params.set('limit', String(options.limit));
+      if (options?.before) params.set('before', options.before);
+      const query = params.size > 0 ? `?${params.toString()}` : '';
+      const response = await apiCall<
+        SessionMessageEntry[] | { items: SessionMessageEntry[]; nextCursor?: string }
+      >('GET', `/session/${id}/message${query}`);
+      if (Array.isArray(response)) return response;
+      const items = response.items as SessionMessagePage;
+      if (response.nextCursor) items.nextCursor = response.nextCursor;
+      return items;
     },
     async todos(id: string): Promise<Todo[]> {
       return apiCall('GET', `/session/${id}/todo`);
@@ -199,6 +212,12 @@ export const client = {
       async deleteImmediately(sessionID: string): Promise<boolean> {
         return apiCall('DELETE', `/varro/session/${encodeURIComponent(sessionID)}/delete`);
       },
+      async renameIfUntitled(sessionID: string): Promise<SessionTitleFallbackResponse> {
+        return apiCall(
+          'POST',
+          `/varro/session/${encodeURIComponent(sessionID)}/rename-if-untitled`
+        );
+      },
     },
     async openPlan(content: string): Promise<{ path: string }> {
       return apiCall('POST', '/varro/plan/open', { content });
@@ -257,6 +276,9 @@ export const client = {
     },
     async disconnect(name: string): Promise<boolean> {
       return apiCall('POST', `/mcp/${encodeURIComponent(name)}/disconnect`);
+    },
+    async authenticate(name: string): Promise<unknown> {
+      return apiCall('POST', `/mcp/${encodeURIComponent(name)}/auth/authenticate`);
     },
   },
 

@@ -6,6 +6,7 @@ type SessionMcpDependencies = {
   loadMcps(): Promise<void>;
   getAvailableMcpNames(): string[];
   connectMcp(name: string): Promise<unknown>;
+  authenticateMcp(name: string): Promise<unknown>;
   disconnectMcp(name: string): Promise<unknown>;
   logError(context: string, err: unknown): void;
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
@@ -22,6 +23,7 @@ export class SessionMcpOperations {
         loadMcps: this.deps.loadMcps,
         getAvailableMcpNames: this.deps.getAvailableMcpNames,
         connectMcp: this.deps.connectMcp,
+        authenticateMcp: this.deps.authenticateMcp,
         disconnectMcp: this.deps.disconnectMcp,
         logError: this.deps.logError,
       },
@@ -48,6 +50,7 @@ export async function syncSessionMcpsWithDependencies(
     loadMcps(): Promise<void>;
     getAvailableMcpNames(): string[];
     connectMcp(name: string): Promise<unknown>;
+    authenticateMcp(name: string): Promise<unknown>;
     disconnectMcp(name: string): Promise<unknown>;
     logError(context: string, err: unknown): void;
   },
@@ -62,17 +65,22 @@ export async function syncSessionMcpsWithDependencies(
 
   const available = new Set(deps.getAvailableMcpNames());
   const desiredSet = new Set(desired.filter((name) => available.has(name)));
-  const connected = Object.entries(deps.getMcpStatus())
+  const statuses = deps.getMcpStatus();
+  const connected = Object.entries(statuses)
     .filter(([, value]) => value?.status === 'connected')
     .map(([name]) => name);
 
-  const connect = [...desiredSet].filter((name) => !connected.includes(name));
+  const authenticate = [...desiredSet].filter((name) => statuses[name]?.status === 'needs_auth');
+  const connect = [...desiredSet].filter(
+    (name) => !connected.includes(name) && statuses[name]?.status !== 'needs_auth'
+  );
   const disconnect = connected.filter((name) => !desiredSet.has(name));
-  if (connect.length === 0 && disconnect.length === 0) return;
+  if (connect.length === 0 && authenticate.length === 0 && disconnect.length === 0) return;
 
   try {
     await Promise.all([
       ...connect.map((name) => deps.connectMcp(name)),
+      ...authenticate.map((name) => deps.authenticateMcp(name)),
       ...disconnect.map((name) => deps.disconnectMcp(name)),
     ]);
   } catch (err) {

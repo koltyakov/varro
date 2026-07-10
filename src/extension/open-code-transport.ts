@@ -5,6 +5,15 @@ import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-u
 
 type EventStreamState = 'healthy' | 'degraded';
 
+export type OpenCodeResponseMetadata = {
+  data: unknown;
+  nextCursor?: string;
+};
+
+export type OpenCodeRequestOptions = {
+  captureNextCursor?: boolean;
+};
+
 // OpenCode's v2 event stream. Current servers emit direct `{ id, type, properties }`
 // events plus heartbeat messages, scoped by the `x-opencode-directory` header.
 const EVENT_STREAM_PATH = '/api/event';
@@ -41,7 +50,12 @@ export class OpenCodeTransport {
     this.options = options;
   }
 
-  async request(method: string, path: string, body?: unknown): Promise<unknown> {
+  async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: OpenCodeRequestOptions
+  ): Promise<unknown> {
     const scoped = scopeOpenCodeRequest(
       this.options.getUrl(),
       path,
@@ -72,6 +86,10 @@ export class OpenCodeTransport {
       if (!res.ok) {
         const msg = getResponseErrorMessage(data, res.statusText);
         throw new Error(`${res.status} ${msg}`);
+      }
+      if (options?.captureNextCursor) {
+        const nextCursor = res.headers.get('x-next-cursor')?.trim();
+        return { data, ...(nextCursor ? { nextCursor } : {}) } satisfies OpenCodeResponseMetadata;
       }
       return data;
     } catch (err) {

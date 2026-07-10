@@ -540,6 +540,19 @@ describe('registerSessionEventHandlers', () => {
     expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
   });
 
+  it('reconciles server state after the event stream reconnects', async () => {
+    const handlers = installHandlers();
+    const reconcileServerState = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(createDefaultDeps({ reconcileServerState }));
+
+    handlers.get('server.connected')?.({});
+    handlers.get('server.connected')?.({});
+    await Promise.resolve();
+
+    expect(reconcileServerState).toHaveBeenCalledTimes(1);
+  });
+
   it('marks session.error events failed and stops active loading', () => {
     const handlers = installHandlers();
     const deps = createDefaultDeps({ getActiveSessionId: () => 'session-1' });

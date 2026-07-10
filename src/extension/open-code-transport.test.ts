@@ -229,6 +229,23 @@ describe('OpenCodeTransport requests', () => {
       createTransport().request('PATCH', '/session/session-1', { title: 'x' })
     ).rejects.toThrow('400 Unsupported content type');
   });
+
+  it('captures the next message cursor when requested', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text: async () => '[]',
+        headers: new Headers({ 'x-next-cursor': 'cursor-2' }),
+      })) as unknown as typeof fetch
+    );
+
+    await expect(
+      createTransport().request('GET', '/session/session-1/message?limit=200', undefined, {
+        captureNextCursor: true,
+      })
+    ).resolves.toEqual({ data: [], nextCursor: 'cursor-2' });
+  });
 });
 
 describe('OpenCodeTransport request scoping', () => {

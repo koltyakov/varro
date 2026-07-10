@@ -23,11 +23,13 @@ const mocks = vi.hoisted(() => ({
     providerLimit: vi.fn(),
     mcpStatus: vi.fn(),
     mcpConnect: vi.fn(),
+    mcpAuthenticate: vi.fn(),
     mcpDisconnect: vi.fn(),
     questionList: vi.fn(),
     permissionList: vi.fn(),
     varroOpenPlan: vi.fn(),
     varroJudgePermission: vi.fn(),
+    varroSessionRenameIfUntitled: vi.fn(),
     recycleBinList: vi.fn(),
     recycleBinRestore: vi.fn(),
     recycleBinDelete: vi.fn(),
@@ -90,6 +92,9 @@ vi.mock('../lib/client', () => ({
     varro: {
       openPlan: clientMocks.varroOpenPlan,
       judgePermission: clientMocks.varroJudgePermission,
+      session: {
+        renameIfUntitled: clientMocks.varroSessionRenameIfUntitled,
+      },
       recycleBin: {
         list: clientMocks.recycleBinList,
         restore: clientMocks.recycleBinRestore,
@@ -100,6 +105,7 @@ vi.mock('../lib/client', () => ({
     mcp: {
       status: clientMocks.mcpStatus,
       connect: clientMocks.mcpConnect,
+      authenticate: clientMocks.mcpAuthenticate,
       disconnect: clientMocks.mcpDisconnect,
     },
     question: {
@@ -266,11 +272,13 @@ beforeEach(() => {
   clientMocks.providerLimit.mockReset();
   clientMocks.mcpStatus.mockReset();
   clientMocks.mcpConnect.mockReset();
+  clientMocks.mcpAuthenticate.mockReset();
   clientMocks.mcpDisconnect.mockReset();
   clientMocks.questionList.mockReset();
   clientMocks.permissionList.mockReset();
   clientMocks.varroOpenPlan.mockReset();
   clientMocks.varroJudgePermission.mockReset();
+  clientMocks.varroSessionRenameIfUntitled.mockReset();
   clientMocks.recycleBinList.mockReset();
   clientMocks.recycleBinRestore.mockReset();
   clientMocks.recycleBinDelete.mockReset();
@@ -297,9 +305,11 @@ beforeEach(() => {
   clientMocks.sessionUpdate.mockResolvedValue(session());
   clientMocks.sessionUnrevert.mockResolvedValue(session());
   clientMocks.mcpConnect.mockResolvedValue(true);
+  clientMocks.mcpAuthenticate.mockResolvedValue(undefined);
   clientMocks.mcpDisconnect.mockResolvedValue(true);
   clientMocks.varroOpenPlan.mockResolvedValue({ path: '/tmp/plan.md' });
   clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'test' });
+  clientMocks.varroSessionRenameIfUntitled.mockResolvedValue(null);
   clientMocks.recycleBinList.mockResolvedValue([]);
   clientMocks.recycleBinRestore.mockResolvedValue(true);
   clientMocks.recycleBinDelete.mockResolvedValue(true);

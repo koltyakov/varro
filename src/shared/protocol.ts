@@ -58,6 +58,11 @@ export type AutoApproveJudgeResponse = {
   reason?: string;
 };
 
+export type SessionTitleFallbackResponse = {
+  id: string;
+  title: string;
+} | null;
+
 export type ProviderLimitUnit = 'requests' | 'tokens' | 'messages' | 'credits' | 'usd' | 'unknown';
 
 export type ProviderLimitWindow = {

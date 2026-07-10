@@ -8,7 +8,7 @@ type MessageEntry = { info: Message; parts: Part[] };
 const [truncatedSessionIds, setTruncatedSessionIds] = createSignal<ReadonlySet<string>>(
   new Set<string>()
 );
-const fullHistorySessionIds = new Set<string>();
+const historyCursors = new Map<string, string>();
 
 export function isSessionHistoryTruncated(sessionId: string | null | undefined): boolean {
   return !!sessionId && truncatedSessionIds().has(sessionId);
@@ -23,16 +23,18 @@ export function markSessionHistoryTruncated(sessionId: string, truncated: boolea
   setTruncatedSessionIds(next);
 }
 
-export function requestFullMessageHistory(sessionId: string) {
-  fullHistorySessionIds.add(sessionId);
+export function getSessionHistoryCursor(sessionId: string): string | undefined {
+  return historyCursors.get(sessionId);
 }
 
-export function hasFullMessageHistory(sessionId: string): boolean {
-  return fullHistorySessionIds.has(sessionId);
+export function setSessionHistoryCursor(sessionId: string, cursor?: string) {
+  if (cursor) historyCursors.set(sessionId, cursor);
+  else historyCursors.delete(sessionId);
+  markSessionHistoryTruncated(sessionId, !!cursor);
 }
 
 export function resetMessageWindowState() {
-  fullHistorySessionIds.clear();
+  historyCursors.clear();
   setTruncatedSessionIds(new Set<string>());
 }
 
@@ -50,4 +52,15 @@ export function mergeWindowedHistory(
   );
   if (index <= 0) return incoming;
   return [...current.slice(0, index), ...incoming];
+}
+
+export function mergeOlderHistory(current: MessageEntry[], older: MessageEntry[]): MessageEntry[] {
+  if (older.length === 0) return current;
+  const currentKeys = new Set(
+    current.map((entry) => `${entry.info.sessionID}\u0000${entry.info.id}`)
+  );
+  return [
+    ...older.filter((entry) => !currentKeys.has(`${entry.info.sessionID}\u0000${entry.info.id}`)),
+    ...current,
+  ];
 }

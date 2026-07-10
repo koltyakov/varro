@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeSessionTitle } from './session-title';
+import { isPlaceholderSessionTitle, normalizeSessionTitle } from './session-title';
 
 describe('normalizeSessionTitle', () => {
   it('collapses generated timestamped new-session titles', () => {
@@ -31,5 +31,15 @@ describe('normalizeSessionTitle', () => {
       'New session - onboarding notes'
     );
     expect(normalizeSessionTitle('New session - 2026-04-22')).toBe('New session - 2026-04-22');
+  });
+});
+
+describe('isPlaceholderSessionTitle', () => {
+  it('detects empty and generated session titles', () => {
+    expect(isPlaceholderSessionTitle('')).toBe(true);
+    expect(isPlaceholderSessionTitle('New Chat')).toBe(true);
+    expect(isPlaceholderSessionTitle('New session')).toBe(true);
+    expect(isPlaceholderSessionTitle('New session - 2026-04-22T17:00:10Z')).toBe(true);
+    expect(isPlaceholderSessionTitle('Fix build')).toBe(false);
   });
 });

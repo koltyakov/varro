@@ -12,6 +12,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=msg-1')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/message')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=200')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/session/abc/message?limit=200&before=cursor-2')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/todo')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/unrevert')).toBe(true);
     expect(isAllowedApiRequest('POST', '/question/request-1/reply')).toBe(true);
@@ -26,6 +27,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/opencode-config')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session/session-1/rename-if-untitled')).toBe(true);
     expect(isAllowedApiRequest('DELETE', '/varro/session/session-1/delete')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session-trash')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/restore')).toBe(true);
@@ -35,6 +37,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/mcp')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/connect')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/disconnect')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth/authenticate')).toBe(true);
     expect(isAllowedApiRequest('GET', '/provider/auth')).toBe(true);
     expect(isAllowedApiRequest('POST', '/provider/openai/oauth/authorize')).toBe(true);
     expect(isAllowedApiRequest('POST', '/provider/openai/oauth/callback')).toBe(true);
@@ -50,6 +53,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('DELETE', '/config/providers')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=1&extra=1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=5&extra=1')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session/abc/message?before=cursor-2')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session/abc/message?limit=5')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/provider-limit?modelID=gpt')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/workspace-file')).toBe(false);
@@ -57,6 +61,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/opencode-config')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/opencode-config/model-routing')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/permission/judge')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/rename-if-untitled')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/plan/open')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/delete')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/delete')).toBe(false);

@@ -2,7 +2,7 @@ import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import type { ServerStatus } from '../shared/protocol';
 import { OpenCodeProcess, type OpenCodeCompactionSettings } from './open-code-process';
-import { OpenCodeTransport } from './open-code-transport';
+import { OpenCodeTransport, type OpenCodeRequestOptions } from './open-code-transport';
 import { logger } from './logger';
 import { ServerLifecycleStateMachine } from './server-lifecycle';
 import { isPortInUseMessage, normalizeRunningStatus } from './server-utils';
@@ -440,8 +440,13 @@ export class OpenCodeServer extends EventEmitter {
     return data.healthy === true;
   }
 
-  async request(method: string, path: string, body?: unknown): Promise<unknown> {
-    return this.transport.request(method, path, body);
+  async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: OpenCodeRequestOptions
+  ): Promise<unknown> {
+    return this.transport.request(method, path, body, options);
   }
 
   async readServerInfo(): Promise<OpenCodeServerInfo> {

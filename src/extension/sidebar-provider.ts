@@ -19,6 +19,7 @@ import type { OpenCodeServer } from './server';
 import { ServerEventBridge } from './server-event-bridge';
 import { SessionExportService } from './session-export-service';
 import { SessionStateManager } from './session-state-manager';
+import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
 import { SidebarProviderBridge } from './sidebar-provider-bridge';
@@ -40,6 +41,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionTrash: SessionTrashManager;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly autoApproveJudge: AutoApproveJudge;
+  private readonly sessionTitleFallback: SessionTitleFallback;
   private readonly ralphHost: RalphHost;
   private readonly messageRouter: MessageRouter;
   private readonly restProxy: RestProxy;
@@ -101,6 +103,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionTrash = new SessionTrashManager(persistence);
     this.hiddenSessions = new HiddenSessionManager();
     this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions);
+    this.sessionTitleFallback = new SessionTitleFallback(server, this.hiddenSessions, () =>
+      vscode.workspace
+        .getConfiguration('varro')
+        .get<boolean>('chat.autoRenameUntitledSessions', true)
+    );
     this.sessionState = new SessionStateManager(
       persistence,
       {
@@ -166,6 +173,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       sessionTrash: this.sessionTrash,
       hiddenSessions: this.hiddenSessions,
       autoApproveJudge: this.autoApproveJudge,
+      sessionTitleFallback: this.sessionTitleFallback,
       simulateNoProviders: this.simulateNoProviders,
       getRequestGeneration: () => this.webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),

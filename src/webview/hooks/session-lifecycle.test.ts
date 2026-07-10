@@ -282,7 +282,7 @@ describe('session-lifecycle helpers', () => {
 
   it('keeps a title update from an older snapshot when the current title is a placeholder', () => {
     const existing = session('session-1', '/repo', 10);
-    existing.title = 'New Chat';
+    existing.title = 'New session - 2026-07-09T12:00:00.000Z';
     const olderWithTitle = session('session-1', '/repo', 5);
     olderWithTitle.title = 'Actual task title';
     const setup = createDeps({ sessions: [existing] });

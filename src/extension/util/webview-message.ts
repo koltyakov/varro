@@ -318,6 +318,7 @@ const API_ROUTES: ApiRoute[] = [
   route('/varro/opencode-config', methodsNoQuery('GET')),
   route('/varro/opencode-config/model-routing', methodsNoQuery('POST')),
   route('/varro/permission/judge', methodsNoQuery('POST')),
+  route('/varro/session/:id/rename-if-untitled', methodsNoQuery('POST')),
   route('/varro/session/:id/delete', methodsNoQuery('DELETE')),
   route('/varro/session-trash', methodsNoQuery('GET', 'DELETE')),
   route('/varro/plan/open', methodsNoQuery('POST')),
@@ -340,6 +341,7 @@ const API_ROUTES: ApiRoute[] = [
       noQuery(url) &&
       (params.action === 'connect' || params.action === 'disconnect')
   ),
+  route('/mcp/:id/auth/authenticate', methodsNoQuery('POST')),
   route(
     '/provider/:id/oauth/:action',
     ({ method, url, params }) =>
@@ -349,7 +351,13 @@ const API_ROUTES: ApiRoute[] = [
   ),
   route('/experimental/workspace/warp', methodsNoQuery('POST')),
   route('/session/:id/diff', ({ method, url }) => method === 'GET' && onlyQuery(url, 'messageID')),
-  route('/session/:id/message', ({ method, url }) => method === 'GET' && onlyQuery(url, 'limit')),
+  route(
+    '/session/:id/message',
+    ({ method, url }) =>
+      method === 'GET' &&
+      onlyQuery(url, 'limit', 'before') &&
+      (!url.searchParams.has('before') || requiredQuery(url, 'limit'))
+  ),
   route('/session/:id/todo', methodsNoQuery('GET')),
   route(
     '/session/:id/:action',

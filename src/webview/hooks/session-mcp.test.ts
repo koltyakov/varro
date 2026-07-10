@@ -8,6 +8,7 @@ import {
 describe('session MCP helpers', () => {
   it('connects and disconnects MCPs to match the session selection', async () => {
     const connectMcp = vi.fn(async () => {});
+    const authenticateMcp = vi.fn(async () => {});
     const disconnectMcp = vi.fn(async () => {});
     const loadMcps = vi.fn(async () => {});
 
@@ -21,6 +22,7 @@ describe('session MCP helpers', () => {
         loadMcps,
         getAvailableMcpNames: () => ['alpha', 'beta'],
         connectMcp,
+        authenticateMcp,
         disconnectMcp,
         logError: vi.fn(),
       },
@@ -29,7 +31,30 @@ describe('session MCP helpers', () => {
 
     expect(disconnectMcp).toHaveBeenCalledWith('alpha');
     expect(connectMcp).toHaveBeenCalledWith('beta');
+    expect(authenticateMcp).not.toHaveBeenCalled();
     expect(loadMcps).toHaveBeenCalledTimes(1);
+  });
+
+  it('authenticates selected MCPs that require OAuth', async () => {
+    const connectMcp = vi.fn(async () => {});
+    const authenticateMcp = vi.fn(async () => {});
+
+    await syncSessionMcpsWithDependencies(
+      {
+        getSelectedMcpsForSession: () => ['oauth-server'],
+        getMcpStatus: () => ({ 'oauth-server': { status: 'needs_auth' } }),
+        loadMcps: vi.fn(async () => {}),
+        getAvailableMcpNames: () => ['oauth-server'],
+        connectMcp,
+        authenticateMcp,
+        disconnectMcp: vi.fn(async () => {}),
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(authenticateMcp).toHaveBeenCalledWith('oauth-server');
+    expect(connectMcp).not.toHaveBeenCalled();
   });
 
   it('loads MCP status first when none has been hydrated yet', async () => {
@@ -47,6 +72,7 @@ describe('session MCP helpers', () => {
         loadMcps,
         getAvailableMcpNames: () => ['alpha'],
         connectMcp: vi.fn(async () => {}),
+        authenticateMcp: vi.fn(async () => {}),
         disconnectMcp: vi.fn(async () => {}),
         logError: vi.fn(),
       },
@@ -71,6 +97,7 @@ describe('session MCP helpers', () => {
         loadMcps,
         getAvailableMcpNames: () => ['alpha'],
         connectMcp,
+        authenticateMcp: vi.fn(async () => {}),
         disconnectMcp,
         logError: vi.fn(),
       },
@@ -102,6 +129,7 @@ describe('session MCP helpers', () => {
   it('creates bound session MCP operations from one dependency bag', async () => {
     const loadMcps = vi.fn(async () => {});
     const connectMcp = vi.fn(async () => {});
+    const authenticateMcp = vi.fn(async () => {});
     const disconnectMcp = vi.fn(async () => {});
     const setSelectedMcpsForSession = vi.fn();
 
@@ -114,6 +142,7 @@ describe('session MCP helpers', () => {
       loadMcps,
       getAvailableMcpNames: () => ['alpha', 'beta'],
       connectMcp,
+      authenticateMcp,
       disconnectMcp,
       logError: vi.fn(),
       setSelectedMcpsForSession,

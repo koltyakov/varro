@@ -1,4 +1,5 @@
 import { batch } from 'solid-js';
+import { normalizeSessionTitle } from '../../../shared/session-title';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { isSamePath } from '../../lib/path-display';
@@ -126,8 +127,8 @@ export function sortSessions(sessions: Session[]) {
 }
 
 function isPlaceholderSessionTitle(title: string | null | undefined) {
-  const normalized = title?.trim().toLowerCase();
-  return !normalized || normalized === 'new chat' || normalized === 'new session';
+  const normalized = normalizeSessionTitle(title).toLowerCase();
+  return !normalized || normalized === 'new chat';
 }
 
 function mergeFreshSession(existing: Session | undefined, incoming: Session) {

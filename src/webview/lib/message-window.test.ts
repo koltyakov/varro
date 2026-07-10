@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Message, Part } from '../types';
 import {
-  hasFullMessageHistory,
+  getSessionHistoryCursor,
   isSessionHistoryTruncated,
   markSessionHistoryTruncated,
+  mergeOlderHistory,
   mergeWindowedHistory,
-  requestFullMessageHistory,
   resetMessageWindowState,
+  setSessionHistoryCursor,
 } from './message-window';
 
 function entry(id: string, sessionID = 'session-1'): { info: Message; parts: Part[] } {
@@ -78,15 +79,33 @@ describe('history window state', () => {
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
   });
 
-  it('tracks full-history requests until reset', () => {
-    expect(hasFullMessageHistory('session-1')).toBe(false);
-    requestFullMessageHistory('session-1');
-    expect(hasFullMessageHistory('session-1')).toBe(true);
-
-    markSessionHistoryTruncated('session-1', true);
+  it('tracks opaque history cursors until reset', () => {
+    expect(getSessionHistoryCursor('session-1')).toBeUndefined();
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    expect(getSessionHistoryCursor('session-1')).toBe('cursor-1');
+    expect(isSessionHistoryTruncated('session-1')).toBe(true);
     resetMessageWindowState();
-
-    expect(hasFullMessageHistory('session-1')).toBe(false);
+    expect(getSessionHistoryCursor('session-1')).toBeUndefined();
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
+  });
+
+  it('clears truncation when the cursor reaches the final page', () => {
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    setSessionHistoryCursor('session-1');
+    expect(getSessionHistoryCursor('session-1')).toBeUndefined();
+    expect(isSessionHistoryTruncated('session-1')).toBe(false);
+  });
+});
+
+describe('mergeOlderHistory', () => {
+  it('prepends older entries while preserving current duplicates', () => {
+    const current = [entry('m2'), entry('m3')];
+    const olderDuplicate = entry('m2');
+    olderDuplicate.parts = [{ id: 'old-part' } as Part];
+
+    const merged = mergeOlderHistory(current, [entry('m1'), olderDuplicate]);
+
+    expect(merged.map((item) => item.info.id)).toEqual(['m1', 'm2', 'm3']);
+    expect(merged[1]).toBe(current[0]);
   });
 });

@@ -29,6 +29,21 @@ describe('sendMessage', () => {
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
   });
 
+  it('starts title fallback as soon as OpenCode accepts the prompt', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('sessions', [{ ...session(), title: 'New Chat' }]);
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionUpdate.mockResolvedValue({ ...session(), title: 'New Chat' });
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Fix the delayed session title');
+
+    expect(clientMocks.varroSessionRenameIfUntitled).toHaveBeenCalledWith('session-1');
+  });
+
   it('omits pasted images and placeholder tags for non-vision models', async () => {
     const { stateModule, hookModule } = await loadModules();
 

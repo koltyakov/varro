@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.19.12",
+  "version": "0.19.14",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -225,6 +225,11 @@
           ],
           "default": "auto",
           "markdownDescription": "Permission mode selected by default when no project or global Varro permission-mode selection has been saved."
+        },
+        "varro.chat.autoRenameUntitledSessions": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let Varro generate a fallback title when OpenCode leaves a session untitled. Disable this to rely only on OpenCode's native session naming."
         },
         "varro.chat.autoCompact": {
           "type": "boolean",

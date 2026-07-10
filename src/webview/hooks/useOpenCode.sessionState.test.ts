@@ -107,6 +107,47 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
+  it('applies a fallback title when refetching the session fails', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionGet.mockRejectedValue(new Error('404 Session not found'));
+    clientMocks.varroSessionRenameIfUntitled.mockResolvedValue({
+      id: 'session-1',
+      title: 'Test Message',
+    });
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      stateModule.setState('sessions', [{ ...session('session-1'), title: 'New Chat' }]);
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+
+      await vi.waitFor(() => {
+        expect(stateModule.state.sessions[0]?.title).toBe('Test Message');
+      });
+      expect(clientMocks.varroSessionRenameIfUntitled).toHaveBeenCalledWith('session-1');
+    } finally {
+      dispose();
+    }
+  });
+
   it('keeps the active session marked seen when a later session update arrives', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {
@@ -176,5 +217,37 @@ describe('useOpenCode session state flows', () => {
 
     expect(stateModule.state.activeSessionId).toBe('session-2');
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['user-2']);
+  });
+
+  it('loads older session messages through cursor pages', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const latest = [{ info: userMessage('user-3'), parts: [] }] as Array<{
+      info: ReturnType<typeof userMessage>;
+      parts: [];
+    }> & { nextCursor?: string };
+    latest.nextCursor = 'cursor-2';
+    const older = [
+      { info: userMessage('user-1'), parts: [] },
+      { info: userMessage('user-2'), parts: [] },
+    ] as typeof latest;
+
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValueOnce(latest).mockResolvedValueOnce(older);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    await hookModule.selectSession('session-1');
+    await hookModule.loadFullSessionHistory('session-1');
+
+    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(1, 'session-1', { limit: 200 });
+    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
+      limit: 200,
+      before: 'cursor-2',
+    });
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-1',
+      'user-2',
+      'user-3',
+    ]);
   });
 });
