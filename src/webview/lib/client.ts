@@ -217,6 +217,9 @@ export const client = {
       async diffSummary(sessionID: string): Promise<SessionDiffSummary> {
         return apiCall('GET', buildVarroSessionEndpoint(sessionID, 'diff-summary'));
       },
+      async setPinned(sessionID: string, pinned: boolean): Promise<string[]> {
+        return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'pin'), { pinned });
+      },
       async renameIfUntitled(sessionID: string): Promise<SessionTitleFallbackResponse> {
         return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'rename-if-untitled'));
       },

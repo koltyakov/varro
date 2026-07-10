@@ -18,6 +18,7 @@ import { isAllowedApiRequest } from './util/webview-message';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
 import type { ProviderLimitService } from './provider-limit-service';
+import type { PinnedSessionManager } from './pinned-session-manager';
 import type { OpenCodeServer } from './server';
 import type { OpenCodeResponseMetadata } from './open-code-transport';
 import type { SessionBusyAttempt, SessionStateManager } from './session-state-manager';
@@ -80,6 +81,7 @@ export interface RestProxyCallbacks {
     | 'moveToTrash'
     | 'restore'
   >;
+  pinnedSessions: Pick<PinnedSessionManager, 'setPinned'>;
   hiddenSessions: Pick<
     HiddenSessionManager,
     | 'filterVisibleSessionRequests'
@@ -118,6 +120,16 @@ export class RestProxy {
       const permanentDeleteRequest = this.parsePermanentDeleteRequest(method, payload.path);
       if (permanentDeleteRequest) {
         const data = await this.deleteSessionPermanently(permanentDeleteRequest.sessionID);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const pinRequest = this.parsePinRequest(method, payload.path, payload.body);
+      if (pinRequest) {
+        const data = await this.callbacks.pinnedSessions.setPinned(
+          pinRequest.sessionID,
+          pinRequest.pinned
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -362,6 +374,16 @@ export class RestProxy {
     if (!url.pathname.startsWith(prefix)) return null;
     const match = url.pathname.slice(prefix.length).match(/^([^/]+)\/diff-summary$/);
     return match?.[1] ? decodeURIComponent(match[1]) : null;
+  }
+
+  private parsePinRequest(method: string, path: string, body: unknown) {
+    if (method !== 'POST') return null;
+    const url = new URL(path, 'http://localhost');
+    const match = url.pathname.match(/^\/varro\/session\/([^/]+)\/pin$/);
+    if (!match) return null;
+    const record = asRecord(body);
+    if (typeof record?.pinned !== 'boolean') throw new Error('Invalid pin request');
+    return { sessionID: decodeURIComponent(match[1]!), pinned: record.pinned };
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {

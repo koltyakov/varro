@@ -162,7 +162,7 @@ export const VARRO_API_ENDPOINTS = {
   permissionJudge: `${VARRO_API_NAMESPACE}/permission/judge`,
 } as const;
 
-export type VarroSessionEndpointAction = 'delete' | 'diff-summary' | 'rename-if-untitled';
+export type VarroSessionEndpointAction = 'delete' | 'diff-summary' | 'pin' | 'rename-if-untitled';
 
 export function buildVarroSessionEndpoint(
   sessionID: string,
@@ -374,6 +374,7 @@ export type InitialWebviewState = {
   pendingPermissions?: Array<Record<string, unknown>>;
   pendingQuestions?: Array<Record<string, unknown>>;
   recycleBinEntries?: RecycleBinEntry[];
+  pinnedSessionIds?: string[];
 };
 
 /**

@@ -96,6 +96,7 @@ export interface AppState {
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
   sessions: Session[];
+  pinnedSessionIds: string[];
   recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
   currentDocumentEnabledBySession: Record<string, boolean>;
@@ -268,6 +269,7 @@ export function createAppState(): AppStateInstance {
     droppedFiles: initialWebviewState.droppedFiles ?? [],
     clipboardImages: [],
     sessions: [],
+    pinnedSessionIds: initialWebviewState.pinnedSessionIds ?? [],
     recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
     activeSessionId: null,
     currentDocumentEnabledBySession: {},

@@ -416,6 +416,42 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
     background-color 0.1s;
 }
 
+.session-item-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-vscode-muted);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.session-item:hover .session-item-pin,
+.session-item-pin.is-pinned {
+  opacity: 0.8;
+  visibility: visible;
+}
+
+.session-item-pin:hover {
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-toolbar-hover);
+  opacity: 1;
+}
+
+.session-item-pin.is-pinned {
+  color: var(--color-vscode-accent);
+}
+
+.session-item-pin svg {
+  width: 14px;
+  height: 14px;
+}
+
 .session-item-plan-tag {
   display: inline-flex;
   align-items: center;

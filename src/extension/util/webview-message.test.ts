@@ -73,6 +73,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session/session-1/pin')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/rename-if-untitled')).toBe(true);
     expect(isAllowedApiRequest('DELETE', '/varro/session/session-1/delete')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session-trash')).toBe(true);
@@ -108,6 +109,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/opencode-config/model-routing')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/permission/judge')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/diff-summary')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/pin')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary?messageID=1')).toBe(
       false
     );

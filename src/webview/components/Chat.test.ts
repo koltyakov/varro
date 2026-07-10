@@ -377,6 +377,28 @@ describe('groupSessions', () => {
     expect(groups.attention.map((item) => item.id)).toEqual(['attention-newer', 'attention-older']);
     expect(groups.surfacedOther.map((item) => item.id)).toEqual(['other']);
   });
+
+  it('surfaces pinned sessions regardless of age', () => {
+    const sessions = [
+      session('recent', now - 1_000),
+      session('pinned-old', now - 48 * 60 * 60 * 1_000),
+    ];
+
+    const groups = groupSessions(
+      sessions,
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      () => false,
+      now,
+      (sessionId) => sessionId === 'pinned-old'
+    );
+
+    expect(groups.pinned.map((item) => item.id)).toEqual(['pinned-old']);
+    expect(groups.surfacedOther.map((item) => item.id)).toEqual(['recent']);
+    expect(groups.overflowOther).toEqual([]);
+  });
 });
 
 describe('empty session pruning', () => {

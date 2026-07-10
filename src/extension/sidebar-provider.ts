@@ -14,6 +14,7 @@ import { MessageRouter } from './message-router';
 import { getOpenCodeConfigPaths } from './open-code-process';
 import { readExtensionConfigState } from './provider-limit-config';
 import { ProviderLimitService } from './provider-limit-service';
+import { PinnedSessionManager } from './pinned-session-manager';
 import { RalphHost } from './ralph-host';
 import { RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
@@ -61,6 +62,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly fileSearch: FileSearchService;
   private readonly sessionState: SessionStateManager;
   private readonly sessionTrash: SessionTrashManager;
+  private readonly pinnedSessions: PinnedSessionManager;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly autoApproveJudge: AutoApproveJudge;
   private readonly sessionTitleFallback: SessionTitleFallback;
@@ -127,6 +129,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.providerLimitService = new ProviderLimitService(server);
     this.bridge = new SidebarProviderBridge(extensionUri);
     this.sessionTrash = new SessionTrashManager(persistence);
+    this.pinnedSessions = new PinnedSessionManager(persistence);
     this.hiddenSessions = new HiddenSessionManager();
     this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions);
     this.sessionTitleFallback = new SessionTitleFallback(server, this.hiddenSessions, () =>
@@ -170,6 +173,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.bridge,
       this.sessionState,
       this.sessionTrash,
+      this.pinnedSessions,
       this.hiddenSessions,
       contextProvider,
       this.contextFilesState,
@@ -197,6 +201,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       providerLimitService: this.providerLimitService,
       sessionState: this.sessionState,
       sessionTrash: this.sessionTrash,
+      pinnedSessions: this.pinnedSessions,
       hiddenSessions: this.hiddenSessions,
       autoApproveJudge: this.autoApproveJudge,
       sessionTitleFallback: this.sessionTitleFallback,

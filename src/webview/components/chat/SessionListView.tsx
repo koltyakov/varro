@@ -8,6 +8,8 @@ import {
   isSessionUnread,
   isSkippedPlanSession,
   setPersistentShowSessionPicker as setShowSessionPicker,
+  setError,
+  setState,
   state,
 } from '../../lib/state';
 import {
@@ -39,6 +41,7 @@ import { formatRelativeAge } from '../../lib/message-metrics';
 import { getSpinnerPhaseDelayStyle } from './spinner-phase';
 
 type SessionGroups = {
+  pinned: (typeof state.sessions)[number][];
   failed: (typeof state.sessions)[number][];
   planReady: (typeof state.sessions)[number][];
   newlyCompleted: (typeof state.sessions)[number][];
@@ -442,7 +445,8 @@ export function groupSessions(
   isFailed: (sessionId: string) => boolean,
   isPlanReady: (session: (typeof state.sessions)[number]) => boolean,
   isNewlyCompleted: (session: (typeof state.sessions)[number]) => boolean,
-  now: number
+  now: number,
+  isPinned: (sessionId: string) => boolean = () => false
 ): SessionGroups {
   const primaries: (typeof state.sessions)[number][] = [];
   const subagents: (typeof state.sessions)[number][] = [];
@@ -454,6 +458,7 @@ export function groupSessions(
 
   primaries.sort((left, right) => right.time.updated - left.time.updated);
   const failed: SessionGroups['failed'] = [];
+  const pinned: SessionGroups['pinned'] = [];
   const planReady: SessionGroups['planReady'] = [];
   const attention: SessionGroups['attention'] = [];
   const running: SessionGroups['running'] = [];
@@ -463,6 +468,10 @@ export function groupSessions(
   const recentSessionCutoff = now - SESSION_SHOW_MORE_AGE_MS;
 
   for (const session of primaries) {
+    if (isPinned(session.id)) {
+      pinned.push(session);
+      continue;
+    }
     switch (
       getSessionPriorityRank(
         session,
@@ -496,6 +505,7 @@ export function groupSessions(
   }
 
   return {
+    pinned,
     failed,
     planReady,
     newlyCompleted,
@@ -521,6 +531,15 @@ function getSessionPriorityRank(
   if (isRunning(session.id)) return 3;
   if (isNewlyCompleted(session)) return 4;
   return 5;
+}
+
+function sortSessionsForDisplay(sessions: typeof state.sessions) {
+  return sessions.toSorted((left, right) => {
+    const pinRank =
+      Number(state.pinnedSessionIds.includes(right.id)) -
+      Number(state.pinnedSessionIds.includes(left.id));
+    return pinRank || right.time.updated - left.time.updated;
+  });
 }
 
 export async function archiveSessionGroup(
@@ -701,9 +720,11 @@ export function SessionListView(props: {
       (sessionId) => sessionIndicators().failedIds.has(sessionId),
       (session) => sessionIndicators().planReadyIds.has(session.id),
       (session) => sessionIndicators().newlyCompletedIds.has(session.id),
-      now()
+      now(),
+      (sessionId) => state.pinnedSessionIds.includes(sessionId)
     )
   );
+  const pinnedSessions = () => groupedSessions().pinned;
   const failedSessions = () => groupedSessions().failed;
   const planReadySessions = () => groupedSessions().planReady;
   const attentionSessions = () => groupedSessions().attention;
@@ -729,14 +750,15 @@ export function SessionListView(props: {
       : []
   );
   const defaultSurfacedSessions = createMemo(() =>
-    [
+    sortSessionsForDisplay([
+      ...pinnedSessions(),
       ...failedSessions(),
       ...planReadySessions(),
       ...attentionSessions(),
       ...runningSessions(),
       ...newlyCompletedSessions(),
       ...surfacedOtherSessions(),
-    ].toSorted((left, right) => right.time.updated - left.time.updated)
+    ])
   );
   const surfacedSessions = createMemo(() => {
     const sessions = defaultSurfacedSessions();
@@ -767,7 +789,8 @@ export function SessionListView(props: {
     return [];
   });
   const searchableSessions = createMemo(() => {
-    if (props.subagentParentId || props.sessionFilter) return directSessions();
+    if (props.subagentParentId) return directSessions();
+    if (props.sessionFilter) return sortSessionsForDisplay(directSessions());
     if (defaultSurfacedSessions().length === 0) return overflowOtherSessions();
     return [...surfacedSessions(), ...overflowOtherSessions()];
   });
@@ -887,6 +910,18 @@ export function SessionListView(props: {
           needsAttention={sessionIndicators().attentionIds.has(session.id)}
           isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
           isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
+          isPinned={state.pinnedSessionIds.includes(session.id)}
+          onTogglePinned={async () => {
+            try {
+              const pinnedSessionIds = await client.varro.session.setPinned(
+                session.id,
+                !state.pinnedSessionIds.includes(session.id)
+              );
+              setState('pinnedSessionIds', pinnedSessionIds);
+            } catch (error) {
+              setError(error instanceof Error ? error.message : String(error));
+            }
+          }}
           onOpenSubagents={props.onOpenSubagents}
           embedded={props.embedded}
         />
@@ -1185,6 +1220,8 @@ function SessionListItem(props: {
   needsAttention: boolean;
   isNewlyCompleted: boolean;
   isCompletedPlanSession: boolean;
+  isPinned: boolean;
+  onTogglePinned: () => Promise<void>;
   onOpenSubagents?: (parentSessionId: string) => void;
   embedded?: boolean;
 }) {
@@ -1288,6 +1325,19 @@ function SessionListItem(props: {
         </div>
       </button>
       <div class="session-item-trailing">
+        <Show when={!props.session.parentID}>
+          <button
+            type="button"
+            class={`session-item-pin ${props.isPinned ? 'is-pinned' : ''}`}
+            onClick={() => void props.onTogglePinned()}
+            title={props.isPinned ? 'Unpin session' : 'Pin session'}
+            aria-label={props.isPinned ? 'Unpin session' : 'Pin session'}
+          >
+            <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+              <path d="M27.79 26.386l-6.458-8.303L25.414 14h-4L14 6.586v-4L2.586 14h4L14 21.414v4l4.083-4.083 8.303 6.458 1.404-1.403zM7.414 12L12 7.414 20.586 16 16 20.586 7.414 12zm12.094 7.906.398-.398 1.393 1.791-1.791-1.393z" />
+            </svg>
+          </button>
+        </Show>
         <Show when={ralphStore.isRalphSession(props.session.id)}>
           <span class="session-item-ralph-tag" title="Ralph loop" aria-label="Ralph loop">
             Ralph

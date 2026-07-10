@@ -79,6 +79,11 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       moveToTrash: vi.fn(() => Promise.resolve(null)),
       restore: vi.fn(() => Promise.resolve(null)),
     },
+    pinnedSessions: {
+      setPinned: vi.fn((_sessionID: string, pinned: boolean) =>
+        Promise.resolve(pinned ? ['session-1'] : [])
+      ),
+    },
     hiddenSessions: {
       filterVisibleSessionRequests: vi.fn(<T>(arr: T[]) => arr) as never,
       filterVisibleSessions: vi.fn(<T>(arr: T[]) => arr) as never,
@@ -268,6 +273,36 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 1,
       error: 'Unsupported API request',
+    });
+  });
+
+  it('updates pinned sessions without starting OpenCode', async () => {
+    const setPinned = vi.fn(() => Promise.resolve(['session-1']));
+    const { proxy, callbacks } = createProxy({ pinnedSessions: { setPinned } });
+
+    await proxy.handleRequest(
+      makePayload(8, 'POST', '/varro/session/session-1/pin', { pinned: true })
+    );
+
+    expect(setPinned).toHaveBeenCalledWith('session-1', true);
+    expect(callbacks.ensureServerStarted).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 8,
+      data: ['session-1'],
+    });
+  });
+
+  it('rejects malformed pin requests', async () => {
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest(
+      makePayload(9, 'POST', '/varro/session/session-1/pin', { pinned: 'yes' })
+    );
+
+    expect(callbacks.pinnedSessions.setPinned).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9,
+      error: 'Invalid pin request',
     });
   });
 

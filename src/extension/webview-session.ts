@@ -10,6 +10,7 @@ import type { HiddenSessionManager } from './hidden-session-manager';
 import type { SidebarProviderBridge } from './sidebar-provider-bridge';
 import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import type { SessionTrashManager } from './session-trash-manager';
+import type { PinnedSessionManager } from './pinned-session-manager';
 import { logger } from './logger';
 import { parseWebviewMessage } from './util/webview-message';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../shared/provider-limit-config';
@@ -43,6 +44,7 @@ export class WebviewSession {
       SessionTrashManager,
       'hiddenSessionIds' | 'isHidden' | 'list'
     >,
+    private readonly pinnedSessions: Pick<PinnedSessionManager, 'list'>,
     private readonly hiddenSessions: Pick<HiddenSessionManager, 'hiddenSessionIds' | 'isHidden'>,
     private readonly contextProvider: Pick<ContextProvider, 'context' | 'terminalSelection'>,
     private readonly contextFilesState: Pick<
@@ -250,6 +252,7 @@ export class WebviewSession {
         .filter((item) => item.kind === 'question')
         .filter((item) => !this.isHiddenSession(item.sessionID))
         .map((item) => item.props),
+      pinnedSessionIds: this.pinnedSessions.list(),
     };
   }
 

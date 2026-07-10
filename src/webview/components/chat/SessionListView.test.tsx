@@ -43,6 +43,7 @@ function deferred<T>() {
 beforeEach(() => {
   resetSessionDiffSummaryStateForTests();
   setState('sessions', []);
+  setState('pinnedSessionIds', []);
   setState('activeSessionId', null);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -53,6 +54,7 @@ afterEach(() => {
   cleanup = undefined;
   container.remove();
   setState('sessions', []);
+  setState('pinnedSessionIds', []);
   vi.restoreAllMocks();
   resetSessionDiffSummaryStateForTests();
 });
@@ -141,5 +143,35 @@ describe('SessionListView diff summaries', () => {
 
     setState('sessions', [session('session-1', updated + 1)]);
     await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('SessionListView pins', () => {
+  it('pins and unpins a session from its row control', async () => {
+    const setPinned = vi
+      .spyOn(client.varro.session, 'setPinned')
+      .mockResolvedValueOnce(['session-1'])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+    });
+    setState('sessions', [session('session-1', Date.now())]);
+    cleanup = render(() => <SessionListView />, container);
+
+    const pinButton = container.querySelector<HTMLButtonElement>('[aria-label="Pin session"]')!;
+    pinButton.click();
+
+    await vi.waitFor(() => expect(setPinned).toHaveBeenCalledWith('session-1', true));
+    await vi.waitFor(() => {
+      expect(container.querySelector('[aria-label="Unpin session"]')).not.toBeNull();
+    });
+    container.querySelector<HTMLButtonElement>('[aria-label="Unpin session"]')!.click();
+
+    await vi.waitFor(() => expect(setPinned).toHaveBeenLastCalledWith('session-1', false));
+    await vi.waitFor(() => {
+      expect(container.querySelector('[aria-label="Pin session"]')).not.toBeNull();
+    });
   });
 });

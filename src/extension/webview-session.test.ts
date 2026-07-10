@@ -132,6 +132,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     getContextFiles: vi.fn(() => []),
     postContextFiles: vi.fn(),
   };
+  const pinnedSessions = { list: vi.fn(() => ['pinned-session']) };
 
   const deps = {
     handleMessage: vi.fn(() => Promise.resolve()),
@@ -159,6 +160,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     bridge as never,
     sessionState as never,
     sessionTrash as never,
+    pinnedSessions,
     hiddenSessions as never,
     contextProvider as never,
     contextFilesState as never,
@@ -276,6 +278,7 @@ describe('WebviewSession', () => {
         providerLimitPollIntervalSeconds: 120,
         providerLimitThresholdPercent: 40,
         providerLimitsDisabled: false,
+        pinnedSessionIds: ['pinned-session'],
       })
     );
   });

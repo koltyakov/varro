@@ -660,6 +660,20 @@ describe('client', () => {
     );
   });
 
+  it('updates a session pin through the canonical encoded route', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(['session with space']);
+
+    await expect(client.varro.session.setPinned('session with space', true)).resolves.toEqual([
+      'session with space',
+    ]);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/session/session%20with%20space/pin',
+      { pinned: true }
+    );
+  });
+
   it('filters out entries with partial summary (missing fields)', async () => {
     const { client } = await loadClient();
     const session = {
