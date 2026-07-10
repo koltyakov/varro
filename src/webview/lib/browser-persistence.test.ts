@@ -62,4 +62,33 @@ describe('BrowserPersistence', () => {
       sessionId: 'session-1',
     });
   });
+
+  it('continues with VSCode state when localStorage acquisition is denied', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    let vscodeState: Record<string, unknown> = {};
+    window.__vscodeWebviewState = {
+      getState: () => vscodeState,
+      setState: (state) => {
+        vscodeState = state;
+      },
+    };
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('denied');
+      },
+    });
+
+    try {
+      const storage = new BrowserPersistence();
+      storage.set('varro.lastOpenedView', { type: 'sessions-list' });
+
+      expect(storage.get('varro.lastOpenedView')).toEqual({ type: 'sessions-list' });
+      expect(vscodeState).toEqual({
+        'varro.lastOpenedView': { type: 'sessions-list' },
+      });
+    } finally {
+      if (descriptor) Object.defineProperty(window, 'localStorage', descriptor);
+    }
+  });
 });

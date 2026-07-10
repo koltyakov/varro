@@ -8,6 +8,7 @@ const {
   getMock,
   onDidChangeConfigurationMock,
   registerWebviewViewProviderMock,
+  sweepStaleInjectedConfigDirectoriesMock,
 } = vi.hoisted(() => ({
   executeCommandMock: vi.fn(() => Promise.resolve()),
   getMock: vi.fn((key: string, fallback?: unknown) => {
@@ -32,6 +33,7 @@ const {
   }),
   onDidChangeConfigurationMock: vi.fn((_listener: ConfigChangeListener) => ({ dispose: vi.fn() })),
   registerWebviewViewProviderMock: vi.fn(() => ({ dispose: vi.fn() })),
+  sweepStaleInjectedConfigDirectoriesMock: vi.fn(() => Promise.resolve()),
 }));
 
 const {
@@ -67,6 +69,7 @@ const {
   latestSidebarProviderInstance: {
     current: null as null | {
       dispose: ReturnType<typeof vi.fn>;
+      initializeProviderFileSignature: ReturnType<typeof vi.fn>;
       post: ReturnType<typeof vi.fn>;
     },
   },
@@ -111,17 +114,19 @@ vi.mock('./server', () => ({
   },
 }));
 vi.mock('./open-code-process', () => ({
-  sweepStaleInjectedConfigDirectories: vi.fn(() => Promise.resolve()),
+  sweepStaleInjectedConfigDirectories: sweepStaleInjectedConfigDirectoriesMock,
 }));
 vi.mock('./sidebar-provider', () => ({
   SidebarProvider: class {
     static viewType = 'varro.sidebar';
     dispose = vi.fn(() => Promise.resolve());
+    initializeProviderFileSignature = vi.fn(() => Promise.resolve());
     post = vi.fn();
 
     constructor(...args: unknown[]) {
       latestSidebarProviderInstance.current = {
         dispose: this.dispose,
+        initializeProviderFileSignature: this.initializeProviderFileSignature,
         post: this.post,
       };
       sidebarProviderMock(...args);
@@ -152,6 +157,7 @@ describe('extension activation', () => {
     contextChangeCallback.current = null;
     latestServerInstance.current = null;
     latestSidebarProviderInstance.current = null;
+    sweepStaleInjectedConfigDirectoriesMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -268,6 +274,45 @@ describe('extension activation', () => {
     expect(registerCommandsMock.mock.calls[0]?.[3]).toMatchObject(latestServerInstance.current!);
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:activated', true);
     expect(context.subscriptions).toHaveLength(2);
+  });
+
+  it('registers the provider and commands before starting non-blocking stale cleanup', async () => {
+    sweepStaleInjectedConfigDirectoriesMock.mockReturnValueOnce(new Promise(() => {}));
+    const { activate } = await import('./extension');
+
+    await expect(
+      activate({
+        extensionUri: {},
+        extension: { id: 'koltyakov.varro' },
+        workspaceState: {},
+        subscriptions: [],
+      } as never)
+    ).resolves.toBeUndefined();
+
+    expect(sweepStaleInjectedConfigDirectoriesMock).toHaveBeenCalledOnce();
+    expect(registerWebviewViewProviderMock.mock.invocationCallOrder[0]).toBeLessThan(
+      sweepStaleInjectedConfigDirectoriesMock.mock.invocationCallOrder[0] ?? 0
+    );
+    expect(registerCommandsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      sweepStaleInjectedConfigDirectoriesMock.mock.invocationCallOrder[0] ?? 0
+    );
+  });
+
+  it('logs stale cleanup failures without rejecting activation', async () => {
+    sweepStaleInjectedConfigDirectoriesMock.mockRejectedValueOnce(new Error('cleanup failed'));
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    await Promise.resolve();
+
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Failed to clean up stale temporary config directories: cleanup failed'
+    );
   });
 
   it('posts a changed workspace only after the event stream is rescoped', async () => {

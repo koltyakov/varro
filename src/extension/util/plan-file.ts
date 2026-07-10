@@ -16,10 +16,6 @@ export function getOpenCodeConfigDir(
   platform = process.platform
 ) {
   const join = getJoin(platform);
-  if (platform === 'win32') {
-    return env.APPDATA?.trim() || join(home, 'AppData', 'Roaming');
-  }
-
   return env.XDG_CONFIG_HOME?.trim() || join(home, '.config');
 }
 

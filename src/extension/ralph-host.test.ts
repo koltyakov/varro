@@ -57,6 +57,14 @@ class FakeServer extends EventEmitter {
       return {};
     }
     if (method === 'POST' && path.endsWith('/abort')) return {};
+    if (method === 'GET' && path === '/session/status') {
+      return Object.fromEntries(
+        Array.from({ length: this.sessionCount }, (_, index) => [
+          `child-${index + 1}`,
+          { type: 'busy' },
+        ])
+      );
+    }
     if (method === 'GET' && path === '/session') return [];
     if (method === 'GET' && path.endsWith('/message')) {
       return [
@@ -115,6 +123,34 @@ describe('HostRalphStore', () => {
 
     const reloaded = new HostRalphStore(persistence, vi.fn());
     expect(reloaded.getRun(config.managerSessionId)?.status).toBe('paused');
+  });
+
+  it('round-trips every persisted iteration recovery phase', async () => {
+    const { persistence } = createMemoryPersistence();
+    const store = new HostRalphStore(persistence, vi.fn());
+    const phases = ['primary', 'verification', 'repair'] as const;
+
+    for (const [index, phase] of phases.entries()) {
+      const config = createConfig({ managerSessionId: `manager-${phase}`, iterations: 3 });
+      store.startRun(config);
+      store.upsertIteration(config.managerSessionId, {
+        index: index + 1,
+        childSessionId: `child-${phase}`,
+        status: 'running',
+        phase,
+        startedAt: 100 + index,
+        endedAt: null,
+        filesChanged: [],
+        verification: {},
+        ...(phase === 'repair' ? { repairSessionIds: ['repair-1'] } : {}),
+      });
+    }
+    await store.flush();
+
+    const reloaded = new HostRalphStore(persistence, vi.fn());
+    expect(
+      phases.map((phase) => reloaded.getRun(`manager-${phase}`)?.iterations[0]?.phase)
+    ).toEqual(phases);
   });
 
   it('serializes delayed persistence writes and flushes the latest snapshot', async () => {
@@ -383,6 +419,33 @@ describe('RalphHost', () => {
     expect(server.request).toHaveBeenCalledWith('POST', '/session/child-shutdown/abort', undefined);
   });
 
+  it('does not hang disposal when prompt and abort requests never settle', async () => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    const never = new Promise<never>(() => {});
+    server.request.mockImplementation(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'child-never' };
+      if (method === 'POST' && path.endsWith('/prompt_async')) return never;
+      if (method === 'POST' && path.endsWith('/abort')) return never;
+      if (method === 'GET' && path === '/session/status') {
+        return { 'child-never': { type: 'busy' } };
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(server.request).toHaveBeenCalledWith(
+        'POST',
+        '/session/child-never/prompt_async',
+        expect.anything()
+      )
+    );
+
+    await expect(host.dispose()).resolves.toBeUndefined();
+    expect(host.getStatePayload().activeIds).toEqual([]);
+  });
+
   it('runs a loop to completion from a ralph/start message', async () => {
     const { host, server, broadcasts, ensureServerStarted } = createHost();
     const config = createConfig();
@@ -409,6 +472,85 @@ describe('RalphHost', () => {
     expect(host.getStatePayload().activeIds).toEqual([]);
   });
 
+  it('treats an omitted status as idle when the child still exists and SSE is lost', async () => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    server.request.mockImplementation(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'child-polled' };
+      if (method === 'POST' && path.endsWith('/prompt_async')) return {};
+      if (method === 'GET' && path === '/session/status') return {};
+      if (method === 'GET' && path === '/session') return [{ id: 'child-polled' }];
+      if (method === 'GET' && path.endsWith('/message')) {
+        return [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'lint: PASS' }] }];
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
+    );
+
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/status', undefined);
+    expect(server.request).toHaveBeenCalledWith('GET', '/session', undefined);
+  });
+
+  it('surfaces terminal status errors with child-session context', async () => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    server.request.mockImplementation(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'child-error' };
+      if (method === 'POST' && path.endsWith('/prompt_async')) return {};
+      if (method === 'GET' && path === '/session/status') {
+        return { 'child-error': { type: 'error', message: 'provider unavailable' } };
+      }
+      if (method === 'POST' && path.endsWith('/abort')) return {};
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('failed')
+    );
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.note).toContain(
+      'Ralph session child-error failed while waiting for idle: provider unavailable'
+    );
+  });
+
+  it.each([
+    {
+      label: 'deleted',
+      statuses: {},
+      expected: 'missing from the authoritative status snapshot',
+    },
+    {
+      label: 'unknown',
+      statuses: { 'child-status': { type: 'mystery' } },
+      expected: 'OpenCode returned an unknown status "mystery" for child-status',
+    },
+  ])('does not treat a $label child status as idle', async ({ statuses, expected }) => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    server.request.mockImplementation(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') return { id: 'child-status' };
+      if (method === 'POST' && path.endsWith('/prompt_async')) return {};
+      if (method === 'GET' && path === '/session/status') return statuses;
+      if (method === 'GET' && path === '/session') return [];
+      if (method === 'POST' && path.endsWith('/abort')) return {};
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('failed')
+    );
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.note).toContain(
+      expected
+    );
+  });
+
   it('adopts legacy runs from ralph/sync and broadcasts state', async () => {
     const { host, broadcasts } = createHost();
     const config = createConfig({ managerSessionId: 'manager-legacy', iterations: 3 });
@@ -425,11 +567,111 @@ describe('RalphHost', () => {
       payload: { legacyRuns: { [config.managerSessionId]: legacyRun } },
     });
 
-    expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('paused');
-    expect(broadcasts.at(-1)?.runs[config.managerSessionId]).toBeDefined();
+    await vi.waitFor(() => {
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('paused');
+      expect(broadcasts.at(-1)?.runs[config.managerSessionId]).toEqual(
+        expect.objectContaining({ legacyMigrationAcknowledged: true })
+      );
+    });
   });
 
-  it('stops a run with manual_stop and pauses/updates model on request', () => {
+  it('does not acknowledge or retain a legacy run when persistence fails', async () => {
+    const config = createConfig({ managerSessionId: 'manager-write-failure' });
+    const persistence: Persistence = {
+      get: () => undefined,
+      set: vi.fn().mockRejectedValue(new Error('disk full')),
+      remove: () => undefined,
+    };
+    const { host, broadcasts } = createHost({ persistence });
+
+    host.handleMessage({
+      type: 'ralph/sync',
+      payload: {
+        legacyRuns: {
+          [config.managerSessionId]: {
+            config,
+            status: 'paused',
+            currentIteration: 0,
+            iterations: [],
+            updatedAt: 1,
+          },
+        },
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to persist Ralph runs: disk full')
+      )
+    );
+    expect(host.getStatePayload().runs[config.managerSessionId]).toBeUndefined();
+    expect(
+      broadcasts.some(
+        (payload) => payload.runs[config.managerSessionId]?.legacyMigrationAcknowledged === true
+      )
+    ).toBe(false);
+  });
+
+  it('acknowledges only legacy runs that fit host capacity', async () => {
+    const { persistence } = createMemoryPersistence();
+    const existingConfig = createConfig({ managerSessionId: 'existing' });
+    const stored: Record<string, RalphRun> = {
+      [existingConfig.managerSessionId]: {
+        config: existingConfig,
+        status: 'paused',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: 1,
+      },
+    };
+    for (let index = 1; index < 100; index += 1) {
+      const config = createConfig({ managerSessionId: `paused-${index}` });
+      stored[config.managerSessionId] = {
+        config,
+        status: 'paused',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: index + 1,
+      };
+    }
+    await persistence.set(RALPH_RUNS_KEY, stored);
+    const rejectedConfig = createConfig({ managerSessionId: 'capacity-rejected' });
+    const { host, broadcasts } = createHost({ persistence });
+
+    host.handleMessage({
+      type: 'ralph/sync',
+      payload: {
+        legacyRuns: {
+          [existingConfig.managerSessionId]: stored[existingConfig.managerSessionId]!,
+          [rejectedConfig.managerSessionId]: {
+            config: rejectedConfig,
+            status: 'paused',
+            currentIteration: 0,
+            iterations: [],
+            updatedAt: 200,
+          },
+        },
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(
+        broadcasts.some(
+          (payload) =>
+            payload.runs[existingConfig.managerSessionId]?.legacyMigrationAcknowledged === true
+        )
+      ).toBe(true)
+    );
+    expect(host.getStatePayload().runs[rejectedConfig.managerSessionId]).toBeUndefined();
+    expect(
+      broadcasts.some(
+        (payload) =>
+          payload.runs[rejectedConfig.managerSessionId]?.legacyMigrationAcknowledged === true
+      )
+    ).toBe(false);
+  });
+
+  it('stops a run with manual_stop and pauses/updates model on request', async () => {
     const { host } = createHost();
     const config = createConfig({ iterations: 5 });
     // Seed a run without starting the loop.
@@ -447,6 +689,9 @@ describe('RalphHost', () => {
         },
       },
     });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]).toBeDefined()
+    );
 
     host.handleMessage({
       type: 'ralph/update-model',
@@ -488,5 +733,57 @@ describe('RalphHost', () => {
       expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done');
     });
     expect(ensureServerStarted).toHaveBeenCalled();
+  });
+
+  it('settles a persisted running child instead of creating a replacement', async () => {
+    const { persistence } = createMemoryPersistence();
+    const config = createConfig();
+    await persistence.set(RALPH_RUNS_KEY, {
+      [config.managerSessionId]: {
+        config,
+        status: 'running',
+        currentIteration: 1,
+        iterations: [
+          {
+            index: 1,
+            childSessionId: 'child-persisted',
+            status: 'running',
+            startedAt: 100,
+            endedAt: null,
+            filesChanged: [],
+            verification: {},
+          },
+        ],
+        updatedAt: 1,
+      },
+    });
+
+    const { host, server } = createHost({ persistence });
+    server.request.mockImplementation(async (method: string, path: string) => {
+      if (method === 'GET' && path === '/session/status') {
+        return { 'child-persisted': { type: 'idle' } };
+      }
+      if (method === 'POST' && path.endsWith('/prompt_async')) {
+        const sessionID = decodeURIComponent(path.split('/')[2] || '');
+        setTimeout(() => {
+          server.emit('event', { type: 'session.idle', properties: { sessionID } });
+        }, 0);
+        return {};
+      }
+      if (method === 'GET' && path === '/session') return [];
+      if (method === 'GET' && path.endsWith('/message')) {
+        return [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'lint: PASS' }] }];
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
+    );
+
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/status', undefined);
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/session', expect.anything());
+    expect(
+      host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.childSessionId
+    ).toBe('child-persisted');
   });
 });

@@ -161,7 +161,6 @@ type SessionSyncDependencies = {
 
 type SessionSyncGenerations = {
   nextSelection(): number;
-  nextSync(): number;
   isCurrentSync(generation: number): boolean;
 };
 
@@ -215,7 +214,7 @@ export class SessionSyncOperations {
     );
   };
 
-  readonly syncSessionMessages = async (sessionId: string) => {
+  readonly syncSessionMessages = async (sessionId: string, generation: number) => {
     await syncSessionMessagesWithStateDependencies(
       {
         getActiveSessionId: this.deps.getActiveSessionId,
@@ -230,7 +229,7 @@ export class SessionSyncOperations {
         handoffTodosToMessages: this.deps.handoffTodosToMessages,
       },
       {
-        next: this.generations.nextSync,
+        next: () => generation,
         isCurrent: this.generations.isCurrentSync,
       },
       sessionId

@@ -35,20 +35,32 @@ function sessionMatchesTaskLabel(session: TaskSessionInfo, taskLabel: string) {
 export function resolveTaskSessionId(
   tool: ToolPart,
   messages: MessageEntry[],
-  sessions: readonly TaskSessionInfo[]
+  sessions: readonly TaskSessionInfo[],
+  createdBefore?: number
 ) {
   if (normalizeToolName(tool.tool) !== 'task' || tool.state.status === 'pending') return null;
 
   const metadata = tool.state.metadata as Record<string, unknown> | undefined;
   const metadataSessionId = getTaskSessionIdFromMetadata(metadata);
-  if (metadataSessionId) return metadataSessionId;
+  if (metadataSessionId) {
+    const metadataSession = sessions.find((session) => session.id === metadataSessionId);
+    if (
+      metadataSession &&
+      createdBefore !== undefined &&
+      metadataSession.time.created >= createdBefore
+    ) {
+      return null;
+    }
+    return metadataSessionId;
+  }
 
   const parent = messages.find((entry) => entry.info.id === tool.messageID);
   const parentCreated = parent?.info.time.created || 0;
   const candidates = sessions
     .filter((session) => {
       if (session.parentID !== tool.sessionID && session.parentID !== tool.messageID) return false;
-      return parentCreated <= 0 || session.time.created >= parentCreated;
+      if (parentCreated > 0 && session.time.created < parentCreated) return false;
+      return createdBefore === undefined || session.time.created < createdBefore;
     })
     .toSorted((a, b) => a.time.created - b.time.created);
   if (candidates.length === 0) return null;

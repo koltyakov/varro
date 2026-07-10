@@ -30,6 +30,16 @@ export type BlockingRequestSnapshot = {
   directory?: string;
 };
 
+export type RecoverySnapshot = {
+  interruptedSessions: InterruptedSessionSnapshot[];
+  blockingRequests: BlockingRequestSnapshot[];
+};
+
+export type SessionBusyAttempt = {
+  readonly sessionID: string;
+  readonly id: number;
+};
+
 export interface SessionStateListener {
   /** Called whenever any state that the status bar renders has changed. */
   onStatusChange(): void;
@@ -47,6 +57,8 @@ const MAX_PERSISTED_BLOCKING_REQUESTS = 100;
 const MAX_PERSISTED_METADATA_ENTRIES = 20;
 const MAX_PERSISTED_STRING_LENGTH = 500;
 const MAX_SESSION_METADATA_ENTRIES = 200;
+const MAX_DEFERRED_PROMPT_FAILURES = 100;
+const MAX_DEFERRED_PROMPT_RECONCILIATIONS = 3;
 const MIN_EPOCH_MILLIS = 1_000_000_000_000;
 const COMPLETION_NOTIFICATION_CLOCK_SKEW_MS = 5_000;
 
@@ -68,8 +80,17 @@ export class SessionStateManager {
   private readonly sessionModes = new Map<string, string>();
   private readonly busyStartedAt = new Map<string, number>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
+  private readonly blockingRequestMutations = new Set<string>();
+  private readonly recoveryDeletedSessionIDs = new Set<string>();
+  private readonly busyAttempts = new Map<string, Set<number>>();
+  private readonly deferredPromptFailures = new Map<
+    number,
+    { attempt: SessionBusyAttempt; remainingReconciliations: number }
+  >();
   private readonly reconcileIdleSince = new Map<string, number>();
   private persistenceQueue: Promise<void> = Promise.resolve();
+  private recoverySnapshotPromise: Promise<RecoverySnapshot> | undefined;
+  private nextBusyAttemptID = 0;
 
   constructor(
     private readonly persistence: Persistence,
@@ -129,11 +150,49 @@ export class SessionStateManager {
    * guarantees the busy marker is in place before any finish event lands,
    * eliminating the missed-finish race for ping-style turns.
    */
-  markSessionBusy(sessionID: string): void {
-    if (!sessionID) return;
-    this.markBusyInternal(sessionID);
-    this.listener.onStatusChange();
-    void this.persist();
+  markSessionBusy(sessionID: string): SessionBusyAttempt | undefined {
+    if (!sessionID) return undefined;
+    const attempt = { sessionID, id: ++this.nextBusyAttemptID };
+    const attempts = this.busyAttempts.get(sessionID) ?? new Set<number>();
+    attempts.add(attempt.id);
+    this.busyAttempts.set(sessionID, attempts);
+    if (this.markBusyInternal(sessionID)) {
+      this.listener.onStatusChange();
+      void this.persist();
+    }
+    return attempt;
+  }
+
+  reconcilePromptFailure(attempt: SessionBusyAttempt, serverStatus: unknown): void {
+    this.deferredPromptFailures.delete(attempt.id);
+    const attempts = this.busyAttempts.get(attempt.sessionID);
+    if (!attempts?.delete(attempt.id)) return;
+    if (attempts.size === 0) this.busyAttempts.delete(attempt.sessionID);
+
+    const statusType = getString(asRecord(serverStatus)?.type);
+    let changed = false;
+    if (statusType === 'busy' || statusType === 'retry') {
+      changed = this.markBusyInternal(attempt.sessionID);
+    } else if ((serverStatus === undefined || statusType === 'idle') && attempts.size === 0) {
+      changed = this.clearBusy(attempt.sessionID);
+    }
+    if (changed) {
+      this.listener.onStatusChange();
+      void this.persist();
+    }
+  }
+
+  deferPromptFailure(attempt: SessionBusyAttempt): void {
+    if (!this.busyAttempts.get(attempt.sessionID)?.has(attempt.id)) return;
+    this.deferredPromptFailures.set(attempt.id, {
+      attempt,
+      remainingReconciliations: MAX_DEFERRED_PROMPT_RECONCILIATIONS,
+    });
+    while (this.deferredPromptFailures.size > MAX_DEFERRED_PROMPT_FAILURES) {
+      const oldest = this.deferredPromptFailures.values().next().value?.attempt;
+      if (!oldest) break;
+      this.reconcilePromptFailure(oldest, undefined);
+    }
   }
 
   handleServerEvent(event: ServerEvent): void {
@@ -185,7 +244,11 @@ export class SessionStateManager {
       case 'session.error': {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
-        changed = this.markSessionFailed(sessionID, asRecord(props?.error)) || changed;
+        const error = asRecord(props?.error);
+        changed =
+          (error && isAbortedErrorRecord(error)
+            ? this.clearAbortedSession(sessionID)
+            : this.markSessionFailed(sessionID, error)) || changed;
         break;
       }
       case 'message.updated': {
@@ -293,36 +356,45 @@ export class SessionStateManager {
     return this.persistenceQueue;
   }
 
-  consumeInterruptedSessions(): Promise<InterruptedSessionSnapshot[]> {
-    return this.enqueuePersistence(async () => {
-      const stored = this.persistence.get<unknown>(INTERRUPTED_SESSIONS_KEY);
-      const snapshots = Array.isArray(stored) ? stored : [];
-      await this.persistence.remove(INTERRUPTED_SESSIONS_KEY);
-      return snapshots.filter(
-        (item) =>
-          typeof item?.id === 'string' &&
-          item.id.trim().length > 0 &&
-          !isSubagentSessionTitle(item.title)
-      );
-    });
-  }
+  consumeRecoverySnapshot(): Promise<RecoverySnapshot> {
+    if (this.recoverySnapshotPromise) return this.recoverySnapshotPromise;
 
-  consumeBlockingRequests(): Promise<BlockingRequestSnapshot[]> {
-    return this.enqueuePersistence(async () => {
-      const stored = this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY);
-      const snapshots = Array.isArray(stored) ? stored : [];
-      await this.persistence.remove(BLOCKING_REQUESTS_KEY);
-      return snapshots.filter(
-        (item) =>
-          typeof item?.id === 'string' &&
-          item.id.trim().length > 0 &&
-          typeof item?.sessionID === 'string' &&
-          item.sessionID.trim().length > 0 &&
-          (item.kind === 'permission' || item.kind === 'question') &&
-          item.props &&
-          typeof item.props === 'object'
+    const operation = this.enqueuePersistence(async () => {
+      const interruptedSessions = validateInterruptedSessionSnapshots(
+        this.persistence.get<unknown>(INTERRUPTED_SESSIONS_KEY)
       );
+      const blockingRequests = validateBlockingRequestSnapshots(
+        this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY)
+      );
+
+      // Merge before yielding so subsequent server events always win. Current
+      // process state includes both request replies and session deletions.
+      const recoveredSessionIDs = new Set(blockingRequests.map((item) => item.sessionID));
+      for (const sessionID of this.recoveryDeletedSessionIDs) {
+        if (!recoveredSessionIDs.has(sessionID)) this.recoveryDeletedSessionIDs.delete(sessionID);
+      }
+      this.mergeBlockingRequests(blockingRequests);
+      await Promise.all([
+        this.persistence.remove(INTERRUPTED_SESSIONS_KEY),
+        this.persistence.remove(BLOCKING_REQUESTS_KEY),
+      ]);
+      this.blockingRequestMutations.clear();
+      return {
+        interruptedSessions,
+        blockingRequests: this.getLiveBlockingRequestSnapshots(),
+      };
     });
+    this.recoverySnapshotPromise = operation;
+    void operation.then(
+      () => {
+        this.recoveryDeletedSessionIDs.clear();
+        if (this.recoverySnapshotPromise === operation) this.recoverySnapshotPromise = undefined;
+      },
+      () => {
+        if (this.recoverySnapshotPromise === operation) this.recoverySnapshotPromise = undefined;
+      }
+    );
+    return operation;
   }
 
   private enqueuePersistence<T>(operation: () => Promise<T>): Promise<T> {
@@ -334,14 +406,14 @@ export class SessionStateManager {
     return result;
   }
 
-  /**
-   * Reinstate pending-attention entries from a previous session (after
-   * webview reload). Does not emit notifications - those were already
-   * shown in the prior run.
-   */
-  restoreBlockingRequests(snapshots: BlockingRequestSnapshot[]): void {
-    this.pendingAttention.clear();
+  private mergeBlockingRequests(snapshots: BlockingRequestSnapshot[]): void {
     for (const item of snapshots) {
+      if (
+        this.recoveryDeletedSessionIDs.has(item.sessionID) ||
+        this.pendingAttention.has(item.id) ||
+        this.blockingRequestMutations.has(item.id)
+      )
+        continue;
       this.pendingAttention.set(item.id, {
         sessionID: item.sessionID,
         kind: item.kind,
@@ -464,6 +536,21 @@ export class SessionStateManager {
       .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
   }
 
+  private getLiveBlockingRequestSnapshots(): BlockingRequestSnapshot[] {
+    return [...this.pendingAttention.entries()]
+      .map(([id, request]) => ({
+        id,
+        sessionID: request.sessionID,
+        kind: request.kind,
+        props: { ...request.props },
+        directory: trimOptionalString(
+          request.directory || this.sessionDirectories.get(request.sessionID)
+        ),
+      }))
+      .toSorted((a, b) => a.id.localeCompare(b.id))
+      .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
+  }
+
   private serializeBlockingRequestProps(
     kind: PendingAttentionKind,
     props: Record<string, unknown>
@@ -512,7 +599,9 @@ export class SessionStateManager {
     const requestID =
       getString(props.id) || getString(props.permissionID) || getString(props.requestID);
     const sessionID = getString(props.sessionID);
-    if (!requestID || !sessionID || this.pendingAttention.has(requestID)) return false;
+    if (!requestID || !sessionID) return false;
+    this.blockingRequestMutations.add(requestID);
+    if (this.pendingAttention.has(requestID)) return false;
 
     const label =
       kind === 'question' ? describeQuestionRequest(props) : describePermissionRequest(props);
@@ -530,6 +619,7 @@ export class SessionStateManager {
   }
 
   private removeSession(sessionID: string) {
+    if (this.recoverySnapshotPromise) this.recoveryDeletedSessionIDs.add(sessionID);
     let changed = false;
     changed = this.busySessions.delete(sessionID) || changed;
     changed = this.completedSessions.delete(sessionID) || changed;
@@ -540,6 +630,7 @@ export class SessionStateManager {
     changed = this.sessionParentIDs.delete(sessionID) || changed;
     changed = this.sessionModes.delete(sessionID) || changed;
     this.busyStartedAt.delete(sessionID);
+    this.clearBusyAttempts(sessionID);
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
       this.pendingAttention.delete(requestID);
@@ -550,6 +641,7 @@ export class SessionStateManager {
 
   private clearBlockingRequest(requestID: string | undefined): boolean {
     if (!requestID) return false;
+    this.blockingRequestMutations.add(requestID);
     return this.pendingAttention.delete(requestID);
   }
 
@@ -562,18 +654,29 @@ export class SessionStateManager {
 
   private clearBusy(sessionID: string): boolean {
     const wasBusy = this.busySessions.delete(sessionID);
+    this.clearBusyAttempts(sessionID);
     if (wasBusy) this.busyStartedAt.delete(sessionID);
     return wasBusy;
   }
 
+  private clearBusyAttempts(sessionID: string): void {
+    this.busyAttempts.delete(sessionID);
+    for (const [attemptID, deferred] of this.deferredPromptFailures) {
+      if (deferred.attempt.sessionID === sessionID) {
+        this.deferredPromptFailures.delete(attemptID);
+      }
+    }
+  }
+
   private markBusyInternal(sessionID: string): boolean {
+    let changed = !this.busySessions.has(sessionID);
     if (!this.busySessions.has(sessionID)) {
       this.busyStartedAt.set(sessionID, Date.now());
     }
     this.busySessions.add(sessionID);
-    this.completedSessions.delete(sessionID);
-    this.failedSessions.delete(sessionID);
-    return true;
+    changed = this.completedSessions.delete(sessionID) || changed;
+    changed = this.failedSessions.delete(sessionID) || changed;
+    return changed;
   }
 
   private finishBusySession(sessionID: string, completedAt: number | undefined): boolean {
@@ -631,6 +734,23 @@ export class SessionStateManager {
     graceMs: number,
     now: number = Date.now()
   ): string[] {
+    for (const deferred of this.deferredPromptFailures.values()) {
+      const { attempt } = deferred;
+      const serverStatus = serverStatuses[attempt.sessionID];
+      const statusType = getString(asRecord(serverStatus)?.type);
+      if (
+        serverStatus === undefined ||
+        statusType === 'idle' ||
+        statusType === 'busy' ||
+        statusType === 'retry'
+      ) {
+        this.reconcilePromptFailure(attempt, serverStatus);
+      } else if (deferred.remainingReconciliations <= 1) {
+        this.reconcilePromptFailure(attempt, undefined);
+      } else {
+        deferred.remainingReconciliations -= 1;
+      }
+    }
     if (this.busySessions.size === 0) {
       this.reconcileIdleSince.clear();
       return [];
@@ -681,6 +801,13 @@ export class SessionStateManager {
       this.showFailureNotification(sessionID, error ? describeFailure(error) : undefined);
     }
     return !wasFailed;
+  }
+
+  private clearAbortedSession(sessionID: string): boolean {
+    let changed = this.clearBusy(sessionID);
+    changed = this.failedSessions.delete(sessionID) || changed;
+    changed = this.completedSessions.delete(sessionID) || changed;
+    return changed;
   }
 
   private showBlockingNotification(
@@ -780,6 +907,32 @@ function isContinuationStepEnd(props: Record<string, unknown>): boolean {
 
 function isSubagentSessionTitle(title: string | undefined): boolean {
   return !!title?.trim().match(/\(@[^)]*\bsubagent\)$/i);
+}
+
+function validateInterruptedSessionSnapshots(value: unknown): InterruptedSessionSnapshot[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is InterruptedSessionSnapshot =>
+      typeof item?.id === 'string' &&
+      item.id.trim().length > 0 &&
+      !isSubagentSessionTitle(item.title)
+  );
+}
+
+function validateBlockingRequestSnapshots(value: unknown): BlockingRequestSnapshot[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (item): item is BlockingRequestSnapshot =>
+        typeof item?.id === 'string' &&
+        item.id.trim().length > 0 &&
+        typeof item?.sessionID === 'string' &&
+        item.sessionID.trim().length > 0 &&
+        (item.kind === 'permission' || item.kind === 'question') &&
+        !!item.props &&
+        typeof item.props === 'object'
+    )
+    .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

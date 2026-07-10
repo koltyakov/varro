@@ -1,4 +1,9 @@
 import { Buffer } from 'buffer';
+import {
+  MAX_DROPPED_CONTENT_FILES,
+  MAX_DROPPED_CONTENT_FILE_BYTES,
+  MAX_DROPPED_CONTENT_TOTAL_BYTES,
+} from '../../shared/dropped-content-policy';
 import { VARRO_API_ENDPOINTS } from '../../shared/protocol';
 import type { DesktopSessionPaneSide, PermissionMode, WebviewMessage } from '../../shared/protocol';
 import type {
@@ -8,6 +13,7 @@ import type {
   RalphRun,
   RalphSelectedModel,
 } from '../../shared/ralph';
+import { MAX_RALPH_ITERATIONS } from '../../shared/ralph';
 import { asRecord } from '../../shared/type-utils';
 
 const MAX_PATH_LENGTH = 4096;
@@ -15,18 +21,13 @@ const MAX_QUERY_LENGTH = 2048;
 const MAX_LOG_FIELD_LENGTH = 10_000;
 const MAX_SEARCH_QUERY_LENGTH = 200;
 const MAX_DROPPED_PATHS = 100;
-const MAX_DROPPED_CONTENT_FILES = 20;
-const MAX_DROPPED_CONTENT_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_DROPPED_CONTENT_TOTAL_BYTES = 50 * 1024 * 1024;
 const MAX_DROPPED_CONTENT_NAME_LENGTH = 512;
 const MAX_DROPPED_CONTENT_BASE64_LENGTH = Math.ceil(MAX_DROPPED_CONTENT_FILE_BYTES / 3) * 4;
 const MAX_RALPH_ID_LENGTH = 512;
 const MAX_RALPH_PROMPT_LENGTH = 100_000;
-const MAX_RALPH_START_ITERATIONS = 500;
-const MAX_RALPH_RUN_ITERATIONS = 10_000;
 const MAX_RALPH_LEGACY_RUNS = 100;
 const MAX_RALPH_LEGACY_ITERATIONS = 5_000;
-const MAX_RALPH_ITERATIONS_PER_RUN = 1_000;
+const MAX_RALPH_ITERATIONS_PER_RUN = MAX_RALPH_ITERATIONS;
 const MAX_RALPH_FILES_CHANGED = 500;
 const MAX_RALPH_VERIFICATIONS = 100;
 const MAX_RALPH_REPAIR_SESSIONS = 100;
@@ -260,7 +261,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'ralph/start': {
       const payload = asRecord(message?.payload);
       if (!payload || !isWithinRalphStructuralBudget(payload)) return null;
-      const config = parseRalphConfig(payload?.config, MAX_RALPH_START_ITERATIONS);
+      const config = parseRalphConfig(payload?.config, MAX_RALPH_ITERATIONS);
       return config ? { type, payload: { config } } : null;
     }
 
@@ -406,12 +407,12 @@ function parseRalphRuns(
 
 function parseRalphRun(value: unknown, contentBudget: RalphContentBudget): RalphRun | null {
   const record = asRecord(value);
-  const config = parseRalphConfig(record?.config, MAX_RALPH_RUN_ITERATIONS);
+  const config = parseRalphConfig(record?.config, MAX_RALPH_ITERATIONS);
   const status = getRalphStatus(record?.status);
   const currentIteration = getBoundedInteger(
     record?.currentIteration,
     0,
-    config?.iterations ?? MAX_RALPH_RUN_ITERATIONS
+    config?.iterations ?? MAX_RALPH_ITERATIONS
   );
   const updatedAt = getSafeInteger(record?.updatedAt);
   if (
@@ -475,6 +476,8 @@ function parseRalphIteration(
 
   const verification = parseRalphVerification(record.verification);
   if (!verification) return null;
+  const phase = getRalphIterationPhase(record.phase);
+  if (record.phase !== undefined && !phase) return null;
 
   const iteration: RalphIteration = {
     index,
@@ -484,6 +487,7 @@ function parseRalphIteration(
     endedAt,
     filesChanged,
     verification,
+    ...(phase ? { phase } : {}),
   };
 
   if (record.tokens !== undefined) {
@@ -514,6 +518,10 @@ function parseRalphIteration(
   }
 
   return iteration;
+}
+
+function getRalphIterationPhase(value: unknown): RalphIteration['phase'] | null {
+  return value === 'primary' || value === 'verification' || value === 'repair' ? value : null;
 }
 
 function parseRalphVerification(value: unknown): RalphIteration['verification'] | null {

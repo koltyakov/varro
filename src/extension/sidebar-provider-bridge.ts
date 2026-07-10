@@ -2,7 +2,6 @@ import { readFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import * as vscode from 'vscode';
 import type { ExtensionMessage, InitialWebviewState } from '../shared/protocol';
-import { logger } from './logger';
 import { renderWebviewHtml, type WebviewAssetContent } from './webview-html';
 
 export class SidebarProviderBridge {
@@ -47,18 +46,22 @@ export class SidebarProviderBridge {
 
   private async loadWebviewAssets(): Promise<WebviewAssetContent> {
     const distDir = resolve(this.extensionUri.fsPath, 'dist', 'webview');
-    const [scriptResult, cssResult] = await Promise.allSettled([
-      readFile(join(distDir, 'webview.js'), 'utf-8'),
-      readFile(join(distDir, 'webview.css'), 'utf-8'),
-    ]);
-
-    const scriptContent = scriptResult.status === 'fulfilled' ? scriptResult.value : '';
-    const cssContent = cssResult.status === 'fulfilled' ? cssResult.value : '';
-
-    if (scriptResult.status !== 'fulfilled') {
-      logger.warn('webview.js not found - run `npm run build:webview` first');
-      return { scriptContent, cssContent };
+    let scriptContent: string;
+    let cssContent: string;
+    try {
+      [scriptContent, cssContent] = await Promise.all([
+        readFile(join(distDir, 'webview.js'), 'utf-8'),
+        readFile(join(distDir, 'webview.css'), 'utf-8'),
+      ]);
+    } catch (err) {
+      throw new Error(
+        `Failed to load built webview assets: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err }
+      );
     }
+
+    if (!scriptContent.trim()) throw new Error('Built webview.js is empty');
+    if (!cssContent.trim()) throw new Error('Built webview.css is empty');
 
     return { scriptContent, cssContent };
   }

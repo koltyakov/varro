@@ -233,7 +233,11 @@ export class OpenCodeServer extends EventEmitter {
         throw new Error(OpenCodeProcess.MISSING_CLI_MESSAGE);
       }
 
-      this.throwIfStartCancelled(disposeGeneration, signal);
+      if (this.processManager.hasOwnershipLeaseCandidate) {
+        this.throwIfStartCancelled(disposeGeneration, signal);
+        await this.processManager.recoverManagedServerOwnership();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+      }
       const health = await this.readHealthInfo();
       this.throwIfStartCancelled(disposeGeneration, signal);
       if (health.healthy) {
@@ -241,7 +245,7 @@ export class OpenCodeServer extends EventEmitter {
           logger.info(`Found existing OpenCode server at ${this.url}`);
           await this.processManager.prepareForHealthyExistingServer();
           this.throwIfStartCancelled(disposeGeneration, signal);
-          if (this.hasInjectedCompactionOverride()) {
+          if (this.hasInjectedCompactionOverride() && !this.managedProcess) {
             logger.warn(
               'Varro chat auto-compaction settings require a Varro-managed OpenCode server; project opencode.json still overrides when present'
             );
@@ -266,6 +270,11 @@ export class OpenCodeServer extends EventEmitter {
             ? (this._status as { message: string }).message
             : 'server not running'
         );
+      }
+
+      if (this.managedProcess && !this.process) {
+        await this.processManager.stopServerForRestart();
+        this.throwIfStartCancelled(disposeGeneration, signal);
       }
 
       this.throwIfStartCancelled(disposeGeneration, signal);
@@ -462,6 +471,11 @@ export class OpenCodeServer extends EventEmitter {
           return;
         }
         if (healthNow.healthy) {
+          await this.processManager.confirmManagedServerOwnership();
+          if (isInvalidAttempt()) {
+            rejectCancelledAttempt();
+            return;
+          }
           this.setRunningStatus(this.url, 'healthy');
           this.processManager.resetPortRetryState();
           this.startEventStream();
@@ -646,6 +660,14 @@ export class OpenCodeServer extends EventEmitter {
         reject(new Error(message));
       } else if (health.healthy) {
         this.cancelPollHealth();
+        await this.processManager.confirmManagedServerOwnership();
+        if (
+          signal?.aborted ||
+          !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
+        ) {
+          reject(this.getCancellationError(signal));
+          return;
+        }
         this.setRunningStatus(this.url, 'healthy');
         this.processManager.resetPortRetryState();
         this.startEventStream();
@@ -670,6 +692,11 @@ export class OpenCodeServer extends EventEmitter {
     body?: unknown,
     options?: OpenCodeRequestOptions
   ): Promise<unknown> {
+    const restartPromise = this.lifecycle.getRestartPromise<string>();
+    if (restartPromise) await restartPromise;
+    if (this.lifecycle.phase === 'disposing' || this.lifecycle.phase === 'restarting') {
+      throw new Error('OpenCode server is not accepting requests while stopping');
+    }
     return this.transport.request(method, path, body, options);
   }
 
@@ -695,7 +722,7 @@ export class OpenCodeServer extends EventEmitter {
       command: this.resolveCommand(),
       autoStart: this.processManager.isAutoStartEnabled,
       managedProcess: this.managedProcess,
-      processId: this.process?.pid ?? null,
+      processId: this.processManager.managedProcessId,
       cliVersion,
       cliVersionError,
       health: await this.readHealthInfo(),
@@ -775,6 +802,17 @@ export class OpenCodeServer extends EventEmitter {
     const observed = serverVersion
       ? `the running server is ${serverVersion}`
       : 'the running server version could not be determined';
+
+    if (this.processManager.hasForeignActiveOwnership) {
+      await this.processManager.refreshManagedServerOwnership();
+      this.throwIfStartCancelled(disposeGeneration, signal);
+    }
+    if (this.processManager.hasForeignActiveOwnership) {
+      this.failForRequiredUpdate(
+        observed,
+        'The running server is actively owned by another Varro extension host and cannot be replaced safely.'
+      );
+    }
 
     if (!this.processManager.isAutoUpdateEnabled) {
       this.failForRequiredUpdate(observed, 'Automatic updates are disabled.');
@@ -977,7 +1015,10 @@ export class OpenCodeServer extends EventEmitter {
 
   private async prepareForWindowsCliUpgrade() {
     if (process.platform !== 'win32') return;
-    if (!this.process || !this.managedProcess) return;
+    if (this.processManager.hasForeignActiveOwnership) {
+      await this.processManager.refreshManagedServerOwnership();
+    }
+    if (!this.managedProcess) return;
 
     await this.stopManagedProcessForRestart();
     this.setStatus({ state: 'stopped' });
@@ -1015,22 +1056,26 @@ export class OpenCodeServer extends EventEmitter {
 
   restart(): Promise<string> {
     return this.runRestart(async () => {
-      this.clearRestartTimer();
-      this.stopMaintenanceLoop();
-      this.cancelPollHealth();
-      this.stopEventStream();
-      this.transport.clearPendingAttentionRequests();
-      this.transport.abortRequests();
       await this.processManager.stopServerForRestart();
-      this.setStatus({ state: 'stopped' });
     });
   }
 
   private runRestart(stop: () => Promise<void>): Promise<string> {
-    this.clearRetryResetTimer();
-    return this.lifecycle.setRestartPromise(async (signal) => {
+    const existingRestart = this.lifecycle.getRestartPromise<string>();
+    if (existingRestart) return existingRestart;
+
+    const operation = this.lifecycle.setRestartPromise(async (signal) => {
       this.throwIfOperationCancelled(signal);
-      await stop();
+      try {
+        await stop();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.setStatus({
+          state: 'error',
+          message: `Failed to stop OpenCode server for restart: ${message}`,
+        });
+        throw err;
+      }
       this.throwIfOperationCancelled(signal);
       this.restartReadyToStart = true;
       try {
@@ -1041,6 +1086,15 @@ export class OpenCodeServer extends EventEmitter {
         this.restartReadyToStart = false;
       }
     }, OpenCodeServer.START_DISPOSED_MESSAGE);
+
+    this.setStatus({ state: 'starting' });
+    this.clearRestartTimer();
+    this.clearRetryResetTimer();
+    this.cancelPollHealth();
+    this.stopEventStream();
+    this.transport.clearPendingAttentionRequests();
+    this.transport.abortRequests();
+    return operation;
   }
 
   private async disposeResources(options: { stopProcess: boolean }) {

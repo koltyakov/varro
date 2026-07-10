@@ -138,6 +138,8 @@ export function createDataLoaderOperations(deps: {
   logError: Logger;
 }) {
   let emptySessionSnapshotCount = 0;
+  let mcpLoadGeneration = 0;
+  let inFlightMcpLoad: { sessionId: string | null; promise: Promise<void> } | null = null;
 
   const shouldApplySessionsSnapshot = (sessions: Session[]) => {
     if (sessions.length > 0 || deps.getSessions().length === 0) {
@@ -154,8 +156,11 @@ export function createDataLoaderOperations(deps: {
     return true;
   };
 
-  const loadMcps = async () => {
-    await loadMcpsWithDependencies(
+  const loadMcps = () => {
+    const sessionId = deps.getActiveSessionId();
+    if (inFlightMcpLoad?.sessionId === sessionId) return inFlightMcpLoad.promise;
+    const generation = ++mcpLoadGeneration;
+    const request = loadMcpsWithDependencies(
       {
         listMcpStatus: deps.listMcpStatus,
         setMcpStatus: deps.setMcpStatus,
@@ -163,8 +168,14 @@ export function createDataLoaderOperations(deps: {
         getSelectedMcpsForSession: deps.getSelectedMcpsForSession,
         setSelectedMcpsForSession: deps.setSelectedMcpsForSession,
       },
-      deps.logError
+      deps.logError,
+      () => generation === mcpLoadGeneration
     );
+    const tracked = request.finally(() => {
+      if (inFlightMcpLoad?.promise === tracked) inFlightMcpLoad = null;
+    });
+    inFlightMcpLoad = { sessionId, promise: tracked };
+    return tracked;
   };
 
   const loadQuestions = async () => {
@@ -338,14 +349,20 @@ export async function loadMcpsWithDependencies(
     getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
     setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
+  const activeSessionId = deps.getActiveSessionId();
   try {
     const status = await deps.listMcpStatus();
+    if (!isCurrent()) return;
     const nextStatus = status || {};
     deps.setMcpStatus(nextStatus);
-    const activeSessionId = deps.getActiveSessionId();
-    if (activeSessionId && deps.getSelectedMcpsForSession(activeSessionId) === null) {
+    if (
+      activeSessionId &&
+      deps.getActiveSessionId() === activeSessionId &&
+      deps.getSelectedMcpsForSession(activeSessionId) === null
+    ) {
       deps.setSelectedMcpsForSession(
         activeSessionId,
         Object.entries(nextStatus)
@@ -354,7 +371,7 @@ export async function loadMcpsWithDependencies(
       );
     }
   } catch (err) {
-    logError('loadMcps', err);
+    if (isCurrent()) logError('loadMcps', err);
   }
 }
 

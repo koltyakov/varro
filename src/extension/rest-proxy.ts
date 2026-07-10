@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { existsSync } from 'fs';
-import { basename, dirname, join, resolve } from 'path';
+import { posix, win32 } from 'path';
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import { VARRO_API_ENDPOINTS } from '../shared/protocol';
 import type {
@@ -20,7 +20,7 @@ import { logger } from './logger';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { OpenCodeServer } from './server';
 import type { OpenCodeResponseMetadata } from './open-code-transport';
-import type { SessionStateManager } from './session-state-manager';
+import type { SessionBusyAttempt, SessionStateManager } from './session-state-manager';
 import type { SessionTitleFallback } from './session-title-fallback';
 import type { SessionDeleteTarget, SessionTrashManager } from './session-trash-manager';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
@@ -60,7 +60,12 @@ export interface RestProxyCallbacks {
   providerLimitService: Pick<ProviderLimitService, 'get'>;
   sessionState: Pick<
     SessionStateManager,
-    'handleServerEvent' | 'isSessionInWorkspace' | 'markSessionBusy' | 'removeSessions'
+    | 'handleServerEvent'
+    | 'isSessionInWorkspace'
+    | 'markSessionBusy'
+    | 'deferPromptFailure'
+    | 'reconcilePromptFailure'
+    | 'removeSessions'
   >;
   sessionTrash: Pick<
     SessionTrashManager,
@@ -230,16 +235,22 @@ export class RestProxy {
       // admission, and on fast turns the finish can land first; pre-marking
       // here ensures the busy marker exists before any finish event arrives.
       const promptSessionID = this.parsePromptSessionID(method, payload.path);
-      if (promptSessionID) {
-        this.callbacks.sessionState.markSessionBusy(promptSessionID);
-      }
+      const promptAttempt = promptSessionID
+        ? this.callbacks.sessionState.markSessionBusy(promptSessionID)
+        : undefined;
 
       const paginatedMessages = this.isPaginatedMessagesRequest(method, payload.path);
-      const response = paginatedMessages
-        ? await this.callbacks.server.request(method, payload.path, payload.body, {
-            captureNextCursor: true,
-          })
-        : await this.callbacks.server.request(method, payload.path, payload.body);
+      let response: unknown;
+      try {
+        response = paginatedMessages
+          ? await this.callbacks.server.request(method, payload.path, payload.body, {
+              captureNextCursor: true,
+            })
+          : await this.callbacks.server.request(method, payload.path, payload.body);
+      } catch (err) {
+        if (promptAttempt) await this.reconcileFailedPrompt(promptAttempt, err);
+        throw err;
+      }
       const data = paginatedMessages
         ? this.formatPaginatedMessagesResponse(
             method,
@@ -292,6 +303,30 @@ export class RestProxy {
     const url = new URL(path, 'http://localhost');
     const match = url.pathname.match(/^\/session\/([^/]+)\/prompt(?:_async)?$/);
     return match ? decodeURIComponent(match[1]!) : undefined;
+  }
+
+  private async reconcileFailedPrompt(
+    attempt: SessionBusyAttempt,
+    requestError: unknown
+  ): Promise<void> {
+    if (isKnownPreAdmissionPromptFailure(requestError)) {
+      this.callbacks.sessionState.reconcilePromptFailure(attempt, undefined);
+      return;
+    }
+    try {
+      const result = await this.callbacks.server.request('GET', '/session/status');
+      const statuses = Array.isArray(result) ? undefined : asRecord(result);
+      if (!statuses) {
+        this.callbacks.sessionState.deferPromptFailure(attempt);
+        return;
+      }
+      this.callbacks.sessionState.reconcilePromptFailure(attempt, statuses[attempt.sessionID]);
+    } catch (err) {
+      this.callbacks.sessionState.deferPromptFailure(attempt);
+      logger.warn(
+        `Failed to reconcile rejected prompt for ${attempt.sessionID}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   private isPaginatedMessagesRequest(method: string, path: string) {
@@ -740,7 +775,7 @@ export class RestProxy {
     if (!workspacePath) {
       throw new Error('Open a workspace folder before editing project OpenCode config');
     }
-    return resolve(workspacePath);
+    return getOpenCodePathApi(workspacePath).resolve(workspacePath);
   }
 
   private async readOpenCodeConfigObject() {
@@ -751,8 +786,9 @@ export class RestProxy {
       raw: string;
       config: Record<string, unknown>;
     }> = [];
+    const pathApi = getOpenCodePathApi(workspacePath);
     const candidates = resolveOpenCodeProjectConfigPaths(workspacePath, (path) =>
-      basename(path) === '.git' ? existsSync(path) : true
+      pathApi.basename(path) === '.git' ? existsSync(path) : true
     );
     for (const path of candidates) {
       const uri = vscode.Uri.file(path);
@@ -777,10 +813,10 @@ export class RestProxy {
       (merged, file) => mergeOpenCodeConfig(merged, file.config),
       {}
     );
-    const localFiles = files.filter((file) => dirname(file.path) === workspacePath);
+    const localFiles = files.filter((file) => pathApi.dirname(file.path) === workspacePath);
     const target = localFiles.at(-1) || {
-      path: join(workspacePath, 'opencode.json'),
-      uri: vscode.Uri.file(join(workspacePath, 'opencode.json')),
+      path: pathApi.join(workspacePath, 'opencode.json'),
+      uri: vscode.Uri.file(pathApi.join(workspacePath, 'opencode.json')),
       raw: '{}\n',
       config: {} as Record<string, unknown>,
     };
@@ -916,18 +952,24 @@ export function resolveOpenCodeProjectConfigPaths(
   pathExists: (path: string) => boolean = existsSync
 ) {
   const files: string[] = [];
-  let current = resolve(directory);
+  const pathApi = getOpenCodePathApi(directory);
+  let current = pathApi.resolve(directory);
   while (true) {
     for (const name of ['opencode.jsonc', 'opencode.json']) {
-      const candidate = join(current, name);
+      const candidate = pathApi.join(current, name);
       if (pathExists(candidate)) files.push(candidate);
     }
-    if (pathExists(join(current, '.git'))) break;
-    const parent = dirname(current);
+    if (pathExists(pathApi.join(current, '.git'))) break;
+    const parent = pathApi.dirname(current);
     if (parent === current) break;
     current = parent;
   }
   return files.toReversed();
+}
+
+function getOpenCodePathApi(path: string) {
+  // VS Code can expose POSIX paths from remote workspaces even on Windows.
+  return /^[a-z]:[\\/]/i.test(path) || path.startsWith('\\\\') ? win32 : posix;
 }
 
 function parseOpenCodeConfig(raw: string, path: string): Record<string, unknown> {
@@ -1047,4 +1089,12 @@ function isDirectoryInWorkspace(
 ): boolean {
   if (!normalizeWorkspaceIdentity(workspacePath)) return true;
   return isSameWorkspacePath(typeof directory === 'string' ? directory : undefined, workspacePath);
+}
+
+function isKnownPreAdmissionPromptFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /^4\d{2}(?:\s|$)/.test(message) ||
+    message.includes('OpenCode server is not accepting requests while stopping')
+  );
 }

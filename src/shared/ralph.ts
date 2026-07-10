@@ -1,6 +1,7 @@
 import type { PermissionMode } from './protocol';
 
 export const RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT = 5;
+export const MAX_RALPH_ITERATIONS = 1_000;
 
 export type RalphStatus = 'running' | 'paused' | 'stopped' | 'done' | 'incomplete' | 'failed';
 
@@ -19,6 +20,7 @@ export type RalphStopReason =
   | 'iteration_error';
 
 export type RalphIterationStatus = 'pending' | 'running' | 'passed' | 'failed' | 'aborted';
+export type RalphIterationPhase = 'primary' | 'verification' | 'repair';
 
 export type RalphVerificationVerdict = 'pass' | 'fail' | 'skipped';
 
@@ -52,6 +54,8 @@ export type RalphIteration = {
   index: number;
   childSessionId: string | null;
   status: RalphIterationStatus;
+  /** Last durably entered orchestration phase, used for safe restart recovery. */
+  phase?: RalphIterationPhase;
   startedAt: number | null;
   endedAt: number | null;
   filesChanged: string[];

@@ -24,6 +24,7 @@ function createRalphRun() {
         index: 1,
         childSessionId: 'child-1',
         status: 'passed',
+        phase: 'verification',
         startedAt: 101,
         endedAt: 102,
         filesChanged: ['src/app.ts'],
@@ -354,7 +355,26 @@ describe('webview message validation', () => {
     expect(
       parseWebviewMessage({
         type: 'ralph/start',
-        payload: { config: { ...createRalphConfig(), iterations: 501 } },
+        payload: { config: { ...createRalphConfig(), iterations: 1_000 } },
+      })
+    ).not.toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/start',
+        payload: { config: { ...createRalphConfig(), iterations: 1_001 } },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/sync',
+        payload: {
+          legacyRuns: {
+            'manager-1': {
+              ...createRalphRun(),
+              iterations: [{ ...createRalphRun().iterations[0], phase: 'unknown' }],
+            },
+          },
+        },
       })
     ).toBeNull();
     expect(

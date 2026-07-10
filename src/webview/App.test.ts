@@ -1,5 +1,33 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+
+const appMocks = vi.hoisted(() => ({
+  apiCall: vi.fn(),
+  cleanupBridge: vi.fn(),
+  onMessage: vi.fn(() => vi.fn()),
+  postMessage: vi.fn(() => true),
+  ralphError: { current: null as Error | null },
+  useOpenCode: vi.fn(),
+}));
+
+vi.mock('./hooks/useOpenCode', () => ({
+  useOpenCode: appMocks.useOpenCode,
+}));
+
+vi.mock('./lib/bridge', () => ({
+  apiCall: appMocks.apiCall,
+  cleanupBridge: appMocks.cleanupBridge,
+  onMessage: appMocks.onMessage,
+  postMessage: appMocks.postMessage,
+}));
+
+vi.mock('./components/ralph/RalphForm', () => ({
+  RalphForm: () => {
+    if (appMocks.ralphError.current) throw appMocks.ralphError.current;
+    return null;
+  },
+}));
+
 import { AppRoot } from './App';
 import { resetDefaultAppState, setError, setState, state } from './lib/state';
 
@@ -13,6 +41,9 @@ function mountAppRoot() {
 describe('AppRoot', () => {
   beforeEach(() => {
     resetDefaultAppState();
+    appMocks.ralphError.current = null;
+    appMocks.cleanupBridge.mockReset();
+    appMocks.useOpenCode.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
   });
@@ -55,5 +86,34 @@ describe('AppRoot', () => {
     expect(state.serverStatus).toEqual({ state: 'error', message: 'boom' });
     expect(state.activeSessionId).toBe('session-1');
     expect(state.messages).toHaveLength(1);
+  });
+
+  it('cleans up the bridge only when the Solid root is disposed', () => {
+    mountAppRoot();
+
+    expect(appMocks.cleanupBridge).not.toHaveBeenCalled();
+    cleanup?.();
+    cleanup = undefined;
+
+    expect(appMocks.cleanupBridge).toHaveBeenCalledOnce();
+  });
+
+  it('renders the root fallback when app initialization throws', () => {
+    appMocks.useOpenCode.mockImplementationOnce(() => {
+      throw new Error('initialization failed');
+    });
+
+    expect(() => mountAppRoot()).not.toThrow();
+    expect(container?.textContent).toContain('Something went wrong');
+    expect(container?.textContent).toContain('initialization failed');
+    expect(container?.textContent).not.toContain('Error: initialization failed');
+  });
+
+  it('keeps RalphForm failures inside the root boundary', () => {
+    appMocks.ralphError.current = new Error('ralph failed');
+
+    expect(() => mountAppRoot()).not.toThrow();
+    expect(container?.textContent).toContain('Something went wrong');
+    expect(container?.textContent).toContain('ralph failed');
   });
 });

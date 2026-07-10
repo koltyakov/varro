@@ -62,7 +62,9 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     sessionState: {
       handleServerEvent: vi.fn(),
       isSessionInWorkspace: vi.fn(() => true),
-      markSessionBusy: vi.fn(),
+      markSessionBusy: vi.fn((sessionID: string) => ({ sessionID, id: 1 })),
+      deferPromptFailure: vi.fn(),
+      reconcilePromptFailure: vi.fn(),
       removeSessions: vi.fn(),
     },
     sessionTrash: {
@@ -225,6 +227,18 @@ describe('resolveOpenCodeProjectConfigPaths', () => {
     expect(
       resolveOpenCodeProjectConfigPaths('/repo/packages/app', (path) => existing.has(path))
     ).toEqual(['/repo/opencode.json', '/repo/opencode.jsonc', '/repo/packages/app/opencode.jsonc']);
+  });
+
+  it('resolves Windows workspace paths independently of the host platform', () => {
+    const existing = new Set([
+      'C:\\repo\\.git',
+      'C:\\repo\\opencode.json',
+      'C:\\repo\\packages\\app\\opencode.jsonc',
+    ]);
+
+    expect(
+      resolveOpenCodeProjectConfigPaths('C:\\repo\\packages\\app', (path) => existing.has(path))
+    ).toEqual(['C:\\repo\\opencode.json', 'C:\\repo\\packages\\app\\opencode.jsonc']);
   });
 });
 
@@ -976,13 +990,100 @@ describe('RestProxy handleRequest', () => {
     expect(markSessionBusy).toHaveBeenCalledWith('01J6XQT8HM2N1V9K6Q3B7Y4C0P');
   });
 
+  it('reconciles a failed prompt against authoritative session status', async () => {
+    const attempt = { sessionID: 'session-1', id: 17 };
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'POST') return Promise.reject(new Error('prompt rejected'));
+      if (path === '/session/status') return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    const markSessionBusy = vi.fn(() => attempt);
+    const reconcilePromptFailure = vi.fn();
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        markSessionBusy,
+        reconcilePromptFailure,
+      } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(32, 'POST', '/session/session-1/prompt_async', { parts: [] })
+    );
+
+    expect(serverRequest.mock.calls).toEqual([
+      ['POST', '/session/session-1/prompt_async', { parts: [] }],
+      ['GET', '/session/status'],
+    ]);
+    expect(reconcilePromptFailure).toHaveBeenCalledWith(attempt, undefined);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 32,
+      error: 'prompt rejected',
+    });
+  });
+
+  it('immediately rolls back known pre-admission prompt failures', async () => {
+    const attempt = { sessionID: 'session-1', id: 18 };
+    const serverRequest = vi.fn(() => Promise.reject(new Error('422 Invalid prompt body')));
+    const reconcilePromptFailure = vi.fn();
+    const deferPromptFailure = vi.fn();
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        markSessionBusy: vi.fn(() => attempt),
+        deferPromptFailure,
+        reconcilePromptFailure,
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(33, 'POST', '/session/session-1/prompt_async'));
+
+    expect(serverRequest).toHaveBeenCalledOnce();
+    expect(reconcilePromptFailure).toHaveBeenCalledWith(attempt, undefined);
+    expect(deferPromptFailure).not.toHaveBeenCalled();
+  });
+
+  it('defers rollback when prompt and restart-time status reconciliation both fail', async () => {
+    const attempt = { sessionID: 'session-1', id: 19 };
+    const serverRequest = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('fetch failed'))
+      .mockRejectedValueOnce(new Error('OpenCode server is restarting'));
+    const reconcilePromptFailure = vi.fn();
+    const deferPromptFailure = vi.fn();
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        markSessionBusy: vi.fn(() => attempt),
+        deferPromptFailure,
+        reconcilePromptFailure,
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(34, 'POST', '/session/session-1/prompt_async'));
+
+    expect(serverRequest.mock.calls).toEqual([
+      ['POST', '/session/session-1/prompt_async', undefined],
+      ['GET', '/session/status'],
+    ]);
+    expect(deferPromptFailure).toHaveBeenCalledWith(attempt);
+    expect(reconcilePromptFailure).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 34,
+      error: 'fetch failed',
+    });
+  });
+
   it('does not optimistically mark busy for non-prompt requests', async () => {
     const markSessionBusy = vi.fn();
     const { proxy } = createProxy({
       sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
     });
 
-    await proxy.handleRequest(makePayload(32, 'POST', '/session/session-1/abort'));
+    await proxy.handleRequest(makePayload(35, 'POST', '/session/session-1/abort'));
 
     expect(markSessionBusy).not.toHaveBeenCalled();
   });

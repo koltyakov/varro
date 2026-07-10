@@ -39,7 +39,6 @@ async function disposeSafe(fn: () => PromiseLike<void> | void, label: string) {
 
 export async function activate(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
-  await sweepStaleInjectedConfigDirectories();
 
   const config = vscode.workspace.getConfiguration('varro');
   const port = config.get<number>('server.port', 4096);
@@ -114,6 +113,20 @@ export async function activate(context: vscode.ExtensionContext) {
   registerCommands(context, sidebarProvider!, contextProvider!, server!);
 
   vscode.commands.executeCommand('setContext', 'varro:activated', true);
+  void sidebarProvider.initializeProviderFileSignature().catch((err) => {
+    logger.warn(
+      `Failed to initialize provider file observation: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
+  void (async () => {
+    try {
+      await sweepStaleInjectedConfigDirectories();
+    } catch (err) {
+      logger.warn(
+        `Failed to clean up stale temporary config directories: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  })();
   logger.info('Varro extension activated; server startup is deferred until the chat view is used');
 }
 

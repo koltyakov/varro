@@ -209,21 +209,11 @@ export function createSessionStatusSnapshotCoordinator(
 }
 
 export function createPerSessionMessageSyncGenerations() {
-  type SyncAttempt = { sessionId: string; token?: number; applied: boolean };
+  type SyncAttempt = { sessionId: string; token: number; applied: boolean };
 
   let nextToken = 0;
-  let activeAttempt: SyncAttempt | null = null;
   const currentTokenBySession = new Map<string, number>();
   const attemptsByToken = new Map<number, SyncAttempt>();
-
-  const next = () => {
-    if (!activeAttempt) throw new Error('Message sync generation requested outside a sync');
-    const token = ++nextToken;
-    activeAttempt.token = token;
-    attemptsByToken.set(token, activeAttempt);
-    currentTokenBySession.set(activeAttempt.sessionId, token);
-    return token;
-  };
 
   const isCurrent = (token: number) => {
     const attempt = attemptsByToken.get(token);
@@ -233,23 +223,19 @@ export function createPerSessionMessageSyncGenerations() {
     return current;
   };
 
-  const run = (sessionId: string, operation: () => Promise<void>): Promise<boolean> => {
-    const attempt: SyncAttempt = { sessionId, applied: false };
-    const previousAttempt = activeAttempt;
-    activeAttempt = attempt;
-    let request: Promise<void>;
-    try {
-      // SessionSyncOperations allocates its generation synchronously before its first await.
-      request = operation();
-    } catch (err) {
-      activeAttempt = previousAttempt;
-      return Promise.reject(err);
-    }
-    activeAttempt = previousAttempt;
-    return request
+  const run = (
+    sessionId: string,
+    operation: (token: number) => Promise<void>
+  ): Promise<boolean> => {
+    const token = ++nextToken;
+    const attempt: SyncAttempt = { sessionId, token, applied: false };
+    attemptsByToken.set(token, attempt);
+    currentTokenBySession.set(sessionId, token);
+    return Promise.resolve()
+      .then(() => operation(token))
       .then(() => attempt.applied)
       .finally(() => {
-        if (attempt.token !== undefined) attemptsByToken.delete(attempt.token);
+        attemptsByToken.delete(token);
       });
   };
 
@@ -258,12 +244,11 @@ export function createPerSessionMessageSyncGenerations() {
   };
 
   const clear = () => {
-    activeAttempt = null;
     currentTokenBySession.clear();
     attemptsByToken.clear();
   };
 
-  return { next, isCurrent, run, invalidate, clear };
+  return { isCurrent, run, invalidate, clear };
 }
 
 function isNotFoundError(err: unknown) {
@@ -1013,7 +998,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     },
     {
       nextSelection: () => ++sessionSelectionGeneration,
-      nextSync: messageSyncGenerations.next,
       isCurrentSync: messageSyncGenerations.isCurrent,
     }
   );
@@ -1168,8 +1152,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   function runSessionMessageSync(sessionId: string): Promise<boolean> {
-    return messageSyncGenerations.run(sessionId, () =>
-      sessionSyncOperations.syncSessionMessages(sessionId)
+    return messageSyncGenerations.run(sessionId, (token) =>
+      sessionSyncOperations.syncSessionMessages(sessionId, token)
     );
   }
 

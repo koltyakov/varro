@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   spawn: vi.fn(),
   mkdtemp: vi.fn(),
   open: vi.fn(),
+  providerSignatureFileSystem: {
+    readFile: vi.fn(),
+    stat: vi.fn(),
+  },
   readFile: vi.fn(),
   rm: vi.fn(),
   vscode: {
@@ -73,6 +77,12 @@ const mocks = vi.hoisted(() => ({
       HighContrast: 3,
       HighContrastLight: 4,
     },
+    FileType: {
+      Unknown: 0,
+      File: 1,
+      Directory: 2,
+      SymbolicLink: 64,
+    },
     Uri: {
       joinPath: vi.fn(() => ({ toString: () => 'vscode-resource://icon.png' })),
       file: vi.fn((fsPath: string) => ({ fsPath, toString: () => fsPath })),
@@ -98,6 +108,10 @@ export function getOpenMock() {
 
 export function getReadFileMock() {
   return mocks.readFile;
+}
+
+export function getProviderSignatureFileSystemMock() {
+  return mocks.providerSignatureFileSystem;
 }
 
 export function getRmMock() {
@@ -218,6 +232,7 @@ export async function createSidebarProviderInstance(
     extensionUri?: { fsPath: string };
     workspaceState?: ReturnType<typeof createWorkspaceState>;
     contextProvider?: ReturnType<typeof createContextProvider>;
+    providerSignatureFileSystem?: typeof mocks.providerSignatureFileSystem;
     server?: ReturnType<typeof createServer>;
   } = {}
 ) {
@@ -230,7 +245,9 @@ export async function createSidebarProviderInstance(
     workspaceState as never,
     contextProvider as never,
     server as never,
-    'koltyakov.varro'
+    'koltyakov.varro',
+    false,
+    options.providerSignatureFileSystem ?? mocks.providerSignatureFileSystem
   );
 
   return { SidebarProvider, provider, workspaceState, contextProvider, server };
@@ -246,6 +263,11 @@ beforeEach(() => {
   mocks.open.mockReset();
   mocks.open.mockResolvedValue({ fd: 17, close: vi.fn(() => Promise.resolve()) });
   mocks.readFile.mockReset();
+  mocks.providerSignatureFileSystem.readFile.mockReset();
+  mocks.providerSignatureFileSystem.stat.mockReset();
+  mocks.providerSignatureFileSystem.stat.mockRejectedValue(
+    Object.assign(new Error('missing'), { code: 'ENOENT' })
+  );
   mocks.rm.mockReset();
   mocks.rm.mockResolvedValue(undefined);
 

@@ -3,13 +3,19 @@ import {
   attachTestView,
   createServer,
   createSidebarProviderInstance,
+  getLoggerMock,
+  getProviderSignatureFileSystemMock,
   getVscodeMock,
 } from './sidebar-provider.test-support';
 
 const vscodeMock = getVscodeMock();
+const loggerMock = getLoggerMock();
+const providerFileSystem = getProviderSignatureFileSystemMock();
 
 type ProviderRefreshAccess = {
-  refreshProviderState(): Promise<void>;
+  initializeProviderFileSignature(): Promise<void>;
+  readProviderFilesSignature(): Promise<string>;
+  refreshProviderState(generation?: number, requireSignatureChange?: boolean): Promise<void>;
   setProviderWatchActive(active: boolean): void;
 };
 
@@ -18,6 +24,85 @@ afterEach(() => {
 });
 
 describe('SidebarProvider provider refresh', () => {
+  it('does not read provider files synchronously during construction', async () => {
+    const { provider } = await createSidebarProviderInstance();
+
+    expect(providerFileSystem.stat).not.toHaveBeenCalled();
+    expect(providerFileSystem.readFile).not.toHaveBeenCalled();
+    await provider.dispose();
+  });
+
+  it('does not read provider signature content from non-regular files', async () => {
+    providerFileSystem.stat.mockResolvedValue({
+      ino: 1,
+      isFile: () => false,
+      mtimeMs: 1,
+      size: 0,
+    });
+    const { provider } = await createSidebarProviderInstance();
+
+    await (provider as unknown as ProviderRefreshAccess).initializeProviderFileSignature();
+
+    expect(providerFileSystem.stat).toHaveBeenCalledTimes(4);
+    expect(providerFileSystem.readFile).not.toHaveBeenCalled();
+    await provider.dispose();
+  });
+
+  it('reads regular targets reached through known symlink paths', async () => {
+    providerFileSystem.stat.mockResolvedValue({
+      ino: 42,
+      isFile: () => true,
+      mtimeMs: 10,
+      size: 6,
+    });
+    providerFileSystem.readFile.mockResolvedValue(Buffer.from('config'));
+    const { provider } = await createSidebarProviderInstance();
+
+    await (provider as unknown as ProviderRefreshAccess).initializeProviderFileSignature();
+
+    expect(providerFileSystem.stat).toHaveBeenCalledTimes(4);
+    expect(providerFileSystem.readFile).toHaveBeenCalledTimes(4);
+    await provider.dispose();
+  });
+
+  it('changes oversized signatures when target metadata changes without reading content', async () => {
+    vi.useFakeTimers();
+    let mtimeMs = 10;
+    providerFileSystem.stat.mockImplementation(async () => ({
+      ino: 42,
+      isFile: () => true,
+      mtimeMs,
+      size: 1024 * 1024 + 1,
+    }));
+    const server = createServer({
+      readServerInfo: vi.fn(async () => ({ managedProcess: false })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+
+    const first = await access.readProviderFilesSignature();
+    await access.initializeProviderFileSignature();
+    access.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+    posted.length = 0;
+
+    mtimeMs = 20;
+    const second = await access.readProviderFilesSignature();
+    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as
+      | { onDidChange: ReturnType<typeof vi.fn> }
+      | undefined;
+    watcher?.onDidChange.mock.calls[0]?.[0]();
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(first).toContain('oversized:size=1048577:mtime=10:ino=42');
+    expect(second).toContain('oversized:size=1048577:mtime=20:ino=42');
+    expect(second).not.toBe(first);
+    expect(providerFileSystem.readFile).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({ type: 'providers/refresh' });
+    await provider.dispose();
+  });
+
   it('watches every global config candidate and coalesces unchanged events', async () => {
     vi.useFakeTimers();
     const server = createServer();
@@ -93,6 +178,87 @@ describe('SidebarProvider provider refresh', () => {
     expect(server.request).not.toHaveBeenCalled();
     expect(server.restart).not.toHaveBeenCalled();
     expect(posted).toContainEqual({ type: 'providers/refresh' });
+
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.setProviderWatchActive(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(server.readServerInfo).toHaveBeenCalledOnce();
+    await provider.dispose();
+  });
+
+  it('resumes a pending managed restart when provider watching is reopened', async () => {
+    vi.useFakeTimers();
+    let idle = false;
+    providerFileSystem.stat.mockResolvedValue({
+      ino: 1,
+      isFile: () => true,
+      mtimeMs: 1,
+      size: 6,
+    });
+    providerFileSystem.readFile.mockResolvedValue(Buffer.from('config'));
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/question') return [];
+        return idle ? {} : { active: { type: 'busy' } };
+      }),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    await access.refreshProviderState();
+    expect(server.restart).not.toHaveBeenCalled();
+
+    access.setProviderWatchActive(false);
+    idle = true;
+    access.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(server.restart).toHaveBeenCalledOnce();
+
+    access.setProviderWatchActive(false);
+    access.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(server.restart).toHaveBeenCalledOnce();
+    await provider.dispose();
+  });
+
+  it('does not continue toward a restart after disposal during an ownership check', async () => {
+    let resolveOwnership!: (value: { managedProcess: boolean }) => void;
+    const ownership = new Promise<{ managedProcess: boolean }>((resolve) => {
+      resolveOwnership = resolve;
+    });
+    const server = createServer({
+      readServerInfo: vi.fn(() => ownership),
+      request: vi.fn(),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const refresh = (provider as unknown as ProviderRefreshAccess).refreshProviderState();
+    await vi.waitFor(() => expect(server.readServerInfo).toHaveBeenCalledOnce());
+
+    const dispose = provider.dispose();
+    resolveOwnership({ managedProcess: true });
+    await Promise.all([refresh, dispose]);
+
+    expect(server.request).not.toHaveBeenCalled();
+    expect(server.restart).not.toHaveBeenCalled();
+  });
+
+  it('returns and catches resolver failures with the webview fallback', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { view } = attachTestView(provider);
+    const webviewSession = (
+      provider as unknown as { webviewSession: { resolve: ReturnType<typeof vi.fn> } }
+    ).webviewSession;
+    vi.spyOn(webviewSession, 'resolve').mockRejectedValueOnce(new Error('resolver failed'));
+
+    await provider.resolveWebviewView(view as never, {} as never, {} as never);
+
+    expect(view.webview.html).toBe('<p>Failed to load Varro webview. Please reload.</p>');
+    expect(loggerMock.error).toHaveBeenCalledWith('resolveWebviewView failed: resolver failed');
     await provider.dispose();
   });
 

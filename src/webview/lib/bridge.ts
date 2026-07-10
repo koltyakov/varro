@@ -9,6 +9,9 @@ type ApiCallOptions = {
 };
 
 const handlers = new Set<MessageHandler>();
+let disposed = false;
+const BRIDGE_CLEANUP_KEY = '__cleanupVarroBridge';
+const bridgeWindow = window as unknown as Record<string, unknown>;
 
 const messageListener = (event: MessageEvent) => {
   const msg = parseExtensionMessage(event.data);
@@ -19,6 +22,7 @@ const messageListener = (event: MessageEvent) => {
 window.addEventListener('message', messageListener);
 
 export function cleanupBridge() {
+  disposed = true;
   window.removeEventListener('message', messageListener);
   handlers.clear();
   for (const p of pending.values()) {
@@ -26,6 +30,14 @@ export function cleanupBridge() {
     p.reject(new Error('Bridge cleaned up'));
   }
   pending.clear();
+  for (const retry of pendingRetries) {
+    clearTimeout(retry.timer);
+    pendingRetries.delete(retry);
+    retry.reject(new Error('Bridge cleaned up'));
+  }
+  if (bridgeWindow[BRIDGE_CLEANUP_KEY] === cleanupBridge) {
+    delete bridgeWindow[BRIDGE_CLEANUP_KEY];
+  }
 }
 
 export function onMessage(handler: MessageHandler): () => void {
@@ -34,6 +46,7 @@ export function onMessage(handler: MessageHandler): () => void {
 }
 
 export function postMessage(msg: WebviewMessage): boolean {
+  if (disposed) return false;
   const send = (window as unknown as Record<string, unknown>).__sendToExtension as
     | ((m: WebviewMessage) => void)
     | undefined;
@@ -52,6 +65,11 @@ const pending = new Map<
     cleanupAbort?: () => void;
   }
 >();
+type PendingRetry = {
+  timer: number;
+  reject(error: Error): void;
+};
+const pendingRetries = new Set<PendingRetry>();
 const API_CALL_TIMEOUT_MS = 35_000;
 const API_CALL_LONG_TIMEOUT_MS = 40_000;
 const API_CALL_RETRY_DELAY_MS = 150;
@@ -67,6 +85,7 @@ onMessage((msg) => {
     else p.resolve(msg.payload.data);
   }
 });
+bridgeWindow[BRIDGE_CLEANUP_KEY] = cleanupBridge;
 
 export function apiCall<T = unknown>(
   method: string,
@@ -87,6 +106,7 @@ function sendApiCall<T>(
   body: unknown,
   options: { timeoutMs: number; signal?: AbortSignal; retries: number }
 ): Promise<T> {
+  if (disposed) return Promise.reject(new Error('Bridge cleaned up'));
   const id = ++reqId;
   return new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -135,29 +155,49 @@ function sendApiCall<T>(
       pending.get(id)!.cleanupAbort = cleanupAbort;
     }
 
-    const sent = postMessage({
-      type: 'api/request',
-      payload: {
-        id,
-        method,
-        path,
-        body,
-      },
-    });
+    let sendError: unknown;
+    let sent = false;
+    try {
+      sent = postMessage({
+        type: 'api/request',
+        payload: {
+          id,
+          method,
+          path,
+          body,
+        },
+      });
+    } catch (err) {
+      sendError = err;
+    }
 
     if (sent) return;
 
     finish(() => {
       if (options.retries > 0 && !options.signal?.aborted) {
-        window.setTimeout(() => {
+        const retry: PendingRetry = {
+          timer: 0,
+          reject: (error: Error) => reject(error),
+        };
+        retry.timer = window.setTimeout(() => {
+          pendingRetries.delete(retry);
+          if (disposed) {
+            reject(new Error('Bridge cleaned up'));
+            return;
+          }
           void sendApiCall<T>(method, path, body, {
             ...options,
             retries: options.retries - 1,
           }).then(resolve, reject);
         }, API_CALL_RETRY_DELAY_MS);
+        pendingRetries.add(retry);
         return;
       }
-      reject(new Error(`Extension transport unavailable: ${method} ${path}`));
+      reject(
+        sendError instanceof Error
+          ? new Error(`Extension transport failed: ${method} ${path}: ${sendError.message}`)
+          : new Error(`Extension transport unavailable: ${method} ${path}`)
+      );
     });
   });
 }

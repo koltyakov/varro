@@ -185,6 +185,10 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       const runs = asRecord(payload?.runs);
       if (!payload || !runs || !Array.isArray(payload.activeIds)) return null;
+      for (const run of Object.values(runs)) {
+        const acknowledged = asRecord(run)?.legacyMigrationAcknowledged;
+        if (acknowledged !== undefined && acknowledged !== true) return null;
+      }
       return {
         type,
         payload: {

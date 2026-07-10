@@ -124,7 +124,25 @@ async function request(name, method, path, options = {}) {
   }
 }
 
-async function requestExpectedMissingRequest(name, method, path, requestKind, options = {}) {
+function isRouteSpecificMissingRequest(status, text, path, requestKind, missingRequestId) {
+  if (status !== 400 && status !== 404) return false;
+  const normalized = text.toLowerCase();
+  const withoutRoute = normalized.replaceAll(path.toLowerCase(), '');
+  const withoutSyntheticId = withoutRoute.replaceAll(missingRequestId.toLowerCase(), '');
+  return (
+    withoutSyntheticId.includes(requestKind) &&
+    /\b(?:missing|not found|does not exist|unknown)\b/.test(withoutSyntheticId)
+  );
+}
+
+async function requestExpectedMissingRequest(
+  name,
+  method,
+  path,
+  requestKind,
+  missingRequestId,
+  options = {}
+) {
   const startedAt = Date.now();
   try {
     const headers = { 'x-opencode-directory': DIRECTORY };
@@ -135,25 +153,45 @@ async function requestExpectedMissingRequest(name, method, path, requestKind, op
     }
     const response = await fetchWithTimeout(scopedUrl(path), init);
     const text = await response.text();
-    if (response.status !== 400 && response.status !== 404) {
-      throw new Error(`expected 400/404 for a missing request, received ${response.status}`);
+    if (response.ok) {
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`${response.status} returned a non-JSON ${requestKind} reply result`);
+      }
+      if (typeof data !== 'boolean') {
+        throw new Error(`${response.status} returned a non-boolean ${requestKind} reply result`);
+      }
+      checks.push({ name, ok: true, durationMs: Date.now() - startedAt });
+      return;
     }
-    const normalized = text.toLowerCase();
-    if (
-      response.status === 404 &&
-      !normalized.includes(requestKind) &&
-      !normalized.includes('varro-missing')
-    ) {
-      throw new Error(
-        `404 did not identify a missing ${requestKind} request: ${text.slice(0, 300)}`
-      );
+    if (!isRouteSpecificMissingRequest(response.status, text, path, requestKind, missingRequestId)) {
+      if (response.status === 400) {
+        checks.push({
+          name,
+          ok: false,
+          required: false,
+          advisory: true,
+          durationMs: Date.now() - startedAt,
+          error: '400 response did not expose a route-specific missing-request contract',
+        });
+        return;
+      }
+      throw new Error(`${response.status} did not identify a missing ${requestKind} request`);
     }
-    checks.push({ name, ok: true, required: false, durationMs: Date.now() - startedAt });
+    checks.push({
+      name,
+      ok: true,
+      required: false,
+      advisory: true,
+      durationMs: Date.now() - startedAt,
+    });
   } catch (error) {
     checks.push({
       name,
       ok: false,
-      required: false,
+      required: true,
       durationMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -318,6 +356,7 @@ async function runProbe() {
         'POST',
         '/permission/varro-missing-permission/reply',
         'permission',
+        'varro-missing-permission',
         { body: { reply: 'reject' } }
       );
       await requestExpectedMissingRequest(
@@ -325,6 +364,7 @@ async function runProbe() {
         'POST',
         '/question/varro-missing-question/reply',
         'question',
+        'varro-missing-question',
         { body: { answers: [['No']] } }
       );
     }

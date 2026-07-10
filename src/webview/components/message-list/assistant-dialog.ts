@@ -171,7 +171,7 @@ function sumAssistantDialogTokens(
     if (!entry) continue;
     for (const part of entry.parts) {
       if (part.type !== 'tool') continue;
-      const sessionId = resolveTaskSessionId(part, allMessages, sessions);
+      const sessionId = resolveTaskSessionId(part, allMessages, sessions, nextUserRequestCreated);
       if (sessionId) childSessionIds.add(sessionId);
     }
   }
@@ -190,6 +190,9 @@ function sumAssistantDialogTokens(
     if (!sessionId) continue;
     for (const child of sessionsByParentId.get(sessionId) || []) {
       if (childSessionIds.has(child.id)) continue;
+      if (nextUserRequestCreated !== undefined && child.time.created >= nextUserRequestCreated) {
+        continue;
+      }
       childSessionIds.add(child.id);
       pending.push(child.id);
     }
@@ -229,6 +232,12 @@ function collectAssistantDialogMessages(
     result.push(message);
 
     for (const child of childRunsByParentId.get(message.id) || []) {
+      if (
+        nextUserRequestCreated !== undefined &&
+        child.info.time.created >= nextUserRequestCreated
+      ) {
+        continue;
+      }
       pending.push(child.info);
     }
 

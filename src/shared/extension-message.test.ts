@@ -77,6 +77,50 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'api/response', payload: { id: 'x' } })).toBeNull();
   });
 
+  it('parses Ralph migration acknowledgements and rejects malformed markers', () => {
+    const run = {
+      config: {
+        managerSessionId: 'manager-1',
+        planDocPath: 'RALPH.md',
+        iterations: 1,
+        promptTemplate: 'Prompt',
+        permissionMode: 'full',
+        model: null,
+        agent: null,
+        createdAt: 1,
+      },
+      status: 'paused',
+      currentIteration: 0,
+      iterations: [],
+      updatedAt: 1,
+    } as const;
+
+    expect(
+      parseExtensionMessage({
+        type: 'ralph/state',
+        payload: {
+          runs: { 'manager-1': { ...run, legacyMigrationAcknowledged: true } },
+          activeIds: [],
+        },
+      })
+    ).toEqual({
+      type: 'ralph/state',
+      payload: {
+        runs: { 'manager-1': { ...run, legacyMigrationAcknowledged: true } },
+        activeIds: [],
+      },
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'ralph/state',
+        payload: {
+          runs: { 'manager-1': { ...run, legacyMigrationAcknowledged: 'yes' } },
+          activeIds: [],
+        },
+      })
+    ).toBeNull();
+  });
+
   it('parses server/event requiring a type', () => {
     expect(
       parseExtensionMessage({

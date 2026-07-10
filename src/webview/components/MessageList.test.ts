@@ -1949,6 +1949,62 @@ describe('MessageList sticky prompt preview', () => {
     expect(summaries.get('assistant-2')).toMatchObject({ inputTokens: 2_200, outputTokens: 220 });
   });
 
+  it('does not attach a late task session to the preceding assistant turn', () => {
+    const messages = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt 1')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 1_100, completed: 1_500 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [
+          {
+            id: 'task-1',
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            type: 'tool' as const,
+            callID: 'call-1',
+            tool: 'task',
+            state: {
+              status: 'completed' as const,
+              input: { description: 'Late task' },
+              output: '',
+              title: 'Late task',
+              metadata: {},
+              time: { start: 1_200, end: 1_400 },
+            },
+          },
+        ],
+      },
+      {
+        info: { ...userMessage('user-2'), time: { created: 2_000 } },
+        parts: [textPart('text-2', 'Prompt 2')],
+      },
+      {
+        info: assistantMessage('assistant-2', {
+          time: { created: 2_100, completed: 2_500 },
+          tokens: { input: 200, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+    ];
+    const sessions = [
+      session('late-child', {
+        parentID: 'session-1',
+        title: 'Late task',
+        time: { created: 2_100, updated: 2_500 },
+        tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    ];
+
+    const summaries = getAssistantDialogSummaryMap(messages, undefined, { sessions });
+
+    expect(summaries.get('assistant-1')).toMatchObject({ inputTokens: 100, outputTokens: 10 });
+  });
+
   it('keeps stopped assistant turns out of final answer formatting while preserving the summary', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([

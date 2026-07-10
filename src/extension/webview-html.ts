@@ -27,6 +27,43 @@ export function renderWebviewHtml(
 <body>
   <div id="root"></div>
   <script nonce="${nonce}">
+    (function() {
+      var active = true;
+      var handleFailure = function(event) {
+        if (!active) return;
+        event.preventDefault();
+        clearHandlers();
+        try {
+          if (typeof window.__cleanupVarroBridge === 'function') {
+            window.__cleanupVarroBridge();
+          }
+        } catch {}
+        var root = document.getElementById('root');
+        if (!root) return;
+        root.replaceChildren();
+        var fallback = document.createElement('div');
+        fallback.setAttribute('role', 'alert');
+        fallback.style.cssText = 'box-sizing:border-box;display:flex;min-height:100vh;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;font-family:system-ui,sans-serif;color:var(--vscode-errorForeground,#f48771);background:var(--vscode-sideBar-background,#181818)';
+        var title = document.createElement('strong');
+        title.textContent = 'Something went wrong';
+        var message = document.createElement('span');
+        message.textContent = 'Varro could not start. Reload the sidebar to try again.';
+        fallback.append(title, message);
+        root.append(fallback);
+      };
+      var clearHandlers = function() {
+        if (!active) return;
+        active = false;
+        window.removeEventListener('error', handleFailure);
+        window.removeEventListener('unhandledrejection', handleFailure);
+        if (window.__clearVarroBootstrapFailureHandlers === clearHandlers) {
+          delete window.__clearVarroBootstrapFailureHandlers;
+        }
+      };
+      window.addEventListener('error', handleFailure);
+      window.addEventListener('unhandledrejection', handleFailure);
+      window.__clearVarroBootstrapFailureHandlers = clearHandlers;
+    })();
     const vscode = acquireVsCodeApi();
     window.__initialWebviewState = ${serializedInitialState};
     window.__initialTheme = window.__initialWebviewState.theme;

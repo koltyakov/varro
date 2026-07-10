@@ -4,6 +4,11 @@ import { Buffer } from 'buffer';
 import { randomBytes } from 'crypto';
 import { join, isAbsolute, relative } from 'path';
 import * as vscode from 'vscode';
+import {
+  MAX_DROPPED_CONTENT_FILES,
+  MAX_DROPPED_CONTENT_FILE_BYTES,
+  MAX_DROPPED_CONTENT_TOTAL_BYTES,
+} from '../shared/dropped-content-policy';
 import type { DroppedFile } from '../shared/protocol';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
@@ -12,9 +17,6 @@ import { getRelativePath } from './util/path';
 type DroppedFileInput = Pick<DroppedFile, 'path' | 'relativePath' | 'type'>;
 const MAX_CONCURRENT_DROPPED_CONTENT_WRITES = 2;
 const MAX_CONCURRENT_DROPPED_PATH_STATS = 8;
-const MAX_DROPPED_CONTENT_FILES = 20;
-const MAX_DROPPED_CONTENT_SIZE_BYTES = 10 * 1024 * 1024;
-const MAX_DROPPED_CONTENT_TOTAL_BYTES = 50 * 1024 * 1024;
 const STALE_DROPS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const DROP_DIRECTORY_NAME_PATTERN = /^drop-[a-zA-Z0-9_-]+$/;
 const DROP_OWNER_MARKER_NAME = '.varro-owner.json';
@@ -453,10 +455,10 @@ function isDroppedContentSizeWithinLimits(file: { name: string; size: number }) 
   if (
     !Number.isSafeInteger(file.size) ||
     file.size < 0 ||
-    file.size > MAX_DROPPED_CONTENT_SIZE_BYTES
+    file.size > MAX_DROPPED_CONTENT_FILE_BYTES
   ) {
     logger.warn(
-      `Ignoring dropped file ${file.name}: file is larger than ${MAX_DROPPED_CONTENT_SIZE_BYTES} bytes`
+      `Ignoring dropped file ${file.name}: file is larger than ${MAX_DROPPED_CONTENT_FILE_BYTES} bytes`
     );
     return false;
   }
@@ -464,10 +466,10 @@ function isDroppedContentSizeWithinLimits(file: { name: string; size: number }) 
 }
 
 function isDroppedContentEncodingValid(file: { name: string; content: string; size: number }) {
-  const maxBase64Length = Math.ceil(MAX_DROPPED_CONTENT_SIZE_BYTES / 3) * 4;
+  const maxBase64Length = Math.ceil(MAX_DROPPED_CONTENT_FILE_BYTES / 3) * 4;
   if (typeof file.content !== 'string' || file.content.length > maxBase64Length) {
     logger.warn(
-      `Ignoring dropped file ${file.name}: encoded content is larger than ${MAX_DROPPED_CONTENT_SIZE_BYTES} bytes`
+      `Ignoring dropped file ${file.name}: encoded content is larger than ${MAX_DROPPED_CONTENT_FILE_BYTES} bytes`
     );
     return false;
   }

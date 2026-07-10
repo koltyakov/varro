@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type {
   BlockingRequestSnapshot,
   InterruptedSessionSnapshot,
+  RecoverySnapshot,
   SessionStateManager,
 } from './session-state-manager';
 import type { ContextProvider } from './context-provider';
@@ -28,6 +29,7 @@ export class WebviewSession {
   private pendingInputFocus = false;
   private pendingOpenAttentionSessions = false;
   private webviewLoadGeneration = 0;
+  private recoverySnapshotLoad?: Promise<RecoverySnapshot>;
   private themeDisposable?: vscode.Disposable;
   private webviewDisposables: vscode.Disposable[] = [];
 
@@ -35,11 +37,7 @@ export class WebviewSession {
     private readonly bridge: SidebarProviderBridge,
     private readonly sessionState: Pick<
       SessionStateManager,
-      | 'clearCompleted'
-      | 'consumeBlockingRequests'
-      | 'consumeInterruptedSessions'
-      | 'replayBlockingRequests'
-      | 'restoreBlockingRequests'
+      'clearCompleted' | 'consumeRecoverySnapshot' | 'replayBlockingRequests'
     >,
     private readonly sessionTrash: Pick<
       SessionTrashManager,
@@ -130,9 +128,10 @@ export class WebviewSession {
       })
     );
 
-    void this.renderHtml()
+    void this.renderHtml(webviewLoadGeneration, webviewView)
       .then((html) => {
         if (
+          html === undefined ||
           this.bridge.getView() !== webviewView ||
           webviewLoadGeneration !== this.webviewLoadGeneration
         ) {
@@ -195,14 +194,33 @@ export class WebviewSession {
     this.bridge.setView(undefined);
   }
 
-  private async renderHtml() {
-    const [interruptedSessions, blockingRequests] = await Promise.all([
-      this.sessionState.consumeInterruptedSessions(),
-      this.sessionState.consumeBlockingRequests(),
-    ]);
-    this.restoreBlockingState(interruptedSessions, blockingRequests);
-    this.deps.updateStatusBarItem();
-    return this.bridge.renderHtml(this.buildInitialState(this.deps.renderStatus()));
+  private async renderHtml(
+    webviewLoadGeneration: number,
+    webviewView: vscode.WebviewView
+  ): Promise<string | undefined> {
+    const recoverySnapshotLoad =
+      this.recoverySnapshotLoad ??
+      (this.recoverySnapshotLoad = this.sessionState.consumeRecoverySnapshot());
+    try {
+      const snapshot = await recoverySnapshotLoad;
+      if (
+        this.bridge.getView() !== webviewView ||
+        webviewLoadGeneration !== this.webviewLoadGeneration
+      ) {
+        return undefined;
+      }
+      this.commitRecoverySnapshot(snapshot);
+      this.deps.updateStatusBarItem();
+      return await this.bridge.renderHtml(this.buildInitialState(this.deps.renderStatus()));
+    } finally {
+      if (
+        this.bridge.getView() === webviewView &&
+        webviewLoadGeneration === this.webviewLoadGeneration &&
+        this.recoverySnapshotLoad === recoverySnapshotLoad
+      ) {
+        this.recoverySnapshotLoad = undefined;
+      }
+    }
   }
 
   private buildInitialState(serverStatus: ServerStatus): InitialWebviewState {
@@ -264,13 +282,9 @@ export class WebviewSession {
     this.flushPendingOpenAttentionSessions();
   }
 
-  private restoreBlockingState(
-    interruptedSessions: InterruptedSessionSnapshot[],
-    blockingRequests: BlockingRequestSnapshot[]
-  ) {
-    this.interruptedSessionsForWebview = interruptedSessions;
-    this.blockingRequestsForWebview = blockingRequests;
-    this.sessionState.restoreBlockingRequests(blockingRequests);
+  private commitRecoverySnapshot(snapshot: RecoverySnapshot) {
+    this.interruptedSessionsForWebview = snapshot.interruptedSessions;
+    this.blockingRequestsForWebview = snapshot.blockingRequests;
     this.deps.resetStatusBarCache();
   }
 

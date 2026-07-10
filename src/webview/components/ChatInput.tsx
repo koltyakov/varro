@@ -121,6 +121,11 @@ import { DropOverlay } from './chat-input/DropOverlay';
 import { QueuedMessages } from './chat-input/QueuedMessages';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import type { DroppedFile, ExtensionMessage, InitialWebviewState } from '../../shared/protocol';
+import {
+  MAX_DROPPED_CONTENT_FILES,
+  MAX_DROPPED_CONTENT_FILE_BYTES,
+  MAX_DROPPED_CONTENT_TOTAL_BYTES,
+} from '../../shared/dropped-content-policy';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import { createUsageLimitProviderLimit } from '../lib/usage-limit';
 import {
@@ -173,9 +178,6 @@ import {
 } from './chat-input/queued-steer';
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
-const MAX_DROPPED_CONTENT_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_DROPPED_CONTENT_TOTAL_BYTES = 50 * 1024 * 1024;
-const MAX_DROPPED_CONTENT_FILES = 20;
 
 function isRemoteExtensionHost() {
   return (

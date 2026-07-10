@@ -124,6 +124,32 @@ describe('SidebarProviderRuntime', () => {
     expect(mocks.errorHub.report).not.toHaveBeenCalled();
   });
 
+  it('waits for the shared start operation while a restart is in progress', async () => {
+    const restarting = createDeferred<string>();
+    const { runtime, server } = createRuntime({
+      serverStatus: { state: 'starting' },
+      start: () => restarting.promise,
+    });
+
+    const first = runtime.ensureServerStarted();
+    const second = runtime.ensureServerStarted();
+    let settled = false;
+    void Promise.all([first, second]).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(server.start).toHaveBeenCalledTimes(2);
+
+    restarting.resolve('http://127.0.0.1:4096');
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      'http://127.0.0.1:4096',
+      'http://127.0.0.1:4096',
+    ]);
+    expect(mocks.errorHub.report).not.toHaveBeenCalled();
+  });
+
   it('reports cli-missing failures once and logs repeated identical failures', async () => {
     const startError = new Error('OpenCode CLI not found in PATH');
     const { runtime } = createRuntime({

@@ -382,7 +382,13 @@ export type InitialWebviewState = {
  * a render mirror of this payload.
  */
 export type RalphStatePayload = {
-  runs: Record<string, RalphRun>;
+  runs: Record<
+    string,
+    RalphRun & {
+      /** Transient host acknowledgement that this legacy run is durably stored. */
+      legacyMigrationAcknowledged?: true;
+    }
+  >;
   /** Manager session ids whose loop is currently executing on the host. */
   activeIds: string[];
 };

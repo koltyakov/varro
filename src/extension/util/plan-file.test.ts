@@ -29,14 +29,24 @@ describe('plan file helpers', () => {
     );
   });
 
-  it('uses AppData on Windows', () => {
+  it('uses the OpenCode ~/.config convention on Windows', () => {
     expect(
       getOpenCodePlansDirectory(
         { APPDATA: 'C:\\Users\\alice\\AppData\\Roaming' } as NodeJS.ProcessEnv,
         'C:\\Users\\alice',
         'win32'
       )
-    ).toBe('C:\\Users\\alice\\AppData\\Roaming\\opencode\\plans');
+    ).toBe('C:\\Users\\alice\\.config\\opencode\\plans');
+  });
+
+  it('honors XDG config home on Windows', () => {
+    expect(
+      getOpenCodePlansDirectory(
+        { XDG_CONFIG_HOME: 'D:\\config' } as NodeJS.ProcessEnv,
+        'C:\\Users\\alice',
+        'win32'
+      )
+    ).toBe('D:\\config\\opencode\\plans');
   });
 
   it('creates a stable short hash-based file name', () => {

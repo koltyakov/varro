@@ -6,12 +6,25 @@ import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
 import { RalphForm } from './components/ralph/RalphForm';
 import { ralphRunner } from './components/ralph/ralph-runner';
+import { cleanupBridge } from './lib/bridge';
 
 export function AppRoot() {
+  return (
+    <ErrorBoundary fallback={renderErrorFallback}>
+      <InitializedApp />
+    </ErrorBoundary>
+  );
+}
+
+function InitializedApp() {
   const restoreOpenCodeRuntime = installOpenCodeRuntime(createOpenCodeRuntime());
 
   onCleanup(() => {
-    restoreOpenCodeRuntime();
+    try {
+      restoreOpenCodeRuntime();
+    } finally {
+      cleanupBridge();
+    }
   });
 
   return <App />;
@@ -34,11 +47,9 @@ export function App() {
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
-      <ErrorBoundary fallback={renderErrorFallback}>
-        <Show when={showChat()} fallback={<ServerStatus />}>
-          <Chat />
-        </Show>
-      </ErrorBoundary>
+      <Show when={showChat()} fallback={<ServerStatus />}>
+        <Chat />
+      </Show>
       <RalphForm />
       <Show when={defaultAppState.error()}>
         <div class="flex items-start justify-between gap-2 border-t border-vscode-error/30 bg-vscode-error/6 px-4 py-2 text-[11px] text-vscode-error">
@@ -68,9 +79,6 @@ function ErrorFallback(props: { err: Error }) {
       <p class="max-w-full break-words text-xs text-vscode-muted">
         {props.err?.message || 'Unknown error'}
       </p>
-      <pre class="max-h-40 max-w-full overflow-auto text-left text-[10px] text-vscode-muted">
-        {props.err?.stack || ''}
-      </pre>
       <button
         class="rounded bg-vscode-button-bg px-3 py-1 text-xs text-vscode-button-fg hover:bg-vscode-button-hover"
         onClick={() => window.location.reload()}

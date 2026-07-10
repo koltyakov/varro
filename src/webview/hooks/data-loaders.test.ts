@@ -73,6 +73,14 @@ function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): Data
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe('data loaders', () => {
   it('defaults the toolbar agent to build when no session is active', async () => {
     const setAllAgents = vi.fn();
@@ -144,6 +152,77 @@ describe('data loaders', () => {
       },
       vi.fn()
     );
+
+    expect(setSelectedMcpsForSession).not.toHaveBeenCalled();
+  });
+
+  it('applies only the latest overlapping MCP status response', async () => {
+    const responseA = deferred<Record<string, { status: 'connected' }>>();
+    const responseB = deferred<Record<string, { status: 'connected' }>>();
+    const activeSession = { value: 'session-a' };
+    const setMcpStatus = vi.fn();
+    const listMcpStatus = vi
+      .fn<() => Promise<Record<string, { status: 'connected' }>>>()
+      .mockReturnValueOnce(responseA.promise)
+      .mockReturnValueOnce(responseB.promise);
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listMcpStatus,
+        setMcpStatus,
+        getActiveSessionId: () => activeSession.value,
+        getSelectedMcpsForSession: () => [],
+      })
+    );
+
+    const loadA = operations.loadMcps();
+    activeSession.value = 'session-b';
+    const loadB = operations.loadMcps();
+    responseB.resolve({ beta: { status: 'connected' } });
+    await loadB;
+    responseA.resolve({ alpha: { status: 'connected' } });
+    await loadA;
+
+    expect(setMcpStatus).toHaveBeenCalledTimes(1);
+    expect(setMcpStatus).toHaveBeenCalledWith({ beta: { status: 'connected' } });
+  });
+
+  it('deduplicates concurrent MCP status loads for the same active session', async () => {
+    const response = deferred<Record<string, { status: 'connected' }>>();
+    const listMcpStatus = vi.fn(() => response.promise);
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listMcpStatus,
+        getActiveSessionId: () => 'session-1',
+        getSelectedMcpsForSession: () => [],
+      })
+    );
+
+    const first = operations.loadMcps();
+    const second = operations.loadMcps();
+    expect(listMcpStatus).toHaveBeenCalledTimes(1);
+
+    response.resolve({ alpha: { status: 'connected' } });
+    await Promise.all([first, second]);
+  });
+
+  it('does not initialize MCP selection for a session activated while status was loading', async () => {
+    const response = deferred<Record<string, { status: 'connected' }>>();
+    const activeSession = { value: 'session-a' };
+    const setSelectedMcpsForSession = vi.fn();
+
+    const load = loadMcpsWithDependencies(
+      {
+        listMcpStatus: () => response.promise,
+        setMcpStatus: vi.fn(),
+        getActiveSessionId: () => activeSession.value,
+        getSelectedMcpsForSession: () => null,
+        setSelectedMcpsForSession,
+      },
+      vi.fn()
+    );
+    activeSession.value = 'session-b';
+    response.resolve({ alpha: { status: 'connected' } });
+    await load;
 
     expect(setSelectedMcpsForSession).not.toHaveBeenCalled();
   });

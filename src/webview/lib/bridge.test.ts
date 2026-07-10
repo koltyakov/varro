@@ -6,6 +6,9 @@ declare global {
   }
 }
 
+const BRIDGE_CLEANUP_KEY = '__cleanupVarroBridge';
+const bridgeWindow = window as unknown as Record<string, unknown>;
+
 let cleanup: (() => void) | null = null;
 
 async function loadBridge() {
@@ -18,6 +21,7 @@ beforeEach(() => {
   vi.resetModules();
   cleanup = null;
   delete window.__sendToExtension;
+  delete bridgeWindow[BRIDGE_CLEANUP_KEY];
 });
 
 afterEach(() => {
@@ -26,9 +30,19 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   delete window.__sendToExtension;
+  delete bridgeWindow[BRIDGE_CLEANUP_KEY];
 });
 
 describe('bridge', () => {
+  it('exposes startup cleanup until the bridge is disposed', async () => {
+    const bridge = await loadBridge();
+
+    expect(bridgeWindow[BRIDGE_CLEANUP_KEY]).toBe(bridge.cleanupBridge);
+    bridge.cleanupBridge();
+
+    expect(bridgeWindow[BRIDGE_CLEANUP_KEY]).toBeUndefined();
+  });
+
   it('subscribes and unsubscribes message handlers', async () => {
     const bridge = await loadBridge();
     const handler = vi.fn();
@@ -172,6 +186,42 @@ describe('bridge', () => {
 
     await expect(request).resolves.toEqual({ ok: true });
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a pending transport retry during cleanup', async () => {
+    vi.useFakeTimers();
+    const bridge = await loadBridge();
+    const request = bridge.apiCall('GET', '/session');
+    const rejection = expect(request).rejects.toThrow('Bridge cleaned up');
+
+    bridge.cleanupBridge();
+    window.__sendToExtension = vi.fn();
+    await vi.advanceTimersByTimeAsync(150);
+
+    await rejection;
+    expect(window.__sendToExtension).not.toHaveBeenCalled();
+  });
+
+  it('rejects synchronous extension sender failures without leaving a pending request', async () => {
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn(() => {
+      throw new Error('sender failed');
+    });
+
+    await expect(bridge.apiCall('GET', '/session', undefined, { retries: 0 })).rejects.toThrow(
+      'Extension transport failed: GET /session: sender failed'
+    );
+
+    bridge.cleanupBridge();
+  });
+
+  it('does not create API requests after cleanup', async () => {
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn();
+    bridge.cleanupBridge();
+
+    await expect(bridge.apiCall('GET', '/session')).rejects.toThrow('Bridge cleaned up');
+    expect(window.__sendToExtension).not.toHaveBeenCalled();
   });
 
   it('aborts in-flight API requests', async () => {

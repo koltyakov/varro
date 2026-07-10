@@ -3,15 +3,18 @@ import { postMessage } from './bridge';
 
 export class BrowserPersistence implements Persistence {
   private warnedSetFailure = false;
+  private readonly storage: Storage | undefined;
 
-  constructor(private readonly storage: Storage = window.localStorage) {}
+  constructor(storage?: Storage) {
+    this.storage = storage ?? acquireLocalStorage();
+  }
 
   get<T>(key: string): T | undefined {
     const vscodeValue = readVsCodeWebviewStateValue<T>(key);
     if (vscodeValue !== undefined) return vscodeValue;
 
     try {
-      const raw = this.storage.getItem(key);
+      const raw = this.storage?.getItem(key);
       return raw ? (JSON.parse(raw) as T) : undefined;
     } catch {
       return undefined;
@@ -24,11 +27,11 @@ export class BrowserPersistence implements Persistence {
     try {
       const serialized = JSON.stringify(value);
       if (serialized === undefined) {
-        this.storage.removeItem(key);
+        this.storage?.removeItem(key);
         return;
       }
-      if (this.storage.getItem(key) === serialized) return;
-      this.storage.setItem(key, serialized);
+      if (this.storage?.getItem(key) === serialized) return;
+      this.storage?.setItem(key, serialized);
     } catch (err) {
       if (!this.warnedSetFailure) {
         this.warnedSetFailure = true;
@@ -48,8 +51,16 @@ export class BrowserPersistence implements Persistence {
     removeVsCodeWebviewStateValue(key);
 
     try {
-      this.storage.removeItem(key);
+      this.storage?.removeItem(key);
     } catch {}
+  }
+}
+
+function acquireLocalStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
   }
 }
 

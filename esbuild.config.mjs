@@ -1,7 +1,10 @@
 import pkg from 'esbuild';
-import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import {
+  smokeLoadExtensionBundle,
+  verifyExtensionBundleMetafile,
+} from './scripts/verify-extension-bundle.mjs';
 
 const { build, context } = pkg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -13,10 +16,8 @@ const verifySelfContainedBundle = {
   setup(build) {
     build.onEnd(async (result) => {
       if (result.errors.length > 0) return;
-      const output = await readFile(extensionOutfile, 'utf-8');
-      if (/\brequire\(\s*(['"])\.{1,2}\//.test(output)) {
-        throw new Error('Extension bundle contains a relative runtime require');
-      }
+      verifyExtensionBundleMetafile(result.metafile);
+      if (!isWatch) await smokeLoadExtensionBundle(extensionOutfile);
     });
   },
 };
@@ -28,6 +29,7 @@ const common = {
   external: ['vscode'],
   format: 'cjs',
   mainFields: ['module', 'main'],
+  metafile: true,
   platform: 'node',
   plugins: [verifySelfContainedBundle],
   target: 'node22',

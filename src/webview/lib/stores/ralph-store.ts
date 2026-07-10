@@ -8,6 +8,8 @@ import type {
   RalphStatus,
   RalphStopReason,
 } from '../../../shared/ralph';
+import { MAX_RALPH_ITERATIONS } from '../../../shared/ralph';
+import type { RalphStatePayload } from '../../../shared/protocol';
 import { postMessage } from '../bridge';
 import { readStored, writeStored } from '../state-storage';
 
@@ -68,23 +70,33 @@ export const ralphStore = {
   },
 
   /** Replace the mirror with the host's authoritative snapshot. */
-  applyHostState(nextRuns: RalphRunsRecord, activeIds: string[]) {
-    setRuns(reconcile(nextRuns, { merge: true }));
+  applyHostState(nextRuns: RalphStatePayload['runs'], activeIds: string[]) {
+    const acknowledgedLegacyRunIds: string[] = [];
+    const cleanRuns: RalphRunsRecord = {};
+    for (const [managerSessionId, stateRun] of Object.entries(nextRuns)) {
+      const { legacyMigrationAcknowledged, ...run } = stateRun;
+      cleanRuns[managerSessionId] = run;
+      if (legacyMigrationAcknowledged) acknowledgedLegacyRunIds.push(managerSessionId);
+    }
+
+    setRuns(reconcile(cleanRuns, { merge: true }));
     setActiveRunnerIds(activeIds);
+    acknowledgeLegacyRuns(acknowledgedLegacyRunIds);
   },
 
   /**
    * One-time migration: older builds persisted runs in webview localStorage.
-   * Hand them to the host (via ralph/sync) and clear the legacy key.
+   * Hand them to the host via `ralph/sync`. They remain in localStorage until
+   * a host snapshot explicitly acknowledges durable adoption.
    */
   consumeLegacyRuns(): RalphRunsRecord | undefined {
     const stored = readStored<RalphRunsRecord>(LEGACY_STORAGE_KEY);
     if (!stored || Object.keys(stored).length === 0) return undefined;
-    writeStored(LEGACY_STORAGE_KEY, null);
     return stored;
   },
 
   startRun(config: RalphConfig) {
+    if (runs[config.managerSessionId]) return;
     const now = Date.now();
     const run: RalphRun = {
       config,
@@ -113,7 +125,10 @@ export const ralphStore = {
     setRuns(
       sessionId,
       produce((draft) => {
-        draft.config.iterations += Math.floor(count);
+        draft.config.iterations = Math.min(
+          MAX_RALPH_ITERATIONS,
+          draft.config.iterations + Math.floor(count)
+        );
         draft.updatedAt = Date.now();
       })
     );
@@ -157,3 +172,13 @@ export const ralphStore = {
 };
 
 export type RalphStore = typeof ralphStore;
+
+function acknowledgeLegacyRuns(managerSessionIds: string[]): void {
+  if (managerSessionIds.length === 0) return;
+  const stored = readStored<RalphRunsRecord>(LEGACY_STORAGE_KEY);
+  if (!stored) return;
+
+  const remaining = { ...stored };
+  for (const managerSessionId of managerSessionIds) delete remaining[managerSessionId];
+  writeStored(LEGACY_STORAGE_KEY, Object.keys(remaining).length > 0 ? remaining : null);
+}

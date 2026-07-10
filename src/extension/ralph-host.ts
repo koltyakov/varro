@@ -1,4 +1,5 @@
 import type { RalphConfig, RalphIteration, RalphRun, RalphStopReason } from '../shared/ralph';
+import { MAX_RALPH_ITERATIONS } from '../shared/ralph';
 import type { RalphStatePayload, WebviewMessage } from '../shared/protocol';
 import type { Persistence } from '../shared/persistence';
 import { normalizeModelVariant } from '../shared/model-variant';
@@ -8,6 +9,7 @@ import {
   type RalphRunner,
   type RalphRunnerStore,
   type RalphSessionSummary,
+  type RalphSessionStatus,
 } from '../shared/ralph-runner-core';
 import { asRecord } from '../shared/type-utils';
 import type { ContextProvider } from './context-provider';
@@ -16,8 +18,7 @@ import { logger } from './logger';
 
 const RALPH_RUNS_KEY = 'varro.ralph.runs';
 const MAX_PERSISTED_RALPH_RUNS = 100;
-const MAX_PERSISTED_RALPH_ITERATIONS = 1_000;
-const MAX_RALPH_ITERATION_COUNT = MAX_PERSISTED_RALPH_ITERATIONS;
+const MAX_PERSISTED_RALPH_ITERATIONS = MAX_RALPH_ITERATIONS;
 const MAX_RALPH_ID_LENGTH = 512;
 const MAX_RALPH_PATH_LENGTH = 4_096;
 const MAX_RALPH_PROMPT_LENGTH = 100_000;
@@ -73,7 +74,13 @@ export class HostRalphStore implements RalphRunnerStore {
 
   startRun(config: RalphConfig): void {
     const normalizedConfig = normalizeRalphConfigForMutation(config);
-    if (!normalizedConfig || !this.reserveRunSlot(normalizedConfig.managerSessionId)) return;
+    if (
+      !normalizedConfig ||
+      Object.prototype.hasOwnProperty.call(this.runs, normalizedConfig.managerSessionId) ||
+      !this.reserveRunSlot(normalizedConfig.managerSessionId)
+    ) {
+      return;
+    }
     this.runs[normalizedConfig.managerSessionId] = {
       config: normalizedConfig,
       status: 'running',
@@ -97,6 +104,41 @@ export class HostRalphStore implements RalphRunnerStore {
     this.commit();
   }
 
+  async adoptLegacyRuns(legacyRuns: Record<string, RalphRun>): Promise<string[]> {
+    const candidates: RalphRun[] = [];
+    for (const [managerSessionId, rawRun] of Object.entries(legacyRuns)) {
+      const normalized = normalizePersistedRalphRun(rawRun, managerSessionId);
+      if (normalized) candidates.push(normalized);
+    }
+    if (candidates.length === 0) return [];
+
+    const stagedRuns = { ...this.runs };
+    for (const candidate of candidates) {
+      const managerSessionId = candidate.config.managerSessionId;
+      if (Object.prototype.hasOwnProperty.call(stagedRuns, managerSessionId)) continue;
+      if (!reserveRunSlotIn(stagedRuns, managerSessionId)) continue;
+      stagedRuns[managerSessionId] = candidate;
+    }
+    if (!(await this.enqueuePersistence(stagedRuns))) return [];
+
+    // Re-apply against the latest in-memory state in case another command
+    // mutated the store while the migration write was pending.
+    const acknowledged: string[] = [];
+    for (const candidate of candidates) {
+      const managerSessionId = candidate.config.managerSessionId;
+      if (Object.prototype.hasOwnProperty.call(this.runs, managerSessionId)) {
+        acknowledged.push(managerSessionId);
+        continue;
+      }
+      if (!this.reserveRunSlot(managerSessionId)) continue;
+      this.runs[managerSessionId] = candidate;
+      acknowledged.push(managerSessionId);
+    }
+    if (!(await this.enqueuePersistence(this.snapshot()))) return [];
+    this.onChange();
+    return acknowledged;
+  }
+
   setStatus(managerSessionId: string, status: RalphRun['status'], stopReason?: RalphStopReason) {
     const run = this.getRun(managerSessionId);
     if (!run) return;
@@ -114,10 +156,7 @@ export class HostRalphStore implements RalphRunnerStore {
   addIterations(managerSessionId: string, count: number): void {
     const run = this.getRun(managerSessionId);
     if (!run || !Number.isFinite(count) || count < 1) return;
-    const iterations = Math.min(
-      MAX_RALPH_ITERATION_COUNT,
-      run.config.iterations + Math.floor(count)
-    );
+    const iterations = Math.min(MAX_RALPH_ITERATIONS, run.config.iterations + Math.floor(count));
     if (iterations === run.config.iterations) return;
     this.runs[managerSessionId] = {
       ...run,
@@ -167,29 +206,29 @@ export class HostRalphStore implements RalphRunnerStore {
   }
 
   private reserveRunSlot(managerSessionId: string): boolean {
-    if (Object.prototype.hasOwnProperty.call(this.runs, managerSessionId)) return true;
-    const entries = Object.entries(this.runs);
-    if (entries.length < MAX_PERSISTED_RALPH_RUNS) return true;
-    const oldestTerminal = entries
-      .filter(([, run]) => isTerminalRalphStatus(run.status))
-      .toSorted(([, left], [, right]) => left.updatedAt - right.updatedAt)[0];
-    if (!oldestTerminal) return false;
-    delete this.runs[oldestTerminal[0]];
-    return true;
+    return reserveRunSlotIn(this.runs, managerSessionId);
   }
 
   private commit() {
     const snapshot = this.snapshot();
-    this.persistenceQueue = this.persistenceQueue.then(async () => {
+    void this.enqueuePersistence(snapshot);
+    this.onChange();
+  }
+
+  private enqueuePersistence(snapshot: Record<string, RalphRun>): Promise<boolean> {
+    const result = this.persistenceQueue.then(async () => {
       try {
         await this.persistence.set(RALPH_RUNS_KEY, snapshot);
+        return true;
       } catch (err) {
         logger.warn(
           `Failed to persist Ralph runs: ${err instanceof Error ? err.message : String(err)}`
         );
+        return false;
       }
     });
-    this.onChange();
+    this.persistenceQueue = result.then(() => {});
+    return result;
   }
 }
 
@@ -217,24 +256,39 @@ export class RalphHost {
     this.store = new HostRalphStore(deps.persistence, () => this.broadcast());
     this.runner = createRalphRunner({
       store: this.store,
-      createSession: async ({ title, permission, parentID }) => {
-        const session = await this.request('POST', '/session', {
-          title,
-          parentID,
-          ...(permission.length > 0 ? { permission } : {}),
-        });
+      createSession: async ({ title, permission, parentID }, signal) => {
+        const session = await this.request(
+          'POST',
+          '/session',
+          {
+            title,
+            parentID,
+            ...(permission.length > 0 ? { permission } : {}),
+          },
+          signal
+        );
         const sessionID = getString(asRecord(session)?.id);
         if (!sessionID) throw new Error('Ralph child session was not created');
         return sessionID;
       },
-      sendPrompt: async (sessionId, body) => {
-        await this.request('POST', `/session/${encodeURIComponent(sessionId)}/prompt_async`, body);
+      sendPrompt: async (sessionId, body, signal) => {
+        await this.request(
+          'POST',
+          `/session/${encodeURIComponent(sessionId)}/prompt_async`,
+          body,
+          signal
+        );
       },
-      abortSession: async (sessionId) => {
-        await this.request('POST', `/session/${encodeURIComponent(sessionId)}/abort`);
+      abortSession: async (sessionId, signal) => {
+        await this.request(
+          'POST',
+          `/session/${encodeURIComponent(sessionId)}/abort`,
+          undefined,
+          signal
+        );
       },
-      listSessions: async () => {
-        const sessions = await this.request('GET', '/session');
+      listSessions: async (signal) => {
+        const sessions = await this.request('GET', '/session', undefined, signal);
         if (!Array.isArray(sessions)) return [];
         return sessions
           .map((item): RalphSessionSummary | null => {
@@ -245,27 +299,55 @@ export class RalphHost {
           })
           .filter((item): item is RalphSessionSummary => item !== null);
       },
-      listMessages: async (sessionId) => {
+      listMessages: async (sessionId, signal) => {
         const messages = await this.request(
           'GET',
-          `/session/${encodeURIComponent(sessionId)}/message`
+          `/session/${encodeURIComponent(sessionId)}/message`,
+          undefined,
+          signal
         );
         return Array.isArray(messages) ? (messages as RalphMessageEntry[]) : [];
       },
-      onSessionIdle: (listener) => {
+      getSessionStatus: async (sessionId, signal) => {
+        const statuses = asRecord(await this.request('GET', '/session/status', undefined, signal));
+        if (!statuses) throw new Error('OpenCode returned an invalid session status snapshot');
+        if (!Object.prototype.hasOwnProperty.call(statuses, sessionId)) {
+          const sessions = await this.request('GET', '/session', undefined, signal);
+          if (!Array.isArray(sessions)) {
+            throw new Error(
+              'OpenCode returned an invalid session list while confirming idle status'
+            );
+          }
+          const exists = sessions.some((session) => getString(asRecord(session)?.id) === sessionId);
+          return exists ? { type: 'idle' } : { type: 'missing' };
+        }
+        const status = asRecord(statuses?.[sessionId]);
+        if (!status) {
+          return {
+            type: 'unknown',
+            message: `OpenCode returned a malformed status for ${sessionId}`,
+          };
+        }
+        return parseRalphSessionStatus(status, sessionId);
+      },
+      onSessionStatus: (listener) => {
         const handler = (event: { type?: string; properties?: unknown }) => {
           const props = asRecord(event?.properties);
           const sessionID = getString(props?.sessionID);
           if (!sessionID) return;
           if (event.type === 'session.idle') {
-            listener(sessionID);
+            listener(sessionID, { type: 'idle' });
             return;
           }
-          if (
-            event.type === 'session.status' &&
-            getString(asRecord(props?.status)?.type) === 'idle'
-          ) {
-            listener(sessionID);
+          if (event.type === 'session.status') {
+            listener(sessionID, parseRalphSessionStatus(asRecord(props?.status), sessionID));
+            return;
+          }
+          if (event.type === 'session.error') {
+            listener(sessionID, {
+              type: 'error',
+              message: getRalphSessionErrorMessage(props?.error),
+            });
           }
         };
         this.deps.server.on('event', handler);
@@ -273,7 +355,8 @@ export class RalphHost {
           this.deps.server.off('event', handler);
         };
       },
-      readWorkspaceFile: (path) => this.deps.contextProvider.readFile(path),
+      readWorkspaceFile: (path, signal) =>
+        raceAgainstAbort(this.deps.contextProvider.readFile(path), signal),
       normalizeVariant: (modelID, variant) => normalizeModelVariant(modelID, variant),
       logError: (context, err) => {
         logger.error(`ralph-host:${context}: ${err instanceof Error ? err.message : String(err)}`);
@@ -316,11 +399,7 @@ export class RalphHost {
         this.store.updateRunModel(msg.payload.managerSessionId, msg.payload.model);
         break;
       case 'ralph/sync': {
-        for (const run of Object.values(msg.payload.legacyRuns || {})) {
-          if (run?.config?.managerSessionId) this.store.adoptRun(run);
-        }
-        void this.withServer(async () => this.runner.reattachAll(), 'reattach');
-        this.broadcast();
+        void this.handleSync(msg.payload.legacyRuns);
         break;
       }
     }
@@ -355,17 +434,103 @@ export class RalphHost {
     }
   }
 
-  private request(method: string, path: string, body?: unknown) {
-    return this.deps.server.request(method, path, body);
+  private async handleSync(legacyRuns?: Record<string, RalphRun>): Promise<void> {
+    const acknowledgedIds = legacyRuns ? await this.store.adoptLegacyRuns(legacyRuns) : [];
+    if (this.disposed) return;
+    await this.withServer(async () => this.runner.reattachAll(), 'reattach');
+    this.broadcast(acknowledgedIds);
   }
 
-  private broadcast() {
-    this.deps.broadcastState(this.getStatePayload());
+  private request(method: string, path: string, body?: unknown, signal?: AbortSignal) {
+    const request = this.deps.server.request(method, path, body);
+    return signal ? raceAgainstAbort(request, signal) : request;
+  }
+
+  private broadcast(legacyMigrationAcknowledgedIds: string[] = []) {
+    const payload = this.getStatePayload();
+    for (const managerSessionId of legacyMigrationAcknowledgedIds) {
+      const run = payload.runs[managerSessionId];
+      if (run) payload.runs[managerSessionId] = { ...run, legacyMigrationAcknowledged: true };
+    }
+    this.deps.broadcastState(payload);
   }
 }
 
 function getString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function raceAgainstAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    void promise.catch(() => {});
+    return Promise.reject(new Error('Ralph operation was cancelled'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cancel = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Ralph operation was cancelled'));
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', cancel);
+        resolve(value);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', cancel);
+        reject(err);
+      }
+    );
+    if (signal.aborted) cancel();
+  });
+}
+
+function parseRalphSessionStatus(
+  status: Record<string, unknown> | null,
+  sessionId: string
+): RalphSessionStatus {
+  if (!status) {
+    return { type: 'unknown', message: `OpenCode returned a missing status for ${sessionId}` };
+  }
+  const type = getString(status.type);
+  if (type === 'idle') return { type: 'idle' };
+  if (type === 'busy' || type === 'retry') return { type: 'active' };
+  if (type === 'error' || type === 'failed') {
+    return { type: 'error', message: getRalphSessionErrorMessage(status) };
+  }
+  return {
+    type: 'unknown',
+    message: `OpenCode returned an unknown status${type ? ` "${type}"` : ''} for ${sessionId}`,
+  };
+}
+
+function getRalphSessionErrorMessage(value: unknown): string {
+  const error = asRecord(value);
+  const data = asRecord(error?.data);
+  return (
+    getString(data?.message) ||
+    getString(error?.message) ||
+    getString(error?.name) ||
+    'The child session ended with an unknown error'
+  );
+}
+
+function reserveRunSlotIn(runs: Record<string, RalphRun>, managerSessionId: string): boolean {
+  if (Object.prototype.hasOwnProperty.call(runs, managerSessionId)) return true;
+  const entries = Object.entries(runs);
+  if (entries.length < MAX_PERSISTED_RALPH_RUNS) return true;
+  const oldestTerminal = entries
+    .filter(([, run]) => isTerminalRalphStatus(run.status))
+    .toSorted(([, left], [, right]) => left.updatedAt - right.updatedAt)[0];
+  if (!oldestTerminal) return false;
+  delete runs[oldestTerminal[0]];
+  return true;
 }
 
 function normalizePersistedRalphRuns(value: unknown): Record<string, RalphRun> {
@@ -456,7 +621,7 @@ function normalizePersistedRalphConfig(value: unknown): RalphConfig | null {
     !isSafeRalphRecordKey(managerSessionId) ||
     !planDocPath ||
     !promptTemplate ||
-    !isBoundedInteger(record.iterations, 1, MAX_RALPH_ITERATION_COUNT) ||
+    !isBoundedInteger(record.iterations, 1, MAX_RALPH_ITERATIONS) ||
     !isPermissionMode(record.permissionMode) ||
     !isSafeInteger(record.createdAt)
   ) {
@@ -484,7 +649,7 @@ function normalizeRalphConfigForMutation(config: RalphConfig): RalphConfig | nul
   if (!Number.isSafeInteger(config.iterations) || config.iterations < 1) return null;
   return normalizePersistedRalphConfig({
     ...config,
-    iterations: Math.min(config.iterations, MAX_RALPH_ITERATION_COUNT),
+    iterations: Math.min(config.iterations, MAX_RALPH_ITERATIONS),
   });
 }
 
@@ -518,6 +683,8 @@ function normalizePersistedRalphIteration(value: unknown, maxIndex: number): Ral
   if (!filesChanged.every((path): path is string => path !== null)) return null;
   const verification = normalizePersistedRalphVerification(record.verification);
   if (!verification) return null;
+  const phase = getRalphIterationPhase(record.phase);
+  if (record.phase !== undefined && !phase) return null;
 
   const iteration: RalphIteration = {
     index: record.index,
@@ -527,6 +694,7 @@ function normalizePersistedRalphIteration(value: unknown, maxIndex: number): Ral
     endedAt: record.endedAt,
     filesChanged,
     verification,
+    ...(phase ? { phase } : {}),
   };
   if (record.tokens !== undefined) {
     const tokens = normalizePersistedRalphTokens(record.tokens);
@@ -556,6 +724,10 @@ function normalizePersistedRalphIteration(value: unknown, maxIndex: number): Ral
     iteration.repairSessionIds = repairSessionIds;
   }
   return iteration;
+}
+
+function getRalphIterationPhase(value: unknown): RalphIteration['phase'] | null {
+  return value === 'primary' || value === 'verification' || value === 'repair' ? value : null;
 }
 
 function normalizePersistedRalphVerification(

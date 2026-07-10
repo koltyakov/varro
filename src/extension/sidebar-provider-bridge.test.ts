@@ -4,7 +4,6 @@ import type { InitialWebviewState } from '../shared/protocol';
 const mocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   renderWebviewHtml: vi.fn(() => '<html />'),
-  warn: vi.fn(),
   joinPath: vi.fn((base: { fsPath: string }, ...parts: string[]) => ({
     fsPath: [base.fsPath, ...parts].join('/'),
   })),
@@ -20,12 +19,6 @@ vi.mock('fs/promises', () => ({
 vi.mock('vscode', () => ({
   Uri: {
     joinPath: mocks.joinPath,
-  },
-}));
-
-vi.mock('./logger', () => ({
-  logger: {
-    warn: mocks.warn,
   },
 }));
 
@@ -67,6 +60,7 @@ function createView(options?: { visible?: boolean; cspSource?: string }) {
 describe('SidebarProviderBridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readFile.mockReset();
     mocks.renderWebviewHtml.mockReturnValue('<html />');
   });
 
@@ -139,34 +133,36 @@ describe('SidebarProviderBridge', () => {
       scriptContent: 'console.log("second")',
       cssContent: 'body { color: blue; }',
     });
-    expect(mocks.warn).not.toHaveBeenCalled();
   });
 
-  it('warns when the webview script is missing and retries the asset load next time', async () => {
+  it.each(['webview.js', 'webview.css'])('rejects when built %s is missing', async (asset) => {
     const extensionUri = { fsPath: '/extension' };
     const bridge = new SidebarProviderBridge(extensionUri as never);
     const initialState = createInitialState();
 
     mocks.readFile.mockImplementation((path: string) => {
-      if (path.endsWith('webview.js')) return Promise.reject(new Error('missing script'));
-      return Promise.resolve('body { color: red; }');
+      if (path.endsWith(asset)) return Promise.reject(new Error(`missing ${asset}`));
+      return Promise.resolve(
+        path.endsWith('webview.js') ? 'console.log("ready")' : 'body { color: red; }'
+      );
     });
 
-    await bridge.renderHtml(initialState);
-    await bridge.renderHtml(initialState);
-
-    expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(1, '', initialState, {
-      scriptContent: '',
-      cssContent: 'body { color: red; }',
-    });
-    expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(2, '', initialState, {
-      scriptContent: '',
-      cssContent: 'body { color: red; }',
-    });
-    expect(mocks.warn).toHaveBeenCalledTimes(2);
-    expect(mocks.warn).toHaveBeenCalledWith(
-      'webview.js not found - run `npm run build:webview` first'
+    await expect(bridge.renderHtml(initialState)).rejects.toThrow(
+      `Failed to load built webview assets: missing ${asset}`
     );
-    expect(mocks.readFile).toHaveBeenCalledTimes(4);
+    expect(mocks.renderWebviewHtml).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['webview.js', '', 'body { color: red; }'],
+    ['webview.css', 'console.log("ready")', '   '],
+  ])('rejects when %s is empty', async (asset, scriptContent, cssContent) => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    mocks.readFile.mockResolvedValueOnce(scriptContent).mockResolvedValueOnce(cssContent);
+
+    await expect(bridge.renderHtml(createInitialState())).rejects.toThrow(
+      `Built ${asset} is empty`
+    );
+    expect(mocks.renderWebviewHtml).not.toHaveBeenCalled();
   });
 });

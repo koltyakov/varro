@@ -213,13 +213,12 @@ describe('session sync helpers', () => {
       },
       {
         nextSelection: () => 1,
-        nextSync: () => 1,
         isCurrentSync: () => true,
       }
     );
 
     await operations.selectSession('session-1');
-    await operations.syncSessionMessages('session-1');
+    await operations.syncSessionMessages('session-1', 1);
     await operations.syncSession('session-1');
 
     expect(activeSession.value).toBe('session-1');

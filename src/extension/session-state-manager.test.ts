@@ -216,6 +216,70 @@ describe('SessionStateManager notifications', () => {
     expect(manager.completed.has('session-1')).toBe(true);
   });
 
+  it('rolls back a failed optimistic prompt without reporting completion', () => {
+    const manager = createManager();
+    const attempt = manager.markSessionBusy('session-1');
+
+    expect(attempt).toBeDefined();
+    manager.reconcilePromptFailure(attempt!, { type: 'idle' });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+  });
+
+  it('does not clear a concurrent prompt attempt when an earlier attempt fails', () => {
+    const manager = createManager();
+    const firstAttempt = manager.markSessionBusy('session-1');
+    const secondAttempt = manager.markSessionBusy('session-1');
+
+    manager.reconcilePromptFailure(firstAttempt!, undefined);
+    expect(manager.busy.has('session-1')).toBe(true);
+
+    manager.reconcilePromptFailure(secondAttempt!, undefined);
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+  });
+
+  it('rolls back a deferred prompt failure on the next authoritative status snapshot', () => {
+    const manager = createManager();
+    const attempt = manager.markSessionBusy('session-1');
+
+    manager.deferPromptFailure(attempt!);
+    const stale = manager.reconcileStaleBusySessions({}, 10_000, 1_000);
+
+    expect(stale).toEqual([]);
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+  });
+
+  it('preserves a concurrent prompt while reconciling a deferred failed attempt', () => {
+    const manager = createManager();
+    const failedAttempt = manager.markSessionBusy('session-1');
+    const concurrentAttempt = manager.markSessionBusy('session-1');
+
+    manager.deferPromptFailure(failedAttempt!);
+    manager.reconcileStaleBusySessions({}, 10_000, 1_000);
+
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
+
+    manager.reconcilePromptFailure(concurrentAttempt!, undefined);
+    expect(manager.busy.has('session-1')).toBe(false);
+  });
+
+  it('bounds deferred rollback when authoritative status entries stay malformed', () => {
+    const manager = createManager();
+    const attempt = manager.markSessionBusy('session-1');
+    manager.deferPromptFailure(attempt!);
+
+    for (let i = 0; i < 3; i += 1) {
+      manager.reconcileStaleBusySessions({ 'session-1': { type: 'unknown' } }, 10_000, i);
+    }
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+  });
+
   it('does not mark continuation step ends complete', () => {
     const manager = createManager();
 
@@ -502,6 +566,28 @@ describe('SessionStateManager notifications', () => {
     expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
   });
 
+  it('terminally clears busy on an aborted session.error without later reporting success', () => {
+    const manager = createManager();
+    markBusy(manager, 'session-1');
+
+    manager.handleServerEvent({
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'aborted', data: { message: 'Aborted' } },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(false);
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
   it('persists trimmed interrupted sessions and blocking requests', async () => {
     const workspaceState: WorkspaceStateMock = {
       get: vi.fn(() => undefined),
@@ -694,7 +780,7 @@ describe('SessionStateManager notifications', () => {
     );
 
     markBusy(manager, 'session-1');
-    const consumed = manager.consumeInterruptedSessions();
+    const consumed = manager.consumeRecoverySnapshot();
     manager.handleServerEvent({
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
@@ -704,7 +790,9 @@ describe('SessionStateManager notifications', () => {
     expect(events).toEqual(['set-1-start']);
     releaseFirstWrite?.();
 
-    await expect(consumed).resolves.toEqual([{ id: 'session-1', title: undefined }]);
+    await expect(consumed).resolves.toMatchObject({
+      interruptedSessions: [{ id: 'session-1', title: undefined }],
+    });
     await manager.flush();
     expect(events).toEqual([
       'set-1-start',
@@ -717,7 +805,7 @@ describe('SessionStateManager notifications', () => {
     expect(storage.get('varro.interruptedSessions')).toEqual([]);
   });
 
-  it('serializes blocking-request consume between overlapping writes', async () => {
+  it('serializes blocking recovery and preserves a newer reply', async () => {
     const storage = new Map<string, unknown>();
     const events: string[] = [];
     let releaseFirstWrite: (() => void) | undefined;
@@ -763,7 +851,7 @@ describe('SessionStateManager notifications', () => {
       type: 'permission.asked',
       properties: { id: 'permission-1', sessionID: 'session-1', title: 'Use Bash' },
     });
-    const consumed = manager.consumeBlockingRequests();
+    const consumed = manager.consumeRecoverySnapshot();
     manager.handleServerEvent({
       type: 'permission.replied',
       properties: { id: 'permission-1', sessionID: 'session-1' },
@@ -773,9 +861,7 @@ describe('SessionStateManager notifications', () => {
     expect(events).toEqual(['set-1-start']);
     releaseFirstWrite?.();
 
-    await expect(consumed).resolves.toMatchObject([
-      { id: 'permission-1', sessionID: 'session-1', kind: 'permission' },
-    ]);
+    await expect(consumed).resolves.toMatchObject({ blockingRequests: [] });
     await manager.flush();
     expect(events).toEqual([
       'set-1-start',
@@ -814,10 +900,9 @@ describe('SessionStateManager notifications', () => {
       { shouldShow: () => false }
     );
 
-    await expect(manager.consumeInterruptedSessions()).resolves.toEqual([
-      { id: 'session-1', title: 'Session 1' },
-      { id: 'session-2' },
-    ]);
+    await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
+      interruptedSessions: [{ id: 'session-1', title: 'Session 1' }, { id: 'session-2' }],
+    });
     expect(workspaceState.remove).toHaveBeenCalledWith('varro.interruptedSessions');
   });
 
@@ -878,21 +963,23 @@ describe('SessionStateManager notifications', () => {
       { shouldShow: () => false }
     );
 
-    await expect(manager.consumeBlockingRequests()).resolves.toEqual([
-      {
-        id: 'perm-1',
-        sessionID: 'session-1',
-        kind: 'permission',
-        props: { id: 'perm-1', sessionID: 'session-1', title: 'Use Bash' },
-        directory: '/repo',
-      },
-      {
-        id: 'question-1',
-        sessionID: 'session-2',
-        kind: 'question',
-        props: { id: 'question-1', sessionID: 'session-2', questions: [] },
-      },
-    ]);
+    await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
+      blockingRequests: [
+        {
+          id: 'perm-1',
+          sessionID: 'session-1',
+          kind: 'permission',
+          props: { id: 'perm-1', sessionID: 'session-1', title: 'Use Bash' },
+          directory: '/repo',
+        },
+        {
+          id: 'question-1',
+          sessionID: 'session-2',
+          kind: 'question',
+          props: { id: 'question-1', sessionID: 'session-2', questions: [] },
+        },
+      ],
+    });
     expect(workspaceState.remove).toHaveBeenCalledWith('varro.blockingRequests');
   });
 
@@ -908,8 +995,169 @@ describe('SessionStateManager notifications', () => {
       { shouldShow: () => false }
     );
 
-    await expect(manager.consumeInterruptedSessions()).resolves.toEqual([]);
-    await expect(manager.consumeBlockingRequests()).resolves.toEqual([]);
+    await expect(manager.consumeRecoverySnapshot()).resolves.toEqual({
+      interruptedSessions: [],
+      blockingRequests: [],
+    });
+  });
+
+  it('shares an overlapping recovery consume', async () => {
+    const releaseRemoves: Array<() => void> = [];
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn(() => undefined),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseRemoves.push(resolve);
+          })
+      ),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    const first = manager.consumeRecoverySnapshot();
+    const second = manager.consumeRecoverySnapshot();
+
+    expect(second).toBe(first);
+    await vi.waitFor(() => expect(workspaceState.remove).toHaveBeenCalledTimes(2));
+    for (const release of releaseRemoves) release();
+    await Promise.all([first, second]);
+    expect(workspaceState.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves permission and question events that arrive during recovery', async () => {
+    let releaseBlockingRemove: (() => void) | undefined;
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) =>
+        key === 'varro.blockingRequests'
+          ? [
+              {
+                id: 'permission-1',
+                sessionID: 'session-1',
+                kind: 'permission',
+                props: { id: 'permission-1', sessionID: 'session-1', title: 'Use Bash' },
+              },
+            ]
+          : undefined
+      ),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn((key: string) => {
+        if (key !== 'varro.blockingRequests') return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          releaseBlockingRemove = resolve;
+        });
+      }),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    const recovery = manager.consumeRecoverySnapshot();
+    await vi.waitFor(() => expect(releaseBlockingRemove).toBeDefined());
+    manager.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-2', sessionID: 'session-2', questions: [] },
+    });
+    releaseBlockingRemove?.();
+
+    await expect(recovery).resolves.toMatchObject({
+      blockingRequests: [
+        { id: 'permission-1', kind: 'permission' },
+        { id: 'question-2', kind: 'question' },
+      ],
+    });
+    expect([...manager.pending.keys()]).toEqual(['permission-1', 'question-2']);
+  });
+
+  it('does not resurrect a persisted request replied to during recovery', async () => {
+    let releaseBlockingRemove: (() => void) | undefined;
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) =>
+        key === 'varro.blockingRequests'
+          ? [
+              {
+                id: 'permission-1',
+                sessionID: 'session-1',
+                kind: 'permission',
+                props: { id: 'permission-1', sessionID: 'session-1' },
+              },
+            ]
+          : undefined
+      ),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn((key: string) => {
+        if (key !== 'varro.blockingRequests') return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          releaseBlockingRemove = resolve;
+        });
+      }),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    const recovery = manager.consumeRecoverySnapshot();
+    await vi.waitFor(() => expect(releaseBlockingRemove).toBeDefined());
+    manager.handleServerEvent({
+      type: 'permission.replied',
+      properties: { id: 'permission-1', sessionID: 'session-1' },
+    });
+    releaseBlockingRemove?.();
+
+    await expect(recovery).resolves.toMatchObject({ blockingRequests: [] });
+    expect(manager.pending.has('permission-1')).toBe(false);
+  });
+
+  it('skips recovered requests for a session deleted before merge and prunes the tombstone', async () => {
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) =>
+        key === 'varro.blockingRequests'
+          ? [
+              {
+                id: 'permission-deleted',
+                sessionID: 'session-deleted',
+                kind: 'permission',
+                props: { id: 'permission-deleted', sessionID: 'session-deleted' },
+              },
+              {
+                id: 'permission-live',
+                sessionID: 'session-live',
+                kind: 'permission',
+                props: { id: 'permission-live', sessionID: 'session-live' },
+              },
+            ]
+          : undefined
+      ),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    const recovery = manager.consumeRecoverySnapshot();
+    manager.handleServerEvent({
+      type: 'session.deleted',
+      properties: { sessionID: 'session-deleted' },
+    });
+
+    await expect(recovery).resolves.toMatchObject({
+      blockingRequests: [{ id: 'permission-live', sessionID: 'session-live' }],
+    });
+    expect(manager.pending.has('permission-deleted')).toBe(false);
+
+    await manager.consumeRecoverySnapshot();
+    expect(manager.pending.has('permission-deleted')).toBe(true);
   });
 
   it('evicts old session metadata entries as new sessions arrive', () => {
@@ -985,21 +1233,33 @@ describe('SessionStateManager notifications', () => {
     expect(manager.isSessionInWorkspace('session-1', '/other')).toBe(false);
   });
 
-  it('treats restored blocking requests without a directory as out of workspace', () => {
-    const manager = createManager(() => false);
-
-    manager.restoreBlockingRequests([
+  it('treats restored blocking requests without a directory as out of workspace', async () => {
+    const manager = new SessionStateManager(
       {
-        id: 'perm-1',
-        sessionID: 'session-1',
-        kind: 'permission',
-        props: {
-          id: 'perm-1',
-          sessionID: 'session-1',
-          title: 'Use Bash',
-        },
-      },
-    ]);
+        get: vi.fn((key: string) =>
+          key === 'varro.blockingRequests'
+            ? [
+                {
+                  id: 'perm-1',
+                  sessionID: 'session-1',
+                  kind: 'permission',
+                  props: {
+                    id: 'perm-1',
+                    sessionID: 'session-1',
+                    title: 'Use Bash',
+                  },
+                },
+              ]
+            : undefined
+        ),
+        set: vi.fn(() => Promise.resolve()),
+        remove: vi.fn(() => Promise.resolve()),
+      } as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    await manager.consumeRecoverySnapshot();
 
     expect(manager.isSessionInWorkspace('session-1', '/repo')).toBe(false);
     expect(manager.isSessionInWorkspace('session-1', null)).toBe(true);

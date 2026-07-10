@@ -91,7 +91,7 @@ describe('ralph store host-state mirror', () => {
     expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
   });
 
-  it('consumes legacy localStorage runs exactly once', async () => {
+  it('retains legacy localStorage runs until the host acknowledges persistence', async () => {
     const config = createConfig({ managerSessionId: 'manager-legacy' });
     window.localStorage.setItem(
       LEGACY_STORAGE_KEY,
@@ -102,8 +102,48 @@ describe('ralph store host-state mirror', () => {
     const legacy = ralphStore.consumeLegacyRuns();
 
     expect(legacy?.[config.managerSessionId]?.config.managerSessionId).toBe('manager-legacy');
+    expect(ralphStore.consumeLegacyRuns()).toEqual(legacy);
+    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).not.toBeNull();
+
+    ralphStore.applyHostState(
+      {
+        [config.managerSessionId]: {
+          ...createRun(config),
+          legacyMigrationAcknowledged: true,
+        },
+      },
+      []
+    );
+
     expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
     expect(ralphStore.consumeLegacyRuns()).toBeUndefined();
+  });
+
+  it('keeps rejected legacy runs after partial host adoption', async () => {
+    const acceptedConfig = createConfig({ managerSessionId: 'manager-accepted' });
+    const rejectedConfig = createConfig({ managerSessionId: 'manager-rejected' });
+    window.localStorage.setItem(
+      LEGACY_STORAGE_KEY,
+      JSON.stringify({
+        [acceptedConfig.managerSessionId]: createRun(acceptedConfig),
+        [rejectedConfig.managerSessionId]: createRun(rejectedConfig),
+      })
+    );
+
+    const { ralphStore } = await loadRalphStore();
+    ralphStore.applyHostState(
+      {
+        [acceptedConfig.managerSessionId]: {
+          ...createRun(acceptedConfig),
+          legacyMigrationAcknowledged: true,
+        },
+      },
+      []
+    );
+
+    expect(ralphStore.consumeLegacyRuns()).toEqual({
+      [rejectedConfig.managerSessionId]: createRun(rejectedConfig),
+    });
   });
 
   it('applies iteration and status mutations optimistically', async () => {
@@ -181,6 +221,9 @@ describe('ralph store host-state mirror', () => {
       iterations: [],
       updatedAt: 2_000,
     });
+
+    ralphStore.addIterations(config.managerSessionId, 5_000);
+    expect(ralphStore.getRun(config.managerSessionId)?.config.iterations).toBe(1_000);
   });
 });
 

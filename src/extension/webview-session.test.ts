@@ -24,7 +24,7 @@ vi.mock('vscode', () => vscodeMock);
 vi.mock('./logger', () => ({ logger: loggerMock }));
 
 import type { InitialWebviewState, ServerStatus } from '../shared/protocol';
-import type { BlockingRequestSnapshot } from './session-state-manager';
+import type { BlockingRequestSnapshot, RecoverySnapshot } from './session-state-manager';
 import { WebviewSession } from './webview-session';
 
 const RUNNING_STATUS: ServerStatus = { state: 'running', url: 'http://127.0.0.1:4096' };
@@ -98,10 +98,13 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
 
   const sessionState = {
     clearCompleted: vi.fn(),
-    consumeBlockingRequests: vi.fn(() => Promise.resolve([] as BlockingRequestSnapshot[])),
-    consumeInterruptedSessions: vi.fn(() => Promise.resolve([])),
+    consumeRecoverySnapshot: vi.fn(() =>
+      Promise.resolve({
+        interruptedSessions: [],
+        blockingRequests: [],
+      } satisfies RecoverySnapshot)
+    ),
     replayBlockingRequests: vi.fn(),
-    restoreBlockingRequests: vi.fn(),
   };
 
   const sessionTrash = {
@@ -204,7 +207,7 @@ describe('WebviewSession', () => {
   it('ignores stale renderHtml results from an earlier resolve generation', async () => {
     const firstHtml = createDeferred<string>();
     const secondHtml = createDeferred<string>();
-    const { session, bridge } = createSession({
+    const { session, bridge, sessionState } = createSession({
       renderHtml: vi
         .fn()
         .mockImplementationOnce(() => firstHtml.promise)
@@ -217,6 +220,7 @@ describe('WebviewSession', () => {
     await flushMicrotasks();
 
     expect(bridge.renderHtml).toHaveBeenCalledTimes(2);
+    expect(sessionState.consumeRecoverySnapshot).toHaveBeenCalledOnce();
 
     firstHtml.resolve('<html>stale</html>');
     await flushMicrotasks();
@@ -225,6 +229,39 @@ describe('WebviewSession', () => {
     secondHtml.resolve('<html>fresh</html>');
     await flushMicrotasks();
     expect(view.webview.html).toBe('<html>fresh</html>');
+  });
+
+  it('shares an overlapping recovery load and lets only the current generation commit it', async () => {
+    const recovery = createDeferred<RecoverySnapshot>();
+    const { session, bridge, sessionState, deps } = createSession();
+    sessionState.consumeRecoverySnapshot.mockReturnValue(recovery.promise);
+    const firstView = createWebviewView(true);
+    const secondView = createWebviewView(true);
+
+    await session.resolve(firstView as never);
+    await session.resolve(secondView as never);
+    recovery.resolve({
+      interruptedSessions: [{ id: 'session-1', title: 'Interrupted' }],
+      blockingRequests: [
+        {
+          id: 'permission-1',
+          sessionID: 'session-1',
+          kind: 'permission',
+          props: { id: 'permission-1', sessionID: 'session-1' },
+        },
+      ],
+    });
+    await flushMicrotasks();
+
+    expect(sessionState.consumeRecoverySnapshot).toHaveBeenCalledOnce();
+    expect(deps.resetStatusBarCache).toHaveBeenCalledOnce();
+    expect(bridge.renderHtml).toHaveBeenCalledOnce();
+    expect(firstView.webview.html).toBe('');
+    expect(secondView.webview.html).toBe('<html><body>Varro</body></html>');
+    expect(session.interruptedSessionsForWebview).toEqual([
+      { id: 'session-1', title: 'Interrupted' },
+    ]);
+    expect(session.blockingRequestsForWebview).toHaveLength(1);
   });
 
   it('includes provider-limit poll interval in the initial webview state', async () => {
@@ -260,26 +297,29 @@ describe('WebviewSession', () => {
     const { session, bridge, sessionState, hiddenSessions } = createSession();
     const view = createWebviewView(true);
     hiddenSessions.isHidden.mockImplementation((sessionID) => sessionID === 'hidden-session');
-    sessionState.consumeBlockingRequests.mockResolvedValue([
-      {
-        id: 'perm-hidden',
-        sessionID: 'hidden-session',
-        kind: 'permission',
-        props: { id: 'perm-hidden', sessionID: 'hidden-session' },
-      },
-      {
-        id: 'question-hidden',
-        sessionID: 'hidden-session',
-        kind: 'question',
-        props: { id: 'question-hidden', sessionID: 'hidden-session' },
-      },
-      {
-        id: 'perm-visible',
-        sessionID: 'visible-session',
-        kind: 'permission',
-        props: { id: 'perm-visible', sessionID: 'visible-session' },
-      },
-    ] satisfies BlockingRequestSnapshot[]);
+    sessionState.consumeRecoverySnapshot.mockResolvedValue({
+      interruptedSessions: [],
+      blockingRequests: [
+        {
+          id: 'perm-hidden',
+          sessionID: 'hidden-session',
+          kind: 'permission',
+          props: { id: 'perm-hidden', sessionID: 'hidden-session' },
+        },
+        {
+          id: 'question-hidden',
+          sessionID: 'hidden-session',
+          kind: 'question',
+          props: { id: 'question-hidden', sessionID: 'hidden-session' },
+        },
+        {
+          id: 'perm-visible',
+          sessionID: 'visible-session',
+          kind: 'permission',
+          props: { id: 'perm-visible', sessionID: 'visible-session' },
+        },
+      ] satisfies BlockingRequestSnapshot[],
+    });
 
     await session.resolve(view as never);
     await flushMicrotasks();

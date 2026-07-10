@@ -1235,6 +1235,35 @@ describe('OpenCodeServer maintenance', () => {
 });
 
 describe('OpenCodeServer compatibility gate', () => {
+  it('does not update or replace a server actively leased by another extension host', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    const hasActiveSessions = vi.fn().mockResolvedValue(false);
+    const upgradeRunningServer = vi.fn().mockResolvedValue(true);
+    const api = server as unknown as {
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: typeof hasActiveSessions;
+      upgradeRunningServer: typeof upgradeRunningServer;
+      processManager: {
+        foreignActiveOwnership: boolean;
+        refreshManagedServerOwnership: () => Promise<boolean>;
+      };
+    };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
+    api.hasActiveSessions = hasActiveSessions;
+    api.upgradeRunningServer = upgradeRunningServer;
+    api.processManager.foreignActiveOwnership = true;
+    api.processManager.refreshManagedServerOwnership = vi.fn().mockResolvedValue(false);
+
+    await expect(server.start()).rejects.toThrow('actively owned by another Varro extension host');
+
+    expect(hasActiveSessions).not.toHaveBeenCalled();
+    expect(upgradeRunningServer).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('blocks an outdated running server when automatic updates are disabled', async () => {
     const server = new OpenCodeServer(4096, true);
     const api = server as unknown as {
@@ -1432,13 +1461,15 @@ describe('OpenCodeServer managed process lifecycle', () => {
   it('rejects a start when dispose cancels health polling', async () => {
     const server = new OpenCodeServer(4096, true);
     const { children } = configureManagedStartup(server, false);
+    const api = server as unknown as {
+      processManager: { disposeProcess: () => Promise<void> };
+    };
+    api.processManager.disposeProcess = vi.fn().mockResolvedValue(undefined);
     const startPromise = server.start();
     const startResult = expect(startPromise).rejects.toThrow('Server start was cancelled');
     await flushMicrotasks();
     await flushMicrotasks();
     expect(children).toHaveLength(1);
-    children[0]!.exitCode = 0;
-
     await server.dispose();
 
     await startResult;
@@ -1610,6 +1641,92 @@ describe('OpenCodeServer managed process lifecycle', () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual([server.url, server.url]);
     expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds requests behind restart while process stop is deferred', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const stopping = deferred<void>();
+    const start = vi.fn().mockResolvedValue(server.url);
+    const stopServerForRestart = vi.fn(() => stopping.promise);
+    const api = server as unknown as {
+      start: typeof start;
+      processManager: { stopServerForRestart: typeof stopServerForRestart };
+    };
+    api.start = start;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+    const fetchMock = vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      text: async () => '{}',
+    } as Response);
+
+    const restart = server.restart();
+    const request = server.request('GET', '/session');
+    await flushMicrotasks();
+
+    expect(server.status.state).toBe('starting');
+    expect(stopServerForRestart).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    stopping.resolve();
+    await expect(restart).resolves.toBe(server.url);
+    await expect(request).resolves.toEqual({});
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('makes concurrent starts join the in-flight restart', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const stopping = deferred<void>();
+    const start = vi.fn().mockResolvedValue(server.url);
+    const api = server as unknown as {
+      start: typeof start;
+      processManager: { stopServerForRestart: () => Promise<void> };
+    };
+    api.processManager.stopServerForRestart = vi.fn(() => stopping.promise);
+
+    const restart = server.restart();
+    const firstStart = server.start();
+    const secondStart = server.start();
+
+    expect(server.status.state).toBe('starting');
+    expect(firstStart).toBe(restart);
+    expect(secondStart).toBe(restart);
+
+    api.start = start;
+    stopping.resolve();
+    await expect(Promise.all([restart, firstStart, secondStart])).resolves.toEqual([
+      server.url,
+      server.url,
+      server.url,
+    ]);
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a stop rejection without returning to a running status', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const statuses: ServerStatus[] = [];
+    server.on('status', (status) => statuses.push(status));
+    const start = vi.fn().mockResolvedValue(server.url);
+    const stopError = new Error('listener would not stop');
+    const api = server as unknown as {
+      start: typeof start;
+      processManager: { stopServerForRestart: () => Promise<void> };
+    };
+    api.start = start;
+    api.processManager.stopServerForRestart = vi.fn().mockRejectedValue(stopError);
+
+    const restart = server.restart();
+
+    expect(server.status.state).toBe('starting');
+    await expect(restart).rejects.toThrow(stopError.message);
+    expect(server.status).toEqual({
+      state: 'error',
+      message: 'Failed to stop OpenCode server for restart: listener would not stop',
+    });
+    expect(statuses.map((status) => status.state)).toEqual(['starting', 'error']);
+    expect(start).not.toHaveBeenCalled();
   });
 
   it('gives isolated crashes a fresh retry budget after the stability window', async () => {

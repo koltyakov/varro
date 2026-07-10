@@ -59,8 +59,7 @@ describe('open code runtime synchronization', () => {
     const sessionB = deferred<void>();
     const applied: string[] = [];
     const sync = (sessionId: string, pending: Promise<void>) =>
-      generations.run(sessionId, async () => {
-        const token = generations.next();
+      generations.run(sessionId, async (token) => {
         await pending;
         if (generations.isCurrent(token)) applied.push(sessionId);
       });
@@ -74,5 +73,26 @@ describe('open code runtime synchronization', () => {
     await expect(syncA).resolves.toBe(true);
 
     expect(applied).toEqual(['session-b', 'session-a']);
+  });
+
+  it('ignores an older message response for the same session', async () => {
+    const generations = createPerSessionMessageSyncGenerations();
+    const responseA = deferred<void>();
+    const responseB = deferred<void>();
+    const applied: string[] = [];
+    const sync = (label: string, pending: Promise<void>) =>
+      generations.run('session-1', async (token) => {
+        await pending;
+        if (generations.isCurrent(token)) applied.push(label);
+      });
+
+    const syncA = sync('a', responseA.promise);
+    const syncB = sync('b', responseB.promise);
+    responseB.resolve();
+    await expect(syncB).resolves.toBe(true);
+    responseA.resolve();
+    await expect(syncA).resolves.toBe(false);
+
+    expect(applied).toEqual(['b']);
   });
 });
