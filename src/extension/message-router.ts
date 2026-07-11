@@ -32,6 +32,7 @@ export interface MessageRouterCallbacks {
   runInTerminal(command: string, title?: string): void;
   exportSession(sessionId: string): Promise<void>;
   openSettings(query?: string): Promise<void>;
+  showOutput(): void;
   handleDroppedPaths(paths: string[]): Promise<void>;
   handleDroppedContent(files: DroppedContentFile[]): Promise<void>;
   removeContextFile(path: string): void;
@@ -80,6 +81,9 @@ export class MessageRouter {
           break;
         case 'vscode/open-settings':
           await this.handleOpenSettingsMessage(msg);
+          break;
+        case 'vscode/show-output':
+          this.callbacks.showOutput();
           break;
         case 'files/drop':
           await this.handleFilesDropMessage(msg);

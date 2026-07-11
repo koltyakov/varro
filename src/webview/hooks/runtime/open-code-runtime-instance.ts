@@ -94,6 +94,7 @@ export interface OpenCodeRuntime {
   selectSession(id: string, options?: { markSeen?: boolean }): Promise<void>;
   loadFullSessionHistory(sessionId: string): Promise<void>;
   createSession(title?: string, initialPermissionMode?: PermissionMode): Promise<string | null>;
+  renameSession(id: string, title: string): Promise<boolean>;
   forkSession(id: string, messageID?: string): Promise<string | null>;
   deleteSession(id: string): Promise<void>;
   deleteSessionImmediately(id: string): Promise<void>;
@@ -1110,6 +1111,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const sessionManagementOperations = new SessionManagementOperations({
     getActiveSessionId: () => appStore.state.activeSessionId,
     createRemoteSession: (body) => client.session.create(body),
+    updateRemoteSession: (sessionId, body) => client.session.update(sessionId, body),
     forkRemoteSession: (sessionId, messageID) => client.session.fork(sessionId, messageID),
     getPermissionModeForSession: permissionsStore.getPermissionModeForSession,
     buildCreatePermission: (mode) => getSessionPermissionRulesForMode(mode, 'create'),
@@ -1222,6 +1224,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const sessionId = await sessionManagementOperations.forkSession(id, messageID);
     if (sessionId) sessionStore.persistLastOpenedView({ type: 'session', sessionId });
     return sessionId;
+  }
+
+  async function renameSession(id: string, title: string): Promise<boolean> {
+    return sessionManagementOperations.renameSession(id, title);
   }
 
   async function deleteSession(id: string) {
@@ -1366,6 +1372,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     selectSession,
     loadFullSessionHistory,
     createSession,
+    renameSession,
     forkSession,
     deleteSession,
     deleteSessionImmediately,

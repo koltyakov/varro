@@ -6,6 +6,7 @@ import { ModelsPanel } from '../ModelsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionListFilter } from './SessionListView';
+import type { SlowApiRequest } from '../../lib/bridge';
 import { RalphDashboard } from '../ralph/RalphDashboard';
 import { inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
@@ -48,6 +49,7 @@ export function ChatWorkspace(props: {
   showSessionPicker: boolean;
   showSettings: boolean;
   showReconnectBanner: boolean;
+  slowApiRequests: readonly SlowApiRequest[];
   sessionFilter: SessionListFilter | null;
   subagentParentId: string | null;
   sessionListFilterLabel: string | null;
@@ -208,6 +210,27 @@ export function ChatWorkspace(props: {
             <span class="chat-transport-title">Live updates are reconnecting</span>
             <span class="chat-transport-message">
               Chat actions still work, but session status may lag until the event stream recovers.
+            </span>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={props.slowApiRequests.length > 0}>
+        <div
+          class={`chat-transport-banner chat-api-warning-banner ${props.shouldRenderWorkspace ? 'chat-main-column' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div class="chat-transport-copy">
+            <span class="chat-transport-title">Some requests are taking longer than expected</span>
+            <span class="chat-transport-message">
+              {props.slowApiRequests
+                .slice(0, 3)
+                .map((request) => `${request.method} ${request.path}`)
+                .join(' · ')}
+              {props.slowApiRequests.length > 3
+                ? ` · ${props.slowApiRequests.length - 3} more`
+                : ''}
             </span>
           </div>
         </div>

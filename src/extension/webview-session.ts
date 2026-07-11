@@ -28,6 +28,7 @@ export class WebviewSession {
   private webviewHasFocus = false;
   private webviewReady = false;
   private pendingInputFocus = false;
+  private pendingSearchSessions = false;
   private pendingOpenAttentionSessions = false;
   private webviewLoadGeneration = 0;
   private recoverySnapshotLoad?: Promise<RecoverySnapshot>;
@@ -93,6 +94,11 @@ export class WebviewSession {
   requestInputFocus() {
     this.pendingInputFocus = true;
     this.flushPendingInputFocus();
+  }
+
+  searchSessions() {
+    this.pendingSearchSessions = true;
+    this.flushPendingSearchSessions();
   }
 
   openAttentionSessions() {
@@ -282,6 +288,7 @@ export class WebviewSession {
       }
     );
     this.flushPendingInputFocus();
+    this.flushPendingSearchSessions();
     this.flushPendingOpenAttentionSessions();
   }
 
@@ -307,6 +314,12 @@ export class WebviewSession {
       return;
     this.pendingOpenAttentionSessions = false;
     this.bridge.post({ type: 'command/open-attention-sessions' });
+  }
+
+  private flushPendingSearchSessions() {
+    if (!this.pendingSearchSessions || !this.bridge.isVisible() || !this.webviewReady) return;
+    this.pendingSearchSessions = false;
+    this.bridge.post({ type: 'command/search-sessions' });
   }
 
   private disposeWebviewDisposables() {

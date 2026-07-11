@@ -23,6 +23,7 @@ function createCallbacks(): MessageRouterCallbacks {
     runInTerminal: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
     openSettings: vi.fn(() => Promise.resolve()),
+    showOutput: vi.fn(),
     handleDroppedPaths: vi.fn(() => Promise.resolve()),
     handleDroppedContent: vi.fn(() => Promise.resolve()),
     removeContextFile: vi.fn(),
@@ -59,6 +60,13 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'providers/watch', payload: { active: true } });
     expect(cb.setProviderWatchActive).toHaveBeenCalledWith(true);
+  });
+
+  it('dispatches vscode/show-output', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    await router.handleMessage({ type: 'vscode/show-output' });
+    expect(cb.showOutput).toHaveBeenCalledOnce();
   });
 
   it('dispatches context/request', async () => {

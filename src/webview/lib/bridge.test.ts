@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SlowApiRequest } from './bridge';
 
 declare global {
   interface Window {
@@ -90,6 +91,58 @@ describe('bridge', () => {
 
     await expect(request).resolves.toEqual({ ok: true });
     expect(message.payload.body).toBe(body);
+  });
+
+  it('reports sanitized requests that remain pending for 15 seconds', async () => {
+    vi.useFakeTimers();
+    const bridge = await loadBridge();
+    const snapshots: Array<readonly SlowApiRequest[]> = [];
+    window.__sendToExtension = vi.fn();
+    bridge.onSlowApiRequestsChange((requests) => snapshots.push(requests));
+
+    const request = bridge.apiCall('GET', '/session/session-1?token=secret');
+    vi.advanceTimersByTime(14_999);
+    expect(snapshots.at(-1)).toEqual([]);
+
+    vi.advanceTimersByTime(1);
+    expect(snapshots.at(-1)).toMatchObject([{ id: 1, method: 'GET', path: '/session/session-1' }]);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'api/response', payload: { id: 1, data: true } },
+      })
+    );
+    await expect(request).resolves.toBe(true);
+    expect(snapshots.at(-1)).toEqual([]);
+  });
+
+  it('keeps slow request state until every slow request settles', async () => {
+    vi.useFakeTimers();
+    const bridge = await loadBridge();
+    const handler = vi.fn();
+    window.__sendToExtension = vi.fn();
+    bridge.onSlowApiRequestsChange(handler);
+
+    const first = bridge.apiCall('GET', '/session/one');
+    const second = bridge.apiCall('GET', '/session/two');
+    vi.advanceTimersByTime(15_000);
+    expect(handler.mock.calls.at(-1)?.[0]).toHaveLength(2);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'api/response', payload: { id: 1, data: true } },
+      })
+    );
+    await first;
+    expect(handler.mock.calls.at(-1)?.[0]).toHaveLength(1);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'api/response', payload: { id: 2, data: true } },
+      })
+    );
+    await second;
+    expect(handler.mock.calls.at(-1)?.[0]).toEqual([]);
   });
 
   it('rejects API requests when the extension returns an error', async () => {

@@ -307,6 +307,7 @@ async function runProbe() {
   await checkEventStream();
 
   let sessionID;
+  let forkSessionID;
   try {
     const session = await request('POST /session', 'POST', '/session', {
       body: { title: 'Varro compatibility probe' },
@@ -348,6 +349,44 @@ async function runProbe() {
           validate: (value) => value === null,
         }
       );
+      const messages = await request(
+        'GET /session/:id/message after prompt',
+        'GET',
+        `/session/${encodedID}/message?limit=10`,
+        { validate: Array.isArray }
+      );
+      const messageID = Array.isArray(messages)
+        ? messages
+            .toReversed()
+            .map((entry) => (isRecord(entry) && isRecord(entry.info) ? entry.info.id : undefined))
+            .find((id) => typeof id === 'string')
+        : undefined;
+      if (messageID) {
+        const encodedMessageID = encodeURIComponent(messageID);
+        await request(
+          'GET /session/:id/diff with messageID',
+          'GET',
+          `/session/${encodedID}/diff?messageID=${encodedMessageID}`,
+          { validate: Array.isArray }
+        );
+        const fork = await request(
+          'POST /session/:id/fork with messageID',
+          'POST',
+          `/session/${encodedID}/fork`,
+          {
+            body: { messageID },
+            validate: (value) => isRecord(value) && typeof value.id === 'string',
+          }
+        );
+        forkSessionID = isRecord(fork) && typeof fork.id === 'string' ? fork.id : undefined;
+        await request('POST /session/:id/revert', 'POST', `/session/${encodedID}/revert`, {
+          body: { messageID },
+          validate: (value) => isRecord(value) && value.id === sessionID,
+        });
+        await request('POST /session/:id/unrevert', 'POST', `/session/${encodedID}/unrevert`, {
+          validate: (value) => isRecord(value) && value.id === sessionID,
+        });
+      }
       await request('POST /session/:id/abort', 'POST', `/session/${encodedID}/abort`, {
         validate: (value) => value === true,
       });
@@ -369,6 +408,14 @@ async function runProbe() {
       );
     }
   } finally {
+    if (forkSessionID) {
+      await request(
+        'DELETE forked /session/:id',
+        'DELETE',
+        `/session/${encodeURIComponent(forkSessionID)}`,
+        { validate: (value) => typeof value === 'boolean' }
+      );
+    }
     if (sessionID) {
       await request('DELETE /session/:id', 'DELETE', `/session/${encodeURIComponent(sessionID)}`, {
         validate: (value) => typeof value === 'boolean',

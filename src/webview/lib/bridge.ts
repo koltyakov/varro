@@ -2,6 +2,13 @@ import type { ExtensionMessage, WebviewMessage } from '../../shared/protocol';
 import { parseExtensionMessage } from '../../shared/extension-message';
 
 type MessageHandler = (msg: ExtensionMessage) => void;
+export type SlowApiRequest = {
+  id: number;
+  method: string;
+  path: string;
+  startedAt: number;
+};
+type SlowApiRequestHandler = (requests: readonly SlowApiRequest[]) => void;
 type ApiCallOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -9,6 +16,8 @@ type ApiCallOptions = {
 };
 
 const handlers = new Set<MessageHandler>();
+const slowApiRequestHandlers = new Set<SlowApiRequestHandler>();
+const slowApiRequests = new Map<number, SlowApiRequest>();
 let disposed = false;
 const BRIDGE_CLEANUP_KEY = '__cleanupVarroBridge';
 const bridgeWindow = window as unknown as Record<string, unknown>;
@@ -26,10 +35,12 @@ export function cleanupBridge() {
   window.removeEventListener('message', messageListener);
   handlers.clear();
   for (const p of pending.values()) {
-    clearTimeout(p.timer);
     p.reject(new Error('Bridge cleaned up'));
   }
   pending.clear();
+  slowApiRequests.clear();
+  notifySlowApiRequestsChanged();
+  slowApiRequestHandlers.clear();
   for (const retry of pendingRetries) {
     clearTimeout(retry.timer);
     pendingRetries.delete(retry);
@@ -43,6 +54,12 @@ export function cleanupBridge() {
 export function onMessage(handler: MessageHandler): () => void {
   handlers.add(handler);
   return () => handlers.delete(handler);
+}
+
+export function onSlowApiRequestsChange(handler: SlowApiRequestHandler): () => void {
+  slowApiRequestHandlers.add(handler);
+  handler([...slowApiRequests.values()]);
+  return () => slowApiRequestHandlers.delete(handler);
 }
 
 export function postMessage(msg: WebviewMessage): boolean {
@@ -62,6 +79,7 @@ const pending = new Map<
     resolve(v: unknown): void;
     reject(e: unknown): void;
     timer: ReturnType<typeof setTimeout>;
+    slowTimer: ReturnType<typeof setTimeout>;
     cleanupAbort?: () => void;
   }
 >();
@@ -73,14 +91,12 @@ const pendingRetries = new Set<PendingRetry>();
 const API_CALL_TIMEOUT_MS = 35_000;
 const API_CALL_LONG_TIMEOUT_MS = 40_000;
 const API_CALL_RETRY_DELAY_MS = 150;
+export const SLOW_API_REQUEST_THRESHOLD_MS = 15_000;
 
 onMessage((msg) => {
   if (msg.type === 'api/response') {
     const p = pending.get(msg.payload.id);
     if (!p) return;
-    clearTimeout(p.timer);
-    p.cleanupAbort?.();
-    pending.delete(msg.payload.id);
     if (msg.payload.error) p.reject(new Error(msg.payload.error));
     else p.resolve(msg.payload.data);
   }
@@ -108,6 +124,7 @@ function sendApiCall<T>(
 ): Promise<T> {
   if (disposed) return Promise.reject(new Error('Bridge cleaned up'));
   const id = ++reqId;
+  const startedAt = Date.now();
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const finish = (callback: () => void) => {
@@ -116,21 +133,34 @@ function sendApiCall<T>(
       const entry = pending.get(id);
       if (entry) {
         clearTimeout(entry.timer);
+        clearTimeout(entry.slowTimer);
         entry.cleanupAbort?.();
         pending.delete(id);
       }
+      if (slowApiRequests.delete(id)) notifySlowApiRequestsChanged();
       callback();
     };
 
     const timer = setTimeout(() => {
       finish(() => reject(new Error(`API call timed out: ${method} ${path}`)));
     }, options.timeoutMs);
+    const slowTimer = setTimeout(() => {
+      if (!pending.has(id)) return;
+      slowApiRequests.set(id, {
+        id,
+        method: method.toUpperCase(),
+        path: sanitizeDiagnosticPath(path),
+        startedAt,
+      });
+      notifySlowApiRequestsChanged();
+    }, SLOW_API_REQUEST_THRESHOLD_MS);
 
     let cleanupAbort: (() => void) | undefined;
     pending.set(id, {
       resolve: (value) => finish(() => resolve(value as T)),
       reject: (error) => finish(() => reject(error)),
       timer,
+      slowTimer,
       cleanupAbort,
     });
 
@@ -200,6 +230,19 @@ function sendApiCall<T>(
       );
     });
   });
+}
+
+function sanitizeDiagnosticPath(path: string): string {
+  try {
+    return new URL(path, 'http://varro.local').pathname;
+  } catch {
+    return path.split('?')[0] || '/';
+  }
+}
+
+function notifySlowApiRequestsChanged() {
+  const snapshot = [...slowApiRequests.values()];
+  for (const handler of slowApiRequestHandlers) handler(snapshot);
 }
 
 function defaultTimeoutForPath(path: string) {

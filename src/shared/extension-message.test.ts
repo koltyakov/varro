@@ -16,6 +16,9 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'command/focus-input' })).toEqual({
       type: 'command/focus-input',
     });
+    expect(parseExtensionMessage({ type: 'command/search-sessions' })).toEqual({
+      type: 'command/search-sessions',
+    });
     expect(parseExtensionMessage({ type: 'command/open-attention-sessions' })).toEqual({
       type: 'command/open-attention-sessions',
     });

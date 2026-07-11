@@ -5,7 +5,9 @@ import {
   setPersistentShowSessionPicker as setShowSessionPicker,
   showSettings,
   openAttentionSessionsKey,
+  sessionSearchFocusKey,
   isSessionAwaitingInput,
+  setShowSettings,
 } from '../lib/state';
 import { createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
 import { selectSession, deleteSessionImmediately } from '../hooks/useOpenCode';
@@ -26,6 +28,7 @@ import {
   shouldShowSessionHeaderBadge,
 } from './chat/SessionListView';
 import type { SessionListFilter } from './chat/SessionListView';
+import { onSlowApiRequestsChange, type SlowApiRequest } from '../lib/bridge';
 
 type HeaderSessionCounts = {
   running: number;
@@ -56,6 +59,7 @@ export function Chat() {
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
   const [isEnteringChatView, setIsEnteringChatView] = createSignal(false);
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
+  const [slowApiRequests, setSlowApiRequests] = createSignal<readonly SlowApiRequest[]>([]);
   const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
   const visibleSessions = createMemo(() => {
     const indicators = sessionIndicators();
@@ -106,6 +110,11 @@ export function Chat() {
     onCleanup(() => mediaQuery.removeEventListener('change', handleChange));
   });
 
+  onMount(() => {
+    const unsubscribe = onSlowApiRequestsChange(setSlowApiRequests);
+    onCleanup(unsubscribe);
+  });
+
   createEffect(
     on(isEventStreamDegraded, (isDegraded) => {
       if (isDegraded) {
@@ -138,6 +147,20 @@ export function Chat() {
         if (!isEventStreamDegraded()) setShowReconnectBanner(false);
       }, remainingVisibleMs);
     })
+  );
+
+  createEffect(
+    on(
+      sessionSearchFocusKey,
+      (key) => {
+        if (key === 0) return;
+        setSessionFilter(null);
+        setSubagentParentId(null);
+        setShowSettings(false);
+        setShowSessionPicker(true);
+      },
+      { defer: true }
+    )
   );
 
   createEffect(() => {
@@ -403,6 +426,7 @@ export function Chat() {
       showSessionPicker={showSessionPicker()}
       showSettings={showSettings()}
       showReconnectBanner={showReconnectBanner()}
+      slowApiRequests={slowApiRequests()}
       sessionFilter={sessionFilter()}
       subagentParentId={subagentParentId()}
       sessionListFilterLabel={sessionListFilterLabel()}

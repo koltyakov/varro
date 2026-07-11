@@ -16,6 +16,7 @@ export {
   openPlan,
   recheckSessionStatus,
   redoSession,
+  renameSession,
   refreshRoutingState,
   rejectQuestion,
   respondPermission,

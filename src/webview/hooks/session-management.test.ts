@@ -8,6 +8,7 @@ import {
   deleteSessionWithDependencies,
   emptyRecycleBinWithDependencies,
   forkSessionWithDependencies,
+  renameSessionWithDependencies,
   restoreSessionWithDependencies,
 } from './session/session-management';
 
@@ -311,10 +312,57 @@ describe('session management helpers', () => {
     expect(setError).toHaveBeenCalledWith('fork failed');
   });
 
+  it('trims and applies a manual session title', async () => {
+    const updated = session('session-1', { title: 'Renamed session' });
+    const updateRemoteSession = vi.fn(async () => updated);
+    const upsertSession = vi.fn();
+
+    const result = await renameSessionWithDependencies(
+      { updateRemoteSession, upsertSession, setError: vi.fn() },
+      'session-1',
+      '  Renamed session  '
+    );
+
+    expect(result).toBe(true);
+    expect(updateRemoteSession).toHaveBeenCalledWith('session-1', { title: 'Renamed session' });
+    expect(upsertSession).toHaveBeenCalledWith(updated);
+  });
+
+  it('rejects an empty manual session title without making a request', async () => {
+    const updateRemoteSession = vi.fn();
+    const result = await renameSessionWithDependencies(
+      { updateRemoteSession, upsertSession: vi.fn(), setError: vi.fn() },
+      'session-1',
+      '   '
+    );
+
+    expect(result).toBe(false);
+    expect(updateRemoteSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps rename editing available after a request error', async () => {
+    const setError = vi.fn();
+    const result = await renameSessionWithDependencies(
+      {
+        updateRemoteSession: vi.fn(async () => {
+          throw new Error('rename failed');
+        }),
+        upsertSession: vi.fn(),
+        setError,
+      },
+      'session-1',
+      'New name'
+    );
+
+    expect(result).toBe(false);
+    expect(setError).toHaveBeenCalledWith('rename failed');
+  });
+
   it('creates bound session-management operations from one dependency bag', async () => {
     const deps = {
       getActiveSessionId: () => null,
       createRemoteSession: vi.fn(async () => session('session-2')),
+      updateRemoteSession: vi.fn(async () => session('session-1', { title: 'Renamed' })),
       forkRemoteSession: vi.fn(async () => session('session-3')),
       getPermissionModeForSession: vi.fn(() => 'default' as const),
       buildCreatePermission: () => [],
@@ -359,6 +407,7 @@ describe('session management helpers', () => {
     const operations = new SessionManagementOperations(deps);
 
     await operations.createSession();
+    await operations.renameSession('session-1', 'Renamed');
     await operations.forkSession('session-1');
     await operations.deleteSession('session-1');
     await operations.restoreSession('session-1');
@@ -366,6 +415,7 @@ describe('session management helpers', () => {
     await operations.emptyRecycleBin();
 
     expect(deps.createRemoteSession).toHaveBeenCalledTimes(1);
+    expect(deps.updateRemoteSession).toHaveBeenCalledWith('session-1', { title: 'Renamed' });
     expect(deps.forkRemoteSession).toHaveBeenCalledWith('session-1', undefined);
     expect(deps.deleteRemoteSession).toHaveBeenCalledWith('session-1');
     expect(deps.restoreRecycleBinEntry).toHaveBeenCalledWith('session-1');

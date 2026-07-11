@@ -9,11 +9,14 @@ import {
   SessionListView,
 } from './SessionListView';
 
+const renameSessionMock = vi.hoisted(() => vi.fn());
+
 vi.mock('../../hooks/useOpenCode', () => ({
   deleteSession: vi.fn(),
   deleteSessionPermanently: vi.fn(),
   emptyRecycleBin: vi.fn(),
   restoreSession: vi.fn(),
+  renameSession: renameSessionMock,
   selectSession: vi.fn(),
 }));
 
@@ -45,6 +48,8 @@ beforeEach(() => {
   setState('sessions', []);
   setState('pinnedSessionIds', []);
   setState('activeSessionId', null);
+  renameSessionMock.mockReset();
+  renameSessionMock.mockResolvedValue(true);
   container = document.createElement('div');
   document.body.appendChild(container);
 });
@@ -173,5 +178,30 @@ describe('SessionListView pins', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[aria-label="Pin session"]')).not.toBeNull();
     });
+  });
+});
+
+describe('SessionListView actions', () => {
+  it('renames a session from its row action menu', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+    });
+    setState('sessions', [session('session-1', Date.now())]);
+    cleanup = render(() => <SessionListView />, container);
+
+    container.querySelector<HTMLButtonElement>('[aria-label="Session actions"]')!.click();
+    container.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+
+    const input = container.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
+    input.value = '  Better title  ';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    input.closest('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(renameSessionMock).toHaveBeenCalledWith('session-1', 'Better title');
+    });
+    await vi.waitFor(() => expect(container.querySelector('[role="menu"]')).toBeNull());
   });
 });

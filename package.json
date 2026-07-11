@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.20.2",
+  "version": "0.20.3",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -102,6 +102,10 @@
         "title": "Varro: New Session"
       },
       {
+        "command": "varro.chat.searchSessions",
+        "title": "Varro: Search Sessions"
+      },
+      {
         "command": "varro.chat.abort",
         "title": "Varro: Abort Session"
       },
@@ -112,6 +116,14 @@
       {
         "command": "varro.about",
         "title": "Varro: About"
+      },
+      {
+        "command": "varro.showOutput",
+        "title": "Varro: Show Output"
+      },
+      {
+        "command": "varro.openSourceControl",
+        "title": "Varro: Open Source Control"
       },
       {
         "command": "varro.chat.addToContext",

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   })),
   parseServerEvent: vi.fn(),
   getSessionIdsForEvent: vi.fn(),
+  loggerWarn: vi.fn(),
 }));
 
 vi.mock('vscode', () => ({
@@ -22,6 +23,10 @@ vi.mock('../shared/protocol', () => ({
 
 vi.mock('./sidebar-provider-utils', () => ({
   getSessionIdsForEvent: mocks.getSessionIdsForEvent,
+}));
+
+vi.mock('./logger', () => ({
+  logger: { warn: mocks.loggerWarn },
 }));
 
 import { ServerEventBridge } from './server-event-bridge';
@@ -163,6 +168,35 @@ describe('ServerEventBridge', () => {
     handlers.event!({ bogus: true });
     expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('logs unknown event types at most once per minute', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-11T00:00:00Z'));
+    const { bridge, handlers } = createMocks();
+    mocks.parseServerEvent.mockReturnValue(null);
+    bridge.attach();
+
+    handlers.event!({ payload: { type: 'future.event' } });
+    handlers.event!({ payload: { type: 'future.event' } });
+    expect(mocks.loggerWarn).toHaveBeenCalledTimes(1);
+    expect(mocks.loggerWarn).toHaveBeenCalledWith(
+      'Ignoring unknown OpenCode event type: future.event'
+    );
+
+    vi.advanceTimersByTime(60_000);
+    handlers.event!({ payload: { type: 'future.event' } });
+    expect(mocks.loggerWarn).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('does not log malformed values without an event discriminator', () => {
+    mocks.loggerWarn.mockClear();
+    const { bridge, handlers } = createMocks();
+    mocks.parseServerEvent.mockReturnValue(null);
+    bridge.attach();
+    handlers.event!({ bogus: true });
+    expect(mocks.loggerWarn).not.toHaveBeenCalled();
   });
 
   it('event handler suppresses events for hidden sessions', () => {

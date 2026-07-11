@@ -176,11 +176,12 @@ describe('WebviewSession', () => {
     vscodeMock.env.remoteName = undefined;
   });
 
-  it('queues focus and attention commands until the webview is visible and ready', async () => {
+  it('queues focus, search, and attention commands until the webview is visible and ready', async () => {
     const { session, bridge, sessionState, deps } = createSession();
     const view = createWebviewView(false);
 
     session.requestInputFocus();
+    session.searchSessions();
     session.openAttentionSessions();
 
     await session.resolve(view as never);
@@ -190,6 +191,7 @@ describe('WebviewSession', () => {
       ([message]) => (message as { type: string }).type
     );
     expect(typesAfterReady).not.toContain('command/focus-input');
+    expect(typesAfterReady).not.toContain('command/search-sessions');
     expect(typesAfterReady).not.toContain('command/open-attention-sessions');
 
     view.visible = true;
@@ -199,6 +201,7 @@ describe('WebviewSession', () => {
       ([message]) => (message as { type: string }).type
     );
     expect(postedTypes.filter((type) => type === 'command/focus-input')).toHaveLength(1);
+    expect(postedTypes.filter((type) => type === 'command/search-sessions')).toHaveLength(1);
     expect(postedTypes.filter((type) => type === 'command/open-attention-sessions')).toHaveLength(
       1
     );

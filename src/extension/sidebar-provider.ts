@@ -331,6 +331,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewSession.requestInputFocus();
   }
 
+  searchSessions() {
+    this.webviewSession.searchSessions();
+  }
+
   hasPendingAttention() {
     return this.sessionState.pending.size > 0;
   }

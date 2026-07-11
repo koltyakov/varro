@@ -14,6 +14,7 @@ import {
   requestComposerFocus,
   requestMessageListScrollToBottom,
   requestOpenAttentionSessions,
+  requestSessionSearchFocus,
   setPersistentShowSessionPicker,
   setComposerFocusKey,
   setDesktopSessionPaneSide,
@@ -25,6 +26,8 @@ import {
   setLoadingStartedAt,
   setMessageListScrollRequestKey,
   setOpenAttentionSessionsKey,
+  sessionSearchFocusKey,
+  setSessionSearchFocusKey,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
   setShowModelPicker,
@@ -74,6 +77,8 @@ export const uiStore = {
   setComposerFocusKey,
   openAttentionSessionsKey,
   setOpenAttentionSessionsKey,
+  sessionSearchFocusKey,
+  setSessionSearchFocusKey,
   providerLimitPollIntervalSeconds,
   setProviderLimitPollIntervalSeconds,
   providerLimitThresholdPercent,
@@ -91,6 +96,7 @@ export const uiStore = {
   markLoadingActivity,
   requestComposerFocus,
   requestOpenAttentionSessions,
+  requestSessionSearchFocus,
   requestMessageListScrollToBottom,
 };
 

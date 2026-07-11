@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
+      show: vi.fn(),
     },
     vscode: {
       commands: {
@@ -122,6 +123,7 @@ describe('createSidebarProviderActions', () => {
     actions.setProviderWatchActive(true);
     actions.requestContext();
     actions.refreshProviders();
+    actions.showOutput();
     actions.clearTerminalSelection();
     actions.runInTerminal('npm test', 'Tests');
     await actions.exportSession('session-1');
@@ -141,6 +143,7 @@ describe('createSidebarProviderActions', () => {
     expect(deps.setProviderWatchActive).toHaveBeenCalledWith(true);
     expect(deps.postContext).toHaveBeenCalledTimes(2);
     expect(deps.postConfigState).toHaveBeenCalledTimes(1);
+    expect(mocks.logger.show).toHaveBeenCalledOnce();
     expect(deps.postTerminalSelection).toHaveBeenNthCalledWith(1, {
       text: 'npm test',
       terminalName: 'Terminal 1',

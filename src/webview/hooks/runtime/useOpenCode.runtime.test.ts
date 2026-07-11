@@ -15,6 +15,7 @@ function createRuntimeMock(label: string) {
       loadFullSessionHistory: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue(`${label}-session`),
       forkSession: vi.fn().mockResolvedValue(`${label}-fork`),
+      renameSession: vi.fn().mockResolvedValue(true),
       deleteSession: vi.fn().mockResolvedValue(undefined),
       deleteSessionImmediately: vi.fn().mockResolvedValue(undefined),
       restoreSession: vi.fn().mockResolvedValue(undefined),
@@ -123,6 +124,12 @@ describe('useOpenCode.runtime', () => {
         invoke: () => module.loadFullSessionHistory('session-1'),
         mock: installed.runtime.loadFullSessionHistory,
         args: ['session-1'],
+      },
+      {
+        invoke: () => module.renameSession('session-1', 'Renamed'),
+        mock: installed.runtime.renameSession,
+        args: ['session-1', 'Renamed'],
+        result: true,
       },
       {
         invoke: () => module.forkSession('session-1', 'message-1'),

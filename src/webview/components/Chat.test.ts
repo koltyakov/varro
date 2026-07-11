@@ -33,6 +33,7 @@ import {
 import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
   requestOpenAttentionSessions,
+  requestSessionSearchFocus,
   setDesktopSessionPaneSide,
   hasActiveUsageLimit,
   state,
@@ -946,6 +947,18 @@ describe('SessionListSectionHeader', () => {
 });
 
 describe('header status badges', () => {
+  it('opens the session list and focuses search when requested by the host', async () => {
+    cleanup = render(() => Chat(), container!);
+
+    requestSessionSearchFocus();
+    await Promise.resolve();
+    vi.advanceTimersByTime(20);
+
+    const search = container?.querySelector<HTMLInputElement>('[aria-label="Search sessions"]');
+    expect(search).toBeInstanceOf(HTMLInputElement);
+    expect(document.activeElement).toBe(search);
+  });
+
   it('does not show the reconnect banner for brief event stream degradation', () => {
     setState('serverStatus', {
       state: 'running',

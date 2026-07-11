@@ -5,6 +5,7 @@ import type { PermissionRule, Session, SessionStatus } from '../../types';
 type SessionManagementDependencies = {
   getActiveSessionId(): string | null;
   createRemoteSession(body: { title?: string; permission?: PermissionRule[] }): Promise<Session>;
+  updateRemoteSession(sessionId: string, body: { title: string }): Promise<Session>;
   forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
   getPermissionModeForSession(sessionId: string): PermissionMode;
   buildCreatePermission(mode: PermissionMode): PermissionRule[];
@@ -103,6 +104,18 @@ export class SessionManagementOperations {
       },
       id,
       messageID
+    );
+  };
+
+  readonly renameSession = async (id: string, title: string) => {
+    return renameSessionWithDependencies(
+      {
+        updateRemoteSession: this.deps.updateRemoteSession,
+        upsertSession: this.deps.upsertSession,
+        setError: this.deps.setError,
+      },
+      id,
+      title
     );
   };
 
@@ -269,6 +282,28 @@ export async function forkSessionWithDependencies(
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to fork session');
     return null;
+  }
+}
+
+export async function renameSessionWithDependencies(
+  deps: {
+    updateRemoteSession(sessionId: string, body: { title: string }): Promise<Session>;
+    upsertSession(session: Session): void;
+    setError(message: string): void;
+  },
+  id: string,
+  title: string
+): Promise<boolean> {
+  const normalizedTitle = title.trim();
+  if (!normalizedTitle) return false;
+
+  try {
+    const session = await deps.updateRemoteSession(id, { title: normalizedTitle });
+    deps.upsertSession(session);
+    return true;
+  } catch (err) {
+    deps.setError(err instanceof Error ? err.message : 'Failed to rename session');
+    return false;
   }
 }
 

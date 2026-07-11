@@ -6,7 +6,7 @@ test('archives an overflow completed session', async ({ page }) => {
 
   const firstRow = page.locator('.session-item').filter({ hasText: 'Archive candidate 1' });
   await firstRow.hover();
-  await firstRow.getByTitle('Archive').click();
+  await firstRow.getByTitle('Move to Recycle Bin').click();
 
   const deleteCount = await getE2EState(page, () => {
     const value = (window as Window & {
@@ -27,7 +27,7 @@ test('restores a recycle-bin session back into the list', async ({ page }) => {
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
   await row.hover();
-  await row.getByTitle('Archive').click();
+  await row.getByTitle('Move to Recycle Bin').click();
 
   await expect(page.locator('.session-item-title')).not.toContainText(['Archive row target']);
 
@@ -61,7 +61,7 @@ test('permanently deletes a recycle-bin session', async ({ page }) => {
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
   await row.hover();
-  await row.getByTitle('Archive').click();
+  await row.getByTitle('Move to Recycle Bin').click();
 
   await page.getByLabel('Expand Recycle Bin').click();
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Archive row target' });
@@ -94,7 +94,7 @@ test('empties the recycle bin from the grouped sessions view', async ({ page }) 
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
   await row.hover();
-  await row.getByTitle('Archive').click();
+  await row.getByTitle('Move to Recycle Bin').click();
 
   await page.getByLabel('Expand Recycle Bin').click();
   await expect(page.locator('.recycle-bin-item')).toHaveCount(1);

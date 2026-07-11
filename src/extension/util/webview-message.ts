@@ -73,6 +73,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'terminal/run': true,
   'session/export': true,
   'vscode/open-settings': true,
+  'vscode/show-output': true,
   'files/drop': true,
   'files/drop-content': true,
   'files/remove': true,
@@ -106,6 +107,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'terminal-selection/clear':
     case 'files/clear':
     case 'files/pick':
+    case 'vscode/show-output':
       return { type };
 
     case 'session/export': {

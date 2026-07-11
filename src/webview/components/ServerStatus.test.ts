@@ -65,6 +65,12 @@ describe('ServerStatus', () => {
     expect(container?.textContent).toContain('OpenCode could not start');
     expect(container?.textContent).toContain('failed to bind port');
     expect(container?.textContent).not.toContain('  failed to bind port  ');
+
+    const showOutput = Array.from(container?.querySelectorAll('button') || []).find(
+      (button) => button.textContent?.trim() === 'Show Output'
+    );
+    showOutput?.click();
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'vscode/show-output' });
   });
 
   it('shows install guidance for missing CLI errors and opens the docs links', () => {

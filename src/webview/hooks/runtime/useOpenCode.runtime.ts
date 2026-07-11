@@ -50,6 +50,10 @@ export async function createSession(title?: string, initialPermissionMode?: Perm
   return getCurrentOpenCodeRuntime().createSession(title, initialPermissionMode);
 }
 
+export async function renameSession(id: string, title: string) {
+  return getCurrentOpenCodeRuntime().renameSession(id, title);
+}
+
 export async function forkSession(id: string, messageID?: string) {
   return getCurrentOpenCodeRuntime().forkSession(id, messageID);
 }

@@ -6,7 +6,7 @@ test('recycle bin entry shows sub-agent count after archiving parent', async ({ 
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
   await parentRow.hover();
-  await parentRow.getByTitle('Archive').click();
+  await parentRow.getByTitle('Move to Recycle Bin').click();
 
   await page.getByLabel('Expand Recycle Bin').click();
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Parent orchestration' });
@@ -19,7 +19,7 @@ test('restoring a parent session from recycle bin also restores children', async
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
   await parentRow.hover();
-  await parentRow.getByTitle('Archive').click();
+  await parentRow.getByTitle('Move to Recycle Bin').click();
 
   await page.getByLabel('Expand Recycle Bin').click();
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Parent orchestration' });
@@ -44,7 +44,7 @@ test('permanently deleting a parent from recycle bin removes the entire tree', a
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
   await parentRow.hover();
-  await parentRow.getByTitle('Archive').click();
+  await parentRow.getByTitle('Move to Recycle Bin').click();
 
   await page.getByLabel('Expand Recycle Bin').click();
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Parent orchestration' });

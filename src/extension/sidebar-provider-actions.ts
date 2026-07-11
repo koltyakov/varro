@@ -70,6 +70,7 @@ export function createSidebarProviderActions(
         query ?? `@ext:${deps.extensionId}`
       );
     },
+    showOutput: () => logger.show(),
     handleDroppedPaths: (paths) => deps.handleDroppedPaths(paths),
     handleDroppedContent: (files) => deps.handleDroppedContent(files),
     removeContextFile: (path) => deps.removeContextFile(path),

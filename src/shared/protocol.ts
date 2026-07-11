@@ -418,6 +418,7 @@ export type ExtensionMessage =
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session' }
   | { type: 'command/focus-input' }
+  | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }
   | { type: 'command/abort' }
   | { type: 'ralph/state'; payload: RalphStatePayload };
@@ -431,6 +432,7 @@ export type WebviewMessage =
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'vscode/open-settings'; payload: { query?: string } }
+  | { type: 'vscode/show-output' }
   | { type: 'files/drop'; payload: { paths: string[] } }
   | {
       type: 'files/drop-content';

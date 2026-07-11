@@ -10,6 +10,7 @@ import {
   setPersistentShowSessionPicker as setShowSessionPicker,
   setError,
   setState,
+  sessionSearchFocusKey,
   state,
 } from '../../lib/state';
 import {
@@ -29,6 +30,7 @@ import {
   restoreSession,
   deleteSessionPermanently,
   emptyRecycleBin,
+  renameSession,
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry } from '../../../shared/protocol';
@@ -38,6 +40,7 @@ import { getMessageFileChanges } from '../../lib/tool-file-change';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatRelativeAge } from '../../lib/message-metrics';
+import { writeClipboard } from '../../lib/write-clipboard';
 import { getSpinnerPhaseDelayStyle } from './spinner-phase';
 
 type SessionGroups = {
@@ -1087,6 +1090,19 @@ export function SessionListView(props: {
     });
   });
 
+  createEffect(
+    on(
+      sessionSearchFocusKey,
+      (key) => {
+        if (key === 0) return;
+        queueMicrotask(() => {
+          if (shouldShowSearch()) searchInputRef?.focus();
+        });
+      },
+      { defer: true }
+    )
+  );
+
   const emptyMessage = () => {
     if (props.subagentParentId) return 'No sub-agent sessions';
     if (normalizedSearchQuery()) return 'No matching sessions';
@@ -1225,6 +1241,12 @@ function SessionListItem(props: {
   onOpenSubagents?: (parentSessionId: string) => void;
   embedded?: boolean;
 }) {
+  const [showActions, setShowActions] = createSignal(false);
+  const [renaming, setRenaming] = createSignal(false);
+  const [renameValue, setRenameValue] = createSignal('');
+  const [renamePending, setRenamePending] = createSignal(false);
+  let actionsButtonRef: HTMLButtonElement | undefined;
+  let renameInputRef: HTMLInputElement | undefined;
   const isActive = () => props.session.id === state.activeSessionId;
   const isFocused = () => props.focusedIndex() === props.itemIndex();
   const status = () => state.sessionStatus[props.session.id];
@@ -1263,6 +1285,32 @@ function SessionListItem(props: {
       if (props.hasPermissionRequest) return 'Permission request pending';
     }
     return getSessionStatusIndicatorTitle(kind, { retrying: status()?.type === 'retry' });
+  };
+  const closeActions = () => {
+    setShowActions(false);
+    setRenaming(false);
+    setRenamePending(false);
+  };
+  const beginRename = () => {
+    setRenameValue(normalizeSessionTitle(props.session.title) || '');
+    setRenaming(true);
+    queueMicrotask(() => {
+      renameInputRef?.focus();
+      renameInputRef?.select();
+    });
+  };
+  const submitRename = async () => {
+    if (renamePending()) return;
+    const title = renameValue().trim();
+    if (!title) return;
+    setRenamePending(true);
+    const renamed = await renameSession(props.session.id, title);
+    setRenamePending(false);
+    if (renamed) closeActions();
+  };
+  const copySessionId = async () => {
+    closeActions();
+    if (!(await writeClipboard(props.session.id))) setError('Failed to copy session ID');
   };
 
   return (
@@ -1368,12 +1416,114 @@ function SessionListItem(props: {
           onClick={() => {
             deleteSession(props.session.id);
           }}
-          title="Archive"
+          title="Move to Recycle Bin"
+          aria-label="Move to Recycle Bin"
         >
           <svg viewBox="0 0 16 16" fill="currentColor">
             <path d="M14.5 1h-13a.5.5 0 00-.5.5V4h14V1.5a.5.5 0 00.5-.5zM1 5v9.5a.5.5 0 00.5.5h13a.5.5 0 00.5-.5V5H1zm5 3h4v1H6V8z" />
           </svg>
         </button>
+        <div
+          class="session-item-actions"
+          onFocusOut={(event) => {
+            const next = event.relatedTarget;
+            if (!(next instanceof Node) || !event.currentTarget.contains(next)) closeActions();
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            closeActions();
+            actionsButtonRef?.focus();
+          }}
+        >
+          <button
+            ref={(element) => {
+              actionsButtonRef = element;
+            }}
+            type="button"
+            class="session-item-actions-trigger"
+            aria-label="Session actions"
+            aria-haspopup="menu"
+            aria-expanded={showActions()}
+            onClick={() => {
+              setShowActions((value) => !value);
+              setRenaming(false);
+            }}
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <circle cx="3" cy="8" r="1.25" />
+              <circle cx="8" cy="8" r="1.25" />
+              <circle cx="13" cy="8" r="1.25" />
+            </svg>
+          </button>
+          <Show when={showActions()}>
+            <div class="session-item-actions-menu" role="menu" aria-label="Session actions">
+              <Show
+                when={renaming()}
+                fallback={
+                  <>
+                    <button type="button" role="menuitem" onClick={beginRename}>
+                      Rename
+                    </button>
+                    <Show when={!props.session.parentID}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          closeActions();
+                          void props.onTogglePinned();
+                        }}
+                      >
+                        {props.isPinned ? 'Unpin' : 'Pin'}
+                      </button>
+                    </Show>
+                    <button type="button" role="menuitem" onClick={() => void copySessionId()}>
+                      Copy session ID
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      class="is-destructive"
+                      onClick={() => {
+                        closeActions();
+                        void deleteSession(props.session.id);
+                      }}
+                    >
+                      Move to Recycle Bin
+                    </button>
+                  </>
+                }
+              >
+                <form
+                  class="session-item-rename-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitRename();
+                  }}
+                >
+                  <label for={`session-rename-${props.session.id}`}>Session name</label>
+                  <input
+                    ref={(element) => {
+                      renameInputRef = element;
+                    }}
+                    id={`session-rename-${props.session.id}`}
+                    value={renameValue()}
+                    onInput={(event) => setRenameValue(event.currentTarget.value)}
+                    disabled={renamePending()}
+                  />
+                  <div class="session-item-rename-actions">
+                    <button type="button" onClick={() => setRenaming(false)}>
+                      Cancel
+                    </button>
+                    <button type="submit" disabled={!renameValue().trim() || renamePending()}>
+                      Save
+                    </button>
+                  </div>
+                </form>
+              </Show>
+            </div>
+          </Show>
+        </div>
         <span
           class="session-item-age"
           title={new Date(props.session.time.updated).toLocaleString()}

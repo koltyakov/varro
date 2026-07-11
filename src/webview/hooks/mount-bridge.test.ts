@@ -234,6 +234,7 @@ describe('mount bridge helpers', () => {
     const createSession = vi.fn();
     const focusComposer = vi.fn();
     const openAttentionSessions = vi.fn();
+    const searchSessions = vi.fn();
     const abortSession = vi.fn();
     const refreshMcps = vi.fn();
     const refreshProviders = vi.fn();
@@ -260,6 +261,7 @@ describe('mount bridge helpers', () => {
       createSession,
       requestComposerFocus: focusComposer,
       requestOpenAttentionSessions: openAttentionSessions,
+      requestSessionSearchFocus: searchSessions,
       abortSession,
       refreshMcps,
       refreshProviders,
@@ -270,6 +272,7 @@ describe('mount bridge helpers', () => {
     handleExtensionMessageWithDependencies(deps, { type: 'command/new-session' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/focus-input' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/open-attention-sessions' });
+    handleExtensionMessageWithDependencies(deps, { type: 'command/search-sessions' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/abort' });
     handleExtensionMessageWithDependencies(deps, {
       type: 'files/dropped',
@@ -288,6 +291,7 @@ describe('mount bridge helpers', () => {
     expect(createSession).toHaveBeenCalledTimes(1);
     expect(focusComposer).toHaveBeenCalledTimes(1);
     expect(openAttentionSessions).toHaveBeenCalledTimes(1);
+    expect(searchSessions).toHaveBeenCalledTimes(1);
     expect(abortSession).toHaveBeenCalledTimes(1);
     expect(addDroppedContextFiles).toHaveBeenCalledTimes(1);
     expect(removeDroppedContextFile).toHaveBeenCalledWith('/repo/file.ts');

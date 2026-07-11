@@ -231,6 +231,13 @@ function GenericErrorState(props: { message: string }) {
         <p class="text-[13px] font-medium text-vscode-fg">OpenCode could not start</p>
         <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
       </div>
+      <button
+        type="button"
+        class="rounded-md border border-vscode-border px-3 py-1.5 text-[12px] text-vscode-fg hover:bg-vscode-hover"
+        onClick={() => postMessage({ type: 'vscode/show-output' })}
+      >
+        Show Output
+      </button>
     </div>
   );
 }

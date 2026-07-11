@@ -50,6 +50,17 @@ export function registerCommands(
       sidebar.postCommand('new-session');
     }),
 
+    vscode.commands.registerCommand('varro.chat.searchSessions', async () => {
+      try {
+        await vscode.commands.executeCommand('workbench.view.extension.varro');
+        sidebar.searchSessions();
+      } catch (err) {
+        logger.error(
+          `varro.chat.searchSessions: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }),
+
     vscode.commands.registerCommand('varro.chat.abort', () => {
       sidebar.postCommand('abort');
     }),
@@ -67,6 +78,14 @@ export function registerCommands(
         logger.error(message);
         vscode.window.showErrorMessage(message);
       }
+    }),
+
+    vscode.commands.registerCommand('varro.showOutput', () => {
+      logger.show();
+    }),
+
+    vscode.commands.registerCommand('varro.openSourceControl', async () => {
+      await vscode.commands.executeCommand('workbench.view.scm');
     }),
 
     vscode.commands.registerCommand('varro.server.restart', async () => {

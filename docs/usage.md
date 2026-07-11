@@ -101,12 +101,12 @@ Some commands only appear when they apply. For example, `/init` only appears in 
 
 Sessions are filtered to the current workspace directory, then sorted by most recently updated.
 
-- Start a fresh session with `Varro: New Session` or the new chat button.
+- Start a fresh session with `Varro: New Session` or the new chat button. Crafted composer text is kept for the new session, while file, image, terminal, and message-edit context is cleared.
 - Open the session list from the back button in the header.
-- Search sessions by title, session ID, or workspace directory.
+- Search sessions by title, session ID, or workspace directory, or run `Varro: Search Sessions` to open and focus search directly.
 - Filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions from the header badges.
 - Open sub-agent sessions from the parent session row when they exist.
-- Archive sessions from the session list.
+- Rename, pin, copy the ID, or move sessions to the recycle bin from the session row actions.
 - Deleted session roots move into a recycle bin section where you can restore them or delete them permanently until they expire.
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.
@@ -251,13 +251,17 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - Context compaction markers when OpenCode summarizes a session
 - Usage-limit banners when a run is retrying against provider limits
 - A transport banner when the OpenCode event stream is reconnecting and live updates may lag temporarily
+- A slow-request banner when an OpenCode request has been waiting for more than 15 seconds
 - A jump-to-latest button when you scroll away from the bottom of the chat; clicking it returns to the newest message and re-enables auto-follow
 
 ## VS Code Commands And Keybindings
 
 - `Varro: New Session`
+- `Varro: Search Sessions`
 - `Varro: Abort Session`
 - `Varro: Restart Server`
+- `Varro: Show Output`
+- `Varro: Open Source Control`
 - `Varro: Add to Context` from Explorer, from the Command Palette (adds the active file), or `Cmd+Shift+K` / `Ctrl+Shift+K` when focus is outside the editor and terminal
 - `Varro: Add to Context` from the editor selection context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` with an editor selection. Without a selection the key keeps its VS Code default (`Delete Line`)
 - `Varro: Add to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused

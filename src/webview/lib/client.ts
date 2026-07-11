@@ -156,7 +156,7 @@ export const client = {
         reply: response,
       });
     },
-    async revert(id: string, messageID: string): Promise<boolean> {
+    async revert(id: string, messageID: string): Promise<Session> {
       return apiCall('POST', `/session/${id}/revert`, { messageID });
     },
     async unrevert(id: string): Promise<Session> {

@@ -1,9 +1,14 @@
 import { batch } from 'solid-js';
 import {
+  clearClipboardImages,
+  clearContextFiles,
   clearMessages,
+  inputText,
   isSessionAwaitingInput,
   persistActiveSessionId,
+  resetPastedImageIndex,
   setError,
+  setInputText,
   setPersistentShowSessionPicker,
   setShowModelPicker,
   setShowSettings,
@@ -11,7 +16,9 @@ import {
   state,
   stopLoading,
 } from './state';
+import { postMessage } from './bridge';
 import { isEmptySession } from './empty-session';
+import { resetMessageEditState } from './message-edit-state';
 import { resetToolCallExpansionState } from './tool-call-expansion-state';
 
 export function getDiscardableActiveBlankSessionId(): string | false {
@@ -32,7 +39,14 @@ export function getDiscardableActiveBlankSessionId(): string | false {
  */
 export function startNewChatDraft() {
   const blankSessionId = getDiscardableActiveBlankSessionId();
+  const craftedText = inputText();
   batch(() => {
+    resetMessageEditState();
+    clearContextFiles();
+    clearClipboardImages();
+    resetPastedImageIndex();
+    setState('terminalSelection', null);
+    setInputText(craftedText);
     resetToolCallExpansionState();
     clearMessages();
     if (!blankSessionId) {
@@ -45,4 +59,6 @@ export function startNewChatDraft() {
     stopLoading();
     setPersistentShowSessionPicker(false);
   });
+  postMessage({ type: 'files/clear' });
+  postMessage({ type: 'terminal-selection/clear' });
 }

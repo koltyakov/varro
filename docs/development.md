@@ -150,7 +150,7 @@ See [architecture.md](architecture.md) for a deeper component-by-component break
 - Checks `/global/health` before spawning anything
 - Starts `opencode serve --port <port>` only when Varro first needs the server and auto-start is enabled
 - Adds the current workspace directory to non-global requests
-- Opens an SSE connection to `/event`
+- Opens an SSE connection to `/api/event`
 - Reconnects the event stream with backoff
 - Restarts the child process a limited number of times if it exits unexpectedly
 

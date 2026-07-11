@@ -277,6 +277,9 @@ describe('webview message validation', () => {
     expect(parseWebviewMessage({ type: 'providers/refresh' })).toEqual({
       type: 'providers/refresh',
     });
+    expect(parseWebviewMessage({ type: 'vscode/show-output' })).toEqual({
+      type: 'vscode/show-output',
+    });
   });
 
   it('accepts providers/watch with active state', () => {
