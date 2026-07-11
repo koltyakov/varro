@@ -667,6 +667,96 @@ describe('SessionStateManager notifications', () => {
     );
   });
 
+  it('round-trips legacy and v2 permission context with the matching event type', async () => {
+    const persisted = new Map<string, unknown>();
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) => persisted.get(key)),
+      set: vi.fn((key: string, value: unknown) => {
+        persisted.set(key, value);
+        return Promise.resolve();
+      }),
+      remove: vi.fn((key: string) => {
+        persisted.delete(key);
+        return Promise.resolve();
+      }),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: {
+        id: 'legacy-1',
+        sessionID: 'session-1',
+        permission: 'read',
+        pattern: 'src/index.ts',
+      },
+    });
+    manager.handleServerEvent({
+      type: 'permission.v2.asked',
+      properties: {
+        id: 'v2-1',
+        sessionID: 'session-2',
+        action: 'external_directory',
+        resources: Array.from({ length: 25 }, (_, index) => `/external/${index}`),
+        save: ['approved'],
+        source: {
+          type: 'tool',
+          messageID: 'm'.repeat(600),
+          callID: 'c'.repeat(600),
+        },
+      },
+    });
+    await manager.persist();
+
+    const snapshots = persisted.get('varro.blockingRequests') as Array<{
+      id: string;
+      eventType?: string;
+      props: Record<string, unknown>;
+    }>;
+    expect(snapshots.find((item) => item.id === 'legacy-1')).toMatchObject({
+      eventType: 'permission.asked',
+      props: { pattern: 'src/index.ts' },
+    });
+    expect(snapshots.find((item) => item.id === 'v2-1')).toMatchObject({
+      eventType: 'permission.v2.asked',
+      props: {
+        action: 'external_directory',
+        save: ['approved'],
+        source: { type: 'tool' },
+      },
+    });
+    const v2Snapshot = snapshots.find((item) => item.id === 'v2-1');
+    expect((v2Snapshot?.props.resources as string[] | undefined)?.length).toBe(20);
+    expect(
+      ((v2Snapshot?.props.source as { messageID?: string } | undefined)?.messageID ?? '').length
+    ).toBe(500);
+
+    const recovered = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+    await recovered.consumeRecoverySnapshot();
+    const post = vi.fn();
+    recovered.replayBlockingRequests(post, new Set());
+
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'permission.v2.asked',
+        properties: expect.objectContaining({
+          id: 'v2-1',
+          action: 'external_directory',
+          save: ['approved'],
+        }),
+      },
+    });
+  });
+
   it('serializes snapshots so a delayed older write cannot overwrite newer state', async () => {
     let releaseFirstWrite: (() => void) | undefined;
     const interruptedSnapshots: unknown[] = [];

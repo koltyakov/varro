@@ -62,6 +62,7 @@ import {
   seedContextFileAttachmentSequences,
 } from './attachment-order';
 import { createMessageIndex } from './message-index';
+import { normalizePermissionEvent } from './session-event-reducer';
 import {
   getSessionMarkerWorkspaceScope,
   isSessionCompletedResponseUnreadMarker,
@@ -566,73 +567,7 @@ export function consumeInterruptedSessionIds() {
 }
 
 function normalizeInitialPermission(value: Record<string, unknown>): Permission | null {
-  const id =
-    typeof value.id === 'string'
-      ? value.id
-      : typeof value.permissionID === 'string'
-        ? value.permissionID
-        : typeof value.requestID === 'string'
-          ? value.requestID
-          : null;
-  const sessionID = typeof value.sessionID === 'string' ? value.sessionID : null;
-  if (!id || !sessionID) return null;
-
-  const tool = value.tool as { messageID?: unknown; callID?: unknown } | undefined;
-  const patterns = Array.isArray(value.patterns)
-    ? value.patterns.filter((item): item is string => typeof item === 'string')
-    : typeof value.patterns === 'string'
-      ? value.patterns
-      : undefined;
-  const metadata =
-    value.metadata && typeof value.metadata === 'object'
-      ? (value.metadata as Record<string, unknown>)
-      : {};
-  const createdAt =
-    value.time &&
-    typeof value.time === 'object' &&
-    typeof (value.time as { created?: unknown }).created === 'number'
-      ? ((value.time as { created: number }).created ?? Date.now())
-      : Date.now();
-  const title =
-    typeof value.title === 'string' && value.title.trim().length > 0
-      ? value.title
-      : [
-          typeof value.permission === 'string' ? value.permission : '',
-          Array.isArray(patterns)
-            ? patterns.join(', ')
-            : typeof patterns === 'string'
-              ? patterns
-              : '',
-        ]
-          .filter(Boolean)
-          .join(' ') || 'Permission required';
-
-  return {
-    id,
-    type:
-      typeof value.permission === 'string'
-        ? value.permission
-        : typeof value.type === 'string'
-          ? value.type
-          : '',
-    pattern: patterns,
-    sessionID,
-    messageID:
-      typeof value.messageID === 'string'
-        ? value.messageID
-        : typeof tool?.messageID === 'string'
-          ? tool.messageID
-          : '',
-    callID:
-      typeof value.callID === 'string'
-        ? value.callID
-        : typeof tool?.callID === 'string'
-          ? tool.callID
-          : undefined,
-    title,
-    metadata,
-    time: { created: createdAt },
-  };
+  return normalizePermissionEvent(value);
 }
 
 function stableSerializePermissionValue(value: unknown): string {

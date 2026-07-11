@@ -143,6 +143,40 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('does not approve an auto-judged prompt after switching to default mode', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.permissionList.mockResolvedValue([permissionListItem()]);
+    let resolveJudge: ((value: { decision: 'allow'; reason: string }) => void) | undefined;
+    clientMocks.varroJudgePermission.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveJudge = resolve;
+        })
+    );
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(1));
+
+      stateModule.setPermissionModeForSession('session-1', 'default');
+      resolveJudge?.({ decision: 'allow', reason: 'Allowed.' });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+    }
+  });
+
   it('responds to listed prompts without displaying them in full mode', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();

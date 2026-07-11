@@ -1082,18 +1082,21 @@ export function ChatInput() {
       setHistoryIndex(null);
       setHistoryDraft('');
       setCompletionIndex(0);
-      const prevError = error();
       setInputText('');
       resetPastedImageIndex();
-      resetMessageEditState();
+      let sent = false;
       if (editTargetExists) {
         clearUsageLimitsForSessionTree(state.activeSessionId);
-        await editMessage(editing.messageId, text, { allowEmptyText: hasEditableAttachments });
+        sent = await editMessage(editing.messageId, text, {
+          allowEmptyText: hasEditableAttachments,
+        });
       } else {
         clearUsageLimitsForSessionTree(state.activeSessionId);
-        await sendMessage(text);
+        sent = await sendMessage(text);
       }
-      if (error() && error() !== prevError) {
+      if (sent) {
+        resetMessageEditState();
+      } else {
         setInputText(text);
       }
       return;

@@ -110,6 +110,11 @@ export class RestProxy {
         throw new Error('Unsupported API request');
       }
 
+      const directSessionID = parseDirectSessionID(payload.path);
+      if (directSessionID) {
+        await this.assertSessionInCurrentWorkspace(directSessionID);
+      }
+
       const recycleBinRequest = this.parseRecycleBinRequest(method, payload.path);
       if (recycleBinRequest) {
         const data = await this.handleRecycleBinRequest(recycleBinRequest);
@@ -490,6 +495,20 @@ export class RestProxy {
     );
   }
 
+  private async assertSessionInCurrentWorkspace(sessionID: string) {
+    const workspacePath = this.getCurrentWorkspacePath();
+    if (!normalizeWorkspaceIdentity(workspacePath)) return;
+    if (this.callbacks.sessionState.isSessionInWorkspace(sessionID, workspacePath)) return;
+
+    if (this.callbacks.getStatus().state !== 'running') {
+      await this.callbacks.ensureServerStarted();
+    }
+    const directory = await this.lookupSessionDirectory(sessionID);
+    if (!isSameWorkspacePath(directory, workspacePath)) {
+      throw new Error('404 Session not found');
+    }
+  }
+
   private isHiddenSession(sessionID: string | null | undefined) {
     return (
       this.callbacks.sessionTrash.isHidden(sessionID) ||
@@ -634,6 +653,7 @@ export class RestProxy {
   private async lookupSessionDirectory(sessionID: string) {
     const sessions = await this.callbacks.server.request('GET', '/session');
     if (!Array.isArray(sessions)) return undefined;
+    this.rememberSessionList(sessions);
     const match = sessions.find((session) => asRecord(session)?.id === sessionID);
     const record = asRecord(match);
     return typeof record?.directory === 'string' ? record.directory : undefined;
@@ -1074,6 +1094,13 @@ function readDiffLineCount(primary: unknown, fallback: unknown) {
 
 function isDiffLineCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function parseDirectSessionID(path: string): string | null {
+  const pathname = new URL(path, 'http://localhost').pathname;
+  if (pathname === '/session/status') return null;
+  const match = pathname.match(/^\/(?:varro\/)?session\/([^/]+)(?:\/|$)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
 function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeReference[] {

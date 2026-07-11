@@ -2,12 +2,17 @@ import * as vscode from 'vscode';
 import { friendlyErrorName, isAbortedAssistantError } from '../shared/error-classification';
 import type { Persistence } from '../shared/persistence';
 import type { ExtensionMessage, ServerEvent } from '../shared/protocol';
-import type { PermissionEventProperties, QuestionRequest } from '../shared/opencode-types';
+import type {
+  PermissionEventProperties,
+  PermissionV2AskedProperties,
+  QuestionRequest,
+} from '../shared/opencode-types';
 import { normalizeSessionTitle } from '../shared/session-title';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
 
 export type PendingAttentionKind = 'permission' | 'question';
+export type PermissionAskEventType = 'permission.asked' | 'permission.v2.asked';
 
 export type PendingAttentionEntry = {
   sessionID: string;
@@ -15,6 +20,7 @@ export type PendingAttentionEntry = {
   label: string;
   props: Record<string, unknown>;
   directory?: string;
+  eventType?: PermissionAskEventType;
 };
 
 export type InterruptedSessionSnapshot = {
@@ -28,6 +34,7 @@ export type BlockingRequestSnapshot = {
   kind: PendingAttentionKind;
   props: Record<string, unknown>;
   directory?: string;
+  eventType?: PermissionAskEventType;
 };
 
 export type RecoverySnapshot = {
@@ -296,7 +303,13 @@ export class SessionStateManager {
         const propsRecord = asRecord(props);
         const requestProps = asRecord(propsRecord?.info) || propsRecord;
         changed =
-          (requestProps ? this.trackBlockingRequest('permission', requestProps) : false) || changed;
+          (requestProps
+            ? this.trackBlockingRequest(
+                'permission',
+                requestProps,
+                type === 'permission.v2.asked' ? 'permission.v2.asked' : 'permission.asked'
+              )
+            : false) || changed;
         break;
       }
       case 'permission.replied':
@@ -423,6 +436,7 @@ export class SessionStateManager {
             : describePermissionRequest(item.props),
         props: item.props,
         directory: trimOptionalString(item.directory),
+        ...(item.eventType ? { eventType: item.eventType } : {}),
       });
       const directory = trimOptionalString(item.directory);
       if (directory) {
@@ -446,6 +460,7 @@ export class SessionStateManager {
         sessionID: request.sessionID,
         kind: request.kind,
         props: request.props,
+        eventType: request.eventType,
       }))
       .filter((item) => !hiddenSessionIds.has(item.sessionID));
     const currentRequestIds = new Set(currentRequests.map((item) => item.id));
@@ -468,18 +483,32 @@ export class SessionStateManager {
           continue;
         }
 
-        post({
-          type: 'server/event',
-          payload: {
-            type: 'permission.replied',
-            properties: {
-              id: item.id,
-              permissionID: item.id,
-              requestID: item.id,
-              sessionID: item.sessionID,
-            },
-          },
-        });
+        post(
+          item.eventType === 'permission.v2.asked'
+            ? {
+                type: 'server/event',
+                payload: {
+                  type: 'permission.v2.replied',
+                  properties: {
+                    requestID: item.id,
+                    sessionID: item.sessionID,
+                    reply: null,
+                  },
+                },
+              }
+            : {
+                type: 'server/event',
+                payload: {
+                  type: 'permission.replied',
+                  properties: {
+                    id: item.id,
+                    permissionID: item.id,
+                    requestID: item.id,
+                    sessionID: item.sessionID,
+                  },
+                },
+              }
+        );
       }
     }
 
@@ -495,13 +524,23 @@ export class SessionStateManager {
         continue;
       }
 
-      post({
-        type: 'server/event',
-        payload: {
-          type: 'permission.asked',
-          properties: item.props as PermissionEventProperties,
-        },
-      });
+      post(
+        item.eventType === 'permission.v2.asked'
+          ? {
+              type: 'server/event',
+              payload: {
+                type: 'permission.v2.asked',
+                properties: item.props as PermissionV2AskedProperties,
+              },
+            }
+          : {
+              type: 'server/event',
+              payload: {
+                type: 'permission.asked',
+                properties: item.props as PermissionEventProperties,
+              },
+            }
+      );
     }
   }
 
@@ -528,6 +567,7 @@ export class SessionStateManager {
         sessionID: request.sessionID,
         kind: request.kind,
         props: this.serializeBlockingRequestProps(request.kind, request.props),
+        ...(request.eventType ? { eventType: request.eventType } : {}),
         directory: trimOptionalString(
           request.directory || this.sessionDirectories.get(request.sessionID)
         ),
@@ -542,7 +582,8 @@ export class SessionStateManager {
         id,
         sessionID: request.sessionID,
         kind: request.kind,
-        props: { ...request.props },
+        props: this.serializeBlockingRequestProps(request.kind, request.props),
+        ...(request.eventType ? { eventType: request.eventType } : {}),
         directory: trimOptionalString(
           request.directory || this.sessionDirectories.get(request.sessionID)
         ),
@@ -594,7 +635,8 @@ export class SessionStateManager {
 
   private trackBlockingRequest(
     kind: PendingAttentionKind,
-    props: Record<string, unknown>
+    props: Record<string, unknown>,
+    eventType?: PermissionAskEventType
   ): boolean {
     const requestID =
       getString(props.id) || getString(props.permissionID) || getString(props.requestID);
@@ -612,6 +654,7 @@ export class SessionStateManager {
       label,
       props: { ...props },
       directory: this.sessionDirectories.get(sessionID),
+      ...(eventType ? { eventType } : {}),
     });
     this.completedSessions.delete(sessionID);
     this.showBlockingNotification(kind, sessionID, label);
@@ -930,7 +973,10 @@ function validateBlockingRequestSnapshots(value: unknown): BlockingRequestSnapsh
         item.sessionID.trim().length > 0 &&
         (item.kind === 'permission' || item.kind === 'question') &&
         !!item.props &&
-        typeof item.props === 'object'
+        typeof item.props === 'object' &&
+        (item.eventType === undefined ||
+          item.eventType === 'permission.asked' ||
+          item.eventType === 'permission.v2.asked')
     )
     .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
 }
@@ -971,6 +1017,9 @@ function serializePermissionRequestProps(props: Record<string, unknown>): Record
   const permission = trimOptionalString(getString(props.permission));
   if (permission) result.permission = permission;
 
+  const type = trimOptionalString(getString(props.type));
+  if (type) result.type = type;
+
   const title = trimOptionalString(getString(props.title));
   if (title) result.title = title;
 
@@ -985,6 +1034,18 @@ function serializePermissionRequestProps(props: Record<string, unknown>): Record
       : [];
   if (patterns.length > 0) result.patterns = patterns;
 
+  const pattern = serializePersistedStringOrArray(props.pattern);
+  if (pattern !== undefined) result.pattern = pattern;
+
+  const action = trimOptionalString(getString(props.action));
+  if (action) result.action = action;
+
+  const resources = serializePersistedStringArray(props.resources);
+  if (resources.length > 0) result.resources = resources;
+
+  const save = serializePersistedStringArray(props.save);
+  if (save.length > 0) result.save = save;
+
   const messageID =
     getString(props.messageID) || getString(asRecord(props.tool)?.messageID) || undefined;
   const callID = getString(props.callID) || getString(asRecord(props.tool)?.callID) || undefined;
@@ -993,6 +1054,13 @@ function serializePermissionRequestProps(props: Record<string, unknown>): Record
       ...(messageID ? { messageID: trimRequiredString(messageID) } : {}),
       ...(callID ? { callID: trimRequiredString(callID) } : {}),
     };
+  }
+
+  const source = asRecord(props.source);
+  const sourceMessageID = trimOptionalString(getString(source?.messageID));
+  const sourceCallID = trimOptionalString(getString(source?.callID));
+  if (source?.type === 'tool' && sourceMessageID && sourceCallID) {
+    result.source = { type: 'tool', messageID: sourceMessageID, callID: sourceCallID };
   }
 
   const metadata = asRecord(props.metadata);
@@ -1011,6 +1079,21 @@ function serializePermissionRequestProps(props: Record<string, unknown>): Record
   return result;
 }
 
+function serializePersistedStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => getString(item))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, MAX_PERSISTED_METADATA_ENTRIES)
+    .map((item) => trimRequiredString(item));
+}
+
+function serializePersistedStringOrArray(value: unknown): string | string[] | undefined {
+  if (typeof value === 'string') return trimRequiredString(value);
+  const items = serializePersistedStringArray(value);
+  return items.length > 0 ? items : undefined;
+}
+
 function serializeQuestionRequestProps(props: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {
     id: getString(props.id) || '',
@@ -1022,7 +1105,7 @@ function serializeQuestionRequestProps(props: Record<string, unknown>): Record<s
         .map((item) => serializeQuestionDefinition(asRecord(item)))
         .filter((item): item is NonNullable<typeof item> => item !== null)
     : [];
-  if (questions.length > 0) {
+  if (Array.isArray(props.questions)) {
     result.questions = questions;
   }
 

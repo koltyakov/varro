@@ -405,6 +405,41 @@ describe('AutoApproveJudge', () => {
     expect(sessionCount).toBe(1);
   });
 
+  it('does not reuse an allow verdict when permission metadata changes', async () => {
+    let sessionCount = 0;
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') {
+        sessionCount += 1;
+        return { id: `judge-session-${sessionCount}` };
+      }
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path.endsWith('/message')) {
+        return { info: { structured_output: { decision: 'allow', reason: 'Safe fetch.' } } };
+      }
+      if (method === 'DELETE') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+    const permission = {
+      id: 'perm-1',
+      type: 'webfetch',
+      sessionID: 'session-1',
+      title: 'Fetch documentation',
+      metadata: { url: 'https://example.com/one' },
+    };
+
+    await judge.judge({ permission });
+    await judge.judge({
+      permission: {
+        ...permission,
+        id: 'perm-2',
+        metadata: { url: 'https://example.com/two' },
+      },
+    });
+
+    expect(sessionCount).toBe(2);
+  });
+
   it('does not reuse ask verdicts or allow verdicts across different prior approvals', async () => {
     let sessionCount = 0;
     let decision: 'allow' | 'ask' = 'ask';

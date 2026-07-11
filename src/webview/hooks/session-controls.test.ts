@@ -148,6 +148,7 @@ describe('session-controls helpers', () => {
     });
     const sendEditedMessage = vi.fn(async () => {
       callOrder.push('send');
+      return true;
     });
     const abortSession = vi.fn(async () => {});
     const invalidateMessageSync = vi.fn(() => {
@@ -199,6 +200,41 @@ describe('session-controls helpers', () => {
     ]);
   });
 
+  it('unreverts and restores pruned messages when the edited send fails', async () => {
+    const restorePrunedMessages = vi.fn();
+    const unreverted = session('session-1');
+    const unrevertSession = vi.fn(async () => unreverted);
+    const upsertSession = vi.fn();
+    const stopLoading = vi.fn();
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [{ info: userMessage('user-1') }],
+        isSessionWorking: () => false,
+        abortSession: vi.fn(async () => {}),
+        startLoading: vi.fn(),
+        pruneMessagesFrom: vi.fn(() => restorePrunedMessages),
+        revertSession: vi.fn(async () => {}),
+        syncSession: vi.fn(async () => {}),
+        syncSessionMessages: vi.fn(async () => {}),
+        sendEditedMessage: vi.fn(async () => false),
+        unrevertSession,
+        upsertSession,
+        stopLoading,
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(unrevertSession).toHaveBeenCalledWith('session-1');
+    expect(upsertSession).toHaveBeenCalledWith(unreverted);
+    expect(restorePrunedMessages).toHaveBeenCalledOnce();
+    expect(stopLoading).toHaveBeenCalledOnce();
+  });
+
   it('aborts a working session before reverting the edited message', async () => {
     const callOrder: string[] = [];
 
@@ -218,6 +254,7 @@ describe('session-controls helpers', () => {
         syncSessionMessages: vi.fn(async () => {}),
         sendEditedMessage: vi.fn(async () => {
           callOrder.push('send');
+          return true;
         }),
         stopLoading: vi.fn(),
         setError: vi.fn(),
@@ -244,7 +281,7 @@ describe('session-controls helpers', () => {
       revertSession,
       syncSession: vi.fn(async () => {}),
       syncSessionMessages: vi.fn(async () => {}),
-      sendEditedMessage: vi.fn(async () => {}),
+      sendEditedMessage: vi.fn(async () => true),
       stopLoading: vi.fn(),
       setError: vi.fn(),
       ...overrides,
@@ -276,7 +313,7 @@ describe('session-controls helpers', () => {
 
   it('editMessage can resend attachment-only edits with empty text', async () => {
     const revertSession = vi.fn(async () => {});
-    const sendEditedMessage = vi.fn(async () => {});
+    const sendEditedMessage = vi.fn(async () => true);
 
     await editMessageWithDependencies(
       {
@@ -304,7 +341,7 @@ describe('session-controls helpers', () => {
   it('editMessage stops loading and reports errors without sending when revert fails', async () => {
     const stopLoading = vi.fn();
     const setError = vi.fn();
-    const sendEditedMessage = vi.fn(async () => {});
+    const sendEditedMessage = vi.fn(async () => true);
     const restorePrunedMessages = vi.fn();
 
     await editMessageWithDependencies(
@@ -349,7 +386,7 @@ describe('session-controls helpers', () => {
         }),
         syncSession: vi.fn(async () => {}),
         syncSessionMessages: vi.fn(async () => {}),
-        sendEditedMessage: vi.fn(async () => {}),
+        sendEditedMessage: vi.fn(async () => true),
         stopLoading: vi.fn(),
         setError,
       },
@@ -432,7 +469,7 @@ describe('session-controls helpers', () => {
     const upsertSession = vi.fn();
     const clearPendingAbort = vi.fn();
     const compactRemoteSession = vi.fn(async () => {});
-    const sendEditedMessage = vi.fn(async () => {});
+    const sendEditedMessage = vi.fn(async () => true);
 
     const operations = new SessionControlOperations({
       getActiveSessionId: () => 'session-1',

@@ -12,9 +12,11 @@ test('responds to a pending permission request', async ({ page }) => {
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const value = (window as Window & {
-          __varroE2E?: { permissionResponses: Array<{ response: string }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { permissionResponses: Array<{ response: string }> };
+          }
+        ).__varroE2E;
         return value?.permissionResponses[0]?.response || null;
       })
     )
@@ -32,9 +34,11 @@ test('rejects a pending permission request', async ({ page }) => {
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const value = (window as Window & {
-          __varroE2E?: { permissionResponses: Array<{ response: string }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { permissionResponses: Array<{ response: string }> };
+          }
+        ).__varroE2E;
         return value?.permissionResponses[0]?.response || null;
       })
     )
@@ -54,15 +58,17 @@ test('keeps a linked permission visible when its tool row is hidden in chat', as
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: {
-            permissionResponses: Array<{
-              sessionId: string;
-              permissionId: string;
-              response: string;
-            }>;
-          };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: {
+              permissionResponses: Array<{
+                sessionId: string;
+                permissionId: string;
+                response: string;
+              }>;
+            };
+          }
+        ).__varroE2E;
         return value?.permissionResponses[0] || null;
       })
     )
@@ -81,7 +87,9 @@ test('recovers a permission prompt when the live permission event is missed', as
   await expect(page.locator('.tool-invocation-title')).toHaveCount(0);
 });
 
-test('default permissions end up with a bash permission request for opencode version', async ({ page }) => {
+test('default permissions end up with a bash permission request for opencode version', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
   await expect(page.getByRole('button', { name: 'Default permissions' })).toBeVisible();
@@ -96,7 +104,9 @@ test('default permissions end up with a bash permission request for opencode ver
   await expect(page.locator('.model-name-text')).toContainText('GLM 5.1');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
-  await composer.fill('In default permissions mode, get opencode version using bash by running opencode --version.');
+  await composer.fill(
+    'In default permissions mode, get opencode version using bash by running opencode --version.'
+  );
   await page.getByTitle('Send (Enter)').click();
 
   await expect(page.getByText('Permission Required')).toBeVisible();
@@ -105,9 +115,11 @@ test('default permissions end up with a bash permission request for opencode ver
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+          }
+        ).__varroE2E;
         const createRequest = value?.requests.find(
           (request) => request.method === 'POST' && request.path === '/session'
         );
@@ -117,9 +129,11 @@ test('default permissions end up with a bash permission request for opencode ver
     .toBeTruthy();
 
   const permissionCreateBody = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-    }).__varroE2E;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+      }
+    ).__varroE2E;
     return value?.requests.find(
       (request) => request.method === 'POST' && request.path === '/session'
     )?.body as
@@ -139,9 +153,11 @@ test('default permissions end up with a bash permission request for opencode ver
   });
 
   const promptBody = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ path: string; body?: unknown }> };
-    }).__varroE2E;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ path: string; body?: unknown }> };
+      }
+    ).__varroE2E;
     return value?.requests.find((request) => request.path.endsWith('/prompt_async'))?.body as
       | { agent?: string; model?: { providerID: string; modelID: string } }
       | undefined;
@@ -167,11 +183,13 @@ test('keeps a grouped permission prompt visible after a one-time approval', asyn
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: {
-            permissionResponses: Array<{ permissionId: string; response: string }>;
-          };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: {
+              permissionResponses: Array<{ permissionId: string; response: string }>;
+            };
+          }
+        ).__varroE2E;
         return (value?.permissionResponses || []).map(({ permissionId, response }) => ({
           permissionId,
           response,
@@ -191,16 +209,21 @@ test('keeps grouped permission prompts bundled when rejecting them', async ({ pa
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: {
-            permissionResponses: Array<{ permissionId: string; response: string }>;
-          };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: {
+              permissionResponses: Array<{ permissionId: string; response: string }>;
+            };
+          }
+        ).__varroE2E;
         return (value?.permissionResponses || []).map(({ permissionId, response }) => ({
           permissionId,
           response,
         }));
       })
     )
-    .toEqual([{ permissionId: 'permission-group-1', response: 'reject' }]);
+    .toEqual([
+      { permissionId: 'permission-group-1', response: 'reject' },
+      { permissionId: 'permission-group-2', response: 'reject' },
+    ]);
 });

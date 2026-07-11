@@ -229,10 +229,14 @@ OpenCode approval flows stay inside the chat UI.
 
 - Permission requests appear inline and can be answered with `Reject`, `Once`, or `Always`.
 - Follow-up questions appear inline with selectable options and optional custom input.
-- Each session can run in `Default` or `Full access` permission mode.
+- Each session can run in `Default`, `Auto approve`, or `Full access` permission mode.
 - Use the permission control in the composer toolbar to switch the active session between those modes.
 
-`Default` allows read-style tools by default and asks for tool calls that can modify state. `Full access` updates the session permission rules and auto-approves pending permission prompts for that session.
+`Default` is the first-run mode. It allows read-style tools and asks before actions that can modify state.
+
+`Auto approve` applies conservative local rules to eligible workspace edits and commands. Requests that cannot be decided locally may be sent, with their command, path, metadata, and recent approval examples, to the configured model in a temporary hidden judge session. Allowed verdicts are cached briefly for identical permission context. Switching away from `Auto approve` prevents an unfinished judge request from granting permission.
+
+`Full access` updates the session permission rules and auto-approves pending permission prompts for that session. Select it only when the session can operate without confirmation.
 
 ## Output In The Chat
 
@@ -282,6 +286,7 @@ Provider limits:
 
 Chat view:
 
+- `varro.chat.defaultPermissionMode` - initial permission mode when no saved project or global selection exists; defaults to `default`
 - `varro.chat.expandThinkingByDefault` - expand reasoning/thinking blocks by default
 - `varro.chat.showStickyUserPrompt` - show a sticky preview of the latest user prompt while scrolling long assistant responses
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`

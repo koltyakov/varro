@@ -3,6 +3,7 @@ import type { PermissionMode } from '../../../shared/protocol';
 import type { Permission, QuestionRequest, Session } from '../../types';
 
 type PermissionResponse = 'once' | 'always' | 'reject';
+type PermissionResponseTarget = { id: string; sessionID: string };
 
 export async function respondPermissionWithDependencies(
   deps: {
@@ -17,10 +18,16 @@ export async function respondPermissionWithDependencies(
   sessionId: string,
   permissionId: string,
   response: PermissionResponse,
-  options?: { rethrow?: boolean }
+  options?: { rethrow?: boolean; groupMembers?: PermissionResponseTarget[] }
 ) {
   try {
-    await deps.respondPermission(sessionId, permissionId, response);
+    const targets =
+      response === 'reject' && options?.groupMembers?.length
+        ? options.groupMembers
+        : [{ id: permissionId, sessionID: sessionId }];
+    await Promise.all(
+      targets.map((target) => deps.respondPermission(target.sessionID, target.id, response))
+    );
     deps.removePermission(permissionId, { removeGroup: response !== 'once' });
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to respond to permission');
@@ -170,7 +177,7 @@ export class SessionApprovalOperations {
     sessionId: string,
     permissionId: string,
     response: PermissionResponse,
-    options?: { rethrow?: boolean }
+    options?: { rethrow?: boolean; groupMembers?: PermissionResponseTarget[] }
   ) => {
     await respondPermissionWithDependencies(
       {

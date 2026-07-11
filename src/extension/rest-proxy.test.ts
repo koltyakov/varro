@@ -306,6 +306,89 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('rejects direct session requests owned by another workspace', async () => {
+    const serverRequest = vi.fn(async (method: string, path: string) => {
+      if (method === 'GET' && path === '/session') {
+        return [{ id: 'foreign', directory: '/other' }];
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        isSessionInWorkspace: vi.fn(() => false),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(91, 'GET', '/session/foreign/message'));
+
+    expect(serverRequest).toHaveBeenCalledTimes(1);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 91,
+      error: '404 Session not found',
+    });
+  });
+
+  it('rejects foreign sessions before local Varro actions run', async () => {
+    const setPinned = vi.fn(() => Promise.resolve(['foreign']));
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        request: vi.fn(() => Promise.resolve([{ id: 'foreign', directory: '/other' }])),
+      } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        isSessionInWorkspace: vi.fn(() => false),
+      } as never,
+      pinnedSessions: { setPinned },
+    });
+
+    await proxy.handleRequest(
+      makePayload(92, 'POST', '/varro/session/foreign/pin', { pinned: true })
+    );
+
+    expect(setPinned).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 92,
+      error: '404 Session not found',
+    });
+  });
+
+  it('allows normalized Windows workspace matches from an authoritative lookup', async () => {
+    const serverRequest = vi.fn(async (method: string, path: string) => {
+      if (method === 'GET' && path === '/session') {
+        return [{ id: 'session one', directory: 'c:/users/andrew/projects/VARRO/' }];
+      }
+      if (method === 'GET' && path === '/session/session%20one/message') return [];
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        context: {
+          workspacePath: 'C:\\Users\\Andrew\\Projects\\Varro',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+      } as never,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        isSessionInWorkspace: vi.fn(() => false),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(93, 'GET', '/session/session%20one/message'));
+
+    expect(serverRequest.mock.calls).toEqual([
+      ['GET', '/session'],
+      ['GET', '/session/session%20one/message', undefined],
+    ]);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 93, data: [] });
+  });
+
   it('routes recycle bin list request', async () => {
     const trashList = [{ rootID: 'abc' }];
     const { proxy, callbacks } = createProxy({

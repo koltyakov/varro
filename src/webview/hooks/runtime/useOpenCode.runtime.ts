@@ -99,7 +99,7 @@ export async function editMessage(
   text: string,
   options?: { allowEmptyText?: boolean }
 ) {
-  await getCurrentOpenCodeRuntime().editMessage(messageId, text, options);
+  return await getCurrentOpenCodeRuntime().editMessage(messageId, text, options);
 }
 
 export async function implementPlan(prompt: string, sessionId?: string | null) {

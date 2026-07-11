@@ -107,7 +107,9 @@ export async function editMessageWithDependencies(
     revertSession(sessionId: string, messageId: string): Promise<unknown>;
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
-    sendEditedMessage(text: string): Promise<unknown>;
+    sendEditedMessage(text: string): Promise<boolean>;
+    unrevertSession(sessionId: string): Promise<Session>;
+    upsertSession(session: Session): void;
     stopLoading(): void;
     setError(message: string): void;
   },
@@ -116,12 +118,12 @@ export async function editMessageWithDependencies(
   options?: { allowEmptyText?: boolean }
 ) {
   const sessionId = deps.getActiveSessionId();
-  if (!sessionId || (!options?.allowEmptyText && !text.trim())) return;
+  if (!sessionId || (!options?.allowEmptyText && !text.trim())) return false;
 
   const target = deps
     .getMessages()
     .find((entry) => entry.info.role === 'user' && entry.info.id === messageId);
-  if (!target || target.info.sessionID !== sessionId) return;
+  if (!target || target.info.sessionID !== sessionId) return false;
 
   let restorePrunedMessages: (() => void) | null = null;
   try {
@@ -137,10 +139,25 @@ export async function editMessageWithDependencies(
     restorePrunedMessages?.();
     deps.stopLoading();
     deps.setError(err instanceof Error ? err.message : 'Failed to edit message');
-    return;
+    return false;
   }
 
-  await deps.sendEditedMessage(text);
+  try {
+    if (await deps.sendEditedMessage(text)) return true;
+  } catch (err) {
+    deps.setError(err instanceof Error ? err.message : 'Failed to send edited message');
+  }
+
+  try {
+    deps.upsertSession(await deps.unrevertSession(sessionId));
+  } catch (err) {
+    deps.setError(
+      `Failed to restore the original message: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  restorePrunedMessages?.();
+  deps.stopLoading();
+  return false;
 }
 
 export async function redoSessionWithDependencies(deps: {
@@ -237,7 +254,7 @@ type SessionControlDependencies = {
   syncSessionMessages(sessionId: string): Promise<void>;
   setError(message: string): void;
   isSessionWorking(sessionId: string): boolean;
-  sendEditedMessage(text: string): Promise<unknown>;
+  sendEditedMessage(text: string): Promise<boolean>;
   invalidateMessageSync(): void;
   pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null;
   unrevertSession(sessionId: string): Promise<Session>;
@@ -299,7 +316,7 @@ export class SessionControlOperations {
     text: string,
     options?: { allowEmptyText?: boolean }
   ) => {
-    await editMessageWithDependencies(
+    return await editMessageWithDependencies(
       {
         getActiveSessionId: this.deps.getActiveSessionId,
         getMessages: this.deps.getMessages,
@@ -312,6 +329,8 @@ export class SessionControlOperations {
         syncSession: this.deps.syncSession,
         syncSessionMessages: this.deps.syncSessionMessages,
         sendEditedMessage: this.deps.sendEditedMessage,
+        unrevertSession: this.deps.unrevertSession,
+        upsertSession: this.deps.upsertSession,
         stopLoading: this.deps.stopLoading,
         setError: this.deps.setError,
       },

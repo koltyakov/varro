@@ -92,6 +92,34 @@ describe('session-approvals helpers', () => {
     expect(removePermission).toHaveBeenCalledWith('perm-1', { removeGroup: false });
   });
 
+  it('rejects every grouped permission before clearing the group', async () => {
+    const removePermission = vi.fn();
+    const respondPermission = vi.fn(async () => {});
+
+    await respondPermissionWithDependencies(
+      {
+        respondPermission,
+        removePermission,
+        setError: vi.fn(),
+      },
+      'session-1',
+      'perm-1',
+      'reject',
+      {
+        groupMembers: [
+          { id: 'perm-1', sessionID: 'session-1' },
+          { id: 'perm-2', sessionID: 'session-1' },
+        ],
+      }
+    );
+
+    expect(respondPermission.mock.calls).toEqual([
+      ['session-1', 'perm-1', 'reject'],
+      ['session-1', 'perm-2', 'reject'],
+    ]);
+    expect(removePermission).toHaveBeenCalledWith('perm-1', { removeGroup: true });
+  });
+
   it('sets a fallback error and rethrows when permission responses fail', async () => {
     const setError = vi.fn();
 

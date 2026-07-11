@@ -118,7 +118,7 @@ export interface OpenCodeRuntime {
     messageId: string,
     text: string,
     options?: { allowEmptyText?: boolean }
-  ): Promise<void>;
+  ): Promise<boolean>;
   implementPlan(prompt: string, sessionId?: string | null): Promise<void>;
   openPlan(markdown: string, sessionId?: string | null): Promise<void>;
   abortSession(): Promise<void>;
@@ -737,7 +737,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         approvedReferences: approvedPermissionReferences,
         ...(model ? { model } : {}),
       });
-      if (!isCurrent()) return;
+      if (
+        !isCurrent() ||
+        permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'auto'
+      ) {
+        return;
+      }
       if (response.decision === 'allow') {
         await sessionApprovalOperations.respondPermission(
           permission.sessionID,
@@ -752,7 +757,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     } catch (err) {
       logError('autoApproveJudge', err);
     }
-    if (isCurrent()) permissionsStore.addPermission(permission);
+    if (
+      isCurrent() &&
+      permissionsStore.getPermissionModeForSession(permission.sessionID) === 'auto'
+    ) {
+      permissionsStore.addPermission(permission);
+    }
   }
 
   function initConnection() {
@@ -1255,7 +1265,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     text: string,
     options?: { allowEmptyText?: boolean }
   ) {
-    await sessionControlOperations.editMessage(messageId, text, options);
+    return await sessionControlOperations.editMessage(messageId, text, options);
   }
 
   async function implementPlan(prompt: string, sessionId = appStore.state.activeSessionId) {
@@ -1301,7 +1311,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     options?: { rethrow?: boolean }
   ) {
     const permission = appStore.state.permissions.find((item) => item.id === permissionId);
-    await sessionApprovalOperations.respondPermission(sessionId, permissionId, response, options);
+    await sessionApprovalOperations.respondPermission(sessionId, permissionId, response, {
+      ...options,
+      ...(response === 'reject' && permission
+        ? { groupMembers: permissionsStore.getPermissionGroupMembers(permission) }
+        : {}),
+    });
     if (permission && response !== 'reject' && !options?.rethrow) {
       recordApprovedPermissionReference(permission, response);
     }

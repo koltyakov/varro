@@ -584,6 +584,7 @@ export type PermissionEventProperties =
       permissionID?: string;
       requestID?: string;
       permission?: string;
+      pattern?: string | string[];
       patterns?: string | string[];
       sessionID: string;
       messageID?: string;

@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -226,8 +226,8 @@
             "auto",
             "full"
           ],
-          "default": "auto",
-          "markdownDescription": "Permission mode selected by default when no project or global Varro permission-mode selection has been saved."
+          "default": "default",
+          "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` asks before state-changing actions, `auto` judges eligible requests automatically, and `full` grants unrestricted access."
         },
         "varro.chat.autoRenameUntitledSessions": {
           "type": "boolean",

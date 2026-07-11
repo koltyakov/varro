@@ -415,27 +415,40 @@ function extractCommand(permission: NormalizedJudgePermission) {
 }
 
 /**
- * Cache key for judge verdicts. Keyed on what the permission actually does
- * (command text, edit paths, or pattern/title) plus the prior-approval
- * references the judge saw, so a verdict is only reused while the judge
- * would receive the same inputs. Session and request IDs are deliberately
- * excluded: identical actions repeat across sessions in agent loops.
+ * Cache key for judge verdicts. Keyed on the complete normalized action
+ * context plus the prior-approval references the judge saw, so a verdict is
+ * only reused while the judge would receive the same inputs. Session and
+ * request IDs are deliberately excluded: identical actions repeat across
+ * sessions in agent loops.
  */
 function buildVerdictCacheKey(
   permission: NormalizedJudgePermission,
   approvedReferences: AutoApproveJudgeReference[]
 ) {
-  const subject =
-    permission.type === 'bash' || permission.type === 'shell'
-      ? extractCommand(permission)
-      : isEditPermissionType(permission)
-        ? collectPermissionPaths(permission).toSorted().join('\n')
-        : JSON.stringify([permission.pattern ?? null, permission.title]);
+  const subject = stableSerialize({
+    title: permission.title,
+    pattern: permission.pattern ?? null,
+    metadata: permission.metadata,
+  });
   const references = approvedReferences
-    .map((reference) => JSON.stringify(reference))
+    .map((reference) => stableSerialize(reference))
     .toSorted()
     .join('\n');
   return [permission.type, subject, references].join('\u0000');
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(String(value));
 }
 
 function describePermissionSubject(permission: NormalizedJudgePermission) {
