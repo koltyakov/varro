@@ -647,12 +647,22 @@ describe('client', () => {
 
   it('requests the aggregate session diff summary through the canonical encoded route', async () => {
     const { client } = await loadClient();
-    bridgeMocks.apiCall.mockResolvedValue({ files: 2, additions: 6, deletions: 4 });
+    bridgeMocks.apiCall.mockResolvedValue({
+      files: 2,
+      additions: 6,
+      deletions: 4,
+      tokens: 12_345,
+      durationMs: 65_000,
+      activeStartedAt: null,
+    });
 
     await expect(client.varro.session.diffSummary('session with space')).resolves.toEqual({
       files: 2,
       additions: 6,
       deletions: 4,
+      tokens: 12_345,
+      durationMs: 65_000,
+      activeStartedAt: null,
     });
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
       'GET',

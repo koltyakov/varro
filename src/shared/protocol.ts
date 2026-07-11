@@ -67,6 +67,9 @@ export type SessionDiffSummary = {
   files: number;
   additions: number;
   deletions: number;
+  tokens: number;
+  durationMs: number;
+  activeStartedAt: number | null;
 };
 
 export type ProviderLimitUnit = 'requests' | 'tokens' | 'messages' | 'credits' | 'usd' | 'unknown';

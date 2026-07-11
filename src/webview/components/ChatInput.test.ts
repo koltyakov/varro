@@ -783,6 +783,53 @@ describe('ChatInput', () => {
     expect(metaRow?.querySelector('.provider-limit-anchor')).not.toBeNull();
   });
 
+  it('uses the full composer controls and starts a new session only when sending', async () => {
+    setupModelState();
+    setState('activeSessionId', 'existing-session');
+    setState('sessionStatus', { 'existing-session': { type: 'busy' } });
+    setInputText('Build a fresh feature');
+    setState('droppedFiles', [
+      { path: '/repo/src/new.ts', relativePath: 'src/new.ts', type: 'file' },
+    ]);
+    const onBeforeSend = vi.fn(() => {
+      setState('activeSessionId', null);
+      setState('droppedFiles', []);
+    });
+
+    cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    editor?.focus();
+
+    expect(container?.querySelector('.model-picker-btn')).not.toBeNull();
+    expect(container?.querySelector('.permission-mode-button')).not.toBeNull();
+    expect(container?.querySelector('[title="Send (Enter)"]')).not.toBeNull();
+    expect(onBeforeSend).not.toHaveBeenCalled();
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(onBeforeSend).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith('Build a fresh feature', {
+      noReply: false,
+      queuedAttachments: {
+        droppedFiles: [
+          {
+            path: '/repo/src/new.ts',
+            relativePath: 'src/new.ts',
+            type: 'file',
+            lineRanges: undefined,
+            attachmentSequence: undefined,
+          },
+        ],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    });
+  });
+
   it('right-aligns the provider limit popup when no context is shown', async () => {
     setProviderLimitThresholdPercent(40);
     setupModelState();

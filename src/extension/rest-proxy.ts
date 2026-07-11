@@ -392,11 +392,17 @@ export class RestProxy {
   }
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
-    const diffs = await this.callbacks.server.request(
-      'GET',
-      `/session/${encodeURIComponent(sessionID)}/diff`
-    );
-    return summarizeSessionDiff(diffs);
+    const encodedSessionID = encodeURIComponent(sessionID);
+    const [diffs, messages] = await Promise.all([
+      this.callbacks.server.request('GET', `/session/${encodedSessionID}/diff`),
+      this.callbacks.server.request('GET', `/session/${encodedSessionID}/message`),
+    ]);
+    const diffStats = summarizeSessionDiff(diffs);
+    return {
+      ...(hasSessionEdits(diffStats) ? diffStats : summarizeSessionMessageEdits(messages)),
+      tokens: summarizeSessionTokens(messages),
+      ...summarizeSessionDuration(messages),
+    };
   }
 
   private getHiddenSessionIdFromPath(path: string) {
@@ -1049,14 +1055,16 @@ function applyJsoncChange(raw: string, path: (string | number)[], value: unknown
   );
 }
 
-function summarizeSessionDiff(value: unknown): SessionDiffSummary {
+function summarizeSessionDiff(
+  value: unknown
+): Omit<SessionDiffSummary, 'tokens' | 'durationMs' | 'activeStartedAt'> {
   const record = asRecord(value);
   const candidates = Array.isArray(value)
     ? value
     : record && isDiffRecord(record)
       ? [record]
       : Object.values(record ?? {});
-  const files = new Set<string>();
+  const files: string[] = [];
   let validDiffs = 0;
   let additions = 0;
   let deletions = 0;
@@ -1065,16 +1073,230 @@ function summarizeSessionDiff(value: unknown): SessionDiffSummary {
     const diff = asRecord(candidate);
     if (!diff || !isDiffRecord(diff)) continue;
     validDiffs += 1;
-    if (typeof diff.file === 'string' && diff.file) files.add(diff.file);
+    if (
+      typeof diff.file === 'string' &&
+      diff.file &&
+      !files.some((file) => isSameSummaryFile(file, diff.file as string))
+    ) {
+      files.push(diff.file);
+    }
     additions += readDiffLineCount(diff.additions, diff.added);
     deletions += readDiffLineCount(diff.deletions, diff.removed);
   }
 
   return {
-    files: files.size || validDiffs,
+    files: files.length || validDiffs,
     additions,
     deletions,
   };
+}
+
+function isSameSummaryFile(left: string, right: string) {
+  const leftPath = normalizeSummaryFile(left);
+  const rightPath = normalizeSummaryFile(right);
+  if (leftPath === rightPath) return true;
+
+  if (isAbsoluteSummaryFile(leftPath) === isAbsoluteSummaryFile(rightPath)) return false;
+  const [absolute, relative] = isAbsoluteSummaryFile(leftPath)
+    ? [leftPath, rightPath]
+    : [rightPath, leftPath];
+  return absolute.endsWith(`/${relative}`);
+}
+
+function normalizeSummaryFile(path: string) {
+  return path.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function isAbsoluteSummaryFile(path: string) {
+  return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
+}
+
+function summarizeSessionMessageEdits(
+  value: unknown
+): Omit<SessionDiffSummary, 'tokens' | 'durationMs' | 'activeStartedAt'> {
+  if (!Array.isArray(value)) return { files: 0, additions: 0, deletions: 0 };
+
+  const diffs: Record<string, unknown>[] = [];
+  for (const entry of value) {
+    const message = asRecord(entry);
+    const info = asRecord(message?.info);
+    const summary = asRecord(info?.summary);
+    if (Array.isArray(summary?.diffs)) diffs.push(...summary.diffs.flatMap(asDiffRecord));
+
+    if (!Array.isArray(message?.parts)) continue;
+    for (const partValue of message.parts) {
+      const part = asRecord(partValue);
+      if (part?.type === 'patch' && Array.isArray(part.files)) {
+        for (const file of part.files) {
+          if (typeof file === 'string' && file) diffs.push({ file });
+        }
+        continue;
+      }
+      if (part?.type !== 'tool' || typeof part.tool !== 'string') continue;
+
+      const state = asRecord(part.state);
+      const metadata = asRecord(state?.metadata);
+      if (Array.isArray(metadata?.files)) {
+        for (const item of metadata.files) {
+          const diff = asRecord(item);
+          const file = diff && readFirstString(diff, ['relativePath', 'file', 'path', 'filePath']);
+          if (!diff || !file) continue;
+          diffs.push({ ...diff, file });
+        }
+        continue;
+      }
+
+      const tool = part.tool.trim().toLowerCase().split('.').pop() || '';
+      if (!SESSION_FILE_CHANGE_TOOLS.has(tool)) continue;
+      const input = asRecord(state?.input);
+      const source = { ...metadata, ...input };
+      const file = readFirstString(source, [
+        'relativePath',
+        'file',
+        'path',
+        'filePath',
+        'filepath',
+        'filename',
+      ]);
+      if (!file) continue;
+      diffs.push({
+        file,
+        additions: source.additions ?? source.linesAdded,
+        deletions: source.deletions ?? source.linesRemoved,
+      });
+    }
+  }
+  return summarizeSessionDiff(diffs);
+}
+
+function asDiffRecord(value: unknown): Record<string, unknown>[] {
+  const record = asRecord(value);
+  return record ? [record] : [];
+}
+
+function readFirstString(source: Record<string, unknown>, keys: readonly string[]) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return undefined;
+}
+
+function hasSessionEdits(
+  stats: Omit<SessionDiffSummary, 'tokens' | 'durationMs' | 'activeStartedAt'>
+) {
+  return stats.files > 0 || stats.additions > 0 || stats.deletions > 0;
+}
+
+const SESSION_FILE_CHANGE_TOOLS = new Set([
+  'apply_patch',
+  'edit',
+  'write',
+  'create',
+  'file_edit',
+  'file_write',
+  'file_create',
+  'update_file',
+  'replace',
+  'insert',
+  'apply_edit',
+  'apply_diff',
+  'delete',
+  'remove',
+  'unlink',
+  'rm',
+  'file_delete',
+  'file_remove',
+  'move',
+  'mv',
+  'rename',
+  'file_move',
+  'file_rename',
+]);
+
+function summarizeSessionTokens(value: unknown): number {
+  if (!Array.isArray(value)) return 0;
+
+  let total = 0;
+  for (const entry of value) {
+    const info = asRecord(asRecord(entry)?.info);
+    if (info?.role !== 'assistant') continue;
+    const tokens = asRecord(info.tokens);
+    if (!tokens) continue;
+
+    if (isTokenCount(tokens.total) && tokens.total > 0) {
+      total += tokens.total;
+      continue;
+    }
+
+    const cache = asRecord(tokens.cache);
+    total +=
+      readTokenCount(tokens.input) +
+      readTokenCount(tokens.output) +
+      readTokenCount(tokens.reasoning) +
+      readTokenCount(cache?.read) +
+      readTokenCount(cache?.write);
+  }
+  return total;
+}
+
+function summarizeSessionDuration(
+  value: unknown
+): Pick<SessionDiffSummary, 'durationMs' | 'activeStartedAt'> {
+  if (!Array.isArray(value)) return { durationMs: 0, activeStartedAt: null };
+
+  let total = 0;
+  let promptStartedAt: number | null = null;
+  let firstAssistantCreatedAt: number | null = null;
+  let latestCompletedAt: number | null = null;
+  let lastAssistantCompleted = false;
+
+  const flush = () => {
+    if (lastAssistantCompleted && latestCompletedAt !== null) {
+      const startedAt = promptStartedAt ?? firstAssistantCreatedAt;
+      if (startedAt !== null) total += Math.max(0, latestCompletedAt - startedAt);
+    }
+    promptStartedAt = null;
+    firstAssistantCreatedAt = null;
+    latestCompletedAt = null;
+    lastAssistantCompleted = false;
+  };
+
+  for (const entry of value) {
+    const info = asRecord(asRecord(entry)?.info);
+    if (info?.role !== 'assistant') {
+      flush();
+      if (info?.role === 'user') promptStartedAt = readTimestamp(asRecord(info.time)?.created);
+      continue;
+    }
+    if (info.mode === 'subagent') continue;
+
+    const time = asRecord(info.time);
+    firstAssistantCreatedAt ??= readTimestamp(time?.created);
+    const completedAt = readTimestamp(time?.completed);
+    lastAssistantCompleted = completedAt !== null;
+    if (completedAt !== null) {
+      latestCompletedAt = Math.max(latestCompletedAt ?? completedAt, completedAt);
+    }
+  }
+
+  const activeStartedAt = lastAssistantCompleted
+    ? null
+    : (promptStartedAt ?? firstAssistantCreatedAt);
+  flush();
+  return { durationMs: total, activeStartedAt };
+}
+
+function readTimestamp(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readTokenCount(value: unknown): number {
+  return isTokenCount(value) ? value : 0;
+}
+
+function isTokenCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isDiffRecord(value: Record<string, unknown>) {

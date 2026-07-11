@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import type { AssistantMessage, Session, ToolPart } from '../types';
@@ -925,6 +926,30 @@ describe('SessionListSectionHeader', () => {
     expect(container?.querySelector('button.session-list-section-confirm')).toBeNull();
   });
 
+  it('keeps inline confirmation open when the section count changes', () => {
+    const [count, setCount] = createSignal(2);
+
+    cleanup = render(
+      () =>
+        SessionListSectionHeader({
+          title: 'Archive',
+          get count() {
+            return count();
+          },
+          expanded: false,
+          onToggle: vi.fn(),
+          onArchive: vi.fn(),
+        }),
+      container!
+    );
+
+    container?.querySelector<HTMLButtonElement>('button.session-list-section-archive')?.click();
+    setCount(3);
+
+    expect(container?.querySelector('button.session-list-section-confirm')).not.toBeNull();
+    expect(container?.querySelector('button.session-list-section-cancel')).not.toBeNull();
+  });
+
   it('uses a custom action label when provided', () => {
     cleanup = render(
       () =>
@@ -1141,7 +1166,7 @@ describe('header status badges', () => {
     expect(subagentsButton).toBeNull();
   });
 
-  it('returns from an active sub-agent session to its parent session', async () => {
+  it('returns from an active sub-agent session to its top session', async () => {
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1152,7 +1177,7 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const backButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Back to sessions"]'
+      '.chat-header .chat-header-btn[title="Go to top session"]'
     ) as HTMLButtonElement | null;
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -1163,6 +1188,31 @@ describe('header status badges', () => {
     expect(
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
     ).toBeNull();
+  });
+
+  it('returns from a nested sub-agent session to the top session', async () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+
+    setState('sessions', [
+      session('top', 500),
+      session('child', 400, { parentID: 'top' }),
+      session('grandchild', 300, { parentID: 'child' }),
+    ]);
+    setState('activeSessionId', 'grandchild');
+
+    cleanup = render(() => Chat(), container!);
+
+    const topButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="Go to top session"]'
+    ) as HTMLButtonElement | null;
+    expect(topButton).toBeInstanceOf(HTMLButtonElement);
+
+    topButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('top');
   });
 
   it('returns from the sub-agent list to the parent session', async () => {
@@ -1458,9 +1508,12 @@ describe('header status badges', () => {
     expect(
       container?.querySelector('.chat-session-sidebar-header .chat-header-completed-badge')
     ).toBeInstanceOf(HTMLButtonElement);
-    const activeIndicator = container?.querySelector(
-      '.session-item.active .session-item-indicator'
-    );
+    const activeIndicator = Array.from(container?.querySelectorAll('.session-item') ?? [])
+      .find(
+        (item) =>
+          item.querySelector('.session-item-title')?.textContent?.trim() === 'active-completed'
+      )
+      ?.querySelector('.session-item-indicator');
     expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
   });
 
@@ -1473,9 +1526,11 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
-    const activeIndicator = container?.querySelector(
-      '.session-item.active .session-item-indicator'
-    );
+    const activeIndicator = Array.from(container?.querySelectorAll('.session-item') ?? [])
+      .find(
+        (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'session-1'
+      )
+      ?.querySelector('.session-item-indicator');
     expect(activeIndicator?.classList.contains('is-completed')).toBe(true);
   });
 
@@ -1688,7 +1743,7 @@ describe('header status badges', () => {
     ).toBe(true);
   });
 
-  it('shows a plan tag before the trailing action buttons for running plan sessions', () => {
+  it('shows a plan tag before trailing session metadata for running plan sessions', () => {
     setState('sessions', [
       session('plan-1', 300),
       session('plan-child', 250, { parentID: 'plan-1' }),
@@ -1706,19 +1761,19 @@ describe('header status badges', () => {
     const trailing = planRow?.querySelector('.session-item-trailing') as HTMLDivElement | null;
     const planTag = trailing?.querySelector('.session-item-plan-tag');
     const subagentsButton = trailing?.querySelector('.session-item-subagents');
-    const actionsButton = trailing?.querySelector('.session-item-actions');
+    const age = trailing?.querySelector('.session-item-age');
     const trailingChildren = Array.from(trailing?.children ?? []);
     const planTagIndex = trailingChildren.indexOf(planTag as Element);
     const subagentsIndex = trailingChildren.indexOf(subagentsButton as Element);
-    const actionsIndex = trailingChildren.indexOf(actionsButton as Element);
+    const ageIndex = trailingChildren.indexOf(age as Element);
 
     expect(planTag?.textContent?.trim()).toBe('Plan');
     expect(planTagIndex).toBeGreaterThanOrEqual(0);
     if (subagentsIndex >= 0) expect(planTagIndex).toBeLessThan(subagentsIndex);
-    expect(planTagIndex).toBeLessThan(actionsIndex);
+    expect(planTagIndex).toBeLessThan(ageIndex);
   });
 
-  it('does not show a plan tag for completed plan sessions', () => {
+  it('continues to show a plan tag for plan-ready sessions', () => {
     setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
     setState('activeSessionId', 'session-1');
     setState('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 });
@@ -1730,7 +1785,7 @@ describe('header status badges', () => {
       (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
     );
 
-    expect(planRow?.querySelector('.session-item-plan-tag')).toBeNull();
+    expect(planRow?.querySelector('.session-item-plan-tag')?.textContent?.trim()).toBe('Plan');
   });
 
   it('orders the default session list by age only', () => {
@@ -1858,6 +1913,7 @@ describe('header status badges', () => {
         item.textContent?.trim()
       )
     ).toEqual(['Archive']);
+    expect(bottomGroups?.querySelector('.session-list-section-archive')).toBeNull();
   });
 
   it('keeps showing sessions in the default list when all are older than one day', () => {

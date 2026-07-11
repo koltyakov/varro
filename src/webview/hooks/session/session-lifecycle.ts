@@ -3,6 +3,7 @@ import { normalizeSessionTitle } from '../../../shared/session-title';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { isSamePath } from '../../lib/path-display';
+import { compareSessionsByActivity } from '../../lib/session-order';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
@@ -122,8 +123,8 @@ export function isSessionInWorkspace(
   return isSamePath(normalizedSessionDirectory, normalizedWorkspace);
 }
 
-export function sortSessions(sessions: Session[]) {
-  return [...sessions].toSorted((a, b) => b.time.updated - a.time.updated);
+export function sortSessions(sessions: Session[], now = Date.now()) {
+  return [...sessions].toSorted((a, b) => compareSessionsByActivity(a, b, now));
 }
 
 function isPlaceholderSessionTitle(title: string | null | undefined) {

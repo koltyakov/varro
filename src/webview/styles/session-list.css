@@ -79,6 +79,14 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   overflow-y: auto;
 }
 
+.session-list-content {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .session-list-layout {
   display: flex;
   flex-direction: column;
@@ -96,6 +104,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-list-bottom-groups .session-list-section-header:first-child {
   margin-top: 0;
+}
+
+.session-list-new-session {
+  flex-shrink: 0;
+  margin-top: auto;
+  border-top: 1px solid var(--color-vscode-border-soft);
 }
 
 .session-empty {
@@ -284,25 +298,30 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   text-align: left;
 }
 
-.session-item:hover {
+.session-item:hover,
+.session-item.keyboard-focus {
   background: var(--color-vscode-hover);
 }
 
-.session-item.is-pinned:not(.active) {
+.session-item.is-pinned {
   background: color-mix(in srgb, var(--color-vscode-accent) 7%, transparent);
   box-shadow: inset 2px 0 color-mix(in srgb, var(--color-vscode-accent) 65%, transparent);
 }
 
-.session-item.is-pinned:not(.active):hover {
+.session-item.is-pinned:hover,
+.session-item.is-pinned.keyboard-focus {
   background: color-mix(in srgb, var(--color-vscode-accent) 11%, var(--color-vscode-hover));
 }
 
-.session-item.active {
-  --session-item-active-bg: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
-  background: var(--session-item-active-bg);
-  border-left: 2px solid var(--color-vscode-accent);
-  padding-left: 10px;
-  padding-right: 12px;
+.session-item.is-context-selected,
+.session-item.is-context-selected:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 11%, transparent);
+}
+
+.session-item.is-context-obscured {
+  pointer-events: none;
+  filter: blur(1px);
+  opacity: 0.45;
 }
 
 .session-item-content {
@@ -321,49 +340,20 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   flex-shrink: 0;
 }
 
-.session-item-actions {
-  position: relative;
-  display: flex;
-}
-
-.session-item-actions-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: var(--color-vscode-muted);
-  cursor: pointer;
-  opacity: 0.72;
-}
-
-.session-item-actions-trigger[aria-expanded='true'],
-.session-item-actions-trigger:focus-visible {
-  opacity: 1;
-}
-
-.session-item-actions-trigger:hover {
-  color: var(--color-vscode-fg);
-  background: var(--color-vscode-toolbar-hover);
-}
-
-.session-item-actions-trigger svg {
-  width: 14px;
-  height: 14px;
+.session-item-actions-backdrop {
+  position: fixed;
+  z-index: 29;
+  inset: 0;
+  cursor: default;
 }
 
 .session-item-actions-menu {
-  position: absolute;
+  position: fixed;
   z-index: 30;
-  top: calc(100% + 4px);
-  right: 0;
   display: flex;
   flex-direction: column;
   min-width: 170px;
+  overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--color-vscode-border);
   border-radius: 6px;

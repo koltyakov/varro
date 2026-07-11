@@ -24,6 +24,7 @@ import {
   on,
   untrack,
 } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import {
   selectSession,
   deleteSession,
@@ -33,13 +34,15 @@ import {
   renameSession,
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
-import type { RecycleBinEntry } from '../../../shared/protocol';
+import type { RecycleBinEntry, SessionDiffSummary } from '../../../shared/protocol';
 import type { Part, Session } from '../../types';
 import { client } from '../../lib/client';
 import { getMessageFileChanges } from '../../lib/tool-file-change';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
-import { formatRelativeAge } from '../../lib/message-metrics';
+import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
+import { clampPopupToViewport } from '../../lib/popup-position';
+import { compareSessionsByActivity } from '../../lib/session-order';
 import { writeClipboard } from '../../lib/write-clipboard';
 import { getSpinnerPhaseDelayStyle } from './spinner-phase';
 
@@ -75,12 +78,28 @@ type SessionSummaryStats = {
 type SessionDiffSummaryCacheEntry = {
   status: 'loading' | 'ready' | 'error';
   updated: number;
-  stats: SessionSummaryStats | null;
+  stats: SessionDiffSummary | null;
 };
 
 type SessionDiffSummaryRequest = {
   sessionId: string;
   updated: number;
+};
+
+type SessionActionsState = {
+  sessionId: () => string | null;
+  position: () => { x: number; y: number };
+  renaming: () => boolean;
+  renameValue: () => string;
+  renameSelection: () => { start: number; end: number } | null;
+  renamePending: () => boolean;
+  open: (sessionId: string, event: MouseEvent) => void;
+  close: () => void;
+  beginRename: (title: string) => void;
+  setRenaming: (renaming: boolean) => void;
+  setRenameValue: (value: string) => void;
+  setRenameSelection: (selection: { start: number; end: number }) => void;
+  setRenamePending: (pending: boolean) => void;
 };
 
 export type SessionStatusIndicatorKind =
@@ -158,8 +177,6 @@ function isCurrentDiffSummaryRequest(request: SessionDiffSummaryRequest) {
 }
 
 function enqueueDiffSummaryRequest(session: Session) {
-  if (!shouldLoadSessionDiffSummary(session)) return;
-
   const cache = untrack(sessionDiffSummaryCache);
   const cached = cache[session.id];
   // A matching failure is settled for this revision. Retrying from this reactive
@@ -423,11 +440,6 @@ function hasSessionSummaryEdits(stats: SessionSummaryStats) {
   return stats.files > 0 || stats.additions > 0 || stats.deletions > 0;
 }
 
-function shouldLoadSessionDiffSummary(session: Pick<Session, 'summary'>): boolean {
-  const stats = getSessionSummaryStats(session);
-  return !stats || !hasSessionSummaryEdits(stats);
-}
-
 function readDiffCount(
   diff: unknown,
   primaryKey: 'additions' | 'deletions',
@@ -459,7 +471,7 @@ export function groupSessions(
     else primaries.push(session);
   }
 
-  primaries.sort((left, right) => right.time.updated - left.time.updated);
+  primaries.sort((left, right) => compareSessionsByActivity(left, right, now));
   const failed: SessionGroups['failed'] = [];
   const pinned: SessionGroups['pinned'] = [];
   const planReady: SessionGroups['planReady'] = [];
@@ -536,12 +548,12 @@ function getSessionPriorityRank(
   return 5;
 }
 
-function sortSessionsForDisplay(sessions: typeof state.sessions) {
+function sortSessionsForDisplay(sessions: typeof state.sessions, now: number) {
   return sessions.toSorted((left, right) => {
     const pinRank =
       Number(state.pinnedSessionIds.includes(right.id)) -
       Number(state.pinnedSessionIds.includes(left.id));
-    return pinRank || right.time.updated - left.time.updated;
+    return pinRank || compareSessionsByActivity(left, right, now);
   });
 }
 
@@ -567,19 +579,6 @@ export async function archiveSessionGroup(
   return true;
 }
 
-async function archiveSessions(
-  sessions: typeof state.sessions,
-  archiveSession: (sessionId: string) => Promise<void>
-) {
-  if (sessions.length === 0) return false;
-
-  for (const session of sessions) {
-    await archiveSession(session.id);
-  }
-
-  return true;
-}
-
 export function SessionListSectionHeader(props: {
   ref?: (el: HTMLDivElement) => void;
   title: string;
@@ -593,15 +592,6 @@ export function SessionListSectionHeader(props: {
   const archiveActionLabel = () => props.archiveLabel || 'Archive';
   const archiveTargetLabel = () =>
     archiveActionLabel().toLowerCase() === props.title.toLowerCase() ? 'sessions' : props.title;
-
-  createEffect(
-    on(
-      () => props.count,
-      () => {
-        setIsConfirmingArchive(false);
-      }
-    )
-  );
 
   const confirmArchive = async () => {
     setIsConfirmingArchive(false);
@@ -683,18 +673,60 @@ export function SessionListView(props: {
 }) {
   const diffSummaryOwner = Symbol('session-list');
   const [now, setNow] = createSignal(Date.now());
-  const clock = setInterval(() => setNow(Date.now()), 60_000);
+  const clock = setInterval(() => setNow(Date.now()), 1_000);
   onCleanup(() => clearInterval(clock));
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
   const [activeGroupedSection, setActiveGroupedSection] =
     createSignal<SessionListGroupedSection | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
+  const [actionsSessionId, setActionsSessionId] = createSignal<string | null>(null);
+  const [actionsPosition, setActionsPosition] = createSignal({ x: 0, y: 0 });
+  const [frozenSessionOrder, setFrozenSessionOrder] = createSignal<string[] | null>(null);
+  const [renaming, setRenaming] = createSignal(false);
+  const [renameValue, setRenameValue] = createSignal('');
+  const [renameSelection, setRenameSelection] = createSignal<{
+    start: number;
+    end: number;
+  } | null>(null);
+  const [renamePending, setRenamePending] = createSignal(false);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   let recentHeaderRef: HTMLDivElement | undefined;
   let archiveHeaderRef: HTMLDivElement | undefined;
   let recycleBinHeaderRef: HTMLDivElement | undefined;
+
+  const closeActions = () => {
+    setActionsSessionId(null);
+    setFrozenSessionOrder(null);
+    setRenaming(false);
+    setRenamePending(false);
+  };
+  const sessionActions: SessionActionsState = {
+    sessionId: actionsSessionId,
+    position: actionsPosition,
+    renaming,
+    renameValue,
+    renameSelection,
+    renamePending,
+    open: (sessionId, event) => {
+      event.preventDefault();
+      setActionsPosition({ x: event.clientX, y: event.clientY });
+      setFrozenSessionOrder(visibleSessions().map((session) => session.id));
+      setRenaming(false);
+      setActionsSessionId(sessionId);
+    },
+    close: closeActions,
+    beginRename: (title) => {
+      setRenameValue(normalizeSessionTitle(title) || '');
+      setRenameSelection(null);
+      setRenaming(true);
+    },
+    setRenaming,
+    setRenameValue,
+    setRenameSelection,
+    setRenamePending,
+  };
 
   const normalizedSearchQuery = createMemo(() => searchQuery().trim().toLowerCase());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
@@ -753,15 +785,18 @@ export function SessionListView(props: {
       : []
   );
   const defaultSurfacedSessions = createMemo(() =>
-    sortSessionsForDisplay([
-      ...pinnedSessions(),
-      ...failedSessions(),
-      ...planReadySessions(),
-      ...attentionSessions(),
-      ...runningSessions(),
-      ...newlyCompletedSessions(),
-      ...surfacedOtherSessions(),
-    ])
+    sortSessionsForDisplay(
+      [
+        ...pinnedSessions(),
+        ...failedSessions(),
+        ...planReadySessions(),
+        ...attentionSessions(),
+        ...runningSessions(),
+        ...newlyCompletedSessions(),
+        ...surfacedOtherSessions(),
+      ],
+      now()
+    )
   );
   const surfacedSessions = createMemo(() => {
     const sessions = defaultSurfacedSessions();
@@ -793,7 +828,7 @@ export function SessionListView(props: {
   });
   const searchableSessions = createMemo(() => {
     if (props.subagentParentId) return directSessions();
-    if (props.sessionFilter) return sortSessionsForDisplay(directSessions());
+    if (props.sessionFilter) return sortSessionsForDisplay(directSessions(), now());
     if (defaultSurfacedSessions().length === 0) return overflowOtherSessions();
     return [...surfacedSessions(), ...overflowOtherSessions()];
   });
@@ -857,6 +892,11 @@ export function SessionListView(props: {
   });
 
   createEffect(() => {
+    const sessionId = actionsSessionId();
+    if (sessionId && !state.sessions.some((session) => session.id === sessionId)) closeActions();
+  });
+
+  createEffect(() => {
     const sessions = visibleSessions();
     setFocusedIndex((current) => {
       if (sessions.length === 0) return -1;
@@ -896,14 +936,29 @@ export function SessionListView(props: {
   };
 
   const renderSessionItems = (sessions: typeof state.sessions, indexOffset = 0) => (
-    <For each={sessions}>
+    <For
+      each={(() => {
+        const frozenOrder = frozenSessionOrder();
+        if (!frozenOrder) return sessions;
+        const positions = new Map(frozenOrder.map((sessionId, index) => [sessionId, index]));
+        return sessions.toSorted((a, b) => {
+          const aPosition = positions.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const bPosition = positions.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+          return aPosition - bPosition;
+        });
+      })()}
+    >
       {(session, index) => (
         <SessionListItem
           session={session}
           diffSummary={sessionDiffSummaryCache()[session.id]?.stats ?? null}
+          tokens={sessionDiffSummaryCache()[session.id]?.stats?.tokens ?? null}
+          durationMs={sessionDiffSummaryCache()[session.id]?.stats?.durationMs ?? null}
+          activeStartedAt={sessionDiffSummaryCache()[session.id]?.stats?.activeStartedAt ?? null}
           itemIndex={() => indexOffset + index()}
           focusedIndex={focusedIndex}
           setFocusedIndex={setFocusedIndex}
+          actions={sessionActions}
           now={now}
           subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
           hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
@@ -944,7 +999,6 @@ export function SessionListView(props: {
             count={overflowOtherSessions().length}
             expanded={false}
             onToggle={() => toggleGroupedSection('archive')}
-            onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
           />
         </Show>
       </Show>
@@ -1010,7 +1064,6 @@ export function SessionListView(props: {
               count={overflowOtherSessions().length}
               expanded={expanded()}
               onToggle={() => toggleGroupedSection('archive')}
-              onArchive={() => archiveSessions(overflowOtherSessions(), deleteSession)}
             />
             <Show when={expanded()}>{renderSessionItems(overflowOtherSessions())}</Show>
           </>
@@ -1043,6 +1096,14 @@ export function SessionListView(props: {
     const sessions = visibleSessions();
     if (sessions.length === 0) return;
 
+    const scrollFocusedIntoView = () => {
+      queueMicrotask(() => {
+        containerRef
+          ?.querySelector<HTMLElement>('.session-item.keyboard-focus')
+          ?.scrollIntoView({ block: 'nearest' });
+      });
+    };
+
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       e.stopPropagation();
@@ -1050,6 +1111,7 @@ export function SessionListView(props: {
         const next = i + 1;
         return next >= sessions.length ? 0 : next;
       });
+      scrollFocusedIntoView();
       return;
     }
 
@@ -1060,6 +1122,7 @@ export function SessionListView(props: {
         const next = i - 1;
         return next < 0 ? sessions.length - 1 : next;
       });
+      scrollFocusedIntoView();
       return;
     }
 
@@ -1158,16 +1221,21 @@ export function SessionListView(props: {
           </Show>
         </div>
       </Show>
-      <Show when={hasVisibleContent()} fallback={<div class="session-empty">{emptyMessage()}</div>}>
-        <Show when={showBottomGroups()} fallback={renderScrollableContent()}>
-          <div class="session-list-layout">
-            <div class="session-list-scroll session-list-scroll-primary">
-              {renderSessionItems(surfacedSessions())}
+      <div class="session-list-content">
+        <Show
+          when={hasVisibleContent()}
+          fallback={<div class="session-empty">{emptyMessage()}</div>}
+        >
+          <Show when={showBottomGroups()} fallback={renderScrollableContent()}>
+            <div class="session-list-layout">
+              <div class="session-list-scroll session-list-scroll-primary">
+                {renderSessionItems(surfacedSessions())}
+              </div>
+              {renderBottomGroups()}
             </div>
-            {renderBottomGroups()}
-          </div>
+          </Show>
         </Show>
-      </Show>
+      </div>
     </div>
   );
 }
@@ -1224,9 +1292,13 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
 function SessionListItem(props: {
   session: (typeof state.sessions)[number];
   diffSummary: SessionSummaryStats | null;
+  tokens: number | null;
+  durationMs: number | null;
+  activeStartedAt: number | null;
   itemIndex: () => number;
   focusedIndex: () => number;
   setFocusedIndex: (index: number) => void;
+  actions: SessionActionsState;
   now: () => number;
   subagentCount: number;
   hasPermissionRequest: boolean;
@@ -1241,14 +1313,11 @@ function SessionListItem(props: {
   onOpenSubagents?: (parentSessionId: string) => void;
   embedded?: boolean;
 }) {
-  const [showActions, setShowActions] = createSignal(false);
-  const [renaming, setRenaming] = createSignal(false);
-  const [renameValue, setRenameValue] = createSignal('');
-  const [renamePending, setRenamePending] = createSignal(false);
-  let actionsButtonRef: HTMLButtonElement | undefined;
+  let sessionButtonRef: HTMLButtonElement | undefined;
+  let actionsMenuRef: HTMLDivElement | undefined;
   let renameInputRef: HTMLInputElement | undefined;
-  const isActive = () => props.session.id === state.activeSessionId;
   const isFocused = () => props.focusedIndex() === props.itemIndex();
+  const showActions = () => props.actions.sessionId() === props.session.id;
   const status = () => state.sessionStatus[props.session.id];
   const hasUnreadCompletion = () =>
     props.isNewlyCompleted ||
@@ -1258,7 +1327,7 @@ function SessionListItem(props: {
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
   const showsPlanModeTag = () =>
     getSelectedAgentForSession(props.session.id) === 'plan' &&
-    (props.isRunning || props.needsAttention);
+    (props.isRunning || props.needsAttention || props.isCompletedPlanSession);
   const subagentLabel = () =>
     `Show ${props.subagentCount} sub-agent session${props.subagentCount === 1 ? '' : 's'}`;
   const ralphSummary = () => {
@@ -1270,7 +1339,15 @@ function SessionListItem(props: {
     }
     return { files: unique.size, iterations: run.iterations.length };
   };
-  const summaryStats = () => getSessionSummaryStats(props.session, props.diffSummary);
+  const summaryStats = () => props.diffSummary ?? getSessionSummaryStats(props.session);
+  const workedDurationMs = () => {
+    if (props.durationMs === null) return null;
+    const activeDuration =
+      props.isRunning && props.activeStartedAt !== null
+        ? Math.max(0, props.now() - props.activeStartedAt)
+        : 0;
+    return props.durationMs + activeDuration;
+  };
   const indicatorKind = () =>
     getSessionStatusIndicatorKind({
       isFailed: props.isFailed,
@@ -1286,41 +1363,72 @@ function SessionListItem(props: {
     }
     return getSessionStatusIndicatorTitle(kind, { retrying: status()?.type === 'retry' });
   };
-  const closeActions = () => {
-    setShowActions(false);
-    setRenaming(false);
-    setRenamePending(false);
-  };
   const beginRename = () => {
-    setRenameValue(normalizeSessionTitle(props.session.title) || '');
-    setRenaming(true);
+    props.actions.beginRename(props.session.title);
     queueMicrotask(() => {
       renameInputRef?.focus();
       renameInputRef?.select();
     });
   };
   const submitRename = async () => {
-    if (renamePending()) return;
-    const title = renameValue().trim();
+    if (props.actions.renamePending()) return;
+    const title = props.actions.renameValue().trim();
     if (!title) return;
-    setRenamePending(true);
-    const renamed = await renameSession(props.session.id, title);
-    setRenamePending(false);
-    if (renamed) closeActions();
+    const sessionId = props.session.id;
+    props.actions.setRenamePending(true);
+    const renamed = await renameSession(sessionId, title);
+    if (props.actions.sessionId() !== sessionId) return;
+    props.actions.setRenamePending(false);
+    if (renamed) props.actions.close();
   };
   const copySessionId = async () => {
-    closeActions();
+    props.actions.close();
     if (!(await writeClipboard(props.session.id))) setError('Failed to copy session ID');
   };
 
+  const openActions = (event: MouseEvent) => {
+    props.actions.open(props.session.id, event);
+    queueMicrotask(() =>
+      actionsMenuRef?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+    );
+  };
+
+  createEffect(() => {
+    if (!showActions()) return;
+    props.actions.position();
+    props.actions.renaming();
+    queueMicrotask(() => {
+      if (actionsMenuRef) clampPopupToViewport(actionsMenuRef);
+    });
+  });
+
+  createEffect(() => {
+    if (!showActions()) return;
+    const closeIfOutside = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node) || !actionsMenuRef?.contains(target)) props.actions.close();
+    };
+    window.addEventListener('contextmenu', closeIfOutside, true);
+    window.addEventListener('focusin', closeIfOutside);
+    onCleanup(() => {
+      window.removeEventListener('contextmenu', closeIfOutside, true);
+      window.removeEventListener('focusin', closeIfOutside);
+    });
+  });
+
   return (
     <div
-      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
+      class={`session-item ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
       onMouseEnter={() => props.setFocusedIndex(props.itemIndex())}
+      onContextMenu={openActions}
     >
       <button
+        ref={(element) => {
+          sessionButtonRef = element;
+        }}
         type="button"
         class="session-item-main"
+        onFocus={() => props.setFocusedIndex(props.itemIndex())}
         onClick={() => {
           selectSession(props.session.id);
           if (!props.embedded) setShowSessionPicker(false);
@@ -1382,6 +1490,22 @@ function SessionListItem(props: {
                 </>
               )}
             </Show>
+            <Show when={props.tokens !== null}>
+              {' · '}
+              <span title={`${props.tokens!.toLocaleString('en-US')} tokens spent`}>
+                {formatSessionTokens(props.tokens!)} tokens
+              </span>
+            </Show>
+            <Show when={workedDurationMs()}>
+              {(durationMs) => (
+                <>
+                  {' · '}
+                  <span title={`${formatDuration(durationMs())} total time worked`}>
+                    {formatDuration(durationMs())}
+                  </span>
+                </>
+              )}
+            </Show>
           </span>
         </div>
       </button>
@@ -1410,107 +1534,6 @@ function SessionListItem(props: {
             <span class="session-item-subagents-count">{props.subagentCount}</span>
           </button>
         </Show>
-        <div
-          class="session-item-actions"
-          onFocusOut={(event) => {
-            const next = event.relatedTarget;
-            if (!(next instanceof Node) || !event.currentTarget.contains(next)) closeActions();
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            closeActions();
-            actionsButtonRef?.focus();
-          }}
-        >
-          <button
-            ref={(element) => {
-              actionsButtonRef = element;
-            }}
-            type="button"
-            class="session-item-actions-trigger"
-            aria-label="Session actions"
-            aria-haspopup="menu"
-            aria-expanded={showActions()}
-            onClick={() => {
-              setShowActions((value) => !value);
-              setRenaming(false);
-            }}
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <circle cx="3" cy="8" r="1.25" />
-              <circle cx="8" cy="8" r="1.25" />
-              <circle cx="13" cy="8" r="1.25" />
-            </svg>
-          </button>
-          <Show when={showActions()}>
-            <div class="session-item-actions-menu" role="menu" aria-label="Session actions">
-              <Show
-                when={renaming()}
-                fallback={
-                  <>
-                    <button type="button" role="menuitem" onClick={beginRename}>
-                      Rename
-                    </button>
-                    <Show when={!props.session.parentID}>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          closeActions();
-                          void props.onTogglePinned();
-                        }}
-                      >
-                        {props.isPinned ? 'Unpin' : 'Pin'}
-                      </button>
-                    </Show>
-                    <button type="button" role="menuitem" onClick={() => void copySessionId()}>
-                      Copy session ID
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class="is-destructive"
-                      onClick={() => {
-                        closeActions();
-                        void deleteSession(props.session.id);
-                      }}
-                    >
-                      Move to Recycle Bin
-                    </button>
-                  </>
-                }
-              >
-                <form
-                  class="session-item-rename-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void submitRename();
-                  }}
-                >
-                  <label for={`session-rename-${props.session.id}`}>Session name</label>
-                  <input
-                    ref={(element) => {
-                      renameInputRef = element;
-                    }}
-                    id={`session-rename-${props.session.id}`}
-                    value={renameValue()}
-                    onInput={(event) => setRenameValue(event.currentTarget.value)}
-                    disabled={renamePending()}
-                  />
-                  <div class="session-item-rename-actions">
-                    <button type="button" onClick={() => setRenaming(false)}>
-                      Cancel
-                    </button>
-                    <button type="submit" disabled={!renameValue().trim() || renamePending()}>
-                      Save
-                    </button>
-                  </div>
-                </form>
-              </Show>
-            </div>
-          </Show>
-        </div>
         <span
           class="session-item-age"
           title={new Date(props.session.time.updated).toLocaleString()}
@@ -1518,8 +1541,146 @@ function SessionListItem(props: {
           {formatRelativeAge(props.session.time.updated, props.now())}
         </span>
       </div>
+      <Show when={showActions()}>
+        <Portal>
+          <div
+            class="session-item-actions-backdrop"
+            aria-hidden="true"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              props.actions.close();
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              props.actions.close();
+            }}
+          />
+          <div
+            ref={(element) => {
+              actionsMenuRef = element;
+            }}
+            class="session-item-actions-menu"
+            role="menu"
+            aria-label="Session actions"
+            style={{
+              left: `${props.actions.position().x}px`,
+              top: `${props.actions.position().y}px`,
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.preventDefault();
+              props.actions.close();
+              sessionButtonRef?.focus();
+            }}
+          >
+            <Show
+              when={props.actions.renaming()}
+              fallback={
+                <>
+                  <button type="button" role="menuitem" onClick={beginRename}>
+                    Rename
+                  </button>
+                  <Show when={!props.session.parentID}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        props.actions.close();
+                        void props.onTogglePinned();
+                      }}
+                    >
+                      {props.isPinned ? 'Unpin' : 'Pin'}
+                    </button>
+                  </Show>
+                  <button type="button" role="menuitem" onClick={() => void copySessionId()}>
+                    Copy session ID
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="is-destructive"
+                    onClick={() => {
+                      props.actions.close();
+                      void deleteSession(props.session.id);
+                    }}
+                  >
+                    Move to Recycle Bin
+                  </button>
+                </>
+              }
+            >
+              <form
+                class="session-item-rename-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitRename();
+                }}
+              >
+                <label for={`session-rename-${props.session.id}`}>Session name</label>
+                <input
+                  ref={(element) => {
+                    renameInputRef = element;
+                    const selection = props.actions.renameSelection();
+                    if (!selection) return;
+                    queueMicrotask(() => {
+                      element.focus();
+                      element.setSelectionRange(selection.start, selection.end);
+                    });
+                  }}
+                  id={`session-rename-${props.session.id}`}
+                  value={props.actions.renameValue()}
+                  onInput={(event) => {
+                    props.actions.setRenameValue(event.currentTarget.value);
+                    props.actions.setRenameSelection({
+                      start: event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                      end: event.currentTarget.selectionEnd ?? event.currentTarget.value.length,
+                    });
+                  }}
+                  onSelect={(event) =>
+                    props.actions.setRenameSelection({
+                      start: event.currentTarget.selectionStart ?? 0,
+                      end: event.currentTarget.selectionEnd ?? 0,
+                    })
+                  }
+                  onMouseUp={(event) =>
+                    props.actions.setRenameSelection({
+                      start: event.currentTarget.selectionStart ?? 0,
+                      end: event.currentTarget.selectionEnd ?? 0,
+                    })
+                  }
+                  onKeyUp={(event) =>
+                    props.actions.setRenameSelection({
+                      start: event.currentTarget.selectionStart ?? 0,
+                      end: event.currentTarget.selectionEnd ?? 0,
+                    })
+                  }
+                  disabled={props.actions.renamePending()}
+                />
+                <div class="session-item-rename-actions">
+                  <button type="button" onClick={props.actions.close}>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!props.actions.renameValue().trim() || props.actions.renamePending()}
+                  >
+                    Save
+                  </button>
+                </div>
+              </form>
+            </Show>
+          </div>
+        </Portal>
+      </Show>
     </div>
   );
+}
+
+function formatSessionTokens(tokens: number): string {
+  if (tokens < 1_000) return String(tokens);
+  if (tokens < 10_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  if (tokens < 1_000_000) return `${Math.round(tokens / 1_000)}k`;
+  return `${(tokens / 1_000_000).toFixed(1)}M`;
 }
 
 function formatDurationFromNow(timestamp: number, now: number): string {

@@ -1,16 +1,16 @@
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { getE2EState } from './helpers';
 
-async function moveToRecycleBin(row: Locator) {
-  await row.getByRole('button', { name: 'Session actions' }).click();
-  await row.getByRole('menuitem', { name: 'Move to Recycle Bin' }).click();
+async function moveToRecycleBin(page: Page, row: Locator) {
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Recycle Bin' }).click();
 }
 
 test('archives an overflow completed session', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=archive-overflow');
 
   const firstRow = page.locator('.session-item').filter({ hasText: 'Archive candidate 1' });
-  await moveToRecycleBin(firstRow);
+  await moveToRecycleBin(page, firstRow);
 
   const deleteCount = await getE2EState(page, () => {
     const value = (window as Window & {
@@ -30,7 +30,7 @@ test('restores a recycle-bin session back into the list', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=row-archive');
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
-  await moveToRecycleBin(row);
+  await moveToRecycleBin(page, row);
 
   await expect(page.locator('.session-item-title')).not.toContainText(['Archive row target']);
 
@@ -63,7 +63,7 @@ test('permanently deletes a recycle-bin session', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=row-archive');
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
-  await moveToRecycleBin(row);
+  await moveToRecycleBin(page, row);
 
   await page.getByLabel('Expand Recycle Bin').click();
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Archive row target' });
@@ -95,7 +95,7 @@ test('empties the recycle bin from the grouped sessions view', async ({ page }) 
   await page.goto('/e2e/harness/index.html?scenario=row-archive');
 
   const row = page.locator('.session-item').filter({ hasText: 'Archive row target' });
-  await moveToRecycleBin(row);
+  await moveToRecycleBin(page, row);
 
   await page.getByLabel('Expand Recycle Bin').click();
   await expect(page.locator('.recycle-bin-item')).toHaveCount(1);

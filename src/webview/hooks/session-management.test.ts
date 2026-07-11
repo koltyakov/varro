@@ -313,25 +313,37 @@ describe('session management helpers', () => {
   });
 
   it('trims and applies a manual session title', async () => {
-    const updated = session('session-1', { title: 'Renamed session' });
+    const current = session('session-1', {
+      title: 'Old title',
+      time: { created: 0, updated: 10 },
+    });
+    const updated = session('session-1', {
+      title: 'Renamed session',
+      time: { created: 0, updated: 5 },
+    });
     const updateRemoteSession = vi.fn(async () => updated);
     const upsertSession = vi.fn();
 
     const result = await renameSessionWithDependencies(
-      { updateRemoteSession, upsertSession, setError: vi.fn() },
+      { updateRemoteSession, getSessions: () => [current], upsertSession, setError: vi.fn() },
       'session-1',
       '  Renamed session  '
     );
 
     expect(result).toBe(true);
     expect(updateRemoteSession).toHaveBeenCalledWith('session-1', { title: 'Renamed session' });
-    expect(upsertSession).toHaveBeenCalledWith(updated);
+    expect(upsertSession).toHaveBeenCalledWith({ ...current, title: 'Renamed session' });
   });
 
   it('rejects an empty manual session title without making a request', async () => {
     const updateRemoteSession = vi.fn();
     const result = await renameSessionWithDependencies(
-      { updateRemoteSession, upsertSession: vi.fn(), setError: vi.fn() },
+      {
+        updateRemoteSession,
+        getSessions: () => [],
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+      },
       'session-1',
       '   '
     );
@@ -347,6 +359,7 @@ describe('session management helpers', () => {
         updateRemoteSession: vi.fn(async () => {
           throw new Error('rename failed');
         }),
+        getSessions: () => [],
         upsertSession: vi.fn(),
         setError,
       },

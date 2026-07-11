@@ -381,6 +381,24 @@ describe('session-lifecycle helpers', () => {
     expect(sorted.map((s) => s.id)).toEqual(['newest', 'mid', 'old']);
   });
 
+  it('sortSessions uses creation order within the same activity age', () => {
+    const now = 10 * 60_000;
+    const olderCreated = session('older-created', '/repo', now - 5_000);
+    olderCreated.time.created = now - 50_000;
+    const newerCreated = session('newer-created', '/repo', now - 20_000);
+    newerCreated.time.created = now - 30_000;
+    const previousMinute = session('previous-minute', '/repo', now - 70_000);
+    previousMinute.time.created = now - 80_000;
+
+    const sorted = sortSessions([olderCreated, previousMinute, newerCreated], now);
+
+    expect(sorted.map((item) => item.id)).toEqual([
+      'newer-created',
+      'older-created',
+      'previous-minute',
+    ]);
+  });
+
   it('applySessions does not call clearActiveSessionState when active session is in the list', () => {
     const setup = createDeps({
       activeSessionId: 'session-1',

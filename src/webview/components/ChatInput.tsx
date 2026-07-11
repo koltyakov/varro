@@ -206,8 +206,8 @@ function composerActiveFile() {
   return state.editorContext.activeFile;
 }
 
-function activeContextEnabled() {
-  return getCurrentDocumentEnabled(state.activeSessionId);
+function activeContextEnabled(sessionId?: string | null) {
+  return getCurrentDocumentEnabled(sessionId);
 }
 
 function openContextFileInEditor(file: DroppedFile) {
@@ -286,7 +286,7 @@ export async function sendDroppedContent(droppedFiles: File[]) {
   }
 }
 
-export function ChatInput() {
+export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => void } = {}) {
   let richEditorRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
   let inputFrameRef: HTMLDivElement | undefined;
@@ -317,6 +317,10 @@ export function ChatInput() {
   const [showContextPopup, setShowContextPopup] = createSignal(false);
   const [showProviderLimitPopup, setShowProviderLimitPopup] = createSignal(false);
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
+  const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
+  const composerEditingMessage = () => (props.newSession ? null : editingMessage());
+  const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
+  const composerHasActivePermission = () => !props.newSession && hasActivePermission();
 
   type PopupKind =
     | 'agent'
@@ -601,7 +605,7 @@ export function ChatInput() {
     if (!context) return null;
     const label = context.lineRange ? `${context.filename} ${context.lineRange}` : context.filename;
     return `${label}${
-      activeContextEnabled()
+      activeContextEnabled(composerSessionId())
         ? ' · Click to disable current document context'
         : ' · Current document context is disabled. Click to enable it again'
     }`;
@@ -623,9 +627,10 @@ export function ChatInput() {
   const skillCommands = createMemo(() =>
     state.commands.filter((command) => command.source === 'skill')
   );
-  const isComposerBusy = createMemo(() => isActiveSessionWorking());
-  const [composerBusyDisplayHold, setComposerBusyDisplayHold] =
-    createSignal(isActiveSessionWorking());
+  const isComposerBusy = createMemo(() => !props.newSession && isActiveSessionWorking());
+  const [composerBusyDisplayHold, setComposerBusyDisplayHold] = createSignal(
+    !props.newSession && isActiveSessionWorking()
+  );
   let composerBusyDisplayTimer: ReturnType<typeof setTimeout> | 0 = 0;
   const clearComposerBusyDisplayTimer = () => {
     if (!composerBusyDisplayTimer) return;
@@ -652,11 +657,11 @@ export function ChatInput() {
   const slashCommands = createMemo(() =>
     getSlashCommands({
       isBusy: isComposerBusy(),
-      canUndo: !!state.activeSessionId && state.messages.some((m) => m.info.role === 'assistant'),
+      canUndo: !!composerSessionId() && state.messages.some((m) => m.info.role === 'assistant'),
       canRedo:
-        !!state.activeSessionId &&
-        !!state.sessions.find((session) => session.id === state.activeSessionId)?.revert,
-      canInit: !state.activeSessionId || state.messages.length === 0,
+        !!composerSessionId() &&
+        !!state.sessions.find((session) => session.id === composerSessionId())?.revert,
+      canInit: !composerSessionId() || state.messages.length === 0,
       onConnectProvider: openProviderSetup,
       onOpenSessions: () => setShowSessionPicker(true),
       onOpenModels: () => setShowModelPicker(true),
@@ -665,8 +670,9 @@ export function ChatInput() {
       onOpenSettings: () =>
         postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro' } }),
       onExportSession: () => {
-        if (!state.activeSessionId) return;
-        postMessage({ type: 'session/export', payload: { sessionId: state.activeSessionId } });
+        const sessionId = composerSessionId();
+        if (!sessionId) return;
+        postMessage({ type: 'session/export', payload: { sessionId } });
       },
       customCommands: state.commands,
     })
@@ -857,7 +863,7 @@ export function ChatInput() {
         e.preventDefault();
         const agent = agents[agentFocusIndex()];
         if (agent) {
-          setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
+          setSelectedAgent(agent.name, { sessionId: composerSessionId() });
           setShowAgentPicker(false);
         }
         return;
@@ -916,7 +922,7 @@ export function ChatInput() {
           closePopups();
           return;
         }
-        if (editingMessage()) {
+        if (composerEditingMessage()) {
           e.preventDefault();
           cancelMessageEdit();
           return;
@@ -931,7 +937,7 @@ export function ChatInput() {
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      if ((e.ctrlKey || e.metaKey) && isComposerBusy() && !editingMessage()) {
+      if ((e.ctrlKey || e.metaKey) && isComposerBusy() && !composerEditingMessage()) {
         handleSend('steer');
       } else {
         handleSend();
@@ -1066,12 +1072,14 @@ export function ChatInput() {
       terminalSelection: state.terminalSelection,
     });
 
+    if (props.newSession) props.onBeforeSend?.();
+
     const hasQueuedAttachments =
       queuedAttachments.droppedFiles?.length ||
       queuedAttachments.clipboardImages?.length ||
       queuedAttachments.terminalSelection;
 
-    const editing = editingMessage();
+    const editing = composerEditingMessage();
     if (editing) {
       const hasEditableAttachments =
         state.droppedFiles.length > 0 || hasSendableImages || !!state.terminalSelection;
@@ -1086,12 +1094,12 @@ export function ChatInput() {
       resetPastedImageIndex();
       let sent = false;
       if (editTargetExists) {
-        clearUsageLimitsForSessionTree(state.activeSessionId);
+        clearUsageLimitsForSessionTree(composerSessionId());
         sent = await editMessage(editing.messageId, text, {
           allowEmptyText: hasEditableAttachments,
         });
       } else {
-        clearUsageLimitsForSessionTree(state.activeSessionId);
+        clearUsageLimitsForSessionTree(composerSessionId());
         sent = await sendMessage(text);
       }
       if (sent) {
@@ -1111,15 +1119,15 @@ export function ChatInput() {
       mode !== 'steer' &&
       mode !== 'after-stop' &&
       isComposerBusy() &&
-      !hasActiveQuestion() &&
-      !hasActivePermission() &&
-      state.activeSessionId &&
+      !composerHasActiveQuestion() &&
+      !composerHasActivePermission() &&
+      composerSessionId() &&
       (sendableText.trim() || hasQueuedAttachments)
     ) {
       requestMessageListScrollToBottom();
       enqueueMessage({
         id: createAttachmentID(),
-        sessionId: state.activeSessionId,
+        sessionId: composerSessionId()!,
         text: sendableText,
         droppedFiles: queuedAttachments.droppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
@@ -1144,8 +1152,16 @@ export function ChatInput() {
     const prevError = error();
     setInputText('');
     resetPastedImageIndex();
-    clearUsageLimitsForSessionTree(state.activeSessionId);
-    await sendMessage(text, mode === 'steer' ? { delivery: 'steer' } : { noReply: false });
+    clearUsageLimitsForSessionTree(composerSessionId());
+    await sendMessage(
+      text,
+      mode === 'steer'
+        ? { delivery: 'steer' }
+        : {
+            noReply: false,
+            ...(props.newSession ? { queuedAttachments } : {}),
+          }
+    );
     if (error() && error() !== prevError) {
       setInputText(text);
     }
@@ -1153,10 +1169,10 @@ export function ChatInput() {
 
   let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
   createEffect(() => {
-    const sessionId = state.activeSessionId;
+    const sessionId = composerSessionId();
     const loading = isComposerBusy();
-    const activeQuestion = hasActiveQuestion();
-    const activePermission = hasActivePermission();
+    const activeQuestion = composerHasActiveQuestion();
+    const activePermission = composerHasActivePermission();
     const steeringIds = steeringQueuedMessageIds();
     const failedSteerIds = failedSteerQueuedMessageIds();
     const hasSteeringQueued = state.queuedMessages.some(
@@ -1181,8 +1197,8 @@ export function ChatInput() {
       return;
     queueDispatchTimer = setTimeout(() => {
       queueDispatchTimer = 0;
-      if (isComposerBusy() || hasActiveQuestion() || hasActivePermission()) return;
-      const sid = state.activeSessionId;
+      if (isComposerBusy() || composerHasActiveQuestion() || composerHasActivePermission()) return;
+      const sid = composerSessionId();
       if (!sid) return;
       const currentSteeringIds = steeringQueuedMessageIds();
       const currentFailedSteerIds = failedSteerQueuedMessageIds();
@@ -1595,7 +1611,7 @@ export function ChatInput() {
   });
 
   createEffect(() => {
-    void state.activeSessionId;
+    void composerSessionId();
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
@@ -1632,7 +1648,7 @@ export function ChatInput() {
   let activeEditMessageId: string | null = null;
 
   createEffect(() => {
-    const editing = editingMessage();
+    const editing = composerEditingMessage();
     if (!editing) {
       activeEditMessageId = null;
       return;
@@ -1665,8 +1681,8 @@ export function ChatInput() {
   }
 
   createEffect(() => {
-    const editing = editingMessage();
-    if (editing && state.activeSessionId !== editing.sessionId) {
+    const editing = composerEditingMessage();
+    if (editing && composerSessionId() !== editing.sessionId) {
       cancelMessageEdit();
     }
   });
@@ -1690,27 +1706,27 @@ export function ChatInput() {
   }
 
   const canSend = () =>
-    !hasActiveQuestion() &&
-    !hasActivePermission() &&
+    !composerHasActiveQuestion() &&
+    !composerHasActivePermission() &&
     (getSendableInputText().trim().length > 0 ||
       state.droppedFiles.length > 0 ||
       hasSendableClipboardImages() ||
       !!state.terminalSelection);
   const isBusyWithoutInterruption = createMemo(
-    () => isComposerBusy() && !hasActiveQuestion() && !hasActivePermission()
+    () => isComposerBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
   );
   const isDisplayBusyWithoutInterruption = createMemo(
-    () => isComposerDisplayBusy() && !hasActiveQuestion() && !hasActivePermission()
+    () => isComposerDisplayBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
   );
   const showBusySendControls = createMemo(
-    () => isBusyWithoutInterruption() && canSend() && !editingMessage()
+    () => isBusyWithoutInterruption() && canSend() && !composerEditingMessage()
   );
 
   const clipboardImagesDisabled = () =>
     composerClipboardImages().length > 0 && !currentModelSupportsVision();
 
   const currentSessionMessageEntries = createMemo(() =>
-    getMessageEntriesForSession(state.messages, state.activeSessionId)
+    getMessageEntriesForSession(state.messages, composerSessionId())
   );
 
   const contextUsage = createMemo(() => {
@@ -1728,7 +1744,7 @@ export function ChatInput() {
   );
 
   const activeUsageLimit = createMemo(() => {
-    const activeSessionId = state.activeSessionId;
+    const activeSessionId = composerSessionId();
     for (const sessionId of getSessionTreeIdsForSession(activeSessionId)) {
       void state.sessionUsageLimits[sessionId];
     }
@@ -1789,9 +1805,9 @@ export function ChatInput() {
     getPrimaryProviderLimitWindow(createUsageLimitProviderLimit(visibleUsageLimit()))
   );
   const activeRalphManagerSessionId = createMemo(() =>
-    ralphStore.isRalphSession(state.activeSessionId)
-      ? state.activeSessionId
-      : ralphStore.findManagerSessionIdForChild(state.activeSessionId)
+    ralphStore.isRalphSession(composerSessionId())
+      ? composerSessionId()
+      : ralphStore.findManagerSessionIdForChild(composerSessionId())
   );
   const activeRalphRun = createMemo(() => ralphStore.getRun(activeRalphManagerSessionId()));
 
@@ -1831,8 +1847,8 @@ export function ChatInput() {
     variant: effectiveVariant(),
     hasContextUsage: !!contextUsage(),
     loading: isComposerBusy(),
-    hasQuestion: hasActiveQuestion(),
-    hasPermission: hasActivePermission(),
+    hasQuestion: composerHasActiveQuestion(),
+    hasPermission: composerHasActivePermission(),
     showBusySendControls: showBusySendControls(),
     showAgentPicker: showAgentPicker(),
     showVariantPicker: showVariantPicker(),
@@ -1844,7 +1860,7 @@ export function ChatInput() {
     showProviderLimitPopup: showProviderLimitPopup(),
   }));
 
-  const activePermissionMode = createMemo(() => getPermissionModeForSession(state.activeSessionId));
+  const activePermissionMode = createMemo(() => getPermissionModeForSession(composerSessionId()));
 
   function syncActiveRalphModel(nextModel: RalphSelectedModel) {
     const managerSessionId = activeRalphManagerSessionId();
@@ -1862,12 +1878,12 @@ export function ChatInput() {
       variant: state.selectedModel?.variant,
     };
 
-    setSelectedModel(nextModel, { sessionId: state.activeSessionId });
+    setSelectedModel(nextModel, { sessionId: composerSessionId() });
     syncActiveRalphModel(nextModel);
 
     const usageLimit = activeUsageLimit();
     const visibleLimit = visibleUsageLimit();
-    const activeSessionId = state.activeSessionId;
+    const activeSessionId = composerSessionId();
     const providerModelChanged =
       currentSelection.providerID !== nextModel.providerID ||
       currentSelection.modelID !== nextModel.modelID;
@@ -1931,15 +1947,16 @@ export function ChatInput() {
   }
 
   async function handleUsageLimitContinue() {
-    if (!state.activeSessionId) return;
+    const sessionId = composerSessionId();
+    if (!sessionId) return;
     closePopups();
-    clearUsageLimitsForSessionTree(state.activeSessionId);
+    clearUsageLimitsForSessionTree(sessionId);
     await sendMessage('Continue', { noReply: false });
   }
 
   const queuedForSession = createMemo(() =>
-    state.activeSessionId
-      ? state.queuedMessages.filter((item) => item.sessionId === state.activeSessionId)
+    composerSessionId()
+      ? state.queuedMessages.filter((item) => item.sessionId === composerSessionId())
       : []
   );
 
@@ -2004,13 +2021,13 @@ export function ChatInput() {
 
   return (
     <div
-      class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}${editingMessage() ? ' editing-message' : ''}`}
+      class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}${composerEditingMessage() ? ' editing-message' : ''}`}
     >
       <Show when={isDraggingOver()}>
         <DropOverlay />
       </Show>
 
-      <Show when={queuedForSession().length > 0 && !editingMessage()}>
+      <Show when={queuedForSession().length > 0 && !composerEditingMessage()}>
         <QueuedMessages
           items={queuedForSession()}
           steeringItemIds={steeringQueuedMessageIds()}
@@ -2020,15 +2037,22 @@ export function ChatInput() {
         />
       </Show>
 
-      <Show when={state.todos.length > 0 && !showModelPicker() && !editingMessage()}>
+      <Show
+        when={
+          !props.newSession &&
+          state.todos.length > 0 &&
+          !showModelPicker() &&
+          !composerEditingMessage()
+        }
+      >
         <TodoList />
       </Show>
 
-      <Show when={!showModelPicker() && !editingMessage()}>
+      <Show when={!props.newSession && !showModelPicker() && !composerEditingMessage()}>
         <ChangedFilesList />
       </Show>
 
-      <Show when={editingMessage()}>
+      <Show when={composerEditingMessage()}>
         <div class="composer-edit-banner">
           <svg
             class="composer-edit-banner-icon"
@@ -2058,7 +2082,9 @@ export function ChatInput() {
           meta={describeUsageLimit(activeUsageLimitWindow(), visibleUsageLimit()?.attempt ?? null)}
           primaryActionLabel="Continue"
           onPrimaryAction={() => void handleUsageLimitContinue()}
-          showStopRetrying={isComposerBusy() && !hasActiveQuestion() && !hasActivePermission()}
+          showStopRetrying={
+            isComposerBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
+          }
           onStopRetrying={() => abortSession()}
           onSwitchProvider={() => {
             closePopups();
@@ -2096,8 +2122,8 @@ export function ChatInput() {
 
         <Show when={showMcpPicker()}>
           <McpPicker
-            sessionId={state.activeSessionId}
-            onChange={(names) => void applySessionMcps(names)}
+            sessionId={composerSessionId()}
+            onChange={(names) => void applySessionMcps(names, composerSessionId())}
             onClose={() => setShowMcpPicker(false)}
             popoverRef={(el) => (mcpPopoverRef = el)}
           />
@@ -2129,13 +2155,13 @@ export function ChatInput() {
           <Show when={hasContext() || hasMentions()}>
             <AttachmentStrip
               activeContext={activeContext()}
-              activeContextEnabled={activeContextEnabled()}
+              activeContextEnabled={activeContextEnabled(composerSessionId())}
               activeContextTitle={activeContextTitle()}
               terminalSelection={composerTerminalSelection()}
               files={visibleFiles()}
               clipboardImages={visibleClipboardImages()}
               clipboardImagesDisabled={clipboardImagesDisabled()}
-              onToggleActiveContext={() => toggleCurrentDocumentEnabled(state.activeSessionId)}
+              onToggleActiveContext={() => toggleCurrentDocumentEnabled(composerSessionId())}
               onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
               onRemoveFile={(path) => {
                 removeContextFile(path);
@@ -2152,9 +2178,9 @@ export function ChatInput() {
               richEditorRef = el;
             }}
             placeholder={
-              editingMessage()
+              composerEditingMessage()
                 ? 'Edit your message'
-                : hasActiveQuestion() || hasActivePermission()
+                : composerHasActiveQuestion() || composerHasActivePermission()
                   ? 'Respond to the prompt above to continue...'
                   : isComposerDisplayBusy()
                     ? 'Queue a follow-up or steer'
@@ -2266,7 +2292,7 @@ export function ChatInput() {
               setShowPermissionModePicker(next);
             }}
             onSelectPermissionMode={(mode) => {
-              void updatePermissionModeForSession(mode);
+              void updatePermissionModeForSession(mode, composerSessionId());
               setShowPermissionModePicker(false);
             }}
             agents={state.agents}
@@ -2290,7 +2316,7 @@ export function ChatInput() {
               if (next) setAgentFocusIndex(0);
             }}
             onSelectAgent={(agent) => {
-              setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
+              setSelectedAgent(agent.name, { sessionId: composerSessionId() });
               setShowAgentPicker(false);
             }}
             onAgentFocusIndex={setAgentFocusIndex}
@@ -2407,7 +2433,7 @@ export function ChatInput() {
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
           connectedMcpCount={connectedMcpCount()}
-          showPermissionControl={!editingMessage()}
+          showPermissionControl={!composerEditingMessage()}
           permissionButtonRef={(el) => {
             permissionPickerRef = el;
           }}
@@ -2422,7 +2448,7 @@ export function ChatInput() {
             setShowPermissionModePicker(next);
           }}
           onSelectPermissionMode={(mode) => {
-            void updatePermissionModeForSession(mode);
+            void updatePermissionModeForSession(mode, composerSessionId());
             setShowPermissionModePicker(false);
           }}
           agents={state.agents}
@@ -2446,7 +2472,7 @@ export function ChatInput() {
             if (next) setAgentFocusIndex(0);
           }}
           onSelectAgent={(agent) => {
-            setSelectedAgent(agent.name, { sessionId: state.activeSessionId });
+            setSelectedAgent(agent.name, { sessionId: composerSessionId() });
             setShowAgentPicker(false);
           }}
           onAgentFocusIndex={setAgentFocusIndex}
@@ -2460,7 +2486,7 @@ export function ChatInput() {
             closePopups(next ? 'model' : undefined);
             setShowModelPicker(next);
           }}
-          providerLimitBadges={editingMessage() ? [] : currentProviderLimitBadges()}
+          providerLimitBadges={composerEditingMessage() ? [] : currentProviderLimitBadges()}
           providerLimitTitle={currentProviderLimitTitle()}
           providerLimit={showCurrentProviderLimit() ? currentProviderLimit() : null}
           showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
@@ -2504,7 +2530,7 @@ export function ChatInput() {
             setShowVariantPicker(false);
           }}
           contextUsage={contextUsage()}
-          showContextControl={!!contextUsage() && !editingMessage()}
+          showContextControl={!!contextUsage() && !composerEditingMessage()}
           contextButtonRef={(el) => {
             contextButtonRef = el;
           }}

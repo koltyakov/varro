@@ -32,7 +32,7 @@ test('does not throw while opening a subagent session from the filtered subagent
 
   await page.locator('.session-item').filter({ hasText: 'Update tests' }).getByRole('button').first().click();
 
-  await expect(page.getByTitle('Back to sessions')).toBeVisible();
+  await expect(page.getByTitle('Go to top session')).toBeVisible();
   await expect(page.locator('.interactive-session > .chat-header .chat-header-title-text')).toHaveText(
     'Update tests'
   );

@@ -7,6 +7,7 @@ import {
   openAttentionSessionsKey,
   sessionSearchFocusKey,
   isSessionAwaitingInput,
+  getSessionTreeRootId,
   setShowSettings,
 } from '../lib/state';
 import { createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
@@ -308,7 +309,7 @@ export function Chat() {
     const sessionId = state.activeSessionId;
     const parentSessionId = sessionId ? sessionsById().get(sessionId)?.parentID : null;
     if (parentSessionId) {
-      await openParentSession(parentSessionId);
+      await openParentSession(getSessionTreeRootId(sessionId) || parentSessionId);
       return;
     }
     // If the user is currently viewing a Ralph iteration child session, "back"
@@ -449,6 +450,7 @@ export function Chat() {
       sessionSidebarCompletedCount={sessionSidebarCompletedCount()}
       sessionSidebarRunningCount={sessionSidebarRunningCount()}
       activeTitle={activeTitle()}
+      isSubagentSession={!!activeSession()?.parentID}
       activeSubagentRootId={activeSubagentCount() > 0 ? activeSubagentRootId() : null}
       activeSubagentCount={activeSubagentCount()}
       activeSubagentLabel={activeSubagentLabel()}

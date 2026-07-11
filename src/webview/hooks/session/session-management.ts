@@ -111,6 +111,7 @@ export class SessionManagementOperations {
     return renameSessionWithDependencies(
       {
         updateRemoteSession: this.deps.updateRemoteSession,
+        getSessions: this.deps.getSessions,
         upsertSession: this.deps.upsertSession,
         setError: this.deps.setError,
       },
@@ -288,6 +289,7 @@ export async function forkSessionWithDependencies(
 export async function renameSessionWithDependencies(
   deps: {
     updateRemoteSession(sessionId: string, body: { title: string }): Promise<Session>;
+    getSessions(): Session[];
     upsertSession(session: Session): void;
     setError(message: string): void;
   },
@@ -299,7 +301,8 @@ export async function renameSessionWithDependencies(
 
   try {
     const session = await deps.updateRemoteSession(id, { title: normalizedTitle });
-    deps.upsertSession(session);
+    const current = deps.getSessions().find((item) => item.id === id);
+    deps.upsertSession(current ? { ...current, title: session.title } : session);
     return true;
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to rename session');

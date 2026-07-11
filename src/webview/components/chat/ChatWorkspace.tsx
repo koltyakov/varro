@@ -72,6 +72,7 @@ export function ChatWorkspace(props: {
   sessionSidebarCompletedCount: number;
   sessionSidebarRunningCount: number;
   activeTitle: string;
+  isSubagentSession: boolean;
   activeSubagentRootId: string | null;
   activeSubagentCount: number;
   activeSubagentLabel: string;
@@ -128,6 +129,7 @@ export function ChatWorkspace(props: {
     <ActiveChatHeader
       title={props.activeTitle}
       showBackButton={showBackButton}
+      isSubagentSession={props.isSubagentSession}
       showActions={showActions}
       activeSubagentRootId={props.activeSubagentRootId}
       activeSubagentCount={props.activeSubagentCount}
@@ -239,11 +241,16 @@ export function ChatWorkspace(props: {
       <Show
         when={props.shouldRenderWorkspace}
         fallback={
-          <SessionListView
-            sessionFilter={props.sessionFilter}
-            subagentParentId={props.subagentParentId}
-            onOpenSubagents={props.onOpenSubagentSessions}
-          />
+          <>
+            <SessionListView
+              sessionFilter={props.sessionFilter}
+              subagentParentId={props.subagentParentId}
+              onOpenSubagents={props.onOpenSubagentSessions}
+            />
+            <div class="session-list-new-session">
+              <ChatInput newSession onBeforeSend={props.onCreateSessionFromPicker} />
+            </div>
+          </>
         }
       >
         <Show when={props.showSettings}>

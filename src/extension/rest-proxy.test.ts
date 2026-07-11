@@ -636,25 +636,78 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
-  it('returns only aggregate session diff data to the webview', async () => {
-    const serverRequest = vi.fn(() =>
-      Promise.resolve([
-        {
-          file: 'src/a.ts',
-          additions: 4,
-          deletions: 1,
-          before: 'FULL_BEFORE_TEXT',
-          after: 'FULL_AFTER_TEXT',
-          patch: 'FULL_PATCH_TEXT',
-        },
-        {
-          file: 'src/b.ts',
-          additions: 2,
-          deletions: 3,
-          before: 'OTHER_BEFORE_TEXT',
-          after: 'OTHER_AFTER_TEXT',
-        },
-      ])
+  it('returns only aggregate session edit and token data to the webview', async () => {
+    const serverRequest = vi.fn((_method: string, path: string) =>
+      Promise.resolve(
+        path.endsWith('/diff')
+          ? [
+              {
+                file: 'src/a.ts',
+                additions: 4,
+                deletions: 1,
+                before: 'FULL_BEFORE_TEXT',
+                after: 'FULL_AFTER_TEXT',
+                patch: 'FULL_PATCH_TEXT',
+              },
+              {
+                file: 'src/b.ts',
+                additions: 2,
+                deletions: 3,
+                before: 'OTHER_BEFORE_TEXT',
+                after: 'OTHER_AFTER_TEXT',
+              },
+            ]
+          : [
+              { info: { role: 'user', time: { created: 1_000 } }, parts: [] },
+              {
+                info: {
+                  role: 'assistant',
+                  time: { created: 2_000, completed: 5_000 },
+                  tokens: {
+                    total: 1_000,
+                    input: 900,
+                    output: 200,
+                    reasoning: 100,
+                    cache: { read: 50, write: 25 },
+                  },
+                },
+                parts: [{ type: 'text', text: 'FULL_ASSISTANT_TEXT' }],
+              },
+              {
+                info: { role: 'user', time: { created: 6_000 } },
+                parts: [],
+              },
+              {
+                info: {
+                  role: 'assistant',
+                  time: { created: 7_000, completed: 12_000 },
+                  tokens: {
+                    input: 2_000,
+                    output: 300,
+                    reasoning: 50,
+                    cache: { read: 100, write: 25 },
+                  },
+                },
+                parts: [],
+              },
+              {
+                info: {
+                  role: 'assistant',
+                  mode: 'subagent',
+                  time: { created: 7_500, completed: 20_000 },
+                },
+                parts: [],
+              },
+              {
+                info: { role: 'user', time: { created: 13_000 }, tokens: { total: 99_999 } },
+                parts: [],
+              },
+              {
+                info: { role: 'assistant', time: { created: 14_000 }, tokens: {} },
+                parts: [],
+              },
+            ]
+      )
     );
     const { proxy, callbacks } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
@@ -662,14 +715,87 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(82, 'GET', '/varro/session/session-1/diff-summary'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session/session-1/diff');
+    expect(serverRequest.mock.calls).toEqual([
+      ['GET', '/session/session-1/diff'],
+      ['GET', '/session/session-1/message'],
+    ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 82,
-      data: { files: 2, additions: 6, deletions: 4 },
+      data: {
+        files: 2,
+        additions: 6,
+        deletions: 4,
+        tokens: 3_475,
+        durationMs: 10_000,
+        activeStartedAt: 13_000,
+      },
     });
     const response = (callbacks.postApiResponse as ReturnType<typeof vi.fn>).mock.calls[0]?.[1];
     expect(JSON.stringify(response)).not.toContain('FULL_');
     expect(JSON.stringify(response)).not.toContain('OTHER_');
+  });
+
+  it('falls back to message tool metadata when the session diff is empty', async () => {
+    const serverRequest = vi.fn((_method: string, path: string) =>
+      Promise.resolve(
+        path.endsWith('/diff')
+          ? []
+          : [
+              {
+                info: {
+                  role: 'assistant',
+                  time: { created: 1_000, completed: 4_000 },
+                  tokens: { total: 500 },
+                },
+                parts: [
+                  {
+                    type: 'tool',
+                    tool: 'apply_patch',
+                    state: {
+                      status: 'completed',
+                      metadata: {
+                        files: [
+                          {
+                            filePath: '/repo/src/a.ts',
+                            relativePath: 'src/a.ts',
+                            type: 'update',
+                            additions: 4,
+                            deletions: 1,
+                          },
+                          {
+                            filePath: '/repo/src/b.ts',
+                            relativePath: 'src/b.ts',
+                            type: 'add',
+                            additions: 2,
+                            deletions: 0,
+                          },
+                        ],
+                      },
+                    },
+                  },
+                  { type: 'patch', files: ['/repo/src/a.ts', '/repo/src/b.ts'] },
+                ],
+              },
+            ]
+      )
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(83, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 83,
+      data: {
+        files: 2,
+        additions: 6,
+        deletions: 1,
+        tokens: 500,
+        durationMs: 3_000,
+        activeStartedAt: null,
+      },
+    });
   });
 
   it('simulates no providers when flag is set', async () => {
