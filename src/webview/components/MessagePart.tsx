@@ -11,6 +11,7 @@ import { ToolCall } from './ToolCall';
 import { formatDisplayPath } from '../lib/path-display';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { parseUsageLimitNotice } from '../lib/usage-limit';
+import { hasVisibleReasoningContent } from '../lib/part-utils';
 
 export function MessagePart(props: {
   part: Part;
@@ -116,16 +117,22 @@ function ReasoningBlock(props: {
   const [expanded, setExpanded] = createSignal(expandThinkingByDefault());
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
-  const bodyText = createMemo(() => (expanded() ? splitReasoningText(reasoningText()).body : ''));
+  const reasoningBody = createMemo(() => splitReasoningText(reasoningText()).body);
+  const bodyText = createMemo(() => (expanded() ? reasoningBody() : ''));
   const isStreaming = () => props.part.time.end === undefined;
-  const hasBody = () => bodyText().trim().length > 0;
+  const hasBody = () => hasVisibleReasoningContent(reasoningBody());
   const detailLabel = () => getReasoningDetailLabel(props.messageInfo);
   const headerLabel = () => formatReasoningHeader(subjectLabel(), detailLabel());
   const durationLabel = () => formatReasoningDuration(props.part.time);
 
   return (
     <div class="chat-thinking-box">
-      <button class="thinking-header" onClick={() => setExpanded(!expanded())}>
+      <button
+        class="thinking-header"
+        disabled={!hasBody()}
+        aria-expanded={hasBody() ? expanded() : undefined}
+        onClick={() => hasBody() && setExpanded(!expanded())}
+      >
         <span class="thinking-label">
           <BrainTopicIcon class={isStreaming() ? 'thinking-in-progress' : undefined} />
           <span class={`thinking-label-text${isStreaming() ? ' shimmer-progress' : ''}`}>
@@ -135,19 +142,21 @@ function ReasoningBlock(props: {
         <Show when={durationLabel()}>
           <span class="thinking-duration">{durationLabel()}</span>
         </Show>
-        <svg
-          class={`thinking-chevron ${expanded() ? 'expanded' : ''}`}
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          width="12"
-          height="12"
-        >
-          <path d="M6 4l4 4-4 4" />
-        </svg>
+        <Show when={hasBody()}>
+          <svg
+            class={`thinking-chevron ${expanded() ? 'expanded' : ''}`}
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="12"
+            height="12"
+          >
+            <path d="M6 4l4 4-4 4" />
+          </svg>
+        </Show>
       </button>
       <Show when={expanded() && hasBody()}>
         <div class="thinking-content">

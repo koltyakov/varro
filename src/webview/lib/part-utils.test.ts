@@ -79,6 +79,11 @@ describe('part utils', () => {
       time: { start: 0 },
     };
     const emptyReasoningPart: Part = { ...reasoningPart, id: 'reason-2', text: '' };
+    const commentReasoningPart: Part = {
+      ...reasoningPart,
+      id: 'reason-3',
+      text: '<!-- -->',
+    };
     const retryPart: Part = {
       id: 'retry-1',
       sessionID: 'session-1',
@@ -94,6 +99,7 @@ describe('part utils', () => {
     expect(shouldShowAssistantPartInline(emptyTextPart)).toBe(false);
     expect(shouldShowAssistantPartInline(reasoningPart)).toBe(true);
     expect(shouldShowAssistantPartInline(emptyReasoningPart)).toBe(false);
+    expect(shouldShowAssistantPartInline(commentReasoningPart)).toBe(false);
     expect(shouldShowAssistantPartInline(toolPart('todowrite', completedState({})))).toBe(false);
     expect(shouldShowAssistantPartInline(retryPart)).toBe(true);
 

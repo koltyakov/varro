@@ -154,6 +154,19 @@ describe('MessagePart', () => {
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
   });
 
+  it('keeps a reasoning summary but hides an empty HTML-comment body', () => {
+    setExpandThinkingByDefaultPreference(true);
+
+    renderPart(reasoningPart('**Designing shared finder cache with TTL**\n\n<!-- -->'));
+
+    expect(container?.querySelector('.thinking-label-text')?.textContent).toBe(
+      'Designing shared finder cache with TTL'
+    );
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+    expect(container?.querySelector('.thinking-chevron')).toBeNull();
+    expect(container?.textContent).not.toContain('<!-- -->');
+  });
+
   it('renders streamed text for text parts', () => {
     renderPart(
       {

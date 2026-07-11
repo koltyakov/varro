@@ -144,6 +144,10 @@
   opacity: 1;
 }
 
+.chat-thinking-box .thinking-header:disabled {
+  cursor: default;
+}
+
 .chat-thinking-box .thinking-label {
   display: inline-flex;
   align-items: center;

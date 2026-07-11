@@ -6,8 +6,12 @@ export function isWorkspaceDirectoryText(text: string) {
   return text.startsWith('[Working directory:');
 }
 
+export function hasVisibleReasoningContent(text: string) {
+  return text.replace(/<!--[\s\S]*?-->/g, '').trim().length > 0;
+}
+
 export function shouldShowAssistantPartInHighlightedCard(part: Part) {
-  if (part.type === 'reasoning') return part.text.trim().length > 0;
+  if (part.type === 'reasoning') return hasVisibleReasoningContent(part.text);
   if (part.type === 'text') {
     return part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text);
   }
@@ -54,7 +58,7 @@ export function shouldShowAssistantPartInline(part: Part, respectThinkingToggle 
     case 'text':
       return part.text.trim().length > 0;
     case 'reasoning':
-      return respectThinkingToggle ? showThinking() && part.text.trim().length > 0 : true;
+      return respectThinkingToggle ? showThinking() && hasVisibleReasoningContent(part.text) : true;
     case 'agent':
     case 'retry':
     case 'compaction':
