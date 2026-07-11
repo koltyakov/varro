@@ -1,12 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { getE2EState } from './helpers';
+
+async function moveToRecycleBin(row: Locator) {
+  await row.getByRole('button', { name: 'Session actions' }).click();
+  await row.getByRole('menuitem', { name: 'Move to Recycle Bin' }).click();
+}
 
 test('recycle bin entry shows sub-agent count after archiving parent', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
-  await parentRow.hover();
-  await parentRow.getByTitle('Move to Recycle Bin').click();
+  await moveToRecycleBin(parentRow);
 
   await page.getByLabel('Expand Recycle Bin').click();
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Parent orchestration' });
@@ -18,8 +22,7 @@ test('restoring a parent session from recycle bin also restores children', async
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
-  await parentRow.hover();
-  await parentRow.getByTitle('Move to Recycle Bin').click();
+  await moveToRecycleBin(parentRow);
 
   await page.getByLabel('Expand Recycle Bin').click();
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Parent orchestration' });
@@ -43,8 +46,7 @@ test('permanently deleting a parent from recycle bin removes the entire tree', a
   await page.goto('/e2e/harness/index.html?scenario=subagent-sessions');
 
   const parentRow = page.locator('.session-item').filter({ hasText: 'Parent orchestration' });
-  await parentRow.hover();
-  await parentRow.getByTitle('Move to Recycle Bin').click();
+  await moveToRecycleBin(parentRow);
 
   await page.getByLabel('Expand Recycle Bin').click();
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Parent orchestration' });

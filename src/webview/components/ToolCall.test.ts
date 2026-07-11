@@ -197,6 +197,72 @@ describe('ToolCall', () => {
     expect(container?.textContent).toContain('git status');
   });
 
+  it('does not offer expansion when a generic tool has no details', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'apply_patch',
+      state: {
+        status: 'running',
+        input: {},
+        title: 'apply_patch',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
+    expect(header?.disabled).toBe(true);
+    expect(header?.hasAttribute('aria-expanded')).toBe(false);
+    expect(container?.querySelector('.tool-invocation-chevron')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
+  });
+
+  it('shows files from running apply_patch input in the compact edit card', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'apply_patch',
+      state: {
+        status: 'running',
+        input: {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-old
++new
+*** Update File: src/theme.css
+@@
+-old
++new
+*** End Patch`,
+        },
+        title: 'apply_patch',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
+    expect(
+      Array.from(container?.querySelectorAll('.file-edit-path-link') || []).map(
+        (link) => link.textContent
+      )
+    ).toEqual(['src/app.ts', 'src/theme.css']);
+    expect(container?.querySelector('.file-edit-running-label')?.textContent).toBe('editing…');
+    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+  });
+
   it('shows an aligned empty output row for completed bash commands', () => {
     const part: ToolPart = {
       id: 'tool-1',

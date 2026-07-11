@@ -234,6 +234,14 @@ function computeToolFileChanges(toolName: string, toolState: ToolState): FileCha
   const metadataChanges = fileChangesFromMetadataFiles(metadata);
   if (metadataChanges.length > 0) return metadataChanges;
 
+  const normalizedToolName = toolName.trim().toLowerCase().split('.').pop();
+  if (normalizedToolName === 'apply_patch') {
+    const inputChanges = fileChangesFromPatchInput(
+      (toolState.input || {}) as Record<string, unknown>
+    );
+    if (inputChanges.length > 0) return inputChanges;
+  }
+
   const single = computeToolFileChange(toolName, toolState);
   return single ? [single] : [];
 }
@@ -263,6 +271,34 @@ function fileChangesFromMetadataFiles(metadata: Record<string, unknown>): FileCh
     const path = primaryPath || toPath || fromPath;
     if (!path || !kind) return [];
     return [withDedupeKey({ kind, path, additions, deletions })];
+  });
+}
+
+function fileChangesFromPatchInput(input: Record<string, unknown>): FileChange[] {
+  const patchText = firstString(input, ['patchText', 'patch_text', 'patch']);
+  if (!patchText) return [];
+
+  const headerPattern = /^\*\*\* (Add|Update|Delete) File:\s*(.+?)\s*$/gm;
+  const headers = [...patchText.matchAll(headerPattern)];
+  return headers.flatMap((match, index) => {
+    const operation = match[1]?.toLowerCase();
+    const path = stripPathWrapping(match[2] || '');
+    if (!operation || !path) return [];
+
+    if (operation === 'update') {
+      const sectionEnd = headers[index + 1]?.index ?? patchText.length;
+      const section = patchText.slice((match.index ?? 0) + match[0].length, sectionEnd);
+      const movePath = section.match(/^\*\*\* Move to:\s*(.+?)\s*$/m)?.[1];
+      if (movePath) {
+        const toPath = stripPathWrapping(movePath);
+        if (toPath) {
+          return [withDedupeKey({ kind: 'moved', path: toPath, fromPath: path, toPath })];
+        }
+      }
+    }
+
+    const kind = operation === 'add' ? 'added' : operation === 'delete' ? 'removed' : 'edited';
+    return [withDedupeKey({ kind, path })];
   });
 }
 

@@ -187,6 +187,44 @@ describe('tool file change helpers', () => {
     );
   });
 
+  it('extracts apply_patch file changes from running patch input', () => {
+    const state: ToolState = {
+      status: 'running',
+      input: {
+        patchText: `*** Begin Patch
+*** Add File: src/new.ts
++export const value = true;
+*** Update File: src/app.ts
+@@
+-old
++new
+*** Update File: src/old.ts
+*** Move to: src/renamed.ts
+@@
+-old
++new
+*** Delete File: src/gone.ts
+*** End Patch`,
+      },
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 0 },
+    };
+
+    expect(getToolFileChanges('functions.apply_patch', state)).toEqual([
+      { kind: 'added', path: 'src/new.ts', dedupeKey: 'added:src/new.ts' },
+      { kind: 'edited', path: 'src/app.ts', dedupeKey: 'edited:src/app.ts' },
+      {
+        kind: 'moved',
+        path: 'src/renamed.ts',
+        fromPath: 'src/old.ts',
+        toPath: 'src/renamed.ts',
+        dedupeKey: 'moved:src/old.ts->src/renamed.ts',
+      },
+      { kind: 'removed', path: 'src/gone.ts', dedupeKey: 'removed:src/gone.ts' },
+    ]);
+  });
+
   it('returns null when there is no recognizable file change', () => {
     expect(getToolFileChange('bash', completedState({ command: 'pwd' }))).toBeNull();
     expect(getToolFileChange('tool', completedState({}, { title: 'Updated value' }))).toBeNull();

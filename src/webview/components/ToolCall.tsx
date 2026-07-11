@@ -790,6 +790,13 @@ function GenericToolCall(props: {
     return Math.max(0, state.time.end - state.time.start);
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
+  const hasExpandableContent = () => {
+    if (props.lightweight) return false;
+    if (props.state.status === 'error') return true;
+    if (props.inputEntries.length > 0) return true;
+    return props.state.status === 'completed' && props.truncatedOutput.length > 0;
+  };
+  const isExpanded = () => hasExpandableContent() && props.expanded;
 
   const bodyId = createUniqueId();
   return (
@@ -798,8 +805,9 @@ function GenericToolCall(props: {
         type="button"
         class="tool-invocation-header"
         onClick={props.toggleExpand}
-        aria-expanded={props.expanded}
-        aria-controls={bodyId}
+        disabled={!hasExpandableContent()}
+        aria-expanded={hasExpandableContent() ? isExpanded() : undefined}
+        aria-controls={hasExpandableContent() ? bodyId : undefined}
       >
         <span class={`tool-status-dot ${props.statusClass}`} />
         <span class="tool-invocation-title">{props.title}</span>
@@ -821,19 +829,21 @@ function GenericToolCall(props: {
             {isAborted() ? 'aborted' : 'failed'}
           </span>
         </Show>
-        <svg
-          class={`tool-invocation-chevron ${props.expanded ? 'expanded' : ''}`}
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M6 4l4 4-4 4" />
-        </svg>
+        <Show when={hasExpandableContent()}>
+          <svg
+            class={`tool-invocation-chevron ${isExpanded() ? 'expanded' : ''}`}
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M6 4l4 4-4 4" />
+          </svg>
+        </Show>
       </button>
-      <Show when={!props.expanded && shouldShowToolPreview(props.title, props.preview)}>
+      <Show when={!isExpanded() && shouldShowToolPreview(props.title, props.preview)}>
         <div class="tool-invocation-preview">
           {(() => {
             const p = props.preview!;
@@ -855,7 +865,7 @@ function GenericToolCall(props: {
         </div>
       </Show>
 
-      <Show when={props.expanded}>
+      <Show when={isExpanded()}>
         <div id={bodyId} class="tool-invocation-detail animate-fade-in">
           <Show
             when={isBash() && bashCommand()}

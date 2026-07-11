@@ -288,6 +288,15 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   background: var(--color-vscode-hover);
 }
 
+.session-item.is-pinned:not(.active) {
+  background: color-mix(in srgb, var(--color-vscode-accent) 7%, transparent);
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--color-vscode-accent) 65%, transparent);
+}
+
+.session-item.is-pinned:not(.active):hover {
+  background: color-mix(in srgb, var(--color-vscode-accent) 11%, var(--color-vscode-hover));
+}
+
 .session-item.active {
   --session-item-active-bg: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
   background: var(--session-item-active-bg);
@@ -329,15 +338,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   background: none;
   color: var(--color-vscode-muted);
   cursor: pointer;
-  opacity: 0;
-  visibility: hidden;
+  opacity: 0.72;
 }
 
-.session-item:hover .session-item-actions-trigger,
 .session-item-actions-trigger[aria-expanded='true'],
 .session-item-actions-trigger:focus-visible {
-  opacity: 0.85;
-  visibility: visible;
+  opacity: 1;
 }
 
 .session-item-actions-trigger:hover {
@@ -483,12 +489,33 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .session-item-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
   font-size: 12px;
   font-weight: 500;
   color: var(--color-vscode-fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-item-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item-pinned-marker {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-vscode-accent);
+}
+
+.session-item-pinned-marker svg {
+  width: 12px;
+  height: 12px;
 }
 
 .session-item-meta {
@@ -532,42 +559,6 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
     opacity 0.1s,
     color 0.1s,
     background-color 0.1s;
-}
-
-.session-item-pin {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: var(--color-vscode-muted);
-  cursor: pointer;
-  opacity: 0;
-  visibility: hidden;
-}
-
-.session-item:hover .session-item-pin,
-.session-item-pin.is-pinned {
-  opacity: 0.8;
-  visibility: visible;
-}
-
-.session-item-pin:hover {
-  color: var(--color-vscode-fg);
-  background: var(--color-vscode-toolbar-hover);
-  opacity: 1;
-}
-
-.session-item-pin.is-pinned {
-  color: var(--color-vscode-accent);
-}
-
-.session-item-pin svg {
-  width: 14px;
-  height: 14px;
 }
 
 .session-item-plan-tag {

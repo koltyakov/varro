@@ -23,7 +23,7 @@ vi.mock('../../hooks/useOpenCode', () => ({
 let container: HTMLDivElement;
 let cleanup: (() => void) | undefined;
 
-function session(id: string, updated: number): Session {
+function session(id: string, updated: number, overrides: Partial<Session> = {}): Session {
   return {
     id,
     projectID: 'project-1',
@@ -32,6 +32,7 @@ function session(id: string, updated: number): Session {
     version: '1',
     time: { created: updated - 1_000, updated },
     summary: { files: 0, additions: 0, deletions: 0 },
+    ...overrides,
   };
 }
 
@@ -152,7 +153,7 @@ describe('SessionListView diff summaries', () => {
 });
 
 describe('SessionListView pins', () => {
-  it('pins and unpins a session from its row control', async () => {
+  it('pins and unpins a session from its row menu and highlights it', async () => {
     const setPinned = vi
       .spyOn(client.varro.session, 'setPinned')
       .mockResolvedValueOnce(['session-1'])
@@ -165,18 +166,29 @@ describe('SessionListView pins', () => {
     setState('sessions', [session('session-1', Date.now())]);
     cleanup = render(() => <SessionListView />, container);
 
-    const pinButton = container.querySelector<HTMLButtonElement>('[aria-label="Pin session"]')!;
-    pinButton.click();
+    const row = () => container.querySelector<HTMLElement>('.session-item')!;
+    expect(row().querySelector('.session-item-pin')).toBeNull();
+    expect(row().querySelector('.session-item-archive')).toBeNull();
+
+    row().querySelector<HTMLButtonElement>('[aria-label="Session actions"]')!.click();
+    Array.from(row().querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Pin')!
+      .click();
 
     await vi.waitFor(() => expect(setPinned).toHaveBeenCalledWith('session-1', true));
     await vi.waitFor(() => {
-      expect(container.querySelector('[aria-label="Unpin session"]')).not.toBeNull();
+      expect(row().classList.contains('is-pinned')).toBe(true);
+      expect(row().querySelector('[aria-label="Pinned session"]')).not.toBeNull();
     });
-    container.querySelector<HTMLButtonElement>('[aria-label="Unpin session"]')!.click();
+    row().querySelector<HTMLButtonElement>('[aria-label="Session actions"]')!.click();
+    Array.from(row().querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Unpin')!
+      .click();
 
     await vi.waitFor(() => expect(setPinned).toHaveBeenLastCalledWith('session-1', false));
     await vi.waitFor(() => {
-      expect(container.querySelector('[aria-label="Pin session"]')).not.toBeNull();
+      expect(row().classList.contains('is-pinned')).toBe(false);
+      expect(row().querySelector('[aria-label="Pinned session"]')).toBeNull();
     });
   });
 });
@@ -203,5 +215,26 @@ describe('SessionListView actions', () => {
       expect(renameSessionMock).toHaveBeenCalledWith('session-1', 'Better title');
     });
     await vi.waitFor(() => expect(container.querySelector('[role="menu"]')).toBeNull());
+  });
+
+  it('places the row menu after sub-agents and immediately before the time', () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+    });
+    const updated = Date.now();
+    setState('sessions', [
+      session('parent', updated),
+      session('child', updated - 1, { parentID: 'parent' }),
+    ]);
+    cleanup = render(() => <SessionListView onOpenSubagents={vi.fn()} />, container);
+
+    const trailing = container.querySelector<HTMLElement>('.session-item-trailing')!;
+    const subagents = trailing.querySelector('.session-item-subagents');
+    const actions = trailing.querySelector('.session-item-actions');
+    const age = trailing.querySelector('.session-item-age');
+    expect(subagents?.nextElementSibling).toBe(actions);
+    expect(actions?.nextElementSibling).toBe(age);
   });
 });

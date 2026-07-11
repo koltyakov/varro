@@ -483,6 +483,10 @@ kbd {
   opacity: 1;
 }
 
+.chat-tool-invocation-part .tool-invocation-header:disabled {
+  cursor: default;
+}
+
 .chat-tool-invocation-part .tool-status-dot {
   width: 6px;
   height: 6px;

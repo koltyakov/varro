@@ -1315,7 +1315,7 @@ function SessionListItem(props: {
 
   return (
     <div
-      class={`session-item ${isActive() ? 'active' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
+      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
       onMouseEnter={() => props.setFocusedIndex(props.itemIndex())}
     >
       <button
@@ -1342,7 +1342,20 @@ function SessionListItem(props: {
         </Show>
         <div class="session-item-content">
           <span class="session-item-title">
-            {normalizeSessionTitle(props.session.title) || 'Untitled'}
+            <span class="session-item-title-text">
+              {normalizeSessionTitle(props.session.title) || 'Untitled'}
+            </span>
+            <Show when={props.isPinned}>
+              <span
+                class="session-item-pinned-marker"
+                title="Pinned session"
+                aria-label="Pinned session"
+              >
+                <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+                  <path d="M27.79 26.386l-6.458-8.303L25.414 14h-4L14 6.586v-4L2.586 14h4L14 21.414v4l4.083-4.083 8.303 6.458 1.404-1.403zM7.414 12L12 7.414 20.586 16 16 20.586 7.414 12zm12.094 7.906.398-.398 1.393 1.791-1.791-1.393z" />
+                </svg>
+              </span>
+            </Show>
           </span>
           <span class="session-item-meta">
             <Show
@@ -1373,19 +1386,6 @@ function SessionListItem(props: {
         </div>
       </button>
       <div class="session-item-trailing">
-        <Show when={!props.session.parentID}>
-          <button
-            type="button"
-            class={`session-item-pin ${props.isPinned ? 'is-pinned' : ''}`}
-            onClick={() => void props.onTogglePinned()}
-            title={props.isPinned ? 'Unpin session' : 'Pin session'}
-            aria-label={props.isPinned ? 'Unpin session' : 'Pin session'}
-          >
-            <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
-              <path d="M27.79 26.386l-6.458-8.303L25.414 14h-4L14 6.586v-4L2.586 14h4L14 21.414v4l4.083-4.083 8.303 6.458 1.404-1.403zM7.414 12L12 7.414 20.586 16 16 20.586 7.414 12zm12.094 7.906.398-.398 1.393 1.791-1.791-1.393z" />
-            </svg>
-          </button>
-        </Show>
         <Show when={ralphStore.isRalphSession(props.session.id)}>
           <span class="session-item-ralph-tag" title="Ralph loop" aria-label="Ralph loop">
             Ralph
@@ -1410,19 +1410,6 @@ function SessionListItem(props: {
             <span class="session-item-subagents-count">{props.subagentCount}</span>
           </button>
         </Show>
-        <button
-          type="button"
-          class="session-item-archive"
-          onClick={() => {
-            deleteSession(props.session.id);
-          }}
-          title="Move to Recycle Bin"
-          aria-label="Move to Recycle Bin"
-        >
-          <svg viewBox="0 0 16 16" fill="currentColor">
-            <path d="M14.5 1h-13a.5.5 0 00-.5.5V4h14V1.5a.5.5 0 00.5-.5zM1 5v9.5a.5.5 0 00.5.5h13a.5.5 0 00.5-.5V5H1zm5 3h4v1H6V8z" />
-          </svg>
-        </button>
         <div
           class="session-item-actions"
           onFocusOut={(event) => {

@@ -12,20 +12,25 @@ export function TodoList() {
   const [collapsed, setCollapsed] = createSignal(allDone());
   let previousTodoIds = new Set(todos().map((todo) => todo.id));
   let previousUserMessageCount = userMessageCount();
+  let previousAllDone = allDone();
 
   createEffect(() => {
     const nextTodoIds = new Set(todos().map((todo) => todo.id));
     const hasNewTodo = todos().some((todo) => !previousTodoIds.has(todo.id));
     const nextUserMessageCount = userMessageCount();
+    const nextAllDone = allDone();
 
-    if (hasNewTodo) {
+    if (nextAllDone && !previousAllDone) {
+      setCollapsed(true);
+    } else if (hasNewTodo) {
       setCollapsed(false);
-    } else if (nextUserMessageCount > previousUserMessageCount && allDone()) {
+    } else if (nextUserMessageCount > previousUserMessageCount && nextAllDone) {
       setCollapsed(true);
     }
 
     previousTodoIds = nextTodoIds;
     previousUserMessageCount = nextUserMessageCount;
+    previousAllDone = nextAllDone;
   });
 
   return (

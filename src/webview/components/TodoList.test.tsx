@@ -111,6 +111,31 @@ describe('TodoList', () => {
     expect(container?.textContent).toContain('2/3');
   });
 
+  it('collapses automatically when all todos become completed', async () => {
+    setState('todos', [
+      { id: 'todo-1', content: 'First task', status: 'in_progress', priority: 'high' },
+      { id: 'todo-2', content: 'Second task', status: 'pending', priority: 'medium' },
+    ]);
+
+    cleanup = render(() => TodoList(), container!);
+
+    const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+
+    setState('todos', 0, 'status', 'completed');
+    await Promise.resolve();
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+
+    setState('todos', 1, 'status', 'completed');
+    await Promise.resolve();
+
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('ul.todo-block-list')).toBeNull();
+
+    toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('collapses completed todos for a new prompt and expands when a new todo arrives', async () => {
     setState('todos', [
       { id: 'todo-1', content: 'Done task', status: 'completed', priority: 'medium' },

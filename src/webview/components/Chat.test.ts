@@ -1706,16 +1706,16 @@ describe('header status badges', () => {
     const trailing = planRow?.querySelector('.session-item-trailing') as HTMLDivElement | null;
     const planTag = trailing?.querySelector('.session-item-plan-tag');
     const subagentsButton = trailing?.querySelector('.session-item-subagents');
-    const archiveButton = trailing?.querySelector('.session-item-archive');
+    const actionsButton = trailing?.querySelector('.session-item-actions');
     const trailingChildren = Array.from(trailing?.children ?? []);
     const planTagIndex = trailingChildren.indexOf(planTag as Element);
     const subagentsIndex = trailingChildren.indexOf(subagentsButton as Element);
-    const archiveIndex = trailingChildren.indexOf(archiveButton as Element);
+    const actionsIndex = trailingChildren.indexOf(actionsButton as Element);
 
     expect(planTag?.textContent?.trim()).toBe('Plan');
     expect(planTagIndex).toBeGreaterThanOrEqual(0);
     if (subagentsIndex >= 0) expect(planTagIndex).toBeLessThan(subagentsIndex);
-    expect(planTagIndex).toBeLessThan(archiveIndex);
+    expect(planTagIndex).toBeLessThan(actionsIndex);
   });
 
   it('does not show a plan tag for completed plan sessions', () => {
