@@ -1,4 +1,4 @@
-import { For, onCleanup, onMount, Show } from 'solid-js';
+import { For, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { formatNumber } from '../../lib/message-metrics';
 import {
   alignPopupToBoundary,
@@ -10,35 +10,41 @@ import {
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
 
+type ContextTokens = {
+  total: number;
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+function getTokenRows(tokens: ContextTokens) {
+  const items: Array<{ label: string; value: number }> = [
+    { label: 'Input', value: tokens.input },
+    { label: 'Output', value: tokens.output },
+  ];
+  if (tokens.reasoning > 0) items.push({ label: 'Reasoning', value: tokens.reasoning });
+  if (tokens.cacheRead > 0) items.push({ label: 'Cache read', value: tokens.cacheRead });
+  if (tokens.cacheWrite > 0) items.push({ label: 'Cache write', value: tokens.cacheWrite });
+  return items;
+}
+
 export function ContextPopup(props: {
   ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
   boundaryRef?: HTMLElement;
   alignTo?: 'left' | 'right';
   usage: { used: number; limit: number; percent: number };
-  tokens: {
-    total: number;
-    input: number;
-    output: number;
-    reasoning: number;
-    cacheRead: number;
-    cacheWrite: number;
-  };
+  tokens: ContextTokens;
+  subagentTokens: ContextTokens;
+  subagentCount: number;
   model: { providerName: string; modelName: string };
   compactDisabled: boolean;
   onClose: () => void;
   onCompact: () => void;
 }) {
-  const rows = () => {
-    const t = props.tokens;
-    const items: Array<{ label: string; value: number; color?: string }> = [
-      { label: 'Input', value: t.input },
-      { label: 'Output', value: t.output },
-    ];
-    if (t.reasoning > 0) items.push({ label: 'Reasoning', value: t.reasoning });
-    if (t.cacheRead > 0) items.push({ label: 'Cache read', value: t.cacheRead });
-    if (t.cacheWrite > 0) items.push({ label: 'Cache write', value: t.cacheWrite });
-    return items;
-  };
+  const [subagentsExpanded, setSubagentsExpanded] = createSignal(false);
+  const overallTotal = () => props.tokens.total + props.subagentTokens.total;
   let popupEl: HTMLDivElement | undefined;
 
   const setRef = (el: HTMLDivElement) => {
@@ -84,7 +90,7 @@ export function ContextPopup(props: {
       <Show when={props.tokens.total > 0}>
         <div class="context-popup-section">Session Tokens</div>
         <div class="context-popup-rows">
-          <For each={rows()}>
+          <For each={getTokenRows(props.tokens)}>
             {(row) => (
               <div class="context-popup-row">
                 <span class="context-popup-row-label">{row.label}</span>
@@ -96,6 +102,58 @@ export function ContextPopup(props: {
             <span class="context-popup-row-label">Total</span>
             <span class="context-popup-row-value">{formatNumber(props.tokens.total)}</span>
           </div>
+        </div>
+      </Show>
+
+      <Show when={props.subagentTokens.total > 0}>
+        <button
+          type="button"
+          class="context-popup-section context-popup-section-toggle"
+          aria-expanded={subagentsExpanded()}
+          onClick={() => setSubagentsExpanded((expanded) => !expanded)}
+        >
+          <span>Subagents{props.subagentCount > 0 ? ` (${props.subagentCount})` : ''}</span>
+          <Show when={!subagentsExpanded()}>
+            <span class="context-popup-section-summary">
+              {formatNumber(props.subagentTokens.total)}
+            </span>
+          </Show>
+          <svg
+            class={`context-popup-section-chevron${subagentsExpanded() ? ' expanded' : ''}`}
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="10"
+            height="10"
+            aria-hidden="true"
+          >
+            <path d="M6 4l4 4-4 4" />
+          </svg>
+        </button>
+        <Show when={subagentsExpanded()}>
+          <div class="context-popup-rows context-popup-subagent-rows">
+            <For each={getTokenRows(props.subagentTokens)}>
+              {(row) => (
+                <div class="context-popup-row">
+                  <span class="context-popup-row-label">{row.label}</span>
+                  <span class="context-popup-row-value">{formatNumber(row.value)}</span>
+                </div>
+              )}
+            </For>
+            <div class="context-popup-row context-popup-row-total">
+              <span class="context-popup-row-label">Total</span>
+              <span class="context-popup-row-value">
+                {formatNumber(props.subagentTokens.total)}
+              </span>
+            </div>
+          </div>
+        </Show>
+        <div class="context-popup-row context-popup-overall-total">
+          <span class="context-popup-row-label">Overall</span>
+          <span class="context-popup-row-value">{formatNumber(overallTotal())}</span>
         </div>
       </Show>
 

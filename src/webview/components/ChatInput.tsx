@@ -132,8 +132,8 @@ import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
   getMessageEntriesForSession,
+  getSessionTreeTokenBreakdown,
   getUserMessageHistoryText,
-  sumAssistantTokensFromMessageEntries,
 } from './chat-input/message-usage';
 import {
   TOOLBAR_COMPACT_MODES,
@@ -1739,9 +1739,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return ctx;
   });
 
-  const sessionTokens = createMemo(() =>
-    sumAssistantTokensFromMessageEntries(currentSessionMessageEntries())
-  );
+  const sessionTokenBreakdown = createMemo(() => {
+    const sessionId = composerSessionId();
+    if (!sessionId) {
+      return getSessionTreeTokenBreakdown([], [], [], '');
+    }
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    return getSessionTreeTokenBreakdown(
+      state.messages,
+      state.sessions,
+      getSessionTreeIds(rootId),
+      rootId
+    );
+  });
 
   const activeUsageLimit = createMemo(() => {
     const activeSessionId = composerSessionId();
@@ -2382,7 +2392,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               contextPopupRef = el;
             }}
             showContextPopup={showContextPopup()}
-            sessionTokens={sessionTokens()}
+            sessionTokens={sessionTokenBreakdown().session}
+            subagentTokens={sessionTokenBreakdown().subagents}
+            subagentCount={sessionTokenBreakdown().subagentCount}
             contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
             onToggleContextPopup={() => {
               const next = !showContextPopup();
@@ -2538,7 +2550,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             contextPopupRef = el;
           }}
           showContextPopup={showContextPopup()}
-          sessionTokens={sessionTokens()}
+          sessionTokens={sessionTokenBreakdown().session}
+          subagentTokens={sessionTokenBreakdown().subagents}
+          subagentCount={sessionTokenBreakdown().subagentCount}
           contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
           onToggleContextPopup={() => {
             const next = !showContextPopup();

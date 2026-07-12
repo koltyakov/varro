@@ -140,23 +140,11 @@ export function ActiveChatHeader(props: {
           <button
             class="chat-header-btn"
             onClick={props.onBack}
-            title={props.isSubagentSession ? 'Go to top session' : 'Back to sessions'}
+            title={props.isSubagentSession ? 'Back to sub-agent sessions' : 'Back to sessions'}
           >
-            <Show
-              when={props.isSubagentSession}
-              fallback={
-                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
-                </svg>
-              }
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                <path
-                  d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z"
-                  transform="rotate(90 8 8)"
-                />
-              </svg>
-            </Show>
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+            </svg>
           </button>
         </Show>
         <span class="chat-header-title-text">{props.title}</span>

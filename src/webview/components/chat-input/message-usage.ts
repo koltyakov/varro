@@ -3,7 +3,7 @@ import {
   getAssistantTotalTokens,
   type TokenUsage,
 } from '../../lib/message-metrics';
-import type { AssistantMessage, Message, Part, TextPart } from '../../types';
+import type { AssistantMessage, Message, Part, Session, TextPart } from '../../types';
 
 export type MessageInfoEntry = { info: Message };
 
@@ -68,6 +68,86 @@ export function sumAssistantTokensFromMessageEntries(
   }
 
   return result;
+}
+
+export function sumSessionTreeTokens(
+  messages: readonly MessageInfoEntry[],
+  sessions: readonly Session[],
+  sessionIds: readonly string[],
+  rootSessionId: string
+): TokenUsage {
+  return getSessionTreeTokenBreakdown(messages, sessions, sessionIds, rootSessionId).total;
+}
+
+export function getSessionTreeTokenBreakdown(
+  messages: readonly MessageInfoEntry[],
+  sessions: readonly Session[],
+  sessionIds: readonly string[],
+  rootSessionId: string
+) {
+  const treeIds = new Set(sessionIds);
+  const messagesBySession = new Map<string, MessageInfoEntry[]>();
+  for (const entry of messages) {
+    const sessionId = entry.info.sessionID;
+    if (!treeIds.has(sessionId)) continue;
+    const entries = messagesBySession.get(sessionId);
+    if (entries) entries.push(entry);
+    else messagesBySession.set(sessionId, [entry]);
+  }
+
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const session = emptyTokenUsage();
+  const subagents = emptyTokenUsage();
+  let subagentCount = 0;
+  for (const sessionId of treeIds) {
+    const messageTokens = sumAssistantTokensFromMessageEntries(
+      messagesBySession.get(sessionId) || []
+    );
+    if (sessionId === rootSessionId) {
+      addTokenUsage(session, messageTokens);
+      continue;
+    }
+
+    subagentCount += 1;
+
+    const snapshotTokens = getSessionTokenUsage(sessionsById.get(sessionId));
+    addTokenUsage(
+      subagents,
+      snapshotTokens && snapshotTokens.total >= messageTokens.total ? snapshotTokens : messageTokens
+    );
+  }
+  const total = emptyTokenUsage();
+  addTokenUsage(total, session);
+  addTokenUsage(total, subagents);
+  return { session, subagents, total, subagentCount };
+}
+
+function getSessionTokenUsage(session: Session | undefined): TokenUsage | null {
+  if (!session?.tokens) return null;
+  const tokens = session.tokens;
+  const usage = {
+    total: 0,
+    input: tokens.input || 0,
+    output: tokens.output || 0,
+    reasoning: tokens.reasoning || 0,
+    cacheRead: tokens.cache?.read || 0,
+    cacheWrite: tokens.cache?.write || 0,
+  };
+  usage.total = usage.input + usage.output + usage.reasoning + usage.cacheRead + usage.cacheWrite;
+  return usage;
+}
+
+function emptyTokenUsage(): TokenUsage {
+  return { total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+}
+
+function addTokenUsage(target: TokenUsage, source: TokenUsage) {
+  target.total += source.total;
+  target.input += source.input;
+  target.output += source.output;
+  target.reasoning += source.reasoning;
+  target.cacheRead += source.cacheRead;
+  target.cacheWrite += source.cacheWrite;
 }
 
 export function getUserMessageHistoryText(parts: Part[]) {

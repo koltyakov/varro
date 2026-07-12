@@ -309,7 +309,8 @@ export function Chat() {
     const sessionId = state.activeSessionId;
     const parentSessionId = sessionId ? sessionsById().get(sessionId)?.parentID : null;
     if (parentSessionId) {
-      await openParentSession(getSessionTreeRootId(sessionId) || parentSessionId);
+      setSubagentParentId(getSessionTreeRootId(sessionId) || parentSessionId);
+      setShowSessionPicker(true);
       return;
     }
     // If the user is currently viewing a Ralph iteration child session, "back"
@@ -403,6 +404,10 @@ export function Chat() {
     return sessionsById().get(parentId) || null;
   });
   const sessionListFilterLabel = createMemo(() => {
+    const subagentParent = activeSubagentParent();
+    if (subagentParent) {
+      return `Sub-agents for ${normalizeSessionTitle(subagentParent.title) || 'Untitled'}`;
+    }
     if (subagentParentId()) return 'Sub-agents';
     return getSessionListFilterLabel(sessionFilter());
   });

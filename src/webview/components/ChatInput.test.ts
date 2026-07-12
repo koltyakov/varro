@@ -210,6 +210,15 @@ function session(id: string, updated: number, overrides: Partial<Session> = {}):
   };
 }
 
+function readContextRows(section: Element | undefined) {
+  return Object.fromEntries(
+    [...(section?.nextElementSibling?.querySelectorAll('.context-popup-row') || [])].map((row) => [
+      row.querySelector('.context-popup-row-label')?.textContent,
+      row.querySelector('.context-popup-row-value')?.textContent,
+    ])
+  );
+}
+
 async function flushAsyncWork(count = 4) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
@@ -725,6 +734,59 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.context-popup')).not.toBeNull();
     expect(button?.hasAttribute('title')).toBe(false);
     expect(button?.getAttribute('aria-label')).toBe('Context usage (50%)');
+  });
+
+  it('includes descendant session snapshots in the session token total', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_000, {
+        parentID: 'session-1',
+        tokens: {
+          input: 500,
+          output: 100,
+          reasoning: 0,
+          cache: { read: 50, write: 0 },
+        },
+      }),
+    ]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const sections = [...(container?.querySelectorAll('.context-popup-section') || [])];
+    expect(sections.map((section) => section.textContent)).toEqual([
+      'Session Tokens',
+      'Subagents (1)650',
+    ]);
+    expect(readContextRows(sections[0])).toMatchObject({
+      Input: '400',
+      Output: '100',
+      Total: '500',
+    });
+    const subagentToggle = sections[1] as HTMLButtonElement;
+    expect(subagentToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('.context-popup-subagent-rows')).toBeNull();
+
+    subagentToggle.click();
+    await Promise.resolve();
+
+    expect(subagentToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(subagentToggle.querySelector('.context-popup-section-summary')).toBeNull();
+    expect(readContextRows(sections[1])).toMatchObject({
+      Input: '500',
+      Output: '100',
+      'Cache read': '50',
+      Total: '650',
+    });
+    expect(container?.querySelector('.context-popup-overall-total')?.textContent).toContain(
+      'Overall1,150'
+    );
   });
 
   it('removes the provider limit title while the popup is open', async () => {

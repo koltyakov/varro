@@ -4,8 +4,9 @@ import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
   sumAssistantTokensFromMessageEntries,
+  sumSessionTreeTokens,
 } from '../components/chat-input/message-usage';
-import type { AssistantMessage, Message } from '../types';
+import type { AssistantMessage, Message, Session } from '../types';
 
 function userMessage(id: string): Message {
   return {
@@ -36,6 +37,19 @@ function assistantMessage(id: string, tokens = { input: 0, output: 0 }): Assista
       reasoning: 0,
       cache: { read: 0, write: 0 },
     },
+  };
+}
+
+function session(id: string, parentID?: string, tokens?: Session['tokens']): Session {
+  return {
+    id,
+    projectID: 'project-1',
+    directory: '/workspace',
+    title: id,
+    version: '1',
+    time: { created: 1, updated: 1 },
+    ...(parentID ? { parentID } : {}),
+    ...(tokens ? { tokens } : {}),
   };
 }
 
@@ -139,5 +153,44 @@ describe('ChatInput perf helpers', () => {
         { info: assistantMessage('assistant-2', { input: 2, output: 3 }) },
       ])
     ).toMatchObject({ total: 20, input: 12, output: 8 });
+  });
+
+  it('includes descendant session tokens without double-counting loaded child messages', () => {
+    const root = assistantMessage('root-message', { input: 10, output: 5 });
+    const child = {
+      ...assistantMessage('child-message', { input: 20, output: 10 }),
+      sessionID: 'child-1',
+      mode: 'subagent' as const,
+    };
+    const grandchild = {
+      ...assistantMessage('grandchild-message', { input: 30, output: 15 }),
+      sessionID: 'grandchild-1',
+      mode: 'subagent' as const,
+    };
+
+    expect(
+      sumSessionTreeTokens(
+        [{ info: root }, { info: child }, { info: grandchild }],
+        [
+          session('session-1'),
+          session('child-1', 'session-1', {
+            input: 100,
+            output: 40,
+            reasoning: 5,
+            cache: { read: 10, write: 0 },
+          }),
+          session('grandchild-1', 'child-1'),
+        ],
+        ['session-1', 'child-1', 'grandchild-1'],
+        'session-1'
+      )
+    ).toEqual({
+      total: 215,
+      input: 140,
+      output: 60,
+      reasoning: 5,
+      cacheRead: 10,
+      cacheWrite: 0,
+    });
   });
 });

@@ -245,6 +245,40 @@ describe('SessionListView diff summaries', () => {
     setState('sessions', [session('session-1', updated + 1)]);
     await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(2));
   });
+
+  it('refreshes a root summary when a descendant session updates', async () => {
+    const diffSummarySpy = vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 100,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setSessions([
+      session('session-1', 100_000),
+      session('child-1', 100_000, { parentID: 'session-1' }),
+    ]);
+
+    cleanup = render(() => <SessionListView />, container);
+    await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(1));
+
+    setSessions([
+      session('session-1', 100_000),
+      session('child-1', 100_001, {
+        parentID: 'session-1',
+        tokens: {
+          input: 200,
+          output: 20,
+          reasoning: 0,
+          cache: { read: 0, write: 0 },
+        },
+      }),
+    ]);
+
+    await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(2));
+    expect(diffSummarySpy).toHaveBeenNthCalledWith(2, 'session-1');
+  });
 });
 
 describe('SessionListView pins', () => {

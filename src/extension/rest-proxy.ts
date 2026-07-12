@@ -393,16 +393,41 @@ export class RestProxy {
 
   private async readSessionDiffSummary(sessionID: string): Promise<SessionDiffSummary> {
     const encodedSessionID = encodeURIComponent(sessionID);
-    const [diffs, messages] = await Promise.all([
+    const [diffs, messages, sessions] = await Promise.all([
       this.callbacks.server.request('GET', `/session/${encodedSessionID}/diff`),
       this.callbacks.server.request('GET', `/session/${encodedSessionID}/message`),
+      this.callbacks.server.request('GET', '/session'),
     ]);
     const diffStats = summarizeSessionDiff(diffs);
     return {
       ...(hasSessionEdits(diffStats) ? diffStats : summarizeSessionMessageEdits(messages)),
-      tokens: summarizeSessionTokens(messages),
+      tokens: await this.summarizeSessionTreeTokens(sessionID, messages, sessions),
       ...summarizeSessionDuration(messages),
     };
+  }
+
+  private async summarizeSessionTreeTokens(
+    sessionID: string,
+    rootMessages: unknown,
+    sessionsValue: unknown
+  ) {
+    const descendants = collectDescendantSessions(sessionsValue, sessionID);
+    let total = summarizeSessionTokens(rootMessages);
+    const sessionsWithoutTokenSnapshots: string[] = [];
+
+    for (const session of descendants) {
+      const snapshotTotal = summarizeTokenRecord(asRecord(session.tokens));
+      if (snapshotTotal > 0) total += snapshotTotal;
+      else sessionsWithoutTokenSnapshots.push(session.id);
+    }
+
+    const messageLists = await Promise.all(
+      sessionsWithoutTokenSnapshots.map((id) =>
+        this.callbacks.server.request('GET', `/session/${encodeURIComponent(id)}/message`)
+      )
+    );
+    for (const messages of messageLists) total += summarizeSessionTokens(messages);
+    return total;
   }
 
   private getHiddenSessionIdFromPath(path: string) {
@@ -1224,20 +1249,49 @@ function summarizeSessionTokens(value: unknown): number {
     const tokens = asRecord(info.tokens);
     if (!tokens) continue;
 
-    if (isTokenCount(tokens.total) && tokens.total > 0) {
-      total += tokens.total;
-      continue;
-    }
-
-    const cache = asRecord(tokens.cache);
-    total +=
-      readTokenCount(tokens.input) +
-      readTokenCount(tokens.output) +
-      readTokenCount(tokens.reasoning) +
-      readTokenCount(cache?.read) +
-      readTokenCount(cache?.write);
+    total += summarizeTokenRecord(tokens);
   }
   return total;
+}
+
+function summarizeTokenRecord(tokens: Record<string, unknown> | undefined): number {
+  if (!tokens) return 0;
+  if (isTokenCount(tokens.total) && tokens.total > 0) return tokens.total;
+  const cache = asRecord(tokens.cache);
+  return (
+    readTokenCount(tokens.input) +
+    readTokenCount(tokens.output) +
+    readTokenCount(tokens.reasoning) +
+    readTokenCount(cache?.read) +
+    readTokenCount(cache?.write)
+  );
+}
+
+function collectDescendantSessions(value: unknown, rootSessionID: string) {
+  if (!Array.isArray(value)) return [];
+  const childrenByParent = new Map<string, Array<{ id: string; tokens?: unknown }>>();
+  for (const item of value) {
+    const session = asRecord(item);
+    const id = typeof session?.id === 'string' ? session.id : undefined;
+    const parentID = typeof session?.parentID === 'string' ? session.parentID : undefined;
+    if (!id || !parentID) continue;
+    const children = childrenByParent.get(parentID);
+    const child = { id, tokens: session?.tokens };
+    if (children) children.push(child);
+    else childrenByParent.set(parentID, [child]);
+  }
+
+  const result: Array<{ id: string; tokens?: unknown }> = [];
+  const visited = new Set<string>([rootSessionID]);
+  const pending = [...(childrenByParent.get(rootSessionID) || [])];
+  while (pending.length > 0) {
+    const session = pending.shift();
+    if (!session || visited.has(session.id)) continue;
+    visited.add(session.id);
+    result.push(session);
+    pending.push(...(childrenByParent.get(session.id) || []));
+  }
+  return result;
 }
 
 function summarizeSessionDuration(

@@ -637,8 +637,28 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('returns only aggregate session edit and token data to the webview', async () => {
-    const serverRequest = vi.fn((_method: string, path: string) =>
-      Promise.resolve(
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session') {
+        return Promise.resolve([
+          { id: 'session-1', directory: '/repo' },
+          {
+            id: 'child-1',
+            parentID: 'session-1',
+            directory: '/repo',
+            tokens: {
+              input: 400,
+              output: 100,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          },
+          { id: 'grandchild-1', parentID: 'child-1', directory: '/repo' },
+        ]);
+      }
+      if (path === '/session/grandchild-1/message') {
+        return Promise.resolve([{ info: { role: 'assistant', tokens: { total: 200 } } }]);
+      }
+      return Promise.resolve(
         path.endsWith('/diff')
           ? [
               {
@@ -707,8 +727,8 @@ describe('RestProxy handleRequest', () => {
                 parts: [],
               },
             ]
-      )
-    );
+      );
+    });
     const { proxy, callbacks } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
@@ -718,6 +738,8 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest.mock.calls).toEqual([
       ['GET', '/session/session-1/diff'],
       ['GET', '/session/session-1/message'],
+      ['GET', '/session'],
+      ['GET', '/session/grandchild-1/message'],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 82,
@@ -725,7 +747,7 @@ describe('RestProxy handleRequest', () => {
         files: 2,
         additions: 6,
         deletions: 4,
-        tokens: 3_475,
+        tokens: 4_175,
         durationMs: 10_000,
         activeStartedAt: 13_000,
       },
@@ -736,8 +758,9 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('falls back to message tool metadata when the session diff is empty', async () => {
-    const serverRequest = vi.fn((_method: string, path: string) =>
-      Promise.resolve(
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session') return Promise.resolve([]);
+      return Promise.resolve(
         path.endsWith('/diff')
           ? []
           : [
@@ -777,8 +800,8 @@ describe('RestProxy handleRequest', () => {
                 ],
               },
             ]
-      )
-    );
+      );
+    });
     const { proxy, callbacks } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });

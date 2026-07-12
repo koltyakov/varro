@@ -119,6 +119,15 @@ function getDiffSummaryKey(sessionId: string, updated: number): string {
   return `${sessionId}:${updated}`;
 }
 
+function getSessionTreeUpdated(sessionId: string): number {
+  const treeIds = new Set(getSessionTreeIds(sessionId));
+  let updated = 0;
+  for (const session of state.sessions) {
+    if (treeIds.has(session.id)) updated = Math.max(updated, session.time.updated);
+  }
+  return updated;
+}
+
 // Module-scoped so cached diff summaries survive the session list being
 // unmounted and remounted (navigating away and back). Persisting the cache and
 // keeping the last-known stats while refreshing avoids the "0 0 0 -> numbers"
@@ -169,36 +178,33 @@ function updateRelevantDiffSummarySessions(owner: symbol, sessionIds: Set<string
 }
 
 function isCurrentDiffSummaryRequest(request: SessionDiffSummaryRequest) {
-  const current = state.sessions.find((session) => session.id === request.sessionId);
   return (
     relevantDiffSummarySessionIds.has(request.sessionId) &&
-    current?.time.updated === request.updated
+    getSessionTreeUpdated(request.sessionId) === request.updated
   );
 }
 
 function enqueueDiffSummaryRequest(session: Session) {
+  const updated = getSessionTreeUpdated(session.id);
   const cache = untrack(sessionDiffSummaryCache);
   const cached = cache[session.id];
   // A matching failure is settled for this revision. Retrying from this reactive
   // effect would otherwise form a tight request loop until the server recovers.
-  if (
-    cached?.updated === session.time.updated &&
-    (cached.status === 'ready' || cached.status === 'error')
-  ) {
+  if (cached?.updated === updated && (cached.status === 'ready' || cached.status === 'error')) {
     return;
   }
 
-  const key = getDiffSummaryKey(session.id, session.time.updated);
+  const key = getDiffSummaryKey(session.id, updated);
   if (queuedDiffSummaryKeys.has(key) || activeDiffSummaryKeys.has(key)) return;
   if (diffSummaryQueue.length >= SESSION_DIFF_SUMMARY_QUEUE_LIMIT) return;
 
   queuedDiffSummaryKeys.add(key);
-  diffSummaryQueue.push({ sessionId: session.id, updated: session.time.updated });
+  diffSummaryQueue.push({ sessionId: session.id, updated });
   const previousStats = cache[session.id]?.stats ?? null;
   setDiffSummaryCacheEntry(session.id, {
     // Keep showing the previous numbers while the refresh is in flight.
     status: 'loading',
-    updated: session.time.updated,
+    updated,
     stats: previousStats,
   });
   pumpDiffSummaryQueue();

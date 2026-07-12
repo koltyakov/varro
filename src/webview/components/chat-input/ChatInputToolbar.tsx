@@ -90,6 +90,8 @@ type ToolbarSharedProps = {
   contextPopupRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   showContextPopup: boolean;
   sessionTokens: SessionTokensInfo;
+  subagentTokens: SessionTokensInfo;
+  subagentCount: number;
   contextCompactDisabled: boolean;
   onToggleContextPopup: () => void;
   onCloseContextPopup: () => void;
@@ -288,6 +290,8 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                     alignTo="right"
                     usage={contextUsage()}
                     tokens={props.sessionTokens}
+                    subagentTokens={props.subagentTokens}
+                    subagentCount={props.subagentCount}
                     model={props.currentModel}
                     compactDisabled={props.contextCompactDisabled}
                     onClose={props.onCloseContextPopup}

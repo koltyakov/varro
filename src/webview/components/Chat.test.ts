@@ -1142,7 +1142,7 @@ describe('header status badges', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
-      'Sub-agents'
+      'Sub-agents for parent'
     );
     const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
       (item) => item.textContent?.trim()
@@ -1166,7 +1166,7 @@ describe('header status badges', () => {
     expect(subagentsButton).toBeNull();
   });
 
-  it('returns from an active sub-agent session to its top session', async () => {
+  it('returns from an active sub-agent session to its top session sub-agent list', async () => {
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1177,20 +1177,24 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const backButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Go to top session"]'
+      '.chat-header .chat-header-btn[title="Back to sub-agent sessions"]'
     ) as HTMLButtonElement | null;
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
-    expect(selectSessionSpy).toHaveBeenCalledWith('parent');
+    expect(selectSessionSpy).not.toHaveBeenCalled();
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Sub-agents for parent'
+    );
     expect(
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
-    ).toBeNull();
+    ).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.session-item-title')?.textContent?.trim()).toBe('child');
   });
 
-  it('returns from a nested sub-agent session to the top session', async () => {
+  it('returns from a nested sub-agent session to the top session sub-agent list', async () => {
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1205,14 +1209,21 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const topButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Go to top session"]'
+      '.chat-header .chat-header-btn[title="Back to sub-agent sessions"]'
     ) as HTMLButtonElement | null;
     expect(topButton).toBeInstanceOf(HTMLButtonElement);
 
     topButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
-    expect(selectSessionSpy).toHaveBeenCalledWith('top');
+    expect(selectSessionSpy).not.toHaveBeenCalled();
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Sub-agents for top'
+    );
+    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
+    );
+    expect(titles).toEqual(['child', 'grandchild']);
   });
 
   it('returns from the sub-agent list to the parent session', async () => {
