@@ -762,7 +762,7 @@ describe('ChatInput', () => {
     const sections = [...(container?.querySelectorAll('.context-popup-section') || [])];
     expect(sections.map((section) => section.textContent)).toEqual([
       'Session Tokens',
-      'Subagents (1)650',
+      'Agents (1)650',
     ]);
     expect(readContextRows(sections[0])).toMatchObject({
       Input: '400',
@@ -771,6 +771,9 @@ describe('ChatInput', () => {
     });
     const subagentToggle = sections[1] as HTMLButtonElement;
     expect(subagentToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(subagentToggle.children[1]?.classList.contains('context-popup-section-chevron')).toBe(
+      true
+    );
     expect(container?.querySelector('.context-popup-subagent-rows')).toBeNull();
 
     subagentToggle.click();

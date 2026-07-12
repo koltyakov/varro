@@ -177,7 +177,7 @@
 .context-popup-overall-total .context-popup-row-label,
 .context-popup-overall-total .context-popup-row-value {
   font-weight: 600;
-  color: var(--color-vscode-fg);
+  color: color-mix(in srgb, var(--color-vscode-accent) 72%, var(--color-vscode-fg));
 }
 
 .context-popup-model {

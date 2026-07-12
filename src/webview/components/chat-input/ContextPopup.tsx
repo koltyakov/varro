@@ -112,12 +112,7 @@ export function ContextPopup(props: {
           aria-expanded={subagentsExpanded()}
           onClick={() => setSubagentsExpanded((expanded) => !expanded)}
         >
-          <span>Subagents{props.subagentCount > 0 ? ` (${props.subagentCount})` : ''}</span>
-          <Show when={!subagentsExpanded()}>
-            <span class="context-popup-section-summary">
-              {formatNumber(props.subagentTokens.total)}
-            </span>
-          </Show>
+          <span>Agents{props.subagentCount > 0 ? ` (${props.subagentCount})` : ''}</span>
           <svg
             class={`context-popup-section-chevron${subagentsExpanded() ? ' expanded' : ''}`}
             viewBox="0 0 16 16"
@@ -132,6 +127,11 @@ export function ContextPopup(props: {
           >
             <path d="M6 4l4 4-4 4" />
           </svg>
+          <Show when={!subagentsExpanded()}>
+            <span class="context-popup-section-summary">
+              {formatNumber(props.subagentTokens.total)}
+            </span>
+          </Show>
         </button>
         <Show when={subagentsExpanded()}>
           <div class="context-popup-rows context-popup-subagent-rows">

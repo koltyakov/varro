@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.20.4",
+  "version": "0.20.5",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.17.18",
-    "dompurify": "^3.4.11",
+    "dompurify": "^3.4.12",
     "highlight.js": "11.11.1",
     "jsonc-parser": "^3.3.1",
     "marked": "18.0.6",
@@ -68,7 +68,7 @@
     "jsdom": "29.1.1",
     "oxfmt": "0.58.0",
     "oxlint": "1.73.0",
-    "postcss": "8.5.16",
+    "postcss": "8.5.17",
     "tailwindcss": "4.3.2",
     "typescript": "7.0.2",
     "vite": "8.1.4",
