@@ -40,6 +40,7 @@ import { client } from '../../lib/client';
 import { getMessageFileChanges } from '../../lib/tool-file-change';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
+import { formatEditCount } from '../../lib/format';
 import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { compareSessionsByActivity } from '../../lib/session-order';
@@ -200,12 +201,11 @@ function enqueueDiffSummaryRequest(session: Session) {
 
   queuedDiffSummaryKeys.add(key);
   diffSummaryQueue.push({ sessionId: session.id, updated });
-  const previousStats = cache[session.id]?.stats ?? null;
   setDiffSummaryCacheEntry(session.id, {
     // Keep showing the previous numbers while the refresh is in flight.
     status: 'loading',
     updated,
-    stats: previousStats,
+    stats: cached?.stats ?? null,
   });
   pumpDiffSummaryQueue();
 }
@@ -958,6 +958,10 @@ export function SessionListView(props: {
         <SessionListItem
           session={session}
           diffSummary={sessionDiffSummaryCache()[session.id]?.stats ?? null}
+          isSummaryLoading={
+            sessionDiffSummaryCache()[session.id]?.status === 'loading' &&
+            sessionDiffSummaryCache()[session.id]?.stats === null
+          }
           tokens={sessionDiffSummaryCache()[session.id]?.stats?.tokens ?? null}
           durationMs={sessionDiffSummaryCache()[session.id]?.stats?.durationMs ?? null}
           activeStartedAt={sessionDiffSummaryCache()[session.id]?.stats?.activeStartedAt ?? null}
@@ -1298,6 +1302,7 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
 function SessionListItem(props: {
   session: (typeof state.sessions)[number];
   diffSummary: SessionSummaryStats | null;
+  isSummaryLoading: boolean;
   tokens: number | null;
   durationMs: number | null;
   activeStartedAt: number | null;
@@ -1398,6 +1403,17 @@ function SessionListItem(props: {
       actionsMenuRef?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
     );
   };
+  const openSession = () => {
+    selectSession(props.session.id);
+    if (!props.embedded) setShowSessionPicker(false);
+  };
+  const handleRowClick = (event: MouseEvent) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const interactive = target.closest('button, a, input, textarea, select');
+    if (interactive && !interactive.classList.contains('session-item-main')) return;
+    openSession();
+  };
 
   createEffect(() => {
     if (!showActions()) return;
@@ -1415,9 +1431,11 @@ function SessionListItem(props: {
       if (!(target instanceof Node) || !actionsMenuRef?.contains(target)) props.actions.close();
     };
     window.addEventListener('contextmenu', closeIfOutside, true);
+    window.addEventListener('pointerdown', closeIfOutside, true);
     window.addEventListener('focusin', closeIfOutside);
     onCleanup(() => {
       window.removeEventListener('contextmenu', closeIfOutside, true);
+      window.removeEventListener('pointerdown', closeIfOutside, true);
       window.removeEventListener('focusin', closeIfOutside);
     });
   });
@@ -1427,6 +1445,7 @@ function SessionListItem(props: {
       class={`session-item ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
       onMouseEnter={() => props.setFocusedIndex(props.itemIndex())}
       onContextMenu={openActions}
+      onClick={handleRowClick}
     >
       <button
         ref={(element) => {
@@ -1435,10 +1454,6 @@ function SessionListItem(props: {
         type="button"
         class="session-item-main"
         onFocus={() => props.setFocusedIndex(props.itemIndex())}
-        onClick={() => {
-          selectSession(props.session.id);
-          if (!props.embedded) setShowSessionPicker(false);
-        }}
       >
         <Show when={indicatorKind()} fallback={<span class="session-item-indicator-spacer" />}>
           {(kind) => (
@@ -1475,16 +1490,31 @@ function SessionListItem(props: {
             <Show
               when={ralphSummary()}
               fallback={
-                <Show when={summaryStats()}>
-                  {(summary) => (
-                    <>
-                      {summary().files} file
-                      {summary().files !== 1 ? 's' : ''}
-                      {' · '}
-                      <span class="diff-lines-added">+{summary().additions}</span>{' '}
-                      <span class="diff-lines-removed">-{summary().deletions}</span>
-                    </>
-                  )}
+                <Show
+                  when={!props.isSummaryLoading}
+                  fallback={
+                    <span
+                      class="session-item-meta-skeleton"
+                      role="status"
+                      aria-label="Loading session statistics"
+                    />
+                  }
+                >
+                  <Show when={summaryStats()}>
+                    {(summary) => (
+                      <>
+                        {summary().files} file
+                        {summary().files !== 1 ? 's' : ''}
+                        {' · '}
+                        <span class="diff-lines-added">
+                          +{formatEditCount(summary().additions)}
+                        </span>{' '}
+                        <span class="diff-lines-removed">
+                          -{formatEditCount(summary().deletions)}
+                        </span>
+                      </>
+                    )}
+                  </Show>
                 </Show>
               }
             >
@@ -1549,18 +1579,6 @@ function SessionListItem(props: {
       </div>
       <Show when={showActions()}>
         <Portal>
-          <div
-            class="session-item-actions-backdrop"
-            aria-hidden="true"
-            onPointerDown={(event) => {
-              event.preventDefault();
-              props.actions.close();
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              props.actions.close();
-            }}
-          />
           <div
             ref={(element) => {
               actionsMenuRef = element;

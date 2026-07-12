@@ -9,6 +9,8 @@ import type {
   OpenCodeModelRouting,
   ServerStatus,
   SessionDiffSummary,
+  SessionTokenBreakdown,
+  SessionTokenUsage,
   WebviewMessage,
 } from '../shared/protocol';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
@@ -399,9 +401,11 @@ export class RestProxy {
       this.callbacks.server.request('GET', '/session'),
     ]);
     const diffStats = summarizeSessionDiff(diffs);
+    const tokenBreakdown = await this.summarizeSessionTreeTokens(sessionID, messages, sessions);
     return {
       ...(hasSessionEdits(diffStats) ? diffStats : summarizeSessionMessageEdits(messages)),
-      tokens: await this.summarizeSessionTreeTokens(sessionID, messages, sessions),
+      tokens: tokenBreakdown.session.total + tokenBreakdown.subagents.total,
+      tokenBreakdown,
       ...summarizeSessionDuration(messages),
     };
   }
@@ -412,13 +416,14 @@ export class RestProxy {
     sessionsValue: unknown
   ) {
     const descendants = collectDescendantSessions(sessionsValue, sessionID);
-    let total = summarizeSessionTokens(rootMessages);
+    const session = summarizeSessionTokenUsage(rootMessages);
+    const subagents = emptySessionTokenUsage();
     const sessionsWithoutTokenSnapshots: string[] = [];
 
-    for (const session of descendants) {
-      const snapshotTotal = summarizeTokenRecord(asRecord(session.tokens));
-      if (snapshotTotal > 0) total += snapshotTotal;
-      else sessionsWithoutTokenSnapshots.push(session.id);
+    for (const descendant of descendants) {
+      const snapshot = summarizeTokenUsageRecord(asRecord(descendant.tokens));
+      if (snapshot.total > 0) addSessionTokenUsage(subagents, snapshot);
+      else sessionsWithoutTokenSnapshots.push(descendant.id);
     }
 
     const messageLists = await Promise.all(
@@ -426,8 +431,14 @@ export class RestProxy {
         this.callbacks.server.request('GET', `/session/${encodeURIComponent(id)}/message`)
       )
     );
-    for (const messages of messageLists) total += summarizeSessionTokens(messages);
-    return total;
+    for (const messages of messageLists) {
+      addSessionTokenUsage(subagents, summarizeSessionTokenUsage(messages));
+    }
+    return {
+      session,
+      subagents,
+      subagentCount: descendants.length,
+    } satisfies SessionTokenBreakdown;
   }
 
   private getHiddenSessionIdFromPath(path: string) {
@@ -1239,32 +1250,50 @@ const SESSION_FILE_CHANGE_TOOLS = new Set([
   'file_rename',
 ]);
 
-function summarizeSessionTokens(value: unknown): number {
-  if (!Array.isArray(value)) return 0;
+function summarizeSessionTokenUsage(value: unknown): SessionTokenUsage {
+  const usage = emptySessionTokenUsage();
+  if (!Array.isArray(value)) return usage;
 
-  let total = 0;
   for (const entry of value) {
     const info = asRecord(asRecord(entry)?.info);
     if (info?.role !== 'assistant') continue;
     const tokens = asRecord(info.tokens);
     if (!tokens) continue;
 
-    total += summarizeTokenRecord(tokens);
+    addSessionTokenUsage(usage, summarizeTokenUsageRecord(tokens));
   }
-  return total;
+  return usage;
 }
 
-function summarizeTokenRecord(tokens: Record<string, unknown> | undefined): number {
-  if (!tokens) return 0;
-  if (isTokenCount(tokens.total) && tokens.total > 0) return tokens.total;
+function summarizeTokenUsageRecord(tokens: Record<string, unknown> | undefined): SessionTokenUsage {
+  if (!tokens) return emptySessionTokenUsage();
   const cache = asRecord(tokens.cache);
-  return (
-    readTokenCount(tokens.input) +
-    readTokenCount(tokens.output) +
-    readTokenCount(tokens.reasoning) +
-    readTokenCount(cache?.read) +
-    readTokenCount(cache?.write)
-  );
+  const usage = {
+    total: 0,
+    input: readTokenCount(tokens.input),
+    output: readTokenCount(tokens.output),
+    reasoning: readTokenCount(tokens.reasoning),
+    cacheRead: readTokenCount(cache?.read),
+    cacheWrite: readTokenCount(cache?.write),
+  };
+  usage.total =
+    isTokenCount(tokens.total) && tokens.total > 0
+      ? tokens.total
+      : usage.input + usage.output + usage.reasoning + usage.cacheRead + usage.cacheWrite;
+  return usage;
+}
+
+function emptySessionTokenUsage(): SessionTokenUsage {
+  return { total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+}
+
+function addSessionTokenUsage(target: SessionTokenUsage, source: SessionTokenUsage) {
+  target.total += source.total;
+  target.input += source.input;
+  target.output += source.output;
+  target.reasoning += source.reasoning;
+  target.cacheRead += source.cacheRead;
+  target.cacheWrite += source.cacheWrite;
 }
 
 function collectDescendantSessions(value: unknown, rootSessionID: string) {

@@ -554,14 +554,27 @@
   align-items: center;
   gap: 2px;
   height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: color-mix(in srgb, var(--color-vscode-fg-soft) 56%, transparent);
   font-size: 10.5px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
   flex-shrink: 0;
+  cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.toolbar-mcp-count:hover {
+  color: var(--color-vscode-fg-soft);
+}
+
+.toolbar-mcp-count:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 1px;
 }
 
 .toolbar-mcp-count-label {
@@ -1431,37 +1444,39 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin: 8px auto 4px;
-  padding: 5px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--color-vscode-border);
-  background: var(--color-vscode-surface-softer);
-}
-
-.message-history-banner-text {
-  font-size: 11px;
+  min-height: 22px;
+  margin: 0 0 12px;
   color: var(--color-vscode-fg-soft);
 }
 
-.message-history-banner-btn {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--color-vscode-border);
-  background: transparent;
-  color: var(--color-vscode-fg);
-  cursor: pointer;
+.message-history-banner::before,
+.message-history-banner::after {
+  content: '';
+  min-width: 12px;
+  height: 6px;
+  flex: 1;
+  background: currentColor;
+  opacity: 0.3;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3C2 0 4 0 6 3s4 3 6 0' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E");
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: repeat-x;
+  -webkit-mask-size: 12px 6px;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3C2 0 4 0 6 3s4 3 6 0' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E");
+  mask-position: center;
+  mask-repeat: repeat-x;
+  mask-size: 12px 6px;
 }
 
-.message-history-banner-btn:hover:not(:disabled) {
-  background: var(--color-vscode-surface-soft);
+.message-history-banner.is-loading::before,
+.message-history-banner.is-loading::after {
+  animation: message-history-wave 0.7s linear infinite;
 }
 
-.message-history-banner-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
+@keyframes message-history-wave {
+  to {
+    -webkit-mask-position: 12px center;
+    mask-position: 12px center;
+  }
 }
 
 .chat-transport-title {

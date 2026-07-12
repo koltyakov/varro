@@ -4,6 +4,7 @@ import { reconcile } from 'solid-js/store';
 import {
   replaceMessages,
   requestMessageListScrollToBottom,
+  state,
   setSessions,
   setShowModelPicker,
   setShowThinkingPreference,
@@ -47,6 +48,13 @@ import {
   resetMessageEditState,
   startEditingMessage,
 } from '../lib/message-edit-state';
+import {
+  cacheSessionHistoryPage,
+  resetMessageWindowState,
+  setSessionHistoryCursor,
+  setSessionHistoryPrompts,
+} from '../lib/message-window';
+import { client } from '../lib/client';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -277,6 +285,7 @@ afterEach(() => {
   setState('queuedMessages', []);
   setState('streamingPartId', null);
   setState('streamingText', '');
+  resetMessageWindowState();
   setState('sessionSelectedAgents', reconcile({}));
   setState('sessionStatus', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
@@ -664,6 +673,67 @@ describe('shouldShowStickyUserMessagePreview', () => {
     expect(stickyText?.textContent).toContain('Prompt 2');
     expect(stickyText?.getAttribute('title')).toBeNull();
 
+    animationFrames.restore();
+  });
+
+  it('loads and scrolls to a sticky prompt behind a truncated history boundary', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView,
+    });
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    setSessionHistoryPrompts('session-1', [
+      { info: userMessage('boundary-user'), parts: [textPart('boundary-text', 'Boundary prompt')] },
+    ]);
+    vi.spyOn(client.session, 'messages').mockResolvedValue([
+      { info: userMessage('boundary-user'), parts: [textPart('boundary-text', 'Boundary prompt')] },
+    ]);
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('assistant-text', 'Visible response')],
+      },
+    ]);
+
+    const rectMap = new Map<Element, DOMRect>();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
+    rectMap.set(list, new DOMRect(0, 0, 500, 500));
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky-text')?.textContent).toContain(
+      'Boundary prompt'
+    );
+
+    const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    sticky?.click();
+    expect(sticky?.classList.contains('is-loading')).toBe(true);
+    expect(sticky?.textContent).toContain('Loading…');
+    await vi.waitFor(() => {
+      expect(state.messages.some((message) => message.info.id === 'boundary-user')).toBe(true);
+    });
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(client.session.messages).toHaveBeenCalledWith('session-1', {
+      limit: 50,
+      before: 'cursor-1',
+    });
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
     animationFrames.restore();
   });
 
@@ -2034,6 +2104,43 @@ describe('MessageList sticky prompt preview', () => {
     expect(response?.className).toContain('assistant-turn-content-plain');
     expect(response?.className).not.toContain('assistant-turn-content-highlighted');
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 12 · ↓ 4');
+  });
+
+  it('includes prefetched turn history in the Worked for summary', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-2', {
+          time: { created: 6_000, completed: 11_000 },
+          tokens: { input: 200, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-2', 'Visible response')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.textContent).toContain('Collecting stats...');
+    expect(container?.textContent).not.toContain('Worked for 5s - Tokens ↑ 200 · ↓ 20');
+
+    cacheSessionHistoryPage('session-1', 'cursor-1', [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 5_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-1', 'Earlier response')],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 300 · ↓ 30');
+    expect(container?.querySelector('[data-msg-id="assistant-1"]')).toBeNull();
   });
 
   it('omits the token summary when input and output tokens are zero', async () => {

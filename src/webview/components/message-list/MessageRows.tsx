@@ -17,6 +17,7 @@ export type AssistantDialogSummaryInfo = {
   inputTokens: number;
   outputTokens: number;
   agentCount: number;
+  collectingStats?: boolean;
 };
 
 export type MessageRowSharedProps = {
@@ -193,18 +194,20 @@ function AssistantDialogSummary(props: {
   onImplementPlan?: () => void;
   onSkipPlan?: () => void;
 }) {
-  const tokenSuffix =
+  const tokenSuffix = () =>
     props.summary.inputTokens > 0 || props.summary.outputTokens > 0
       ? ` - Tokens ↑ ${formatNumber(props.summary.inputTokens)} · ↓ ${formatNumber(props.summary.outputTokens)}`
       : '';
-  const agentSuffix =
+  const agentSuffix = () =>
     props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
 
   return (
     <div class="model-change-indicator assistant-dialog-summary">
       <div class="assistant-dialog-summary-content">
         <span class="model-change-label">
-          {`Worked for ${formatDuration(props.summary.durationMs)}${tokenSuffix}${agentSuffix}`}
+          {props.summary.collectingStats
+            ? 'Collecting stats...'
+            : `Worked for ${formatDuration(props.summary.durationMs)}${tokenSuffix()}${agentSuffix()}`}
         </span>
       </div>
       <Show when={props.showImplementPlanAction}>

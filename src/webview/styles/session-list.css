@@ -319,7 +319,6 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .session-item.is-context-obscured {
-  pointer-events: none;
   filter: blur(1px);
   opacity: 0.45;
 }
@@ -338,13 +337,6 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   gap: 4px;
   margin-left: auto;
   flex-shrink: 0;
-}
-
-.session-item-actions-backdrop {
-  position: fixed;
-  z-index: 29;
-  inset: 0;
-  cursor: default;
 }
 
 .session-item-actions-menu {
@@ -515,6 +507,16 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   text-overflow: ellipsis;
   white-space: nowrap;
   min-height: 1.2em;
+}
+
+.session-item-meta-skeleton {
+  display: inline-block;
+  width: 18ch;
+  height: 0.75em;
+  border-radius: 2px;
+  vertical-align: -0.05em;
+  background: color-mix(in srgb, var(--color-vscode-muted) 35%, transparent);
+  animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
 .session-item-age {

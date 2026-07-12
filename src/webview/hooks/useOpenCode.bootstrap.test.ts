@@ -63,6 +63,7 @@ describe('useOpenCode initialization', () => {
       await vi.waitFor(() => {
         expect(stateModule.state.selectedAgent).toBe('build');
       });
+      expect(stateModule.connectionInitialized()).toBe(true);
       expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
     } finally {
       dispose();

@@ -53,7 +53,7 @@ import {
   replaceContextFiles,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
-import { serverEvents } from '../lib/client';
+import { client, serverEvents } from '../lib/client';
 import { openProviderSetup } from '../lib/provider-setup';
 import {
   applySessionMcps,
@@ -63,6 +63,7 @@ import {
   compactSession,
   editMessage,
   initSession,
+  loadOlderSessionPrompts,
   redoSession,
   undoSession,
   reviewSession,
@@ -111,6 +112,7 @@ import {
   type ComposerHistoryAction,
   type ComposerSnapshot,
 } from '../lib/composer-history';
+import { getSessionHistoryPrompts } from '../lib/message-window';
 import { TodoList } from './TodoList';
 import { ChangedFilesList } from './ChangedFilesList';
 import { ImagePreviewOverlay, createImagePreviewEffect, type PreviewImage } from './ImagePreview';
@@ -120,7 +122,12 @@ import { RichComposerArea, type RichComposerChip } from './chat-input/RichCompos
 import { DropOverlay } from './chat-input/DropOverlay';
 import { QueuedMessages } from './chat-input/QueuedMessages';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
-import type { DroppedFile, ExtensionMessage, InitialWebviewState } from '../../shared/protocol';
+import type {
+  DroppedFile,
+  ExtensionMessage,
+  InitialWebviewState,
+  SessionTokenBreakdown,
+} from '../../shared/protocol';
 import {
   MAX_DROPPED_CONTENT_FILES,
   MAX_DROPPED_CONTENT_FILE_BYTES,
@@ -315,6 +322,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [showPermissionModePicker, setShowPermissionModePicker] = createSignal(false);
   const [showContextPopup, setShowContextPopup] = createSignal(false);
+  const [completeTokenBreakdown, setCompleteTokenBreakdown] = createSignal<{
+    rootId: string;
+    breakdown: SessionTokenBreakdown;
+  } | null>(null);
   const [showProviderLimitPopup, setShowProviderLimitPopup] = createSignal(false);
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
   const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
@@ -354,6 +365,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [isFocused, setIsFocused] = createSignal(false);
   const [historyIndex, setHistoryIndex] = createSignal<number | null>(null);
   const [historyDraft, setHistoryDraft] = createSignal('');
+  const [loadingOlderMessageHistory, setLoadingOlderMessageHistory] = createSignal(false);
   const [caretPosition, setCaretPosition] = createSignal(0);
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
@@ -1284,19 +1296,65 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     });
   }
 
-  const messageHistory = createMemo(() =>
-    state.messages
-      .filter((entry) => entry.info.role === 'user')
-      .map((entry) => getUserMessageHistoryText(entry.parts))
-      .filter((text): text is string => !!text)
-  );
+  const messageHistory = createMemo(() => {
+    const sessionId = composerSessionId();
+    if (!sessionId) return [];
+    const entries = [
+      ...getSessionHistoryPrompts(sessionId),
+      ...state.messages.filter((entry) => entry.info.sessionID === sessionId),
+    ];
+    const seen = new Set<string>();
+    return entries
+      .map((entry) => {
+        if (entry.info.role !== 'user' || seen.has(entry.info.id)) return null;
+        seen.add(entry.info.id);
+        return getUserMessageHistoryText(entry.parts);
+      })
+      .filter((text): text is string => !!text);
+  });
+
+  async function navigateToOlderMessageHistory(
+    sessionId: string,
+    previousLength: number,
+    previousIndex: number | null,
+    previousText: string
+  ) {
+    if (loadingOlderMessageHistory()) return;
+    setLoadingOlderMessageHistory(true);
+    try {
+      const loaded = await loadOlderSessionPrompts(sessionId);
+      if (
+        !loaded ||
+        composerSessionId() !== sessionId ||
+        historyIndex() !== previousIndex ||
+        inputText() !== previousText
+      ) {
+        return;
+      }
+
+      const history = messageHistory();
+      const added = history.length - previousLength;
+      if (added <= 0) return;
+      const nextIndex = previousIndex === null ? history.length - 1 : added - 1;
+      setHistoryIndex(nextIndex);
+      setComposerValue(history[nextIndex]!);
+    } finally {
+      setLoadingOlderMessageHistory(false);
+    }
+  }
 
   function navigateMessageHistory(direction: -1 | 1) {
     const history = messageHistory();
-    if (history.length === 0) return false;
-
     const currentIndex = historyIndex();
     if (currentIndex === null && inputText().length > 0) return false;
+
+    if (history.length === 0) {
+      const sessionId = composerSessionId();
+      if (direction !== -1 || !sessionId) return false;
+      setHistoryDraft(inputText());
+      void navigateToOlderMessageHistory(sessionId, 0, null, inputText());
+      return true;
+    }
 
     if (currentIndex === null) {
       setHistoryDraft(inputText());
@@ -1312,7 +1370,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (nextIndex === null) return false;
 
     if (nextIndex < 0) {
-      return false;
+      const sessionId = composerSessionId();
+      if (!sessionId) return false;
+      void navigateToOlderMessageHistory(sessionId, history.length, currentIndex, inputText());
+      return true;
     }
 
     if (nextIndex >= history.length) {
@@ -1739,7 +1800,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return ctx;
   });
 
-  const sessionTokenBreakdown = createMemo(() => {
+  const localSessionTokenBreakdown = createMemo(() => {
     const sessionId = composerSessionId();
     if (!sessionId) {
       return getSessionTreeTokenBreakdown([], [], [], '');
@@ -1752,6 +1813,54 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       rootId
     );
   });
+
+  const sessionTokenBreakdown = createMemo(() => {
+    const local = localSessionTokenBreakdown();
+    const sessionId = composerSessionId();
+    const rootId = sessionId ? getSessionTreeRootId(sessionId) || sessionId : null;
+    const complete = completeTokenBreakdown();
+    if (!rootId || complete?.rootId !== rootId) return local;
+
+    return {
+      ...local,
+      session:
+        complete.breakdown.session.total >= local.session.total
+          ? complete.breakdown.session
+          : local.session,
+      subagents:
+        complete.breakdown.subagents.total >= local.subagents.total
+          ? complete.breakdown.subagents
+          : local.subagents,
+      subagentCount: Math.max(local.subagentCount, complete.breakdown.subagentCount),
+    };
+  });
+
+  let tokenBreakdownRequestId = 0;
+  onCleanup(() => tokenBreakdownRequestId++);
+  async function loadCompleteTokenBreakdown() {
+    const sessionId = composerSessionId();
+    if (!sessionId) return;
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    const requestId = ++tokenBreakdownRequestId;
+    try {
+      const summary = await client.varro.session.diffSummary(rootId);
+      if (
+        requestId !== tokenBreakdownRequestId ||
+        (getSessionTreeRootId(composerSessionId()) || composerSessionId()) !== rootId ||
+        !summary.tokenBreakdown
+      ) {
+        return;
+      }
+      setCompleteTokenBreakdown({ rootId, breakdown: summary.tokenBreakdown });
+    } catch {}
+  }
+
+  function toggleContextPopup() {
+    const next = !showContextPopup();
+    closePopups(next ? 'context' : undefined);
+    setShowContextPopup(next);
+    if (next) void loadCompleteTokenBreakdown();
+  }
 
   const activeUsageLimit = createMemo(() => {
     const activeSessionId = composerSessionId();
@@ -2396,11 +2505,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             subagentTokens={sessionTokenBreakdown().subagents}
             subagentCount={sessionTokenBreakdown().subagentCount}
             contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
-            onToggleContextPopup={() => {
-              const next = !showContextPopup();
-              closePopups(next ? 'context' : undefined);
-              setShowContextPopup(next);
-            }}
+            onToggleContextPopup={toggleContextPopup}
             onCloseContextPopup={() => setShowContextPopup(false)}
             onCompactSession={() => {
               void compactSession();
@@ -2445,6 +2550,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
           connectedMcpCount={connectedMcpCount()}
+          onOpenMcps={() => setShowMcpPicker(true)}
           showPermissionControl={!composerEditingMessage()}
           permissionButtonRef={(el) => {
             permissionPickerRef = el;
@@ -2554,11 +2660,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           subagentTokens={sessionTokenBreakdown().subagents}
           subagentCount={sessionTokenBreakdown().subagentCount}
           contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
-          onToggleContextPopup={() => {
-            const next = !showContextPopup();
-            closePopups(next ? 'context' : undefined);
-            setShowContextPopup(next);
-          }}
+          onToggleContextPopup={toggleContextPopup}
           onCloseContextPopup={() => setShowContextPopup(false)}
           onCompactSession={() => {
             void compactSession();

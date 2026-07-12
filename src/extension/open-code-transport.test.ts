@@ -18,7 +18,7 @@ vi.mock('./util/opencode-request', () => ({
   getOpenCodeDirectoryHeaders: vi.fn(() => ({})),
   scopeOpenCodeRequest: vi.fn((baseUrl: string, path: string, directory?: string) => {
     const url = new URL(path, baseUrl);
-    if (directory) {
+    if (directory && !url.pathname.startsWith('/global/')) {
       url.searchParams.set('directory', directory);
       if (url.pathname.startsWith('/api/')) {
         url.searchParams.set('location[directory]', directory);
@@ -56,6 +56,19 @@ function createPendingEventResponse(signal: AbortSignal) {
                 { once: true }
               );
             }),
+        };
+      },
+    },
+  } as unknown as Response;
+}
+
+function createClosedEventResponse() {
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        return {
+          read: () => Promise.resolve({ value: undefined, done: true }),
         };
       },
     },
@@ -120,10 +133,67 @@ describe('OpenCodeTransport reconnect delay', () => {
     expect(warnMock).toHaveBeenCalledTimes(1);
     expect(warnMock).toHaveBeenCalledWith('Event stream error: network failed');
   });
+
+  it('keeps backing off when successful event stream responses close immediately', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const fetchMock = vi.fn().mockResolvedValue(createClosedEventResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createTransport() as unknown as {
+      startEventStream(): Promise<void>;
+      stopEventStream(): void;
+      eventReconnectDelay: number;
+    };
+
+    await transport.startEventStream();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(transport.eventReconnectDelay).toBe(2_000);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(transport.eventReconnectDelay).toBe(4_000);
+    transport.stopEventStream();
+  });
+
+  it('resets reconnect backoff after an event stream remains stable', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input, init) => {
+        signal = init?.signal as AbortSignal;
+        return createPendingEventResponse(signal);
+      })
+    );
+    const transport = createTransport() as unknown as {
+      startEventStream(): Promise<void>;
+      stopEventStream(): void;
+      eventReconnectDelay: number;
+      eventReconnectCount: number;
+    };
+    transport.eventReconnectDelay = 8_000;
+    transport.eventReconnectCount = 3;
+
+    const stream = transport.startEventStream();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(transport.eventReconnectDelay).toBe(8_000);
+    expect(transport.eventReconnectCount).toBe(3);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transport.eventReconnectDelay).toBe(1_000);
+    expect(transport.eventReconnectCount).toBe(0);
+
+    transport.stopEventStream();
+    await stream;
+  });
 });
 
 describe('OpenCodeTransport event stream path', () => {
-  it('subscribes to the v2 /api/event stream', async () => {
+  it('subscribes to the global event stream', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -138,10 +208,10 @@ describe('OpenCodeTransport event stream path', () => {
 
     await transport.startEventStream();
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/api/event');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/global/event');
   });
 
-  it('scopes the v2 /api/event stream with SDK-compatible query params and headers', async () => {
+  it('sends the workspace header without adding query scope to the global stream', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -156,15 +226,36 @@ describe('OpenCodeTransport event stream path', () => {
 
     await transport.startEventStream();
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      'http://localhost:4096/api/event?directory=%2Frepo&location%5Bdirectory%5D=%2Frepo'
-    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:4096/global/event');
     expect(scopeOpenCodeRequest).toHaveBeenCalledWith(
       'http://localhost:4096',
-      '/api/event',
+      '/global/event',
       '/repo'
     );
     expect(getOpenCodeDirectoryHeaders).toHaveBeenCalledWith('/repo');
+  });
+
+  it('filters global event envelopes to the active workspace', () => {
+    const transport = createTransport() as unknown as {
+      eventStreamDirectory: string;
+      processSseChunk(chunk: string): void;
+    };
+    transport.eventStreamDirectory = '/repo-a';
+    const matchingEvent = {
+      directory: '/repo-a',
+      payload: { type: 'session.created', properties: { info: { id: 'session-1' } } },
+    };
+
+    transport.processSseChunk(
+      `data: ${JSON.stringify({
+        directory: '/repo-b',
+        payload: { type: 'session.created', properties: { info: { id: 'session-2' } } },
+      })}`
+    );
+    transport.processSseChunk(`data: ${JSON.stringify(matchingEvent)}`);
+
+    expect(emitEventMock).toHaveBeenCalledTimes(1);
+    expect(emitEventMock).toHaveBeenCalledWith(matchingEvent);
   });
 
   it('tracks direct v2 permission events from properties payloads', () => {
@@ -246,7 +337,7 @@ describe('OpenCodeTransport event stream path', () => {
     let eventRequests = 0;
     const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
-      if (url.pathname !== '/api/event') {
+      if (url.pathname !== '/global/event') {
         return Promise.resolve({ ok: true, text: async () => '{}' } as Response);
       }
       eventRequests += 1;
@@ -296,7 +387,7 @@ describe('OpenCodeTransport event stream path', () => {
     let eventRequests = 0;
     const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
-      if (url.pathname !== '/api/event') {
+      if (url.pathname !== '/global/event') {
         return Promise.resolve({ ok: true, text: async () => '{}' } as Response);
       }
       eventRequests += 1;
@@ -337,7 +428,7 @@ describe('OpenCodeTransport event stream path', () => {
     let eventRequests = 0;
     const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
-      if (url.pathname !== '/api/event') {
+      if (url.pathname !== '/global/event') {
         return Promise.resolve({ ok: true, text: async () => '{}' } as Response);
       }
       eventRequests += 1;
@@ -377,7 +468,7 @@ describe('OpenCodeTransport event stream path', () => {
     let eventRequests = 0;
     const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
-      if (url.pathname !== '/api/event') {
+      if (url.pathname !== '/global/event') {
         return Promise.resolve({ ok: true, text: async () => '{}' } as Response);
       }
       eventRequests += 1;

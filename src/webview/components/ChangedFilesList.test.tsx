@@ -54,6 +54,14 @@ function fileEditPart(path: string): Part {
   };
 }
 
+function largeFileEditPart(path: string): Part {
+  const part = fileEditPart(path);
+  if (part.type === 'tool' && part.state.status === 'completed') {
+    part.state.input = { path, additions: 3_392, deletions: 30_098 };
+  }
+  return part;
+}
+
 describe('ChangedFilesList', () => {
   beforeEach(() => {
     resetDefaultAppState();
@@ -111,6 +119,17 @@ describe('ChangedFilesList', () => {
     expect(container?.textContent).toContain('1');
     expect(container?.textContent).toContain('+3');
     expect(container?.textContent).toContain('-1');
+  });
+
+  it('compacts large line counts in the header', () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session()]);
+    setState('messages', [{ info: assistantMessage(), parts: [largeFileEditPart('src/app.ts')] }]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+
+    expect(container?.querySelector('.changed-files-lines')?.textContent).toContain('+3392');
+    expect(container?.querySelector('.changed-files-lines')?.textContent).toContain('-30K');
   });
 
   it('hides backend summary files for an idle session that made no edits', () => {

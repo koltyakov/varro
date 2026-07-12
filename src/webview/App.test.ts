@@ -21,6 +21,10 @@ vi.mock('./lib/bridge', () => ({
   postMessage: appMocks.postMessage,
 }));
 
+vi.mock('./components/Chat', () => ({
+  Chat: () => 'New Chat',
+}));
+
 vi.mock('./components/ralph/RalphForm', () => ({
   RalphForm: () => {
     if (appMocks.ralphError.current) throw appMocks.ralphError.current;
@@ -29,7 +33,13 @@ vi.mock('./components/ralph/RalphForm', () => ({
 }));
 
 import { AppRoot } from './App';
-import { resetDefaultAppState, setError, setState, state } from './lib/state';
+import {
+  resetDefaultAppState,
+  setConnectionInitialized,
+  setError,
+  setState,
+  state,
+} from './lib/state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -96,6 +106,19 @@ describe('AppRoot', () => {
     cleanup = undefined;
 
     expect(appMocks.cleanupBridge).toHaveBeenCalledOnce();
+  });
+
+  it('shows a loading screen until the recent view is restored', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    mountAppRoot();
+
+    expect(container?.textContent).toContain('Loading workspace...');
+    expect(container?.textContent).not.toContain('New Chat');
+
+    setConnectionInitialized(true);
+
+    expect(container?.textContent).not.toContain('Loading workspace...');
+    expect(container?.textContent).toContain('New Chat');
   });
 
   it('renders the root fallback when app initialization throws', () => {

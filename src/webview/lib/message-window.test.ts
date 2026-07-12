@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Message, Part } from '../types';
 import {
+  cacheSessionHistoryPage,
+  getPrefetchedSessionHistory,
   getSessionHistoryCursor,
+  getSessionHistoryPrompts,
   isSessionHistoryTruncated,
   markSessionHistoryTruncated,
   mergeOlderHistory,
   mergeWindowedHistory,
   resetMessageWindowState,
   setSessionHistoryCursor,
+  setSessionHistoryPrompts,
+  takeCachedSessionHistoryPage,
 } from './message-window';
 
 function entry(id: string, sessionID = 'session-1'): { info: Message; parts: Part[] } {
@@ -94,6 +99,41 @@ describe('history window state', () => {
     setSessionHistoryCursor('session-1');
     expect(getSessionHistoryCursor('session-1')).toBeUndefined();
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
+  });
+
+  it('tracks user prompts fetched from behind the visible history boundary', () => {
+    const prompts = [entry('user-1')];
+    setSessionHistoryPrompts('session-1', prompts);
+
+    expect(getSessionHistoryPrompts('session-1')).toEqual(prompts);
+    resetMessageWindowState();
+    expect(getSessionHistoryPrompts('session-1')).toEqual([]);
+  });
+
+  it('stores prefetched history pages until the visible history consumes them', () => {
+    const page = [entry('user-1')];
+    cacheSessionHistoryPage('session-1', 'cursor-1', page);
+
+    expect(takeCachedSessionHistoryPage('session-1', 'cursor-1')).toBe(page);
+    expect(takeCachedSessionHistoryPage('session-1', 'cursor-1')).toBeUndefined();
+  });
+
+  it('returns prefetched pages in chronological order', () => {
+    cacheSessionHistoryPage('session-1', 'cursor-1', [entry('m3'), entry('m4')]);
+    cacheSessionHistoryPage('session-1', 'cursor-2', [entry('m1'), entry('m2')]);
+
+    expect(getPrefetchedSessionHistory('session-1').map((item) => item.info.id)).toEqual([
+      'm1',
+      'm2',
+      'm3',
+      'm4',
+    ]);
+
+    takeCachedSessionHistoryPage('session-1', 'cursor-1');
+    expect(getPrefetchedSessionHistory('session-1').map((item) => item.info.id)).toEqual([
+      'm1',
+      'm2',
+    ]);
   });
 });
 

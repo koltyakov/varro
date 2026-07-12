@@ -211,12 +211,13 @@ function extractCodexSparkWindows(record: Record<string, unknown>, checkedAt: nu
   const primaryWindow = asRecord(rateLimit?.primary_window ?? rateLimit?.primaryWindow);
   const secondaryWindow = asRecord(rateLimit?.secondary_window ?? rateLimit?.secondaryWindow);
   const explicitWindows = collectCodexSparkWindows(record, checkedAt);
-  if (explicitWindows.length > 0) return explicitWindows;
-  if (!sparkRecord) return [];
+  if (!sparkRecord) return explicitWindows;
 
+  const primaryID = getCodexPrimaryWindowID('', primaryWindow, secondaryWindow);
   return dedupeCodexWindows(
     [
-      buildCodexWindow('spark_five_hour', primaryWindow, checkedAt),
+      ...explicitWindows,
+      buildCodexWindow(primaryID ? `spark_${primaryID}` : '', primaryWindow, checkedAt),
       buildCodexWindow('spark_seven_day', secondaryWindow, checkedAt),
     ].filter((window): window is ProviderLimitWindow => window != null)
   );

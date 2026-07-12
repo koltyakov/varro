@@ -1,7 +1,7 @@
 import { ErrorBoundary, Show, onCleanup, onMount } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
 import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
-import { defaultAppState } from './lib/state';
+import { connectionInitialized, defaultAppState } from './lib/state';
 import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
 import { RalphForm } from './components/ralph/RalphForm';
@@ -34,6 +34,9 @@ const showChat = () =>
   defaultAppState.state.serverStatus.state === 'running' &&
   !(defaultAppState.state.providersLoaded && defaultAppState.state.providers.length === 0);
 
+const isRestoringWorkspace = () =>
+  defaultAppState.state.serverStatus.state === 'running' && !connectionInitialized();
+
 function renderErrorFallback(err: Error) {
   return <ErrorFallback err={err} />;
 }
@@ -47,8 +50,10 @@ export function App() {
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
-      <Show when={showChat()} fallback={<ServerStatus />}>
-        <Chat />
+      <Show when={!isRestoringWorkspace()} fallback={<WorkspaceLoading />}>
+        <Show when={showChat()} fallback={<ServerStatus />}>
+          <Chat />
+        </Show>
       </Show>
       <RalphForm />
       <Show when={defaultAppState.error()}>
@@ -65,6 +70,32 @@ export function App() {
           </button>
         </div>
       </Show>
+    </div>
+  );
+}
+
+function WorkspaceLoading() {
+  return (
+    <div
+      class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center"
+      role="status"
+      aria-label="Loading workspace"
+    >
+      <div class="flex items-center gap-2" aria-hidden="true">
+        <span class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft" />
+        <span
+          class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft"
+          style={{ 'animation-delay': '0.3s' }}
+        />
+        <span
+          class="h-2 w-2 rounded-full bg-vscode-accent animate-pulse-soft"
+          style={{ 'animation-delay': '0.6s' }}
+        />
+      </div>
+      <div>
+        <p class="text-[13px] font-medium text-vscode-fg">Loading workspace...</p>
+        <p class="mt-1.5 text-[12px] text-vscode-muted/70">Restoring your recent view</p>
+      </div>
     </div>
   );
 }

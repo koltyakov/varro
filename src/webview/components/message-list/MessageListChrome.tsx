@@ -15,6 +15,7 @@ export function StickyUserMessagePreviewCard(props: {
   preview: StickyUserMessagePreview;
   onClick?: (preview: StickyUserMessagePreview) => void;
   title?: string;
+  loading?: boolean;
 }) {
   const isClickable = () => !!props.onClick;
 
@@ -24,11 +25,19 @@ export function StickyUserMessagePreviewCard(props: {
         <div class="latest-user-message-sticky-top" />
         <div class="latest-user-message-sticky-shell">
           <div
-            class={`latest-user-message-sticky${isClickable() ? ' latest-user-message-sticky-clickable' : ''}`}
-            title={props.title}
-            onClick={() => props.onClick?.(props.preview)}
+            class={`latest-user-message-sticky${isClickable() ? ' latest-user-message-sticky-clickable' : ''}${props.loading ? ' is-loading' : ''}`}
+            title={props.loading ? 'Loading message' : props.title}
+            onClick={() => {
+              if (!props.loading) props.onClick?.(props.preview);
+            }}
           >
             <div class="latest-user-message-sticky-text">{props.preview.text}</div>
+            <Show when={props.loading}>
+              <div class="latest-user-message-sticky-loading">
+                <span class="latest-user-message-sticky-spinner" aria-hidden="true" />
+                <span>Loading…</span>
+              </div>
+            </Show>
             <Show when={props.preview.attachmentCount > 0 || props.preview.imageCount > 0}>
               <div class="latest-user-message-sticky-meta" aria-hidden="true">
                 <Show when={props.preview.imageCount > 0}>

@@ -193,4 +193,29 @@ describe('ChatInput perf helpers', () => {
       cacheWrite: 0,
     });
   });
+
+  it('uses the root session snapshot when only a message window is loaded', () => {
+    expect(
+      sumSessionTreeTokens(
+        [{ info: assistantMessage('loaded-root-message', { input: 10, output: 5 }) }],
+        [
+          session('session-1', undefined, {
+            input: 1_000,
+            output: 200,
+            reasoning: 50,
+            cache: { read: 100, write: 25 },
+          }),
+        ],
+        ['session-1'],
+        'session-1'
+      )
+    ).toEqual({
+      total: 1_375,
+      input: 1_000,
+      output: 200,
+      reasoning: 50,
+      cacheRead: 100,
+      cacheWrite: 25,
+    });
+  });
 });

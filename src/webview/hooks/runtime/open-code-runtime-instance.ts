@@ -27,11 +27,18 @@ import {
   isSessionTreeStatusWorking,
 } from '../../lib/state';
 import {
+  cacheSessionHistoryPage,
+  clearCachedSessionHistoryPages,
   getSessionHistoryCursor,
+  getSessionHistoryPromptCursor,
+  getSessionHistoryPrompts,
   MESSAGE_HISTORY_WINDOW,
   mergeOlderHistory,
   mergeWindowedHistory,
+  setSessionHistoryPrompts,
+  setSessionHistoryPromptCursor,
   setSessionHistoryCursor,
+  takeCachedSessionHistoryPage,
 } from '../../lib/message-window';
 import { startNewChatDraft } from '../../lib/new-chat-draft';
 import {
@@ -93,6 +100,8 @@ export interface OpenCodeRuntime {
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
   selectSession(id: string, options?: { markSeen?: boolean }): Promise<void>;
   loadFullSessionHistory(sessionId: string): Promise<void>;
+  loadOlderSessionHistoryPage(sessionId: string): Promise<boolean>;
+  loadOlderSessionPrompts(sessionId: string): Promise<boolean>;
   createSession(title?: string, initialPermissionMode?: PermissionMode): Promise<string | null>;
   renameSession(id: string, title: string): Promise<boolean>;
   forkSession(id: string, messageID?: string): Promise<string | null>;
@@ -256,26 +265,83 @@ function isNotFoundError(err: unknown) {
   return err instanceof Error && /^404\b/.test(err.message);
 }
 
-async function fetchSessionMessages(sessionId: string): Promise<SessionEntry[]> {
+async function fetchSessionMessages(
+  sessionId: string,
+  options?: { resetHistoryWindow?: boolean }
+): Promise<SessionEntry[]> {
   const incoming = await client.session.messages(sessionId, { limit: MESSAGE_HISTORY_WINDOW });
   const current = appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId);
-  if (current.length === 0) {
+  if (options?.resetHistoryWindow || current.length === 0) {
+    clearCachedSessionHistoryPages(sessionId);
     setSessionHistoryCursor(sessionId, incoming.nextCursor);
+    setSessionHistoryPrompts(sessionId, []);
+    setSessionHistoryPromptCursor(sessionId, incoming.nextCursor);
+    if (incoming.nextCursor) {
+      void loadSessionBoundaryPrompts(sessionId, incoming.nextCursor);
+    }
   }
   return mergeWindowedHistory(current, incoming);
+}
+
+const promptHistoryLoads = new Map<string, Promise<boolean>>();
+
+function loadOlderSessionPrompts(sessionId: string, initialCursor?: string): Promise<boolean> {
+  const existing = promptHistoryLoads.get(sessionId);
+  if (existing) return existing;
+
+  const load = (async () => {
+    let cursor = initialCursor ?? getSessionHistoryPromptCursor(sessionId);
+    const visited = new Set<string>();
+    while (cursor && !visited.has(cursor)) {
+      visited.add(cursor);
+      const page = await client.session.messages(sessionId, {
+        limit: MESSAGE_HISTORY_WINDOW,
+        before: cursor,
+      });
+      cacheSessionHistoryPage(sessionId, cursor, page);
+      setSessionHistoryPromptCursor(sessionId, page.nextCursor);
+      const prompts = page.filter((entry) => entry.info.role === 'user');
+      if (prompts.length > 0) {
+        setSessionHistoryPrompts(
+          sessionId,
+          mergeOlderHistory(getSessionHistoryPrompts(sessionId), prompts)
+        );
+        return true;
+      }
+      cursor = page.nextCursor;
+    }
+    return false;
+  })()
+    .catch((err: unknown) => {
+      logError('loadOlderSessionPrompts', err);
+      return false;
+    })
+    .finally(() => promptHistoryLoads.delete(sessionId));
+  promptHistoryLoads.set(sessionId, load);
+  return load;
+}
+
+function loadSessionBoundaryPrompts(sessionId: string, initialCursor: string): Promise<void> {
+  const existing = promptHistoryLoads.get(sessionId);
+  if (!existing) return loadOlderSessionPrompts(sessionId, initialCursor).then(() => {});
+  return existing.then(() => {
+    if (getSessionHistoryPromptCursor(sessionId) !== initialCursor) return;
+    return loadOlderSessionPrompts(sessionId, initialCursor).then(() => {});
+  });
 }
 
 async function loadSessionWithMessages(sessionId: string): Promise<{
   session: Session;
   messages: SessionEntry[];
 }> {
-  const session = await client.session.get(sessionId);
-  try {
-    return { session, messages: await fetchSessionMessages(sessionId) };
-  } catch (err) {
-    if (isNotFoundError(err)) return { session, messages: [] };
-    throw err;
-  }
+  const messagesPromise = fetchSessionMessages(sessionId, { resetHistoryWindow: true }).catch(
+    (err: unknown) => {
+      if (isNotFoundError(err)) return [];
+      throw err;
+    }
+  );
+  const [session, messages] = await Promise.all([client.session.get(sessionId), messagesPromise]);
+  return { session, messages };
 }
 
 async function loadSessionMessagesAllowingEmpty(sessionId: string): Promise<SessionEntry[]> {
@@ -369,6 +435,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let latestPermissionSyncGeneration = 0;
   let permissionSnapshotGeneration = 0;
   const fullHistoryLoads = new Map<string, Promise<void>>();
+  const historyPageLoads = new Map<string, Promise<boolean>>();
   const pendingAbortRetryAttempts = new Map<string, number | null>();
   const statusSnapshotStartedAt = new WeakMap<Record<string, SessionStatus>, number>();
   const statusSnapshots = createSessionStatusSnapshotCoordinator(() => client.session.status());
@@ -538,6 +605,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         for (const cleanup of eventHandlerCleanups) cleanup();
         eventHandlerCleanups = [];
         initialized = false;
+        uiStore.setConnectionInitialized(false);
         initializing = false;
         currentWorkspacePath = null;
         connectionGeneration = 0;
@@ -864,6 +932,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setShowSessionPicker: uiStore.setShowSessionPicker,
     setInitialized: (value) => {
       initialized = value;
+      uiStore.setConnectionInitialized(value);
     },
     setError: uiStore.setError,
     nextConnectionGeneration: () => ++connectionGeneration,
@@ -1195,28 +1264,48 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     if (existing) return existing;
 
     const load = (async () => {
-      try {
-        let cursor = getSessionHistoryCursor(sessionId);
-        while (cursor && appStore.state.activeSessionId === sessionId) {
-          const page = await client.session.messages(sessionId, {
-            limit: MESSAGE_HISTORY_WINDOW,
-            before: cursor,
-          });
-          if (appStore.state.activeSessionId !== sessionId) return;
-          const current = appStore.state.messages.filter(
-            (entry) => entry.info.sessionID === sessionId
-          );
-          sessionStore.setMessagesIncremental(mergeOlderHistory(current, page));
-          cursor = page.nextCursor;
-          setSessionHistoryCursor(sessionId, cursor);
-        }
-      } catch (err) {
-        logError('loadFullSessionHistory', err);
+      while (getSessionHistoryCursor(sessionId) && appStore.state.activeSessionId === sessionId) {
+        if (!(await loadOlderSessionHistoryPage(sessionId))) return;
       }
     })().finally(() => {
       fullHistoryLoads.delete(sessionId);
     });
     fullHistoryLoads.set(sessionId, load);
+    return load;
+  }
+
+  function loadOlderSessionHistoryPage(sessionId: string): Promise<boolean> {
+    const existing = historyPageLoads.get(sessionId);
+    if (existing) return existing;
+
+    const load = (async () => {
+      const cursor = getSessionHistoryCursor(sessionId);
+      if (!cursor || appStore.state.activeSessionId !== sessionId) return false;
+      try {
+        let page = takeCachedSessionHistoryPage(sessionId, cursor);
+        if (!page) {
+          await promptHistoryLoads.get(sessionId);
+          page = takeCachedSessionHistoryPage(sessionId, cursor);
+        }
+        page ??= await client.session.messages(sessionId, {
+          limit: MESSAGE_HISTORY_WINDOW,
+          before: cursor,
+        });
+        if (appStore.state.activeSessionId !== sessionId) return false;
+        const current = appStore.state.messages.filter(
+          (entry) => entry.info.sessionID === sessionId
+        );
+        sessionStore.setMessagesIncremental(mergeOlderHistory(current, page));
+        const nextCursor = page.nextCursor === cursor ? undefined : page.nextCursor;
+        setSessionHistoryCursor(sessionId, nextCursor);
+        if (nextCursor) void loadSessionBoundaryPrompts(sessionId, nextCursor);
+        return page.length > 0;
+      } catch (err) {
+        logError('loadOlderSessionHistoryPage', err);
+        return false;
+      }
+    })().finally(() => historyPageLoads.delete(sessionId));
+    historyPageLoads.set(sessionId, load);
     return load;
   }
 
@@ -1371,6 +1460,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     applySessionMcps,
     selectSession,
     loadFullSessionHistory,
+    loadOlderSessionHistoryPage,
+    loadOlderSessionPrompts,
     createSession,
     renameSession,
     forkSession,

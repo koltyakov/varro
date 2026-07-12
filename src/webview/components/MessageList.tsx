@@ -32,8 +32,13 @@ import { isAssistantMessage } from '../lib/message-metrics';
 import type { AssistantMessage, Part } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
 import { editingMessage } from '../lib/message-edit-state';
-import { isSessionHistoryTruncated } from '../lib/message-window';
-import { loadFullSessionHistory, recheckSessionStatus } from '../hooks/useOpenCode';
+import {
+  getPrefetchedSessionHistory,
+  getSessionHistoryPrompts,
+  isSessionHistoryTruncated,
+  mergeOlderHistory,
+} from '../lib/message-window';
+import { loadOlderSessionHistoryPage, recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
 import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
@@ -227,7 +232,7 @@ export function MessageList() {
     messageInfoVersion();
     return untrack(() => {
       const result = new Map<string, number>();
-      for (const [index, entry] of state.messages.entries()) {
+      for (const [index, entry] of messages().entries()) {
         result.set(entry.info.id, index);
       }
       return result;
@@ -264,9 +269,7 @@ export function MessageList() {
   const nextVisibleUserMessageTopByMessageId = createMemo(() => {
     observedVisibleMessageVersion();
     messageStructureVersion();
-    return untrack(() =>
-      getNextVisibleUserMessageTopMap(state.messages, observedVisibleMessageBounds)
-    );
+    return untrack(() => getNextVisibleUserMessageTopMap(messages(), observedVisibleMessageBounds));
   });
 
   function flushStickyPreviewViewportState() {
@@ -603,7 +606,29 @@ export function MessageList() {
       }
     }
 
-    const preview = getStickyUserMessagePreview(messages(), firstVisibleMessageIndex);
+    const visibleMessages = messages();
+    let preview = getStickyUserMessagePreview(visibleMessages, firstVisibleMessageIndex);
+    let usesBoundaryPrompt = false;
+    if (
+      !preview &&
+      firstVisibleMessageIndex !== null &&
+      visibleMessages[firstVisibleMessageIndex]?.info.role === 'assistant'
+    ) {
+      const loadedMessageIds = new Set(visibleMessages.map((entry) => entry.info.id));
+      const boundaryPrompt = getSessionHistoryPrompts(state.activeSessionId)
+        .toReversed()
+        .find((entry) => !loadedMessageIds.has(entry.info.id));
+      if (boundaryPrompt) {
+        const boundaryPreview = getStickyUserMessagePreview(
+          [boundaryPrompt, visibleMessages[firstVisibleMessageIndex]!],
+          1
+        );
+        if (boundaryPreview) {
+          preview = { ...boundaryPreview, index: -1 };
+          usesBoundaryPrompt = true;
+        }
+      }
+    }
     if (!preview) return null;
 
     const previewElement = getStickyUserMessageSourceElement(preview.id);
@@ -619,7 +644,7 @@ export function MessageList() {
         : null;
     const shouldShow = shouldShowStickyUserMessagePreview({
       preview,
-      shouldVirtualize: virtualized,
+      shouldVirtualize: virtualized || usesBoundaryPrompt,
       visibleRange: currentVisibleRange,
       rowTop: rowRect ? rowRect.top - containerRect.top : null,
       rowBottom: rowRect ? rowRect.bottom - containerRect.top : null,
@@ -1171,6 +1196,13 @@ export function MessageList() {
         if (sessionId) startFollowLoop(sessionId);
       });
     }
+    if (
+      top <= 24 &&
+      showTruncatedHistoryBanner() &&
+      (!autoScrollEnabled || decision.nextAutoScroll === false)
+    ) {
+      void handleLoadOlderHistory();
+    }
   }
 
   function onWheel(event: WheelEvent) {
@@ -1567,6 +1599,19 @@ export function MessageList() {
     () => new Map<string, AssistantFileEditStackGroup | null>()
   );
 
+  const assistantDialogMessages = createMemo(() => {
+    messageStructureVersion();
+    return mergeOlderHistory(state.messages, getPrefetchedSessionHistory(state.activeSessionId));
+  });
+
+  const collectingLeadingDialogStats = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId || !isSessionHistoryTruncated(sessionId)) return false;
+    const firstVisible = state.messages.find((entry) => entry.info.sessionID === sessionId);
+    if (!firstVisible || firstVisible.info.role === 'user') return false;
+    return !getPrefetchedSessionHistory(sessionId).some((entry) => entry.info.role === 'user');
+  });
+
   const assistantDialogSummaryMap = createMemo(() => {
     messageStructureVersion();
     const activeStatusType = state.activeSessionId
@@ -1586,10 +1631,12 @@ export function MessageList() {
         ? { input: session.tokens.input, output: session.tokens.output }
         : undefined,
     }));
+    const dialogMessages = assistantDialogMessages();
     return untrack(() =>
-      getAssistantDialogSummaryMap(state.messages, renderedMessageIds(), {
+      getAssistantDialogSummaryMap(dialogMessages, renderedMessageIds(), {
         sessions,
         suppressTrailingSummary,
+        collectLeadingSummaryStats: collectingLeadingDialogStats(),
       })
     );
   });
@@ -1606,7 +1653,7 @@ export function MessageList() {
     return untrack(
       () =>
         new Set(
-          getAssistantDialogSummaryMap(state.messages, undefined, {
+          getAssistantDialogSummaryMap(assistantDialogMessages(), undefined, {
             suppressTrailingSummary,
           }).keys()
         )
@@ -1634,34 +1681,92 @@ export function MessageList() {
       return;
     }
     if (shouldVirtualize()) {
-      const nextScrollTop = virtualMetrics().prefix[preview.index] ?? 0;
+      const messageIndex = messages().findIndex((entry) => entry.info.id === preview.id);
+      if (messageIndex < 0) return;
+      const nextScrollTop = virtualMetrics().prefix[messageIndex] ?? 0;
       containerRef.scrollTop = nextScrollTop;
       setScrollTop(nextScrollTop);
       setStickyPreviewScrollTop(nextScrollTop);
+      requestAnimationFrame(() => {
+        const mountedRow = [
+          ...(containerRef?.querySelectorAll<HTMLElement>('[data-msg-id]') ?? []),
+        ].find((element) => element.dataset.msgId === preview.id);
+        mountedRow?.scrollIntoView({ block: 'start' });
+      });
     }
   }
 
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {
+    if (loadingStickyPreviewId()) return;
     followModeLocked = false;
     pinnedToBottom = false;
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
     cancelPendingScroll();
     if (autoScroll()) setAutoScroll(false);
-    scrollMessageIntoView(preview);
+    if (messages().some((entry) => entry.info.id === preview.id)) {
+      scrollMessageIntoView(preview);
+      return;
+    }
+    const sessionId = state.activeSessionId;
+    if (sessionId) {
+      setLoadingStickyPreviewId(preview.id);
+      void loadAndScrollToStickyPreview(sessionId, preview);
+    }
+  }
+
+  async function loadAndScrollToStickyPreview(
+    sessionId: string,
+    preview: StickyUserMessagePreview
+  ) {
+    setLoadingOlderHistory(true);
+    try {
+      while (
+        state.activeSessionId === sessionId &&
+        !messages().some((entry) => entry.info.id === preview.id)
+      ) {
+        if (!(await loadOlderSessionHistoryPage(sessionId))) break;
+      }
+    } finally {
+      setLoadingOlderHistory(false);
+    }
+    if (state.activeSessionId !== sessionId) {
+      setLoadingStickyPreviewId(null);
+      return;
+    }
+    requestAnimationFrame(() => {
+      scrollMessageIntoView(preview);
+      setLoadingStickyPreviewId(null);
+    });
   }
 
   const stickyPreviewTitle = 'Click to scroll to message';
 
-  const [loadingFullHistory, setLoadingFullHistory] = createSignal(false);
-  async function handleLoadFullHistory() {
+  const [loadingStickyPreviewId, setLoadingStickyPreviewId] = createSignal<string | null>(null);
+  const [loadingOlderHistory, setLoadingOlderHistory] = createSignal(false);
+  async function handleLoadOlderHistory() {
     const sessionId = state.activeSessionId;
-    if (!sessionId || loadingFullHistory()) return;
-    setLoadingFullHistory(true);
+    const container = containerRef;
+    if (!sessionId || !container || loadingOlderHistory()) return;
+    const previousScrollHeight = container.scrollHeight;
+    const previousScrollTop = container.scrollTop;
+    setLoadingOlderHistory(true);
     try {
-      await loadFullSessionHistory(sessionId);
+      const loaded = await loadOlderSessionHistoryPage(sessionId);
+      if (!loaded || state.activeSessionId !== sessionId) return;
+      requestAnimationFrame(() => {
+        if (state.activeSessionId !== sessionId || !containerRef) return;
+        const heightDelta = containerRef.scrollHeight - previousScrollHeight;
+        suppressSyncScrollTop = true;
+        containerRef.scrollTop = previousScrollTop + Math.max(0, heightDelta);
+        suppressSyncScrollTop = false;
+        batch(() => {
+          setScrollTop(containerRef!.scrollTop);
+          setViewportHeight(containerRef!.clientHeight);
+        });
+      });
     } finally {
-      setLoadingFullHistory(false);
+      setLoadingOlderHistory(false);
     }
   }
 
@@ -1678,13 +1783,14 @@ export function MessageList() {
       >
         <div
           ref={trackRef}
-          class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}`}
+          class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}${showTruncatedHistoryBanner() && scrollTop() <= 24 ? ' history-boundary-visible' : ''}`}
         >
           <Show when={showStickyUserPrompt() && stickyUserMessagePreview()}>
             {(preview) => (
               <StickyUserMessagePreviewCard
                 preview={preview()}
                 title={stickyPreviewTitle}
+                loading={loadingStickyPreviewId() === preview().id}
                 onClick={handleStickyPreviewClick}
               />
             )}
@@ -1720,19 +1826,10 @@ export function MessageList() {
             }
           >
             <Show when={showTruncatedHistoryBanner()}>
-              <div class="message-history-banner" role="status">
-                <span class="message-history-banner-text">
-                  Showing the most recent messages only.
-                </span>
-                <button
-                  type="button"
-                  class="message-history-banner-btn"
-                  disabled={loadingFullHistory()}
-                  onClick={() => void handleLoadFullHistory()}
-                >
-                  {loadingFullHistory() ? 'Loading…' : 'Load full history'}
-                </button>
-              </div>
+              <div
+                class={`message-history-banner${loadingOlderHistory() ? ' is-loading' : ''}`}
+                aria-hidden="true"
+              />
             </Show>
             <VirtualizedContent
               messages={messages()}

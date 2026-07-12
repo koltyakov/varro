@@ -28,6 +28,14 @@ export function formatContextLimit(value: number) {
   return String(value);
 }
 
+export function formatEditCount(value: number) {
+  if (value < 10_000) return String(value);
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 export function formatLabelWithProvider(
   label: string | null | undefined,
   provider: string | null | undefined

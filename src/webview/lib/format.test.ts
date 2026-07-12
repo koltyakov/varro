@@ -3,6 +3,7 @@ import {
   formatAgentInitial,
   formatAgentLabel,
   formatContextLimit,
+  formatEditCount,
   formatLabelWithProvider,
   formatProviderLimitCompact,
   formatProviderLimitCompactPrefix,
@@ -65,6 +66,13 @@ describe('format helpers', () => {
     expect(formatContextLimit(1_500)).toBe('2k');
     expect(formatContextLimit(1_000_000)).toBe('1.0M');
     expect(formatContextLimit(12_000_000)).toBe('12M');
+  });
+
+  it('compacts large edit counts', () => {
+    expect(formatEditCount(9_999)).toBe('9999');
+    expect(formatEditCount(10_000)).toBe('10K');
+    expect(formatEditCount(30_098)).toBe('30K');
+    expect(formatEditCount(10_000_000)).toBe('10M');
   });
 
   it('appends provider names in parentheses', () => {

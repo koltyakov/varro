@@ -6,6 +6,72 @@ export type WebviewAssetContent = {
   cssContent: string;
 };
 
+const LOADING_STYLES = `
+html, body, #root { width: 100%; height: 100%; margin: 0; }
+body { background: var(--vscode-sideBar-background, #181818); }
+.varro-startup-loading {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 40px 32px;
+  text-align: center;
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  color: var(--vscode-foreground, #cccccc);
+}
+.varro-startup-dots { display: flex; gap: 8px; }
+.varro-startup-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--vscode-focusBorder, #007fd4);
+  animation: varro-startup-pulse 1.5s ease-in-out infinite;
+}
+.varro-startup-dot:nth-child(2) { animation-delay: 0.3s; }
+.varro-startup-dot:nth-child(3) { animation-delay: 0.6s; }
+.varro-startup-title { margin: 0; font-size: 13px; font-weight: 500; }
+.varro-startup-detail {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #999999);
+  opacity: 0.7;
+}
+@keyframes varro-startup-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}`;
+
+const LOADING_MARKUP = `<div class="varro-startup-loading" role="status" aria-label="Loading workspace">
+    <div class="varro-startup-dots" aria-hidden="true">
+      <span class="varro-startup-dot"></span>
+      <span class="varro-startup-dot"></span>
+      <span class="varro-startup-dot"></span>
+    </div>
+    <div>
+      <p class="varro-startup-title">Loading workspace...</p>
+      <p class="varro-startup-detail">Restoring your recent view</p>
+    </div>
+  </div>`;
+
+export function renderWebviewLoadingHtml() {
+  return /*html*/ `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
+  <title>Varro</title>
+  <style>${LOADING_STYLES}</style>
+</head>
+<body>
+  <div id="root">${LOADING_MARKUP}</div>
+</body>
+</html>`;
+}
+
 export function renderWebviewHtml(
   cspSource: string,
   initialState: InitialWebviewState,
@@ -22,10 +88,10 @@ export function renderWebviewHtml(
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
   <title>Varro</title>
-  <style>${assets.cssContent}</style>
+  <style>${LOADING_STYLES}\n${assets.cssContent}</style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">${LOADING_MARKUP}</div>
   <script nonce="${nonce}">
     (function() {
       var active = true;

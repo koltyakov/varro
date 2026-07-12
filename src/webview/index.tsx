@@ -48,6 +48,7 @@ export function bootstrap(root: HTMLElement) {
   };
 
   try {
+    root.replaceChildren();
     dispose = render(() => <AppRoot />, root);
     clearStartupHandlers();
   } catch {

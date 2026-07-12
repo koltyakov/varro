@@ -204,6 +204,8 @@ export interface AppStateInstance {
   setLoadingLastActivityAt: Setter<number | null>;
   error: Accessor<string | null>;
   setError: Setter<string | null>;
+  connectionInitialized: Accessor<boolean>;
+  setConnectionInitialized: Setter<boolean>;
   showSessionPicker: Accessor<boolean>;
   setShowSessionPicker: Setter<boolean>;
   showModelPicker: Accessor<boolean>;
@@ -339,6 +341,7 @@ export function createAppState(): AppStateInstance {
   const [loadingStartedAt, setLoadingStartedAt] = createSignal<number | null>(null);
   const [loadingLastActivityAt, setLoadingLastActivityAt] = createSignal<number | null>(null);
   const [error, setError] = createSignal<string | null>(null);
+  const [connectionInitialized, setConnectionInitialized] = createSignal(false);
   const [showSessionPicker, setShowSessionPicker] = createSignal(false);
   const [showModelPicker, setShowModelPicker] = createSignal(false);
   const [showSettings, setShowSettings] = createSignal(false);
@@ -402,6 +405,8 @@ export function createAppState(): AppStateInstance {
     setLoadingLastActivityAt,
     error,
     setError,
+    connectionInitialized,
+    setConnectionInitialized,
     showSessionPicker,
     setShowSessionPicker,
     showModelPicker,
@@ -471,6 +476,8 @@ export const loadingLastActivityAt = defaultAppState.loadingLastActivityAt;
 export const setLoadingLastActivityAt = defaultAppState.setLoadingLastActivityAt;
 export const error = defaultAppState.error;
 export const setError = defaultAppState.setError;
+export const connectionInitialized = defaultAppState.connectionInitialized;
+export const setConnectionInitialized = defaultAppState.setConnectionInitialized;
 export const showSessionPicker = defaultAppState.showSessionPicker;
 export const setShowSessionPicker = defaultAppState.setShowSessionPicker;
 export function setPersistentShowSessionPicker(value: boolean) {
@@ -532,6 +539,7 @@ export function resetDefaultAppState() {
   setLoadingStartedAt(next.loadingStartedAt());
   setLoadingLastActivityAt(next.loadingLastActivityAt());
   setError(next.error());
+  setConnectionInitialized(next.connectionInitialized());
   setShowSessionPicker(next.showSessionPicker());
   setShowModelPicker(next.showModelPicker());
   setShowSettings(next.showSettings());

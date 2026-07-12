@@ -152,6 +152,68 @@ describe('session-selection helpers', () => {
     expect(setError).not.toHaveBeenCalled();
   });
 
+  it('does not block message loading on MCP reconciliation', async () => {
+    let resolveMcpSync!: () => void;
+    const mcpSync = new Promise<void>((resolve) => {
+      resolveMcpSync = resolve;
+    });
+    const setMessagesIncremental = vi.fn();
+    const selection = selectSessionWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        setActiveSessionId: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        persistActiveSessionId: vi.fn(),
+        markSessionSeen: vi.fn(),
+        clearDraftCurrentDocumentState: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
+        applySelectedAgent: vi.fn(),
+        resolvePersistedModel: () => null,
+        resolveFallbackModel: () => null,
+        applySelectedModel: vi.fn(),
+        getConnectedMcpNames: () => [],
+        hasSelectedMcps: () => false,
+        setSelectedMcpsForSession: vi.fn(),
+        syncSessionMcps: vi.fn(() => mcpSync),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        loadSession: vi.fn(async () => ({
+          session: {
+            id: 'session-1',
+            projectID: 'project-1',
+            directory: '/repo',
+            title: 'Session 1',
+            version: '1',
+            time: { created: 0, updated: 2 },
+          },
+          messages: [{ info: assistantMessage('assistant-1'), parts: [] }],
+        })),
+        isCurrentSelectionGeneration: () => true,
+        upsertSession: vi.fn(),
+        setMessagesIncremental,
+        syncFailedSessionsFromMessages: vi.fn(),
+        requestMessageListScrollToBottom: vi.fn(),
+        deriveSelectedAgentFromMessages: () => null,
+        deriveSelectedModelFromMessages: () => null,
+        syncTodosForSession: vi.fn(async () => {}),
+        loadQuestions: vi.fn(async () => {}),
+        loadSessionStatuses: vi.fn(async () => ({})),
+        mergeSessionStatuses: vi.fn(),
+        updateUsageLimitState: vi.fn(),
+        startLoading: vi.fn(),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      { next: () => 1 },
+      'session-1'
+    );
+
+    await vi.waitFor(() => expect(setMessagesIncremental).toHaveBeenCalledTimes(1));
+    resolveMcpSync();
+    await selection;
+  });
+
   it('does not report loaded messages as failed when follow-up startup sync fails', async () => {
     const activeSession = { value: null as string | null };
     const setMessagesIncremental = vi.fn();

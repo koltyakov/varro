@@ -239,9 +239,9 @@ describe('useOpenCode session state flows', () => {
     await hookModule.selectSession('session-1');
     await hookModule.loadFullSessionHistory('session-1');
 
-    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(1, 'session-1', { limit: 200 });
+    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(1, 'session-1', { limit: 50 });
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
-      limit: 200,
+      limit: 50,
       before: 'cursor-2',
     });
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
@@ -249,5 +249,95 @@ describe('useOpenCode session state flows', () => {
       'user-2',
       'user-3',
     ]);
+  });
+
+  it('loads one older history page at a time for scroll pagination', async () => {
+    const latest = [{ info: userMessage('user-3'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    latest.nextCursor = 'cursor-2';
+    const older = [
+      { info: userMessage('user-1'), parts: [] },
+      { info: userMessage('user-2'), parts: [] },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    older.nextCursor = 'cursor-1';
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValueOnce(latest).mockResolvedValueOnce(older);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    await hookModule.selectSession('session-1');
+
+    await expect(hookModule.loadOlderSessionHistoryPage('session-1')).resolves.toBe(true);
+    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
+      limit: 50,
+      before: 'cursor-2',
+    });
+    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(3, 'session-1', {
+      limit: 50,
+      before: 'cursor-1',
+    });
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-1',
+      'user-2',
+      'user-3',
+    ]);
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-1');
+  });
+
+  it('prefetches a user prompt behind an assistant-only history boundary', async () => {
+    const latest = [{ info: assistantMessage('assistant-1', 'user-1'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    latest.nextCursor = 'cursor-1';
+    const boundary = [{ info: userMessage('user-1'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    boundary.nextCursor = 'cursor-2';
+    const older = [{ info: userMessage('user-0'), parts: [] }];
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages
+      .mockResolvedValueOnce(latest)
+      .mockResolvedValueOnce(boundary)
+      .mockResolvedValueOnce(older);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    await hookModule.selectSession('session-1');
+
+    await vi.waitFor(() => {
+      expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
+        limit: 50,
+        before: 'cursor-1',
+      });
+      expect(
+        messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
+      ).toEqual(['user-1']);
+    });
+
+    await expect(hookModule.loadOlderSessionHistoryPage('session-1')).resolves.toBe(true);
+    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
+      limit: 50,
+      before: 'cursor-1',
+    });
+    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(3, 'session-1', {
+      limit: 50,
+      before: 'cursor-2',
+    });
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-2');
+
+    await vi.waitFor(() => {
+      expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(3, 'session-1', {
+        limit: 50,
+        before: 'cursor-2',
+      });
+      expect(
+        messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
+      ).toEqual(['user-0', 'user-1']);
+    });
   });
 });

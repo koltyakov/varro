@@ -281,6 +281,95 @@ describe('createCodexAdapter', () => {
     );
   });
 
+  it('maps a single long Spark primary window to the weekly quota', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        plan_type: 'pro',
+        rate_limit: {
+          primary_window: {
+            used_percent: 10,
+            limit_window_seconds: 604_800,
+          },
+        },
+        additional_rate_limits: [
+          {
+            limit_name: 'gpt-5.3-codex-spark',
+            rate_limit: {
+              primary_window: {
+                used_percent: 4,
+                reset_at: 1_766_400_600,
+                limit_window_seconds: 604_800,
+              },
+              secondary_window: null,
+            },
+          },
+        ],
+      })
+    );
+
+    const status = await adapter.fetch({
+      provider: oauthProvider,
+      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
+      modelID: 'gpt-5.3-codex-spark',
+      checkedAt: 1_000,
+    });
+
+    expect(status.status === 'available' ? status.windows : []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'spark_seven_day',
+          label: 'Weekly Limit (Spark)',
+          remaining: 96,
+          percent: 4,
+        }),
+      ])
+    );
+    expect(status.status === 'available' ? status.windows : []).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'spark_five_hour' })])
+    );
+  });
+
+  it('combines explicitly labeled and structured Spark windows', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        plan_type: 'pro',
+        rate_limit: {
+          primary_window: { used_percent: 1 },
+          secondary_window: { used_percent: 7 },
+        },
+        models: [
+          {
+            model_id: 'gpt-5.3-codex-spark',
+            rate_limits: {
+              primary_window: { used_percent: 4 },
+              secondary_window: { used_percent: 9 },
+            },
+            display_limits: [
+              {
+                label: 'GPT-5.3-Codex-Spark 5 hour usage limit',
+                used_percent: 3,
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    const status = await adapter.fetch({
+      provider: oauthProvider,
+      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
+      modelID: 'gpt-5.3-codex-spark',
+      checkedAt: 1_000,
+    });
+
+    expect(status.status === 'available' ? status.windows : []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'spark_five_hour', percent: 3 }),
+        expect.objectContaining({ id: 'spark_seven_day', percent: 9 }),
+      ])
+    );
+  });
+
   it('finds Spark windows identified by display labels anywhere in the payload', async () => {
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse({

@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
 import {
@@ -65,31 +66,36 @@ export async function selectSessionWithDependencies(
   options?: { markSeen?: boolean }
 ) {
   const generation = generationRef.next();
-  deps.clearDraftCurrentDocumentState();
-  deps.resetToolCallExpansionState();
-  deps.setActiveSessionId(id);
-  deps.clearPendingAbort(id);
+  let persistedAgent: string | null = null;
+  batch(() => {
+    deps.clearDraftCurrentDocumentState();
+    deps.resetToolCallExpansionState();
+    deps.setActiveSessionId(id);
+    deps.clearPendingAbort(id);
 
-  const { persistedAgent, fallbackAgent } = deps.resolvePersistedAgent(id);
-  if (persistedAgent) {
-    deps.applySelectedAgent(persistedAgent, id);
-  } else if (fallbackAgent) {
-    deps.applySelectedAgent(fallbackAgent, id);
-  }
-
-  const persistedModel = deps.resolvePersistedModel(id);
-  if (persistedModel) {
-    deps.applySelectedModel(persistedModel, id);
-  } else {
-    const fallbackModel = deps.resolveFallbackModel();
-    if (fallbackModel) {
-      deps.applySelectedModel(fallbackModel, id);
+    const resolvedAgent = deps.resolvePersistedAgent(id);
+    persistedAgent = resolvedAgent.persistedAgent;
+    if (resolvedAgent.persistedAgent) {
+      deps.applySelectedAgent(resolvedAgent.persistedAgent, id);
+    } else if (resolvedAgent.fallbackAgent) {
+      deps.applySelectedAgent(resolvedAgent.fallbackAgent, id);
     }
-  }
 
-  deps.resetTodoSync();
-  deps.clearMessages();
-  await deps.syncSessionMcps(id);
+    const persistedModel = deps.resolvePersistedModel(id);
+    if (persistedModel) {
+      deps.applySelectedModel(persistedModel, id);
+    } else {
+      const fallbackModel = deps.resolveFallbackModel();
+      if (fallbackModel) {
+        deps.applySelectedModel(fallbackModel, id);
+      }
+    }
+
+    deps.resetTodoSync();
+    deps.clearMessages();
+  });
+
+  const mcpSync = deps.syncSessionMcps(id).catch(() => {});
 
   let loaded: { session: Session; messages: SessionEntry[] };
   try {
@@ -124,6 +130,8 @@ export async function selectSessionWithDependencies(
     deps.applySelectedModel(inferredModel, id);
   }
 
+  await mcpSync;
+  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
   await deps.syncTodosForSession(id, messages).catch(() => {});
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
   await deps.loadQuestions().catch(() => {});

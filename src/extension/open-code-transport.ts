@@ -1,4 +1,5 @@
 import type { ServerStatus } from '../shared/protocol';
+import { isSameWorkspacePath } from '../shared/workspace-path';
 import { logger } from './logger';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
 import { anySignal, asRecord, findSseChunkBoundary, getString } from './server-utils';
@@ -19,9 +20,9 @@ export type OpenCodeRescopeResult = {
   directory: string | undefined;
 };
 
-// OpenCode's v2 event stream. Servers emit direct `{ id, type, data|properties }`
-// events plus heartbeat messages, scoped by the `x-opencode-directory` header.
-const EVENT_STREAM_PATH = '/api/event';
+// The global stream survives per-workspace instance disposal. Its envelopes retain
+// the event directory so Varro can filter them to the active workspace locally.
+const EVENT_STREAM_PATH = '/global/event';
 
 interface OpenCodeTransportOptions {
   getUrl: () => string;
@@ -36,6 +37,7 @@ export class OpenCodeTransport {
   private static readonly HEALTH_TIMEOUT_MS = 2000;
   private static readonly REQUEST_TIMEOUT_MS = 30_000;
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
+  private static readonly EVENT_STABILITY_WINDOW_MS = 15_000;
   private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
   private static readonly EVENT_MAX_BUFFER_CHARS = 1_000_000;
   private static readonly EVENT_MAX_PAYLOAD_CHARS = 250_000;
@@ -195,6 +197,7 @@ export class OpenCodeTransport {
     );
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
+    let stabilityTimer: ReturnType<typeof setTimeout> | null = null;
     const isCurrentStream = () => this.isCurrentEventStream(controller, generation);
     const clearConnectTimer = () => {
       if (connectTimer) {
@@ -242,9 +245,12 @@ export class OpenCodeTransport {
         clearTimeout(pending.timer);
         pending.resolve({ state: 'connected', directory: eventStreamDirectory });
       }
-      this.eventReconnectDelay = 1000;
-      this.eventReconnectCount = 0;
       this.options.updateEventStreamState('healthy');
+      stabilityTimer = setTimeout(() => {
+        if (!isCurrentStream() || controller.signal.aborted) return;
+        this.eventReconnectDelay = 1000;
+        this.eventReconnectCount = 0;
+      }, OpenCodeTransport.EVENT_STABILITY_WINDOW_MS);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -294,6 +300,10 @@ export class OpenCodeTransport {
       if (idleTimer) {
         clearTimeout(idleTimer);
         idleTimer = null;
+      }
+      if (stabilityTimer) {
+        clearTimeout(stabilityTimer);
+        stabilityTimer = null;
       }
       if (
         shouldReconnect &&
@@ -433,6 +443,7 @@ export class OpenCodeTransport {
     ) {
       return;
     }
+    if (!this.isEventInCurrentDirectory(parsed)) return;
     try {
       this.observeServerEvent(parsed);
     } catch (err) {
@@ -494,6 +505,17 @@ export class OpenCodeTransport {
         break;
       }
     }
+  }
+
+  private isEventInCurrentDirectory(event: unknown) {
+    const evt = asRecord(event);
+    const location = asRecord(evt?.location);
+    const directory = getString(evt?.directory) || getString(location?.directory);
+    return (
+      !directory ||
+      !this.eventStreamDirectory ||
+      isSameWorkspacePath(directory, this.eventStreamDirectory)
+    );
   }
 
   private getEventReconnectDelay() {

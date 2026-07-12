@@ -46,6 +46,14 @@ export async function loadFullSessionHistory(sessionId: string) {
   await getCurrentOpenCodeRuntime().loadFullSessionHistory(sessionId);
 }
 
+export async function loadOlderSessionHistoryPage(sessionId: string) {
+  return getCurrentOpenCodeRuntime().loadOlderSessionHistoryPage(sessionId);
+}
+
+export async function loadOlderSessionPrompts(sessionId: string) {
+  return getCurrentOpenCodeRuntime().loadOlderSessionPrompts(sessionId);
+}
+
 export async function createSession(title?: string, initialPermissionMode?: PermissionMode) {
   return getCurrentOpenCodeRuntime().createSession(title, initialPermissionMode);
 }

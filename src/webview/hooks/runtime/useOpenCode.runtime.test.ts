@@ -13,6 +13,8 @@ function createRuntimeMock(label: string) {
       applySessionMcps: vi.fn().mockResolvedValue(undefined),
       selectSession: vi.fn().mockResolvedValue(undefined),
       loadFullSessionHistory: vi.fn().mockResolvedValue(undefined),
+      loadOlderSessionHistoryPage: vi.fn().mockResolvedValue(true),
+      loadOlderSessionPrompts: vi.fn().mockResolvedValue(true),
       createSession: vi.fn().mockResolvedValue(`${label}-session`),
       forkSession: vi.fn().mockResolvedValue(`${label}-fork`),
       renameSession: vi.fn().mockResolvedValue(true),
@@ -124,6 +126,18 @@ describe('useOpenCode.runtime', () => {
         invoke: () => module.loadFullSessionHistory('session-1'),
         mock: installed.runtime.loadFullSessionHistory,
         args: ['session-1'],
+      },
+      {
+        invoke: () => module.loadOlderSessionHistoryPage('session-1'),
+        mock: installed.runtime.loadOlderSessionHistoryPage,
+        args: ['session-1'],
+        result: true,
+      },
+      {
+        invoke: () => module.loadOlderSessionPrompts('session-1'),
+        mock: installed.runtime.loadOlderSessionPrompts,
+        args: ['session-1'],
+        result: true,
       },
       {
         invoke: () => module.renameSession('session-1', 'Renamed'),

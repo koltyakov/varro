@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus, WebviewMessage } from '../../shared/protocol';
-import type { Session } from '../types';
+import type { Session, TextPart, UserMessage } from '../types';
 import { ChatInput, sendDroppedContent } from './ChatInput';
 import {
   state,
@@ -20,11 +20,13 @@ import {
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-limit-selection';
+import { setSessionHistoryPrompts } from '../lib/message-window';
 
 const {
   abortSessionMock,
   continueInterruptedSessionMock,
   forkSessionMock,
+  loadOlderSessionPromptsMock,
   redoSessionMock,
   undoSessionMock,
   runSlashCommandByNameMock,
@@ -35,6 +37,7 @@ const {
   abortSessionMock: vi.fn(async () => {}),
   continueInterruptedSessionMock: vi.fn(async () => {}),
   forkSessionMock: vi.fn(async () => 'forked-session'),
+  loadOlderSessionPromptsMock: vi.fn(async () => false),
   redoSessionMock: vi.fn(async () => {}),
   undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
@@ -62,6 +65,7 @@ vi.mock('../hooks/useOpenCode', async () => {
     abortSession: abortSessionMock,
     continueInterruptedSession: continueInterruptedSessionMock,
     forkSession: forkSessionMock,
+    loadOlderSessionPrompts: loadOlderSessionPromptsMock,
     redoSession: redoSessionMock,
     undoSession: undoSessionMock,
     runSlashCommandByName: runSlashCommandByNameMock,
@@ -72,6 +76,16 @@ vi.mock('../hooks/useOpenCode', async () => {
 vi.mock('../lib/client', () => ({
   client: {
     varro: {
+      session: {
+        diffSummary: vi.fn(async () => ({
+          files: 0,
+          additions: 0,
+          deletions: 0,
+          tokens: 0,
+          durationMs: 0,
+          activeStartedAt: null,
+        })),
+      },
       resolveWorkspacePath: vi.fn(async (path: string) => {
         if (path === 'README.md') {
           return { path: '/repo/README.md', relativePath: 'README.md', type: 'file' as const };
@@ -137,9 +151,12 @@ afterEach(() => {
   setState('queuedMessages', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setSessionHistoryPrompts('session-1', []);
   resetMessageEditState();
   __resetProviderLimitWindowSelectionsForTests();
   sendMessageMock.mockReset();
+  loadOlderSessionPromptsMock.mockReset();
+  loadOlderSessionPromptsMock.mockResolvedValue(false);
   serverEventHandlers.clear();
   serverEventsOnMock.mockClear();
   runSlashCommandByNameMock.mockReset();
@@ -150,6 +167,15 @@ afterEach(() => {
   forkSessionMock.mockResolvedValue('forked-session');
   redoSessionMock.mockReset();
   undoSessionMock.mockReset();
+  vi.mocked(client.varro.session.diffSummary).mockReset();
+  vi.mocked(client.varro.session.diffSummary).mockResolvedValue({
+    files: 0,
+    additions: 0,
+    deletions: 0,
+    tokens: 0,
+    durationMs: 0,
+    activeStartedAt: null,
+  });
   vi.mocked(client.varro.resolveWorkspacePath).mockClear();
 });
 
@@ -428,7 +454,7 @@ describe('ChatInput', () => {
     );
   });
 
-  it('shows the connected MCP count only when one or more MCPs are connected', () => {
+  it('shows the connected MCP count and opens the MCP picker when clicked', () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
@@ -440,9 +466,14 @@ describe('ChatInput', () => {
       delta: { status: 'failed' },
     });
 
-    const mcpCount = container?.querySelector('.toolbar-mcp-count');
+    const mcpCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
     expect(mcpCount?.textContent).toContain('MCPs:');
     expect(mcpCount?.textContent).toContain('2');
+
+    mcpCount?.click();
+
+    expect(container?.querySelector('.dropdown-menu')?.textContent).toContain('alpha');
+    expect(container?.querySelector('.dropdown-menu')?.textContent).toContain('gamma');
   });
 
   it('hides provider-limit UI when polling is disabled', () => {
@@ -790,6 +821,87 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.context-popup-overall-total')?.textContent).toContain(
       'Overall1,150'
     );
+  });
+
+  it('uses the root session snapshot when older messages are not loaded', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000, {
+        tokens: {
+          input: 1_000,
+          output: 200,
+          reasoning: 50,
+          cache: { read: 100, write: 25 },
+        },
+      }),
+    ]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const sessionSection = container?.querySelector('.context-popup-section');
+    expect(readContextRows(sessionSection ?? undefined)).toEqual({
+      Input: '1,000',
+      Output: '200',
+      Reasoning: '50',
+      'Cache read': '100',
+      'Cache write': '25',
+      Total: '1,375',
+    });
+  });
+
+  it('loads tokens for subagent sessions whose messages and snapshots are not loaded', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_000, { parentID: 'session-1' }),
+    ]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+    vi.mocked(client.varro.session.diffSummary).mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 1_400,
+      tokenBreakdown: {
+        session: {
+          total: 500,
+          input: 400,
+          output: 100,
+          reasoning: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+        },
+        subagents: {
+          total: 900,
+          input: 700,
+          output: 100,
+          reasoning: 50,
+          cacheRead: 50,
+          cacheWrite: 0,
+        },
+        subagentCount: 1,
+      },
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.context-popup-section-toggle')?.textContent).toContain(
+        'Agents (1)900'
+      );
+    });
+    expect(client.varro.session.diffSummary).toHaveBeenCalledWith('session-1');
   });
 
   it('removes the provider limit title while the popup is open', async () => {
@@ -2218,7 +2330,63 @@ function pressKey(editor: HTMLDivElement | null | undefined, init: KeyboardEvent
   editor?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
 }
 
+function historyEntry(id: string, text: string) {
+  const info: UserMessage = {
+    id,
+    sessionID: 'session-1',
+    role: 'user',
+    time: { created: 1 },
+    agent: 'build',
+    model: { providerID: 'openai', modelID: 'gpt-5' },
+  };
+  const part: TextPart = {
+    id: `${id}-text`,
+    sessionID: 'session-1',
+    messageID: id,
+    type: 'text',
+    text,
+  };
+  return { info, parts: [part] };
+}
+
 describe('ChatInput composer history hotkeys', () => {
+  it('paginates through sent prompts with Up and returns with Down', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPrompts('session-1', [
+      historyEntry('user-1', 'Earlier loaded prompt'),
+      historyEntry('user-2', 'Most recent loaded prompt'),
+    ]);
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    pressKey(editor, { key: 'ArrowUp' });
+    expect(inputText()).toBe('Most recent loaded prompt');
+
+    pressKey(editor, { key: 'ArrowUp' });
+    expect(inputText()).toBe('Earlier loaded prompt');
+
+    loadOlderSessionPromptsMock.mockImplementationOnce(async () => {
+      setSessionHistoryPrompts('session-1', [
+        historyEntry('user-0', 'Oldest fetched prompt'),
+        historyEntry('user-1', 'Earlier loaded prompt'),
+        historyEntry('user-2', 'Most recent loaded prompt'),
+      ]);
+      return true;
+    });
+    pressKey(editor, { key: 'ArrowUp' });
+    await flushAsyncWork();
+    expect(inputText()).toBe('Oldest fetched prompt');
+
+    pressKey(editor, { key: 'ArrowDown' });
+    expect(inputText()).toBe('Earlier loaded prompt');
+
+    pressKey(editor, { key: 'ArrowDown' });
+    expect(inputText()).toBe('Most recent loaded prompt');
+
+    pressKey(editor, { key: 'ArrowDown' });
+    expect(inputText()).toBe('');
+  });
+
   it('undoes and redoes composer text edits with the keyboard', async () => {
     cleanup = render(() => ChatInput(), container!);
     setInputText('hello');

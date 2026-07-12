@@ -103,18 +103,18 @@ export function getSessionTreeTokenBreakdown(
     const messageTokens = sumAssistantTokensFromMessageEntries(
       messagesBySession.get(sessionId) || []
     );
+    const snapshotTokens = getSessionTokenUsage(sessionsById.get(sessionId));
+    const tokens =
+      snapshotTokens && snapshotTokens.total >= messageTokens.total
+        ? snapshotTokens
+        : messageTokens;
     if (sessionId === rootSessionId) {
-      addTokenUsage(session, messageTokens);
+      addTokenUsage(session, tokens);
       continue;
     }
 
     subagentCount += 1;
-
-    const snapshotTokens = getSessionTokenUsage(sessionsById.get(sessionId));
-    addTokenUsage(
-      subagents,
-      snapshotTokens && snapshotTokens.total >= messageTokens.total ? snapshotTokens : messageTokens
-    );
+    addTokenUsage(subagents, tokens);
   }
   const total = emptyTokenUsage();
   addTokenUsage(total, session);

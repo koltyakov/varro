@@ -210,6 +210,10 @@ input:focus-visible {
   isolation: isolate;
 }
 
+.interactive-list-track.history-boundary-visible .latest-user-message-sticky-wrap {
+  top: 22px;
+}
+
 .latest-user-message-sticky-overlay {
   position: absolute;
   top: 0;
@@ -286,6 +290,36 @@ input:focus-visible {
   overflow-wrap: anywhere;
   font-size: var(--vscode-font-size, 13px);
   line-height: 1.35;
+}
+
+.latest-user-message-sticky.is-loading {
+  cursor: progress;
+}
+
+.latest-user-message-sticky-loading {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  margin-left: 12px;
+  font-size: 11px;
+  color: var(--color-vscode-fg-soft);
+}
+
+.latest-user-message-sticky-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: sticky-message-loading-spin 0.7s linear infinite;
+}
+
+@keyframes sticky-message-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .latest-user-message-sticky:hover .latest-user-message-sticky-text {

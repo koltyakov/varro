@@ -109,6 +109,32 @@ describe('MessageListChrome', () => {
     expect(card?.classList.contains('latest-user-message-sticky-clickable')).toBe(false);
   });
 
+  it('shows loading feedback and ignores repeat clicks', () => {
+    const onClick = vi.fn();
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-1',
+            index: -1,
+            text: 'A prompt behind history.',
+            attachmentCount: 0,
+            imageCount: 0,
+          }}
+          loading
+          onClick={onClick}
+        />
+      ),
+      container!
+    );
+
+    const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    expect(card?.classList.contains('is-loading')).toBe(true);
+    expect(card?.textContent).toContain('Loading…');
+    card?.click();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it('renders attachment and image counters when the preview contains them', () => {
     cleanup = render(
       () => (

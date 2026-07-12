@@ -1,5 +1,6 @@
 import {
   composerFocusKey,
+  connectionInitialized,
   desktopSessionPaneSide,
   error,
   expandThinkingByDefault,
@@ -17,6 +18,7 @@ import {
   requestSessionSearchFocus,
   setPersistentShowSessionPicker,
   setComposerFocusKey,
+  setConnectionInitialized,
   setDesktopSessionPaneSide,
   setError,
   setExpandThinkingByDefault,
@@ -50,6 +52,8 @@ import {
 } from '../state';
 
 export const uiStore = {
+  connectionInitialized,
+  setConnectionInitialized,
   showThinking,
   setShowThinking,
   expandThinkingByDefault,

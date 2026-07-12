@@ -8,7 +8,7 @@ vi.mock('crypto', () => ({
   randomBytes: randomBytesMock,
 }));
 
-import { renderWebviewHtml } from './webview-html';
+import { renderWebviewHtml, renderWebviewLoadingHtml } from './webview-html';
 
 const initialState: InitialWebviewState = {
   theme: 'dark',
@@ -35,7 +35,9 @@ describe('renderWebviewHtml', () => {
       cssContent: 'body{color:red;}',
     });
 
-    expect(html).toContain('<style>body{color:red;}</style>');
+    expect(html).toContain('body{color:red;}');
+    expect(html).toContain('role="status" aria-label="Loading workspace"');
+    expect(html).toContain('Loading workspace...');
     expect(html).toContain('console.log("ready")');
     expect(html).toContain('window.__initialTheme = window.__initialWebviewState.theme;');
     expect(html).toContain(
@@ -52,6 +54,16 @@ describe('renderWebviewHtml', () => {
     expect(html.indexOf('window.__clearVarroBootstrapFailureHandlers')).toBeLessThan(
       html.indexOf('console.log("ready")')
     );
+    expect(html.indexOf('Loading workspace...')).toBeLessThan(html.indexOf('console.log("ready")'));
+  });
+
+  it('renders a standalone loading screen before the webview assets are available', () => {
+    const html = renderWebviewLoadingHtml();
+
+    expect(html).toContain('role="status" aria-label="Loading workspace"');
+    expect(html).toContain('Loading workspace...');
+    expect(html).toContain('Restoring your recent view');
+    expect(html).not.toContain('<script');
   });
 
   it('restricts image sources to the webview and data URIs', () => {

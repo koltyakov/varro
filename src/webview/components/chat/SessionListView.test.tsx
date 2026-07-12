@@ -80,6 +80,39 @@ afterEach(() => {
 });
 
 describe('SessionListView diff summaries', () => {
+  it('shows a skeleton instead of zero counters while the aggregate summary loads', async () => {
+    const pending = deferred<{
+      files: number;
+      additions: number;
+      deletions: number;
+      tokens: number;
+      durationMs: number;
+      activeStartedAt: number | null;
+    }>();
+    vi.spyOn(client.varro.session, 'diffSummary').mockReturnValue(pending.promise);
+    setState('sessions', [session('session-1', Date.now())]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-item-meta-skeleton')).not.toBeNull();
+    });
+    expect(container.querySelector('.session-item-meta')?.textContent).not.toContain('0 files');
+
+    pending.resolve({
+      files: 2,
+      additions: 6,
+      deletions: 4,
+      tokens: 12_345,
+      durationMs: 65_000,
+      activeStartedAt: null,
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-item-meta-skeleton')).toBeNull();
+      expect(container.querySelector('.session-item-meta')?.textContent).toContain('2 files');
+    });
+  });
+
   it('uses the aggregate session diff response instead of loading full diffs or messages', async () => {
     const diffSummarySpy = vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 2,
@@ -107,6 +140,27 @@ describe('SessionListView diff summaries', () => {
     expect(container.querySelector('[title="1m 5s total time worked"]')).not.toBeNull();
     expect(diffSpy).not.toHaveBeenCalled();
     expect(messagesSpy).not.toHaveBeenCalled();
+  });
+
+  it('compacts large edit counts', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 62,
+      additions: 8_190,
+      deletions: 32_568,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setState('sessions', [session('session-1', Date.now())]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => {
+      const meta = container.querySelector('.session-item-meta')?.textContent;
+      expect(meta).toContain('62 files');
+      expect(meta).toContain('+8190');
+      expect(meta).toContain('-33K');
+    });
   });
 
   it('uses loaded diff counts when stale edit counts already exist on the session', async () => {
@@ -382,6 +436,16 @@ describe('SessionListView selection', () => {
       container.querySelectorAll('.session-item')[1]?.classList.contains('keyboard-focus')
     ).toBe(true);
   });
+
+  it('selects a session from the trailing row area', () => {
+    vi.mocked(selectSession).mockClear();
+    setState('sessions', [session('session-1', Date.now())]);
+    cleanup = render(() => <SessionListView embedded />, container);
+
+    container.querySelector<HTMLElement>('.session-item-age')!.click();
+
+    expect(selectSession).toHaveBeenCalledWith('session-1');
+  });
 });
 
 describe('SessionListView ordering', () => {
@@ -415,7 +479,7 @@ describe('SessionListView ordering', () => {
 });
 
 describe('SessionListView actions', () => {
-  it('obscures other sessions and consumes an outside click before closing the menu', () => {
+  it('closes the context menu and selects another session with one click', () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
       additions: 0,
@@ -431,16 +495,18 @@ describe('SessionListView actions', () => {
     const rows = container.querySelectorAll<HTMLElement>('.session-item');
     const owningRow = rows[0]!;
     const otherRow = rows[1]!;
+    vi.mocked(selectSession).mockClear();
     openSessionActions(owningRow);
 
     expect(owningRow.classList.contains('is-context-selected')).toBe(true);
     expect(otherRow.classList.contains('is-context-obscured')).toBe(true);
 
-    const backdrop = document.querySelector<HTMLElement>('.session-item-actions-backdrop')!;
-    backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    otherRow.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    otherRow.querySelector<HTMLButtonElement>('.session-item-main')!.click();
 
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(otherRow.classList.contains('is-context-obscured')).toBe(false);
+    expect(selectSession).toHaveBeenCalledWith('session-2');
   });
 
   it('freezes session row order until the context menu closes', () => {
@@ -465,9 +531,9 @@ describe('SessionListView actions', () => {
       );
     expect(rowTitles()).toEqual(['session-1', 'session-2']);
 
-    document
-      .querySelector<HTMLElement>('.session-item-actions-backdrop')!
-      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    document.body.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, cancelable: true })
+    );
 
     expect(rowTitles()).toEqual(['session-2', 'session-1']);
   });

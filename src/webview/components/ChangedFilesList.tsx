@@ -9,6 +9,7 @@ import {
 } from '../lib/tool-file-change';
 import { getDiffSummaryStats, getMessageToolSummaryStats } from './chat/SessionListView';
 import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
+import { formatEditCount } from '../lib/format';
 
 const KIND_BADGE: Record<FileChangeKind, { label: string; title: string; class: string }> = {
   added: { label: 'A', title: 'Added', class: 'is-added' },
@@ -127,8 +128,8 @@ export function ChangedFilesList() {
           <span class="todo-block-count">{total()}</span>
           <Show when={hasLineCounts()}>
             <span class="changed-files-lines">
-              <span class="diff-lines-added">+{additions()}</span>{' '}
-              <span class="diff-lines-removed">-{deletions()}</span>
+              <span class="diff-lines-added">+{formatEditCount(additions())}</span>{' '}
+              <span class="diff-lines-removed">-{formatEditCount(deletions())}</span>
             </span>
           </Show>
         </button>

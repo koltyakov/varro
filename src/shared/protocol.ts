@@ -63,11 +63,27 @@ export type SessionTitleFallbackResponse = {
   title: string;
 } | null;
 
+export type SessionTokenUsage = {
+  total: number;
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+export type SessionTokenBreakdown = {
+  session: SessionTokenUsage;
+  subagents: SessionTokenUsage;
+  subagentCount: number;
+};
+
 export type SessionDiffSummary = {
   files: number;
   additions: number;
   deletions: number;
   tokens: number;
+  tokenBreakdown?: SessionTokenBreakdown;
   durationMs: number;
   activeStartedAt: number | null;
 };

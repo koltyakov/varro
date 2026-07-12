@@ -46,7 +46,7 @@ These commands route through `SidebarProvider` and `ContextProvider` rather than
 - Owns the local OpenCode process
 - Checks health before auto-starting
 - Adds workspace scoping to non-global API calls
-- Connects to the OpenCode event stream at `/api/event`
+- Connects to the OpenCode event stream at `/global/event` and filters events to the active workspace
 - Emits `status` and `event` to the rest of the extension
 
 Important behavior:

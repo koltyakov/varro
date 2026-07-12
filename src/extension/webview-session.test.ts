@@ -229,7 +229,7 @@ describe('WebviewSession', () => {
 
     firstHtml.resolve('<html>stale</html>');
     await flushMicrotasks();
-    expect(view.webview.html).toBe('');
+    expect(view.webview.html).toContain('Loading workspace...');
 
     secondHtml.resolve('<html>fresh</html>');
     await flushMicrotasks();
@@ -261,7 +261,7 @@ describe('WebviewSession', () => {
     expect(sessionState.consumeRecoverySnapshot).toHaveBeenCalledOnce();
     expect(deps.resetStatusBarCache).toHaveBeenCalledOnce();
     expect(bridge.renderHtml).toHaveBeenCalledOnce();
-    expect(firstView.webview.html).toBe('');
+    expect(firstView.webview.html).toContain('Loading workspace...');
     expect(secondView.webview.html).toBe('<html><body>Varro</body></html>');
     expect(session.interruptedSessionsForWebview).toEqual([
       { id: 'session-1', title: 'Interrupted' },

@@ -8,6 +8,7 @@ import type { AssistantDialogSummaryInfo } from './MessageRows';
 type AssistantDialogOptions = {
   sessions?: readonly TaskSessionInfo[];
   suppressTrailingSummary?: boolean;
+  collectLeadingSummaryStats?: boolean;
 };
 
 export function getAssistantDialogSummaryMap(
@@ -100,6 +101,7 @@ export function getAssistantDialogSummaryMap(
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       agentCount,
+      collectingStats: options?.collectLeadingSummaryStats && currentUserRequestCreated === null,
     });
 
     currentMessages = [];

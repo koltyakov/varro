@@ -14,6 +14,7 @@ import type { PinnedSessionManager } from './pinned-session-manager';
 import { logger } from './logger';
 import { parseWebviewMessage } from './util/webview-message';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../shared/provider-limit-config';
+import { renderWebviewLoadingHtml } from './webview-html';
 import type {
   InitialWebviewState,
   PermissionMode,
@@ -112,6 +113,7 @@ export class WebviewSession {
     const webviewLoadGeneration = ++this.webviewLoadGeneration;
 
     webviewView.webview.options = this.bridge.webviewOptions();
+    webviewView.webview.html = renderWebviewLoadingHtml();
     this.disposeWebviewDisposables();
 
     this.webviewDisposables.push(
