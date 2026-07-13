@@ -1,18 +1,36 @@
-import { For, createEffect, createSignal } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { defaultAppState } from '../lib/state';
 import type { NormalizedTodo } from '../types';
 
 const todos = () => defaultAppState.state.todos;
+const TODO_LIST_CHAT_SHARE = 0.28;
+const MIN_TODO_LIST_HEIGHT = 52;
+const MAX_TODO_LIST_HEIGHT = 220;
+const DEFAULT_TODO_LIST_HEIGHT = 160;
+const MIN_CHAT_VIEW_HEIGHT = 140;
+const MIN_CHAT_VIEW_SHARE = 0.4;
 
 export function TodoList() {
   const completed = () => todos().filter((todo) => isResolvedTodoStatus(todo.status)).length;
   const total = () => todos().length;
   const progress = () => (total() > 0 ? (completed() / total()) * 100 : 0);
   const allDone = () => total() > 0 && completed() === total();
+  const inProgressTodo = () => todos().find((todo) => todo.status === 'in_progress');
+  const activeTodo = () =>
+    inProgressTodo() || todos().find((todo) => !isResolvedTodoStatus(todo.status));
   const [collapsed, setCollapsed] = createSignal(allDone());
+  const [listMaxHeight, setListMaxHeight] = createSignal(DEFAULT_TODO_LIST_HEIGHT);
   let previousTodoIds = new Set(todos().map((todo) => todo.id));
   let previousUserMessageCount = userMessageCount();
   let previousAllDone = allDone();
+  let blockRef: HTMLDivElement | undefined;
+  let listRef: HTMLUListElement | undefined;
+  let manuallyExpanded = false;
+
+  const setAutomaticCollapsed = (nextCollapsed: boolean) => {
+    manuallyExpanded = false;
+    setCollapsed(nextCollapsed);
+  };
 
   createEffect(() => {
     const nextTodoIds = new Set(todos().map((todo) => todo.id));
@@ -21,11 +39,11 @@ export function TodoList() {
     const nextAllDone = allDone();
 
     if (nextAllDone && !previousAllDone) {
-      setCollapsed(true);
+      setAutomaticCollapsed(true);
     } else if (hasNewTodo) {
-      setCollapsed(false);
+      setAutomaticCollapsed(false);
     } else if (nextUserMessageCount > previousUserMessageCount && nextAllDone) {
-      setCollapsed(true);
+      setAutomaticCollapsed(true);
     }
 
     previousTodoIds = nextTodoIds;
@@ -33,12 +51,79 @@ export function TodoList() {
     previousAllDone = nextAllDone;
   });
 
+  createEffect(() => {
+    const inProgressTodoId = inProgressTodo()?.id;
+    if (!inProgressTodoId || collapsed()) return;
+
+    queueMicrotask(() => {
+      if (collapsed() || inProgressTodo()?.id !== inProgressTodoId) return;
+      const inProgressItem = Array.from(listRef?.children || []).find(
+        (item) => (item as HTMLElement).dataset.todoId === inProgressTodoId
+      );
+      inProgressItem?.scrollIntoView?.({ block: 'nearest' });
+    });
+  });
+
+  onMount(() => {
+    const chatShell = blockRef?.closest<HTMLElement>('.chat-main-column-shell');
+    const chatView = chatShell?.querySelector<HTMLElement>('.interactive-list');
+    if (!chatShell) return;
+
+    let previousChatShellHeight = chatShell.clientHeight;
+    const updateAvailableSpace = () => {
+      const chatShellHeight = chatShell.clientHeight;
+      if (chatShellHeight > 0) {
+        setListMaxHeight(
+          Math.min(
+            MAX_TODO_LIST_HEIGHT,
+            Math.max(MIN_TODO_LIST_HEIGHT, Math.floor(chatShellHeight * TODO_LIST_CHAT_SHARE))
+          )
+        );
+      }
+
+      if (
+        !collapsed() &&
+        !manuallyExpanded &&
+        chatView &&
+        hasLimitedChatRoom(chatShellHeight, chatView.clientHeight)
+      ) {
+        setAutomaticCollapsed(true);
+      }
+    };
+
+    updateAvailableSpace();
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      const chatShellHeight = chatShell.clientHeight;
+      if (chatShellHeight !== previousChatShellHeight) {
+        manuallyExpanded = false;
+        previousChatShellHeight = chatShellHeight;
+      }
+      updateAvailableSpace();
+    });
+    observer.observe(chatShell);
+    if (chatView) observer.observe(chatView);
+    onCleanup(() => observer.disconnect());
+  });
+
+  const toggleCollapsed = () => {
+    const nextCollapsed = !collapsed();
+    manuallyExpanded = !nextCollapsed;
+    setCollapsed(nextCollapsed);
+  };
+
   return (
-    <div class="todo-block animate-fade-in">
+    <div
+      class="todo-block animate-fade-in"
+      ref={(element) => {
+        blockRef = element;
+      }}
+    >
       <button
         type="button"
         class="todo-block-header"
-        onClick={() => setCollapsed(!collapsed())}
+        onClick={toggleCollapsed}
         aria-expanded={!collapsed()}
       >
         <svg
@@ -59,6 +144,13 @@ export function TodoList() {
           <span class="todo-block-count-sep">/</span>
           {total()}
         </span>
+        <Show when={collapsed() && activeTodo()}>
+          {(todo) => (
+            <span class="todo-block-active" title={todo().content}>
+              {todo().content}
+            </span>
+          )}
+        </Show>
         <div
           class="todo-block-progress"
           role="progressbar"
@@ -74,7 +166,13 @@ export function TodoList() {
         </div>
       </button>
       {!collapsed() && (
-        <ul class="todo-block-list">
+        <ul
+          class="todo-block-list"
+          ref={(element) => {
+            listRef = element;
+          }}
+          style={{ 'max-height': `${listMaxHeight()}px` }}
+        >
           <For each={todos()}>{(todo) => <TodoItem todo={todo} />}</For>
         </ul>
       )}
@@ -156,7 +254,7 @@ function TodoItem(props: { todo: NormalizedTodo }) {
     }
   };
   return (
-    <li class={`todo-block-item status-${props.todo.status}`}>
+    <li class={`todo-block-item status-${props.todo.status}`} data-todo-id={props.todo.id}>
       <span class="todo-block-item-icon" role="img" aria-label={statusLabel()}>
         {icon()}
       </span>
@@ -171,4 +269,11 @@ function isResolvedTodoStatus(status: string) {
 
 function userMessageCount() {
   return defaultAppState.state.messages.filter((message) => message.info.role === 'user').length;
+}
+
+function hasLimitedChatRoom(chatShellHeight: number, chatViewHeight: number) {
+  if (chatShellHeight <= 0 || chatViewHeight <= 0) return false;
+  return (
+    chatViewHeight < MIN_CHAT_VIEW_HEIGHT || chatViewHeight / chatShellHeight < MIN_CHAT_VIEW_SHARE
+  );
 }
