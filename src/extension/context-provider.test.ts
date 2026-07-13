@@ -55,7 +55,7 @@ const vscodeMock = vi.hoisted(() => ({
     },
   },
   Uri: {
-    file: vi.fn((fsPath: string) => ({ fsPath })),
+    file: vi.fn((fsPath: string) => ({ fsPath: fsPath.replace(/\\/g, '/') })),
   },
   FileType: {
     Directory: 2,
