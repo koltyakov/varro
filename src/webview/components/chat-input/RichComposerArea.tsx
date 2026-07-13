@@ -1,6 +1,5 @@
 import { Show, createEffect, onMount, onCleanup } from 'solid-js';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
-import type { InlineChipData } from './InlineChip';
 
 type ComposerClipboardEvent = ClipboardEvent & {
   __varroPasteText?: string;
@@ -11,7 +10,14 @@ const FOLDER_ICON_SVG =
 
 const CARET_SPACER = '\u200B';
 
-export type RichComposerChip = InlineChipData & {
+export type RichComposerChip = {
+  id: string;
+  type: 'mention-file' | 'mention-agent' | 'image';
+  label: string;
+  title?: string;
+  detail?: string;
+  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'agent';
+  disabled?: boolean;
   textMarker: string;
 };
 

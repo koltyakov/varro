@@ -98,24 +98,8 @@ export function getSpawnMock() {
   return mocks.spawn;
 }
 
-export function getMkdtempMock() {
-  return mocks.mkdtemp;
-}
-
-export function getOpenMock() {
-  return mocks.open;
-}
-
-export function getReadFileMock() {
-  return mocks.readFile;
-}
-
 export function getProviderSignatureFileSystemMock() {
   return mocks.providerSignatureFileSystem;
-}
-
-export function getRmMock() {
-  return mocks.rm;
 }
 
 export function getVscodeMock() {

@@ -19,7 +19,6 @@ import {
 } from '../lib/state';
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
-import { __resetProviderLimitWindowSelectionsForTests } from '../lib/provider-limit-selection';
 import { setSessionHistoryPrompts } from '../lib/message-window';
 
 const {
@@ -110,7 +109,6 @@ let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 
 beforeEach(() => {
-  __resetProviderLimitWindowSelectionsForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
@@ -154,7 +152,6 @@ afterEach(() => {
   setState('hiddenModels', []);
   setSessionHistoryPrompts('session-1', []);
   resetMessageEditState();
-  __resetProviderLimitWindowSelectionsForTests();
   sendMessageMock.mockReset();
   loadOlderSessionPromptsMock.mockReset();
   loadOlderSessionPromptsMock.mockResolvedValue(false);

@@ -158,21 +158,6 @@ export function userMessage(id: string): Message {
   };
 }
 
-export function userMessageForSession(
-  id: string,
-  sessionID: string,
-  model: { providerID: string; modelID: string; variant?: string }
-): Message {
-  return {
-    id,
-    sessionID,
-    role: 'user',
-    time: { created: 0 },
-    agent: 'build',
-    model,
-  };
-}
-
 export function assistantMessage(id: string, parentID: string): Message {
   return {
     id,
@@ -210,34 +195,6 @@ export function todoPart(
     state: {
       input: {
         todos: [{ id: `${id}-todo`, content, status, priority: 'medium' }],
-      },
-    },
-  } as unknown as Part;
-}
-
-export function parallelTodoPart(
-  id: string,
-  messageID: string,
-  content: string,
-  status = 'completed'
-): Part {
-  return {
-    id,
-    sessionID: 'session-1',
-    messageID,
-    type: 'tool',
-    callID: `${id}-call`,
-    tool: 'multi_tool_use.parallel',
-    state: {
-      input: {
-        tool_uses: [
-          {
-            recipient_name: 'functions.todowrite',
-            parameters: {
-              todos: [{ id: `${id}-todo`, content, status, priority: 'medium' }],
-            },
-          },
-        ],
       },
     },
   } as unknown as Part;

@@ -549,12 +549,6 @@ export type Provider = {
   };
 };
 
-export type Model = {
-  id: string;
-  providerID: string;
-  name: string;
-};
-
 export type SessionEventInfo = Partial<Session> & { id?: string | null; agent?: string | null };
 
 export type MessageEventInfo =

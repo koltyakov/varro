@@ -35,13 +35,3 @@ export function getPlanHash(content: string) {
 export function getPlanFileName(content: string) {
   return `plan-${getPlanHash(content)}.md`;
 }
-
-export function getPlanFilePath(
-  content: string,
-  env = process.env,
-  home = homedir(),
-  platform = process.platform
-) {
-  const join = getJoin(platform);
-  return join(getOpenCodePlansDirectory(env, home, platform), getPlanFileName(content));
-}

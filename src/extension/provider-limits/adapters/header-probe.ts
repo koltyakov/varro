@@ -1,9 +1,4 @@
-import {
-  buildProviderLimitProbe,
-  parseProviderLimitHeaders,
-  type ProviderAuthRecord,
-  type ProviderMetadata,
-} from '../../util/provider-limit';
+import { buildProviderLimitProbe, parseProviderLimitHeaders } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import { unsupportedProviderStatus } from '../adapter-utils';
 
@@ -64,12 +59,4 @@ export function createHeaderProbeAdapter(id: string): ProviderLimitAdapter {
       }
     },
   };
-}
-
-export function supportsHeaderProbeProvider(
-  id: string,
-  provider: ProviderMetadata,
-  authStore: Record<string, ProviderAuthRecord>
-) {
-  return provider.id === id && buildProviderLimitProbe(provider, authStore) != null;
 }

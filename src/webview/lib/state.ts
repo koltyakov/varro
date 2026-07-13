@@ -2518,14 +2518,6 @@ export function hasSettledLatestAssistantMessage(
   );
 }
 
-export function hasCompletedLatestAssistantMessage(
-  sessionId: string,
-  messages: MessageEntry[] = state.messages
-) {
-  const latest = getLatestMessageInfoForSession(sessionId, messages);
-  return latest?.role === 'assistant' && !latest.error && !!latest.time.completed;
-}
-
 function settleRunningSessionStatusesFromMessages(messages: MessageEntry[]) {
   const settledMessages = getSettledLatestAssistantMessages(messages);
   if (settledMessages.size === 0) return;
@@ -2574,14 +2566,6 @@ function getLatestMessageEntryForSession(sessionId: string, messages: MessageEnt
 
 function hasRunningToolPart(parts: Part[]) {
   return parts.some((part) => part.type === 'tool' && part.state.status === 'running');
-}
-
-function getLatestMessageInfoForSession(sessionId: string, messages: MessageEntry[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const info = messages[index]?.info;
-    if (info?.sessionID === sessionId) return info;
-  }
-  return null;
 }
 
 function mergeMessageEntry(

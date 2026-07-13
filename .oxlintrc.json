@@ -24,7 +24,6 @@
             "__initialWebviewState",
             "__parseMarkdownForTests",
             "__resetMarkdownCachesForTests",
-            "__resetProviderLimitWindowSelectionsForTests",
             "__sendToExtension",
             "__varroE2E",
             "__varroPasteText",

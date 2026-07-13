@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderMetadata } from '../../util/provider-limit';
-import { createHeaderProbeAdapter, supportsHeaderProbeProvider } from './header-probe';
+import { createHeaderProbeAdapter } from './header-probe';
 
 const openAiAdapter = createHeaderProbeAdapter('openai');
 const copilotAdapter = createHeaderProbeAdapter('github-copilot');
@@ -44,17 +44,6 @@ describe('createHeaderProbeAdapter', () => {
         'github-copilot': { type: 'oauth', access: 'copilot-oauth-token' },
       })
     ).toBe(true);
-
-    expect(
-      supportsHeaderProbeProvider('github-copilot', copilotProvider, {
-        'github-copilot': { type: 'oauth', access: 'copilot-oauth-token' },
-      })
-    ).toBe(true);
-    expect(
-      supportsHeaderProbeProvider('openai', copilotProvider, {
-        'github-copilot': { type: 'oauth', access: 'copilot-oauth-token' },
-      })
-    ).toBe(false);
   });
 
   it('parses request and token headers for OpenAI probes', async () => {

@@ -20,7 +20,6 @@ export const STORAGE_KEYS = {
   showThinking: 'varro.showThinking',
   expandThinkingByDefault: 'varro.expandThinkingByDefault',
   showStickyUserPrompt: 'varro.showStickyUserPrompt',
-  providerLimitWindow: 'varro.providerLimitWindow',
 } as const;
 
 const browserPersistence = new BrowserPersistence();

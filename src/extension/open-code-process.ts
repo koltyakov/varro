@@ -57,14 +57,6 @@ export function getOpenCodeConfigPaths(
   );
 }
 
-export function getOpenCodeConfigPath(
-  env: NodeJS.ProcessEnv = process.env,
-  home = homedir(),
-  platform = process.platform
-) {
-  return getOpenCodeConfigPaths(env, home, platform)[1]!;
-}
-
 export interface OpenCodeCompactionSettings {
   auto: boolean | null;
   reserved: number | null;

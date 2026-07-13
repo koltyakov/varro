@@ -3,7 +3,6 @@ import {
   getOpenCodeConfigDir,
   getOpenCodePlansDirectory,
   getPlanFileName,
-  getPlanFilePath,
   getPlanHash,
   normalizePlanMarkdown,
 } from './plan-file';
@@ -54,13 +53,5 @@ describe('plan file helpers', () => {
 
     expect(getPlanHash(content)).toHaveLength(16);
     expect(getPlanFileName(content)).toBe(`plan-${getPlanHash(content)}.md`);
-  });
-
-  it('builds the full plan file path from the content hash', () => {
-    const content = '# Plan\n\n1. Ship it';
-
-    expect(getPlanFilePath(content, {} as NodeJS.ProcessEnv, '/Users/test', 'linux')).toBe(
-      `/Users/test/.config/opencode/plans/${getPlanFileName(content)}`
-    );
   });
 });
