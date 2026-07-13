@@ -15,7 +15,7 @@ function DiffItem(props: { diff: FileDiff }) {
   const openFile = () => {
     const path = file();
     if (!path) return;
-    postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
+    postMessage({ type: 'vscode/open', payload: { path, kind: 'file', view: 'diff' } });
   };
 
   return (

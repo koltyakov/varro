@@ -939,11 +939,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           cancelMessageEdit();
           return;
         }
-        if (isBusyWithoutInterruption()) {
-          e.preventDefault();
-          void abortSession();
-          return;
-        }
       }
     }
 
@@ -955,6 +950,26 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         handleSend();
       }
     }
+  }
+
+  function handlePopupEscape(e: KeyboardEvent) {
+    if (
+      e.defaultPrevented ||
+      e.key !== 'Escape' ||
+      e.altKey ||
+      e.ctrlKey ||
+      e.metaKey ||
+      e.shiftKey ||
+      e.isComposing ||
+      !anyComposerPopupOpen()
+    ) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+    Object.assign(e, { varroHandled: true });
+    closePopups();
   }
 
   function moveCompletionSelection(direction: 1 | -1) {
@@ -1632,6 +1647,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setIsDraggingOver(false);
     };
 
+    window.addEventListener('keydown', handlePopupEscape, true);
     window.addEventListener('click', handleWindowClick, true);
     document.addEventListener('dragenter', beginDropTarget, true);
     document.addEventListener('dragover', handleWindowDragOver, true);
@@ -1640,6 +1656,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     onCleanup(() => {
       disposeBridge();
+      window.removeEventListener('keydown', handlePopupEscape, true);
       window.removeEventListener('click', handleWindowClick, true);
       document.removeEventListener('dragenter', beginDropTarget, true);
       document.removeEventListener('dragover', handleWindowDragOver, true);

@@ -13,6 +13,7 @@ import {
   formatContextLineRanges,
   formatSelectionReference,
   getFirstContextLine,
+  mergeContextFile,
   parseSelectionReference,
 } from '../../../shared/context-files';
 import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
@@ -262,22 +263,21 @@ export function getUserMessageEditText(parts: Part[]): string {
 
 export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
   const parsed = parseUserMessageContent(parts);
-  const files = parsed.attachments.flatMap((attachment) => {
-    if (attachment.type === 'terminal-selection') return [];
+  const filesByPath = new Map<string, MessageEditContext['files'][number]>();
+  for (const attachment of parsed.attachments) {
+    if (attachment.type === 'terminal-selection') continue;
 
     const path = attachment.type === 'file-selection' ? attachment.filename : attachment.path;
-    return [
-      {
-        path,
-        relativePath: path,
-        type:
-          attachment.type === 'file-reference' && attachment.isDirectory
-            ? ('directory' as const)
-            : ('file' as const),
-        lineRanges: attachment.type === 'file-selection' ? attachment.lineRanges : undefined,
-      },
-    ];
-  });
+    const file: MessageEditContext['files'][number] = {
+      path,
+      relativePath: path,
+      type: attachment.type === 'file-reference' && attachment.isDirectory ? 'directory' : 'file',
+      lineRanges: attachment.type === 'file-selection' ? attachment.lineRanges : undefined,
+    };
+    const key = normalizePath(path);
+    filesByPath.set(key, mergeContextFile(filesByPath.get(key), file));
+  }
+  const files = [...filesByPath.values()];
   const images = parsed.fileParts
     .filter((part) => part.mime.startsWith('image/'))
     .map((part, index) => ({

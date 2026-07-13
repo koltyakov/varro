@@ -298,7 +298,6 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   text-align: left;
 }
 
-.session-item:hover,
 .session-item.keyboard-focus {
   background: var(--color-vscode-hover);
 }
@@ -308,7 +307,6 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   box-shadow: inset 2px 0 color-mix(in srgb, var(--color-vscode-accent) 65%, transparent);
 }
 
-.session-item.is-pinned:hover,
 .session-item.is-pinned.keyboard-focus {
   background: color-mix(in srgb, var(--color-vscode-accent) 11%, var(--color-vscode-hover));
 }
@@ -321,6 +319,11 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-item.is-context-obscured {
   filter: blur(1px);
   opacity: 0.45;
+}
+
+.session-item:is(.is-context-selected, .is-context-obscured),
+.session-item:is(.is-context-selected, .is-context-obscured) * {
+  cursor: default;
 }
 
 .session-item-content {

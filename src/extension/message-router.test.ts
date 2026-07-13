@@ -192,7 +192,7 @@ describe('MessageRouter', () => {
   it('dispatches vscode/open', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);
-    const payload = { path: '/a.ts', line: 10, kind: 'file' as const };
+    const payload = { path: '/a.ts', line: 10, kind: 'file' as const, view: 'diff' as const };
     await router.handleMessage({ type: 'vscode/open', payload });
     expect(cb.openPath).toHaveBeenCalledWith(payload);
   });

@@ -135,7 +135,7 @@ describe('createSidebarProviderActions', () => {
     await actions.pickFiles();
     actions.searchFiles(7, 'src', 25);
     await actions.readContextFile('/repo/a.ts');
-    await actions.openPath({ path: '/repo/a.ts', line: 12, kind: 'file' });
+    await actions.openPath({ path: '/repo/a.ts', line: 12, kind: 'file', view: 'diff' });
     await actions.handleApiRequest({ id: 4, method: 'GET', path: '/api', body: { ok: true } });
 
     expect(deps.handleReadyMessage).toHaveBeenCalledOnce();
@@ -165,6 +165,7 @@ describe('createSidebarProviderActions', () => {
     expect(contextProvider.openPath).toHaveBeenCalledWith('/repo/a.ts', {
       line: 12,
       kind: 'file',
+      view: 'diff',
     });
     expect(restProxy.handleRequest).toHaveBeenCalledWith({
       id: 4,

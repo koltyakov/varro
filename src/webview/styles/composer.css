@@ -1105,18 +1105,33 @@
 .todo-block-active {
   min-width: 0;
   flex: 1;
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: var(--color-vscode-fg-soft);
   font-size: 11.5px;
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.todo-block-active::before {
-  content: '\00b7';
-  margin-right: 7px;
+.todo-block-active-indicators {
+  width: 6px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.todo-block-active-dot {
   color: color-mix(in srgb, var(--color-vscode-muted) 65%, transparent);
+}
+
+.todo-block-active-dot.is-current {
+  color: var(--color-vscode-accent);
+}
+
+.todo-block-active-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .todo-block-progress {
@@ -1217,7 +1232,7 @@
 
 .changed-files-list {
   /* Show at most ~5 rows, then scroll. */
-  max-height: 124px;
+  max-height: 128px;
   overflow-y: auto;
   overscroll-behavior: contain;
   /* Bleed through the block's horizontal padding (11px) so the scrollbar hugs

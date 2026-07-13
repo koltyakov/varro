@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { ChangedFilesList } from './ChangedFilesList';
 import { resetDefaultAppState, setState } from '../lib/state';
@@ -65,6 +65,7 @@ function largeFileEditPart(path: string): Part {
 describe('ChangedFilesList', () => {
   beforeEach(() => {
     resetDefaultAppState();
+    delete window.__sendToExtension;
     container = document.createElement('div');
     document.body.appendChild(container);
   });
@@ -74,6 +75,7 @@ describe('ChangedFilesList', () => {
     cleanup = undefined;
     container?.remove();
     container = null;
+    delete window.__sendToExtension;
     resetDefaultAppState();
   });
 
@@ -130,6 +132,23 @@ describe('ChangedFilesList', () => {
 
     expect(container?.querySelector('.changed-files-lines')?.textContent).toContain('+3392');
     expect(container?.querySelector('.changed-files-lines')?.textContent).toContain('-30K');
+  });
+
+  it('opens file rows in VS Code diff view', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session()]);
+    setState('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+    container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
+    container?.querySelector<HTMLButtonElement>('.changed-files-row-button')?.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: 'src/app.ts', kind: 'file', view: 'diff' },
+    });
   });
 
   it('hides backend summary files for an idle session that made no edits', () => {

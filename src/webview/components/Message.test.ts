@@ -949,6 +949,28 @@ describe('getUserMessageEditContext', () => {
       terminalSelection: { terminalName: 'zsh', text: 'npm test' },
     });
   });
+
+  it('deduplicates files when reconstructing edited message context', () => {
+    const context = getUserMessageEditContext([
+      textPart('text-1', 'src/app.ts'),
+      textPart('text-2', 'src/app.ts'),
+      textPart('text-3', '[Selection from src/main.ts lines 2-4]'),
+      textPart('text-4', '[Selection from src/main.ts lines 6-8]'),
+    ]);
+
+    expect(context.files).toEqual([
+      { path: 'src/app.ts', relativePath: 'src/app.ts', type: 'file', lineRanges: undefined },
+      {
+        path: 'src/main.ts',
+        relativePath: 'src/main.ts',
+        type: 'file',
+        lineRanges: [
+          { startLine: 2, endLine: 4 },
+          { startLine: 6, endLine: 8 },
+        ],
+      },
+    ]);
+  });
 });
 
 describe('Message user editing', () => {

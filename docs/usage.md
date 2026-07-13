@@ -71,7 +71,7 @@ Use any of these flows to add more context.
 - While a session is running, the send menu also exposes `Add to Queue`, `Steer with Message`, and `Stop and Send`.
 - `ArrowUp` and `ArrowDown` can step through previous user prompts when the composer is empty.
 - `Cmd+Z` / `Ctrl+Z` undoes the last composer edit, including pasted text and attachment changes (context files and pasted images). `Cmd+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y` redoes it.
-- `Escape` closes any open composer popup; otherwise, while a session is running, it stops the session.
+- `Escape` closes any open composer popup or cancels message editing; otherwise, it returns to the session list without stopping a running session.
 - `Tab` accepts the highlighted slash-command or mention completion.
 - Slash commands are available directly in the composer.
 

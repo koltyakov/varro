@@ -315,13 +315,24 @@ export class ContextProvider implements vscode.Disposable {
     }
   }
 
-  async openPath(path: string, options?: { line?: number; kind?: 'auto' | 'file' | 'directory' }) {
+  async openPath(
+    path: string,
+    options?: { line?: number; kind?: 'auto' | 'file' | 'directory'; view?: 'diff' }
+  ) {
     try {
-      const resolved = await this.resolveWorkspaceUri(path);
+      const resolved = await this.resolveWorkspaceUri(path, options?.view === 'diff');
       const uri = resolved?.uri;
       if (!uri) {
         logger.warn(`Could not resolve file path: ${path}`);
         return;
+      }
+
+      if (options?.view === 'diff') {
+        if (await hasGitChange(uri)) {
+          const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+          await vscode.commands.executeCommand('git.openChange', uri);
+          if (vscode.window.tabGroups.activeTabGroup.activeTab !== activeTab) return;
+        }
       }
 
       const stat = await vscode.workspace.fs.stat(uri);
@@ -348,13 +359,18 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   private async resolveWorkspaceUri(
-    rawPath: string
+    rawPath: string,
+    allowMissing = false
   ): Promise<{ uri: vscode.Uri; workspaceFolder?: vscode.WorkspaceFolder } | null> {
     const input = rawPath.trim();
     if (!input) return null;
 
     if (isAbsolute(input)) {
       const uri = vscode.Uri.file(input);
+      if (allowMissing) {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        return workspaceFolder ? { uri, workspaceFolder } : { uri };
+      }
       try {
         await vscode.workspace.fs.stat(uri);
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
@@ -388,6 +404,13 @@ export class ContextProvider implements vscode.Disposable {
       } catch {}
     }
 
+    if (allowMissing && resolutionOrder[0]) {
+      return {
+        uri: vscode.Uri.file(join(resolutionOrder[0].uri.fsPath, relativePath)),
+        workspaceFolder: resolutionOrder[0],
+      };
+    }
+
     return null;
   }
 
@@ -416,6 +439,34 @@ export class ContextProvider implements vscode.Disposable {
     const fallbackFolder = vscode.workspace.workspaceFolders?.[0];
     return fallbackFolder?.uri.fsPath || null;
   }
+}
+
+type GitChange = { uri: vscode.Uri };
+type GitRepository = {
+  state: {
+    workingTreeChanges: GitChange[];
+    indexChanges: GitChange[];
+    mergeChanges: GitChange[];
+  };
+};
+type GitExtension = {
+  getAPI(version: 1): { repositories: GitRepository[] };
+};
+
+async function hasGitChange(uri: vscode.Uri): Promise<boolean> {
+  const extension = vscode.extensions.getExtension<GitExtension>('vscode.git');
+  if (!extension) return false;
+
+  const git = extension.isActive ? extension.exports : await extension.activate();
+  return git
+    .getAPI(1)
+    .repositories.some((repository) =>
+      [
+        ...repository.state.workingTreeChanges,
+        ...repository.state.indexChanges,
+        ...repository.state.mergeChanges,
+      ].some((change) => change.uri.fsPath === uri.fsPath)
+    );
 }
 
 type ContextSnapshot = Pick<EditorContext, 'workspacePath' | 'activeFile' | 'selection'>;

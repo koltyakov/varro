@@ -86,6 +86,7 @@ export function createSidebarProviderActions(
       deps.contextProvider.openPath(payload.path, {
         line: payload.line,
         kind: payload.kind,
+        view: payload.view,
       }),
     openExternal: async (url) => {
       if (!url.startsWith('https://')) {

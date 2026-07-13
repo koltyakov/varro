@@ -62,6 +62,10 @@ function dispatchDesktopMediaQueryChange(matches: boolean) {
   desktopMediaQueryListeners.forEach((listener) => listener(event));
 }
 
+function preventKeyboardDefault(event: KeyboardEvent) {
+  event.preventDefault();
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   container = document.createElement('div');
@@ -1084,6 +1088,54 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-main-shell')).toBeInstanceOf(HTMLDivElement);
   });
 
+  it('switches sessions when requested by the extension host', () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+    setState('sessions', [session('newest', 300), session('middle', 200), session('oldest', 100)]);
+    setState('activeSessionId', 'middle');
+
+    cleanup = render(() => Chat(), container!);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'command/switch-session', payload: { direction: 'next' } },
+      })
+    );
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('oldest');
+  });
+
+  it('returns to the sessions list with Escape', async () => {
+    setState('sessions', [session('active', 500), session('other', 400)]);
+    setState('activeSessionId', 'active');
+
+    cleanup = render(() => Chat(), container!);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('leaves Escape to nested chat controls that consume it', async () => {
+    setState('sessions', [session('active', 500), session('other', 400)]);
+    setState('activeSessionId', 'active');
+
+    cleanup = render(() => Chat(), container!);
+    window.addEventListener('keydown', preventKeyboardDefault);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    await Promise.resolve();
+    window.removeEventListener('keydown', preventKeyboardDefault);
+
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeNull();
+  });
+
   it('shows status badges in the desktop chat header', () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');
@@ -1863,7 +1915,7 @@ describe('header status badges', () => {
     expect(input).toBeInstanceOf(HTMLInputElement);
     expect(items).toHaveLength(3);
 
-    items[2]?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    items[2]?.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
     expect(items[2]?.classList.contains('keyboard-focus')).toBe(true);
 
     input!.dispatchEvent(new FocusEvent('focus'));

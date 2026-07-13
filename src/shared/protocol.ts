@@ -439,6 +439,7 @@ export type ExtensionMessage =
   | { type: 'command/focus-input' }
   | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }
+  | { type: 'command/switch-session'; payload: { direction: 'previous' | 'next' } }
   | { type: 'command/abort' }
   | { type: 'ralph/state'; payload: RalphStatePayload };
 
@@ -464,7 +465,12 @@ export type WebviewMessage =
   | { type: 'file/read'; payload: { path: string } }
   | {
       type: 'vscode/open';
-      payload: { path: string; line?: number; kind?: 'auto' | 'file' | 'directory' };
+      payload: {
+        path: string;
+        line?: number;
+        kind?: 'auto' | 'file' | 'directory';
+        view?: 'diff';
+      };
     }
   | { type: 'vscode/open-external'; payload: { url: string } }
   | {

@@ -327,6 +327,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: `command/${cmd}` } as ExtensionMessage);
   }
 
+  switchSession(direction: 'previous' | 'next') {
+    this.post({ type: 'command/switch-session', payload: { direction } });
+  }
+
   requestInputFocus() {
     this.webviewSession.requestInputFocus();
   }

@@ -1283,11 +1283,11 @@ describe('FileChangeCard', () => {
 
     expect(sendSpy).toHaveBeenNthCalledWith(1, {
       type: 'vscode/open',
-      payload: { path: '/repo/src/old.ts', kind: 'file' },
+      payload: { path: '/repo/src/old.ts', kind: 'file', view: 'diff' },
     });
     expect(sendSpy).toHaveBeenNthCalledWith(2, {
       type: 'vscode/open',
-      payload: { path: '/repo/src/new.ts', kind: 'file' },
+      payload: { path: '/repo/src/new.ts', kind: 'file', view: 'diff' },
     });
   });
 
@@ -1340,7 +1340,7 @@ describe('FileChangeCard', () => {
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: 'src/app.ts', kind: 'file' },
+      payload: { path: 'src/app.ts', kind: 'file', view: 'diff' },
     });
   });
 
@@ -1405,7 +1405,7 @@ describe('FileChangeCard', () => {
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: 'src/three.ts', kind: 'file' },
+      payload: { path: 'src/three.ts', kind: 'file', view: 'diff' },
     });
     expect(container?.querySelector('.file-edit-more-menu')).toBeNull();
   });

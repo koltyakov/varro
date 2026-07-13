@@ -172,7 +172,10 @@ function openFileChangePath(path: string) {
   return (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
+    postMessage({
+      type: 'vscode/open',
+      payload: { path, kind: 'file', view: 'diff' },
+    });
   };
 }
 
@@ -504,6 +507,7 @@ function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChan
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      event.preventDefault();
       setMoreMenuOpen(false);
       moreButtonRef?.focus();
     };

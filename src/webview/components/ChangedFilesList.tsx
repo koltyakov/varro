@@ -153,11 +153,11 @@ function ChangedFileItem(props: { change: FileChange }) {
     const name = leaf();
     return path.endsWith(name) ? path.slice(0, path.length - name.length) : '';
   };
-  // A removed file no longer exists on disk, so there is nothing to open.
-  const isOpenable = () => props.change.kind !== 'removed';
   const openFile = () => {
-    if (!isOpenable()) return;
-    postMessage({ type: 'vscode/open', payload: { path: openPath(), kind: 'file' } });
+    postMessage({
+      type: 'vscode/open',
+      payload: { path: openPath(), kind: 'file', view: 'diff' },
+    });
   };
 
   const content = (
@@ -190,16 +190,14 @@ function ChangedFileItem(props: { change: FileChange }) {
 
   return (
     <li class={`todo-block-item changed-files-item kind-${props.change.kind}`}>
-      <Show when={isOpenable()} fallback={<span class="changed-files-row">{content}</span>}>
-        <button
-          type="button"
-          class="changed-files-row changed-files-row-button"
-          onClick={openFile}
-          title={`Open ${displayPath()}`}
-        >
-          {content}
-        </button>
-      </Show>
+      <button
+        type="button"
+        class="changed-files-row changed-files-row-button"
+        onClick={openFile}
+        title={`Open diff for ${displayPath()}`}
+      >
+        {content}
+      </button>
     </li>
   );
 }

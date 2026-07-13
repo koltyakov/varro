@@ -15,9 +15,28 @@ export function TodoList() {
   const total = () => todos().length;
   const progress = () => (total() > 0 ? (completed() / total()) * 100 : 0);
   const allDone = () => total() > 0 && completed() === total();
-  const inProgressTodo = () => todos().find((todo) => todo.status === 'in_progress');
-  const activeTodo = () =>
-    inProgressTodo() || todos().find((todo) => !isResolvedTodoStatus(todo.status));
+  const inProgressTodos = () => todos().filter((todo) => todo.status === 'in_progress');
+  const inProgressTodo = () => inProgressTodos()[0];
+  const [activeTodoIndex, setActiveTodoIndex] = createSignal(0);
+  const activeTodo = () => {
+    const running = inProgressTodos();
+    return (
+      running[activeTodoIndex() % running.length] ||
+      todos().find((todo) => !isResolvedTodoStatus(todo.status))
+    );
+  };
+  const activeTodoDots = () => {
+    const count = inProgressTodos().length || (activeTodo() ? 1 : 0);
+    if (count === 0) return [];
+
+    const gap = Math.min(1, 4 / count);
+    const diameter = Math.min(3, (14 - gap * (count - 1)) / count);
+    const firstCenter = (14 - (diameter * count + gap * (count - 1))) / 2 + diameter / 2;
+    return Array.from({ length: count }, (_, index) => ({
+      center: firstCenter + index * (diameter + gap),
+      radius: diameter / 2,
+    }));
+  };
   const [collapsed, setCollapsed] = createSignal(allDone());
   const [listMaxHeight, setListMaxHeight] = createSignal(DEFAULT_TODO_LIST_HEIGHT);
   let previousTodoIds = new Set(todos().map((todo) => todo.id));
@@ -31,6 +50,20 @@ export function TodoList() {
     manuallyExpanded = false;
     setCollapsed(nextCollapsed);
   };
+
+  createEffect(() => {
+    const runningCount = inProgressTodos().length;
+    if (!collapsed() || runningCount <= 1) {
+      setActiveTodoIndex(0);
+      return;
+    }
+
+    setActiveTodoIndex(0);
+    const interval = window.setInterval(() => {
+      setActiveTodoIndex((index) => (index + 1) % runningCount);
+    }, 5_000);
+    onCleanup(() => window.clearInterval(interval));
+  });
 
   createEffect(() => {
     const nextTodoIds = new Set(todos().map((todo) => todo.id));
@@ -147,7 +180,20 @@ export function TodoList() {
         <Show when={collapsed() && activeTodo()}>
           {(todo) => (
             <span class="todo-block-active" title={todo().content}>
-              {todo().content}
+              <svg class="todo-block-active-indicators" viewBox="0 0 6 14" aria-hidden="true">
+                <For each={activeTodoDots()}>
+                  {(dot, index) => (
+                    <circle
+                      class={`todo-block-active-dot ${index() === activeTodoIndex() ? 'is-current' : ''}`}
+                      cx="3"
+                      cy={dot.center}
+                      r={dot.radius}
+                      fill="currentColor"
+                    />
+                  )}
+                </For>
+              </svg>
+              <span class="todo-block-active-text">{todo().content}</span>
             </span>
           )}
         </Show>

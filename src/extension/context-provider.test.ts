@@ -14,6 +14,9 @@ const vscodeMock = vi.hoisted(() => ({
   window: {
     activeTerminal: { name: 'Terminal 1' } as { name: string } | undefined,
     activeTextEditor: undefined as unknown,
+    tabGroups: {
+      activeTabGroup: { activeTab: undefined as unknown },
+    },
     onDidChangeActiveTextEditor: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     onDidChangeTextEditorSelection: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     showTextDocument: vi.fn(),
@@ -38,6 +41,9 @@ const vscodeMock = vi.hoisted(() => ({
   },
   commands: {
     executeCommand: vi.fn(() => Promise.resolve(undefined)),
+  },
+  extensions: {
+    getExtension: vi.fn(),
   },
   env: {
     clipboard: {
@@ -84,11 +90,13 @@ describe('ContextProvider', () => {
     clipboardState.writes = [];
     vscodeMock.window.activeTerminal = { name: 'Terminal 1' };
     vscodeMock.window.activeTextEditor = undefined;
+    vscodeMock.window.tabGroups.activeTabGroup.activeTab = undefined;
     vscodeMock.workspace.getWorkspaceFolder.mockReset();
     vscodeMock.workspace.fs.stat.mockReset();
     vscodeMock.workspace.openTextDocument.mockReset();
     vscodeMock.workspace.asRelativePath.mockReset();
     vscodeMock.window.showTextDocument.mockReset();
+    vscodeMock.extensions.getExtension.mockReset();
     vscodeMock.commands.executeCommand.mockResolvedValue(undefined);
     vscodeMock.languages.getDiagnostics.mockReset();
     vscodeMock.languages.getDiagnostics.mockReturnValue([]);
@@ -216,6 +224,100 @@ describe('ContextProvider', () => {
       expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('revealInExplorer', uri);
       expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
       expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('opens missing workspace-relative file paths in the Git diff editor', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const uri = { fsPath: '/repo/src/deleted.ts' };
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.workspace.fs.stat.mockRejectedValue(new Error('File not found'));
+    vscodeMock.extensions.getExtension.mockReturnValue({
+      isActive: true,
+      exports: {
+        getAPI: () => ({
+          repositories: [
+            {
+              state: { workingTreeChanges: [{ uri }], indexChanges: [], mergeChanges: [] },
+            },
+          ],
+        }),
+      },
+    });
+
+    try {
+      await provider.openPath('src/deleted.ts', { kind: 'file', view: 'diff' });
+
+      expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('git.openChange', uri);
+      expect(vscodeMock.workspace.fs.stat).toHaveBeenCalledWith(uri);
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+      expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('opens the file when Git has no change to show', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const uri = { fsPath: '/repo/src/session-only.ts' };
+    const document = { uri };
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue(document);
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+    vscodeMock.extensions.getExtension.mockReturnValue({
+      isActive: true,
+      exports: {
+        getAPI: () => ({ repositories: [] }),
+      },
+    });
+
+    try {
+      await provider.openPath('src/session-only.ts', { kind: 'file', view: 'diff' });
+
+      expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalledWith('git.openChange', uri);
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(uri);
+      expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith(document, { preview: false });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('opens the file when the Git diff command does not activate a tab', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const uri = { fsPath: '/repo/src/stale-change.ts' };
+    const document = { uri };
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue(document);
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+    vscodeMock.extensions.getExtension.mockReturnValue({
+      isActive: true,
+      exports: {
+        getAPI: () => ({
+          repositories: [
+            {
+              state: { workingTreeChanges: [{ uri }], indexChanges: [], mergeChanges: [] },
+            },
+          ],
+        }),
+      },
+    });
+
+    try {
+      await provider.openPath('src/stale-change.ts', { kind: 'file', view: 'diff' });
+
+      expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('git.openChange', uri);
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(uri);
+      expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith(document, { preview: false });
     } finally {
       provider.dispose();
     }

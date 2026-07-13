@@ -26,6 +26,7 @@ describe('protocol conformance', () => {
       'command/focus-input': true,
       'command/search-sessions': true,
       'command/open-attention-sessions': true,
+      'command/switch-session': true,
       'command/abort': true,
       'ralph/state': true,
     };

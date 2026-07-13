@@ -22,6 +22,15 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'command/open-attention-sessions' })).toEqual({
       type: 'command/open-attention-sessions',
     });
+    expect(
+      parseExtensionMessage({
+        type: 'command/switch-session',
+        payload: { direction: 'previous' },
+      })
+    ).toEqual({ type: 'command/switch-session', payload: { direction: 'previous' } });
+    expect(
+      parseExtensionMessage({ type: 'command/switch-session', payload: { direction: 'sideways' } })
+    ).toBeNull();
     expect(parseExtensionMessage({ type: 'command/abort' })).toEqual({ type: 'command/abort' });
   });
 

@@ -137,6 +137,7 @@ afterEach(() => {
   setState('messages', []);
   setState('sessions', []);
   setState('providers', []);
+  setState('agents', []);
   setState('allAgents', []);
   setState('providerDefaults', {});
   setState('selectedModel', null);
@@ -2439,7 +2440,7 @@ describe('ChatInput composer history hotkeys', () => {
     expect(state.droppedFiles.map((file) => file.path)).toEqual(['/repo/src/a.ts']);
   });
 
-  it('stops the running session on Escape', async () => {
+  it('does not stop the running session on Escape', async () => {
     setState('activeSessionId', 'session-1');
     setIsLoading(true);
     cleanup = render(() => ChatInput(), container!);
@@ -2450,7 +2451,34 @@ describe('ChatInput composer history hotkeys', () => {
     );
     await flushAsyncWork();
 
-    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(abortSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('closes a toolbar popup on Escape without leaking the shortcut', () => {
+    setState('agents', [
+      {
+        name: 'plan',
+        description: 'Draft implementation plans',
+        mode: 'primary',
+        builtIn: true,
+        permission: [],
+      },
+    ]);
+    cleanup = render(() => ChatInput(), container!);
+
+    const agentButton = container?.querySelector<HTMLButtonElement>('[title="Select agent"]');
+    agentButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(container?.querySelector('.agent-popover')).toBeInstanceOf(HTMLDivElement);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(container?.querySelector('.agent-popover')).toBeNull();
   });
 
   it('does not stop anything on Escape while idle', async () => {

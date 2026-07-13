@@ -210,15 +210,18 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH);
       const line = payload?.line === undefined ? undefined : getSafeInteger(payload.line);
       const kind = payload?.kind;
+      const view = payload?.view;
       if (!path || (payload?.line !== undefined && line === null)) return null;
       if (kind !== undefined && kind !== 'auto' && kind !== 'file' && kind !== 'directory')
         return null;
+      if (view !== undefined && view !== 'diff') return null;
       return {
         type,
         payload: {
           path,
           ...(line !== undefined && line !== null ? { line } : {}),
           ...(kind ? { kind } : {}),
+          ...(view ? { view } : {}),
         },
       };
     }

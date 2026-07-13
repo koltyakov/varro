@@ -22,6 +22,7 @@ describe('TodoList', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     cleanup?.();
     cleanup = undefined;
     container?.remove();
@@ -96,12 +97,48 @@ describe('TodoList', () => {
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('ul.todo-block-list')).toBeNull();
     expect(container?.querySelector('.todo-block-active')?.textContent).toBe('Working task');
+    expect(container?.querySelectorAll('.todo-block-active-dot')).toHaveLength(1);
 
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelector('.todo-block-active')).toBeNull();
     items = container?.querySelectorAll('li.todo-block-item');
     expect(items).toHaveLength(4);
+  });
+
+  it('shows a dot per running todo and rotates their collapsed labels every five seconds', async () => {
+    vi.useFakeTimers();
+    setState('todos', [
+      { id: 'todo-1', content: 'First running task', status: 'in_progress', priority: 'high' },
+      { id: 'todo-2', content: 'Second running task', status: 'in_progress', priority: 'medium' },
+      { id: 'todo-3', content: 'Later task', status: 'pending', priority: 'low' },
+    ]);
+
+    cleanup = render(() => TodoList(), container!);
+    const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    const dots = container?.querySelectorAll('.todo-block-active-dot');
+    expect(dots).toHaveLength(2);
+    expect(dots?.item(0).classList).toContain('is-current');
+    expect(dots?.item(1).classList).not.toContain('is-current');
+    expect(container?.querySelector('.todo-block-active-text')?.textContent).toBe(
+      'First running task'
+    );
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(dots?.item(0).classList).not.toContain('is-current');
+    expect(dots?.item(1).classList).toContain('is-current');
+    expect(container?.querySelector('.todo-block-active-text')?.textContent).toBe(
+      'Second running task'
+    );
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(dots?.item(0).classList).toContain('is-current');
+    expect(dots?.item(1).classList).not.toContain('is-current');
+    expect(container?.querySelector('.todo-block-active-text')?.textContent).toBe(
+      'First running task'
+    );
   });
 
   it('scrolls the active todo into view', async () => {

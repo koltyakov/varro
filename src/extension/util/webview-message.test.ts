@@ -631,14 +631,22 @@ describe('webview message validation', () => {
           path: '/repo/src/app.ts',
           line: 12,
           kind: 'file',
+          view: 'diff',
           column: 7,
           selection: { startLine: 12, endLine: 14 },
         },
       })
     ).toEqual({
       type: 'vscode/open',
-      payload: { path: '/repo/src/app.ts', line: 12, kind: 'file' },
+      payload: { path: '/repo/src/app.ts', line: 12, kind: 'file', view: 'diff' },
     });
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open',
+        payload: { path: '/repo/src/app.ts', view: 'editor' },
+      })
+    ).toBeNull();
   });
 
   it('rejects malformed URLs and unsafe path traversal in helper guards', () => {

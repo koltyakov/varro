@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.20.7",
+  "version": "0.20.8",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -108,6 +108,14 @@
       {
         "command": "varro.chat.abort",
         "title": "Varro: Abort Session"
+      },
+      {
+        "command": "varro.chat.previousSession",
+        "title": "Varro: Previous Session"
+      },
+      {
+        "command": "varro.chat.nextSession",
+        "title": "Varro: Next Session"
       },
       {
         "command": "varro.server.restart",

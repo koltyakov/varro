@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe('DiffView', () => {
-  it('opens the clicked diff file in VS Code', () => {
+  it('opens the clicked file in VS Code diff view', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
 
@@ -55,7 +55,7 @@ describe('DiffView', () => {
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: 'src/webview/components/Chat.tsx', kind: 'file' },
+      payload: { path: 'src/webview/components/Chat.tsx', kind: 'file', view: 'diff' },
     });
   });
 

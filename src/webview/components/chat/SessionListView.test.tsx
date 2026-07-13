@@ -437,6 +437,34 @@ describe('SessionListView selection', () => {
     ).toBe(true);
   });
 
+  it('does not let stationary hover override keyboard selection after a refresh', async () => {
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const now = Date.now();
+    setState('sessions', [session('session-1', now), session('session-2', now - 1)]);
+
+    try {
+      cleanup = render(() => <SessionListView embedded />, container);
+
+      const list = container.querySelector<HTMLElement>('.session-list-view')!;
+      let items = container.querySelectorAll<HTMLElement>('.session-item');
+      items[0]!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      expect(items[1]?.classList.contains('keyboard-focus')).toBe(true);
+
+      setState('sessions', [session('session-1', now + 1), session('session-2', now - 1)]);
+      await Promise.resolve();
+      items = container.querySelectorAll<HTMLElement>('.session-item');
+      items[0]!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+
+      expect(items[1]?.classList.contains('keyboard-focus')).toBe(true);
+      items[0]!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      expect(items[0]?.classList.contains('keyboard-focus')).toBe(true);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it('selects a session from the trailing row area', () => {
     vi.mocked(selectSession).mockClear();
     setState('sessions', [session('session-1', Date.now())]);
@@ -479,7 +507,7 @@ describe('SessionListView ordering', () => {
 });
 
 describe('SessionListView actions', () => {
-  it('closes the context menu and selects another session with one click', () => {
+  it('closes the context menu without selecting another session with one click', () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
       additions: 0,
@@ -500,13 +528,19 @@ describe('SessionListView actions', () => {
 
     expect(owningRow.classList.contains('is-context-selected')).toBe(true);
     expect(otherRow.classList.contains('is-context-obscured')).toBe(true);
+    expect(owningRow.inert).toBe(true);
+    expect(otherRow.inert).toBe(true);
+
+    otherRow.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    expect(otherRow.classList.contains('keyboard-focus')).toBe(false);
 
     otherRow.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
     otherRow.querySelector<HTMLButtonElement>('.session-item-main')!.click();
 
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(otherRow.classList.contains('is-context-obscured')).toBe(false);
-    expect(selectSession).toHaveBeenCalledWith('session-2');
+    expect(otherRow.inert).not.toBe(true);
+    expect(selectSession).not.toHaveBeenCalled();
   });
 
   it('freezes session row order until the context menu closes', () => {
@@ -618,6 +652,42 @@ describe('SessionListView actions', () => {
     expect(
       container.querySelector('.session-item')?.classList.contains('is-context-selected')
     ).toBe(true);
+  });
+
+  it('does not override repeated caret placement while renaming', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    const now = Date.now();
+    setSessions([session('session-1', now, { title: 'First session' })]);
+    cleanup = render(() => <SessionListView />, container);
+
+    openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    await Promise.resolve();
+
+    const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
+    const setSelectionRange = vi.spyOn(input, 'setSelectionRange');
+
+    input.setSelectionRange(3, 3);
+    setSelectionRange.mockClear();
+    input.dispatchEvent(new Event('select', { bubbles: true }));
+    input.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    input.setSelectionRange(8, 8);
+    setSelectionRange.mockClear();
+    input.dispatchEvent(new Event('select', { bubbles: true }));
+    input.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(setSelectionRange).not.toHaveBeenCalled();
+    expect(input.selectionStart).toBe(8);
+    expect(input.selectionEnd).toBe(8);
   });
 
   it('closes the context menu when rename is cancelled', () => {

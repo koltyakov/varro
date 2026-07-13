@@ -144,7 +144,9 @@ export function ModelsPanel() {
   onMount(() => {
     const onPointerDown = () => closeContextMenu();
     const onEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeContextMenu();
+      if (event.key !== 'Escape' || !contextMenu()) return;
+      event.preventDefault();
+      closeContextMenu();
     };
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onEscape);

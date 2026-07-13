@@ -32,6 +32,7 @@ const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'command/focus-input',
   'command/search-sessions',
   'command/open-attention-sessions',
+  'command/switch-session',
   'command/abort',
   'ralph/state',
 ]);
@@ -58,6 +59,12 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
     case 'command/abort':
     case 'providers/refresh':
       return { type };
+
+    case 'command/switch-session': {
+      const payload = asRecord(record.payload);
+      if (payload?.direction !== 'previous' && payload?.direction !== 'next') return null;
+      return { type, payload: { direction: payload.direction } };
+    }
 
     case 'server/status': {
       const payload = asRecord(record.payload);

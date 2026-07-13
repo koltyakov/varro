@@ -717,6 +717,7 @@ export function SessionListView(props: {
     renamePending,
     open: (sessionId, event) => {
       event.preventDefault();
+      setFocusedIndex(-1);
       setActionsPosition({ x: event.clientX, y: event.clientY });
       setFrozenSessionOrder(visibleSessions().map((session) => session.id));
       setRenaming(false);
@@ -1426,24 +1427,59 @@ function SessionListItem(props: {
 
   createEffect(() => {
     if (!showActions()) return;
+    let dismissOnSessionClick = false;
     const closeIfOutside = (event: Event) => {
       const target = event.target;
-      if (!(target instanceof Node) || !actionsMenuRef?.contains(target)) props.actions.close();
+      if (target instanceof Node && actionsMenuRef?.contains(target)) return;
+      if (
+        event.type === 'pointerdown' &&
+        event instanceof PointerEvent &&
+        event.button === 0 &&
+        target instanceof Element &&
+        target.closest('.session-item')
+      ) {
+        dismissOnSessionClick = true;
+        return;
+      }
+      if (
+        event.type === 'focusin' &&
+        dismissOnSessionClick &&
+        target instanceof Element &&
+        target.closest('.session-item')
+      ) {
+        return;
+      }
+      dismissOnSessionClick = false;
+      props.actions.close();
+    };
+    const dismissSessionClick = (event: MouseEvent) => {
+      if (!dismissOnSessionClick) return;
+      dismissOnSessionClick = false;
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest('.session-item')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      props.actions.close();
     };
     window.addEventListener('contextmenu', closeIfOutside, true);
     window.addEventListener('pointerdown', closeIfOutside, true);
     window.addEventListener('focusin', closeIfOutside);
+    window.addEventListener('click', dismissSessionClick, true);
     onCleanup(() => {
       window.removeEventListener('contextmenu', closeIfOutside, true);
       window.removeEventListener('pointerdown', closeIfOutside, true);
       window.removeEventListener('focusin', closeIfOutside);
+      window.removeEventListener('click', dismissSessionClick, true);
     });
   });
 
   return (
     <div
       class={`session-item ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
-      onMouseEnter={() => props.setFocusedIndex(props.itemIndex())}
+      inert={props.actions.sessionId() ? true : undefined}
+      onMouseMove={() => {
+        if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
+      }}
       onContextMenu={openActions}
       onClick={handleRowClick}
     >
@@ -1453,7 +1489,9 @@ function SessionListItem(props: {
         }}
         type="button"
         class="session-item-main"
-        onFocus={() => props.setFocusedIndex(props.itemIndex())}
+        onFocus={() => {
+          if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
+        }}
       >
         <Show when={indicatorKind()} fallback={<span class="session-item-indicator-spacer" />}>
           {(kind) => (
@@ -1644,7 +1682,7 @@ function SessionListItem(props: {
                 <input
                   ref={(element) => {
                     renameInputRef = element;
-                    const selection = props.actions.renameSelection();
+                    const selection = untrack(props.actions.renameSelection);
                     if (!selection) return;
                     queueMicrotask(() => {
                       element.focus();

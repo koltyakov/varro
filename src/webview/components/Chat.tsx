@@ -29,7 +29,8 @@ import {
   shouldShowSessionHeaderBadge,
 } from './chat/SessionListView';
 import type { SessionListFilter } from './chat/SessionListView';
-import { onSlowApiRequestsChange, type SlowApiRequest } from '../lib/bridge';
+import { onMessage, onSlowApiRequestsChange, type SlowApiRequest } from '../lib/bridge';
+import { compareSessionsByActivity } from '../lib/session-order';
 
 type HeaderSessionCounts = {
   running: number;
@@ -330,6 +331,71 @@ export function Chat() {
     }
     setShowSessionPicker(true);
   };
+
+  const switchActiveSession = (direction: -1 | 1) => {
+    if (!shouldRenderWorkspace() || showSettings()) return;
+
+    const activeSessionId = state.activeSessionId;
+    if (!activeSessionId) return;
+
+    const now = Date.now();
+    const orderedSessions = primarySessions().toSorted((left, right) => {
+      const pinOrder =
+        Number(state.pinnedSessionIds.includes(right.id)) -
+        Number(state.pinnedSessionIds.includes(left.id));
+      return pinOrder || compareSessionsByActivity(left, right, now);
+    });
+    if (orderedSessions.length < 2) return;
+
+    const activeIndex = orderedSessions.findIndex((session) => session.id === activeSessionId);
+    if (activeIndex === -1) return;
+
+    const nextIndex = (activeIndex + direction + orderedSessions.length) % orderedSessions.length;
+    void selectSession(orderedSessions[nextIndex]!.id);
+  };
+
+  onMount(() => {
+    const disposeBridge = onMessage((message) => {
+      if (message.type !== 'command/switch-session') return;
+      switchActiveSession(message.payload.direction === 'previous' ? -1 : 1);
+    });
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+
+      // Target handlers run before this window listener, while other window
+      // handlers may run after it.
+      const wasHandled = event.defaultPrevented;
+      queueMicrotask(() => {
+        if (
+          wasHandled ||
+          event.defaultPrevented ||
+          (event as KeyboardEvent & { varroHandled?: boolean }).varroHandled
+        ) {
+          return;
+        }
+        if (showSettings()) {
+          setShowSettings(false);
+          return;
+        }
+        if (showSessionPicker()) return;
+        void openAllSessions();
+      });
+    };
+
+    window.addEventListener('keydown', handleKeydown);
+    onCleanup(() => {
+      disposeBridge();
+      window.removeEventListener('keydown', handleKeydown);
+    });
+  });
 
   const openSubagentListParentSession = () => {
     const parentSessionId = subagentParentId();

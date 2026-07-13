@@ -65,6 +65,14 @@ export function registerCommands(
       sidebar.postCommand('abort');
     }),
 
+    vscode.commands.registerCommand('varro.chat.previousSession', () => {
+      sidebar.switchSession('previous');
+    }),
+
+    vscode.commands.registerCommand('varro.chat.nextSession', () => {
+      sidebar.switchSession('next');
+    }),
+
     vscode.commands.registerCommand('varro.about', async () => {
       try {
         const serverInfo = await server.readServerInfo();
