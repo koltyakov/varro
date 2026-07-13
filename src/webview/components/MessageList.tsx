@@ -1632,11 +1632,13 @@ export function MessageList() {
         : undefined,
     }));
     const dialogMessages = assistantDialogMessages();
+    const targetMessageIds = renderedMessageIds();
+    const collectLeadingSummaryStats = collectingLeadingDialogStats();
     return untrack(() =>
-      getAssistantDialogSummaryMap(dialogMessages, renderedMessageIds(), {
+      getAssistantDialogSummaryMap(dialogMessages, targetMessageIds, {
         sessions,
         suppressTrailingSummary,
-        collectLeadingSummaryStats: collectingLeadingDialogStats(),
+        collectLeadingSummaryStats,
       })
     );
   });

@@ -1819,6 +1819,74 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
+  it('updates Worked for summaries when the virtualized range changes', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 30 }, (_, index) => {
+        const created = index * 10_000;
+        return [
+          {
+            info: { ...userMessage(`user-${index}`), time: { created } },
+            parts: [textPart(`text-user-${index}`, `Prompt ${index}`)],
+          },
+          {
+            info: assistantMessage(`assistant-${index}`, {
+              time: { created: created + 1_000, completed: created + 2_000 },
+              tokens: { input: 100, output: 25, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+            parts: [textPart(`text-assistant-${index}`, `Response ${index}`)],
+          },
+        ];
+      }).flat()
+    );
+
+    try {
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
+
+      const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 9_600 });
+      Object.defineProperty(list, 'scrollTop', {
+        configurable: true,
+        writable: true,
+        value: 9_200,
+      });
+      list.dispatchEvent(new Event('scroll'));
+      animationFrames.flush();
+      await Promise.resolve();
+
+      cacheSessionHistoryPage('session-1', 'bottom-range', [state.messages[0]!]);
+      await Promise.resolve();
+      expect(
+        container?.querySelector('[data-msg-id="assistant-29"] .assistant-dialog-summary')
+          ?.textContent
+      ).toContain('Worked for 2s');
+
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+      list.scrollTop = 0;
+      list.dispatchEvent(new Event('scroll'));
+      await Promise.resolve();
+      expect(
+        container?.querySelector('[data-msg-id="assistant-0"] .assistant-dialog-summary')
+          ?.textContent
+      ).toContain('Worked for 2s');
+
+      cacheSessionHistoryPage('session-1', 'top-range', [state.messages[0]!]);
+      await Promise.resolve();
+      list.scrollTop = 9_200;
+      list.dispatchEvent(new Event('scroll'));
+      await Promise.resolve();
+      expect(
+        container?.querySelector('[data-msg-id="assistant-29"] .assistant-dialog-summary')
+          ?.textContent
+      ).toContain('Worked for 2s');
+    } finally {
+      animationFrames.restore();
+    }
+  });
+
   it('summarizes elapsed time and tokens across nested agent children', async () => {
     setState('activeSessionId', 'session-1');
     setSessions([
