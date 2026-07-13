@@ -381,7 +381,31 @@ describe('SessionListView pins', () => {
 });
 
 describe('SessionListView selection', () => {
-  it('does not highlight the active session', () => {
+  it('does not steal focus after pointer interaction during mount', () => {
+    let focusCallback: FrameRequestCallback | undefined;
+    const requestFrame = vi
+      .spyOn(globalThis, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        focusCallback = callback;
+        return 42;
+      });
+    const cancelFrame = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {});
+    setState('sessions', [session('session-1', Date.now())]);
+    cleanup = render(() => <SessionListView />, container);
+
+    const sessionButton = container.querySelector<HTMLButtonElement>('.session-item-main')!;
+    sessionButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    sessionButton.focus();
+    focusCallback?.(performance.now());
+
+    expect(document.activeElement).toBe(sessionButton);
+    expect(requestFrame).toHaveBeenCalledOnce();
+    cleanup();
+    cleanup = undefined;
+    expect(cancelFrame).toHaveBeenCalledWith(42);
+  });
+
+  it('does not highlight the active session in the session picker', () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
       additions: 0,
@@ -396,6 +420,41 @@ describe('SessionListView selection', () => {
     cleanup = render(() => <SessionListView />, container);
 
     expect(container.querySelector('.session-item')?.classList.contains('active')).toBe(false);
+    expect(container.querySelector('.session-item-main')?.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('highlights the active session in the embedded desktop list', () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setState('sessions', [session('session-1', Date.now()), session('session-2', Date.now() - 1)]);
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => <SessionListView embedded />, container);
+
+    const items = container.querySelectorAll('.session-item');
+    expect(items[0]?.classList.contains('active')).toBe(true);
+    expect(items[0]?.querySelector('.session-item-main')?.getAttribute('aria-current')).toBe(
+      'page'
+    );
+    expect(items[1]?.classList.contains('active')).toBe(false);
+    expect(items[1]?.querySelector('.session-item-main')?.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('does not reload the active session from the embedded desktop list', () => {
+    vi.mocked(selectSession).mockClear();
+    setState('sessions', [session('session-1', Date.now())]);
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => <SessionListView embedded />, container);
+
+    container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+
+    expect(selectSession).not.toHaveBeenCalled();
   });
 
   it('navigates, wraps, scrolls, and selects sessions with the keyboard', async () => {
@@ -473,6 +532,37 @@ describe('SessionListView selection', () => {
     container.querySelector<HTMLElement>('.session-item-age')!.click();
 
     expect(selectSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('opens desktop sessions on pointer down without double-selecting on click', () => {
+    vi.mocked(selectSession).mockClear();
+    setState('sessions', [session('session-1', Date.now())]);
+    cleanup = render(() => <SessionListView embedded />, container);
+    const row = container.querySelector<HTMLElement>('.session-item')!;
+    const capturePointer = vi.fn();
+    row.setPointerCapture = capturePointer;
+
+    row.querySelector<HTMLElement>('.session-item-main')!.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 0,
+        pointerId: 7,
+        pointerType: 'mouse',
+      })
+    );
+    expect(capturePointer).toHaveBeenCalledWith(7);
+    expect(selectSession).toHaveBeenCalledWith('session-1');
+
+    row.querySelector<HTMLElement>('.session-item-main')!.click();
+    expect(selectSession).toHaveBeenCalledTimes(1);
+
+    const trailingControl = document.createElement('button');
+    row.append(trailingControl);
+    trailingControl.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 8 })
+    );
+    expect(capturePointer).toHaveBeenCalledTimes(1);
+    expect(selectSession).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -76,7 +76,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-list-scroll {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overflow-y: overlay;
+  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
 }
 
 .session-list-content {
@@ -85,6 +88,8 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .session-list-layout {
@@ -96,6 +101,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-list-scroll-primary {
   flex: 1;
+}
+
+@media (max-width: 959px) {
+  .session-list-scroll {
+    scrollbar-color: var(--color-vscode-chat-scrollbar-thumb-desktop) transparent;
+  }
 }
 
 .session-list-bottom-groups {
@@ -309,6 +320,13 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-item.is-pinned.keyboard-focus {
   background: color-mix(in srgb, var(--color-vscode-accent) 11%, var(--color-vscode-hover));
+}
+
+@media (min-width: 1400px) {
+  .chat-workspace .session-list-view-sidebar .session-item.active {
+    background: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
+    box-shadow: inset 2px 0 var(--color-vscode-accent);
+  }
 }
 
 .session-item.is-context-selected,

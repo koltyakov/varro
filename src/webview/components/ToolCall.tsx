@@ -724,6 +724,12 @@ function GenericToolCall(props: {
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
   const isStructuredTool = () => isStructuredToolName(props.tool.tool);
+  const taskAgentLabel = () => {
+    const type = props.state.input?.subagent_type;
+    if (typeof type !== 'string' || !type.trim()) return 'Subagent';
+    const label = type.trim();
+    return `${label.charAt(0).toUpperCase()}${label.slice(1)} subagent`;
+  };
   const taskSessionId = () => {
     if (!isTask()) return null;
     if (
@@ -949,11 +955,27 @@ function GenericToolCall(props: {
             </div>
           </Show>
           <Show when={props.state.status === 'running'}>
-            <div class="tool-invocation-running">
-              <Show when={taskRetryStatus()} fallback="Running...">
-                {(retry) => `Retrying (attempt #${retry().attempt})… ${retry().message}`}
-              </Show>
-            </div>
+            <Show when={isTask()} fallback={<div class="tool-invocation-running">Running…</div>}>
+              <div
+                class={`tool-invocation-running tool-invocation-subagent-running${taskRetryStatus() ? ' is-retrying' : ''}`}
+                role="status"
+                aria-live="polite"
+              >
+                <span class="tool-invocation-activity-ring" aria-hidden="true" />
+                <span class="tool-invocation-running-copy">
+                  <strong class="tool-invocation-running-label">
+                    {taskRetryStatus()
+                      ? `${taskAgentLabel()} is retrying`
+                      : `${taskAgentLabel()} is working`}
+                  </strong>
+                  <span class="tool-invocation-running-detail">
+                    <Show when={taskRetryStatus()} fallback="Results will appear here when ready.">
+                      {(retry) => `Attempt ${retry().attempt} · ${retry().message}`}
+                    </Show>
+                  </span>
+                </span>
+              </div>
+            </Show>
           </Show>
         </div>
       </Show>

@@ -96,7 +96,7 @@
   );
   --color-vscode-chat-scrollbar-thumb: color-mix(
     in srgb,
-    var(--color-vscode-fg) 3%,
+    var(--color-vscode-fg) 5%,
     var(--color-vscode-list-bg)
   );
   --color-vscode-chat-scrollbar-thumb-desktop: color-mix(

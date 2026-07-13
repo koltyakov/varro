@@ -793,6 +793,60 @@ kbd {
   color: var(--color-vscode-fg-muted);
 }
 
+.chat-tool-invocation-part .tool-invocation-subagent-running {
+  gap: 9px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 18%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-vscode-accent) 5%, transparent);
+}
+
+.chat-tool-invocation-part .tool-invocation-activity-ring {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 1.5px solid color-mix(in srgb, var(--color-vscode-accent) 22%, transparent);
+  border-top-color: var(--color-vscode-accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.chat-tool-invocation-part .tool-invocation-running-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-tool-invocation-part .tool-invocation-running-label {
+  color: var(--color-vscode-fg);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.chat-tool-invocation-part .tool-invocation-running-detail {
+  overflow: hidden;
+  color: var(--color-vscode-fg-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-tool-invocation-part .tool-invocation-subagent-running.is-retrying {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 24%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-warning) 6%, transparent);
+}
+
+.chat-tool-invocation-part
+  .tool-invocation-subagent-running.is-retrying
+  .tool-invocation-activity-ring {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 22%, transparent);
+  border-top-color: var(--color-vscode-warning);
+}
+
 .file-change-card {
   position: relative;
   overflow: visible;

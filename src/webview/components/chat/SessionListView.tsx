@@ -701,6 +701,7 @@ export function SessionListView(props: {
   let recentHeaderRef: HTMLDivElement | undefined;
   let archiveHeaderRef: HTMLDivElement | undefined;
   let recycleBinHeaderRef: HTMLDivElement | undefined;
+  let hasPointerInteraction = false;
 
   const closeActions = () => {
     setActionsSessionId(null);
@@ -1155,13 +1156,15 @@ export function SessionListView(props: {
 
   onMount(() => {
     if (props.embedded) return;
-    requestAnimationFrame(() => {
+    const focusFrame = requestAnimationFrame(() => {
+      if (hasPointerInteraction) return;
       if (shouldShowSearch()) {
         searchInputRef?.focus();
         return;
       }
       containerRef?.focus();
     });
+    onCleanup(() => cancelAnimationFrame(focusFrame));
   });
 
   createEffect(
@@ -1197,6 +1200,9 @@ export function SessionListView(props: {
       }}
       class={`session-list-view ${props.class || ''}`.trim()}
       tabindex="-1"
+      onPointerDown={() => {
+        hasPointerInteraction = true;
+      }}
       onKeyDown={handleKeydown}
     >
       <Show when={shouldShowSearch()}>
@@ -1328,7 +1334,10 @@ function SessionListItem(props: {
   let sessionButtonRef: HTMLButtonElement | undefined;
   let actionsMenuRef: HTMLDivElement | undefined;
   let renameInputRef: HTMLInputElement | undefined;
+  let openedPointerId: number | null = null;
+  let pointerClickTimer: ReturnType<typeof setTimeout> | undefined;
   const isFocused = () => props.focusedIndex() === props.itemIndex();
+  const isActive = () => !!props.embedded && state.activeSessionId === props.session.id;
   const showActions = () => props.actions.sessionId() === props.session.id;
   const status = () => state.sessionStatus[props.session.id];
   const hasUnreadCompletion = () =>
@@ -1405,16 +1414,54 @@ function SessionListItem(props: {
     );
   };
   const openSession = () => {
+    if (isActive()) return;
     selectSession(props.session.id);
     if (!props.embedded) setShowSessionPicker(false);
   };
   const handleRowClick = (event: MouseEvent) => {
+    if (openedPointerId !== null) {
+      openedPointerId = null;
+      if (pointerClickTimer !== undefined) clearTimeout(pointerClickTimer);
+      pointerClickTimer = undefined;
+      return;
+    }
     const target = event.target;
     if (!(target instanceof Element)) return;
     const interactive = target.closest('button, a, input, textarea, select');
     if (interactive && !interactive.classList.contains('session-item-main')) return;
     openSession();
   };
+  const handleRowPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0 || props.actions.sessionId()) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const interactive = target.closest('button, a, input, textarea, select');
+    if (interactive && !interactive.classList.contains('session-item-main')) return;
+    const row = event.currentTarget;
+    if (row instanceof HTMLElement) row.setPointerCapture?.(event.pointerId);
+    if (props.embedded && event.pointerType === 'mouse') {
+      openedPointerId = event.pointerId;
+      openSession();
+    }
+  };
+  const handleRowPointerUp = (event: PointerEvent) => {
+    if (event.pointerId !== openedPointerId) return;
+    if (pointerClickTimer !== undefined) clearTimeout(pointerClickTimer);
+    pointerClickTimer = setTimeout(() => {
+      openedPointerId = null;
+      pointerClickTimer = undefined;
+    }, 0);
+  };
+  const handleRowPointerCancel = (event: PointerEvent) => {
+    if (event.pointerId !== openedPointerId) return;
+    openedPointerId = null;
+    if (pointerClickTimer !== undefined) clearTimeout(pointerClickTimer);
+    pointerClickTimer = undefined;
+  };
+
+  onCleanup(() => {
+    if (pointerClickTimer !== undefined) clearTimeout(pointerClickTimer);
+  });
 
   createEffect(() => {
     if (!showActions()) return;
@@ -1475,11 +1522,14 @@ function SessionListItem(props: {
 
   return (
     <div
-      class={`session-item ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
+      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
       inert={props.actions.sessionId() ? true : undefined}
       onMouseMove={() => {
         if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
       }}
+      onPointerDown={handleRowPointerDown}
+      onPointerUp={handleRowPointerUp}
+      onPointerCancel={handleRowPointerCancel}
       onContextMenu={openActions}
       onClick={handleRowClick}
     >
@@ -1489,6 +1539,7 @@ function SessionListItem(props: {
         }}
         type="button"
         class="session-item-main"
+        aria-current={isActive() ? 'page' : undefined}
         onFocus={() => {
           if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
         }}

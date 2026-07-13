@@ -423,9 +423,10 @@ describe('ToolCall', () => {
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
 
     expect(container?.querySelectorAll('.tool-status-dot')).toHaveLength(1);
-    expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
-      'Running...'
-    );
+    const runningStatus = container?.querySelector('.tool-invocation-subagent-running');
+    expect(runningStatus?.getAttribute('role')).toBe('status');
+    expect(runningStatus?.textContent).toContain('Explore subagent is working');
+    expect(runningStatus?.textContent).toContain('Results will appear here when ready.');
   });
 
   it('shows retry status when subagent session is retrying', () => {
@@ -463,11 +464,12 @@ describe('ToolCall', () => {
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     const runningDiv = container?.querySelector('.tool-invocation-running');
-    expect(runningDiv?.textContent).toContain('Retrying (attempt #2)');
+    expect(runningDiv?.textContent).toContain('Subagent is retrying');
+    expect(runningDiv?.textContent).toContain('Attempt 2');
     expect(runningDiv?.textContent).toContain('rate limit exceeded');
   });
 
-  it('shows Running when task has no retry status', () => {
+  it('shows an active subagent status when task has no retry status', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -492,7 +494,7 @@ describe('ToolCall', () => {
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
-      'Running...'
+      'Subagent is working'
     );
   });
 
