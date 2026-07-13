@@ -8,8 +8,11 @@ export type QueuedMessageItem = Pick<
 
 export function QueuedMessages(props: {
   items: QueuedMessageItem[];
+  dispatchingItemId?: string | null;
+  failedDispatchItemIds?: ReadonlySet<string>;
   steeringItemIds?: ReadonlySet<string>;
   failedSteerItemIds?: ReadonlySet<string>;
+  onRetryDispatch: (item: QueuedMessageItem) => void;
   onSendAsSteer: (item: QueuedMessageItem) => void;
   onRemove: (id: string) => void;
 }) {
@@ -17,7 +20,9 @@ export function QueuedMessages(props: {
     <div class="chat-queue-container" role="list" aria-label="Queued messages">
       <For each={props.items}>
         {(item) => {
+          const isDispatching = () => props.dispatchingItemId === item.id;
           const isSteering = () => props.steeringItemIds?.has(item.id) ?? false;
+          const didDispatchFail = () => props.failedDispatchItemIds?.has(item.id) ?? false;
           const didSteerFail = () => props.failedSteerItemIds?.has(item.id) ?? false;
           const attachmentCount =
             (item.droppedFiles?.length || 0) +
@@ -67,16 +72,22 @@ export function QueuedMessages(props: {
               <div class="chat-queue-actions">
                 <button
                   class="chat-queue-action"
-                  onClick={() => props.onSendAsSteer(item)}
-                  disabled={isSteering()}
-                  title={
-                    isSteering()
-                      ? 'Sending as Steer'
-                      : didSteerFail()
-                        ? 'Retry send as Steer'
-                        : 'Send now as Steer'
+                  onClick={() =>
+                    didDispatchFail() ? props.onRetryDispatch(item) : props.onSendAsSteer(item)
                   }
-                  aria-label="Send as Steer"
+                  disabled={isDispatching() || isSteering()}
+                  title={
+                    isDispatching()
+                      ? 'Sending queued message'
+                      : didDispatchFail()
+                        ? 'Retry queued message'
+                        : isSteering()
+                          ? 'Sending as Steer'
+                          : didSteerFail()
+                            ? 'Retry send as Steer'
+                            : 'Send now as Steer'
+                  }
+                  aria-label={didDispatchFail() ? 'Retry queued message' : 'Send as Steer'}
                 >
                   <svg
                     width="11"
@@ -91,7 +102,15 @@ export function QueuedMessages(props: {
                     <path d="M8 13V3M4 7l4-4 4 4" />
                   </svg>
                   <span class="chat-queue-action-label">
-                    {isSteering() ? 'Steering...' : didSteerFail() ? 'Retry Steer' : 'Steer'}
+                    {isDispatching()
+                      ? 'Sending...'
+                      : didDispatchFail()
+                        ? 'Retry'
+                        : isSteering()
+                          ? 'Steering...'
+                          : didSteerFail()
+                            ? 'Retry Steer'
+                            : 'Steer'}
                   </span>
                 </button>
                 <button

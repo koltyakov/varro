@@ -726,9 +726,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
     if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) uiStore.stopLoading();
     deps.syncSession(sessionId).catch(() => {});
-    if (isSessionInActiveTree(sessionId)) {
-      deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
-    }
+    deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
   };
   const schedulePendingPermissionSync = () => {
     if (!deps.syncPendingPermissions || pendingPermissionSync) return;

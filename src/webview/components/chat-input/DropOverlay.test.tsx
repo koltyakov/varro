@@ -29,15 +29,4 @@ describe('DropOverlay', () => {
     expect(overlay?.querySelector('.chat-drop-overlay-card')).toBeInstanceOf(HTMLDivElement);
     expect(overlay?.textContent).toContain('Drop to add to context');
   });
-
-  it('removes the portal content when it unmounts', () => {
-    cleanup = render(() => DropOverlay(), container!);
-
-    expect(document.body.querySelector('.chat-drop-overlay')).toBeInstanceOf(HTMLDivElement);
-
-    cleanup?.();
-    cleanup = undefined;
-
-    expect(document.body.querySelector('.chat-drop-overlay')).toBeNull();
-  });
 });

@@ -471,6 +471,37 @@ describe('session-selection helpers', () => {
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
   });
 
+  it('reconciles stale failures for completed inactive idle sessions', async () => {
+    const setSessionStatusEntry = vi.fn();
+    const syncFailedSessionsFromMessages = vi.fn();
+    const completed = assistantMessage('assistant-1');
+    completed.time.completed = 2;
+    const messages = [{ info: completed, parts: [] }];
+
+    await syncSessionMessagesWithDependencies(
+      {
+        getActiveSessionId: () => 'session-2',
+        getSessionStatus: () => ({ type: 'idle' }) satisfies SessionStatus,
+        loadingStartedAt: () => null,
+        loadSessionMessages: vi.fn(async () => messages),
+        updateUsageLimitState: vi.fn(),
+        setSessionStatusEntry,
+        setMessagesIncremental: vi.fn(),
+        stopLoading: vi.fn(),
+        syncFailedSessionsFromMessages,
+        handoffTodosToMessages: vi.fn(),
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      },
+      'session-1'
+    );
+
+    expect(syncFailedSessionsFromMessages).toHaveBeenCalledWith(messages);
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
+  });
+
   it('keeps loading when synced messages predate the current loading turn', async () => {
     const stopLoading = vi.fn();
     const completed = assistantMessage('assistant-1');

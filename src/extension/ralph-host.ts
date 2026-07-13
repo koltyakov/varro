@@ -241,6 +241,7 @@ export class HostRalphStore implements RalphRunnerStore {
 export class RalphHost {
   private readonly store: HostRalphStore;
   private readonly runner: RalphRunner;
+  private readonly commandGenerations = new Map<string, number>();
   private disposePromise: Promise<void> | null = null;
   private disposed = false;
 
@@ -369,8 +370,11 @@ export class RalphHost {
     if (this.store.getAllRuns().some((run) => run.status === 'running')) {
       void this.deps
         .ensureServerStarted()
-        .then(() => this.runner.reattachAll())
+        .then(() => {
+          if (!this.disposed) return this.runner.reattachAll();
+        })
         .catch((err) => {
+          if (this.disposed) return;
           logger.warn(`Ralph reattach failed: ${err instanceof Error ? err.message : String(err)}`);
         });
     }
@@ -383,18 +387,34 @@ export class RalphHost {
   handleMessage(msg: RalphHostMessage): void {
     if (this.disposed) return;
     switch (msg.type) {
-      case 'ralph/start':
-        void this.withServer(() => this.runner.start(msg.payload.config), 'start');
+      case 'ralph/start': {
+        const managerSessionId = msg.payload.config.managerSessionId;
+        const generation = this.advanceCommandGeneration(managerSessionId);
+        void this.withServer(
+          () => this.runner.start(msg.payload.config),
+          'start',
+          () => this.commandGenerations.get(managerSessionId) === generation
+        );
         break;
+      }
       case 'ralph/stop':
+        this.advanceCommandGeneration(msg.payload.managerSessionId);
         this.runner.stop(msg.payload.managerSessionId);
         break;
       case 'ralph/pause':
+        this.advanceCommandGeneration(msg.payload.managerSessionId);
         this.runner.pause(msg.payload.managerSessionId);
         break;
-      case 'ralph/resume':
-        void this.withServer(() => this.runner.resume(msg.payload.managerSessionId), 'resume');
+      case 'ralph/resume': {
+        const managerSessionId = msg.payload.managerSessionId;
+        const generation = this.advanceCommandGeneration(managerSessionId);
+        void this.withServer(
+          () => this.runner.resume(managerSessionId),
+          'resume',
+          () => this.commandGenerations.get(managerSessionId) === generation
+        );
         break;
+      }
       case 'ralph/update-model':
         this.store.updateRunModel(msg.payload.managerSessionId, msg.payload.model);
         break;
@@ -419,9 +439,14 @@ export class RalphHost {
     return this.disposePromise;
   }
 
-  private async withServer(action: () => Promise<void>, context: string): Promise<void> {
+  private async withServer(
+    action: () => Promise<void>,
+    context: string,
+    isCurrent: () => boolean = () => true
+  ): Promise<void> {
     try {
       await this.deps.ensureServerStarted();
+      if (this.disposed || !isCurrent()) return;
       await action();
     } catch (err) {
       logger.error(
@@ -430,8 +455,14 @@ export class RalphHost {
     } finally {
       // Loop transitions (including activity flags) must reach the webview
       // even when the action itself failed.
-      this.broadcast();
+      if (!this.disposed) this.broadcast();
     }
+  }
+
+  private advanceCommandGeneration(managerSessionId: string): number {
+    const generation = (this.commandGenerations.get(managerSessionId) ?? 0) + 1;
+    this.commandGenerations.set(managerSessionId, generation);
+    return generation;
   }
 
   private async handleSync(legacyRuns?: Record<string, RalphRun>): Promise<void> {

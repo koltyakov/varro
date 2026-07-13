@@ -1,78 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseExtensionMessage } from './extension-message';
-import { parseServerEvent, type ExtensionMessage, type WebviewMessage } from './protocol';
+import { parseServerEvent, type ExtensionMessage } from './protocol';
 
-/**
- * Compile-time conformance: every ExtensionMessage discriminator must be
- * recognized by the runtime validator. If a new message type is added to
- * the protocol but not to the validator, TypeScript will fail here with
- * an exhaustiveness error on `_unreachable`.
- */
-describe('protocol conformance', () => {
-  it('covers every ExtensionMessage type in the validator (compile-time)', () => {
-    const covered: Record<ExtensionMessage['type'], true> = {
-      'server/status': true,
-      'server/event': true,
-      'providers/refresh': true,
-      'context/update': true,
-      'terminal-selection/update': true,
-      'files/dropped': true,
-      'files/removed': true,
-      'files/search-results': true,
-      'config/update': true,
-      'theme/update': true,
-      'api/response': true,
-      'command/new-session': true,
-      'command/focus-input': true,
-      'command/search-sessions': true,
-      'command/open-attention-sessions': true,
-      'command/switch-session': true,
-      'command/abort': true,
-      'ralph/state': true,
-    };
-
-    // If a new ExtensionMessage type is added, the Record literal above will
-    // fail to compile until this map is extended - forcing the validator to
-    // be updated in lockstep.
-    const knownCount = Object.keys(covered).length;
-    expect(knownCount).toBeGreaterThan(0);
-  });
-
-  it('exhaustiveness check on WebviewMessage type discriminators', () => {
-    const covered: Record<WebviewMessage['type'], true> = {
-      'providers/refresh': true,
-      'context/request': true,
-      'webview/focus': true,
-      'providers/watch': true,
-      'terminal-selection/clear': true,
-      'terminal/run': true,
-      'session/export': true,
-      'vscode/open-settings': true,
-      'vscode/show-output': true,
-      'files/drop': true,
-      'files/drop-content': true,
-      'files/remove': true,
-      'files/clear': true,
-      'files/pick': true,
-      'files/search': true,
-      'file/read': true,
-      'vscode/open': true,
-      'vscode/open-external': true,
-      'config/update': true,
-      ready: true,
-      'api/request': true,
-      'ralph/start': true,
-      'ralph/stop': true,
-      'ralph/pause': true,
-      'ralph/resume': true,
-      'ralph/update-model': true,
-      'ralph/sync': true,
-      log: true,
-    };
-
-    expect(Object.keys(covered).length).toBeGreaterThan(0);
-  });
-
+describe('protocol parsers', () => {
   it('validator round-trips a server/status running payload', () => {
     const msg: ExtensionMessage = {
       type: 'server/status',

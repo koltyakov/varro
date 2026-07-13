@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RecycleBinEntry } from '../../shared/protocol';
 import type { Session } from '../types';
 import {
-  SessionManagementOperations,
   createSessionWithDependencies,
   deleteSessionPermanentlyWithDependencies,
   deleteSessionWithDependencies,
@@ -369,70 +368,5 @@ describe('session management helpers', () => {
 
     expect(result).toBe(false);
     expect(setError).toHaveBeenCalledWith('rename failed');
-  });
-
-  it('creates bound session-management operations from one dependency bag', async () => {
-    const deps = {
-      getActiveSessionId: () => null,
-      createRemoteSession: vi.fn(async () => session('session-2')),
-      updateRemoteSession: vi.fn(async () => session('session-1', { title: 'Renamed' })),
-      forkRemoteSession: vi.fn(async () => session('session-3')),
-      getPermissionModeForSession: vi.fn(() => 'default' as const),
-      buildCreatePermission: () => [],
-      upsertSession: vi.fn(),
-      resetToolCallExpansionState: vi.fn(),
-      setActiveSessionId: vi.fn(),
-      clearDraftCurrentDocumentState: vi.fn(),
-      adoptDraftCurrentDocumentState: vi.fn(),
-      setSessionStatusEntry: vi.fn(),
-      setSessionUsageLimit: vi.fn(),
-      persistActiveSessionId: vi.fn(),
-      markSessionSeen: vi.fn(),
-      getDefaultSelectedModel: () => null,
-      setSelectedModel: vi.fn(),
-      resolveDefaultAgent: () => null,
-      setSelectedAgent: vi.fn(),
-      getConnectedMcpNames: () => [],
-      setSelectedMcpsForSession: vi.fn(),
-      setPermissionModeForSession: vi.fn(),
-      resetDraftPermissionMode: vi.fn(),
-      resetTodoSync: vi.fn(),
-      clearMessages: vi.fn(),
-      stopLoading: vi.fn(),
-      setError: vi.fn(),
-      getSessions: () => [session('session-1'), session('session-2')],
-      getDeletedSessionTreeIds: () => new Set(['session-1']),
-      getNextSessionIdAfterDeletion: () => 'session-2',
-      deleteRemoteSession: vi.fn(async () => true),
-      hideDeletedSessionTree: vi.fn(),
-      loadRecycleBin: vi.fn(async () => {}),
-      selectSession: vi.fn(async () => {}),
-      logError: vi.fn(),
-      restoreRecycleBinEntry: vi.fn(async () => true),
-      loadSessions: vi.fn(async () => {}),
-      hydrateSessionStatuses: vi.fn(async () => {}),
-      getRecycleBinEntries: () => [],
-      deleteRecycleBinEntry: vi.fn(async () => true),
-      clearDeletedSessionState: vi.fn(),
-      emptyRecycleBin: vi.fn(async () => true),
-    };
-
-    const operations = new SessionManagementOperations(deps);
-
-    await operations.createSession();
-    await operations.renameSession('session-1', 'Renamed');
-    await operations.forkSession('session-1');
-    await operations.deleteSession('session-1');
-    await operations.restoreSession('session-1');
-    await operations.deleteSessionPermanently('session-1');
-    await operations.emptyRecycleBin();
-
-    expect(deps.createRemoteSession).toHaveBeenCalledTimes(1);
-    expect(deps.updateRemoteSession).toHaveBeenCalledWith('session-1', { title: 'Renamed' });
-    expect(deps.forkRemoteSession).toHaveBeenCalledWith('session-1', undefined);
-    expect(deps.deleteRemoteSession).toHaveBeenCalledWith('session-1');
-    expect(deps.restoreRecycleBinEntry).toHaveBeenCalledWith('session-1');
-    expect(deps.deleteRecycleBinEntry).toHaveBeenCalledWith('session-1');
-    expect(deps.emptyRecycleBin).toHaveBeenCalledTimes(1);
   });
 });

@@ -144,9 +144,13 @@ export interface OpenCodeRuntime {
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
   ): Promise<void>;
-  respondQuestion(requestID: string, answers: Array<Array<string>>): Promise<void>;
+  respondQuestion(
+    requestID: string,
+    answers: Array<Array<string>>,
+    options?: { rethrow?: boolean }
+  ): Promise<void>;
   updatePermissionModeForSession(mode: PermissionMode, sessionId?: string | null): Promise<void>;
-  rejectQuestion(requestID: string): Promise<void>;
+  rejectQuestion(requestID: string, options?: { rethrow?: boolean }): Promise<void>;
 }
 
 function logError(context: string, err: unknown) {
@@ -1264,7 +1268,15 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     if (existing) return existing;
 
     const load = (async () => {
-      while (getSessionHistoryCursor(sessionId) && appStore.state.activeSessionId === sessionId) {
+      const visitedCursors = new Set<string>();
+      while (appStore.state.activeSessionId === sessionId) {
+        const cursor = getSessionHistoryCursor(sessionId);
+        if (!cursor) return;
+        if (visitedCursors.has(cursor)) {
+          setSessionHistoryCursor(sessionId);
+          return;
+        }
+        visitedCursors.add(cursor);
         if (!(await loadOlderSessionHistoryPage(sessionId))) return;
       }
     })().finally(() => {
@@ -1433,8 +1445,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     ].slice(-20);
   }
 
-  async function respondQuestion(requestID: string, answers: Array<Array<string>>) {
-    await sessionApprovalOperations.respondQuestion(requestID, answers);
+  async function respondQuestion(
+    requestID: string,
+    answers: Array<Array<string>>,
+    options?: { rethrow?: boolean }
+  ) {
+    await sessionApprovalOperations.respondQuestion(requestID, answers, options);
   }
 
   async function updatePermissionModeForSession(
@@ -1448,8 +1464,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     );
   }
 
-  async function rejectQuestion(requestID: string) {
-    await sessionApprovalOperations.rejectQuestion(requestID);
+  async function rejectQuestion(requestID: string, options?: { rethrow?: boolean }) {
+    await sessionApprovalOperations.rejectQuestion(requestID, options);
   }
 
   return {

@@ -21,7 +21,7 @@ describe('startNewChatDraft', () => {
     delete window.__sendToExtension;
   });
 
-  it('preserves crafted text while clearing transient context', () => {
+  it('preserves the complete composer draft', () => {
     setState('activeSessionId', 'session-1');
     setState('sessions', [
       {
@@ -39,6 +39,13 @@ describe('startNewChatDraft', () => {
     ]);
     setState('clipboardImages', [
       { id: 'image-1', url: 'blob:image', mime: 'image/png', filename: 'image.png', size: 10 },
+      {
+        id: 'image-2',
+        url: 'blob:image-2',
+        mime: 'image/png',
+        filename: 'image-2.png',
+        size: 20,
+      },
     ]);
     setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
 
@@ -46,11 +53,24 @@ describe('startNewChatDraft', () => {
 
     expect(inputText()).toBe('Use this history prompt [image.png]');
     expect(state.activeSessionId).toBeNull();
-    expect(state.droppedFiles).toEqual([]);
-    expect(state.clipboardImages).toEqual([]);
-    expect(state.terminalSelection).toBeNull();
-    expect(window.__sendToExtension).toHaveBeenCalledWith({ type: 'files/clear' });
-    expect(window.__sendToExtension).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
+    expect(state.droppedFiles).toEqual([
+      { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },
+    ]);
+    expect(state.clipboardImages).toEqual([
+      { id: 'image-1', url: 'blob:image', mime: 'image/png', filename: 'image.png', size: 10 },
+      {
+        id: 'image-2',
+        url: 'blob:image-2',
+        mime: 'image/png',
+        filename: 'image-2.png',
+        size: 20,
+      },
+    ]);
+    expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
+    expect(window.__sendToExtension).not.toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(window.__sendToExtension).not.toHaveBeenCalledWith({
+      type: 'terminal-selection/clear',
+    });
   });
 
   it('exits message edit mode without replacing the crafted text', () => {

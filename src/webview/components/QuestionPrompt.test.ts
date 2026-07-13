@@ -1,8 +1,23 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createComponent, render } from 'solid-js/web';
+import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import { setState } from '../lib/state';
 import type { QuestionRequest } from '../types';
 import { QuestionPrompt } from './QuestionPrompt';
+
+const { rejectQuestionMock, respondQuestionMock } = vi.hoisted(() => ({
+  rejectQuestionMock: vi.fn(async () => {}),
+  respondQuestionMock: vi.fn(async () => {}),
+}));
+
+vi.mock('../hooks/useOpenCode', async () => {
+  const actual = await vi.importActual<typeof UseOpenCodeModule>('../hooks/useOpenCode');
+  return {
+    ...actual,
+    rejectQuestion: rejectQuestionMock,
+    respondQuestion: respondQuestionMock,
+  };
+});
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -29,6 +44,10 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   setState('questions', []);
+  rejectQuestionMock.mockReset();
+  rejectQuestionMock.mockResolvedValue(undefined);
+  respondQuestionMock.mockReset();
+  respondQuestionMock.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -83,5 +102,65 @@ describe('QuestionPrompt draft retention', () => {
     renderQuestionPrompt(activeRequest);
 
     expect(container?.querySelector<HTMLInputElement>('.question-custom-input')?.value).toBe('');
+  });
+
+  it('keeps the answer draft and restores controls when answering fails', async () => {
+    const activeRequest = request('failed-answer');
+    setState('questions', [activeRequest]);
+    respondQuestionMock.mockRejectedValueOnce(new Error('answer failed'));
+    renderQuestionPrompt(activeRequest);
+
+    const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
+    input!.value = 'Retry this answer';
+    input!.dispatchEvent(new Event('input', { bubbles: true }));
+    container
+      ?.querySelector<HTMLButtonElement>('.question-btn-primary')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(respondQuestionMock).toHaveBeenCalledWith(activeRequest.id, [['Retry this answer']], {
+      rethrow: true,
+    });
+    expect(input?.value).toBe('Retry this answer');
+    expect(container?.querySelector<HTMLButtonElement>('.question-btn-primary')?.disabled).toBe(
+      false
+    );
+    expect(container?.querySelector<HTMLButtonElement>('.question-btn-tertiary')?.disabled).toBe(
+      false
+    );
+
+    cleanup?.();
+    cleanup = undefined;
+    await Promise.resolve();
+    renderQuestionPrompt(activeRequest);
+    expect(container?.querySelector<HTMLInputElement>('.question-custom-input')?.value).toBe(
+      'Retry this answer'
+    );
+  });
+
+  it('keeps the draft and restores controls when skipping fails', async () => {
+    const activeRequest = request('failed-skip');
+    setState('questions', [activeRequest]);
+    rejectQuestionMock.mockRejectedValueOnce(new Error('skip failed'));
+    renderQuestionPrompt(activeRequest);
+
+    const input = container?.querySelector<HTMLInputElement>('.question-custom-input');
+    input!.value = 'Do not discard this';
+    input!.dispatchEvent(new Event('input', { bubbles: true }));
+    container
+      ?.querySelector<HTMLButtonElement>('.question-btn-tertiary')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(rejectQuestionMock).toHaveBeenCalledWith(activeRequest.id, { rethrow: true });
+    expect(input?.value).toBe('Do not discard this');
+    expect(container?.querySelector<HTMLButtonElement>('.question-btn-primary')?.disabled).toBe(
+      false
+    );
+    expect(container?.querySelector<HTMLButtonElement>('.question-btn-tertiary')?.disabled).toBe(
+      false
+    );
   });
 });

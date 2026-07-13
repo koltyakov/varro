@@ -251,6 +251,43 @@ describe('useOpenCode session state flows', () => {
     ]);
   });
 
+  it('stops full history loading when cursors form a multi-page cycle', async () => {
+    const latest = [{ info: userMessage('user-3'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    latest.nextCursor = 'cursor-a';
+    const pageA = [{ info: userMessage('user-2'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    pageA.nextCursor = 'cursor-b';
+    const pageB = [
+      { info: userMessage('user-1'), parts: [] },
+      { info: userMessage('user-2'), parts: [] },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    pageB.nextCursor = 'cursor-a';
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      if (!options?.before) return latest;
+      if (options.before === 'cursor-a') return pageA;
+      if (options.before === 'cursor-b') return pageB;
+      throw new Error(`Unexpected cursor ${options.before}`);
+    });
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    await hookModule.selectSession('session-1');
+    await hookModule.loadFullSessionHistory('session-1');
+
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-1',
+      'user-2',
+      'user-3',
+    ]);
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
+  });
+
   it('loads one older history page at a time for scroll pagination', async () => {
     const latest = [{ info: userMessage('user-3'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>

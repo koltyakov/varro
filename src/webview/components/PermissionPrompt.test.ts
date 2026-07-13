@@ -4,17 +4,10 @@ import type { Permission } from '../types';
 
 const mocks = vi.hoisted(() => ({
   respondPermission: vi.fn(async () => {}),
-  getPermissionModeForSession: vi.fn(() => 'default'),
 }));
 
 vi.mock('../hooks/useOpenCode', () => ({
   respondPermission: mocks.respondPermission,
-}));
-
-vi.mock('../lib/stores/permissions-store', () => ({
-  permissionsStore: {
-    getPermissionModeForSession: mocks.getPermissionModeForSession,
-  },
 }));
 
 import { PermissionPrompt } from './PermissionPrompt';
@@ -39,8 +32,6 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   mocks.respondPermission.mockClear();
-  mocks.getPermissionModeForSession.mockReset();
-  mocks.getPermissionModeForSession.mockReturnValue('default');
 });
 
 afterEach(() => {
@@ -51,7 +42,7 @@ afterEach(() => {
 });
 
 describe('PermissionPrompt', () => {
-  it('keeps broad Always approval available outside auto mode', () => {
+  it('renders all permission response buttons', () => {
     cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
     const buttons = [...(container?.querySelectorAll('button') || [])].map((button) =>
@@ -61,29 +52,17 @@ describe('PermissionPrompt', () => {
     expect(buttons).toEqual(['Reject', 'Once', 'Always']);
   });
 
-  it('uses one-shot manual approval in auto mode', () => {
-    mocks.getPermissionModeForSession.mockReturnValue('auto');
+  it.each([
+    ['Reject', 'reject'],
+    ['Once', 'once'],
+    ['Always', 'always'],
+  ] as const)('%s sends the %s response', (label, response) => {
     cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
     const buttons = [...(container?.querySelectorAll('button') || [])];
-    expect(buttons.map((button) => button.textContent?.trim())).toEqual([
-      'Reject',
-      'Once',
-      'Always',
-    ]);
+    const button = buttons.find((candidate) => candidate.textContent?.trim() === label);
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
-    buttons[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-
-    expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'once');
-  });
-
-  it('keeps broad Always approval available in auto mode', () => {
-    mocks.getPermissionModeForSession.mockReturnValue('auto');
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-
-    const buttons = [...(container?.querySelectorAll('button') || [])];
-    buttons[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-
-    expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'always');
+    expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', response);
   });
 });

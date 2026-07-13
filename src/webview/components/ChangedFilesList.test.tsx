@@ -19,10 +19,10 @@ function session(overrides?: Partial<Session>): Session {
   };
 }
 
-function assistantMessage(id = 'assistant-1'): Message {
+function assistantMessage(id = 'assistant-1', sessionID = 'session-1'): Message {
   return {
     id,
-    sessionID: 'session-1',
+    sessionID,
     role: 'assistant',
     time: { created: 1, completed: 2 },
     parentID: 'user-1',
@@ -35,11 +35,11 @@ function assistantMessage(id = 'assistant-1'): Message {
   };
 }
 
-function fileEditPart(path: string): Part {
+function fileEditPart(path: string, sessionID = 'session-1', messageID = 'assistant-1'): Part {
   return {
     id: 'tool-1',
-    sessionID: 'session-1',
-    messageID: 'assistant-1',
+    sessionID,
+    messageID,
     type: 'tool',
     callID: 'call-1',
     tool: 'edit',
@@ -201,5 +201,32 @@ describe('ChangedFilesList', () => {
     expect(container?.textContent).toContain('+3');
     expect(container?.textContent).toContain('-1');
     expect(container?.textContent).not.toContain('+9');
+  });
+
+  it('only aggregates active-session messages and drops stale messages during a switch', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session(), session({ id: 'session-2', title: 'Other session' })]);
+    setState('messages', [
+      { info: assistantMessage(), parts: [fileEditPart('src/active.ts')] },
+      {
+        info: assistantMessage('assistant-2', 'session-2'),
+        parts: [fileEditPart('src/other.ts', 'session-2', 'assistant-2')],
+      },
+    ]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+    container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
+
+    expect(container?.textContent).toContain('active.ts');
+    expect(container?.textContent).not.toContain('other.ts');
+    expect(container?.querySelector('.todo-block-count')?.textContent).toBe('1');
+
+    setState('messages', (messages) =>
+      messages.filter(({ info }) => info.sessionID === 'session-1')
+    );
+    setState('activeSessionId', 'session-2');
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('Files');
   });
 });

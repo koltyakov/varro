@@ -159,8 +159,12 @@ export async function respondPermission(
   await getCurrentOpenCodeRuntime().respondPermission(sessionId, permissionId, response, options);
 }
 
-export async function respondQuestion(requestID: string, answers: Array<Array<string>>) {
-  await getCurrentOpenCodeRuntime().respondQuestion(requestID, answers);
+export async function respondQuestion(
+  requestID: string,
+  answers: Array<Array<string>>,
+  options?: { rethrow?: boolean }
+) {
+  await getCurrentOpenCodeRuntime().respondQuestion(requestID, answers, options);
 }
 
 export async function updatePermissionModeForSession(
@@ -170,6 +174,6 @@ export async function updatePermissionModeForSession(
   await getCurrentOpenCodeRuntime().updatePermissionModeForSession(mode, sessionId);
 }
 
-export async function rejectQuestion(requestID: string) {
-  await getCurrentOpenCodeRuntime().rejectQuestion(requestID);
+export async function rejectQuestion(requestID: string, options?: { rethrow?: boolean }) {
+  await getCurrentOpenCodeRuntime().rejectQuestion(requestID, options);
 }

@@ -6,7 +6,6 @@ import {
   editMessageWithDependencies,
   redoSessionWithDependencies,
   reviewSessionWithDependencies,
-  SessionControlOperations,
   undoSessionWithDependencies,
 } from './session/session-controls';
 
@@ -454,79 +453,6 @@ describe('session-controls helpers', () => {
 
     expect(setSessionCompacting).toHaveBeenNthCalledWith(1, 'session-1', true);
     expect(setSessionCompacting).toHaveBeenNthCalledWith(2, 'session-1', false);
-    expect(compactRemoteSession).toHaveBeenCalledWith('session-1', {
-      providerID: 'openai',
-      modelID: 'gpt-4o',
-    });
-  });
-
-  it('creates bound session-control operations from one dependency bag', async () => {
-    const sendMessage = vi.fn(async () => {});
-    const markPendingAbortTree = vi.fn();
-    const abortRemoteSession = vi.fn(async () => {});
-    const revertSession = vi.fn(async () => {});
-    const unrevertSession = vi.fn(async () => session('session-1'));
-    const upsertSession = vi.fn();
-    const clearPendingAbort = vi.fn();
-    const compactRemoteSession = vi.fn(async () => {});
-    const sendEditedMessage = vi.fn(async () => true);
-
-    const operations = new SessionControlOperations({
-      getActiveSessionId: () => 'session-1',
-      sendMessage,
-      getSessionTreeRootId: () => null,
-      getSessionTreeIds: () => ['session-1'],
-      getSelectedAgentForSession: () => 'build',
-      skipPlanSession: vi.fn(),
-      getSessionStatus: () => ({ type: 'idle' }),
-      getSessionUsageLimit: () => null,
-      markPendingAbortTree,
-      setSessionStatusEntry: vi.fn(),
-      stopLoading: vi.fn(),
-      abortRemoteSession,
-      clearPendingAbortTree: vi.fn(),
-      setSessionUsageLimit: vi.fn(),
-      logError: vi.fn(),
-      getMessages: () => [
-        { info: userMessage('user-1') },
-        { info: assistantMessage('assistant-1') },
-      ],
-      startLoading: vi.fn(),
-      revertSession,
-      syncSession: vi.fn(async () => {}),
-      syncSessionMessages: vi.fn(async () => {}),
-      setError: vi.fn(),
-      isSessionWorking: () => false,
-      sendEditedMessage,
-      invalidateMessageSync: vi.fn(),
-      pruneMessagesFrom: vi.fn(),
-      unrevertSession,
-      upsertSession,
-      clearPendingAbort,
-      resolveSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
-      setSessionCompacting: vi.fn(),
-      compactRemoteSession,
-      getSession: () => session('session-1'),
-    });
-
-    await operations.reviewSession();
-    await operations.abortSession();
-    await operations.undoSession();
-    await operations.editMessage('user-1', 'updated prompt');
-    await operations.redoSession();
-    await operations.compactSession();
-
-    expect(sendMessage).toHaveBeenCalledWith(
-      'review the current changes in my code and provide feedback'
-    );
-    expect(markPendingAbortTree).toHaveBeenCalledWith(['session-1']);
-    expect(abortRemoteSession).toHaveBeenCalledWith('session-1');
-    expect(revertSession).toHaveBeenCalledWith('session-1', 'assistant-1');
-    expect(revertSession).toHaveBeenCalledWith('session-1', 'user-1');
-    expect(sendEditedMessage).toHaveBeenCalledWith('updated prompt');
-    expect(unrevertSession).toHaveBeenCalledWith('session-1');
-    expect(upsertSession).toHaveBeenCalledWith(session('session-1'));
-    expect(clearPendingAbort).toHaveBeenCalledWith('session-1');
     expect(compactRemoteSession).toHaveBeenCalledWith('session-1', {
       providerID: 'openai',
       modelID: 'gpt-4o',

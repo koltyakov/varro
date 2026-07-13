@@ -1178,6 +1178,80 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
   });
 
+  it('retains a failed automatic queue item and its attachments until an explicit retry', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'test 1',
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      },
+      { id: 'q2', sessionId: 'session-1', text: 'test 2' },
+    ]);
+    sendMessageMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith('test 1', {
+      queuedAttachments: {
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      },
+      preserveComposer: true,
+    });
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+    const retry = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Retry queued message"]'
+    );
+    expect(retry?.disabled).toBe(false);
+    retry?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock.mock.calls[1]).toEqual(sendMessageMock.mock.calls[0]);
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
+  });
+
+  it('retains a rejected automatic queue item without repeatedly retrying it', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'test 1' },
+      { id: 'q2', sessionId: 'session-1', text: 'test 2' },
+    ]);
+    sendMessageMock.mockRejectedValueOnce(new Error('send failed'));
+
+    cleanup = render(() => ChatInput(), container!);
+
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock.mock.calls[0]?.[0]).toBe('test 1');
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Retry queued message"]')?.disabled
+    ).toBe(false);
+  });
+
   it('sends queued rows as steers and removes them on success', async () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');

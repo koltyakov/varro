@@ -14,6 +14,16 @@ import { HostRalphStore, RalphHost } from './ralph-host';
 
 const RALPH_RUNS_KEY = 'varro.ralph.runs';
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function createMemoryPersistence() {
   const storage = new Map<string, unknown>();
   const persistence: Persistence = {
@@ -83,13 +93,14 @@ class FakeServer extends EventEmitter {
 function createHost(options?: {
   persistence?: Persistence;
   readFile?: (path: string) => Promise<string | null>;
+  ensureServerStarted?: () => Promise<unknown>;
 }) {
   const server = new FakeServer();
   const { persistence } = options?.persistence
     ? { persistence: options.persistence }
     : createMemoryPersistence();
   const broadcasts: RalphStatePayload[] = [];
-  const ensureServerStarted = vi.fn(async () => {});
+  const ensureServerStarted = vi.fn(options?.ensureServerStarted ?? (async () => {}));
   const host = new RalphHost({
     server,
     contextProvider: {
@@ -391,6 +402,72 @@ describe('RalphHost', () => {
 
     expect(host.getStatePayload().runs).toEqual({});
     expect(ensureServerStarted).not.toHaveBeenCalled();
+  });
+
+  it('does not start a run after a stop overtakes pending server startup', async () => {
+    const serverStart = deferred<void>();
+    const { host, server, broadcasts, ensureServerStarted } = createHost({
+      ensureServerStarted: () => serverStart.promise,
+    });
+    const config = createConfig();
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() => expect(ensureServerStarted).toHaveBeenCalledTimes(1));
+    host.handleMessage({
+      type: 'ralph/stop',
+      payload: { managerSessionId: config.managerSessionId },
+    });
+    serverStart.resolve();
+
+    await vi.waitFor(() => expect(broadcasts).toHaveLength(1));
+    expect(host.getStatePayload().runs[config.managerSessionId]).toBeUndefined();
+    expect(server.request).not.toHaveBeenCalled();
+  });
+
+  it('does not start a run after disposal overtakes pending server startup', async () => {
+    const serverStart = deferred<void>();
+    const { host, server, ensureServerStarted } = createHost({
+      ensureServerStarted: () => serverStart.promise,
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config: createConfig() } });
+    await vi.waitFor(() => expect(ensureServerStarted).toHaveBeenCalledTimes(1));
+    await host.dispose();
+    serverStart.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(host.getStatePayload().runs).toEqual({});
+    expect(server.request).not.toHaveBeenCalled();
+  });
+
+  it('does not reattach a persisted run after disposal overtakes server startup', async () => {
+    const { persistence } = createMemoryPersistence();
+    const config = createConfig();
+    await persistence.set(RALPH_RUNS_KEY, {
+      [config.managerSessionId]: {
+        config,
+        status: 'running',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: 1,
+      },
+    });
+    const serverStart = deferred<void>();
+    const { host, server, ensureServerStarted } = createHost({
+      persistence,
+      ensureServerStarted: () => serverStart.promise,
+    });
+
+    await vi.waitFor(() => expect(ensureServerStarted).toHaveBeenCalledTimes(1));
+    await host.dispose();
+    serverStart.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('running');
+    expect(host.getStatePayload().activeIds).toEqual([]);
+    expect(server.request).not.toHaveBeenCalled();
   });
 
   it('shuts down active loops, removes listeners, and preserves running state', async () => {

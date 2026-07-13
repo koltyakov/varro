@@ -8,6 +8,14 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import { SessionTitleFallback } from './session-title-fallback';
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function createHiddenSessions() {
   return {
     registerPendingTitle: vi.fn(),
@@ -159,5 +167,106 @@ describe('SessionTitleFallback', () => {
     await expect(fallback.renameIfUntitled('session-1')).resolves.toBeNull();
     expect(request).not.toHaveBeenCalled();
     expect(hiddenSessions.registerPendingTitle).not.toHaveBeenCalled();
+  });
+
+  it('does not let a timed-out title generation PATCH over a retry', async () => {
+    vi.useFakeTimers();
+    try {
+      const firstTitle = deferred<unknown>();
+      let hiddenSessionCount = 0;
+      const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+        if (method === 'GET' && path === '/session/session-1') {
+          return { id: 'session-1', title: 'New session' };
+        }
+        if (method === 'GET' && path === '/session/session-1/message?limit=20') {
+          return [
+            {
+              info: { role: 'user' },
+              parts: [{ type: 'text', text: 'Fix timeout races' }],
+            },
+          ];
+        }
+        if (method === 'POST' && path === '/session') {
+          hiddenSessionCount += 1;
+          return { id: `hidden-${hiddenSessionCount}` };
+        }
+        if (method === 'GET' && path === '/config') return {};
+        if (method === 'POST' && path === '/session/hidden-1/message') {
+          return firstTitle.promise;
+        }
+        if (method === 'POST' && path === '/session/hidden-2/message') {
+          return { info: { structured: { title: 'Retry Title' } } };
+        }
+        if (method === 'DELETE') return true;
+        if (method === 'PATCH' && path === '/session/session-1') {
+          return { id: 'session-1', title: (body as { title: string }).title };
+        }
+        throw new Error(`Unexpected request ${method} ${path}`);
+      });
+      const fallback = new SessionTitleFallback({ request }, createHiddenSessions(), () => true);
+
+      const timedOut = fallback.renameIfUntitled('session-1');
+      for (let index = 0; index < 10; index += 1) await Promise.resolve();
+      expect(request).toHaveBeenCalledWith('POST', '/session/hidden-1/message', expect.anything());
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(timedOut).resolves.toBeNull();
+
+      await expect(fallback.renameIfUntitled('session-1')).resolves.toEqual({
+        id: 'session-1',
+        title: 'Retry Title',
+      });
+      firstTitle.resolve({ info: { structured: { title: 'Late Title' } } });
+      for (let index = 0; index < 5; index += 1) await Promise.resolve();
+
+      expect(request).toHaveBeenCalledWith('DELETE', '/session/hidden-1');
+      expect(request).toHaveBeenCalledWith('DELETE', '/session/hidden-2');
+      expect(request.mock.calls.filter(([method]) => method === 'PATCH')).toEqual([
+        ['PATCH', '/session/session-1', { title: 'Retry Title' }],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('deletes a hidden title session created after the attempt times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const hiddenSession = deferred<unknown>();
+      const hiddenSessions = createHiddenSessions();
+      const request = vi.fn(async (method: string, path: string) => {
+        if (method === 'GET' && path === '/session/session-1') {
+          return { id: 'session-1', title: 'New session' };
+        }
+        if (method === 'GET' && path === '/session/session-1/message?limit=20') {
+          return [
+            {
+              info: { role: 'user' },
+              parts: [{ type: 'text', text: 'Clean up hidden sessions' }],
+            },
+          ];
+        }
+        if (method === 'POST' && path === '/session') return hiddenSession.promise;
+        if (method === 'DELETE' && path === '/session/hidden-late') return true;
+        throw new Error(`Unexpected request ${method} ${path}`);
+      });
+      const fallback = new SessionTitleFallback({ request }, hiddenSessions, () => true);
+
+      const timedOut = fallback.renameIfUntitled('session-1');
+      for (let index = 0; index < 5; index += 1) await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(timedOut).resolves.toBeNull();
+      expect(hiddenSessions.forgetPendingTitle).toHaveBeenCalledWith(
+        'Varro session title fallback: session-1'
+      );
+
+      hiddenSession.resolve({ id: 'hidden-late' });
+      for (let index = 0; index < 10; index += 1) await Promise.resolve();
+
+      expect(hiddenSessions.hide).toHaveBeenCalledWith('hidden-late');
+      expect(request).toHaveBeenCalledWith('DELETE', '/session/hidden-late');
+      expect(request.mock.calls.some(([method]) => method === 'PATCH')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

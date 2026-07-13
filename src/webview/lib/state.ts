@@ -177,6 +177,82 @@ type SessionTreeIndex = ReturnType<typeof createSessionTreeIndex>;
 type MessageIndex = ReturnType<typeof createMessageIndex>;
 type StreamingDeltaQueue = ReturnType<typeof createStreamingDeltaQueue>;
 
+function asStoredRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function normalizeStoredString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function normalizeStoredStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter((item): item is string => normalizeStoredString(item) !== null);
+}
+
+function normalizeStoredSelectedModel(value: unknown): SelectedModel | null {
+  const record = asStoredRecord(value);
+  const providerID = normalizeStoredString(record?.providerID);
+  const modelID = normalizeStoredString(record?.modelID);
+  if (!providerID || !modelID) return null;
+
+  const variant = normalizeStoredString(record?.variant);
+  return variant ? { providerID, modelID, variant } : { providerID, modelID };
+}
+
+function normalizeStoredRecord<T>(
+  value: unknown,
+  normalizeValue: (entry: unknown) => T | null
+): Record<string, T> {
+  const record = asStoredRecord(value);
+  if (!record) return {};
+
+  const entries: Array<[string, T]> = [];
+  for (const [key, entry] of Object.entries(record)) {
+    if (!normalizeStoredString(key)) continue;
+    const normalized = normalizeValue(entry);
+    if (normalized !== null) entries.push([key, normalized]);
+  }
+  return Object.fromEntries(entries);
+}
+
+function readStoredString(key: string): string | null {
+  return normalizeStoredString(readStored<unknown>(key));
+}
+
+function readStoredStringArray(key: string): string[] {
+  return normalizeStoredStringArray(readStored<unknown>(key)) ?? [];
+}
+
+function readStoredStringRecord(key: string): Record<string, string> {
+  return normalizeStoredRecord(readStored<unknown>(key), normalizeStoredString);
+}
+
+function readStoredSelectedModel(key: string): SelectedModel | null {
+  return normalizeStoredSelectedModel(readStored<unknown>(key));
+}
+
+function readStoredSelectedModels(key: string): SessionSelectedModels {
+  return normalizeStoredRecord(readStored<unknown>(key), normalizeStoredSelectedModel);
+}
+
+function readStoredStringArrayRecord(key: string): SessionSelectedMcps {
+  return normalizeStoredRecord(readStored<unknown>(key), normalizeStoredStringArray);
+}
+
+function readStoredPermissionModes(key: string): Record<string, PermissionMode> {
+  return normalizeStoredRecord(readStored<unknown>(key), (value) =>
+    isPermissionMode(value) ? value : null
+  );
+}
+
+function readStoredBoolean(key: string): boolean | null {
+  const value = readStored<unknown>(key);
+  return typeof value === 'boolean' ? value : null;
+}
+
 export interface AppStateInstance {
   state: Store<AppState>;
   setState: SetStoreFunction<AppState>;
@@ -293,19 +369,15 @@ export function createAppState(): AppStateInstance {
     providerLimits: {},
     mcpStatus: {},
     providerDefaults: {},
-    sessionPermissionModes:
-      readStored<Record<string, PermissionMode>>(STORAGE_KEYS.sessionPermissionModes) || {},
-    selectedAgent: readStored<string>(STORAGE_KEYS.selectedAgent),
-    sessionSelectedAgents:
-      readStored<SessionSelectedAgents>(STORAGE_KEYS.sessionSelectedAgents) || {},
-    selectedModel: readStored<SelectedModel>(STORAGE_KEYS.selectedModel),
-    sessionSelectedModels:
-      readStored<SessionSelectedModels>(STORAGE_KEYS.sessionSelectedModels) || {},
-    modelVariantSelections:
-      readStored<ModelVariantSelections>(STORAGE_KEYS.modelVariantSelections) || {},
-    sessionSelectedMcps: readStored<SessionSelectedMcps>(STORAGE_KEYS.sessionSelectedMcps) || {},
-    hiddenProviders: readStored<string[]>(STORAGE_KEYS.hiddenProviders) || [],
-    hiddenModels: readStored<string[]>(STORAGE_KEYS.hiddenModels) || [],
+    sessionPermissionModes: readStoredPermissionModes(STORAGE_KEYS.sessionPermissionModes),
+    selectedAgent: readStoredString(STORAGE_KEYS.selectedAgent),
+    sessionSelectedAgents: readStoredStringRecord(STORAGE_KEYS.sessionSelectedAgents),
+    selectedModel: readStoredSelectedModel(STORAGE_KEYS.selectedModel),
+    sessionSelectedModels: readStoredSelectedModels(STORAGE_KEYS.sessionSelectedModels),
+    modelVariantSelections: readStoredStringRecord(STORAGE_KEYS.modelVariantSelections),
+    sessionSelectedMcps: readStoredStringArrayRecord(STORAGE_KEYS.sessionSelectedMcps),
+    hiddenProviders: readStoredStringArray(STORAGE_KEYS.hiddenProviders),
+    hiddenModels: readStoredStringArray(STORAGE_KEYS.hiddenModels),
     lastSeenSessions: initialLastSeenSessions,
     completedSessionResponses: initialCompletedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,
@@ -771,15 +843,15 @@ export function getPersistedLastOpenedView(): LastOpenedView | null {
 }
 
 export function getPersistedSelectedModel(): SelectedModel | null {
-  return readStored<SelectedModel>(STORAGE_KEYS.selectedModel);
+  return readStoredSelectedModel(STORAGE_KEYS.selectedModel);
 }
 
 export function getPersistedSelectedAgent(): string | null {
-  return readStored<string>(STORAGE_KEYS.selectedAgent);
+  return readStoredString(STORAGE_KEYS.selectedAgent);
 }
 
 export function getPersistedActiveSessionId(): string | null {
-  return readStored<string>(STORAGE_KEYS.lastActiveSessionId);
+  return readStoredString(STORAGE_KEYS.lastActiveSessionId);
 }
 
 export function markSessionSeen(id: string, updatedAt?: number) {
@@ -1025,7 +1097,8 @@ export function getCurrentDocumentEnabled(
 }
 
 function readShowThinking(): boolean {
-  return readStored<boolean>(STORAGE_KEYS.showThinking) ?? true;
+  const value = readStored<unknown>(STORAGE_KEYS.showThinking);
+  return typeof value === 'boolean' ? value : true;
 }
 
 function readExpandThinkingByDefault(
@@ -1033,7 +1106,7 @@ function readExpandThinkingByDefault(
 ): boolean {
   return (
     initialWebviewState.expandThinkingByDefault ??
-    readStored<boolean>(STORAGE_KEYS.expandThinkingByDefault) ??
+    readStoredBoolean(STORAGE_KEYS.expandThinkingByDefault) ??
     false
   );
 }
@@ -1043,7 +1116,7 @@ function readShowStickyUserPrompt(
 ): boolean {
   return (
     initialWebviewState.showStickyUserPrompt ??
-    readStored<boolean>(STORAGE_KEYS.showStickyUserPrompt) ??
+    readStoredBoolean(STORAGE_KEYS.showStickyUserPrompt) ??
     true
   );
 }
@@ -1059,8 +1132,7 @@ function resolveInitialDraftMode(
   fallbackMode: PermissionMode
 ): PermissionMode {
   if (permissionWorkspace) {
-    const modes =
-      readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+    const modes = readStoredPermissionModes(STORAGE_KEYS.projectPermissionModes);
     const projectMode = modes[permissionWorkspace];
     if (Object.hasOwn(modes, permissionWorkspace) && isPermissionMode(projectMode)) {
       return projectMode;
@@ -1073,8 +1145,7 @@ function resolveInitialDraftMode(
 function resolveProjectDraftModeForCurrentWorkspace(fallbackMode = defaultPermissionMode()) {
   const permissionWorkspace = getPermissionWorkspaceValue();
   if (!permissionWorkspace) return fallbackMode;
-  const modes =
-    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+  const modes = readStoredPermissionModes(STORAGE_KEYS.projectPermissionModes);
   const projectMode = modes[permissionWorkspace];
   return Object.hasOwn(modes, permissionWorkspace) && isPermissionMode(projectMode)
     ? projectMode
@@ -1087,11 +1158,10 @@ function isPermissionMode(value: unknown): value is PermissionMode {
 
 function hasPersistedDraftPermissionMode(permissionWorkspace: string | null): boolean {
   if (permissionWorkspace) {
-    const modes =
-      readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+    const modes = readStoredPermissionModes(STORAGE_KEYS.projectPermissionModes);
     if (Object.hasOwn(modes, permissionWorkspace)) return true;
   }
-  return readStored<PermissionMode>(STORAGE_KEYS.draftPermissionMode) !== null;
+  return isPermissionMode(readStored<unknown>(STORAGE_KEYS.draftPermissionMode));
 }
 
 export function setCurrentDocumentEnabled(
@@ -1289,8 +1359,7 @@ export function syncDraftPermissionForWorkspace(workspacePath: string | null) {
 export function saveProjectPermissionMode(mode: PermissionMode) {
   const permissionWorkspace = getPermissionWorkspaceValue();
   if (!permissionWorkspace) return;
-  const modes =
-    readStored<Record<string, PermissionMode>>(STORAGE_KEYS.projectPermissionModes) || {};
+  const modes = readStoredPermissionModes(STORAGE_KEYS.projectPermissionModes);
   modes[permissionWorkspace] = mode;
   writeStored(STORAGE_KEYS.projectPermissionModes, modes);
 }

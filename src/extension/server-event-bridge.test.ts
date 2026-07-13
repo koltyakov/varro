@@ -30,6 +30,7 @@ vi.mock('./logger', () => ({
 }));
 
 import { ServerEventBridge } from './server-event-bridge';
+import { HiddenSessionManager } from './hidden-session-manager';
 
 interface CapturedHandlers {
   status: ((status: ServerStatus) => void) | undefined;
@@ -39,6 +40,7 @@ interface CapturedHandlers {
 function createMocks(options?: {
   workspacePath?: string | null;
   isSessionInWorkspace?: (sessionID: string, workspacePath: string | null | undefined) => boolean;
+  hiddenSessions?: HiddenSessionManager;
 }) {
   const handlers: CapturedHandlers = { status: undefined, event: undefined };
   const server = {
@@ -55,6 +57,7 @@ function createMocks(options?: {
     flush: vi.fn(() => Promise.resolve()),
   };
   const sessionTrash = { isHidden: vi.fn(() => false) };
+  const hiddenSessions = options?.hiddenSessions ?? sessionTrash;
   const providerLimitService = {
     shouldClearCache: vi.fn(() => false),
     clearCache: vi.fn(),
@@ -64,7 +67,7 @@ function createMocks(options?: {
   const bridge = new ServerEventBridge(
     server as never,
     sessionState as never,
-    sessionTrash as never,
+    hiddenSessions as never,
     providerLimitService as never,
     post,
     updateStatusBarItem,
@@ -207,6 +210,27 @@ describe('ServerEventBridge', () => {
     sessionTrash.isHidden.mockReturnValue(true);
     bridge.attach();
     handlers.event!({});
+    expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('observes and suppresses a pending-title session.created with a real manager', () => {
+    const hiddenSessions = new HiddenSessionManager();
+    hiddenSessions.registerPendingTitle('Internal session');
+    const { bridge, handlers, post, sessionState } = createMocks({ hiddenSessions });
+    const parsed = {
+      type: 'session.created' as const,
+      properties: {
+        info: { id: 'internal-session', title: 'Internal session' },
+      },
+    };
+    mocks.parseServerEvent.mockReturnValue(parsed);
+    mocks.getSessionIdsForEvent.mockReturnValue(['internal-session']);
+
+    bridge.attach();
+    handlers.event!({});
+
+    expect(hiddenSessions.isHidden('internal-session')).toBe(true);
     expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
   });

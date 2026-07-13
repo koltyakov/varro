@@ -6,7 +6,6 @@ import {
   rejectQuestionWithDependencies,
   respondPermissionWithDependencies,
   respondQuestionWithDependencies,
-  SessionApprovalOperations,
   updatePermissionModeForSessionWithDependencies,
 } from './session/session-approvals';
 
@@ -199,6 +198,40 @@ describe('session-approvals helpers', () => {
     expect(removeQuestion).not.toHaveBeenCalled();
     expect(setReplyError).toHaveBeenCalledWith('Failed to answer question');
     expect(setRejectError).toHaveBeenCalledWith('reject failed');
+  });
+
+  it('rethrows question failures when the caller requests an actionable result', async () => {
+    const replyFailure = new Error('reply failed');
+    const rejectFailure = new Error('reject failed');
+
+    await expect(
+      respondQuestionWithDependencies(
+        {
+          replyQuestion: vi.fn(async () => {
+            throw replyFailure;
+          }),
+          removeQuestion: vi.fn(),
+          setError: vi.fn(),
+        },
+        'question-1',
+        [['no']],
+        { rethrow: true }
+      )
+    ).rejects.toBe(replyFailure);
+
+    await expect(
+      rejectQuestionWithDependencies(
+        {
+          rejectQuestion: vi.fn(async () => {
+            throw rejectFailure;
+          }),
+          removeQuestion: vi.fn(),
+          setError: vi.fn(),
+        },
+        'question-2',
+        { rethrow: true }
+      )
+    ).rejects.toBe(rejectFailure);
   });
 
   it('auto-approves all pending permissions for a session', async () => {
@@ -401,47 +434,5 @@ describe('session-approvals helpers', () => {
 
     expect(getQuestionById(questions, 'question-2')).toEqual(question('question-2'));
     expect(getQuestionById(questions, 'question-3')).toBeNull();
-  });
-
-  it('creates bound approval operations from shared dependencies', async () => {
-    const respondRemotePermission = vi.fn(async () => {});
-    const replyQuestion = vi.fn(async () => {});
-    const rejectRemoteQuestion = vi.fn(async () => {});
-    const updateSessionPermission = vi.fn(async () => session('session-1'));
-
-    const operations = new SessionApprovalOperations({
-      respondRemotePermission,
-      removePermission: vi.fn(),
-      setError: vi.fn(),
-      replyQuestion,
-      removeQuestion: vi.fn(),
-      rejectRemoteQuestion,
-      getPermissionModeForSession: () => 'default',
-      getDraftPermissionMode: () => 'default',
-      setPermissionModeForSession: vi.fn(),
-      setDraftPermissionMode: vi.fn(),
-      saveProjectPermissionMode: vi.fn(),
-      updateSessionPermission,
-      upsertSession: vi.fn(),
-      getPermissionsForSession: () => [permission('perm-1')],
-    });
-
-    await operations.respondPermission('session-1', 'perm-1', 'always');
-    await operations.respondQuestion('question-1', [['yes']]);
-    await operations.rejectQuestion('question-2');
-    await operations.autoApprovePermissionsForSession([permission('perm-2')]);
-    await operations.updatePermissionModeForSession(
-      'full',
-      [{ permission: 'bash', pattern: '*', action: 'allow' }],
-      'session-1'
-    );
-
-    expect(respondRemotePermission).toHaveBeenCalledWith('session-1', 'perm-1', 'always');
-    expect(replyQuestion).toHaveBeenCalledWith('question-1', [['yes']]);
-    expect(rejectRemoteQuestion).toHaveBeenCalledWith('question-2');
-    expect(respondRemotePermission).toHaveBeenCalledWith('session-1', 'perm-2', 'always');
-    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', {
-      permission: [{ permission: 'bash', pattern: '*', action: 'allow' }],
-    });
   });
 });

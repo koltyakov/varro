@@ -32,6 +32,8 @@ import {
 } from './open-code-process';
 
 const originalPlatform = process.platform;
+// Linux caps PIDs well below this, so birth-identity tests cannot read a real /proc entry.
+const MOCK_LINUX_PID = 1_073_741_824;
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -45,7 +47,7 @@ function mockLinuxLeaseProcess(options?: {
   pid?: number;
   port?: number;
 }) {
-  const pid = options?.pid ?? 777;
+  const pid = options?.pid ?? MOCK_LINUX_PID;
   const port = options?.port ?? 4096;
   spawnMock.mockImplementation((command: string, args: string[]) => {
     const result = Object.assign(new EventEmitter(), {
@@ -534,7 +536,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       leasePath,
       JSON.stringify({
         version: 1,
-        pid: 777,
+        pid: MOCK_LINUX_PID,
         port: 4096,
         executable: '/usr/bin/opencode',
         birthIdentity: 'linux:old-process',
@@ -565,7 +567,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       leasePath,
       JSON.stringify({
         version: 1,
-        pid: 777,
+        pid: MOCK_LINUX_PID,
         port: 4096,
         executable: '/usr/bin/opencode',
         birthIdentity: 'linux:original-process',
@@ -599,7 +601,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const leasePath = join(directory, 'lease.json');
     const activeLease = {
       version: 1,
-      pid: 777,
+      pid: MOCK_LINUX_PID,
       port: 4096,
       executable: '/usr/bin/opencode',
       birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
@@ -647,7 +649,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       leasePath,
       JSON.stringify({
         version: 1,
-        pid: 777,
+        pid: MOCK_LINUX_PID,
         port: 4096,
         executable: '/usr/bin/opencode',
         birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
@@ -676,14 +678,14 @@ describe('OpenCodeProcess server ownership leases', () => {
     await writeFile(victimConfig, '{"keep":true}', 'utf-8');
     await writeFile(
       join(victimDirectory, 'owner.json'),
-      JSON.stringify({ pid: 777, owner: 'malicious-path-nonce' }),
+      JSON.stringify({ pid: MOCK_LINUX_PID, owner: 'malicious-path-nonce' }),
       'utf-8'
     );
     await writeFile(
       leasePath,
       JSON.stringify({
         version: 1,
-        pid: 777,
+        pid: MOCK_LINUX_PID,
         port: 4096,
         executable: '/usr/bin/opencode',
         birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',

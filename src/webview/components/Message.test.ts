@@ -750,6 +750,18 @@ describe('parseUserMessageContent', () => {
     expect(parsed.attachments).toEqual([]);
   });
 
+  it('keeps test output dividers and source locations as text', () => {
+    const text = [
+      'FAIL src/extension/open-code-process.test.ts > OpenCodeProcess',
+      'src/extension/open-code-process.test.ts:585:58',
+      '--------------------[1/3]--------------------',
+    ].join('\n');
+    const parsed = parseUserMessageContent([textPart('text-1', text)]);
+
+    expect(parsed.messageTexts).toEqual([text]);
+    expect(parsed.attachments).toEqual([]);
+  });
+
   it('treats relative folder references as attachments', () => {
     const parsed = parseUserMessageContent([textPart('text-1', 'See that\n\nsrc/')]);
 

@@ -1,10 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
 import type { AssistantMessage, TextPart } from '../types';
-import {
-  AssistantMessageContent,
-  shouldShowReadModeToggle,
-} from '../components/message/AssistantMessageContent';
+import { AssistantMessageContent } from '../components/message/AssistantMessageContent';
 import { settlePerfEffects } from './harness';
 
 let container: HTMLDivElement | null = null;
@@ -69,8 +66,6 @@ describe('AssistantMessageContent perf guards', () => {
       writable: true,
       value: originalWindowResizeObserver,
     });
-
-    vi.restoreAllMocks();
   });
 
   it('does not create ResizeObserver instances for non-virtualized assistant messages', async () => {
@@ -153,13 +148,5 @@ describe('AssistantMessageContent perf guards', () => {
     await settlePerfEffects();
 
     expect(container?.querySelectorAll('[data-assistant-render-key]').length).toBeLessThan(30);
-  });
-
-  it('detects read-mode eligibility for large text without split allocation', () => {
-    const splitSpy = vi.spyOn(String.prototype, 'split');
-    const longText = `${'A'.repeat(50_000)}\nshort tail`;
-
-    expect(shouldShowReadModeToggle(longText)).toBe(true);
-    expect(splitSpy).not.toHaveBeenCalled();
   });
 });

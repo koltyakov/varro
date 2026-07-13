@@ -556,6 +556,96 @@ describe('state helpers', () => {
     expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
   });
 
+  it('normalizes persisted routing state while preserving valid entries', async () => {
+    window.localStorage.setItem('varro.hiddenProviders', JSON.stringify(['openai', 42, '', null]));
+    window.localStorage.setItem('varro.hiddenModels', JSON.stringify(['openai:gpt-4o', false, '']));
+    window.localStorage.setItem('varro.selectedAgent', JSON.stringify({ name: 'build' }));
+    window.localStorage.setItem(
+      'varro.selectedModel',
+      JSON.stringify({ providerID: 'openai', modelID: 'gpt-5', variant: 42 })
+    );
+    window.localStorage.setItem(
+      'varro.sessionSelectedAgents',
+      JSON.stringify({ 'session-1': 'build', 'session-2': 42, '': 'plan' })
+    );
+    window.localStorage.setItem(
+      'varro.sessionSelectedModels',
+      JSON.stringify({
+        'session-1': { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' },
+        'session-2': { providerID: 'openai' },
+      })
+    );
+    window.localStorage.setItem(
+      'varro.modelVariantSelections',
+      JSON.stringify({ 'openai:gpt-5': 'medium', invalid: false })
+    );
+    window.localStorage.setItem(
+      'varro.sessionSelectedMcps',
+      JSON.stringify({ 'session-1': ['docs', 42, '', 'browser-bridge'], 'session-2': 'docs' })
+    );
+    window.localStorage.setItem(
+      'varro.sessionPermissionModes',
+      JSON.stringify({ 'session-1': 'full', 'session-2': 'invalid' })
+    );
+    window.localStorage.setItem('varro.lastActiveSessionId', JSON.stringify(42));
+
+    const stateModule = await loadState();
+
+    expect(stateModule.state.hiddenProviders).toEqual(['openai']);
+    expect(stateModule.state.hiddenModels).toEqual(['openai:gpt-4o']);
+    expect(stateModule.isProviderVisible('openai')).toBe(false);
+    expect(stateModule.state.selectedAgent).toBeNull();
+    expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
+    expect(stateModule.state.sessionSelectedAgents).toEqual({ 'session-1': 'build' });
+    expect(stateModule.state.sessionSelectedModels).toEqual({
+      'session-1': { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' },
+    });
+    expect(stateModule.state.modelVariantSelections).toEqual({ 'openai:gpt-5': 'medium' });
+    expect(stateModule.state.sessionSelectedMcps).toEqual({
+      'session-1': ['docs', 'browser-bridge'],
+    });
+    expect(stateModule.state.sessionPermissionModes).toEqual({ 'session-1': 'full' });
+    expect(stateModule.getPersistedSelectedAgent()).toBeNull();
+    expect(stateModule.getPersistedSelectedModel()).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5',
+    });
+    expect(stateModule.getPersistedActiveSessionId()).toBeNull();
+  });
+
+  it('rejects malformed routing values from VS Code webview state', async () => {
+    const persisted = {
+      'varro.hiddenProviders': { openai: true },
+      'varro.hiddenModels': ['openai:gpt-4o', null],
+      'varro.selectedAgent': ['build'],
+      'varro.selectedModel': 'openai/gpt-5',
+      'varro.sessionSelectedAgents': ['build'],
+      'varro.sessionSelectedModels': null,
+      'varro.modelVariantSelections': 42,
+      'varro.sessionSelectedMcps': { 'session-1': null },
+    };
+    (window as unknown as { __vscodeWebviewState?: unknown }).__vscodeWebviewState = {
+      getState: () => persisted,
+      setState: vi.fn(),
+    };
+
+    try {
+      const stateModule = await loadState();
+
+      expect(stateModule.state.hiddenProviders).toEqual([]);
+      expect(stateModule.state.hiddenModels).toEqual(['openai:gpt-4o']);
+      expect(stateModule.state.selectedAgent).toBeNull();
+      expect(stateModule.state.selectedModel).toBeNull();
+      expect(stateModule.state.sessionSelectedAgents).toEqual({});
+      expect(stateModule.state.sessionSelectedModels).toEqual({});
+      expect(stateModule.state.modelVariantSelections).toEqual({});
+      expect(stateModule.state.sessionSelectedMcps).toEqual({});
+      expect(stateModule.isModelVisible('openai', 'gpt-4o')).toBe(false);
+    } finally {
+      delete (window as unknown as { __vscodeWebviewState?: unknown }).__vscodeWebviewState;
+    }
+  });
+
   it('remembers reasoning variants independently per model', async () => {
     const stateModule = await loadState();
 

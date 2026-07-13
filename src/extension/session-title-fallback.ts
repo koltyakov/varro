@@ -27,6 +27,13 @@ type ModelRoute = {
   variant?: string;
 };
 
+type RenameAttempt = {
+  controller: AbortController;
+  pendingTitle: string | null;
+  hiddenSessionID: string | null;
+  hiddenSessionCleanupStarted: boolean;
+};
+
 const RENAME_TIMEOUT_MS = 30_000;
 const TITLE_SESSION_PREFIX = 'Varro session title fallback';
 const MAX_PROMPT_CHARS = 8_000;
@@ -57,7 +64,7 @@ const DENY_ALL_PERMISSION_RULES: PermissionRule[] = DENY_ALL_PERMISSION_NAMES.ma
 }));
 
 export class SessionTitleFallback {
-  private readonly inFlight = new Set<string>();
+  private readonly inFlight = new Map<string, RenameAttempt>();
 
   constructor(
     private readonly server: OpenCodeRequest,
@@ -67,56 +74,81 @@ export class SessionTitleFallback {
 
   async renameIfUntitled(sessionID: string): Promise<SessionRecord | null> {
     if (!this.isEnabled() || !sessionID || this.inFlight.has(sessionID)) return null;
-    this.inFlight.add(sessionID);
+    const attempt: RenameAttempt = {
+      controller: new AbortController(),
+      pendingTitle: null,
+      hiddenSessionID: null,
+      hiddenSessionCleanupStarted: false,
+    };
+    this.inFlight.set(sessionID, attempt);
     try {
-      return await this.withTimeout(this.renameIfUntitledInner(sessionID), RENAME_TIMEOUT_MS);
+      return await this.withTimeout(
+        this.renameIfUntitledInner(sessionID, attempt),
+        RENAME_TIMEOUT_MS,
+        () => {
+          attempt.controller.abort();
+          void this.cleanupTitleSession(attempt);
+        }
+      );
     } catch (err) {
       logger.warn(
         `Session title fallback failed: ${err instanceof Error ? err.message : String(err)}`
       );
       return null;
     } finally {
-      this.inFlight.delete(sessionID);
+      if (this.inFlight.get(sessionID) === attempt) this.inFlight.delete(sessionID);
     }
   }
 
-  private async renameIfUntitledInner(sessionID: string): Promise<SessionRecord | null> {
+  private async renameIfUntitledInner(
+    sessionID: string,
+    attempt: RenameAttempt
+  ): Promise<SessionRecord | null> {
     const session = normalizeSession(await this.server.request('GET', sessionPath(sessionID)));
+    if (!this.isCurrentAttempt(sessionID, attempt)) return null;
     if (!session || !isPlaceholderSessionTitle(session.title)) return null;
 
     const messages = normalizeMessages(
       await this.server.request('GET', `${sessionPath(sessionID)}/message?limit=20`)
     );
+    if (!this.isCurrentAttempt(sessionID, attempt)) return null;
     const transcript = buildTranscript(messages);
     if (!transcript) return null;
 
-    const title = await this.generateTitle(sessionID, transcript, messages);
-    if (!title || !this.isEnabled()) return null;
+    const title = await this.generateTitle(sessionID, transcript, messages, attempt);
+    if (!title || !this.isEnabled() || !this.isCurrentAttempt(sessionID, attempt)) return null;
 
     const latest = normalizeSession(await this.server.request('GET', sessionPath(sessionID)));
+    if (!this.isCurrentAttempt(sessionID, attempt)) return null;
     if (!latest || !isPlaceholderSessionTitle(latest.title)) return null;
 
     return normalizeSession(await this.server.request('PATCH', sessionPath(sessionID), { title }));
   }
 
-  private async generateTitle(sessionID: string, transcript: string, messages: MessageEntry[]) {
+  private async generateTitle(
+    sessionID: string,
+    transcript: string,
+    messages: MessageEntry[],
+    attempt: RenameAttempt
+  ) {
     const title = `${TITLE_SESSION_PREFIX}: ${sessionID}`;
+    attempt.pendingTitle = title;
     this.hiddenSessions.registerPendingTitle(title);
-    let hiddenSessionID: string | null = null;
 
     try {
       const session = await this.server.request('POST', '/session', {
         title,
         permission: DENY_ALL_PERMISSION_RULES,
       });
-      hiddenSessionID = getString(asRecord(session)?.id);
-      this.hiddenSessions.hide(hiddenSessionID);
-      if (!hiddenSessionID) return null;
+      attempt.hiddenSessionID = getString(asRecord(session)?.id);
+      this.hiddenSessions.hide(attempt.hiddenSessionID);
+      if (!attempt.hiddenSessionID || !this.isCurrentAttempt(sessionID, attempt)) return null;
 
       const route = await this.resolveTitleModel(messages);
+      if (!this.isCurrentAttempt(sessionID, attempt)) return null;
       const response = await this.server.request(
         'POST',
-        `${sessionPath(hiddenSessionID)}/message`,
+        `${sessionPath(attempt.hiddenSessionID)}/message`,
         {
           ...(route
             ? {
@@ -129,20 +161,32 @@ export class SessionTitleFallback {
           format: titleOutputFormat(),
         }
       );
+      if (!this.isCurrentAttempt(sessionID, attempt)) return null;
       return normalizeGeneratedTitle(response);
     } finally {
-      this.hiddenSessions.forgetPendingTitle(title);
-      if (hiddenSessionID) {
-        try {
-          await this.server.request('DELETE', sessionPath(hiddenSessionID));
-        } catch (err) {
-          logger.warn(
-            `Failed to delete hidden session title fallback: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          );
-        }
-      }
+      await this.cleanupTitleSession(attempt);
+    }
+  }
+
+  private isCurrentAttempt(sessionID: string, attempt: RenameAttempt): boolean {
+    return this.inFlight.get(sessionID) === attempt && !attempt.controller.signal.aborted;
+  }
+
+  private async cleanupTitleSession(attempt: RenameAttempt): Promise<void> {
+    if (attempt.pendingTitle) {
+      this.hiddenSessions.forgetPendingTitle(attempt.pendingTitle);
+      attempt.pendingTitle = null;
+    }
+    if (!attempt.hiddenSessionID || attempt.hiddenSessionCleanupStarted) return;
+    attempt.hiddenSessionCleanupStarted = true;
+    try {
+      await this.server.request('DELETE', sessionPath(attempt.hiddenSessionID));
+    } catch (err) {
+      logger.warn(
+        `Failed to delete hidden session title fallback: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
     }
   }
 
@@ -158,16 +202,20 @@ export class SessionTitleFallback {
     return { ...currentModel, ...(variant ? { variant } : {}) };
   }
 
-  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    onTimeout: () => void
+  ): Promise<T> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         promise,
         new Promise<T>((_, reject) => {
-          timeout = setTimeout(
-            () => reject(new Error('Session title fallback timed out')),
-            timeoutMs
-          );
+          timeout = setTimeout(() => {
+            onTimeout();
+            reject(new Error('Session title fallback timed out'));
+          }, timeoutMs);
         }),
       ]);
     } finally {

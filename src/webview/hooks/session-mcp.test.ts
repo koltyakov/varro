@@ -153,36 +153,6 @@ describe('session MCP helpers', () => {
     expect(syncSessionMcps).toHaveBeenCalledWith('session-1');
   });
 
-  it('creates bound session MCP operations from one dependency bag', async () => {
-    const loadMcps = vi.fn(async () => {});
-    const connectMcp = vi.fn(async () => {});
-    const authenticateMcp = vi.fn(async () => {});
-    const disconnectMcp = vi.fn(async () => {});
-    const setSelectedMcpsForSession = vi.fn();
-
-    const operations = new SessionMcpOperations({
-      getSelectedMcpsForSession: () => ['beta'],
-      getMcpStatus: () => ({
-        alpha: { status: 'connected' },
-        beta: { status: 'disabled' },
-      }),
-      loadMcps,
-      getAvailableMcpNames: () => ['alpha', 'beta'],
-      connectMcp,
-      authenticateMcp,
-      disconnectMcp,
-      logError: vi.fn(),
-      setSelectedMcpsForSession,
-    });
-
-    await operations.syncSessionMcps('session-1');
-    await operations.applySessionMcps(['beta'], 'session-1');
-
-    expect(disconnectMcp).toHaveBeenCalledWith('alpha');
-    expect(connectMcp).toHaveBeenCalledWith('beta');
-    expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-1', ['beta']);
-  });
-
   it('serializes rapid reconciliations so the latest selection wins', async () => {
     let resolveFirstConnect: (() => void) | undefined;
     let statuses: Record<string, { status: 'connected' | 'disabled' }> = {

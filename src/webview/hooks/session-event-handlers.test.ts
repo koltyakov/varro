@@ -592,6 +592,22 @@ describe('registerSessionEventHandlers', () => {
     expect(deps.syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
+  it('reconciles inactive session.error events against persisted messages', () => {
+    const handlers = installHandlers();
+    const deps = createDefaultDeps({ getActiveSessionId: () => 'session-2' });
+
+    registerSessionEventHandlers(deps);
+
+    handlers.get('session.error')?.({
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'UnknownError', data: { message: 'Command failed' } },
+      },
+    });
+
+    expect(deps.syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
   it('binds event handlers to shared state-backed dependencies', async () => {
     const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {

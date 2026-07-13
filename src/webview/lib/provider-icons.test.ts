@@ -13,16 +13,12 @@ import zaiIcon from '../assets/provider-icons/zai.svg';
 import { getProviderIcon } from './provider-icons';
 
 describe('getProviderIcon', () => {
-  it('returns null for null input', () => {
-    expect(getProviderIcon(null)).toBeNull();
-  });
-
-  it('returns null for undefined input', () => {
-    expect(getProviderIcon(undefined)).toBeNull();
-  });
-
-  it('returns null for empty string input', () => {
-    expect(getProviderIcon('')).toBeNull();
+  it.each([
+    { label: 'null', provider: null },
+    { label: 'undefined', provider: undefined },
+    { label: 'empty string', provider: '' },
+  ])('returns null for $label input', ({ provider }) => {
+    expect(getProviderIcon(provider)).toBeNull();
   });
 
   it('returns null for an unknown provider', () => {

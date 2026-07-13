@@ -1194,6 +1194,51 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   }
 
+  const [dispatchingQueuedMessageId, setDispatchingQueuedMessageId] = createSignal<string | null>(
+    null
+  );
+  const [failedQueuedMessageIds, setFailedQueuedMessageIds] = createSignal<ReadonlySet<string>>(
+    new Set()
+  );
+
+  function setQueuedMessageFailed(id: string, failed: boolean) {
+    setFailedQueuedMessageIds((ids) => {
+      const next = new Set(ids);
+      if (failed) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  async function dispatchQueuedMessage(item: (typeof state.queuedMessages)[number], retry = false) {
+    if (dispatchingQueuedMessageId()) return;
+    if (failedQueuedMessageIds().has(item.id) && !retry) return;
+    setQueuedMessageFailed(item.id, false);
+    setDispatchingQueuedMessageId(item.id);
+    let sent = false;
+    try {
+      sent = await sendMessage(item.text, {
+        queuedAttachments: {
+          droppedFiles: item.droppedFiles,
+          clipboardImages: item.clipboardImages,
+          terminalSelection: item.terminalSelection,
+        },
+        preserveComposer: true,
+      });
+    } catch {
+      sent = false;
+    }
+    if (sent) {
+      removeQueuedMessage(item.id);
+    } else if (state.queuedMessages.some((queued) => queued.id === item.id)) {
+      setQueuedMessageFailed(item.id, true);
+    }
+    setDispatchingQueuedMessageId(null);
+  }
+
   let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
   createEffect(() => {
     const sessionId = composerSessionId();
@@ -1202,10 +1247,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const activePermission = composerHasActivePermission();
     const steeringIds = steeringQueuedMessageIds();
     const failedSteerIds = failedSteerQueuedMessageIds();
+    const dispatchingId = dispatchingQueuedMessageId();
+    const failedIds = failedQueuedMessageIds();
     const hasSteeringQueued = state.queuedMessages.some(
       (item) => item.sessionId === sessionId && steeringIds.has(item.id)
     );
-    const hasQueued = state.queuedMessages.some(
+    const next = state.queuedMessages.find(
       (item) =>
         item.sessionId === sessionId && !steeringIds.has(item.id) && !failedSteerIds.has(item.id)
     );
@@ -1219,7 +1266,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       activeQuestion ||
       activePermission ||
       hasSteeringQueued ||
-      !hasQueued
+      dispatchingId ||
+      !next ||
+      failedIds.has(next.id)
     )
       return;
     queueDispatchTimer = setTimeout(() => {
@@ -1227,6 +1276,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (isComposerBusy() || composerHasActiveQuestion() || composerHasActivePermission()) return;
       const sid = composerSessionId();
       if (!sid) return;
+      if (dispatchingQueuedMessageId()) return;
       const currentSteeringIds = steeringQueuedMessageIds();
       const currentFailedSteerIds = failedSteerQueuedMessageIds();
       if (
@@ -1235,22 +1285,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         )
       )
         return;
-      const next = state.queuedMessages.find(
+      const nextQueued = state.queuedMessages.find(
         (item) =>
           item.sessionId === sid &&
           !currentSteeringIds.has(item.id) &&
           !currentFailedSteerIds.has(item.id)
       );
-      if (!next) return;
-      removeQueuedMessage(next.id);
-      void sendMessage(next.text, {
-        queuedAttachments: {
-          droppedFiles: next.droppedFiles,
-          clipboardImages: next.clipboardImages,
-          terminalSelection: next.terminalSelection,
-        },
-        preserveComposer: true,
-      });
+      if (!nextQueued) return;
+      if (failedQueuedMessageIds().has(nextQueued.id)) return;
+      void dispatchQueuedMessage(nextQueued);
     }, 250);
   });
   const queuedSteerAdmissionCleanups = [
@@ -2166,8 +2209,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       <Show when={queuedForSession().length > 0 && !composerEditingMessage()}>
         <QueuedMessages
           items={queuedForSession()}
+          dispatchingItemId={dispatchingQueuedMessageId()}
+          failedDispatchItemIds={failedQueuedMessageIds()}
           steeringItemIds={steeringQueuedMessageIds()}
           failedSteerItemIds={failedSteerQueuedMessageIds()}
+          onRetryDispatch={(item) => void dispatchQueuedMessage(item, true)}
           onSendAsSteer={sendQueuedAsSteer}
           onRemove={removeQueuedMessage}
         />

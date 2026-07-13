@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Message, Session } from '../types';
 import {
   resolveMessagesSelectedModel,
-  SessionSyncOperations,
   selectSessionWithStateDependencies,
   syncSessionMessagesWithStateDependencies,
   syncSessionWithStateDependencies,
@@ -157,70 +156,5 @@ describe('session sync helpers', () => {
     );
 
     expect(resolved).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
-  });
-
-  it('creates bound session sync operations from one dependency bag', async () => {
-    const activeSession = { value: 'session-0' as string | null };
-    const operations = new SessionSyncOperations(
-      {
-        getActiveSessionId: () => activeSession.value,
-        setActiveSessionId: (id) => {
-          activeSession.value = id;
-        },
-        clearPendingAbort: vi.fn(),
-        persistActiveSessionId: vi.fn(),
-        markSessionSeen: vi.fn(),
-        clearDraftCurrentDocumentState: vi.fn(),
-        resetToolCallExpansionState: vi.fn(),
-        resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
-        applySelectedAgent: vi.fn(),
-        resolvePersistedModel: () => null,
-        resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
-        applySelectedModel: vi.fn(),
-        getConnectedMcpNames: () => [],
-        hasSelectedMcps: () => false,
-        setSelectedMcpsForSession: vi.fn(),
-        syncSessionMcps: vi.fn(async () => {}),
-        resetTodoSync: vi.fn(),
-        clearMessages: vi.fn(),
-        loadSession: vi.fn(async () => ({
-          session: session('session-1'),
-          messages: [{ info: assistantMessage('assistant-1'), parts: [] }],
-        })),
-        isCurrentSelectionGeneration: () => true,
-        upsertSession: vi.fn(),
-        setMessagesIncremental: vi.fn(),
-        syncFailedSessionsFromMessages: vi.fn(),
-        requestMessageListScrollToBottom: vi.fn(),
-        deriveSelectedAgentFromMessages: () => 'build',
-        deriveSelectedModelFromMessages: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
-        syncTodosForSession: vi.fn(async () => {}),
-        loadQuestions: vi.fn(async () => {}),
-        loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'busy' as const } })),
-        mergeSessionStatuses: vi.fn(),
-        updateUsageLimitState: vi.fn(),
-        setSessionStatusEntry: vi.fn(),
-        startLoading: vi.fn(),
-        stopLoading: vi.fn(),
-        setError: vi.fn(),
-        getSessionStatus: () => ({ type: 'idle' }),
-        loadingStartedAt: () => null,
-        loadSessionMessages: vi.fn(async () => [
-          { info: assistantMessage('assistant-1'), parts: [] },
-        ]),
-        handoffTodosToMessages: vi.fn(),
-        loadSessionMetadata: vi.fn(async () => session('session-1')),
-      },
-      {
-        nextSelection: () => 1,
-        isCurrentSync: () => true,
-      }
-    );
-
-    await operations.selectSession('session-1');
-    await operations.syncSessionMessages('session-1', 1);
-    await operations.syncSession('session-1');
-
-    expect(activeSession.value).toBe('session-1');
   });
 });

@@ -44,13 +44,15 @@ export async function respondQuestionWithDependencies(
     setError(message: string): void;
   },
   requestId: string,
-  answers: Array<Array<string>>
+  answers: Array<Array<string>>,
+  options?: { rethrow?: boolean }
 ) {
   try {
     await deps.replyQuestion(requestId, answers);
     deps.removeQuestion(requestId);
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to answer question');
+    if (options?.rethrow) throw err;
   }
 }
 
@@ -60,13 +62,15 @@ export async function rejectQuestionWithDependencies(
     removeQuestion(requestId: string): void;
     setError(message: string): void;
   },
-  requestId: string
+  requestId: string,
+  options?: { rethrow?: boolean }
 ) {
   try {
     await deps.rejectQuestion(requestId);
     deps.removeQuestion(requestId);
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to reject question');
+    if (options?.rethrow) throw err;
   }
 }
 
@@ -192,7 +196,11 @@ export class SessionApprovalOperations {
     );
   };
 
-  readonly respondQuestion = async (requestId: string, answers: Array<Array<string>>) => {
+  readonly respondQuestion = async (
+    requestId: string,
+    answers: Array<Array<string>>,
+    options?: { rethrow?: boolean }
+  ) => {
     await respondQuestionWithDependencies(
       {
         replyQuestion: this.deps.replyQuestion,
@@ -200,18 +208,20 @@ export class SessionApprovalOperations {
         setError: this.deps.setError,
       },
       requestId,
-      answers
+      answers,
+      options
     );
   };
 
-  readonly rejectQuestion = async (requestId: string) => {
+  readonly rejectQuestion = async (requestId: string, options?: { rethrow?: boolean }) => {
     await rejectQuestionWithDependencies(
       {
         rejectQuestion: this.deps.rejectRemoteQuestion,
         removeQuestion: this.deps.removeQuestion,
         setError: this.deps.setError,
       },
-      requestId
+      requestId,
+      options
     );
   };
 

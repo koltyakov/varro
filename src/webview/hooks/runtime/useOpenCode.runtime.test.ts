@@ -79,210 +79,28 @@ describe('useOpenCode.runtime', () => {
     expect(installed.runtime.useOpenCode).toHaveBeenCalledTimes(1);
   });
 
-  it('forwards runtime operations to the installed runtime', async () => {
+  it('forwards a result-returning operation to the installed runtime', async () => {
     const installed = createRuntimeMock('installed');
     const { module } = await loadModule();
     module.installOpenCodeRuntime(installed.runtime);
 
-    const queuedAttachments = {
-      droppedFiles: [{ path: '/repo/file.ts' }],
-      clipboardImages: [{ name: 'image.png', data: 'base64' }],
-      terminalSelection: { text: 'npm test', terminalName: 'Terminal 1' },
-    };
+    await expect(module.createSession('Plan session', 'full')).resolves.toBe('installed-session');
+    expect(installed.runtime.createSession).toHaveBeenCalledWith('Plan session', 'full');
+  });
 
-    const operations = [
-      {
-        invoke: () => module.recheckSessionStatus('session-1'),
-        mock: installed.runtime.recheckSessionStatus,
-        args: ['session-1'],
-      },
-      {
-        invoke: () => module.refreshRoutingState(),
-        mock: installed.runtime.refreshRoutingState,
-        args: [],
-      },
-      {
-        invoke: () => module.continueInterruptedSession('session-1'),
-        mock: installed.runtime.continueInterruptedSession,
-        args: ['session-1'],
-      },
-      {
-        invoke: () => module.applySessionMcps(['alpha'], 'session-1'),
-        mock: installed.runtime.applySessionMcps,
-        args: [['alpha'], 'session-1'],
-      },
-      {
-        invoke: () => module.selectSession('session-1', { markSeen: false }),
-        mock: installed.runtime.selectSession,
-        args: ['session-1', { markSeen: false }],
-      },
-      {
-        invoke: () => module.createSession('Plan session', 'full'),
-        mock: installed.runtime.createSession,
-        args: ['Plan session', 'full'],
-        result: 'installed-session',
-      },
-      {
-        invoke: () => module.loadFullSessionHistory('session-1'),
-        mock: installed.runtime.loadFullSessionHistory,
-        args: ['session-1'],
-      },
-      {
-        invoke: () => module.loadOlderSessionHistoryPage('session-1'),
-        mock: installed.runtime.loadOlderSessionHistoryPage,
-        args: ['session-1'],
-        result: true,
-      },
-      {
-        invoke: () => module.loadOlderSessionPrompts('session-1'),
-        mock: installed.runtime.loadOlderSessionPrompts,
-        args: ['session-1'],
-        result: true,
-      },
-      {
-        invoke: () => module.renameSession('session-1', 'Renamed'),
-        mock: installed.runtime.renameSession,
-        args: ['session-1', 'Renamed'],
-        result: true,
-      },
-      {
-        invoke: () => module.forkSession('session-1', 'message-1'),
-        mock: installed.runtime.forkSession,
-        args: ['session-1', 'message-1'],
-        result: 'installed-fork',
-      },
-      {
-        invoke: () => module.deleteSession('session-1'),
-        mock: installed.runtime.deleteSession,
-        args: ['session-1'],
-      },
-      {
-        invoke: () => module.deleteSessionImmediately('session-1'),
-        mock: installed.runtime.deleteSessionImmediately,
-        args: ['session-1'],
-      },
-      {
-        invoke: () => module.restoreSession('root-1'),
-        mock: installed.runtime.restoreSession,
-        args: ['root-1'],
-      },
-      {
-        invoke: () => module.deleteSessionPermanently('root-1'),
-        mock: installed.runtime.deleteSessionPermanently,
-        args: ['root-1'],
-      },
-      {
-        invoke: () => module.emptyRecycleBin(),
-        mock: installed.runtime.emptyRecycleBin,
-        args: [],
-      },
-      {
-        invoke: () =>
-          module.sendMessage('hello', {
-            noReply: true,
-            queuedAttachments,
-            preserveComposer: true,
-          }),
-        mock: installed.runtime.sendMessage,
-        args: [
-          'hello',
-          {
-            noReply: true,
-            queuedAttachments,
-            preserveComposer: true,
-          },
-        ],
-        result: true,
-      },
-      {
-        invoke: () => module.retryMessage('message-1', 'session-1'),
-        mock: installed.runtime.retryMessage,
-        args: ['message-1', 'session-1'],
-      },
-      {
-        invoke: () => module.editMessage('message-1', 'updated prompt'),
-        mock: installed.runtime.editMessage,
-        args: ['message-1', 'updated prompt', undefined],
-      },
-      {
-        invoke: () => module.implementPlan('Implement the next step', 'session-1'),
-        mock: installed.runtime.implementPlan,
-        args: ['Implement the next step', 'session-1'],
-      },
-      {
-        invoke: () => module.openPlan('# Plan', 'session-1'),
-        mock: installed.runtime.openPlan,
-        args: ['# Plan', 'session-1'],
-      },
-      {
-        invoke: () => module.abortSession(),
-        mock: installed.runtime.abortSession,
-        args: [],
-      },
-      {
-        invoke: () => module.undoSession(),
-        mock: installed.runtime.undoSession,
-        args: [],
-      },
-      {
-        invoke: () => module.redoSession(),
-        mock: installed.runtime.redoSession,
-        args: [],
-      },
-      {
-        invoke: () => module.initSession(),
-        mock: installed.runtime.initSession,
-        args: [],
-      },
-      {
-        invoke: () => module.runSlashCommandByName('test', '--watch'),
-        mock: installed.runtime.runSlashCommandByName,
-        args: ['test', '--watch'],
-        result: 'installed-command',
-      },
-      {
-        invoke: () => module.reviewSession(),
-        mock: installed.runtime.reviewSession,
-        args: [],
-      },
-      {
-        invoke: () => module.compactSession(),
-        mock: installed.runtime.compactSession,
-        args: [],
-      },
-      {
-        invoke: () =>
-          module.respondPermission('session-1', 'permission-1', 'always', { rethrow: true }),
-        mock: installed.runtime.respondPermission,
-        args: ['session-1', 'permission-1', 'always', { rethrow: true }],
-      },
-      {
-        invoke: () => module.respondQuestion('question-1', [['answer']]),
-        mock: installed.runtime.respondQuestion,
-        args: ['question-1', [['answer']]],
-      },
-      {
-        invoke: () => module.updatePermissionModeForSession('full', 'session-1'),
-        mock: installed.runtime.updatePermissionModeForSession,
-        args: ['full', 'session-1'],
-      },
-      {
-        invoke: () => module.rejectQuestion('question-1'),
-        mock: installed.runtime.rejectQuestion,
-        args: ['question-1'],
-      },
-    ];
+  it('forwards a void operation to the installed runtime', async () => {
+    const installed = createRuntimeMock('installed');
+    const { module } = await loadModule();
+    module.installOpenCodeRuntime(installed.runtime);
 
-    for (const operation of operations) {
-      const result = await operation.invoke();
-
-      if ('result' in operation) {
-        expect(result).toBe(operation.result);
-      } else {
-        expect(result).toBeUndefined();
-      }
-
-      expect(operation.mock).toHaveBeenCalledWith(...operation.args);
-    }
+    await expect(
+      module.respondPermission('session-1', 'permission-1', 'always', { rethrow: true })
+    ).resolves.toBeUndefined();
+    expect(installed.runtime.respondPermission).toHaveBeenCalledWith(
+      'session-1',
+      'permission-1',
+      'always',
+      { rethrow: true }
+    );
   });
 });

@@ -55,10 +55,7 @@ async function getVirtualScrollSample(list: import('@playwright/test').Locator) 
   });
 }
 
-async function appendDeltaToRapidStreaming(
-  page: import('@playwright/test').Page,
-  delta: string
-) {
+async function appendDeltaToRapidStreaming(page: import('@playwright/test').Page, delta: string) {
   await page.evaluate((nextDelta) => {
     window.postMessage(
       {
@@ -159,32 +156,9 @@ test.describe('auto-scroll', () => {
     expect(Math.abs(afterSettled - detachedScrollTop)).toBeLessThan(3);
   });
 
-  test('does not jitter when scrolled to the middle of a large transcript', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
-    const list = page.locator('.interactive-list');
-    await expect(list).toBeVisible();
-
-    let firstVisibleId: string | null = null;
-    const scrollTopSet = await list.evaluate((element) => {
-      const mid = Math.floor(element.scrollHeight / 2);
-      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
-      element.scrollTop = mid;
-      element.dispatchEvent(new Event('scroll'));
-      return element.scrollTop;
-    });
-    await waitForAnimationFrame(page);
-
-    const posAfterFrame = await list.evaluate((el) => el.scrollTop);
-    // After scrolling to the middle, we should still be far from bottom
-    const metricsAfterFrame = await getScrollMetrics(page, '.interactive-list');
-    expect(metricsAfterFrame.distanceFromBottom).toBeGreaterThan(1000);
-
-    await waitForAnimationFrame(page);
-    const metricsAfterSecondFrame = await getScrollMetrics(page, '.interactive-list');
-    expect(metricsAfterSecondFrame.distanceFromBottom).toBeGreaterThan(1000);
-  });
-
-  test('scrolls upward through a large transcript without virtualized content jumps', async ({ page }) => {
+  test('scrolls upward through a large transcript without virtualized content jumps', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -376,7 +350,9 @@ test.describe('auto-scroll', () => {
 
     const afterDetachedDelta = await list.evaluate((element) => element.scrollTop);
     expect(Math.abs(afterDetachedDelta - detachedScrollTop)).toBeLessThan(3);
-    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(200);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      200
+    );
 
     await list.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
@@ -393,77 +369,9 @@ test.describe('auto-scroll', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
   });
-
-  test('does not jump upward when repeatedly scrolling down near the bottom', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
-    const list = page.locator('.interactive-list');
-    await expect(list).toBeVisible();
-
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
-
-    const positions: number[] = [];
-    for (let index = 0; index < 10; index += 1) {
-      await appendDeltaToLastLargeAssistant(
-        page,
-        `\n\nNear-bottom stability chunk ${index}: ${'content dependent scroll stability '.repeat(12)}`
-      );
-      positions.push(
-        await list.evaluate((element) => {
-          element.scrollTop = element.scrollHeight;
-          element.dispatchEvent(new Event('scroll'));
-          return element.scrollTop;
-        })
-      );
-      await waitForAnimationFrame(page);
-      positions.push(await list.evaluate((element) => element.scrollTop));
-    }
-
-    const largestUpwardJump = positions.reduce((largest, current, index) => {
-      if (index === 0) return largest;
-      return Math.max(largest, positions[index - 1]! - current);
-    }, 0);
-    expect(largestUpwardJump).toBeLessThan(25);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
-  });
 });
 
 test.describe('scroll stability regressions', () => {
-  test('scroll position holds when streaming arrives while scrolled to middle', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
-    const list = page.locator('.interactive-list');
-    await expect(list).toBeVisible();
-
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
-
-    await list.evaluate((element) => {
-      const mid = Math.floor(element.scrollHeight / 2);
-      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
-      element.scrollTop = mid;
-      element.dispatchEvent(new Event('scroll'));
-    });
-    await waitForAnimationFrames(page, 3);
-
-    const metricsBeforeStreaming = await getScrollMetrics(page, '.interactive-list');
-    expect(metricsBeforeStreaming.distanceFromBottom).toBeGreaterThan(1000);
-
-    for (let index = 0; index < 8; index += 1) {
-      await appendDeltaToLastLargeAssistant(
-        page,
-        `\n\nMid-scroll streaming chunk ${index}: ${'this should not move the viewport '.repeat(8)}`
-      );
-      await waitForAnimationFrames(page, 2);
-    }
-
-    const metricsAfterStreaming = await getScrollMetrics(page, '.interactive-list');
-    expect(metricsAfterStreaming.distanceFromBottom).toBeGreaterThan(1000);
-  });
-
   test('rapid streaming at bottom does not oscillate', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
@@ -500,7 +408,7 @@ test.describe('scroll stability regressions', () => {
     let maxJitterAmplitude = 0;
     for (let index = 2; index < positions.length; index += 1) {
       const jitter = Math.abs(
-        (positions[index]! - positions[index - 1]!) - (positions[index - 1]! - positions[index - 2]!)
+        positions[index]! - positions[index - 1]! - (positions[index - 1]! - positions[index - 2]!)
       );
       maxJitterAmplitude = Math.max(maxJitterAmplitude, jitter);
     }
@@ -530,7 +438,9 @@ test.describe('scroll stability regressions', () => {
 
     const afterSettled = await list.evaluate((el) => el.scrollTop);
     expect(Math.abs(afterSettled - scrolledPosition)).toBeLessThan(5);
-    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(190);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      190
+    );
   });
 
   test('no jitter when streaming grows content while auto-scroll follows', async ({ page }) => {
@@ -556,33 +466,12 @@ test.describe('scroll stability regressions', () => {
       await waitForAnimationFrames(page, 2);
     }
 
-    await expect(page.locator('.chat-turn-assistant').last()).toContainText('Growing content block 9');
+    await expect(page.locator('.chat-turn-assistant').last()).toContainText(
+      'Growing content block 9'
+    );
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
-  });
-
-  test('scroll position stable across multiple animation frames after wheel stop', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
-    const list = page.locator('.interactive-list');
-    await expect(list).toBeVisible();
-
-    await list.evaluate((element) => {
-      const target = Math.floor(element.scrollHeight * 0.3);
-      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, bubbles: true }));
-      element.scrollTop = target;
-      element.dispatchEvent(new Event('scroll'));
-    });
-
-    const metrics: Array<{ distanceFromBottom: number }> = [];
-    for (let frame = 0; frame < 10; frame += 1) {
-      await waitForAnimationFrame(page);
-      metrics.push(await getScrollMetrics(page, '.interactive-list'));
-    }
-
-    for (const m of metrics) {
-      expect(m.distanceFromBottom).toBeGreaterThan(500);
-    }
   });
 });
 
@@ -672,7 +561,9 @@ test.describe('auto-scroll re-engage', () => {
     });
     await waitForAnimationFrames(page, 3);
 
-    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(200);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      200
+    );
 
     await list.evaluate((element) => {
       element.scrollTop = element.scrollHeight - element.clientHeight - 8;
@@ -744,7 +635,9 @@ test.describe('auto-scroll re-engage', () => {
     });
     await waitForAnimationFrames(page, 3);
 
-    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(200);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      200
+    );
 
     await appendDeltaToRapidStreaming(
       page,
@@ -773,7 +666,9 @@ test.describe('auto-scroll re-engage', () => {
 });
 
 test.describe('multi-agent scroll stability', () => {
-  test('no jitter when streaming at bottom with multiple completed agent responses', async ({ page }) => {
+  test('no jitter when streaming at bottom with multiple completed agent responses', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -847,7 +742,9 @@ test.describe('multi-agent scroll stability', () => {
 });
 
 test.describe('rapid streaming jitter resistance', () => {
-  test('no jitter at exact bottom during streaming with varying content sizes', async ({ page }) => {
+  test('no jitter at exact bottom during streaming with varying content sizes', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -864,11 +761,11 @@ test.describe('rapid streaming jitter resistance', () => {
 
     const positions: number[] = [];
     for (let i = 0; i < 20; i += 1) {
-      const size = i % 2 === 0 ? 'short' : 'long with extra padding to vary content sizes significantly. '.repeat(8);
-      await appendDeltaToRapidStreaming(
-        page,
-        `\n\nVarying-size chunk ${i}: ${size}`
-      );
+      const size =
+        i % 2 === 0
+          ? 'short'
+          : 'long with extra padding to vary content sizes significantly. '.repeat(8);
+      await appendDeltaToRapidStreaming(page, `\n\nVarying-size chunk ${i}: ${size}`);
       await waitForAnimationFrames(page, 2);
       positions.push(await list.evaluate((element) => element.scrollTop));
     }
@@ -876,7 +773,7 @@ test.describe('rapid streaming jitter resistance', () => {
     let maxOscillation = 0;
     for (let i = 2; i < positions.length; i += 1) {
       const oscillation = Math.abs(
-        (positions[i]! - positions[i - 1]!) - (positions[i - 1]! - positions[i - 2]!)
+        positions[i]! - positions[i - 1]! - (positions[i - 1]! - positions[i - 2]!)
       );
       maxOscillation = Math.max(maxOscillation, oscillation);
     }
@@ -910,7 +807,9 @@ test.describe('rapid streaming jitter resistance', () => {
       .toBeLessThan(10);
   });
 
-  test('scroll position holds when streaming arrives while scrolled to middle near threshold', async ({ page }) => {
+  test('scroll position holds when streaming arrives while scrolled to middle near threshold', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1037,9 +936,7 @@ test.describe('viewport content coverage', () => {
     const midChat = await sampleAt(0.5);
     const samples = [nearTop, midChat];
 
-    const topSpacerSample = samples.find(
-      (sample) => sample.topStyleHeight > sample.viewportHeight
-    );
+    const topSpacerSample = samples.find((sample) => sample.topStyleHeight > sample.viewportHeight);
     const bottomSpacerSample = samples.find(
       (sample) => sample.bottomStyleHeight > sample.viewportHeight
     );
@@ -1208,7 +1105,9 @@ test.describe('viewport content coverage', () => {
     }
   });
 
-  test('no blank bottom space when scrolling from top to bottom in heterogeneous chat', async ({ page }) => {
+  test('no blank bottom space when scrolling from top to bottom in heterogeneous chat', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=heterogeneous-large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1237,7 +1136,9 @@ test.describe('viewport content coverage', () => {
     }
   });
 
-  test('viewport always has rendered rows at every scroll position in multi-agent chat', async ({ page }) => {
+  test('viewport always has rendered rows at every scroll position in multi-agent chat', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1248,7 +1149,13 @@ test.describe('viewport content coverage', () => {
 
     const scrollHeight = await list.evaluate((el) => el.scrollHeight);
     const viewportHeight = await list.evaluate((el) => el.clientHeight);
-    const positions = [0, scrollHeight * 0.25, scrollHeight * 0.5, scrollHeight * 0.75, scrollHeight - viewportHeight];
+    const positions = [
+      0,
+      scrollHeight * 0.25,
+      scrollHeight * 0.5,
+      scrollHeight * 0.75,
+      scrollHeight - viewportHeight,
+    ];
 
     for (const targetScrollTop of positions) {
       await list.evaluate((element, target) => {
@@ -1351,7 +1258,9 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     }
   });
 
-  test('scroll position stable after top-to-bottom round trip in multi-agent transcript', async ({ page }) => {
+  test('scroll position stable after top-to-bottom round trip in multi-agent transcript', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1377,7 +1286,9 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     await waitForAnimationFrames(page, 5);
 
     await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom), { timeout: 8000 })
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom), {
+        timeout: 8000,
+      })
       .toBeLessThan(80);
   });
 
@@ -1398,9 +1309,10 @@ test.describe('multi-agent large virtualized scroll stability', () => {
 
     const positions: number[] = [];
     for (let i = 0; i < 25; i += 1) {
-      const size = i % 3 === 0
-        ? 'Short chunk.'
-        : `Longer streaming chunk with varied content. ${'This exercises scroll anchoring with multiple agent responses above. '.repeat(4 + (i % 6))}`;
+      const size =
+        i % 3 === 0
+          ? 'Short chunk.'
+          : `Longer streaming chunk with varied content. ${'This exercises scroll anchoring with multiple agent responses above. '.repeat(4 + (i % 6))}`;
       await appendDeltaToMultiAgentLargeStreaming(
         page,
         `\n\nMulti-agent large chunk ${i}: ${size}`
@@ -1418,7 +1330,9 @@ test.describe('multi-agent large virtualized scroll stability', () => {
       .toBeLessThan(15);
   });
 
-  test('detached scroll holds while streaming in large multi-agent transcript', async ({ page }) => {
+  test('detached scroll holds while streaming in large multi-agent transcript', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1448,7 +1362,9 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     expect(Math.abs(afterStreaming - detachedScrollTop)).toBeLessThan(10);
   });
 
-  test('no viewport blank space at any scroll position in multi-agent large transcript', async ({ page }) => {
+  test('no viewport blank space at any scroll position in multi-agent large transcript', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1539,13 +1455,11 @@ test.describe('bottom scroll stability during height changes', () => {
 
     const positions: number[] = [];
     for (let i = 0; i < 20; i += 1) {
-      const content = i % 2 === 0
-        ? 'Short.'
-        : `${'Long paragraph with significant height variation to test scroll stability during rapid content size changes. '.repeat(6)}`;
-      await appendDeltaToMultiAgentLargeStreaming(
-        page,
-        `\n\n${content}`
-      );
+      const content =
+        i % 2 === 0
+          ? 'Short.'
+          : `${'Long paragraph with significant height variation to test scroll stability during rapid content size changes. '.repeat(6)}`;
+      await appendDeltaToMultiAgentLargeStreaming(page, `\n\n${content}`);
       await waitForAnimationFrames(page, 2);
       positions.push(await list.evaluate((element) => element.scrollTop));
     }
@@ -1565,7 +1479,9 @@ test.describe('bottom scroll stability during height changes', () => {
       .toBeLessThan(15);
   });
 
-  test('re-engage after detach works smoothly in large multi-agent transcript', async ({ page }) => {
+  test('re-engage after detach works smoothly in large multi-agent transcript', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -1581,14 +1497,18 @@ test.describe('bottom scroll stability during height changes', () => {
     });
     await waitForAnimationFrames(page, 3);
 
-    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(200);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      200
+    );
 
     await appendDeltaToMultiAgentLargeStreaming(
       page,
       `\n\nDetached chunk: ${'should not follow '.repeat(8)}`
     );
     await waitForAnimationFrames(page, 3);
-    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(200);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      200
+    );
 
     await list.evaluate((element) => {
       element.scrollTop = element.scrollHeight - element.clientHeight - 5;

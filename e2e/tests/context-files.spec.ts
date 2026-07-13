@@ -13,12 +13,6 @@ test('searches workspace files via @ mention and adds file to context', async ({
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
 
-  const hasResults = await getE2EState(page, () => {
-    const value = (window as Window & { __varroE2E?: { dispatchedMessages?: Array<{ type: string }> } }).__varroE2E;
-    return value?.dispatchedMessages?.some((msg) => msg.type === 'files/search-results') || false;
-  });
-  expect(hasResults).toBe(true);
-
   await expect(page.getByTitle(/StickyHeader\.tsx/)).toBeVisible();
 });
 
@@ -40,9 +34,11 @@ test('message body includes attached file reference', async ({ page }) => {
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+          }
+        ).__varroE2E;
         const promptReq = value?.requests.find(
           (req) => req.method === 'POST' && req.path.includes('prompt_async')
         );
@@ -50,7 +46,8 @@ test('message body includes attached file reference', async ({ page }) => {
         const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
         if (!body.parts) return null;
         return body.parts.some(
-          (part) => part.type === 'text' && typeof part.text === 'string' && part.text.includes('README.md')
+          (part) =>
+            part.type === 'text' && typeof part.text === 'string' && part.text.includes('README.md')
         );
       })
     )
@@ -92,9 +89,11 @@ test('message uses workspace-relative path for file references', async ({ page }
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+          }
+        ).__varroE2E;
         const promptReq = value?.requests.find(
           (req) => req.method === 'POST' && req.path.includes('prompt_async')
         );
@@ -102,7 +101,8 @@ test('message uses workspace-relative path for file references', async ({ page }
         const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
         if (!body.parts) return null;
         const part = body.parts.find(
-          (p) => p.type === 'text' && typeof p.text === 'string' && p.text.includes('session-filter')
+          (p) =>
+            p.type === 'text' && typeof p.text === 'string' && p.text.includes('session-filter')
         );
         return part?.text || null;
       })

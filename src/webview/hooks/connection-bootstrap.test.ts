@@ -3,7 +3,6 @@ import type { Message, SessionStatus } from '../types';
 import {
   buildInterruptedSessionContinueBody,
   continueInterruptedSessionWithDependencies,
-  createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
   initConnectionWithDependencies,
   INTERRUPTED_SESSION_CONTINUE_PROMPT,
@@ -641,50 +640,5 @@ describe('connection-bootstrap helpers', () => {
     resolveInit?.();
     await Promise.resolve();
     expect(initializing).toBe(false);
-  });
-
-  it('creates bound bootstrap operations from one dependency bag', async () => {
-    const callOrder: string[] = [];
-
-    const operations = createConnectionBootstrapOperations({
-      health: async () => {
-        callOrder.push('health');
-      },
-      loadInitialData: async () => {
-        callOrder.push('load');
-      },
-      hydrateSessionStatuses: async () => {
-        callOrder.push('hydrate');
-      },
-      getActiveSessionId: () => null,
-      getPersistedActiveSessionId: () => null,
-      getSessionCount: () => 1,
-      getOnlyPrimarySessionId: () => 'session-1',
-      hasSession: () => true,
-      selectSession: vi.fn(async () => {}),
-      setShowSessionPicker: (value) => {
-        callOrder.push(`picker:${value}`);
-      },
-      setInitialized: vi.fn(),
-      setError: vi.fn(),
-      nextConnectionGeneration: () => 1,
-      isCurrentConnectionGeneration: () => true,
-      consumeInterruptedSessionIds: () => [],
-      getSessionStatus: () => ({ type: 'idle' }),
-      hasPendingQuestion: () => false,
-      hasPendingPermission: () => false,
-      loadSessionMessages: async () => [],
-      logError: vi.fn(),
-      syncSessionMcps: vi.fn(async () => {}),
-      resolveModel: () => null,
-      resolveAgent: () => null,
-      sendAsync: vi.fn(async () => {}),
-      syncSession: vi.fn(async () => {}),
-      recheckSessionStatus: vi.fn(async () => {}),
-    });
-
-    await operations.initConnection();
-
-    expect(callOrder).toEqual(['health', 'load', 'hydrate', 'picker:false']);
   });
 });

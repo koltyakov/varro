@@ -26,6 +26,10 @@ export function ChangedFilesList() {
   let cachedSessionId: string | null = null;
   let cachedChanges: FileChange[] = [];
   let cachedSummaryStats: ReturnType<typeof getMessageToolSummaryStats> = null;
+  const activeMessages = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    return sessionId ? state.messages.filter((entry) => entry.info.sessionID === sessionId) : [];
+  });
 
   const resetCacheForSession = (sessionId: string | null) => {
     if (cachedSessionId === sessionId) return;
@@ -42,10 +46,13 @@ export function ChangedFilesList() {
   // session's edits stream in, never for an idle session.
   const changes = createMemo(() => {
     const session = getActiveSession();
-    resetCacheForSession(session?.id ?? null);
+    resetCacheForSession(state.activeSessionId);
 
     const summaryDiffs = session?.summary?.diffs;
-    const messageChanges = getMessageFileChanges(state.messages, state.editorContext.workspacePath);
+    const messageChanges = getMessageFileChanges(
+      activeMessages(),
+      state.editorContext.workspacePath
+    );
 
     if (summaryDiffs && summaryDiffs.length > 0 && messageChanges.length === 0) {
       if (isActiveSessionWorking()) {
@@ -69,10 +76,10 @@ export function ChangedFilesList() {
   // own messages so unrelated git changes can't inflate them.
   const summaryStats = createMemo(() => {
     const session = getActiveSession();
-    resetCacheForSession(session?.id ?? null);
+    resetCacheForSession(state.activeSessionId);
     if (!session) return null;
 
-    const messageStats = getMessageToolSummaryStats(state.messages);
+    const messageStats = getMessageToolSummaryStats(activeMessages());
     const summaryDiffs = session.summary?.diffs;
     const working = isActiveSessionWorking();
 

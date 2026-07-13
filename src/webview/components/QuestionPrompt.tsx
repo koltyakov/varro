@@ -109,8 +109,10 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     if (!canSubmit() || isSubmitting()) return;
     setIsSubmitting(true);
     try {
-      await respondQuestion(props.request.id, normalizedAnswers());
+      await respondQuestion(props.request.id, normalizedAnswers(), { rethrow: true });
       questionDrafts.delete(props.request.id);
+    } catch {
+      // The helper has already surfaced the error; retain the draft for retry.
     } finally {
       setIsSubmitting(false);
     }
@@ -120,8 +122,10 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     if (isSubmitting()) return;
     setIsSubmitting(true);
     try {
-      await rejectQuestion(props.request.id);
+      await rejectQuestion(props.request.id, { rethrow: true });
       questionDrafts.delete(props.request.id);
+    } catch {
+      // The helper has already surfaced the error; retain the draft for retry.
     } finally {
       setIsSubmitting(false);
     }
