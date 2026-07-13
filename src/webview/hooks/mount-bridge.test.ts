@@ -270,6 +270,10 @@ describe('mount bridge helpers', () => {
     };
 
     handleExtensionMessageWithDependencies(deps, { type: 'command/new-session' });
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'command/new-session',
+      payload: { prefill: '/init' },
+    });
     handleExtensionMessageWithDependencies(deps, { type: 'command/focus-input' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/open-attention-sessions' });
     handleExtensionMessageWithDependencies(deps, { type: 'command/search-sessions' });
@@ -288,7 +292,8 @@ describe('mount bridge helpers', () => {
     });
     handleExtensionMessageWithDependencies(deps, { type: 'providers/refresh' });
 
-    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(createSession).toHaveBeenNthCalledWith(1, undefined);
+    expect(createSession).toHaveBeenNthCalledWith(2, '/init');
     expect(focusComposer).toHaveBeenCalledTimes(1);
     expect(openAttentionSessions).toHaveBeenCalledTimes(1);
     expect(searchSessions).toHaveBeenCalledTimes(1);

@@ -4,6 +4,7 @@ import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibi
 import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer, OpenCodeServerInfo } from './server';
+import { getOpenCodeConfigDirectory } from './open-code-process';
 import { getRelativePath } from './util/path';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
@@ -96,6 +97,31 @@ export function registerCommands(
       await vscode.commands.executeCommand('workbench.view.scm');
     }),
 
+    vscode.commands.registerCommand('varro.agents.openGlobal', async () => {
+      try {
+        await openAgentsFile(vscode.Uri.file(getOpenCodeConfigDirectory()));
+      } catch (err) {
+        showAgentsFileError('global', err);
+      }
+    }),
+
+    vscode.commands.registerCommand('varro.agents.initializeProject', async () => {
+      const workspacePath = contextProvider.context.workspacePath;
+      if (!workspacePath) {
+        vscode.window.showWarningMessage('Varro: Open a project before initializing AGENTS.md.');
+        return;
+      }
+
+      try {
+        await openAgentsFile(vscode.Uri.file(workspacePath));
+        await vscode.commands.executeCommand('workbench.view.extension.varro');
+        sidebar.post({ type: 'command/new-session', payload: { prefill: '/init' } });
+        sidebar.requestInputFocus();
+      } catch (err) {
+        showAgentsFileError('project', err);
+      }
+    }),
+
     vscode.commands.registerCommand('varro.server.restart', async () => {
       try {
         const url = await server.restart();
@@ -186,6 +212,33 @@ export function registerCommands(
       }
     )
   );
+}
+
+async function openAgentsFile(directoryUri: vscode.Uri) {
+  const fileUri = vscode.Uri.joinPath(directoryUri, 'AGENTS.md');
+  await vscode.workspace.fs.createDirectory(directoryUri);
+
+  try {
+    await vscode.workspace.fs.stat(fileUri);
+  } catch (err) {
+    if (!isFileNotFoundError(err)) throw err;
+    await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
+  }
+
+  const document = await vscode.workspace.openTextDocument(fileUri);
+  await vscode.window.showTextDocument(document, { preview: false });
+}
+
+function isFileNotFoundError(err: unknown) {
+  return (
+    typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'FileNotFound'
+  );
+}
+
+function showAgentsFileError(scope: 'global' | 'project', err: unknown) {
+  const message = `Failed to open ${scope} AGENTS.md: ${err instanceof Error ? err.message : String(err)}`;
+  logger.error(message);
+  vscode.window.showErrorMessage(message);
 }
 
 function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenCodeServerInfo) {

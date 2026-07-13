@@ -435,7 +435,7 @@ export type ExtensionMessage =
     }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
-  | { type: 'command/new-session' }
+  | { type: 'command/new-session'; payload?: { prefill: string } }
   | { type: 'command/focus-input' }
   | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }

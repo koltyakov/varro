@@ -13,6 +13,15 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'command/new-session' })).toEqual({
       type: 'command/new-session',
     });
+    expect(
+      parseExtensionMessage({
+        type: 'command/new-session',
+        payload: { prefill: '/init' },
+      })
+    ).toEqual({ type: 'command/new-session', payload: { prefill: '/init' } });
+    expect(
+      parseExtensionMessage({ type: 'command/new-session', payload: { prefill: 1 } })
+    ).toBeNull();
     expect(parseExtensionMessage({ type: 'command/focus-input' })).toEqual({
       type: 'command/focus-input',
     });

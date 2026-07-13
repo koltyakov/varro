@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.20.10",
+  "version": "0.20.11",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -50,7 +50,7 @@
     "vscode:install": "rm -f varro-*.vsix && npm run package && NODE_NO_WARNINGS=1 code --install-extension varro-*.vsix"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.17.18",
+    "@opencode-ai/sdk": "^1.17.19",
     "dompurify": "^3.4.12",
     "highlight.js": "11.11.1",
     "jsonc-parser": "^3.3.1",
@@ -132,6 +132,14 @@
       {
         "command": "varro.openSourceControl",
         "title": "Varro: Open Source Control"
+      },
+      {
+        "command": "varro.agents.openGlobal",
+        "title": "Varro: Open Global AGENTS.md"
+      },
+      {
+        "command": "varro.agents.initializeProject",
+        "title": "Varro: Initialize Project AGENTS.md"
       },
       {
         "command": "varro.chat.addToContext",

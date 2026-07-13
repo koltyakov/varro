@@ -15,7 +15,7 @@ export function createMountBridgeOperations(deps: {
   setCurrentWorkspacePath(path: string | null): void;
   reloadSessionsForWorkspaceChange(): void;
   isInitialized(): boolean;
-  createSession(): void;
+  createSession(prefill?: string): void;
   abortSession(): void;
   refreshMcps(): void;
   refreshProviders(): void;
@@ -111,7 +111,7 @@ export function handleExtensionMessageWithDependencies(
     ): void;
     addContextFiles(payload: Extract<ExtensionMessage, { type: 'files/dropped' }>['payload']): void;
     removeContextFile(path: string): void;
-    createSession(): void;
+    createSession(prefill?: string): void;
     requestComposerFocus(): void;
     requestOpenAttentionSessions(): void;
     requestSessionSearchFocus?(): void;
@@ -173,7 +173,7 @@ export function handleExtensionMessageWithDependencies(
       deps.removeContextFile(msg.payload.path);
       break;
     case 'command/new-session':
-      deps.createSession();
+      deps.createSession(msg.payload?.prefill);
       break;
     case 'command/focus-input':
       deps.requestComposerFocus();

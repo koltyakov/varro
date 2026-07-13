@@ -97,6 +97,8 @@ Custom OpenCode commands loaded from your local config also appear in the same c
 
 Some commands only appear when they apply. For example, `/init` only appears in blank sessions and `/abort` only appears while a session is active.
 
+Use `Varro: Open Global AGENTS.md` to edit OpenCode's global instructions. `Varro: Initialize Project AGENTS.md` creates the project file when needed, opens it, and starts a new chat with `/init` ready to send using the current model.
+
 ## Sessions
 
 Sessions are filtered to the current workspace directory, then sorted by most recently updated.
@@ -262,6 +264,8 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - `Varro: Restart Server`
 - `Varro: Show Output`
 - `Varro: Open Source Control`
+- `Varro: Open Global AGENTS.md`
+- `Varro: Initialize Project AGENTS.md`
 - `Varro: Add to Context` from Explorer, from the Command Palette (adds the active file), or `Cmd+Shift+K` / `Ctrl+Shift+K` when focus is outside the editor and terminal
 - `Varro: Add to Context` from the editor selection context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` with an editor selection. Without a selection the key keeps its VS Code default (`Delete Line`)
 - `Varro: Add to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused

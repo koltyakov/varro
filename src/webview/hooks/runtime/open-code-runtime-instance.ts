@@ -565,8 +565,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           void loadSessions();
         },
         isInitialized: () => initialized,
-        createSession: () => {
+        createSession: (prefill) => {
           startNewChatDraft();
+          if (prefill !== undefined) {
+            composerStore.setInputText(prefill);
+          }
         },
         abortSession: () => {
           void abortSession();

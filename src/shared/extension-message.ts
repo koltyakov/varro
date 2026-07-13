@@ -52,7 +52,13 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
   }
 
   switch (type) {
-    case 'command/new-session':
+    case 'command/new-session': {
+      if (record.payload === undefined) return { type };
+      const payload = asRecord(record.payload);
+      if (!payload || typeof payload.prefill !== 'string') return null;
+      return { type, payload: { prefill: payload.prefill } };
+    }
+
     case 'command/focus-input':
     case 'command/search-sessions':
     case 'command/open-attention-sessions':

@@ -857,7 +857,7 @@ describe('OpenCodeServer maintenance', () => {
     );
   });
 
-  it('restarts an unmanaged running server when auto-start can relaunch it', async () => {
+  it('keeps using an unmanaged running server when the installed CLI is newer', async () => {
     const server = new OpenCodeServer(4096, true);
     const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
     const api = server as unknown as {
@@ -876,15 +876,19 @@ describe('OpenCodeServer maintenance', () => {
     setRunning(server);
     api.process = null;
     api.managedProcess = false;
-    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.17.19');
     api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(null);
-    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.18' });
     api.hasActiveSessions = vi.fn().mockResolvedValue(false);
     api.restartServerForCliUpdate = restartServerForCliUpdate;
 
     await runMaintenanceTick(server);
 
-    expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.14.20', '1.14.22');
+    expect(restartServerForCliUpdate).not.toHaveBeenCalled();
+    expect(server.status.state).toBe('running');
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      'OpenCode CLI 1.17.19 is newer than running server 1.17.18, but Varro does not own the server; continuing with the existing server'
+    );
   });
 
   it('restarts with the new CLI version after a background update', async () => {
@@ -1235,6 +1239,29 @@ describe('OpenCodeServer maintenance', () => {
 });
 
 describe('OpenCodeServer compatibility gate', () => {
+  it('uses a healthy server newer than the tested compatibility ceiling', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const prepareForHealthyExistingServer = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      startEventStream: () => void;
+      requestMaintenanceCheck: () => void;
+      processManager: {
+        prepareForHealthyExistingServer: typeof prepareForHealthyExistingServer;
+      };
+    };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.19' });
+    api.startEventStream = vi.fn();
+    api.requestMaintenanceCheck = vi.fn();
+    api.processManager.prepareForHealthyExistingServer = prepareForHealthyExistingServer;
+
+    await expect(server.start()).resolves.toBe(server.url);
+
+    expect(server.status.state).toBe('running');
+    expect(prepareForHealthyExistingServer).toHaveBeenCalledOnce();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('does not update or replace a server actively leased by another extension host', async () => {
     getConfigurationMock.mockImplementation(() => ({
       get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),

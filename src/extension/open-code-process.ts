@@ -1352,12 +1352,14 @@ export class OpenCodeProcess {
         return;
       }
 
-      if (!this._managedProcess && !this.autoStart) {
+      if (!this._managedProcess) {
         const key = `${serverVersion}->${restartCliVersion}`;
         if (this.lastLoggedUnmanagedRestartKey !== key) {
           this.lastLoggedUnmanagedRestartKey = key;
           logger.info(
-            `OpenCode CLI ${restartCliVersion} is newer than running server ${serverVersion}, but Varro server auto-start is disabled; skipping automatic restart`
+            this.autoStart
+              ? `OpenCode CLI ${restartCliVersion} is newer than running server ${serverVersion}, but Varro does not own the server; continuing with the existing server`
+              : `OpenCode CLI ${restartCliVersion} is newer than running server ${serverVersion}, but Varro server auto-start is disabled; skipping automatic restart`
           );
         }
         return;
