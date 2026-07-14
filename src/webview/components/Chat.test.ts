@@ -2289,6 +2289,19 @@ describe('header status badges', () => {
     expect(container?.querySelector('.settings-panel')).toBeInstanceOf(HTMLDivElement);
   });
 
+  it('renders settings from the session picker on narrow screens', () => {
+    setState('sessions', [session('session-1', 500), session('session-2', 400)]);
+    setState('activeSessionId', 'session-1');
+    setShowSessionPicker(true);
+    setShowSettings(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-workspace')).toBeNull();
+    expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.settings-panel')).toBeInstanceOf(HTMLDivElement);
+  });
+
   it('renders the desktop session pane on the right when configured', async () => {
     setState('sessions', [session('session-1', 500), session('session-2', 400)]);
     setState('activeSessionId', 'session-1');

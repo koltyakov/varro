@@ -9,7 +9,7 @@ import {
   setShowSettings,
   state,
 } from '../lib/state';
-import { formatContextLimit, formatModelName } from '../lib/format';
+import { formatContextLimit, formatModelName, formatModelReleaseDate } from '../lib/format';
 import {
   modelSupportsTools,
   modelSupportsVariants,
@@ -372,6 +372,7 @@ function ProviderSection(props: {
               const supportsVision = () =>
                 modelSupportsVision(props.provider.id, model.id, state.providers);
               const routeTags = () => getModelRouteTags(props.routing, props.provider.id, model.id);
+              const releaseDate = () => formatModelReleaseDate(model.release_date);
 
               return (
                 <label
@@ -394,38 +395,51 @@ function ProviderSection(props: {
                       setModelVisible(props.provider.id, model.id, e.currentTarget.checked)
                     }
                   />
-                  <span class="settings-model-name">{formatModelName(model.name)}</span>
+                  <span class="settings-model-name-wrap">
+                    <span class="settings-model-name">{formatModelName(model.name)}</span>
+                    <Show when={state.providerDefaults[props.provider.id] === model.id}>
+                      <span class="model-default-label">(default)</span>
+                    </Show>
+                  </span>
                   <Show
                     when={
                       supportsTools() ||
                       supportsVariants() ||
                       supportsVision() ||
                       model.limit?.context ||
+                      releaseDate() ||
                       routeTags().length > 0
                     }
                   >
                     <span class="settings-model-meta">
-                      <For each={routeTags()}>
-                        {(tag) => (
-                          <span class="model-capability-tag settings-route-tag">{tag}</span>
-                        )}
-                      </For>
-                      <Show when={supportsTools()}>
-                        <span class="model-capability-tag model-capability-tag-tools">Tools</span>
-                      </Show>
-                      <Show when={supportsVariants()}>
-                        <span class="model-capability-tag model-capability-tag-variants">
-                          Variants
-                        </span>
-                      </Show>
-                      <Show when={supportsVision()}>
-                        <span class="model-capability-tag model-capability-tag-vision">Vision</span>
-                      </Show>
-                      <Show when={model.limit?.context}>
-                        <span class="settings-model-ctx">
-                          {formatContextLimit(model.limit!.context)}
-                        </span>
-                      </Show>
+                      <span class="model-release-date">
+                        <Show when={releaseDate()}>{(date) => date()}</Show>
+                      </span>
+                      <span class="settings-model-badges">
+                        <For each={routeTags()}>
+                          {(tag) => (
+                            <span class="model-capability-tag settings-route-tag">{tag}</span>
+                          )}
+                        </For>
+                        <Show when={supportsTools()}>
+                          <span class="model-capability-tag model-capability-tag-tools">Tools</span>
+                        </Show>
+                        <Show when={supportsVariants()}>
+                          <span class="model-capability-tag model-capability-tag-variants">
+                            Variants
+                          </span>
+                        </Show>
+                        <Show when={supportsVision()}>
+                          <span class="model-capability-tag model-capability-tag-vision">
+                            Vision
+                          </span>
+                        </Show>
+                        <Show when={model.limit?.context}>
+                          <span class="settings-model-ctx">
+                            {formatContextLimit(model.limit!.context)}
+                          </span>
+                        </Show>
+                      </span>
                     </span>
                   </Show>
                 </label>

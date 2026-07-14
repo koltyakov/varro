@@ -61,6 +61,25 @@ afterEach(() => {
 });
 
 describe('ModelPicker', () => {
+  it('renders an inline release date for desktop layouts', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        detailed: createModel('detailed', 'GPT-5 Detailed', {
+          release_date: '2026-01-01',
+          limit: { context: 400_000, output: 32_000 },
+        }),
+      }),
+    ]);
+    setState('providerDefaults', { openai: 'detailed' });
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    expect(container?.querySelector('.model-release-date')?.textContent).toBe('2026/01/01');
+    expect(container?.querySelector('.model-default-label')?.textContent).toBe('(default)');
+    expect(container?.querySelector('.model-expanded-meta')).toBeNull();
+  });
+
   it('shows the provider default first and newer models before older models', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {

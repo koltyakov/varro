@@ -391,8 +391,15 @@
   background: var(--color-vscode-hover);
 }
 
-.settings-model-name {
+.settings-model-name-wrap {
+  display: flex;
+  align-items: center;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.settings-model-name {
   min-width: 0;
   font-size: 12px;
   color: var(--color-vscode-fg);
@@ -409,6 +416,37 @@
   margin-left: auto;
   flex-shrink: 0;
   min-width: 0;
+}
+
+.settings-model-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (min-width: 960px) {
+  .settings-model-meta {
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    width: 300px;
+    gap: 6px;
+  }
+
+  .settings-model-meta .model-release-date {
+    width: 68px;
+    text-align: left;
+  }
+
+  .settings-model-badges {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .settings-model-badges .settings-model-ctx {
+    margin-left: auto;
+  }
 }
 
 .settings-route-tag {

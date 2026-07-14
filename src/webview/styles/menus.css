@@ -141,6 +141,34 @@
   color: var(--color-vscode-muted);
 }
 
+.model-release-date {
+  display: none;
+  flex-shrink: 0;
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.model-default-label {
+  display: none;
+  flex-shrink: 0;
+  margin-left: 5px;
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+@media (min-width: 960px) {
+  .model-release-date {
+    display: inline;
+  }
+
+  .model-default-label {
+    display: inline;
+  }
+}
+
 .dropdown-header {
   padding: 6px 10px;
   font-size: 11px;

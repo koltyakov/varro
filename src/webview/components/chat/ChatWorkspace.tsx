@@ -238,6 +238,10 @@ export function ChatWorkspace(props: {
         </div>
       </Show>
 
+      <Show when={props.showSettings}>
+        <ModelsPanel />
+      </Show>
+
       <Show
         when={props.shouldRenderWorkspace}
         fallback={
@@ -253,10 +257,6 @@ export function ChatWorkspace(props: {
           </>
         }
       >
-        <Show when={props.showSettings}>
-          <ModelsPanel />
-        </Show>
-
         <div
           class={`chat-workspace ${props.isDesktopSessionPaneRight ? 'chat-workspace-pane-right' : ''}`}
         >

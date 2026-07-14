@@ -33,6 +33,18 @@ export function formatModelName(name: string) {
   return name.replace(/\bfast\b/gi, '⚡');
 }
 
+export function formatModelReleaseDate(value: string | undefined) {
+  if (!value) return '';
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) return '';
+
+  const date = new Date(time);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}/${month}/${day}`;
+}
+
 export function formatEditCount(value: number) {
   if (value < 10_000) return String(value);
   return new Intl.NumberFormat('en-US', {

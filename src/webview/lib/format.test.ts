@@ -6,6 +6,7 @@ import {
   formatEditCount,
   formatLabelWithProvider,
   formatModelName,
+  formatModelReleaseDate,
   formatProviderLimitCompact,
   formatProviderLimitCompactPrefix,
   formatProviderLimitTitle,
@@ -74,6 +75,13 @@ describe('format helpers', () => {
     expect(formatModelName('GPT-5 Fast Reasoning')).toBe('GPT-5 ⚡ Reasoning');
     expect(formatModelName('Claude Fast')).toBe('Claude Fast');
     expect(formatModelName('GPT-5 Faster')).toBe('GPT-5 Faster');
+  });
+
+  it('formats model release dates in UTC and ignores invalid values', () => {
+    expect(formatModelReleaseDate('2026-01-01')).toBe('2026/01/01');
+    expect(formatModelReleaseDate('2026-07-09T23:00:00-05:00')).toBe('2026/07/10');
+    expect(formatModelReleaseDate('not-a-date')).toBe('');
+    expect(formatModelReleaseDate(undefined)).toBe('');
   });
 
   it('compacts large edit counts', () => {

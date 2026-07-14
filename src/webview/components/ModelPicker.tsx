@@ -5,6 +5,7 @@ import {
   formatVariantLabel as formatThinkingLabel,
   formatContextLimit,
   formatModelName,
+  formatModelReleaseDate,
 } from '../lib/format';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
 import {
@@ -277,6 +278,7 @@ export function ModelPicker(props: {
                           modelSupportsVariants(provider.id, model.id, state.providers);
                         const supportsVision = () =>
                           modelSupportsVision(provider.id, model.id, state.providers);
+                        const releaseDate = () => formatModelReleaseDate(model.release_date);
                         return (
                           <button
                             class={`dropdown-item ${isSelected(provider.id, model.id) ? 'selected' : ''} ${focusIndex() === myIndex() ? 'keyboard-focus' : ''}`}
@@ -288,6 +290,9 @@ export function ModelPicker(props: {
                           >
                             <span class="dropdown-name-wrap">
                               <span class="dropdown-name">{formatModelName(model.name)}</span>
+                              <Show when={state.providerDefaults[provider.id] === model.id}>
+                                <span class="model-default-label">(default)</span>
+                              </Show>
                               <span class="dropdown-check">
                                 <Show when={isSelected(provider.id, model.id)}>
                                   <svg
@@ -305,10 +310,14 @@ export function ModelPicker(props: {
                                 supportsTools() ||
                                 supportsVariants() ||
                                 supportsVision() ||
-                                model.limit?.context
+                                model.limit?.context ||
+                                releaseDate()
                               }
                             >
                               <span class="dropdown-meta">
+                                <Show when={releaseDate()}>
+                                  {(date) => <span class="model-release-date">{date()}</span>}
+                                </Show>
                                 <Show when={supportsTools()}>
                                   <span class="model-capability-tag model-capability-tag-tools">
                                     Tools

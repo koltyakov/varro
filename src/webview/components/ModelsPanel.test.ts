@@ -71,6 +71,7 @@ beforeEach(() => {
           capabilities: { toolcall: true },
           cost: { input: 1, output: 1 },
           limit: { context: 400000, output: 32000 },
+          release_date: '2026-01-01',
         },
         'gpt-5-mini': {
           id: 'gpt-5-mini',
@@ -82,6 +83,7 @@ beforeEach(() => {
       },
     },
   ]);
+  setState('providerDefaults', { openai: 'gpt-5' });
   setState('agents', [
     {
       name: 'build',
@@ -120,6 +122,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   setState('providers', []);
+  setState('providerDefaults', {});
   setState('agents', []);
   setState('allAgents', []);
   setState('hiddenProviders', []);
@@ -131,6 +134,18 @@ afterEach(() => {
 });
 
 describe('ModelsPanel', () => {
+  it('renders an inline release date for desktop layouts', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const row = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    );
+    expect(row?.querySelector('.model-release-date')?.textContent).toBe('2026/01/01');
+    expect(row?.querySelector('.model-default-label')?.textContent).toBe('(default)');
+    expect(row?.querySelector('.model-expanded-meta')).toBeNull();
+  });
+
   it('shows routing tags loaded from opencode config and agents', async () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
