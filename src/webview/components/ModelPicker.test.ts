@@ -61,6 +61,26 @@ afterEach(() => {
 });
 
 describe('ModelPicker', () => {
+  it('shows the provider default first and newer models before older models', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        older: createModel('older', 'Older', { release_date: '2025-01-01' }),
+        default: createModel('default', 'Default', { release_date: '2024-01-01' }),
+        newer: createModel('newer', 'Newer', { release_date: '2026-01-01' }),
+      }),
+    ]);
+    setState('providerDefaults', { openai: 'default' });
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    expect(
+      Array.from(container?.querySelectorAll('.dropdown-name') ?? []).map((item) =>
+        item.textContent?.trim()
+      )
+    ).toEqual(['Default', 'Newer', 'Older']);
+  });
+
   it('shows search only when more than ten models are visible and filters by provider or model query', async () => {
     const alphaModels = Object.fromEntries(
       Array.from({ length: 10 }, (_, index) => {

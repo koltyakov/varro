@@ -28,6 +28,11 @@ export function formatContextLimit(value: number) {
   return String(value);
 }
 
+export function formatModelName(name: string) {
+  if (!/^\s*gpt-/i.test(name)) return name;
+  return name.replace(/\bfast\b/gi, '⚡');
+}
+
 export function formatEditCount(value: number) {
   if (value < 10_000) return String(value);
   return new Intl.NumberFormat('en-US', {

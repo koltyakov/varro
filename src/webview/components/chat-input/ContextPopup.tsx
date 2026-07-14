@@ -1,5 +1,6 @@
 import { For, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { formatNumber } from '../../lib/message-metrics';
+import { formatModelName } from '../../lib/format';
 import {
   alignPopupToBoundary,
   clampPopupToViewport,
@@ -175,7 +176,7 @@ export function ContextPopup(props: {
 
       <Show when={props.model.modelName}>
         <div class="context-popup-model">
-          {props.model.providerName} / {props.model.modelName}
+          {props.model.providerName} / {formatModelName(props.model.modelName)}
         </div>
       </Show>
     </div>

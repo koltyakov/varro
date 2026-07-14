@@ -264,6 +264,70 @@ describe('data loaders', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it('excludes unavailable models from OpenAI', async () => {
+    const openAi = provider('openai', {
+      'gpt-5.6-pro': {
+        id: 'gpt-5.6-pro',
+        name: 'GPT-5.6 Pro',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+      'gpt-5.6': {
+        id: 'gpt-5.6',
+        name: 'GPT-5.6',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+      'gpt-5.6-fast': {
+        id: 'gpt-5.6-fast',
+        name: 'GPT-5.6 Fast',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+      'gpt-5.5': {
+        id: 'gpt-5.5',
+        name: 'GPT-5.5',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+    });
+    const other = provider('other', {
+      pro: {
+        id: 'pro',
+        name: 'Other Pro',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+    });
+    const setProviders = vi.fn();
+    const setProviderDefaults = vi.fn();
+    const setSelectedModel = vi.fn();
+
+    await loadProvidersWithDependencies(
+      {
+        listProviders: async () => ({
+          providers: [openAi, other],
+          default: { openai: 'gpt-5.6-fast', other: 'pro' },
+        }),
+        setProvidersLoaded: vi.fn(),
+        setProviders,
+        setProviderDefaults,
+        getSelectedModel: () => null,
+        setSelectedModel,
+      },
+      vi.fn()
+    );
+
+    const loadedProviders = setProviders.mock.calls[0]?.[0];
+    expect(Object.keys(loadedProviders[0].models)).toEqual(['gpt-5.5']);
+    expect(Object.keys(loadedProviders[1].models)).toEqual(['pro']);
+    expect(setProviderDefaults).toHaveBeenCalledWith({ other: 'pro' });
+    expect(setSelectedModel).toHaveBeenCalledWith({
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+    });
+  });
+
   it('hydrates session statuses and usage-limit state for loaded sessions', async () => {
     const setSessionStatuses = vi.fn();
     const updateUsageLimitState = vi.fn();

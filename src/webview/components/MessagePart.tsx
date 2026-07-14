@@ -1,6 +1,6 @@
 import { Show, createMemo, createSignal } from 'solid-js';
 import { expandThinkingByDefault, getMessageById, state, showThinking } from '../lib/state';
-import { formatAgentLabel, formatVariantLabel } from '../lib/format';
+import { formatAgentLabel, formatModelName, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
@@ -256,7 +256,9 @@ function getReasoningDetailLabel(messageInfo?: AssistantMessage) {
   if (!modelChanged && !variantChanged) return null;
 
   const provider = state.providers.find((item) => item.id === messageInfo.providerID);
-  const modelName = provider?.models[messageInfo.modelID]?.name || messageInfo.modelID;
+  const modelName = formatModelName(
+    provider?.models[messageInfo.modelID]?.name || messageInfo.modelID
+  );
   const parts: string[] = [];
 
   if (modelChanged) parts.push(modelName);

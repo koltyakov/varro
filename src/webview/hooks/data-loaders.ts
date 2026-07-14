@@ -456,14 +456,32 @@ export async function loadProvidersWithDependencies(
   deps.setProvidersLoaded(false);
   try {
     const res = await deps.listProviders();
-    const providerDefaults = res.default || {};
-    deps.setProviders(res.providers);
+    const providers = res.providers.map((provider) =>
+      provider.id === 'openai'
+        ? {
+            ...provider,
+            models: Object.fromEntries(
+              Object.entries(provider.models).filter(([, model]) => {
+                const name = model.name.trim();
+                return !/\bpro$/i.test(name) && !/^gpt-5\.6(?: fast)?$/i.test(name);
+              })
+            ),
+          }
+        : provider
+    );
+    const providerDefaults = { ...res.default };
+    const openAiDefault = providerDefaults.openai;
+    const openAiProvider = providers.find((provider) => provider.id === 'openai');
+    if (openAiDefault && !openAiProvider?.models[openAiDefault]) {
+      delete providerDefaults.openai;
+    }
+    deps.setProviders(providers);
     deps.setProviderDefaults(providerDefaults);
     deps.setProvidersLoaded(true);
 
     const routingState = reconcileLoadedProviders({
       selectedModel: deps.getSelectedModel(),
-      providers: res.providers,
+      providers,
       providerDefaults,
     });
     if (routingState.nextSelectedModel !== undefined) {

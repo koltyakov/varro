@@ -5,6 +5,7 @@ import {
   formatContextLimit,
   formatEditCount,
   formatLabelWithProvider,
+  formatModelName,
   formatProviderLimitCompact,
   formatProviderLimitCompactPrefix,
   formatProviderLimitTitle,
@@ -66,6 +67,13 @@ describe('format helpers', () => {
     expect(formatContextLimit(1_500)).toBe('2k');
     expect(formatContextLimit(1_000_000)).toBe('1.0M');
     expect(formatContextLimit(12_000_000)).toBe('12M');
+  });
+
+  it('replaces Fast in GPT model display names with a lightning symbol', () => {
+    expect(formatModelName('GPT-5.6 Fast')).toBe('GPT-5.6 ⚡');
+    expect(formatModelName('GPT-5 Fast Reasoning')).toBe('GPT-5 ⚡ Reasoning');
+    expect(formatModelName('Claude Fast')).toBe('Claude Fast');
+    expect(formatModelName('GPT-5 Faster')).toBe('GPT-5 Faster');
   });
 
   it('compacts large edit counts', () => {

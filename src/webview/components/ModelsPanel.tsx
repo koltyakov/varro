@@ -9,12 +9,13 @@ import {
   setShowSettings,
   state,
 } from '../lib/state';
-import { formatContextLimit } from '../lib/format';
+import { formatContextLimit, formatModelName } from '../lib/format';
 import {
   modelSupportsTools,
   modelSupportsVariants,
   modelSupportsVision,
 } from '../lib/model-capabilities';
+import { sortProviderModels } from '../lib/model-ordering';
 import { openProviderSetup } from '../lib/provider-setup';
 import { client } from '../lib/client';
 import { postMessage } from '../lib/bridge';
@@ -74,8 +75,9 @@ export function ModelsPanel() {
 
     return state.providers
       .map((provider) => {
-        const models = Object.values(provider.models).toSorted((a, b) =>
-          a.name.localeCompare(b.name)
+        const models = sortProviderModels(
+          Object.values(provider.models),
+          state.providerDefaults[provider.id]
         );
 
         if (!search) return { provider, models };
@@ -305,8 +307,7 @@ function ProviderSection(props: {
   routing: OpenCodeModelRouting;
   onOpenContextMenu: (menu: ModelContextMenuState) => void;
 }) {
-  const allModels = () =>
-    Object.values(props.provider.models).sort((a, b) => a.name.localeCompare(b.name));
+  const allModels = () => Object.values(props.provider.models);
 
   const enabledCount = () =>
     props.models.filter((m) => isModelVisible(props.provider.id, m.id)).length;
@@ -393,7 +394,7 @@ function ProviderSection(props: {
                       setModelVisible(props.provider.id, model.id, e.currentTarget.checked)
                     }
                   />
-                  <span class="settings-model-name">{model.name}</span>
+                  <span class="settings-model-name">{formatModelName(model.name)}</span>
                   <Show
                     when={
                       supportsTools() ||

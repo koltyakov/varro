@@ -350,6 +350,25 @@ describe('ToolbarPickers', () => {
     expect(providerIcon?.style.getPropertyValue('--provider-icon-mask')).toContain('url(');
   });
 
+  it('renders GPT Fast models with a lightning symbol', () => {
+    cleanup = render(
+      () => (
+        <ModelPickerButton
+          providerID="openai"
+          providerName="OpenAI"
+          modelName="GPT-5.6 Fast"
+          canEllipsize={false}
+          onToggle={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+    expect(button?.title).toBe('OpenAI / GPT-5.6 ⚡');
+    expect(container?.querySelector('.model-name-text')?.textContent).toBe('GPT-5.6 ⚡');
+  });
+
   it('omits the provider limit chip when no label is available', () => {
     cleanup = render(
       () => <ProviderLimitChip badges={[]} title={null} onClick={vi.fn()} />,

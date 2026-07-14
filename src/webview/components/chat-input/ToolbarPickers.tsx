@@ -2,6 +2,7 @@ import { createEffect, For, onCleanup, Show } from 'solid-js';
 import type { Agent } from '../../types';
 import type { PermissionMode } from '../../../shared/protocol';
 import { getProviderIcon } from '../../lib/provider-icons';
+import { formatModelName } from '../../lib/format';
 import {
   alignPopupToBoundary,
   clampPopupToViewport,
@@ -269,12 +270,14 @@ export function ModelPickerButton(props: {
   canEllipsize: boolean;
   onToggle: () => void;
 }) {
+  const displayModelName = () => formatModelName(props.modelName);
+
   return (
     <button
       ref={props.buttonRef}
       class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''}`}
       onClick={props.onToggle}
-      title={props.modelName ? `${props.providerName} / ${props.modelName}` : 'Choose model'}
+      title={props.modelName ? `${props.providerName} / ${displayModelName()}` : 'Choose model'}
     >
       <Show
         when={props.modelName}
@@ -290,7 +293,7 @@ export function ModelPickerButton(props: {
               />
             )}
           </Show>
-          <span class="model-name-text">{props.modelName}</span>
+          <span class="model-name-text">{displayModelName()}</span>
         </span>
       </Show>
       <PickerChevron />

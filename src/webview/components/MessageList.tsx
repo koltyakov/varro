@@ -40,7 +40,7 @@ import {
 } from '../lib/message-window';
 import { loadOlderSessionHistoryPage, recheckSessionStatus } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
-import { formatLabelWithProvider, formatVariantLabel } from '../lib/format';
+import { formatLabelWithProvider, formatModelName, formatVariantLabel } from '../lib/format';
 import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
 import {
   buildPermissionRequestLookup,
@@ -1551,7 +1551,7 @@ export function MessageList() {
         const variantChanged = (cur.variant || '') !== (prevVariant || '');
         if (prevProvider !== undefined && (modelChanged || variantChanged)) {
           const provider = providerMap.get(cur.providerID);
-          const modelName = provider?.models[cur.modelID]?.name || cur.modelID;
+          const modelName = formatModelName(provider?.models[cur.modelID]?.name || cur.modelID);
           const parts: string[] = [];
           if (modelChanged) parts.push(modelName);
           if (cur.variant) parts.push(formatVariantLabel(cur.variant));

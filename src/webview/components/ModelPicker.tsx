@@ -1,13 +1,18 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { normalizeModelVariant } from '../../shared/model-variant';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
-import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
+import {
+  formatVariantLabel as formatThinkingLabel,
+  formatContextLimit,
+  formatModelName,
+} from '../lib/format';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
 import {
   modelSupportsTools,
   modelSupportsVariants,
   modelSupportsVision,
 } from '../lib/model-capabilities';
+import { sortProviderModels } from '../lib/model-ordering';
 
 interface ModelSelection {
   providerID?: string;
@@ -54,18 +59,19 @@ export function ModelPicker(props: {
     visibleProviders().map((provider) => ({
       provider,
       searchText: `${provider.name}\n${provider.id}`.toLocaleLowerCase(),
-      models: Object.values(provider.models)
-        .toSorted((a, b) => a.name.localeCompare(b.name))
-        .map((model) => ({
-          item: {
-            providerID: provider.id,
-            modelID: model.id,
-            name: model.name,
-            contextLimit: model.limit?.context,
-          },
-          model,
-          searchText: `${model.name}\n${model.id}`.toLocaleLowerCase(),
-        })),
+      models: sortProviderModels(
+        Object.values(provider.models),
+        state.providerDefaults[provider.id]
+      ).map((model) => ({
+        item: {
+          providerID: provider.id,
+          modelID: model.id,
+          name: model.name,
+          contextLimit: model.limit?.context,
+        },
+        model,
+        searchText: `${model.name}\n${model.id}`.toLocaleLowerCase(),
+      })),
     }))
   );
 
@@ -281,7 +287,7 @@ export function ModelPicker(props: {
                             onMouseEnter={() => setFocusIndex(myIndex())}
                           >
                             <span class="dropdown-name-wrap">
-                              <span class="dropdown-name">{model.name}</span>
+                              <span class="dropdown-name">{formatModelName(model.name)}</span>
                               <span class="dropdown-check">
                                 <Show when={isSelected(provider.id, model.id)}>
                                   <svg
