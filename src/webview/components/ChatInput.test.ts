@@ -1479,7 +1479,7 @@ describe('ChatInput', () => {
     expect(state.terminalSelection).toEqual({ text: 'pwd', terminalName: 'draft-terminal' });
   });
 
-  it('does not duplicate an edited attachment that is the active document', async () => {
+  it('merges an edited whole-file attachment into the active document context', async () => {
     setState('activeSessionId', 'session-1');
     setState('editorContext', {
       workspacePath: '/repo',
@@ -1501,12 +1501,11 @@ describe('ChatInput', () => {
     });
     await Promise.resolve();
 
-    expect(state.droppedFiles).toEqual([
-      { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },
-    ]);
-    expect(
-      container?.querySelectorAll('.chat-attachments-container .chat-attachment-chip')
-    ).toHaveLength(1);
+    expect(state.droppedFiles).toEqual([]);
+    const chips = container?.querySelectorAll('.chat-attachments-container .chat-attachment-chip');
+    expect(chips).toHaveLength(1);
+    expect(chips?.[0]?.textContent).toContain('app.ts');
+    expect(chips?.[0]?.querySelector('.chip-remove')).toBeNull();
   });
 
   it('does not keep edited message text in the composer after remounting into another session', async () => {

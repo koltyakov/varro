@@ -233,26 +233,28 @@ function captureEditDraftBackup(): MessageEditContext & { text: string } {
   };
 }
 
-function applyEditContext(context: MessageEditContext) {
+function applyEditContext(context: MessageEditContext, mergeWholeFileIntoActiveContext = false) {
   const activeFile = state.editorContext.activeFile;
   replaceContextFiles(
-    context.files.map((file) =>
-      activeFile &&
-      file.type === 'file' &&
-      (isSamePath(file.path, activeFile.path) ||
-        isSamePath(file.path, activeFile.relativePath) ||
-        isSamePath(file.relativePath, activeFile.relativePath) ||
-        [file.path, file.relativePath].some((path) => {
-          const normalizedPath = path.replace(/^\.\//, '');
-          return (
-            !normalizedPath.includes('/') &&
-            !normalizedPath.includes('\\') &&
-            isSamePath(normalizedPath, getLeafPathName(activeFile.relativePath))
-          );
-        }))
-        ? { ...file, path: activeFile.path, relativePath: activeFile.relativePath }
-        : file
-    )
+    context.files.flatMap((file) => {
+      const matchesActiveFile =
+        activeFile &&
+        file.type === 'file' &&
+        (isSamePath(file.path, activeFile.path) ||
+          isSamePath(file.path, activeFile.relativePath) ||
+          isSamePath(file.relativePath, activeFile.relativePath) ||
+          [file.path, file.relativePath].some((path) => {
+            const normalizedPath = path.replace(/^\.\//, '');
+            return (
+              !normalizedPath.includes('/') &&
+              !normalizedPath.includes('\\') &&
+              isSamePath(normalizedPath, getLeafPathName(activeFile.relativePath))
+            );
+          }));
+      if (!matchesActiveFile) return [file];
+      if (mergeWholeFileIntoActiveContext && !file.lineRanges?.length) return [];
+      return [{ ...file, path: activeFile.path, relativePath: activeFile.relativePath }];
+    })
   );
   replaceClipboardImages(context.images);
   setState(
@@ -1798,7 +1800,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setMessageEditDraftBackup(untrack(captureEditDraftBackup));
     }
     activeEditMessageId = editing.messageId;
-    applyEditContext(editing.context);
+    applyEditContext(editing.context, activeContextEnabled(editing.sessionId));
     setComposerValue(editing.text);
     queueMicrotask(() => {
       if (richEditorRef) {

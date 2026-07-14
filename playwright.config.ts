@@ -20,7 +20,7 @@ export default defineConfig({
   webServer: {
     command: 'npm exec vite -- --host 127.0.0.1 --port 4174 --strictPort',
     url: 'http://127.0.0.1:4174/e2e/harness/index.html',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

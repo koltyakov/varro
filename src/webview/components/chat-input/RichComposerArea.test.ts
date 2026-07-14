@@ -125,6 +125,22 @@ describe('RichComposerArea', () => {
     expect(onInput).toHaveBeenCalledWith('pasted text', 11);
   });
 
+  it('accepts input immediately after syncing the controlled value', () => {
+    const onInput = vi.fn();
+
+    renderComposer({ value: 'restored draft', cursorOffset: 14, chips: [], onInput });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+
+    editor.textContent = 'updated draft';
+    editor.focus();
+    setCollapsedSelection(editor.firstChild || editor, 13);
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(onInput).toHaveBeenCalledWith('updated draft', 13);
+  });
+
   it('copies the underlying chip markers instead of visible labels', () => {
     const chip: RichComposerChip = {
       id: 'file:/workspace/README.md',

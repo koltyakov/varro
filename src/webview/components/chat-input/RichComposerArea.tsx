@@ -47,7 +47,6 @@ export function RichComposerArea(props: {
 }) {
   let editorEl: HTMLDivElement | undefined;
   let isComposing = false;
-  let suppressNextInput = false;
 
   onMount(() => {
     if (editorEl) {
@@ -200,7 +199,6 @@ export function RichComposerArea(props: {
     }
 
     lastSyncedValue = text;
-    suppressNextInput = true;
     const cursorOff =
       textChanged && requestedCursor != null
         ? requestedCursor
@@ -215,13 +213,10 @@ export function RichComposerArea(props: {
     if (isFocused) {
       setCursorOffset(Math.min(cursorOff, text.length));
     }
-    queueMicrotask(() => {
-      suppressNextInput = false;
-    });
   });
 
   function handleInput() {
-    if (suppressNextInput || isComposing) return;
+    if (isComposing) return;
     if (!editorEl) return;
     syncEmptyState();
     const text = extractText(editorEl);
