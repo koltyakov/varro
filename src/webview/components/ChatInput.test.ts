@@ -147,6 +147,12 @@ afterEach(() => {
   setState('clipboardImages', []);
   setState('droppedFiles', []);
   setState('terminalSelection', null);
+  setState('editorContext', {
+    workspacePath: null,
+    activeFile: null,
+    selection: null,
+    diagnostics: [],
+  });
   setState('queuedMessages', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
@@ -1471,6 +1477,36 @@ describe('ChatInput', () => {
       { id: 'draft-img', url: 'blob:draft', mime: 'image/png', filename: 'draft.png', size: 10 },
     ]);
     expect(state.terminalSelection).toEqual({ text: 'pwd', terminalName: 'draft-terminal' });
+  });
+
+  it('does not duplicate an edited attachment that is the active document', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        language: 'typescript',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    startEditingMessage('message-1', 'session-1', 'edited prompt', {
+      files: [{ path: 'app.ts', relativePath: 'app.ts', type: 'file' }],
+      images: [],
+      terminalSelection: null,
+    });
+    await Promise.resolve();
+
+    expect(state.droppedFiles).toEqual([
+      { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },
+    ]);
+    expect(
+      container?.querySelectorAll('.chat-attachments-container .chat-attachment-chip')
+    ).toHaveLength(1);
   });
 
   it('does not keep edited message text in the composer after remounting into another session', async () => {

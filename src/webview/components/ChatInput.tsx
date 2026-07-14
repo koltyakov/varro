@@ -99,7 +99,7 @@ import {
   getClipboardImageAttachmentSequence,
   getContextFileAttachmentSequence,
 } from '../lib/attachment-order';
-import { getLeafPathName } from '../lib/path-display';
+import { getLeafPathName, isSamePath } from '../lib/path-display';
 import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
@@ -234,7 +234,26 @@ function captureEditDraftBackup(): MessageEditContext & { text: string } {
 }
 
 function applyEditContext(context: MessageEditContext) {
-  replaceContextFiles(context.files);
+  const activeFile = state.editorContext.activeFile;
+  replaceContextFiles(
+    context.files.map((file) =>
+      activeFile &&
+      file.type === 'file' &&
+      (isSamePath(file.path, activeFile.path) ||
+        isSamePath(file.path, activeFile.relativePath) ||
+        isSamePath(file.relativePath, activeFile.relativePath) ||
+        [file.path, file.relativePath].some((path) => {
+          const normalizedPath = path.replace(/^\.\//, '');
+          return (
+            !normalizedPath.includes('/') &&
+            !normalizedPath.includes('\\') &&
+            isSamePath(normalizedPath, getLeafPathName(activeFile.relativePath))
+          );
+        }))
+        ? { ...file, path: activeFile.path, relativePath: activeFile.relativePath }
+        : file
+    )
+  );
   replaceClipboardImages(context.images);
   setState(
     'terminalSelection',

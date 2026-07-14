@@ -8,7 +8,13 @@ import {
   onCleanup,
 } from 'solid-js';
 import { isAbortedToolError } from '../../shared/error-classification';
-import type { QuestionRequest, ToolPart, ToolStateCompleted, ToolStateError } from '../types';
+import type {
+  AssistantMessage,
+  QuestionRequest,
+  ToolPart,
+  ToolStateCompleted,
+  ToolStateError,
+} from '../types';
 import { postMessage } from '../lib/bridge';
 import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
@@ -742,6 +748,40 @@ function GenericToolCall(props: {
 
     return resolveTaskSessionId(props.tool, appState.messages, appState.sessions);
   };
+  const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {
+    const sessionId = taskSessionId();
+    let latest: AssistantMessage | null = null;
+    if (sessionId) {
+      for (const entry of appState.messages) {
+        const info = entry.info;
+        if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
+        if (!latest || info.time.created >= latest.time.created) latest = info;
+      }
+    }
+
+    const type = props.state.input?.subagent_type;
+    const agent =
+      typeof type === 'string' && type.trim()
+        ? appState.allAgents.find((candidate) => candidate.name === type.trim())
+        : null;
+    const parentEntry = appState.messages.find((entry) => entry.info.id === props.tool.messageID);
+    const parent = parentEntry?.info.role === 'assistant' ? parentEntry.info : null;
+    const model = latest || agent?.model || parent;
+    if (!model) return [];
+    const reasoning = latest
+      ? latest.variant
+      : agent?.variant || agent?.model?.variant || (!agent?.model ? parent?.variant : undefined);
+
+    return [
+      ['model', `${model.providerID}/${model.modelID}`],
+      ['reasoning', reasoning || 'default'],
+    ];
+  });
+  const detailInputEntries = createMemo(() => {
+    if (!isTask()) return props.inputEntries;
+    const keys = new Set(props.inputEntries.map(([key]) => key));
+    return [...props.inputEntries, ...taskExecutionEntries().filter(([key]) => !keys.has(key))];
+  });
   const taskTokenUsage = createMemo(() => {
     const sessionId = taskSessionId();
     if (!sessionId) return null;
@@ -803,7 +843,7 @@ function GenericToolCall(props: {
   const hasExpandableContent = () => {
     if (props.lightweight) return false;
     if (props.state.status === 'error') return true;
-    if (props.inputEntries.length > 0) return true;
+    if (detailInputEntries().length > 0) return true;
     return props.state.status === 'completed' && props.truncatedOutput.length > 0;
   };
   const isExpanded = () => hasExpandableContent() && props.expanded;
@@ -914,7 +954,7 @@ function GenericToolCall(props: {
                 }
               >
                 <StructuredToolCard
-                  inputEntries={props.inputEntries}
+                  inputEntries={detailInputEntries()}
                   result={structuredResult()}
                   onOpenPath={openGenericToolFile}
                 />

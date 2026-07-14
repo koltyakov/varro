@@ -40,6 +40,7 @@ afterEach(() => {
   setState('sessionStatus', {});
   setState('messages', []);
   setState('sessions', []);
+  setState('allAgents', []);
   resetToolCallExpansionState();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
@@ -396,6 +397,147 @@ describe('ToolCall', () => {
 
     expect(labels).toEqual(['subagent_type', 'task_id', 'prompt', 'task_result']);
     expect(rows[2]?.classList.contains('structured-tool-row-block')).toBe(true);
+  });
+
+  it('shows the subagent model and reasoning in expanded task details', () => {
+    setState('messages', [
+      {
+        info: assistantMessage('subagent-assistant-1', {
+          sessionID: 'subagent-session-1',
+          providerID: 'openai',
+          modelID: 'gpt-5.6-sol',
+          variant: 'high',
+          time: { created: 10 },
+        }),
+        parts: [],
+      },
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          subagent_type: 'explore',
+          prompt: 'Inspect the repository',
+        },
+        title: 'Inspect the repository',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
+    expect(
+      rows.map((row) => [
+        row.querySelector('.structured-tool-label')?.textContent,
+        row.querySelector('.structured-tool-value')?.textContent,
+      ])
+    ).toEqual([
+      ['subagent_type', 'explore'],
+      ['model', 'openai/gpt-5.6-sol'],
+      ['reasoning', 'high'],
+      ['prompt', 'Inspect the repository'],
+    ]);
+  });
+
+  it('shows configured model details after completed subagent messages are unloaded', () => {
+    setState('allAgents', [
+      {
+        name: 'explore',
+        mode: 'subagent',
+        permission: [],
+        model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+        variant: 'medium',
+      },
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        ...completedState(
+          {
+            subagent_type: 'explore',
+            prompt: 'Inspect the repository',
+          },
+          'Inspect the repository'
+        ),
+        output: '<task_result>Report</task_result>',
+        metadata: { sessionId: 'subagent-session-1' },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
+    expect(
+      rows.map((row) => [
+        row.querySelector('.structured-tool-label')?.textContent,
+        row.querySelector('.structured-tool-value')?.textContent,
+      ])
+    ).toEqual([
+      ['subagent_type', 'explore'],
+      ['model', 'openai/gpt-5.6-sol'],
+      ['reasoning', 'medium'],
+      ['prompt', 'Inspect the repository'],
+      ['task_result', 'Report'],
+    ]);
+  });
+
+  it('shows inherited model details for agents without a configured model', () => {
+    setState('allAgents', [
+      {
+        name: 'explore',
+        mode: 'subagent',
+        permission: [],
+        variant: 'low',
+      },
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: completedState(
+        {
+          subagent_type: 'explore',
+          prompt: 'Inspect the repository',
+        },
+        'Inspect the repository'
+      ),
+    };
+    setState('messages', [
+      {
+        info: assistantMessage('message-1', {
+          mode: 'default',
+          providerID: 'openai',
+          modelID: 'gpt-5.6-sol',
+          variant: 'high',
+        }),
+        parts: [part],
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
+    expect(detail).toContain('modelopenai/gpt-5.6-sol');
+    expect(detail).toContain('reasoninglow');
   });
 
   it('does not duplicate the running status dot in expanded task details', () => {
