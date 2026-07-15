@@ -16,8 +16,8 @@ import {
 import { homedir, tmpdir } from 'os';
 import { basename, dirname, join, win32 } from 'path';
 import * as vscode from 'vscode';
-import { MAXIMUM_TESTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
+import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   parseManagedServerOwnershipLease,
   type ManagedServerOwnershipLease,
@@ -125,6 +125,7 @@ const INJECTED_CONFIG_DIRECTORY_PREFIX = 'varro-opencode-config-';
 const INJECTED_CONFIG_OWNER_FILE = 'owner.json';
 const STALE_INJECTED_CONFIG_AGE_MS = 7 * 24 * 60 * 60_000;
 const SERVER_OWNER_ENV = 'VARRO_SERVER_OWNER';
+const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 let staleConfigSweep: Promise<void> = Promise.resolve();
 
 function delay(ms: number) {
@@ -497,6 +498,12 @@ export class OpenCodeProcess {
 
   get isAutoUpdateEnabled(): boolean {
     return vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true);
+  }
+
+  get shouldSuggestUntestedUpdates(): boolean {
+    return vscode.workspace
+      .getConfiguration('varro')
+      .get<boolean>('debug.suggestUntestedOpenCodeUpdates', false);
   }
 
   get isSimulatingMissingCli(): boolean {
@@ -1394,7 +1401,10 @@ export class OpenCodeProcess {
     }
 
     const exceedsTestedCeiling =
-      compareVersions(latestCliVersion, MAXIMUM_TESTED_OPENCODE_VERSION) > 0;
+      compareVersions(latestCliVersion, maximumTestedOpenCodeVersion) > 0;
+    if (exceedsTestedCeiling && !this.shouldSuggestUntestedUpdates) {
+      return null;
+    }
     if (
       !exceedsTestedCeiling &&
       this.isBackgroundCliAutoUpdateEnabled() &&
@@ -1421,7 +1431,7 @@ export class OpenCodeProcess {
 
     const upgradeCommand = OpenCodeProcess.CLI_UPGRADE_COMMAND;
     const message = exceedsTestedCeiling
-      ? `OpenCode CLI ${latestCliVersion} is available, but Varro has only been tested through ${MAXIMUM_TESTED_OPENCODE_VERSION}. Review compatibility before updating with: ${upgradeCommand}`
+      ? `OpenCode CLI ${latestCliVersion} is available, but Varro has only been tested through ${maximumTestedOpenCodeVersion}. Review compatibility before updating with: ${upgradeCommand}`
       : `OpenCode CLI ${latestCliVersion} is available (installed: ${installedCliVersion}). Update with: ${upgradeCommand}`;
     logger.info(message);
     void vscode.window

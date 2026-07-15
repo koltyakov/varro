@@ -3,10 +3,7 @@ import { EventEmitter } from 'events';
 import type * as FsModule from 'fs';
 import type * as FsPromisesModule from 'fs/promises';
 import { dirname } from 'path';
-import {
-  MAXIMUM_TESTED_OPENCODE_VERSION,
-  MINIMUM_SUPPORTED_OPENCODE_VERSION,
-} from '../shared/opencode-compatibility';
+import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;
@@ -59,6 +56,14 @@ vi.mock('fs/promises', async () => {
 });
 
 import { OpenCodeServer } from './server';
+import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
+
+const MANIFEST_OPENCODE_VERSION = readMaximumTestedOpenCodeVersion();
+
+function nextPatchVersion(version: string) {
+  const [major, minor, patch] = version.split('.').map(Number);
+  return `${major}.${minor}.${(patch ?? 0) + 1}`;
+}
 
 function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve());
@@ -1059,10 +1064,10 @@ describe('OpenCodeServer maintenance', () => {
     );
   });
 
-  it('prompts instead of auto-updating beyond the tested compatibility ceiling', async () => {
+  it('does not suggest an update beyond the manifest version by default', async () => {
     stubPlatform('linux');
     const server = new OpenCodeServer(4096, false);
-    const nextUntestedVersion = '1.17.19';
+    const nextUntestedVersion = nextPatchVersion(MANIFEST_OPENCODE_VERSION);
     const api = server as unknown as {
       readLatestCliVersion: () => Promise<string | null>;
     };
@@ -1071,12 +1076,51 @@ describe('OpenCodeServer maintenance', () => {
     }));
     api.readLatestCliVersion = vi.fn().mockResolvedValue(nextUntestedVersion);
 
-    await maybeSuggestCliUpdate(server, MAXIMUM_TESTED_OPENCODE_VERSION);
+    await maybeSuggestCliUpdate(server, MANIFEST_OPENCODE_VERSION);
+    await flushMicrotasks();
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not show a compatibility prompt for an installed untested version', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const installedVersion = nextPatchVersion(MANIFEST_OPENCODE_VERSION);
+    const latestVersion = nextPatchVersion(installedVersion);
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+    api.readLatestCliVersion = vi.fn().mockResolvedValue(latestVersion);
+
+    await maybeSuggestCliUpdate(server, installedVersion);
+    await flushMicrotasks();
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('suggests an update beyond the manifest version when the debug setting is enabled', async () => {
+    stubPlatform('linux');
+    const server = new OpenCodeServer(4096, false);
+    const nextUntestedVersion = nextPatchVersion(MANIFEST_OPENCODE_VERSION);
+    const api = server as unknown as {
+      readLatestCliVersion: () => Promise<string | null>;
+    };
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => {
+        if (key === 'server.autoUpdate') return true;
+        if (key === 'debug.suggestUntestedOpenCodeUpdates') return true;
+        return fallback;
+      },
+    }));
+    api.readLatestCliVersion = vi.fn().mockResolvedValue(nextUntestedVersion);
+
+    await maybeSuggestCliUpdate(server, MANIFEST_OPENCODE_VERSION);
     await flushMicrotasks();
 
     expect(spawnMock).not.toHaveBeenCalled();
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
-      `OpenCode CLI ${nextUntestedVersion} is available, but Varro has only been tested through ${MAXIMUM_TESTED_OPENCODE_VERSION}. Review compatibility before updating with: opencode upgrade`,
+      `OpenCode CLI ${nextUntestedVersion} is available, but Varro has only been tested through ${MANIFEST_OPENCODE_VERSION}. Review compatibility before updating with: opencode upgrade`,
       'Run Upgrade'
     );
   });

@@ -24,4 +24,4 @@ npm run compatibility:discover -- --versions 1.17.18,1.17.17,1.17.16
 
 The detected floor is the oldest release in the newest contiguous compatible range, with the immediately older tested release failing at least one required capability. Floor-check mode tests the newest release window plus the declared floor and its immediate predecessor, so the known boundary remains covered as new versions are published. If every sampled release passes, the result is deliberately reported as inconclusive and `--check-floor` fails; increase `--count` instead of guessing.
 
-The report also records and explicitly probes `MAXIMUM_TESTED_OPENCODE_VERSION`. Varro may prompt for newer releases, but background updates do not cross that tested ceiling until the constant is advanced with a successful probe.
+The report also records and explicitly probes the OpenCode version declared by `@opencode-ai/sdk` in Varro's `package.json`. Background updates do not cross that manifest version. Newer releases are ignored unless the debug-only update-suggestion setting is enabled.

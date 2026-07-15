@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro",
-  "version": "0.20.16",
+  "version": "0.20.17",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -50,7 +50,7 @@
     "vscode:install": "rm -f varro-*.vsix && npm run package && NODE_NO_WARNINGS=1 code --install-extension varro-*.vsix"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.17.20",
+    "@opencode-ai/sdk": "^1.18.1",
     "dompurify": "^3.4.12",
     "highlight.js": "11.11.1",
     "jsonc-parser": "^3.3.1",
@@ -226,7 +226,7 @@
         "varro.server.autoUpdate": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically install OpenCode CLI updates only through Varro's tested compatibility ceiling. Newer untested releases are shown as an upgrade prompt instead"
+          "description": "Automatically install OpenCode CLI updates only through the OpenCode version declared in Varro's manifest"
         },
         "varro.chat.expandThinkingByDefault": {
           "type": "boolean",
@@ -309,6 +309,12 @@
           "type": "boolean",
           "default": false,
           "description": "Debug only: make Varro behave as if no providers are configured"
+        },
+        "varro.debug.suggestUntestedOpenCodeUpdates": {
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
+          "type": "boolean",
+          "default": false,
+          "description": "Debug only: suggest OpenCode CLI versions newer than the version declared in Varro's manifest. These versions are never installed automatically"
         },
         "varro.server.autoStart": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",

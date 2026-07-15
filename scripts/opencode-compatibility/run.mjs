@@ -8,6 +8,7 @@ const DEFAULT_SCAN_COUNT = 12;
 const ROOT = resolve(import.meta.dirname, '../..');
 const DOCKERFILE = resolve(import.meta.dirname, 'Dockerfile');
 const COMPATIBILITY_FILE = resolve(ROOT, 'src/shared/opencode-compatibility.ts');
+const PACKAGE_FILE = resolve(ROOT, 'package.json');
 
 function parseArguments(argv) {
   const options = {
@@ -45,11 +46,21 @@ function compareVersions(left, right) {
 }
 
 async function readDeclaredCompatibilityRange() {
-  const source = await readFile(COMPATIBILITY_FILE, 'utf8');
+  const [source, packageSource] = await Promise.all([
+    readFile(COMPATIBILITY_FILE, 'utf8'),
+    readFile(PACKAGE_FILE, 'utf8'),
+  ]);
   const floor = source.match(/MINIMUM_SUPPORTED_OPENCODE_VERSION\s*=\s*'([^']+)'/)?.[1];
-  const ceiling = source.match(/MAXIMUM_TESTED_OPENCODE_VERSION\s*=\s*'([^']+)'/)?.[1];
+  const packageJson = JSON.parse(packageSource);
+  const declaredSdkVersion = packageJson.dependencies?.['@opencode-ai/sdk'];
+  const ceiling =
+    typeof declaredSdkVersion === 'string'
+      ? declaredSdkVersion.match(/\d+\.\d+\.\d+/)?.[0]
+      : undefined;
   if (!floor || !ceiling) {
-    throw new Error(`Could not read compatibility range from ${COMPATIBILITY_FILE}`);
+    throw new Error(
+      `Could not read the compatibility floor from ${COMPATIBILITY_FILE} and ceiling from ${PACKAGE_FILE}`
+    );
   }
   return { floor, ceiling };
 }
