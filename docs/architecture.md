@@ -86,6 +86,14 @@ It also exposes the Varro extension-host API namespace, `/varro/*`.
 - `POST /varro/plan/open`
 - `GET /varro/opencode-config`
 - `POST /varro/opencode-config/model-routing`
+- `GET /varro/workspace-file`
+- `GET /varro/workspace-file/pick`
+- `GET /varro/workspace-path/resolve`
+- `POST /varro/permission/judge`
+- `GET /varro/session/:sessionID/diff-summary`
+- `POST /varro/session/:sessionID/pin`
+- `POST /varro/session/:sessionID/rename-if-untitled`
+- `DELETE /varro/session/:sessionID/delete`
 - `GET /varro/session-trash`
 - `POST /varro/session-trash/:rootID/restore`
 - `DELETE /varro/session-trash/:rootID/delete`
@@ -119,7 +127,7 @@ Defines:
 - extension-to-webview messages
 - webview-to-extension messages
 
-The protocol is intentionally small and transport-oriented. OpenCode domain types such as `Session`, `Message`, and `Part` live under `src/webview/types/` because they are consumed mainly by the UI.
+The protocol is intentionally transport-oriented. Shared OpenCode domain and event types such as `Session`, `Message`, and `Part` live in `src/shared/opencode-types.ts`. `src/webview/types/index.ts` re-exports those contracts for webview consumers.
 
 Next to the `/varro/*` namespace, the architectural choice is explicit: Varro treats the extension host as a transport boundary, not as a semantic event coordinator for webview state. The extension forwards raw `server/event` payloads and serves local `/varro/*` requests, while the webview derives UI facts like pending attention and recycle-bin views from those transport primitives plus targeted REST reloads.
 
@@ -178,7 +186,7 @@ Ralph loop state is owned by the extension host (`src/extension/ralph-host.ts`, 
 
 #### OpenCode integration
 
-`src/webview/hooks/useOpenCode.ts` is the most important webview file.
+`src/webview/hooks/useOpenCode.ts` is the stable public export surface. Runtime composition lives in `src/webview/hooks/runtime/open-code-runtime-instance.ts`, with focused operations and effects under `src/webview/hooks/session/`.
 
 Responsibilities:
 
@@ -190,7 +198,7 @@ Responsibilities:
 - synchronize per-session MCP selections with OpenCode
 - recover interrupted sessions after reload when the previous run still looks incomplete
 
-The hook also handles workspace filtering for sessions, stale loading recovery, and model/provider limit refreshes.
+The runtime also handles workspace filtering for sessions, stale loading recovery, and model/provider limit refreshes.
 
 #### UI composition
 
@@ -249,7 +257,7 @@ The extension sends:
 
 ### Prompt construction
 
-When the user sends a message, `sendMessage()` in `src/webview/hooks/useOpenCode.ts` builds prompt parts from current UI state.
+When the user sends a message, the send operations in `src/webview/hooks/session/session-send.ts` build prompt parts from current UI state.
 
 Typical part sequence:
 
@@ -269,6 +277,9 @@ This is where Varro turns live VS Code context into OpenCode-compatible prompt p
 - `/varro/provider-limit` returns best-effort provider quota metadata for the current provider and model.
 - `/varro/plan/open` normalizes a plan response, saves it into the local OpenCode plans directory, and opens the file in VS Code.
 - `/varro/opencode-config` and `/varro/opencode-config/model-routing` read and update Varro-managed OpenCode model routing.
+- `/varro/workspace-file`, `/varro/workspace-file/pick`, and `/varro/workspace-path/resolve` provide workspace-scoped file selection and path resolution.
+- `/varro/permission/judge` evaluates eligible automatic permission decisions in the extension host.
+- `/varro/session/:sessionID/*` handles diff summaries, pinning, conditional renaming, and deletion.
 - `/varro/session-trash` and its child paths expose the recycle-bin workflow managed by the extension host.
 
 ## Session And Attention Model

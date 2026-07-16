@@ -70,6 +70,8 @@ function createWebviewSide() {
   });
   registerSessionEventHandlers({
     getActiveSessionId: () => null,
+    getSessionStatus: () => undefined,
+    isSessionTreeStatusWorking: () => false,
     getMessages: () => [],
     handoffTodosToMessages: vi.fn().mockReturnValue(true),
     upsertSession: vi.fn(),
@@ -186,7 +188,7 @@ describe('attention contract: host vs webview', () => {
           type: 'permission.v2.replied',
           properties: { info: { id: 'perm-2', sessionID: 'session-1' } },
         },
-      ] as ServerEvent[],
+      ] as unknown as ServerEvent[],
       []
     );
   });

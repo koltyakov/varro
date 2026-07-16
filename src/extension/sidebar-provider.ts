@@ -1,7 +1,4 @@
 import * as vscode from 'vscode';
-import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { basename, dirname } from 'path';
 import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
 import { AutoApproveJudge } from './auto-approve-judge';
 import type { ContextProvider } from './context-provider';
@@ -11,7 +8,11 @@ import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
 import { logger } from './logger';
 import { MessageRouter } from './message-router';
-import { getOpenCodeConfigPaths } from './open-code-process';
+import {
+  nodeProviderSignatureFileSystem,
+  ProviderFileRefreshController,
+} from './provider-file-refresh-controller';
+import type { ProviderSignatureFileSystem } from './provider-file-refresh-controller';
 import { readExtensionConfigState } from './provider-limit-config';
 import { ProviderLimitService } from './provider-limit-service';
 import { PinnedSessionManager } from './pinned-session-manager';
@@ -27,25 +28,7 @@ import { createSidebarProviderActions } from './sidebar-provider-actions';
 import { SidebarProviderBridge } from './sidebar-provider-bridge';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import { SidebarProviderRuntime } from './sidebar-provider-runtime';
-import { getOpenCodeAuthFilePath } from './util/provider-limit';
 import { WebviewSession } from './webview-session';
-
-type ProviderFileStats = {
-  size: number;
-  mtimeMs: number;
-  ino: number;
-  isFile(): boolean;
-};
-
-type ProviderSignatureFileSystem = {
-  stat(path: string): PromiseLike<ProviderFileStats>;
-  readFile(path: string, signal: AbortSignal): PromiseLike<Uint8Array>;
-};
-
-const nodeProviderSignatureFileSystem: ProviderSignatureFileSystem = {
-  stat,
-  readFile: (path, signal) => readFile(path, { signal }),
-};
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -53,10 +36,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly RECYCLE_BIN_CLEANUP_INTERVAL_MS = 60_000;
   private static readonly SESSION_RECONCILE_INTERVAL_MS = 10_000;
   private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
-  private static readonly PROVIDER_REFRESH_RETRY_MS = 1_000;
-  private static readonly PROVIDER_REFRESH_MAX_RETRIES = 5;
-  private static readonly PROVIDER_SIGNATURE_MAX_BYTES = 1024 * 1024;
-  private static readonly PROVIDER_SIGNATURE_TIMEOUT_MS = 1_000;
 
   private lastStatusBarStateKey = '';
   private readonly fileSearch: FileSearchService;
@@ -77,17 +56,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly webviewSession: WebviewSession;
   private readonly serverEventBridge: ServerEventBridge;
   private readonly droppedFilesService: DroppedFilesService;
+  private readonly providerFileRefresh: ProviderFileRefreshController;
   private readonly configDisposable: vscode.Disposable;
   private readonly windowStateDisposable: vscode.Disposable;
-  private providerConfigWatchers: vscode.FileSystemWatcher[] = [];
-  private providerAuthWatcher: vscode.FileSystemWatcher | null = null;
-  private providerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  private providerRefreshGeneration = 0;
-  private observedProviderFilesSignature: string | null = null;
-  private providerRestartPending = false;
   private sessionReconcileTimer: ReturnType<typeof setInterval> | null = null;
   private readonly contextProvider: ContextProvider;
-  private disposed = false;
 
   get view() {
     return this.bridge.getView();
@@ -120,7 +93,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly server: OpenCodeServer,
     private readonly extensionId: string,
     private readonly simulateNoProviders = false,
-    private readonly providerSignatureFileSystem = nodeProviderSignatureFileSystem
+    providerSignatureFileSystem: ProviderSignatureFileSystem = nodeProviderSignatureFileSystem
   ) {
     this.contextProvider = contextProvider;
     const persistence = new HostPersistence(workspaceState);
@@ -222,6 +195,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       broadcastState: (payload) => this.post({ type: 'ralph/state', payload }),
     });
 
+    this.providerFileRefresh = new ProviderFileRefreshController(
+      {
+        server,
+        hasLocallyActiveWork: () =>
+          this.sessionState.busy.size > 0 ||
+          this.sessionState.pending.size > 0 ||
+          this.ralphHost.getStatePayload().activeIds.length > 0,
+        clearProviderLimitCache: () => this.providerLimitService.clearCache(),
+        postRefresh: () => this.post({ type: 'providers/refresh' }),
+      },
+      providerSignatureFileSystem
+    );
+
     this.messageRouter = new MessageRouter(
       createSidebarProviderActions({
         contextProvider,
@@ -287,16 +273,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async initializeProviderFileSignature() {
-    const generation = this.providerRefreshGeneration;
-    const signature = await this.readProviderFilesSignature();
-    if (
-      this.disposed ||
-      generation !== this.providerRefreshGeneration ||
-      this.observedProviderFilesSignature !== null
-    ) {
-      return;
-    }
-    this.observedProviderFilesSignature = signature;
+    await this.providerFileRefresh.initializeSignature();
   }
 
   async handleMessage(msg: WebviewMessage) {
@@ -348,12 +325,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose() {
-    this.disposed = true;
-    this.providerRefreshGeneration += 1;
-    if (this.providerRefreshTimer) {
-      clearTimeout(this.providerRefreshTimer);
-      this.providerRefreshTimer = null;
-    }
+    this.providerFileRefresh.beginDispose();
     if (this.sessionReconcileTimer) {
       clearInterval(this.sessionReconcileTimer);
       this.sessionReconcileTimer = null;
@@ -363,303 +335,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.serverEventBridge.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();
-    this.disposeProviderFileWatchers();
+    this.providerFileRefresh.dispose();
     this.fileSearch.dispose();
     await this.droppedFilesService.dispose();
   }
 
-  private createProviderFileWatcher(path: string) {
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(dirname(path)), basename(path))
-    );
-    watcher.onDidCreate(() => this.scheduleProviderRefresh());
-    watcher.onDidChange(() => this.scheduleProviderRefresh());
-    watcher.onDidDelete(() => this.scheduleProviderRefresh());
-    return watcher;
-  }
-
   private setProviderWatchActive(active: boolean) {
-    if (active) {
-      if (this.providerConfigWatchers.length > 0 || this.providerAuthWatcher) return;
-      const generation = ++this.providerRefreshGeneration;
-      this.providerConfigWatchers = getOpenCodeConfigPaths().map((path) =>
-        this.createProviderFileWatcher(path)
-      );
-      this.providerAuthWatcher = this.createProviderFileWatcher(getOpenCodeAuthFilePath());
-      void this.activateProviderWatch(generation).catch((err) => {
-        logger.warn(
-          `Failed to activate provider file observation: ${err instanceof Error ? err.message : String(err)}`
-        );
-      });
-      return;
-    }
-
-    this.disposeProviderFileWatchers();
+    this.providerFileRefresh.setActive(active);
   }
 
-  private disposeProviderFileWatchers() {
-    this.providerRefreshGeneration += 1;
-    if (this.providerRefreshTimer) {
-      clearTimeout(this.providerRefreshTimer);
-      this.providerRefreshTimer = null;
-    }
-    for (const watcher of this.providerConfigWatchers) watcher.dispose();
-    this.providerAuthWatcher?.dispose();
-    this.providerConfigWatchers = [];
-    this.providerAuthWatcher = null;
-  }
-
-  private scheduleProviderRefresh() {
-    const generation = ++this.providerRefreshGeneration;
-    if (this.providerRefreshTimer) clearTimeout(this.providerRefreshTimer);
-    this.providerRefreshTimer = setTimeout(() => {
-      this.providerRefreshTimer = null;
-      void this.refreshProviderState(generation, true);
-    }, 250);
-  }
-
-  private async refreshProviderState(
-    generation = ++this.providerRefreshGeneration,
-    requireSignatureChange = false
-  ) {
-    if (this.disposed || generation !== this.providerRefreshGeneration) return;
-    const signature = await this.readProviderFilesSignature();
-    if (this.disposed || generation !== this.providerRefreshGeneration) return;
-    if (requireSignatureChange && this.observedProviderFilesSignature === null) {
-      this.observedProviderFilesSignature = signature;
-      this.post({ type: 'providers/refresh' });
-      return;
-    }
-    if (requireSignatureChange && signature === this.observedProviderFilesSignature) {
-      if (this.providerRestartPending) {
-        await this.maybeRestartForProviderRefresh(generation, 0);
-      }
-      return;
-    }
-    this.providerLimitService.clearCache();
-    this.observedProviderFilesSignature = signature;
-    this.providerRestartPending = true;
-    this.post({ type: 'providers/refresh' });
-    await this.maybeRestartForProviderRefresh(generation, 0);
-  }
-
-  private async activateProviderWatch(generation: number) {
-    const signature = await this.readProviderFilesSignature();
-    if (this.disposed || generation !== this.providerRefreshGeneration) return;
-
-    const changed =
-      this.observedProviderFilesSignature !== null &&
-      signature !== this.observedProviderFilesSignature;
-    this.observedProviderFilesSignature = signature;
-    if (changed) {
-      this.providerLimitService.clearCache();
-      this.providerRestartPending = true;
-    }
-    this.post({ type: 'providers/refresh' });
-    if (this.providerRestartPending) {
-      await this.maybeRestartForProviderRefresh(generation, 0);
-    }
-  }
-
-  private async maybeRestartForProviderRefresh(
-    generation: number,
-    retryCount: number,
-    managedProcessConfirmed = false
-  ) {
-    if (
-      this.disposed ||
-      generation !== this.providerRefreshGeneration ||
-      !this.providerRestartPending
-    ) {
-      return;
-    }
-    if (this.server.status.state === 'starting') {
-      this.scheduleProviderRestartRetry(generation, retryCount, false, managedProcessConfirmed);
-      return;
-    }
-    if (this.server.status.state !== 'running') return;
-
-    if (!managedProcessConfirmed) {
-      const managedProcess = await this.readManagedProviderServerState();
-      if (this.disposed || generation !== this.providerRefreshGeneration) return;
-      if (managedProcess === null) {
-        this.scheduleProviderRestartRetry(generation, retryCount);
-        return;
-      }
-      if (!managedProcess) {
-        this.providerRestartPending = false;
-        return;
-      }
-      managedProcessConfirmed = true;
-    }
-    if (this.hasLocallyActiveProviderWork()) {
-      this.scheduleProviderRestartRetry(generation, retryCount, false, managedProcessConfirmed);
-      return;
-    }
-
-    const idle = await this.isServerIdleForProviderRefresh();
-    if (this.disposed || generation !== this.providerRefreshGeneration) return;
-    if (idle === false) {
-      this.scheduleProviderRestartRetry(generation, retryCount, false, managedProcessConfirmed);
-      return;
-    }
-    if (idle === null) {
-      this.scheduleProviderRestartRetry(generation, retryCount, true, managedProcessConfirmed);
-      return;
-    }
-    if (
-      this.disposed ||
-      generation !== this.providerRefreshGeneration ||
-      this.server.status.state !== 'running' ||
-      this.hasLocallyActiveProviderWork()
-    ) {
-      return;
-    }
-    const stillManaged = await this.readManagedProviderServerState();
-    if (this.disposed || generation !== this.providerRefreshGeneration) return;
-    if (stillManaged !== true) {
-      if (stillManaged === null) {
-        this.scheduleProviderRestartRetry(generation, retryCount, true, managedProcessConfirmed);
-      } else {
-        this.providerRestartPending = false;
-      }
-      return;
-    }
-    if (
-      this.disposed ||
-      generation !== this.providerRefreshGeneration ||
-      this.server.status.state !== 'running' ||
-      this.hasLocallyActiveProviderWork()
-    ) {
-      return;
-    }
-
-    try {
-      await this.server.restart();
-      if (this.disposed || generation !== this.providerRefreshGeneration) return;
-      this.providerRestartPending = false;
-      this.providerLimitService.clearCache();
-      this.post({ type: 'providers/refresh' });
-    } catch (err) {
-      if (this.disposed || generation !== this.providerRefreshGeneration) return;
-      logger.warn(
-        `Provider refresh restart failed: ${err instanceof Error ? err.message : String(err)}`
-      );
-      this.scheduleProviderRestartRetry(generation, retryCount, true, managedProcessConfirmed);
-    }
-  }
-
-  private hasLocallyActiveProviderWork() {
-    return (
-      this.sessionState.busy.size > 0 ||
-      this.sessionState.pending.size > 0 ||
-      this.ralphHost.getStatePayload().activeIds.length > 0
-    );
-  }
-
-  private async readManagedProviderServerState(): Promise<boolean | null> {
-    try {
-      const info = await this.server.readServerInfo();
-      return typeof info.managedProcess === 'boolean' ? info.managedProcess : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private async isServerIdleForProviderRefresh(): Promise<boolean | null> {
-    try {
-      const [statuses, questions] = await Promise.all([
-        this.server.request('GET', '/session/status'),
-        this.server.request('GET', '/question'),
-      ]);
-      if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return null;
-      if (!Array.isArray(questions)) return null;
-      for (const value of Object.values(statuses)) {
-        if (!value || typeof value !== 'object') continue;
-        const type = (value as Record<string, unknown>).type;
-        if (type === 'busy' || type === 'retry') return false;
-      }
-      return questions.length === 0 && !this.hasLocallyActiveProviderWork();
-    } catch {
-      return null;
-    }
-  }
-
-  private scheduleProviderRestartRetry(
-    generation: number,
-    retryCount: number,
-    bounded = true,
-    managedProcessConfirmed = false
-  ) {
-    if (
-      this.disposed ||
-      generation !== this.providerRefreshGeneration ||
-      !this.providerRestartPending ||
-      (this.providerConfigWatchers.length === 0 && !this.providerAuthWatcher)
-    ) {
-      return;
-    }
-    if (bounded && retryCount >= SidebarProvider.PROVIDER_REFRESH_MAX_RETRIES) {
-      logger.info('Provider refresh restart remained deferred after bounded retries');
-      return;
-    }
-    if (this.providerRefreshTimer) clearTimeout(this.providerRefreshTimer);
-    this.providerRefreshTimer = setTimeout(() => {
-      this.providerRefreshTimer = null;
-      void this.maybeRestartForProviderRefresh(
-        generation,
-        bounded ? retryCount + 1 : 0,
-        managedProcessConfirmed
-      );
-    }, SidebarProvider.PROVIDER_REFRESH_RETRY_MS);
+  private async refreshProviderState(generation?: number, requireSignatureChange = false) {
+    await this.providerFileRefresh.refreshState(generation, requireSignatureChange);
   }
 
   private async readProviderFilesSignature() {
-    const signatures = await Promise.all(
-      [...getOpenCodeConfigPaths(), getOpenCodeAuthFilePath()].map(async (path) => {
-        try {
-          const stats = await this.withProviderSignatureTimeout(
-            this.providerSignatureFileSystem.stat(path)
-          );
-          if (!stats.isFile()) return `${path}:ignored`;
-          if (stats.size > SidebarProvider.PROVIDER_SIGNATURE_MAX_BYTES) {
-            return `${path}:oversized:size=${stats.size}:mtime=${stats.mtimeMs}:ino=${stats.ino}`;
-          }
-
-          const content = await this.withProviderSignatureTimeout(
-            this.providerSignatureFileSystem.readFile(
-              path,
-              AbortSignal.timeout(SidebarProvider.PROVIDER_SIGNATURE_TIMEOUT_MS)
-            )
-          );
-          if (content.byteLength > SidebarProvider.PROVIDER_SIGNATURE_MAX_BYTES) {
-            return `${path}:oversized:size=${content.byteLength}:mtime=${stats.mtimeMs}:ino=${stats.ino}`;
-          }
-          const digest = createHash('sha256').update(content).digest('hex');
-          return `${path}:${digest}`;
-        } catch (err) {
-          const code =
-            err && typeof err === 'object' && 'code' in err ? String(err.code) : 'unavailable';
-          return `${path}:${code === 'ENOENT' ? 'missing' : 'unavailable'}`;
-        }
-      })
-    );
-    return signatures.join('|');
-  }
-
-  private async withProviderSignatureTimeout<T>(operation: PromiseLike<T>): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error('Provider signature read timed out')),
-        SidebarProvider.PROVIDER_SIGNATURE_TIMEOUT_MS
-      );
-    });
-    try {
-      return await Promise.race([operation, timeout]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    return this.providerFileRefresh.readFilesSignature();
   }
 
   private async handleReadyMessage() {

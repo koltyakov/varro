@@ -22,6 +22,8 @@ on:
       - 'src/extension/server.ts'
       - 'src/extension/util/opencode-request.ts'
       - 'src/shared/opencode-compatibility.ts'
+      - 'src/shared/opencode-types.ts'
+      - 'src/shared/protocol.ts'
       - 'src/webview/lib/client.ts'
 
 concurrency:
