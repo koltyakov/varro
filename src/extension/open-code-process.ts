@@ -88,12 +88,14 @@ interface MaintenanceCallbacks {
   maybeSuggestCliUpdate: (installedCliVersion: string | null) => Promise<string | null>;
   readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
   hasActiveSessions: () => Promise<boolean>;
+  recoverLegacyManagedServerOwnership: () => Promise<boolean>;
   restartServerForCliUpdate: (serverVersion: string, installedCliVersion: string) => Promise<void>;
 }
 
 interface MaybeSuggestCliUpdateCallbacks {
   readLatestCliVersion: () => Promise<string | null>;
   upgradeRunningServer: (targetVersion: string) => Promise<boolean>;
+  requestMaintenanceCheck: () => void;
   getWorkspaceCwd: () => string | undefined;
   prepareForWindowsCliUpgrade: () => Promise<void>;
 }
@@ -286,6 +288,11 @@ async function readParentPid(pid: number) {
   return Number.isSafeInteger(parentPid) && parentPid > 0 ? parentPid : null;
 }
 
+async function readProcessCommand(pid: number) {
+  if (process.platform === 'win32') return '';
+  return (await runProcess('ps', ['-p', String(pid), '-o', 'command='])).stdout.trim();
+}
+
 async function isProcessOrDescendant(pid: number, ancestorPid: number) {
   let currentPid: number | null = pid;
   for (let depth = 0; currentPid && depth < 32; depth += 1) {
@@ -423,6 +430,7 @@ export class OpenCodeProcess {
   private readonly simulateMissingCli: boolean;
   private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private maintenanceInFlight = false;
+  private pendingMaintenanceCheck: (() => void) | null = null;
   private _managedProcess = false;
   private lastCliUpdateCheckAt = 0;
   private lastSuggestedCliVersion = '';
@@ -617,6 +625,70 @@ export class OpenCodeProcess {
     };
     void operation.then(finish, finish);
     return operation;
+  }
+
+  async recoverLegacyManagedServerOwnership(): Promise<boolean> {
+    if (process.platform === 'win32' || this._managedProcess || this._process) return false;
+    if (await this.readOwnershipLease()) return false;
+
+    const listeners = await findListeningPids(this._port);
+    if (listeners.length !== 1) return false;
+    const pid = listeners[0]!;
+    const configuredExecutable = this.resolveCommand();
+    const [executable, parentPid, command, birthIdentity] = await Promise.all([
+      readProcessExecutable(pid),
+      readParentPid(pid),
+      readProcessCommand(pid),
+      readProcessBirthIdentity(pid),
+    ]);
+    if (
+      !executable ||
+      !birthIdentity ||
+      parentPid !== 1 ||
+      normalizeExecutableIdentity(executable) !==
+        normalizeExecutableIdentity(configuredExecutable) ||
+      command !== `${executable} serve --port ${this._port}`
+    ) {
+      return false;
+    }
+
+    const claimPath = `${this.ownershipLeasePath}.claim`;
+    let claimHandle: Awaited<ReturnType<typeof openFile>>;
+    try {
+      claimHandle = await openFile(claimPath, 'wx', 0o600);
+    } catch {
+      return false;
+    }
+
+    try {
+      if (await this.readOwnershipLease()) return false;
+      const owner = randomBytes(16).toString('hex');
+      const lease: ManagedServerOwnershipLease = {
+        version: 1,
+        pid,
+        port: this._port,
+        executable,
+        birthIdentity,
+        owner,
+        host: this.hostOwner,
+        state: 'active',
+        createdAt: Date.now(),
+      };
+      if (
+        !(await this.matchesOwnershipLease(lease)) ||
+        (await readParentPid(pid)) !== 1 ||
+        (await readProcessCommand(pid)) !== command
+      ) {
+        return false;
+      }
+      await this.writeOwnershipLease(lease);
+      this.adoptManagedServerOwnership(lease);
+      logger.info(`Recovered ownership of legacy Varro OpenCode server PID ${pid}`);
+      return true;
+    } finally {
+      await claimHandle.close().catch(() => {});
+      await rm(claimPath, { force: true }).catch(() => {});
+    }
   }
 
   private async runManagedServerOwnershipRefresh(): Promise<boolean> {
@@ -1325,9 +1397,14 @@ export class OpenCodeProcess {
     if (!this.maintenanceTimer) return;
     clearInterval(this.maintenanceTimer);
     this.maintenanceTimer = null;
+    this.pendingMaintenanceCheck = null;
   }
 
   requestMaintenanceCheck(tick: () => void) {
+    if (this.maintenanceInFlight) {
+      this.pendingMaintenanceCheck = tick;
+      return;
+    }
     tick();
   }
 
@@ -1359,6 +1436,10 @@ export class OpenCodeProcess {
         return;
       }
 
+      if (!this._managedProcess && this.autoStart) {
+        await callbacks.recoverLegacyManagedServerOwnership();
+      }
+
       if (!this._managedProcess) {
         const key = `${serverVersion}->${restartCliVersion}`;
         if (this.lastLoggedUnmanagedRestartKey !== key) {
@@ -1380,6 +1461,11 @@ export class OpenCodeProcess {
       );
     } finally {
       this.maintenanceInFlight = false;
+      const pendingMaintenanceCheck = this.pendingMaintenanceCheck;
+      this.pendingMaintenanceCheck = null;
+      if (pendingMaintenanceCheck && !callbacks.isDisposing()) {
+        pendingMaintenanceCheck();
+      }
     }
   }
 
@@ -1438,7 +1524,10 @@ export class OpenCodeProcess {
       .showInformationMessage(message, OpenCodeProcess.CLI_UPGRADE_ACTION)
       .then(async (action) => {
         if (action === OpenCodeProcess.CLI_UPGRADE_ACTION) {
-          if (await callbacks.upgradeRunningServer(latestCliVersion)) return;
+          if (await callbacks.upgradeRunningServer(latestCliVersion)) {
+            callbacks.requestMaintenanceCheck();
+            return;
+          }
           await this.runTerminalCliUpgrade(callbacks);
         }
       });

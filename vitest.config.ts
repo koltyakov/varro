@@ -14,6 +14,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
+    pool: 'forks',
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
       reportsDirectory: './tmp/coverage',

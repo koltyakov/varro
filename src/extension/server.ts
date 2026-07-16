@@ -32,6 +32,8 @@ export interface OpenCodeServerInfo {
   processId: number | null;
   cliVersion: string | null;
   cliVersionError: string | null;
+  activeAgentCount: number | null;
+  activeAgentError: string | null;
   health: { healthy: boolean; version?: string };
   workspaceCwd: string | undefined;
 }
@@ -49,6 +51,17 @@ function getUpgradeErrorMessage(value: unknown) {
   if (!value || typeof value !== 'object') return '';
   const error = (value as { error?: unknown }).error;
   return typeof error === 'string' ? error : '';
+}
+
+function countActiveAgents(value: unknown) {
+  if (!value || typeof value !== 'object') return 0;
+  let count = 0;
+  for (const status of Object.values(value as Record<string, unknown>)) {
+    const entry = status && typeof status === 'object' ? (status as Record<string, unknown>) : null;
+    const type = typeof entry?.type === 'string' ? entry.type : undefined;
+    if (type === 'busy' || type === 'retry') count += 1;
+  }
+  return count;
 }
 
 function isSupportedOpenCodeVersion(version: string | undefined): boolean {
@@ -99,8 +112,25 @@ export class OpenCodeServer extends EventEmitter {
       getStatus: () => this._status,
       isDisposing: () => this.isDisposing,
       updateEventStreamState: (eventStream) => this.updateEventStreamState(eventStream),
-      emitEvent: (event) => this.emit('event', event),
+      emitEvent: (event) => this.handleServerEvent(event),
     });
+  }
+
+  private handleServerEvent(event: unknown) {
+    this.emit('event', event);
+    if (!event || typeof event !== 'object') return;
+    const value = event as { type?: unknown; properties?: unknown };
+    if (
+      value.type !== 'session.status' ||
+      !value.properties ||
+      typeof value.properties !== 'object'
+    ) {
+      return;
+    }
+    const status = (value.properties as { status?: unknown }).status;
+    if (status && typeof status === 'object' && (status as { type?: unknown }).type === 'idle') {
+      this.requestMaintenanceCheck();
+    }
   }
 
   get status(): ServerStatus {
@@ -708,11 +738,20 @@ export class OpenCodeServer extends EventEmitter {
   async readServerInfo(): Promise<OpenCodeServerInfo> {
     let cliVersion: string | null = null;
     let cliVersionError: string | null = null;
+    let activeAgentCount: number | null = null;
+    let activeAgentError: string | null = null;
 
     try {
       cliVersion = await this.readInstalledCliVersion();
     } catch (err) {
       cliVersionError = err instanceof Error ? err.message : String(err);
+    }
+    if (this._status.state === 'running') {
+      try {
+        activeAgentCount = countActiveAgents(await this.request('GET', '/session/status'));
+      } catch (err) {
+        activeAgentError = err instanceof Error ? err.message : String(err);
+      }
     }
 
     return {
@@ -725,6 +764,8 @@ export class OpenCodeServer extends EventEmitter {
       processId: this.processManager.managedProcessId,
       cliVersion,
       cliVersionError,
+      activeAgentCount,
+      activeAgentError,
       health: await this.readHealthInfo(),
       workspaceCwd: this.getWorkspaceCwd(),
     };
@@ -789,6 +830,8 @@ export class OpenCodeServer extends EventEmitter {
         this.maybeSuggestCliUpdate(installedCliVersion),
       readHealthInfo: () => this.readHealthInfo(),
       hasActiveSessions: () => this.hasActiveSessions(),
+      recoverLegacyManagedServerOwnership: () =>
+        this.processManager.recoverLegacyManagedServerOwnership(),
       restartServerForCliUpdate: (serverVersion, installedCliVersion) =>
         this.restartServerForCliUpdate(serverVersion, installedCliVersion),
     });
@@ -962,17 +1005,7 @@ export class OpenCodeServer extends EventEmitter {
       throw statuses.reason;
     }
 
-    const sessionStatuses =
-      statuses.value && typeof statuses.value === 'object'
-        ? (statuses.value as Record<string, unknown>)
-        : {};
-    for (const value of Object.values(sessionStatuses)) {
-      const entry = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-      const type = typeof entry?.type === 'string' ? entry.type : undefined;
-      if (type === 'busy' || type === 'retry') {
-        return true;
-      }
-    }
+    if (countActiveAgents(statuses.value) > 0) return true;
 
     if (
       questions.status === 'fulfilled' &&
@@ -989,6 +1022,7 @@ export class OpenCodeServer extends EventEmitter {
     return this.processManager.maybeSuggestCliUpdate(installedCliVersion, {
       readLatestCliVersion: () => this.readLatestCliVersion(),
       upgradeRunningServer: (targetVersion) => this.upgradeRunningServer(targetVersion),
+      requestMaintenanceCheck: () => this.requestMaintenanceCheck(),
       getWorkspaceCwd: () => this.getWorkspaceCwd(),
       prepareForWindowsCliUpgrade: () => this.prepareForWindowsCliUpgrade(),
     });

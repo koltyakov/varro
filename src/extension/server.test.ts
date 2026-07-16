@@ -265,7 +265,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  vi.runOnlyPendingTimers();
+  await vi.runOnlyPendingTimersAsync();
+  await flushMicrotasks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   stubPlatform(originalPlatform);
@@ -741,6 +742,31 @@ describe('OpenCodeServer compaction config injection', () => {
 });
 
 describe('OpenCodeServer maintenance', () => {
+  it('reports active agents and ownership in server diagnostics', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      managedProcess: boolean;
+      readInstalledCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      request: (method: string, path: string) => Promise<unknown>;
+    };
+    setRunning(server);
+    api.managedProcess = false;
+    api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.18.2');
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.18' });
+    api.request = vi.fn().mockResolvedValue({
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'retry' },
+      'session-3': { type: 'idle' },
+    });
+
+    const info = await server.readServerInfo();
+
+    expect(info.managedProcess).toBe(false);
+    expect(info.activeAgentCount).toBe(2);
+    expect(info.activeAgentError).toBeNull();
+  });
+
   it('restarts a managed idle server when the installed CLI is newer', async () => {
     const server = new OpenCodeServer(4096, false);
     const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
@@ -769,6 +795,27 @@ describe('OpenCodeServer maintenance', () => {
     await runMaintenanceTick(server);
 
     expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.14.20', '1.14.22');
+  });
+
+  it('checks for a deferred CLI restart when a session becomes idle', () => {
+    const server = new OpenCodeServer(4096, false);
+    const requestMaintenanceCheck = vi.fn();
+    const event = {
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    };
+    const listener = vi.fn();
+    const api = server as unknown as {
+      handleServerEvent: (value: unknown) => void;
+      requestMaintenanceCheck: () => void;
+    };
+    api.requestMaintenanceCheck = requestMaintenanceCheck;
+    server.on('event', listener);
+
+    api.handleServerEvent(event);
+
+    expect(listener).toHaveBeenCalledWith(event);
+    expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
   });
 
   it('restarts a managed process without emitting a stopped status', async () => {
@@ -872,6 +919,7 @@ describe('OpenCodeServer maintenance', () => {
       maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
       readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
       hasActiveSessions: () => Promise<boolean>;
+      processManager: { recoverLegacyManagedServerOwnership: () => Promise<boolean> };
       restartServerForCliUpdate: (
         serverVersion: string,
         installedCliVersion: string
@@ -885,6 +933,7 @@ describe('OpenCodeServer maintenance', () => {
     api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(null);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.18' });
     api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.processManager.recoverLegacyManagedServerOwnership = vi.fn().mockResolvedValue(false);
     api.restartServerForCliUpdate = restartServerForCliUpdate;
 
     await runMaintenanceTick(server);
@@ -1001,13 +1050,16 @@ describe('OpenCodeServer maintenance', () => {
     const server = new OpenCodeServer(4096, false);
     const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
     const request = vi.fn().mockResolvedValue({ success: true, version: '1.14.22' });
+    const requestMaintenanceCheck = vi.fn();
     const api = server as unknown as {
       readLatestCliVersion: () => Promise<string | null>;
       request: typeof request;
+      requestMaintenanceCheck: () => void;
     };
 
     api.readLatestCliVersion = readLatestCliVersion;
     api.request = request;
+    api.requestMaintenanceCheck = requestMaintenanceCheck;
     setRunning(server);
     vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
 
@@ -1015,6 +1067,7 @@ describe('OpenCodeServer maintenance', () => {
     await flushMicrotasks();
 
     expect(request).toHaveBeenCalledWith('POST', '/global/upgrade', { target: '1.14.22' });
+    expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
     expect(vscodeMock.window.createTerminal).not.toHaveBeenCalled();
   });
 
