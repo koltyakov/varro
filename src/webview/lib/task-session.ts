@@ -1,4 +1,4 @@
-import type { Message, Part, ToolPart } from '../types';
+import type { MessageEntry, ToolPart } from '../types';
 
 export type TaskSessionInfo = {
   id: string;
@@ -7,8 +7,6 @@ export type TaskSessionInfo = {
   time: { created: number };
   tokens?: { input: number; output: number };
 };
-
-type MessageEntry = { info: Message; parts: Part[] };
 
 function normalizeToolName(toolName: string) {
   const normalized = toolName.trim().toLowerCase();

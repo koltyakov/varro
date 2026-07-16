@@ -1,6 +1,6 @@
 import type { RalphConfig, RalphIteration, RalphRun, RalphStopReason } from '../shared/ralph';
 import { MAX_RALPH_ITERATIONS } from '../shared/ralph';
-import type { RalphStatePayload, WebviewMessage } from '../shared/protocol';
+import { isPermissionMode, type RalphStatePayload, type WebviewMessage } from '../shared/protocol';
 import type { Persistence } from '../shared/persistence';
 import { normalizeModelVariant } from '../shared/model-variant';
 import {
@@ -834,10 +834,6 @@ function isSafeRalphRecordKey(value: string, maxLength = MAX_RALPH_ID_LENGTH): b
     value !== 'constructor' &&
     !Object.prototype.hasOwnProperty.call(Object.prototype, value)
   );
-}
-
-function isPermissionMode(value: unknown): value is RalphConfig['permissionMode'] {
-  return value === 'default' || value === 'auto' || value === 'full';
 }
 
 function isRalphStatus(value: unknown): value is RalphRun['status'] {

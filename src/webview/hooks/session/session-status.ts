@@ -10,9 +10,8 @@ import {
   latestAssistantFinishedBeforeLoading,
 } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
-import type { Message, Part, SessionStatus } from '../../types';
+import type { MessageEntry, SessionStatus } from '../../types';
 
-type SessionMessageEntry = { info: Message; parts: Part[] };
 type SessionStatusSnapshot = {
   statuses: Record<string, SessionStatus>;
   startedAt: number;
@@ -22,7 +21,7 @@ type SessionStatusDependencies = {
   pendingAbortRetryAttempts: Map<string, number | null>;
   deriveUsageLimitNoticeContext(
     sessionId: string,
-    messages?: SessionMessageEntry[]
+    messages?: MessageEntry[]
   ): { providerID: string; modelID: string | null | undefined } | null;
   refreshProviderLimit(providerID: string, modelID?: string | null): Promise<void>;
   isDocumentVisible(): boolean;
@@ -33,7 +32,7 @@ type SessionStatusDependencies = {
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   loadSessionStatusSnapshot?(): Promise<SessionStatusSnapshot>;
   isActiveSession(sessionId: string): boolean;
-  getMessages?(): SessionMessageEntry[];
+  getMessages?(): MessageEntry[];
   logError(context: string, err: unknown): void;
 };
 
@@ -282,7 +281,7 @@ export function updateUsageLimitStateWithDependencies(
   deps: {
     deriveUsageLimitNoticeContext(
       sessionId: string,
-      messages?: SessionMessageEntry[]
+      messages?: MessageEntry[]
     ): { providerID: string; modelID: string | null | undefined } | null;
     applyUsageLimitNotice(
       sessionId: string,
@@ -292,7 +291,7 @@ export function updateUsageLimitStateWithDependencies(
   },
   sessionID: string,
   status: SessionStatus | null | undefined,
-  messages: SessionMessageEntry[]
+  messages: MessageEntry[]
 ) {
   const rawNotice = deriveUsageLimitNotice({ sessionID, status, messages });
   const context = rawNotice?.providerID
@@ -338,7 +337,7 @@ export async function recheckSessionStatusWithDependencies(
     loadingStartedAt?(): number | null;
     isActiveSession(sessionId: string): boolean;
     getCurrentSessionStatus?(sessionId: string): SessionStatus | null | undefined;
-    getMessages?(): SessionMessageEntry[];
+    getMessages?(): MessageEntry[];
     logError(context: string, err: unknown): void;
   },
   sessionId: string
@@ -438,7 +437,7 @@ function logRejectedSyncs(
   }
 }
 
-function hasUnsettledLatestTurn(messages: SessionMessageEntry[]) {
+function hasUnsettledLatestTurn(messages: MessageEntry[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
     if (!message) continue;
@@ -449,7 +448,7 @@ function hasUnsettledLatestTurn(messages: SessionMessageEntry[]) {
 }
 
 function latestAssistantFinishedBeforeCurrentLoading(
-  messages: SessionMessageEntry[],
+  messages: MessageEntry[],
   loadingStartedAt: number | null
 ) {
   const finishedAt = getLatestAssistantFinishedAt(messages);

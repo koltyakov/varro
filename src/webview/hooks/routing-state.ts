@@ -1,8 +1,6 @@
 import type { SelectedModel } from '../lib/app-state-types';
 import { resolveSelectedModel } from '../lib/state';
-import type { Agent, Message, Part, Provider } from '../types';
-
-type SessionEntry = { info: Message; parts: Part[] };
+import type { Agent, MessageEntry, Provider } from '../types';
 
 type AgentSelectionUpdate = {
   value: string | null;
@@ -17,7 +15,7 @@ export function getBuildAgentName(agents: Agent[]) {
   return agents.find((agent) => agent.name === 'build')?.name || null;
 }
 
-export function deriveSelectedModelFromMessages(messages: SessionEntry[]) {
+export function deriveSelectedModelFromMessages(messages: MessageEntry[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
     if (!message) continue;
@@ -34,7 +32,7 @@ export function deriveSelectedModelFromMessages(messages: SessionEntry[]) {
   return null;
 }
 
-export function deriveSelectedAgentFromMessages(messages: SessionEntry[]) {
+export function deriveSelectedAgentFromMessages(messages: MessageEntry[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
     if (!message) continue;
@@ -171,7 +169,7 @@ export function getActiveProviderSelection(args: {
 
 export function getUsageLimitNoticeContext(args: {
   sessionId: string;
-  messages?: SessionEntry[];
+  messages?: MessageEntry[];
   selectedModelForSession: SelectedModel | null;
   providers: Provider[];
   providerDefaults: Record<string, string>;

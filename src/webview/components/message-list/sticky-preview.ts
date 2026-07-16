@@ -1,5 +1,5 @@
 import { getUserMessagePreviewText, parseUserMessageContent } from '../Message';
-import type { Message, Part } from '../../types';
+import type { Message, MessageEntry, Part } from '../../types';
 
 export type StickyUserMessagePreview = {
   id: string;
@@ -23,7 +23,7 @@ const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
 const EMPTY_USER_MESSAGE_PREVIEW = '(no content)';
 
 export function getStickyUserMessagePreview(
-  messages: Array<{ info: Message; parts: Part[] }>,
+  messages: MessageEntry[],
   firstVisibleMessageIndex: number | null
 ): StickyUserMessagePreview | null {
   if (firstVisibleMessageIndex === null || firstVisibleMessageIndex < 0) return null;

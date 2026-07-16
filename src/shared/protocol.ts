@@ -37,6 +37,10 @@ export interface DroppedFile {
 
 export type PermissionMode = 'default' | 'auto' | 'full';
 
+export function isPermissionMode(value: unknown): value is PermissionMode {
+  return value === 'default' || value === 'auto' || value === 'full';
+}
+
 export type AutoApproveJudgeDecision = 'allow' | 'ask';
 
 export type AutoApproveJudgeReference = {

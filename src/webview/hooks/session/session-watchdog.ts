@@ -1,7 +1,7 @@
 import { createEffect, on, onCleanup } from 'solid-js';
-import { hasUnsettledToolPart, type MessageEntry } from '../../lib/message-metrics';
+import { hasUnsettledToolPart } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
-import type { AssistantMessage, SessionStatus } from '../../types';
+import type { AssistantMessage, MessageEntry, SessionStatus } from '../../types';
 
 // How often the watchdog polls server-authoritative status while at least one
 // session looks busy locally. Tuned short so a missed finish (e.g. a fast ping

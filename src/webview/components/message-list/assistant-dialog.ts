@@ -2,7 +2,7 @@ import { getChildRunsByParentId } from '../../lib/state';
 import { isAssistantMessage, sumAssistantTokens } from '../../lib/message-metrics';
 import { resolveTaskSessionId } from '../../lib/task-session';
 import type { TaskSessionInfo } from '../../lib/task-session';
-import type { AssistantMessage, Message, Part } from '../../types';
+import type { AssistantMessage, MessageEntry } from '../../types';
 import type { AssistantDialogSummaryInfo } from './MessageRows';
 
 type AssistantDialogOptions = {
@@ -12,13 +12,12 @@ type AssistantDialogOptions = {
 };
 
 export function getAssistantDialogSummaryMap(
-  messages: Array<{ info: Message; parts: Part[] }>,
+  messages: MessageEntry[],
   targetMessageIds?: ReadonlySet<string>,
   options?: AssistantDialogOptions
 ) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
-  let childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> | null =
-    null;
+  let childRunsByParentId: Map<string, Array<MessageEntry<AssistantMessage>>> | null = null;
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
@@ -146,7 +145,7 @@ function sumAssistantDialogTokens(
   aggregateMessages: AssistantMessage[],
   primaryMessages: AssistantMessage[],
   primaryMessageIds: string[],
-  allMessages: Array<{ info: Message; parts: Part[] }>,
+  allMessages: MessageEntry[],
   sessions: readonly TaskSessionInfo[],
   dialogStartedAt: number,
   nextUserRequestCreated?: number
@@ -218,7 +217,7 @@ function sumAssistantDialogTokens(
 
 function collectAssistantDialogMessages(
   messages: AssistantMessage[],
-  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>,
+  childRunsByParentId: Map<string, Array<MessageEntry<AssistantMessage>>>,
   parentSessionIds: ReadonlySet<string>,
   dialogStartedAt: number,
   nextUserRequestCreated?: number
@@ -261,7 +260,7 @@ function collectAssistantDialogMessages(
 
 function countAssistantDialogChildRuns(
   rootMessageIds: string[],
-  childRunsByParentId: Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>
+  childRunsByParentId: Map<string, Array<MessageEntry<AssistantMessage>>>
 ) {
   let count = 0;
   const visited = new Set<string>();

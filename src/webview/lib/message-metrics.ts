@@ -1,4 +1,12 @@
-import type { AssistantMessage, FileDiff, Message, Part, Provider, StepFinishPart } from '../types';
+import type {
+  AssistantMessage,
+  FileDiff,
+  Message,
+  MessageEntry,
+  Part,
+  Provider,
+  StepFinishPart,
+} from '../types';
 import { validateFileDiffs } from './validate-diffs';
 
 export type TokenUsage = {
@@ -138,8 +146,6 @@ export function formatRelativeAge(timestamp: number, now: number): string {
   if (hours > 0) return `${hours}h`;
   return `${totalMinutes}m`;
 }
-
-export type MessageEntry = { info: Message; parts: Part[] };
 
 /**
  * Returns the timestamp at which the latest assistant message settled

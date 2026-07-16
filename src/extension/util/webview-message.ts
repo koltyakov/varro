@@ -4,7 +4,7 @@ import {
   MAX_DROPPED_CONTENT_FILE_BYTES,
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
-import { VARRO_API_ENDPOINTS } from '../../shared/protocol';
+import { isPermissionMode, VARRO_API_ENDPOINTS } from '../../shared/protocol';
 import type { DesktopSessionPaneSide, PermissionMode, WebviewMessage } from '../../shared/protocol';
 import type {
   RalphConfig,
@@ -1019,5 +1019,5 @@ function getDesktopSessionPaneSide(value: unknown): DesktopSessionPaneSide | nul
 }
 
 function getPermissionMode(value: unknown): PermissionMode | null {
-  return value === 'default' || value === 'auto' || value === 'full' ? value : null;
+  return isPermissionMode(value) ? value : null;
 }

@@ -1,11 +1,11 @@
 import {
+  isPermissionMode,
   parseServerEvent,
   type ContextLineRange,
   type DesktopSessionPaneSide,
   type DroppedFile,
   type EditorContext,
   type ExtensionMessage,
-  type PermissionMode,
   type RalphStatePayload,
   type ServerStatus,
   type WebviewThemeKind,
@@ -235,10 +235,6 @@ function isServerStatus(value: Record<string, unknown> | null): value is ServerS
 
 function isDesktopSessionPaneSide(value: unknown): value is DesktopSessionPaneSide {
   return value === 'left' || value === 'right';
-}
-
-function isPermissionMode(value: unknown): value is PermissionMode {
-  return value === 'default' || value === 'auto' || value === 'full';
 }
 
 function isWebviewThemeKind(value: unknown): value is WebviewThemeKind {

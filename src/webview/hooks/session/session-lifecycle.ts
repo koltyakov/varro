@@ -4,6 +4,7 @@ import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { isSamePath } from '../../lib/path-display';
 import { compareSessionsByActivity } from '../../lib/session-order';
+import { collectSessionTreeIds } from '../../lib/session-tree-index';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
@@ -212,22 +213,7 @@ export function hideDeletedSessionTree(
 }
 
 export function getDeletedSessionTreeIds(rootId: string, sessions: Session[]) {
-  const deleted = new Set<string>();
-  const pending = [rootId];
-
-  while (pending.length > 0) {
-    const currentId = pending.pop();
-    if (!currentId || deleted.has(currentId)) continue;
-    deleted.add(currentId);
-
-    for (const session of sessions) {
-      if (session.parentID === currentId) {
-        pending.push(session.id);
-      }
-    }
-  }
-
-  return deleted;
+  return new Set(collectSessionTreeIds(rootId, sessions));
 }
 
 export function getNextSessionIdAfterDeletion(sessions: Session[]) {

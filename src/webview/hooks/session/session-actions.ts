@@ -1,6 +1,4 @@
-import type { Message, Part } from '../../types';
-
-type SessionEntry = { info: Message; parts: Part[] };
+import type { Message, MessageEntry, Part } from '../../types';
 
 export const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file containing:
 1. Build, lint, and test commands - especially the command to run a single test.
@@ -93,7 +91,7 @@ export async function runSlashCommandWithDependencies(
     runSessionCommand(
       sessionId: string,
       input: { command: string; arguments: string }
-    ): Promise<SessionEntry>;
+    ): Promise<MessageEntry>;
     shouldApplyToActiveSession(sessionId: string): boolean;
     upsertMessageInfo(info: Message): void;
     upsertPart(part: Part): void;
@@ -160,7 +158,7 @@ type SessionActionDependencies = {
   runSessionCommand(
     sessionId: string,
     input: { command: string; arguments: string }
-  ): Promise<SessionEntry>;
+  ): Promise<MessageEntry>;
   shouldApplyToActiveSession(sessionId: string): boolean;
   upsertMessageInfo(info: Message): void;
   upsertPart(part: Part): void;

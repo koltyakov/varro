@@ -1,4 +1,5 @@
 import type { Persistence } from '../shared/persistence';
+import { normalizeRecycleBinEntry, normalizeRecycleBinSession } from '../shared/recycle-bin';
 import type { RecycleBinEntry, RecycleBinSession } from '../shared/protocol';
 
 export type SessionDeleteTarget = {
@@ -17,7 +18,7 @@ export class SessionTrashManager {
     const value = persistence.get<unknown>(SESSION_TRASH_KEY);
     const stored = Array.isArray(value) ? value : [];
     for (const entry of stored) {
-      const normalized = normalizeEntry(entry);
+      const normalized = normalizeRecycleBinEntry(entry);
       if (normalized) this.entries.set(normalized.rootID, normalized);
     }
   }
@@ -60,7 +61,7 @@ export class SessionTrashManager {
     return this.mutate(async () => {
       if (this.isHidden(sessionID)) return this.entries.get(sessionID) || null;
       const normalized = sessions
-        .map(normalizeSession)
+        .map(normalizeRecycleBinSession)
         .filter((session): session is RecycleBinSession => !!session);
       const root = normalized.find((session) => session.id === sessionID);
       if (!root) return null;
@@ -189,67 +190,6 @@ function cloneSession(session: RecycleBinSession): RecycleBinSession {
     ...session,
     ...(session.summary ? { summary: { ...session.summary } } : {}),
     time: { ...session.time },
-  };
-}
-
-function normalizeEntry(value: unknown): RecycleBinEntry | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const rootID = typeof record.rootID === 'string' ? record.rootID : null;
-  const deletedAt = typeof record.deletedAt === 'number' ? record.deletedAt : null;
-  const expiresAt = typeof record.expiresAt === 'number' ? record.expiresAt : null;
-  const root = normalizeSession(record.root);
-  const sessions = Array.isArray(record.sessions)
-    ? record.sessions
-        .map(normalizeSession)
-        .filter((session): session is RecycleBinSession => !!session)
-    : [];
-  if (!rootID || deletedAt === null || expiresAt === null || !root || sessions.length === 0) {
-    return null;
-  }
-  return { rootID, deletedAt, expiresAt, root, sessions };
-}
-
-function normalizeSession(value: unknown): RecycleBinSession | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const time = record.time as Record<string, unknown> | undefined;
-  if (
-    typeof record.id !== 'string' ||
-    typeof record.projectID !== 'string' ||
-    typeof record.directory !== 'string' ||
-    typeof record.title !== 'string' ||
-    typeof record.version !== 'string' ||
-    typeof time?.created !== 'number' ||
-    typeof time.updated !== 'number'
-  ) {
-    return null;
-  }
-  const summary = record.summary as Record<string, unknown> | undefined;
-  return {
-    id: record.id,
-    projectID: record.projectID,
-    directory: record.directory,
-    ...(typeof record.parentID === 'string' ? { parentID: record.parentID } : {}),
-    ...(summary &&
-    typeof summary.additions === 'number' &&
-    typeof summary.deletions === 'number' &&
-    typeof summary.files === 'number'
-      ? {
-          summary: {
-            additions: summary.additions,
-            deletions: summary.deletions,
-            files: summary.files,
-          },
-        }
-      : {}),
-    title: record.title,
-    version: record.version,
-    time: {
-      created: time.created,
-      updated: time.updated,
-      ...(typeof time.compacting === 'number' ? { compacting: time.compacting } : {}),
-    },
   };
 }
 

@@ -17,17 +17,17 @@ function createModel(
 }
 
 describe('sortProviderModels', () => {
-  it('puts the provider default first, then orders models by newest release', () => {
+  it('orders models by newest release without prioritizing the provider default', () => {
     const models = [
       createModel('older', 'Older', { release_date: '2025-01-01' }),
       createModel('default', 'Default', { release_date: '2024-01-01' }),
       createModel('newer', 'Newer', { release_date: '2026-01-01' }),
     ];
 
-    expect(sortProviderModels(models, 'default').map((model) => model.id)).toEqual([
-      'default',
+    expect(sortProviderModels(models).map((model) => model.id)).toEqual([
       'newer',
       'older',
+      'default',
     ]);
     expect(models.map((model) => model.id)).toEqual(['older', 'default', 'newer']);
   });

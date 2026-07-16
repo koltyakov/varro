@@ -1,7 +1,5 @@
 import { normalizeModelVariant } from '../../shared/model-variant';
-import type { Message, Part, SessionStatus } from '../types';
-
-type SessionEntry = { info: Message; parts: Part[] };
+import type { MessageEntry, SessionStatus } from '../types';
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 
@@ -47,7 +45,7 @@ export function buildInterruptedSessionContinueBody(args: {
   return body;
 }
 
-export function shouldContinueInterruptedSession(messages: SessionEntry[]) {
+export function shouldContinueInterruptedSession(messages: MessageEntry[]) {
   const lastInfo = messages.at(-1)?.info;
   if (!lastInfo) return false;
   if (lastInfo.role === 'user') return true;
@@ -86,7 +84,7 @@ export async function recoverInterruptedSessionsWithDependencies(
     getSessionStatus(sessionId: string): SessionStatus | null | undefined;
     hasPendingQuestion(sessionId: string): boolean;
     hasPendingPermission(sessionId: string): boolean;
-    loadSessionMessages(sessionId: string): Promise<SessionEntry[]>;
+    loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
     continueInterruptedSession(sessionId: string): Promise<void>;
     logError(context: string, err: unknown): void;
   },
@@ -258,7 +256,7 @@ export function createConnectionBootstrapOperations(deps: {
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
   hasPendingQuestion(sessionId: string): boolean;
   hasPendingPermission(sessionId: string): boolean;
-  loadSessionMessages(sessionId: string): Promise<SessionEntry[]>;
+  loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
   logError(context: string, err: unknown): void;
   syncSessionMcps(sessionId: string): Promise<void>;
   resolveModel(sessionId: string): ResolvedModel | null;

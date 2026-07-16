@@ -19,7 +19,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
-import type { Message, Part, Permission, Session, SessionStatus } from '../../types';
+import type { MessageEntry, Permission, Session, SessionStatus } from '../../types';
 import {
   getSessionTreeIds,
   getSessionTreeRootId,
@@ -170,7 +170,6 @@ function isCurrentGeneration(current: number, expected: number) {
 
 const POLLED_STATUS_SNAPSHOT_FRESHNESS_MS = 100;
 
-type SessionEntry = { info: Message; parts: Part[] };
 export type SessionStatusSnapshot = {
   statuses: Record<string, SessionStatus>;
   startedAt: number;
@@ -272,7 +271,7 @@ function isNotFoundError(err: unknown) {
 async function fetchSessionMessages(
   sessionId: string,
   options?: { resetHistoryWindow?: boolean }
-): Promise<SessionEntry[]> {
+): Promise<MessageEntry[]> {
   const incoming = await client.session.messages(sessionId, { limit: MESSAGE_HISTORY_WINDOW });
   const current = appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId);
   if (options?.resetHistoryWindow || current.length === 0) {
@@ -336,7 +335,7 @@ function loadSessionBoundaryPrompts(sessionId: string, initialCursor: string): P
 
 async function loadSessionWithMessages(sessionId: string): Promise<{
   session: Session;
-  messages: SessionEntry[];
+  messages: MessageEntry[];
 }> {
   const messagesPromise = fetchSessionMessages(sessionId, { resetHistoryWindow: true }).catch(
     (err: unknown) => {
@@ -348,7 +347,7 @@ async function loadSessionWithMessages(sessionId: string): Promise<{
   return { session, messages };
 }
 
-async function loadSessionMessagesAllowingEmpty(sessionId: string): Promise<SessionEntry[]> {
+async function loadSessionMessagesAllowingEmpty(sessionId: string): Promise<MessageEntry[]> {
   try {
     return await fetchSessionMessages(sessionId);
   } catch (err) {
@@ -363,7 +362,7 @@ function applyTheme(nextTheme: WebviewThemeKind) {
 
 function getUsageLimitNoticeContext(
   sessionID: string,
-  messages: Array<{ info: Message; parts: Part[] }> = appStore.state.messages
+  messages: MessageEntry[] = appStore.state.messages
 ) {
   return getUsageLimitNoticeContextForState({
     sessionId: sessionID,

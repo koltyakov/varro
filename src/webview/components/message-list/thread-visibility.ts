@@ -1,19 +1,16 @@
 import { getSessionTreeIds, state } from '../../lib/state';
 import { shouldShowAssistantPartInline } from '../../lib/part-utils';
-import type { Message, Part } from '../../types';
+import type { Message, MessageEntry, Part } from '../../types';
 
 export function getRenderedMessages(
-  messages: Array<{ info: Message; parts: Part[] }>,
+  messages: MessageEntry[],
   range: { start: number; end: number },
   shouldVirtualize: boolean
 ) {
   return shouldVirtualize ? messages.slice(range.start, range.end) : messages;
 }
 
-function shouldHideThreadMessage(
-  entry: { info: Message; parts: Part[] },
-  activeSessionId: string | null
-) {
+function shouldHideThreadMessage(entry: MessageEntry, activeSessionId: string | null) {
   if (!activeSessionId) return false;
 
   const activeTreeIds = new Set(getSessionTreeIds(activeSessionId));
@@ -25,7 +22,7 @@ function shouldHideThreadMessage(
 }
 
 export function getVisibleThreadMessages(
-  messages: Array<{ info: Message; parts: Part[] }>,
+  messages: MessageEntry[],
   activeSessionId = state.activeSessionId
 ) {
   return messages.filter((entry) => !shouldHideThreadMessage(entry, activeSessionId));

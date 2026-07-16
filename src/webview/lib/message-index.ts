@@ -1,6 +1,4 @@
-import type { Message, Part } from '../types';
-
-type MessageEntry = { info: Message; parts: Part[] };
+import type { MessageEntry } from '../types';
 
 export type MessageIndexCallbacks = {
   /** Called when message-level structure changes (add/remove/replace messages or info). */

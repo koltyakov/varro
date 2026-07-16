@@ -9,7 +9,14 @@ import {
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { formatDuration, formatNumber, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
-import type { AssistantMessage, Message, Part, QuestionRequest, ToolPart } from '../../types';
+import type {
+  AssistantMessage,
+  Message,
+  MessageEntry,
+  Part,
+  QuestionRequest,
+  ToolPart,
+} from '../../types';
 import { Message as MessageComponent, type AssistantFileEditStackGroup } from '../Message';
 
 export type AssistantDialogSummaryInfo = {
@@ -44,9 +51,7 @@ export type MessageRowSharedProps = {
   buildPlanDocumentContent: (parts: Part[]) => string;
 };
 
-export function MessageRows(
-  props: { messages: Array<{ info: Message; parts: Part[] }> } & MessageRowSharedProps
-) {
+export function MessageRows(props: { messages: MessageEntry[] } & MessageRowSharedProps) {
   return <For each={props.messages}>{(msg) => <MessageRow msg={msg} {...props} />}</For>;
 }
 
@@ -71,9 +76,7 @@ function InlineEditComposerSlot() {
   );
 }
 
-export function MessageRow(
-  props: { msg: { info: Message; parts: Part[] } } & MessageRowSharedProps
-) {
+export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps) {
   let rowRef: HTMLDivElement | undefined;
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const isEditingThisMessage = () =>

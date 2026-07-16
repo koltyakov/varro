@@ -1,14 +1,12 @@
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
 import { routingStore } from '../../lib/stores/routing-store';
-import type { Message, Part, Session, SessionStatus } from '../../types';
+import type { MessageEntry, Session, SessionStatus } from '../../types';
 import {
   selectSessionWithDependencies,
   syncSessionMessagesWithDependencies,
   syncSessionWithDependencies,
 } from './session-selection';
-
-type SessionEntry = { info: Message; parts: Part[] };
 
 export async function selectSessionWithStateDependencies(
   deps: {
@@ -33,18 +31,18 @@ export async function selectSessionWithStateDependencies(
     syncSessionMcps(sessionId: string): Promise<void>;
     resetTodoSync(): void;
     clearMessages(): void;
-    loadSession(id: string): Promise<{ session: Session; messages: SessionEntry[] }>;
+    loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
     isCurrentSelectionGeneration(generation: number): boolean;
     upsertSession(session: Session): void;
     setMessagesIncremental(
-      messages: SessionEntry[],
+      messages: MessageEntry[],
       options?: { preserveExtraParts?: boolean }
     ): void;
-    syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
+    syncFailedSessionsFromMessages(messages: MessageEntry[]): void;
     requestMessageListScrollToBottom(): void;
-    deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
-    deriveSelectedModelFromMessages(messages: SessionEntry[]): SelectedModel | null;
-    syncTodosForSession(sessionId: string, messages: SessionEntry[]): Promise<void>;
+    deriveSelectedAgentFromMessages(messages: MessageEntry[]): string | null;
+    deriveSelectedModelFromMessages(messages: MessageEntry[]): SelectedModel | null;
+    syncTodosForSession(sessionId: string, messages: MessageEntry[]): Promise<void>;
     loadQuestions(): Promise<void>;
     loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
     mergeSessionStatuses(
@@ -54,7 +52,7 @@ export async function selectSessionWithStateDependencies(
     updateUsageLimitState(
       sessionId: string,
       status: SessionStatus | null | undefined,
-      messages: SessionEntry[]
+      messages: MessageEntry[]
     ): void;
     startLoading(): void;
     stopLoading(): void;
@@ -72,20 +70,20 @@ export async function syncSessionMessagesWithStateDependencies(
     getActiveSessionId(): string | null;
     getSessionStatus(sessionId: string): SessionStatus | null | undefined;
     loadingStartedAt(): number | null;
-    loadSessionMessages(sessionId: string): Promise<SessionEntry[]>;
+    loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
     updateUsageLimitState(
       sessionId: string,
       status: SessionStatus | null | undefined,
-      messages: SessionEntry[]
+      messages: MessageEntry[]
     ): void;
     setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
     setMessagesIncremental(
-      messages: SessionEntry[],
+      messages: MessageEntry[],
       options?: { preserveExtraParts?: boolean }
     ): void;
     stopLoading(): void;
-    syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
-    handoffTodosToMessages(messages: SessionEntry[]): void;
+    syncFailedSessionsFromMessages(messages: MessageEntry[]): void;
+    handoffTodosToMessages(messages: MessageEntry[]): void;
   },
   generationRef: { next(): number; isCurrent(generation: number): boolean },
   sessionId: string
@@ -125,18 +123,18 @@ type SessionSyncDependencies = {
   syncSessionMcps(sessionId: string): Promise<void>;
   resetTodoSync(): void;
   clearMessages(): void;
-  loadSession(id: string): Promise<{ session: Session; messages: SessionEntry[] }>;
+  loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
   setMessagesIncremental(
-    messages: SessionEntry[],
+    messages: MessageEntry[],
     options?: { preserveExtraParts?: boolean }
   ): void;
-  syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
+  syncFailedSessionsFromMessages(messages: MessageEntry[]): void;
   requestMessageListScrollToBottom(): void;
-  deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
-  deriveSelectedModelFromMessages(messages: SessionEntry[]): SelectedModel | null;
-  syncTodosForSession(sessionId: string, messages: SessionEntry[]): Promise<void>;
+  deriveSelectedAgentFromMessages(messages: MessageEntry[]): string | null;
+  deriveSelectedModelFromMessages(messages: MessageEntry[]): SelectedModel | null;
+  syncTodosForSession(sessionId: string, messages: MessageEntry[]): Promise<void>;
   loadQuestions(): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   mergeSessionStatuses(
@@ -146,7 +144,7 @@ type SessionSyncDependencies = {
   updateUsageLimitState(
     sessionId: string,
     status: SessionStatus | null | undefined,
-    messages: SessionEntry[]
+    messages: MessageEntry[]
   ): void;
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   startLoading(): void;
@@ -154,8 +152,8 @@ type SessionSyncDependencies = {
   setError(message: string): void;
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
   loadingStartedAt(): number | null;
-  loadSessionMessages(sessionId: string): Promise<SessionEntry[]>;
-  handoffTodosToMessages(messages: SessionEntry[]): void;
+  loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
+  handoffTodosToMessages(messages: MessageEntry[]): void;
   loadSessionMetadata(sessionId: string): Promise<Session>;
 };
 
@@ -248,10 +246,10 @@ export class SessionSyncOperations {
 }
 
 export function resolveMessagesSelectedModel(
-  messages: SessionEntry[],
+  messages: MessageEntry[],
   providers: Array<unknown>,
   providerDefaults: Record<string, string>,
-  deriveModelFromMessages: (messages: SessionEntry[]) => SelectedModel | null
+  deriveModelFromMessages: (messages: MessageEntry[]) => SelectedModel | null
 ) {
   return routingStore.resolveSelectedModel(
     deriveModelFromMessages(messages),

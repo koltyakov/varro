@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { ExtensionConfigState } from '../shared/provider-limit-config';
+import { isPermissionMode } from '../shared/protocol';
 import {
   DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS,
   normalizeProviderLimitThresholdPercent,
@@ -53,7 +54,7 @@ export function readExtensionConfigState(
 
 function readDefaultPermissionMode(config: vscode.WorkspaceConfiguration) {
   const value = config.get<unknown>('chat.defaultPermissionMode');
-  return value === 'full' || value === 'auto' ? value : 'default';
+  return isPermissionMode(value) ? value : 'default';
 }
 
 function isNonEmptyString(value: unknown): value is string {

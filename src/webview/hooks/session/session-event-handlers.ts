@@ -18,6 +18,7 @@ import type {
   AssistantMessage,
   FileDiff,
   Message,
+  MessageEntry,
   Part,
   Permission,
   QuestionRequest,
@@ -149,8 +150,8 @@ type EventHandlerDependencies = {
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
   isSessionTreeStatusWorking(sessionId: string): boolean;
   isSessionInActiveTree?(sessionId: string): boolean;
-  getMessages(): Array<{ info: Message; parts: Part[] }>;
-  handoffTodosToMessages(messages?: Array<{ info: Message; parts: Part[] }>): boolean;
+  getMessages(): MessageEntry[];
+  handoffTodosToMessages(messages?: MessageEntry[]): boolean;
   upsertSession(info: Session): void;
   setSessionCompacting(sessionId: string, compacting: boolean): void;
   removeDeletedSessionTree(sessionId: string): void;
@@ -171,14 +172,8 @@ type EventHandlerDependencies = {
     notice: UsageLimitNotice | null,
     options?: { preserveExistingOnNull?: boolean }
   ): void;
-  syncTodosFromMessages(
-    messages?: Array<{ info: Message; parts: Part[] }>,
-    latestEventPayload?: unknown
-  ): void;
-  syncTodosForSession?(
-    sessionId: string,
-    messages?: Array<{ info: Message; parts: Part[] }>
-  ): Promise<void>;
+  syncTodosFromMessages(messages?: MessageEntry[], latestEventPayload?: unknown): void;
+  syncTodosForSession?(sessionId: string, messages?: MessageEntry[]): Promise<void>;
   shouldAutoApprovePermissions(sessionId: string): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   judgePermission?(permission: Permission): Promise<void>;
@@ -289,7 +284,7 @@ type AssistantUsagePatch = {
   tokens?: AssistantMessage['tokens'];
 };
 
-function hasActiveAssistantReply(messages: Array<{ info: Message; parts: Part[] }>) {
+function hasActiveAssistantReply(messages: MessageEntry[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]?.info;
     if (!message) continue;
@@ -351,10 +346,7 @@ function getFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function latestAssistantMessageForSession(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  sessionId: string
-) {
+function latestAssistantMessageForSession(messages: MessageEntry[], sessionId: string) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (!message || message.info.sessionID !== sessionId || message.info.role !== 'assistant') {
@@ -366,7 +358,7 @@ function latestAssistantMessageForSession(
 }
 
 function getAssistantFinishedMessageId(
-  messages: Array<{ info: Message; parts: Part[] }>,
+  messages: MessageEntry[],
   partialMessage: { sessionID?: string; id?: unknown },
   assistantMessage: AssistantMessage | null
 ) {

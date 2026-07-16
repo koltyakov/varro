@@ -75,10 +75,7 @@ export function ModelsPanel() {
 
     return state.providers
       .map((provider) => {
-        const models = sortProviderModels(
-          Object.values(provider.models),
-          state.providerDefaults[provider.id]
-        );
+        const models = sortProviderModels(Object.values(provider.models));
 
         if (!search) return { provider, models };
 

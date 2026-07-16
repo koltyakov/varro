@@ -1,8 +1,7 @@
 import { appStore } from '../lib/stores/app-store';
-import type { AssistantMessage, Message, NormalizedTodo, Part } from '../types';
+import type { AssistantMessage, MessageEntry, NormalizedTodo, Part } from '../types';
 
 const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
-type SessionEntry = { info: Message; parts: Part[] };
 type TodoSyncDependencies = {
   loadSessionTodos?(sessionId: string): Promise<unknown>;
 };
@@ -31,7 +30,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   };
 
   const syncTodosFromMessagesWithState = (
-    messages: SessionEntry[] = appStore.state.messages,
+    messages: MessageEntry[] = appStore.state.messages,
     latestEventPayload?: unknown
   ) => {
     if (
@@ -49,7 +48,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
 
   const syncTodosForSessionWithState = async (
     sessionId: string,
-    messages: SessionEntry[] = appStore.state.messages
+    messages: MessageEntry[] = appStore.state.messages
   ) => {
     if (!deps.loadSessionTodos) {
       syncTodosFromMessagesWithState(messages);
@@ -73,7 +72,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     }
   };
 
-  const handoffTodosToMessagesWithState = (messages: SessionEntry[] = appStore.state.messages) => {
+  const handoffTodosToMessagesWithState = (messages: MessageEntry[] = appStore.state.messages) => {
     if (nativeTodosEnabled) {
       advanceTodosFromMessages(messages);
       return true;
@@ -90,7 +89,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   };
 }
 
-function advanceTodosFromMessages(messages: SessionEntry[]) {
+function advanceTodosFromMessages(messages: MessageEntry[]) {
   const messageTodos = deriveTodosFromMessages(messages);
   if (messageTodos.length === 0) return false;
 
@@ -106,7 +105,7 @@ function advanceTodosFromMessages(messages: SessionEntry[]) {
   return true;
 }
 
-function isStaleSettledNativeTodoSnapshot(todos: NormalizedTodo[], messages: SessionEntry[]) {
+function isStaleSettledNativeTodoSnapshot(todos: NormalizedTodo[], messages: MessageEntry[]) {
   if (todos.length === 0 || todos.some((todo) => todo.status === 'completed')) return false;
   if (deriveTodosFromMessages(messages).length > 0) return false;
 
@@ -130,7 +129,7 @@ export function extractTodos(raw: unknown): NormalizedTodo[] | null {
   return null;
 }
 
-export function deriveTodosFromMessages(messages: SessionEntry[]): NormalizedTodo[] {
+export function deriveTodosFromMessages(messages: MessageEntry[]): NormalizedTodo[] {
   let lastUserMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]!.info.role === 'user') {
@@ -158,7 +157,7 @@ export function deriveTodosFromMessages(messages: SessionEntry[]): NormalizedTod
 
 export function syncTodosFromMessages(
   setTodos: (todos: NormalizedTodo[]) => void,
-  messages: SessionEntry[],
+  messages: MessageEntry[],
   latestEventPayload?: unknown
 ) {
   const eventTodos = extractTodos(latestEventPayload);
@@ -199,7 +198,7 @@ export function preserveAdvancedTodoStatuses(
 export function handoffTodosToMessages(
   currentTodos: NormalizedTodo[],
   setTodos: (todos: NormalizedTodo[]) => void,
-  messages: Array<{ info: Message; parts: Part[] }>
+  messages: MessageEntry[]
 ): boolean {
   const nextTodos = deriveTodosFromMessages(messages);
   const latestAssistant = getLatestAssistantMessageInTurn(messages);
@@ -357,8 +356,8 @@ function areTodosEqual(left: NormalizedTodo[], right: NormalizedTodo[]) {
 }
 
 function getLatestAssistantMessageInTurn(
-  messages: Array<{ info: Message; parts: Part[] }>
-): { info: AssistantMessage; parts: Part[] } | undefined {
+  messages: MessageEntry[]
+): MessageEntry<AssistantMessage> | undefined {
   let lastUserMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]!.info.role === 'user') {
@@ -370,12 +369,11 @@ function getLatestAssistantMessageInTurn(
   return messages
     .slice(lastUserMessageIndex + 1)
     .findLast(
-      (message): message is { info: AssistantMessage; parts: Part[] } =>
-        message.info.role === 'assistant'
+      (message): message is MessageEntry<AssistantMessage> => message.info.role === 'assistant'
     );
 }
 
-function getLatestTodoMessageId(messages: Array<{ info: Message; parts: Part[] }>) {
+function getLatestTodoMessageId(messages: MessageEntry[]) {
   let lastUserMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]!.info.role === 'user') {

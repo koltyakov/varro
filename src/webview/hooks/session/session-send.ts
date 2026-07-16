@@ -22,7 +22,14 @@ import {
 import { modelSupportsVision } from '../../lib/model-capabilities';
 import { getPreferredVariant } from '../../lib/model-variants';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
-import type { Message, Part, PermissionRule, Provider, Session, SessionStatus } from '../../types';
+import type {
+  MessageEntry,
+  Part,
+  PermissionRule,
+  Provider,
+  Session,
+  SessionStatus,
+} from '../../types';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -72,7 +79,7 @@ type StateBoundSendDependencies = {
   logError?(context: string, err: unknown): void;
 };
 
-type OptimisticMessageEntry = { info: Message; parts: Part[] };
+type OptimisticMessageEntry = MessageEntry;
 
 let optimisticMessageSequence = 0;
 

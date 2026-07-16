@@ -16,6 +16,7 @@ import type {
   Command,
   Provider,
   AssistantMessage,
+  MessageEntry,
 } from '../types';
 import type {
   ClipboardImage,
@@ -39,6 +40,7 @@ import type {
   WebviewThemeKind,
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
+import { isPermissionMode } from '../../shared/protocol';
 import type {
   ProviderAuthMethodsByProvider,
   WorkspaceStatusEntry,
@@ -80,11 +82,7 @@ import {
 } from './state-session-markers';
 import { createSessionTreeIndex, collectSessionTreeIds } from './session-tree-index';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
-import {
-  areMessageEntriesEquivalent,
-  getSharedMessagePrefixLength,
-  type MessageEntry,
-} from './message-entry-sync';
+import { areMessageEntriesEquivalent, getSharedMessagePrefixLength } from './message-entry-sync';
 import { createStreamingDeltaQueue } from './streaming-deltas';
 
 export interface AppState {
@@ -102,7 +100,7 @@ export interface AppState {
   activeSessionId: string | null;
   currentDocumentEnabledBySession: Record<string, boolean>;
   sessionStatus: Record<string, SessionStatus>;
-  messages: Array<{ info: Message; parts: Part[] }>;
+  messages: MessageEntry[];
   todos: NormalizedTodo[];
   permissions: Permission[];
   questions: QuestionRequest[];
@@ -151,10 +149,7 @@ type LastOpenedViewInput =
 export const MAX_CLIPBOARD_IMAGES = 5;
 const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
 const EMPTY_SESSION_TREE_IDS: string[] = [];
-const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<
-  string,
-  Array<{ info: AssistantMessage; parts: Part[] }>
->();
+const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<string, Array<MessageEntry<AssistantMessage>>>();
 const OPTIMISTIC_USER_MESSAGE_ID_PREFIX = 'optimistic-user-';
 const permissionGroupMemberCache = new WeakMap<Permission, PermissionGroupMember[]>();
 export type PermissionReconciliation = {
@@ -162,7 +157,7 @@ export type PermissionReconciliation = {
 };
 const activePermissionReconciliations = new Set<PermissionReconciliation>();
 
-let cachedChildRunsByParentIdMessages: Array<{ info: Message; parts: Part[] }> | null = null;
+let cachedChildRunsByParentIdMessages: MessageEntry[] | null = null;
 let cachedChildRunsByParentIdVersion = -1;
 let cachedChildRunsByParentId = EMPTY_CHILD_RUNS_BY_PARENT_ID;
 
@@ -1152,10 +1147,6 @@ function resolveProjectDraftModeForCurrentWorkspace(fallbackMode = defaultPermis
     : fallbackMode;
 }
 
-function isPermissionMode(value: unknown): value is PermissionMode {
-  return value === 'default' || value === 'auto' || value === 'full';
-}
-
 function hasPersistedDraftPermissionMode(permissionWorkspace: string | null): boolean {
   if (permissionWorkspace) {
     const modes = readStoredPermissionModes(STORAGE_KEYS.projectPermissionModes);
@@ -1902,7 +1893,7 @@ function flushPendingStreamingDeltas() {
   flushPendingStreamingDeltasFor(defaultAppState);
 }
 
-export function upsertMessage(msg: { info: Message; parts: Part[] }) {
+export function upsertMessage(msg: MessageEntry) {
   flushPendingStreamingDeltas();
   setState(
     'messages',
@@ -2875,8 +2866,8 @@ function cloneValue<T>(value: T): T {
 }
 
 export function getChildRunsByParentId(
-  messages: Array<{ info: Message; parts: Part[] }>
-): Map<string, Array<{ info: AssistantMessage; parts: Part[] }>> {
+  messages: MessageEntry[]
+): Map<string, Array<MessageEntry<AssistantMessage>>> {
   if (
     messages === state.messages &&
     cachedChildRunsByParentIdMessages === messages &&
@@ -2885,14 +2876,14 @@ export function getChildRunsByParentId(
     return cachedChildRunsByParentId;
   }
 
-  const map = new Map<string, Array<{ info: AssistantMessage; parts: Part[] }>>();
+  const map = new Map<string, Array<MessageEntry<AssistantMessage>>>();
   for (const entry of messages) {
     if (entry.info.role !== 'assistant') continue;
     const a = entry.info as AssistantMessage;
     if (a.mode !== 'subagent') continue;
     const children = map.get(a.parentID);
-    if (children) children.push(entry as { info: AssistantMessage; parts: Part[] });
-    else map.set(a.parentID, [entry as { info: AssistantMessage; parts: Part[] }]);
+    if (children) children.push(entry as MessageEntry<AssistantMessage>);
+    else map.set(a.parentID, [entry as MessageEntry<AssistantMessage>]);
   }
   for (const children of map.values()) {
     children.sort((a, b) => a.info.time.created - b.info.time.created);

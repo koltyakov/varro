@@ -230,6 +230,39 @@ describe('session-lifecycle helpers', () => {
     ).toBe('other');
   });
 
+  it.each([
+    {
+      name: 'traverses descendants of a missing root in deletion order',
+      rootId: 'missing',
+      sessions: [
+        session('first', '/repo', 0, 'missing'),
+        session('second', '/repo', 0, 'missing'),
+        session('first-leaf', '/repo', 0, 'first'),
+        session('second-leaf', '/repo', 0, 'second'),
+      ],
+      expected: ['missing', 'second', 'second-leaf', 'first', 'first-leaf'],
+    },
+    {
+      name: 'terminates cycles and visits each ID once',
+      rootId: 'a',
+      sessions: [session('a', '/repo', 0, 'b'), session('b', '/repo', 0, 'a')],
+      expected: ['a', 'b'],
+    },
+    {
+      name: 'deduplicates duplicate session IDs',
+      rootId: 'root',
+      sessions: [
+        session('root'),
+        session('child', '/repo', 0, 'root'),
+        session('child', '/repo', 0, 'root'),
+        session('leaf', '/repo', 0, 'child'),
+      ],
+      expected: ['root', 'child', 'leaf'],
+    },
+  ])('$name', ({ rootId, sessions, expected }) => {
+    expect([...getDeletedSessionTreeIds(rootId, sessions)]).toEqual(expected);
+  });
+
   it('clears per-session state on permanent deletion', () => {
     const setup = createDeps({ activeSessionId: 'session-1', sessions: [session('session-1')] });
 

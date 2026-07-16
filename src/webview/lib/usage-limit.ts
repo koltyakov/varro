@@ -1,5 +1,5 @@
 import type { ProviderLimitStatus, ProviderLimitUnit } from '../../shared/protocol';
-import type { Message, Part, SessionStatus } from '../types';
+import type { MessageEntry, SessionStatus } from '../types';
 
 export type UsageLimitNotice = {
   source: 'status' | 'message' | 'retry-part';
@@ -51,7 +51,7 @@ export function parseUsageLimitNotice(
 export function deriveUsageLimitNotice(params: {
   sessionID: string | null | undefined;
   status: SessionStatus | null | undefined;
-  messages: Array<{ info: Message; parts: Part[] }>;
+  messages: MessageEntry[];
 }): UsageLimitNotice | null {
   const sessionID = params.sessionID;
   if (!sessionID) return null;

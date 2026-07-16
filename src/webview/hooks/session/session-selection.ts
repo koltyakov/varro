@@ -5,9 +5,7 @@ import {
   latestAssistantFinished,
   latestAssistantFinishedBeforeLoading,
 } from '../../lib/message-metrics';
-import type { Message, Part, Session, SessionStatus } from '../../types';
-
-type SessionEntry = { info: Message; parts: Part[] };
+import type { MessageEntry, Session, SessionStatus } from '../../types';
 
 type SessionSelectionDeps = {
   getActiveSessionId(): string | null;
@@ -31,18 +29,18 @@ type SessionSelectionDeps = {
   syncSessionMcps(sessionId: string): Promise<void>;
   resetTodoSync(): void;
   clearMessages(): void;
-  loadSession(id: string): Promise<{ session: Session; messages: SessionEntry[] }>;
+  loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
   setMessagesIncremental(
-    messages: SessionEntry[],
+    messages: MessageEntry[],
     options?: { preserveExtraParts?: boolean }
   ): void;
-  syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
+  syncFailedSessionsFromMessages(messages: MessageEntry[]): void;
   requestMessageListScrollToBottom(): void;
-  deriveSelectedAgentFromMessages(messages: SessionEntry[]): string | null;
-  deriveSelectedModelFromMessages(messages: SessionEntry[]): SelectedModel | null;
-  syncTodosForSession(sessionId: string, messages: SessionEntry[]): Promise<void>;
+  deriveSelectedAgentFromMessages(messages: MessageEntry[]): string | null;
+  deriveSelectedModelFromMessages(messages: MessageEntry[]): SelectedModel | null;
+  syncTodosForSession(sessionId: string, messages: MessageEntry[]): Promise<void>;
   loadQuestions(): Promise<void>;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   mergeSessionStatuses(
@@ -52,7 +50,7 @@ type SessionSelectionDeps = {
   updateUsageLimitState(
     sessionId: string,
     status: SessionStatus | null | undefined,
-    messages: SessionEntry[]
+    messages: MessageEntry[]
   ): void;
   startLoading(): void;
   stopLoading(): void;
@@ -97,7 +95,7 @@ export async function selectSessionWithDependencies(
 
   const mcpSync = deps.syncSessionMcps(id).catch(() => {});
 
-  let loaded: { session: Session; messages: SessionEntry[] };
+  let loaded: { session: Session; messages: MessageEntry[] };
   try {
     loaded = await deps.loadSession(id);
   } catch {
@@ -161,20 +159,20 @@ export async function syncSessionMessagesWithDependencies(
     getActiveSessionId(): string | null;
     getSessionStatus(sessionId: string): SessionStatus | null | undefined;
     loadingStartedAt(): number | null;
-    loadSessionMessages(sessionId: string): Promise<SessionEntry[]>;
+    loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
     updateUsageLimitState(
       sessionId: string,
       status: SessionStatus | null | undefined,
-      messages: SessionEntry[]
+      messages: MessageEntry[]
     ): void;
     setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
     setMessagesIncremental(
-      messages: SessionEntry[],
+      messages: MessageEntry[],
       options?: { preserveExtraParts?: boolean }
     ): void;
     stopLoading(): void;
-    syncFailedSessionsFromMessages(messages: SessionEntry[]): void;
-    handoffTodosToMessages(messages: SessionEntry[]): void;
+    syncFailedSessionsFromMessages(messages: MessageEntry[]): void;
+    handoffTodosToMessages(messages: MessageEntry[]): void;
   },
   generationRef: { next(): number; isCurrent(generation: number): boolean },
   sessionId: string

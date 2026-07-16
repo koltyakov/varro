@@ -4,7 +4,7 @@ import {
   getSessionTreeRootId,
 } from '../../lib/state';
 import { shouldShowAssistantPartInline } from '../../lib/part-utils';
-import type { Message, Part, Permission, QuestionRequest } from '../../types';
+import type { MessageEntry, Permission, QuestionRequest } from '../../types';
 
 function getLinkedToolCallKey(
   sessionId: string,
@@ -16,7 +16,7 @@ function getLinkedToolCallKey(
   return `${sessionId}\u0000${messageId}\u0000${callId}`;
 }
 
-export function getLinkedToolCallKeys(messages: Array<{ info: Message; parts: Part[] }>) {
+export function getLinkedToolCallKeys(messages: MessageEntry[]) {
   const keys = new Set<string>();
 
   for (const entry of messages) {
@@ -51,7 +51,7 @@ function hasLinkedToolCall(
 }
 
 export function getStandalonePermissionPrompts(
-  messages: Array<{ info: Message; parts: Part[] }>,
+  messages: MessageEntry[],
   permissions: Permission[],
   activeSessionId: string | null,
   linkedToolCalls = getLinkedToolCallKeys(messages)
@@ -71,7 +71,7 @@ export function getStandalonePermissionPrompts(
 }
 
 export function getStandaloneQuestionPrompts(
-  messages: Array<{ info: Message; parts: Part[] }>,
+  messages: MessageEntry[],
   questions: QuestionRequest[],
   activeSessionId: string | null,
   linkedToolCalls = getLinkedToolCallKeys(messages)

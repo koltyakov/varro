@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { parseExtensionMessage } from './extension-message';
-import { parseServerEvent, type ExtensionMessage } from './protocol';
+import { isPermissionMode, parseServerEvent, type ExtensionMessage } from './protocol';
 
 describe('protocol parsers', () => {
+  it('recognizes only supported permission modes', () => {
+    expect(['default', 'auto', 'full'].every(isPermissionMode)).toBe(true);
+    expect(['', 'Default', 'ask', null, undefined].some(isPermissionMode)).toBe(false);
+  });
+
   it('validator round-trips a server/status running payload', () => {
     const msg: ExtensionMessage = {
       type: 'server/status',

@@ -1,9 +1,8 @@
 import { createSignal } from 'solid-js';
-import type { Message, Part } from '../types';
+import type { MessageEntry } from '../types';
 
 export const MESSAGE_HISTORY_WINDOW = 50;
 
-type MessageEntry = { info: Message; parts: Part[] };
 type HistoryPage = MessageEntry[] & { nextCursor?: string };
 
 const [truncatedSessionIds, setTruncatedSessionIds] = createSignal<ReadonlySet<string>>(

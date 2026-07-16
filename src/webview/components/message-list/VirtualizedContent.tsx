@@ -1,11 +1,11 @@
 import { For, Show, createMemo } from 'solid-js';
-import type { Message, Part } from '../../types';
+import type { MessageEntry } from '../../types';
 import type { VisibleRange } from './virtualization';
 import { MessageRow, type MessageRowSharedProps } from './MessageRows';
 
 export function VirtualizedContent(
   props: {
-    messages: Array<{ info: Message; parts: Part[] }>;
+    messages: MessageEntry[];
     visibleRange?: Partial<VisibleRange>;
     outerListVirtualized?: boolean;
   } & MessageRowSharedProps

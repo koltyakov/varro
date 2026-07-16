@@ -2,8 +2,7 @@ import { apiCall, onMessage, postMessage } from './bridge';
 import { validateFileDiffs } from './validate-diffs';
 import type {
   Session,
-  Message,
-  Part,
+  MessageEntry,
   SessionStatus,
   Agent,
   Command,
@@ -28,29 +27,14 @@ import type {
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
 import { buildVarroSessionEndpoint, VARRO_API_ENDPOINTS } from '../../shared/protocol';
+import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
 import type {
   ProviderAuthAuthorization,
   ProviderAuthMethodsByProvider,
   WorkspaceStatusEntry,
 } from '../../shared/opencode-types';
 
-type RecycleBinSessionRecord = {
-  id: string;
-  projectID: string;
-  directory: string;
-  parentID?: string;
-  summary?: {
-    additions: number;
-    deletions: number;
-    files: number;
-  };
-  title: string;
-  version: string;
-  time: { created: number; updated: number; compacting?: number };
-};
-
-type SessionMessageEntry = { info: Message; parts: Part[] };
-export type SessionMessagePage = SessionMessageEntry[] & { nextCursor?: string };
+export type SessionMessagePage = MessageEntry[] & { nextCursor?: string };
 
 export const client = {
   async health(): Promise<{ healthy: boolean; version: string }> {
@@ -108,7 +92,7 @@ export const client = {
       if (options?.before) params.set('before', options.before);
       const query = params.size > 0 ? `?${params.toString()}` : '';
       const response = await apiCall<
-        SessionMessageEntry[] | { items: SessionMessageEntry[]; nextCursor?: string }
+        MessageEntry[] | { items: MessageEntry[]; nextCursor?: string }
       >('GET', `/session/${id}/message${query}`);
       if (Array.isArray(response)) return response;
       const items = response.items as SessionMessagePage;
@@ -174,7 +158,7 @@ export const client = {
         agent?: string;
         model?: string;
       }
-    ): Promise<{ info: Message; parts: Part[] }> {
+    ): Promise<MessageEntry> {
       return apiCall('POST', `/session/${id}/command`, body);
     },
   },
@@ -375,76 +359,6 @@ function getSharedQuestionList(): Promise<QuestionRequest[]> {
 
 function getSharedPermissionList(): Promise<unknown[]> {
   return sharedRequest(permissionListSlot, () => apiCall<unknown[]>('GET', '/permission'));
-}
-
-function normalizeRecycleBinEntries(value: unknown): RecycleBinEntry[] {
-  if (!Array.isArray(value)) return [];
-  return value.map(normalizeRecycleBinEntry).filter((entry): entry is RecycleBinEntry => !!entry);
-}
-
-function normalizeRecycleBinEntry(value: unknown): RecycleBinEntry | null {
-  const record = asRecord(value);
-  if (!record) return null;
-
-  const rootID = typeof record.rootID === 'string' ? record.rootID : null;
-  const deletedAt = typeof record.deletedAt === 'number' ? record.deletedAt : null;
-  const expiresAt = typeof record.expiresAt === 'number' ? record.expiresAt : null;
-  const root = normalizeRecycleBinSession(record.root);
-  const sessions = Array.isArray(record.sessions)
-    ? record.sessions
-        .map(normalizeRecycleBinSession)
-        .filter((session): session is RecycleBinSessionRecord => !!session)
-    : [];
-
-  if (!rootID || deletedAt === null || expiresAt === null || !root || sessions.length === 0) {
-    return null;
-  }
-
-  return { rootID, deletedAt, expiresAt, root, sessions };
-}
-
-function normalizeRecycleBinSession(value: unknown): RecycleBinSessionRecord | null {
-  const record = asRecord(value);
-  const time = asRecord(record?.time);
-  if (
-    !record ||
-    typeof record.id !== 'string' ||
-    typeof record.projectID !== 'string' ||
-    typeof record.directory !== 'string' ||
-    typeof record.title !== 'string' ||
-    typeof record.version !== 'string' ||
-    typeof time?.created !== 'number' ||
-    typeof time.updated !== 'number'
-  ) {
-    return null;
-  }
-
-  const summary = asRecord(record.summary);
-  return {
-    id: record.id,
-    projectID: record.projectID,
-    directory: record.directory,
-    ...(typeof record.parentID === 'string' ? { parentID: record.parentID } : {}),
-    ...(summary &&
-    typeof summary.additions === 'number' &&
-    typeof summary.deletions === 'number' &&
-    typeof summary.files === 'number'
-      ? {
-          summary: {
-            additions: summary.additions,
-            deletions: summary.deletions,
-            files: summary.files,
-          },
-        }
-      : {}),
-    title: record.title,
-    version: record.version,
-    time: {
-      created: time.created,
-      updated: time.updated,
-      ...(typeof time.compacting === 'number' ? { compacting: time.compacting } : {}),
-    },
-  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

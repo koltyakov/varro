@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AssistantMessage, FileDiff, Message, Part, Provider } from '../types';
+import type { AssistantMessage, FileDiff, Message, MessageEntry, Part, Provider } from '../types';
 import {
   getAssistantDiffRequest,
   formatCost,
@@ -18,7 +18,6 @@ import {
   latestAssistantFinishedBeforeLoading,
   sumAssistantTokens,
   sumSessionCost,
-  type MessageEntry,
 } from './message-metrics';
 
 function assistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantMessage {

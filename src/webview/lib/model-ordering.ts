@@ -18,14 +18,8 @@ function gptModelTier(model: ProviderModel) {
   return tier >= 0 ? tier : null;
 }
 
-export function sortProviderModels(
-  models: readonly ProviderModel[],
-  defaultModelID?: string
-): ProviderModel[] {
+export function sortProviderModels(models: readonly ProviderModel[]): ProviderModel[] {
   return models.toSorted((a, b) => {
-    const defaultOrder = Number(b.id === defaultModelID) - Number(a.id === defaultModelID);
-    if (defaultOrder !== 0) return defaultOrder;
-
     const deprecatedOrder = Number(a.status === 'deprecated') - Number(b.status === 'deprecated');
     if (deprecatedOrder !== 0) return deprecatedOrder;
 

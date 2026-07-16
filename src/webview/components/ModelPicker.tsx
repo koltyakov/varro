@@ -60,10 +60,7 @@ export function ModelPicker(props: {
     visibleProviders().map((provider) => ({
       provider,
       searchText: `${provider.name}\n${provider.id}`.toLocaleLowerCase(),
-      models: sortProviderModels(
-        Object.values(provider.models),
-        state.providerDefaults[provider.id]
-      ).map((model) => ({
+      models: sortProviderModels(Object.values(provider.models)).map((model) => ({
         item: {
           providerID: provider.id,
           modelID: model.id,

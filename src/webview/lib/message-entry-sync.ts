@@ -1,6 +1,4 @@
-import type { Message, Part } from '../types';
-
-export type MessageEntry = { info: Message; parts: Part[] };
+import type { MessageEntry } from '../types';
 
 export function getSharedMessagePrefixLength(current: MessageEntry[], incoming: MessageEntry[]) {
   const minLen = Math.min(current.length, incoming.length);

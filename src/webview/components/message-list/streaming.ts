@@ -1,5 +1,5 @@
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../../lib/part-utils';
-import type { Message, Part } from '../../types';
+import type { MessageEntry, Part } from '../../types';
 
 export function hasVisibleBlockingStreamingPart(part: Part | null, streamingText: string) {
   if (!part) return false;
@@ -16,10 +16,7 @@ export function hasVisibleBlockingStreamingPart(part: Part | null, streamingText
   return shouldShowAssistantPartInline(part);
 }
 
-export function findStreamingPart(
-  messages: Array<{ info: Message; parts: Part[] }>,
-  streamingPartId: string | null
-) {
+export function findStreamingPart(messages: MessageEntry[], streamingPartId: string | null) {
   if (!streamingPartId) return null;
   for (const message of messages) {
     for (const part of message.parts) {
@@ -32,7 +29,7 @@ export function findStreamingPart(
 }
 
 export function hasCommittedVisibleTextAsLastPart(
-  messages: Array<{ info: Message; parts: Part[] }>,
+  messages: MessageEntry[],
   streamingPartId: string | null,
   loadingStartedAt: number | null
 ): boolean {

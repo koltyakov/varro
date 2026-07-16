@@ -80,7 +80,7 @@ describe('ModelPicker', () => {
     expect(container?.querySelector('.model-expanded-meta')).toBeNull();
   });
 
-  it('shows the provider default first and newer models before older models', async () => {
+  it('orders models by release date without prioritizing the provider default', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
         older: createModel('older', 'Older', { release_date: '2025-01-01' }),
@@ -97,7 +97,7 @@ describe('ModelPicker', () => {
       Array.from(container?.querySelectorAll('.dropdown-name') ?? []).map((item) =>
         item.textContent?.trim()
       )
-    ).toEqual(['Default', 'Newer', 'Older']);
+    ).toEqual(['Newer', 'Older', 'Default']);
   });
 
   it('shows search only when more than ten models are visible and filters by provider or model query', async () => {
