@@ -412,6 +412,45 @@ describe('calculateAssistantPartVirtualRange', () => {
       bottomPad: 0,
     });
   });
+
+  it('includes flex gaps in spacer heights when the rendered range changes', () => {
+    const itemKeys = ['part-1', 'part-2', 'part-3', 'part-4', 'part-5'];
+    const measuredHeights = new Map(itemKeys.map((key) => [key, 100]));
+    const itemGap = 10;
+    const first = calculateAssistantPartVirtualRange({
+      itemKeys,
+      measuredHeights,
+      scrollTop: 230,
+      viewportHeight: 100,
+      defaultItemHeight: 100,
+      overscan: 0,
+      itemGap,
+    });
+    const second = calculateAssistantPartVirtualRange({
+      itemKeys,
+      measuredHeights,
+      scrollTop: 340,
+      viewportHeight: 100,
+      defaultItemHeight: 100,
+      overscan: 0,
+      itemGap,
+    });
+    const renderedHeight = (range: typeof first) => {
+      const renderedItems = range.end - range.start;
+      const spacerCount = Number(range.topPad > 0) + Number(range.bottomPad > 0);
+      return (
+        range.topPad +
+        range.bottomPad +
+        renderedItems * 100 +
+        Math.max(0, renderedItems + spacerCount - 1) * itemGap
+      );
+    };
+
+    expect(first).toEqual({ start: 2, end: 4, topPad: 210, bottomPad: 100 });
+    expect(second).toEqual({ start: 3, end: 5, topPad: 320, bottomPad: 0 });
+    expect(renderedHeight(first)).toBe(540);
+    expect(renderedHeight(second)).toBe(540);
+  });
 });
 
 describe('Message user prompt rendering', () => {

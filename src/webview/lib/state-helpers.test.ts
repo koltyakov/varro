@@ -108,6 +108,170 @@ describe('state helpers', () => {
     expect(stateModule.loadingLastActivityAt()).toBeNull();
   });
 
+  it('replaces queued messages without changing their position', async () => {
+    const stateModule = await loadState();
+
+    stateModule.enqueueMessage({ id: 'q1', sessionId: 'session-1', text: 'first' });
+    stateModule.enqueueMessage({ id: 'other', sessionId: 'session-2', text: 'other' });
+    stateModule.enqueueMessage({ id: 'q2', sessionId: 'session-1', text: 'second' });
+
+    expect(
+      stateModule.replaceQueuedMessage('q2', {
+        id: 'q2-edited',
+        sessionId: 'session-1',
+        text: 'second edited',
+      })
+    ).toBe(true);
+
+    expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual([
+      'q1',
+      'other',
+      'q2-edited',
+    ]);
+    expect(stateModule.replaceQueuedMessage('missing', stateModule.state.queuedMessages[0]!)).toBe(
+      false
+    );
+  });
+
+  it('persists queued messages and restores their session-aware order', async () => {
+    let stateModule = await loadState();
+
+    stateModule.enqueueMessage({
+      id: 'q1',
+      sessionId: 'session-1',
+      text: 'first',
+      droppedFiles: [
+        {
+          path: '/repo/src/a.ts',
+          relativePath: 'src/a.ts',
+          type: 'file',
+          attachmentSequence: 2,
+          lineRanges: [{ startLine: 2, endLine: 4 }],
+        },
+      ],
+      clipboardImages: [
+        {
+          id: 'img-1',
+          url: 'data:image/png;base64,AA==',
+          mime: 'image/png',
+          filename: 'img.png',
+          size: 1,
+          contentKey: 'image-content',
+          attachmentSequence: 3,
+        },
+      ],
+      terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+    });
+    stateModule.enqueueMessage({ id: 'other', sessionId: 'session-2', text: 'other' });
+    stateModule.enqueueMessage({ id: 'q2', sessionId: 'session-1', text: 'second' });
+
+    stateModule.reorderQueuedMessage('q2', 'q1');
+    stateModule.reorderQueuedMessage('q2', 'other');
+
+    expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'other', 'q1']);
+    expect(
+      JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]').map(
+        (item: { id: string }) => item.id
+      )
+    ).toEqual(['q2', 'other', 'q1']);
+
+    vi.resetModules();
+    stateModule = await loadState();
+
+    expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'other', 'q1']);
+    expect(stateModule.state.queuedMessages[2]).toEqual({
+      id: 'q1',
+      sessionId: 'session-1',
+      text: 'first',
+      droppedFiles: [
+        {
+          path: '/repo/src/a.ts',
+          relativePath: 'src/a.ts',
+          type: 'file',
+          attachmentSequence: 2,
+          lineRanges: [{ startLine: 2, endLine: 4 }],
+        },
+      ],
+      clipboardImages: [
+        {
+          id: 'img-1',
+          url: 'data:image/png;base64,AA==',
+          mime: 'image/png',
+          filename: 'img.png',
+          size: 1,
+          contentKey: 'image-content',
+          attachmentSequence: 3,
+        },
+      ],
+      terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+    });
+
+    stateModule.removeQueuedMessage('q2');
+    stateModule.clearQueuedMessagesForSession('session-1');
+    expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['other']);
+    expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([
+      {
+        id: 'other',
+        sessionId: 'session-2',
+        text: 'other',
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    ]);
+  });
+
+  it('discards malformed persisted queued messages', async () => {
+    window.localStorage.setItem(
+      'varro.queuedMessages',
+      JSON.stringify([
+        {
+          id: 'valid',
+          sessionId: 'session-1',
+          text: 'keep',
+          droppedFiles: [
+            { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+            { path: '/repo/b.ts', relativePath: 'b.ts', type: 'other' },
+          ],
+          clipboardImages: [
+            {
+              id: 'img-1',
+              url: 'data:image/png;base64,AA==',
+              mime: 'image/png',
+              filename: 'img.png',
+              size: 1,
+            },
+            { id: 'broken-image' },
+          ],
+        },
+        { id: 'valid', sessionId: 'session-1', text: 'duplicate' },
+        { id: '', sessionId: 'session-1', text: 'missing id' },
+        { id: 'empty', sessionId: 'session-1', text: '' },
+      ])
+    );
+
+    const stateModule = await loadState();
+
+    expect(stateModule.state.queuedMessages).toEqual([
+      {
+        id: 'valid',
+        sessionId: 'session-1',
+        text: 'keep',
+        droppedFiles: [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }],
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            filename: 'img.png',
+            size: 1,
+          },
+        ],
+        terminalSelection: null,
+      },
+    ]);
+  });
+
   it('persists active session state and unread markers', async () => {
     const stateModule = await loadState();
     vi.spyOn(Date, 'now').mockReturnValue(1_000);

@@ -8,6 +8,7 @@ import { ChatInput, sendDroppedContent } from './ChatInput';
 import {
   state,
   inputText,
+  setConnectionInitialized,
   setIsLoading,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
@@ -117,6 +118,7 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   } as typeof ResizeObserver;
+  setConnectionInitialized(true);
 });
 
 afterEach(() => {
@@ -127,6 +129,7 @@ afterEach(() => {
   container = null;
   globalThis.ResizeObserver = originalResizeObserver;
   setInputText('');
+  setConnectionInitialized(false);
   setIsLoading(false);
   setProviderLimitPollIntervalSeconds(120);
   setProviderLimitThresholdPercent(40);
@@ -253,6 +256,31 @@ async function flushAsyncWork(count = 4) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
   }
+}
+
+function createDragDataTransfer() {
+  const values = new Map<string, string>();
+  const types: string[] = [];
+  return {
+    types,
+    effectAllowed: 'uninitialized',
+    dropEffect: 'none',
+    setData(type: string, value: string) {
+      values.set(type, value);
+      if (!types.includes(type)) types.push(type);
+    },
+    getData(type: string) {
+      return values.get(type) ?? '';
+    },
+    setDragImage: vi.fn(),
+  } as unknown as DataTransfer;
+}
+
+function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTransfer) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+  target.dispatchEvent(event);
+  return event;
 }
 
 function emitServerEvent(type: string, properties: Record<string, unknown>) {
@@ -1182,6 +1210,219 @@ describe('ChatInput', () => {
     const meta = container?.querySelector('.chat-queue-meta');
     expect(meta?.textContent).toContain('2');
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
+  });
+
+  it('reorders queued rows by dragging the left handle without showing the file-drop overlay', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+      { id: 'q3', sessionId: 'session-1', text: 'third' },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const handles = container!.querySelectorAll<HTMLButtonElement>(
+      '[aria-label^="Reorder queued message:"]'
+    );
+    const rows = container!.querySelectorAll<HTMLElement>('.chat-queue-item');
+    const dataTransfer = createDragDataTransfer();
+
+    expect(handles[0]?.draggable).toBe(true);
+    dispatchDragEvent(handles[0]!, 'dragstart', dataTransfer);
+    dispatchDragEvent(rows[1]!, 'dragover', dataTransfer);
+
+    expect(rows[0]?.classList.contains('is-dragging')).toBe(true);
+    expect(rows[1]?.classList.contains('is-drag-over')).toBe(true);
+    expect(document.querySelector('.chat-drop-overlay')).toBeNull();
+
+    dispatchDragEvent(rows[1]!, 'drop', dataTransfer);
+    dispatchDragEvent(handles[0]!, 'dragend', dataTransfer);
+
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'q1', 'q3']);
+    expect(
+      [...container!.querySelectorAll('.chat-queue-label')].map((item) => item.textContent)
+    ).toEqual(['second', 'first', 'third']);
+  });
+
+  it('keeps an edited queue row visible and cancels editing from the row', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Revise this follow-up',
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            filename: 'img.png',
+            size: 1,
+          },
+        ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Edit queued message"]'
+    );
+    expect(editButton?.disabled).toBe(false);
+    editButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(inputText()).toBe('Revise this follow-up');
+    expect(state.droppedFiles).toEqual([
+      { path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
+    ]);
+    expect(state.clipboardImages).toEqual([
+      {
+        id: 'img-1',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'img.png',
+        size: 1,
+      },
+    ]);
+    expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1']);
+    expect(container?.querySelector('.chat-queue-item.is-editing')).not.toBeNull();
+    expect(container?.querySelector('.chat-queue-editing-label')?.textContent).toBe('Editing');
+    const cancelButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Cancel queued message edit"]'
+    );
+    expect(cancelButton?.disabled).toBe(false);
+
+    cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(inputText()).toBe('');
+    expect(state.droppedFiles).toEqual([]);
+    expect(state.clipboardImages).toEqual([]);
+    expect(state.terminalSelection).toBeNull();
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1']);
+    expect(container?.querySelector('.chat-queue-item.is-editing')).toBeNull();
+    expect(container?.querySelector('[aria-label="Edit queued message"]')).not.toBeNull();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('requeues an edited message at its original position', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+      { id: 'q3', sessionId: 'session-1', text: 'third' },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelectorAll<HTMLButtonElement>('[aria-label="Edit queued message"]')[1]
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setInputText('second edited');
+    await flushAsyncWork();
+    const queueButton = container?.querySelector<HTMLButtonElement>(
+      '[title="Add to queue (Enter)"]'
+    );
+    expect(queueButton).not.toBeNull();
+    expect(inputText()).toBe('second edited');
+    expect(queueButton?.disabled).toBe(false);
+    queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.queuedMessages.map((item) => item.text)).toEqual([
+      'first',
+      'second edited',
+      'third',
+    ]);
+    expect(state.queuedMessages[0]?.id).toBe('q1');
+    expect(state.queuedMessages[2]?.id).toBe('q3');
+  });
+
+  it('pauses automatic queue dispatch while a queued message is being edited', async () => {
+    vi.useFakeTimers();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setIsLoading(false);
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Cancel queued message edit"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('first', {
+      queuedAttachments: {
+        droppedFiles: undefined,
+        clipboardImages: undefined,
+        terminalSelection: undefined,
+      },
+      preserveComposer: true,
+    });
+  });
+
+  it('does not overwrite existing composer content when editing a queued message', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setInputText('Keep this draft');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Queued follow-up' }]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Edit queued message"]'
+    );
+    expect(editButton?.disabled).toBe(true);
+    editButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(inputText()).toBe('Keep this draft');
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1']);
+  });
+
+  it('waits for connection initialization before dispatching a restored queue', async () => {
+    vi.useFakeTimers();
+    setConnectionInitialized(false);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'restored follow-up' }]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    setConnectionInitialized(true);
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('restored follow-up', {
+      queuedAttachments: {
+        droppedFiles: undefined,
+        clipboardImages: undefined,
+        terminalSelection: undefined,
+      },
+      preserveComposer: true,
+    });
   });
 
   it('retains a failed automatic queue item and its attachments until an explicit retry', async () => {

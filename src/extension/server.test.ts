@@ -597,6 +597,10 @@ describe('OpenCodeServer compaction config injection', () => {
     } as never);
 
     const api = server as unknown as {
+      processManager: {
+        ownershipLeaseCandidate: unknown;
+        port: number;
+      };
       readHealthInfo: ReturnType<typeof vi.fn>;
       readInstalledCliVersion: ReturnType<typeof vi.fn>;
       pollHealth: (
@@ -607,6 +611,9 @@ describe('OpenCodeServer compaction config injection', () => {
         attempt?: number
       ) => void;
     };
+    // Do not let a lease from a concurrently running extension redirect this config-only test.
+    api.processManager.ownershipLeaseCandidate = null;
+    api.processManager.port = 4096;
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
     api.readInstalledCliVersion = vi.fn().mockResolvedValue(MINIMUM_SUPPORTED_OPENCODE_VERSION);
     api.pollHealth = (_startAttemptId, _disposeGeneration, resolve) => {

@@ -33,6 +33,8 @@ import {
   clearContextFiles,
   removeContextFile,
   enqueueMessage,
+  reorderQueuedMessage,
+  replaceQueuedMessage,
   removeQueuedMessage,
   getPermissionModeForSession,
   error,
@@ -51,6 +53,7 @@ import {
   providerLimitPollIntervalSeconds,
   replaceClipboardImages,
   replaceContextFiles,
+  connectionInitialized,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { client, serverEvents } from '../lib/client';
@@ -120,7 +123,11 @@ import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import { RichComposerArea, type RichComposerChip } from './chat-input/RichComposerArea';
 import { DropOverlay } from './chat-input/DropOverlay';
-import { QueuedMessages } from './chat-input/QueuedMessages';
+import {
+  QUEUED_MESSAGE_DRAG_TYPE,
+  QueuedMessages,
+  type QueuedMessageItem,
+} from './chat-input/QueuedMessages';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import type {
   DroppedFile,
@@ -211,6 +218,19 @@ function composerTerminalSelection() {
 
 function composerActiveFile() {
   return state.editorContext.activeFile;
+}
+
+function canEditQueuedMessage() {
+  return (
+    inputText().length === 0 &&
+    state.droppedFiles.length === 0 &&
+    state.clipboardImages.length === 0 &&
+    !state.terminalSelection
+  );
+}
+
+function isQueuedMessageDrag(event: DragEvent) {
+  return Array.from(event.dataTransfer?.types ?? []).includes(QUEUED_MESSAGE_DRAG_TYPE);
 }
 
 function activeContextEnabled(sessionId?: string | null) {
@@ -351,8 +371,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
   const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
+  const [queuedMessageEdit, setQueuedMessageEdit] = createSignal<{
+    id: string;
+    sessionId: string;
+  } | null>(null);
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
   const composerHasActivePermission = () => !props.newSession && hasActivePermission();
+
+  createEffect(() => {
+    const queuedEdit = queuedMessageEdit();
+    if (!queuedEdit) return;
+    if (composerSessionId() !== queuedEdit.sessionId) cancelQueuedMessageEdit();
+    else if (composerEditingMessage()) setQueuedMessageEdit(null);
+  });
 
   type PopupKind =
     | 'agent'
@@ -1104,6 +1135,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     const text = inputText();
+    const queuedEdit = queuedMessageEdit();
     const sendableText = getSendableInputText(text);
     const hasSendableImages = hasSendableClipboardImages();
     if (
@@ -1160,7 +1192,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     if (mode !== 'queue' && !hasQueuedAttachments) {
       const ranSlashCommand = await runSlashCommand(text);
-      if (ranSlashCommand) return;
+      if (ranSlashCommand) {
+        if (queuedEdit) removeQueuedMessage(queuedEdit.id);
+        setQueuedMessageEdit(null);
+        return;
+      }
     }
 
     if (
@@ -1173,14 +1209,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (sendableText.trim() || hasQueuedAttachments)
     ) {
       requestMessageListScrollToBottom();
-      enqueueMessage({
+      const sessionId = composerSessionId()!;
+      const message = {
         id: createAttachmentID(),
-        sessionId: composerSessionId()!,
+        sessionId,
         text: sendableText,
         droppedFiles: queuedAttachments.droppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
         terminalSelection: queuedAttachments.terminalSelection,
-      });
+      };
+      const replaced =
+        queuedEdit?.sessionId === sessionId && replaceQueuedMessage(queuedEdit.id, message);
+      if (!replaced) enqueueMessage(message);
+      setQueuedMessageEdit(null);
       setHistoryIndex(null);
       setHistoryDraft('');
       setCompletionIndex(0);
@@ -1201,7 +1242,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setInputText('');
     resetPastedImageIndex();
     clearUsageLimitsForSessionTree(composerSessionId());
-    await sendMessage(
+    const sent = await sendMessage(
       text,
       mode === 'steer'
         ? { delivery: 'steer' }
@@ -1210,6 +1251,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             ...(props.newSession ? { queuedAttachments } : {}),
           }
     );
+    if (sent) {
+      if (queuedEdit) removeQueuedMessage(queuedEdit.id);
+      setQueuedMessageEdit(null);
+    }
     if (error() && error() !== prevError) {
       setInputText(text);
     }
@@ -1263,6 +1308,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
   createEffect(() => {
     const sessionId = composerSessionId();
+    const initialized = connectionInitialized();
     const loading = isComposerBusy();
     const activeQuestion = composerHasActiveQuestion();
     const activePermission = composerHasActivePermission();
@@ -1270,6 +1316,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const failedSteerIds = failedSteerQueuedMessageIds();
     const dispatchingId = dispatchingQueuedMessageId();
     const failedIds = failedQueuedMessageIds();
+    const queuedEdit = queuedMessageEdit();
     const hasSteeringQueued = state.queuedMessages.some(
       (item) => item.sessionId === sessionId && steeringIds.has(item.id)
     );
@@ -1282,10 +1329,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       queueDispatchTimer = 0;
     }
     if (
+      !initialized ||
       !sessionId ||
       loading ||
       activeQuestion ||
       activePermission ||
+      queuedEdit?.sessionId === sessionId ||
       hasSteeringQueued ||
       dispatchingId ||
       !next ||
@@ -1294,7 +1343,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     queueDispatchTimer = setTimeout(() => {
       queueDispatchTimer = 0;
-      if (isComposerBusy() || composerHasActiveQuestion() || composerHasActivePermission()) return;
+      if (
+        !connectionInitialized() ||
+        isComposerBusy() ||
+        composerHasActiveQuestion() ||
+        composerHasActivePermission() ||
+        queuedMessageEdit()?.sessionId === composerSessionId()
+      )
+        return;
       const sid = composerSessionId();
       if (!sid) return;
       if (dispatchingQueuedMessageId()) return;
@@ -1346,6 +1402,51 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (richEditorRef) {
         richEditorRef.focus();
       }
+    });
+  }
+
+  function cancelQueuedMessageEdit() {
+    if (!queuedMessageEdit()) return;
+    batch(() => {
+      setQueuedMessageEdit(null);
+      setHistoryIndex(null);
+      setHistoryDraft('');
+      setCompletionIndex(0);
+      setSuppressCompletion(false);
+      clearContextFiles();
+      setState('terminalSelection', null);
+      clearClipboardImages();
+      resetPastedImageIndex();
+      setComposerValue('');
+    });
+    postMessage({ type: 'files/clear' });
+    postMessage({ type: 'terminal-selection/clear' });
+  }
+
+  function editQueuedMessage(item: QueuedMessageItem) {
+    const queued = state.queuedMessages.find((message) => message.id === item.id);
+    if (
+      !queued ||
+      queued.sessionId !== composerSessionId() ||
+      !canEditQueuedMessage() ||
+      dispatchingQueuedMessageId() === queued.id ||
+      steeringQueuedMessageIds().has(queued.id)
+    ) {
+      return;
+    }
+
+    batch(() => {
+      setHistoryIndex(null);
+      setHistoryDraft('');
+      setCompletionIndex(0);
+      setSuppressCompletion(false);
+      applyEditContext({
+        files: queued.droppedFiles ?? [],
+        images: queued.clipboardImages ?? [],
+        terminalSelection: queued.terminalSelection ?? null,
+      });
+      setQueuedMessageEdit({ id: queued.id, sessionId: queued.sessionId });
+      setComposerValue(queued.text);
     });
   }
 
@@ -1502,6 +1603,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function handleDrop(e: DragEvent) {
+    if (isQueuedMessageDrag(e)) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDraggingOver(false);
@@ -1689,6 +1791,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
 
     const beginDropTarget = (e: DragEvent) => {
+      if (isQueuedMessageDrag(e)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       setIsDraggingOver(true);
@@ -1701,12 +1804,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
 
     const handleWindowDrop = async (e: DragEvent) => {
+      if (isQueuedMessageDrag(e)) return;
       e.preventDefault();
       setIsDraggingOver(false);
       await handleDrop(e);
     };
 
     const handleWindowDragLeave = (e: DragEvent) => {
+      if (isQueuedMessageDrag(e)) return;
       if (e.relatedTarget) return;
       setIsDraggingOver(false);
     };
@@ -2234,8 +2339,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           failedDispatchItemIds={failedQueuedMessageIds()}
           steeringItemIds={steeringQueuedMessageIds()}
           failedSteerItemIds={failedSteerQueuedMessageIds()}
+          editingItemId={queuedMessageEdit()?.id}
+          canEdit={canEditQueuedMessage()}
           onRetryDispatch={(item) => void dispatchQueuedMessage(item, true)}
           onSendAsSteer={sendQueuedAsSteer}
+          onReorder={reorderQueuedMessage}
+          onEdit={editQueuedMessage}
+          onCancelEdit={cancelQueuedMessageEdit}
           onRemove={removeQueuedMessage}
         />
       </Show>
@@ -2338,18 +2448,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showAgentPicker() || showVariantPicker() || showMcpPicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
           onDragEnter={(e) => {
+            if (isQueuedMessageDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
             if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
             setIsDraggingOver(true);
           }}
           onDragOver={(e) => {
+            if (isQueuedMessageDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
             if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
             setIsDraggingOver(true);
           }}
           onDragLeave={(e) => {
+            if (isQueuedMessageDrag(e)) return;
             if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
             setIsDraggingOver(false);
           }}

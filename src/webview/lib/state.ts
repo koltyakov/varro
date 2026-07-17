@@ -243,6 +243,123 @@ function readStoredPermissionModes(key: string): Record<string, PermissionMode> 
   );
 }
 
+function normalizeStoredAttachmentSequence(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function normalizeStoredDroppedFile(value: unknown): DroppedFile | null {
+  const record = asStoredRecord(value);
+  const path = normalizeStoredString(record?.path);
+  const relativePath = normalizeStoredString(record?.relativePath);
+  if (!path || !relativePath || (record?.type !== 'file' && record?.type !== 'directory')) {
+    return null;
+  }
+
+  const file: DroppedFile = { path, relativePath, type: record.type };
+  if (Array.isArray(record.lineRanges)) {
+    file.lineRanges = record.lineRanges.flatMap((item) => {
+      const range = asStoredRecord(item);
+      const startLine = range?.startLine;
+      const endLine = range?.endLine;
+      return typeof startLine === 'number' &&
+        typeof endLine === 'number' &&
+        Number.isSafeInteger(startLine) &&
+        Number.isSafeInteger(endLine) &&
+        startLine >= 1 &&
+        endLine >= startLine
+        ? [{ startLine, endLine }]
+        : [];
+    });
+  }
+  const attachmentSequence = normalizeStoredAttachmentSequence(record.attachmentSequence);
+  if (attachmentSequence !== undefined) file.attachmentSequence = attachmentSequence;
+  return file;
+}
+
+function normalizeStoredClipboardImage(value: unknown): ClipboardImage | null {
+  const record = asStoredRecord(value);
+  const id = normalizeStoredString(record?.id);
+  const url = normalizeStoredString(record?.url);
+  const mime = normalizeStoredString(record?.mime);
+  const filename = normalizeStoredString(record?.filename);
+  const size = record?.size;
+  if (
+    !id ||
+    !url ||
+    !mime ||
+    !filename ||
+    typeof size !== 'number' ||
+    !Number.isFinite(size) ||
+    size < 0
+  ) {
+    return null;
+  }
+
+  const image: ClipboardImage = { id, url, mime, filename, size };
+  const contentKey = normalizeStoredString(record?.contentKey);
+  if (contentKey) image.contentKey = contentKey;
+  const attachmentSequence = normalizeStoredAttachmentSequence(record?.attachmentSequence);
+  if (attachmentSequence !== undefined) image.attachmentSequence = attachmentSequence;
+  return image;
+}
+
+function normalizeStoredTerminalSelection(value: unknown): QueuedMessage['terminalSelection'] {
+  const record = asStoredRecord(value);
+  if (typeof record?.text !== 'string' || typeof record.terminalName !== 'string') return null;
+  return { text: record.text, terminalName: record.terminalName };
+}
+
+function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
+  const record = asStoredRecord(value);
+  const id = normalizeStoredString(record?.id);
+  const sessionId = normalizeStoredString(record?.sessionId);
+  if (!id || !sessionId || typeof record?.text !== 'string') return null;
+
+  const droppedFiles = Array.isArray(record.droppedFiles)
+    ? record.droppedFiles
+        .map(normalizeStoredDroppedFile)
+        .filter((file): file is DroppedFile => file !== null)
+    : [];
+  const clipboardImages = Array.isArray(record.clipboardImages)
+    ? record.clipboardImages
+        .map(normalizeStoredClipboardImage)
+        .filter((image): image is ClipboardImage => image !== null)
+    : [];
+  const terminalSelection = normalizeStoredTerminalSelection(record.terminalSelection);
+  if (
+    record.text.trim().length === 0 &&
+    droppedFiles.length === 0 &&
+    clipboardImages.length === 0 &&
+    !terminalSelection
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    sessionId,
+    text: record.text,
+    droppedFiles,
+    clipboardImages,
+    terminalSelection,
+  };
+}
+
+function readStoredQueuedMessages(): QueuedMessage[] {
+  const value = readStored<unknown>(STORAGE_KEYS.queuedMessages);
+  if (!Array.isArray(value)) return [];
+
+  const ids = new Set<string>();
+  const messages: QueuedMessage[] = [];
+  for (const item of value) {
+    const message = normalizeStoredQueuedMessage(item);
+    if (!message || ids.has(message.id)) continue;
+    ids.add(message.id);
+    messages.push(message);
+  }
+  return messages;
+}
+
 function readStoredBoolean(key: string): boolean | null {
   const value = readStored<unknown>(key);
   return typeof value === 'boolean' ? value : null;
@@ -377,7 +494,7 @@ export function createAppState(): AppStateInstance {
     completedSessionResponses: initialCompletedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,
     compactingSessionIds: [],
-    queuedMessages: [],
+    queuedMessages: readStoredQueuedMessages(),
     failedSessionIds: [],
     sessionUsageLimits: {},
     interruptedSessionIds: initialWebviewState.interruptedSessionIds ?? [],
@@ -788,27 +905,58 @@ function normalizeInitialQuestions(values: unknown): QuestionRequest[] {
     .filter((item): item is QuestionRequest => item !== null);
 }
 
+function commitQueuedMessages(messages: QueuedMessage[]) {
+  setState('queuedMessages', messages);
+  writeStored(STORAGE_KEYS.queuedMessages, messages);
+}
+
 export function enqueueMessage(message: QueuedMessage) {
-  setState(
-    'queuedMessages',
-    produce((items) => {
-      items.push(message);
-    })
-  );
+  commitQueuedMessages([...state.queuedMessages, message]);
+}
+
+export function replaceQueuedMessage(id: string, message: QueuedMessage) {
+  const next = [...state.queuedMessages];
+  const index = next.findIndex((item) => item.id === id);
+  if (index === -1) return false;
+  next[index] = message;
+  commitQueuedMessages(next);
+  return true;
 }
 
 export function removeQueuedMessage(id: string) {
-  setState(
-    'queuedMessages',
-    produce((items) => {
-      const idx = items.findIndex((item) => item.id === id);
-      if (idx !== -1) items.splice(idx, 1);
-    })
+  const next = state.queuedMessages.filter((item) => item.id !== id);
+  if (next.length === state.queuedMessages.length) return;
+  commitQueuedMessages(next);
+}
+
+export function reorderQueuedMessage(id: string, targetId: string) {
+  if (id === targetId) return;
+  const message = state.queuedMessages.find((item) => item.id === id);
+  const target = state.queuedMessages.find((item) => item.id === targetId);
+  if (!message || !target || message.sessionId !== target.sessionId) return;
+
+  const sessionMessages = state.queuedMessages.filter(
+    (item) => item.sessionId === message.sessionId
   );
+  const sourceIndex = sessionMessages.findIndex((item) => item.id === id);
+  const targetIndex = sessionMessages.findIndex((item) => item.id === targetId);
+  const moved = sessionMessages[sourceIndex];
+  if (!moved || targetIndex === -1) return;
+
+  sessionMessages.splice(sourceIndex, 1);
+  sessionMessages.splice(targetIndex, 0, moved);
+  let sessionIndex = 0;
+  const next = state.queuedMessages.map((item) => {
+    if (item.sessionId !== message.sessionId) return item;
+    return sessionMessages[sessionIndex++] ?? item;
+  });
+  commitQueuedMessages(next);
 }
 
 export function clearQueuedMessagesForSession(sessionId: string) {
-  setState('queuedMessages', (items) => items.filter((item) => item.sessionId !== sessionId));
+  const next = state.queuedMessages.filter((item) => item.sessionId !== sessionId);
+  if (next.length === state.queuedMessages.length) return;
+  commitQueuedMessages(next);
 }
 
 export function persistActiveSessionId(id: string | null) {

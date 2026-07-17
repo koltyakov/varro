@@ -223,17 +223,21 @@ export function calculateAssistantPartVirtualRange(args: {
   viewportHeight: number;
   defaultItemHeight?: number;
   overscan?: number;
+  itemGap?: number;
 }): AssistantPartVirtualRange {
   const itemCount = args.itemKeys.length;
   const defaultItemHeight = args.defaultItemHeight ?? ASSISTANT_PART_DEFAULT_ITEM_HEIGHT;
   const overscan = args.overscan ?? ASSISTANT_PART_OVERSCAN;
+  const itemGap = args.itemGap ?? 0;
   if (itemCount === 0) return { start: 0, end: 0, topPad: 0, bottomPad: 0 };
 
   const prefix = Array.from<number>({ length: itemCount + 1 });
   prefix[0] = 0;
   for (let index = 0; index < itemCount; index += 1) {
     prefix[index + 1] =
-      prefix[index]! + (args.measuredHeights.get(args.itemKeys[index]!) ?? defaultItemHeight);
+      prefix[index]! +
+      (args.measuredHeights.get(args.itemKeys[index]!) ?? defaultItemHeight) +
+      (index < itemCount - 1 ? itemGap : 0);
   }
 
   const overscanPx = overscan * defaultItemHeight;
@@ -242,10 +246,11 @@ export function calculateAssistantPartVirtualRange(args: {
   const start = Math.max(0, Math.min(itemCount - 1, lowerBound(prefix, startOffset + 1) - 1));
   const end = Math.min(itemCount, Math.max(start + 1, lowerBound(prefix, endOffset + 1)));
 
+  // The live flex gap supplies the boundary between a spacer and its adjacent rendered item.
   return {
     start,
     end,
-    topPad: prefix[start] || 0,
+    topPad: start > 0 ? Math.max(0, prefix[start]! - itemGap) : 0,
     bottomPad: (prefix[itemCount] || 0) - (prefix[end] || 0),
   };
 }
@@ -275,6 +280,7 @@ export function AssistantMessageContent(props: {
   const [hasScrollContainer, setHasScrollContainer] = createSignal(false);
   const [viewportTop, setViewportTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
+  const [itemGap, setItemGap] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
   const [readModeOpen, setReadModeOpen] = createSignal(false);
   const displayParts = createMemo(() =>
@@ -411,9 +417,16 @@ export function AssistantMessageContent(props: {
     }
   }
 
+  function updateItemGap() {
+    if (!flowRef) return;
+    const nextItemGap = Number.parseFloat(getComputedStyle(flowRef).rowGap);
+    setItemGap(Number.isFinite(nextItemGap) ? nextItemGap : 0);
+  }
+
   function sampleViewport() {
     viewportRafId = 0;
     if (!flowRef || !scrollContainerRef) return;
+    updateItemGap();
     const containerRect = scrollContainerRef.getBoundingClientRect();
     const flowRect = flowRef.getBoundingClientRect();
     setViewportTop(Math.max(0, containerRect.top - flowRect.top));
@@ -435,6 +448,7 @@ export function AssistantMessageContent(props: {
 
   onMount(() => {
     scrollContainerRef = flowRef?.closest('.interactive-list') as HTMLDivElement | null;
+    updateItemGap();
     setHasScrollContainer(!!scrollContainerRef);
   });
 
@@ -490,6 +504,7 @@ export function AssistantMessageContent(props: {
       measuredHeights: measuredItemHeights,
       scrollTop: viewportTop(),
       viewportHeight: viewportHeight(),
+      itemGap: itemGap(),
     });
   });
   const visibleRenderItems = createMemo(() => {

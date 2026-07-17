@@ -65,6 +65,61 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   );
 });
 
+test('reorders and edits queued follow-up messages in place', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  for (const text of ['First follow-up', 'Second follow-up', 'Third follow-up']) {
+    await composer.fill(text);
+    await page.getByTitle('Add to queue (Enter)').click();
+  }
+
+  const queueList = page.getByRole('list', { name: 'Queued messages' });
+  const labels = queueList.locator('.chat-queue-label');
+  await expect(labels).toHaveText(['First follow-up', 'Second follow-up', 'Third follow-up']);
+
+  await queueList
+    .getByRole('button', { name: 'Reorder queued message: First follow-up' })
+    .dragTo(queueList.getByRole('listitem').nth(1));
+
+  await expect(labels).toHaveText(['Second follow-up', 'First follow-up', 'Third follow-up']);
+  await expect(page.locator('.chat-drop-overlay')).toHaveCount(0);
+
+  await queueList
+    .getByRole('listitem')
+    .nth(1)
+    .getByRole('button', { name: 'Edit queued message' })
+    .click();
+  await expect(queueList.getByRole('listitem')).toHaveCount(3);
+  await expect(queueList.getByRole('listitem').nth(1)).toHaveClass(/is-editing/);
+  await expect(queueList.getByRole('listitem').nth(1)).toContainText('Editing');
+  await composer.fill('First follow-up edited');
+  await page.getByTitle('Add to queue (Enter)').click();
+
+  await expect(labels).toHaveText([
+    'Second follow-up',
+    'First follow-up edited',
+    'Third follow-up',
+  ]);
+  await expect(queueList.locator('.chat-queue-item.is-editing')).toHaveCount(0);
+
+  await queueList
+    .getByRole('listitem')
+    .nth(1)
+    .getByRole('button', { name: 'Edit queued message' })
+    .click();
+  await composer.fill('Discard this edit');
+  await queueList.getByRole('button', { name: 'Cancel queued message edit' }).click();
+
+  await expect(composer).toHaveText('');
+  await expect(labels).toHaveText([
+    'Second follow-up',
+    'First follow-up edited',
+    'Third follow-up',
+  ]);
+  await expect(queueList.locator('.chat-queue-item.is-editing')).toHaveCount(0);
+});
+
 test('removes queued follow-up messages before sending them', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-queue');
 
