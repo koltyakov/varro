@@ -846,6 +846,17 @@ function GenericToolCall(props: {
     return Math.max(0, state.time.end - state.time.start);
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
+  const [now, setNow] = createSignal(Date.now());
+  createEffect(() => {
+    if (!isTask() || props.state.status !== 'running') return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    onCleanup(() => clearInterval(timer));
+  });
+  const runningDurationLabel = () => {
+    if (!isTask() || props.state.status !== 'running') return null;
+    return formatDuration(Math.max(0, now() - props.state.time.start)) || '0ms';
+  };
   const hasExpandableContent = () => {
     if (props.lightweight) return false;
     if (props.state.status === 'error') return true;
@@ -876,6 +887,11 @@ function GenericToolCall(props: {
         </Show>
         <Show when={completedDurationLabel()}>
           <span class="tool-invocation-duration">{completedDurationLabel()}</span>
+        </Show>
+        <Show when={runningDurationLabel()}>
+          <span class="tool-invocation-duration" title="Elapsed time">
+            {runningDurationLabel()}
+          </span>
         </Show>
         <Show when={taskRetryStatus()}>
           {(retry) => <span class="tool-invocation-retry-label">retrying #{retry().attempt}</span>}

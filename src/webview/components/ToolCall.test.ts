@@ -43,6 +43,7 @@ afterEach(() => {
   setState('allAgents', []);
   resetToolCallExpansionState();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
+  vi.useRealTimers();
 });
 
 function completedState(
@@ -718,6 +719,34 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 · ↓ 0');
+  });
+
+  it('updates the elapsed duration while a subagent task is running', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: { description: 'Inspect the repository' },
+        title: 'Inspect the repository',
+        metadata: {},
+        time: { start: 5_000 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('5s');
+
+    vi.advanceTimersByTime(2_000);
+
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('7s');
   });
 
   it('uses subagent session token snapshots when message tokens are unavailable', () => {
