@@ -123,6 +123,15 @@ describe('formatToolTitle', () => {
       'git status'
     );
   });
+
+  it('uses the description as the task title', () => {
+    expect(
+      formatToolTitle(
+        'task',
+        completedState({ description: 'Trace Varro diff logic' }, 'Working')
+      )
+    ).toBe('Trace Varro diff logic');
+  });
 });
 
 describe('shouldShowToolPreview', () => {

@@ -84,11 +84,17 @@ export function getVisibleInputEntries(input: Record<string, unknown>) {
 export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   const input = (state.input || {}) as Record<string, unknown>;
   const title = getStateTitle(state);
+  const normalizedToolName = normalizeToolName(toolName);
 
-  if (SEARCH_TOOL_NAMES.has(normalizeToolName(toolName))) {
+  if (SEARCH_TOOL_NAMES.has(normalizedToolName)) {
     const pattern = getSearchPattern(input);
     if (pattern) return `Search: ${pattern}`;
     return title || 'Search';
+  }
+
+  if (normalizedToolName === 'task') {
+    const description = input.description;
+    if (typeof description === 'string' && description.trim()) return description.trim();
   }
 
   return title || toolName;
