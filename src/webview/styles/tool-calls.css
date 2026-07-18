@@ -460,6 +460,36 @@ kbd {
   border-color: color-mix(in srgb, var(--color-vscode-border) 14%, transparent);
 }
 
+.chat-tool-invocation-part.tool-invocation-task {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 32%, transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-vscode-accent) 10%, transparent),
+    color-mix(in srgb, var(--color-vscode-accent) 3%, transparent) 58%,
+    transparent
+  );
+  transition: border-color 0.1s;
+}
+
+.chat-tool-invocation-part.tool-invocation-task:hover {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 48%, transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-vscode-accent) 14%, transparent),
+    color-mix(in srgb, var(--color-vscode-accent) 5%, transparent) 58%,
+    transparent
+  );
+}
+
+.chat-tool-invocation-part.tool-invocation-task:has(.tool-invocation-chevron.expanded) {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 42%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-accent) 7%, var(--color-vscode-list-bg));
+}
+
+.chat-tool-invocation-part.tool-invocation-task .tool-invocation-title {
+  font-weight: 600;
+}
+
 .chat-tool-invocation-part:not(:last-child) {
   margin-bottom: 0;
 }

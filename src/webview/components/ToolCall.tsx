@@ -856,7 +856,7 @@ function GenericToolCall(props: {
 
   const bodyId = createUniqueId();
   return (
-    <div class="chat-tool-invocation-part">
+    <div class={`chat-tool-invocation-part${isTask() ? ' tool-invocation-task' : ''}`}>
       <button
         type="button"
         class="tool-invocation-header"

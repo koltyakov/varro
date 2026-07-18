@@ -366,6 +366,9 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
+    expect(container?.querySelector('.chat-tool-invocation-part')?.classList).toContain(
+      'tool-invocation-task'
+    );
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
 
     const detailText = container?.querySelector('.tool-invocation-detail')?.textContent || '';
