@@ -3,6 +3,7 @@ import type {
   RecycleBinEntry,
   ServerStatus,
   WebviewMessage,
+  WebviewThemeKind,
 } from '../../src/shared/protocol';
 import type {
   Agent,
@@ -146,7 +147,15 @@ type HarnessWindow = Window & {
 const WORKSPACE_PATH = '/workspace/varro';
 const TMP_WORKSPACE_PATH = '/workspace/varro/tmp/e2e-workspace';
 const BASE_TIME = Date.now();
-const THEME = 'dark';
+const THEME = getThemeKind();
+
+function getThemeKind(): WebviewThemeKind {
+  const value = new URLSearchParams(window.location.search).get('theme');
+  if (value === 'light' || value === 'high-contrast' || value === 'high-contrast-light') {
+    return value;
+  }
+  return 'dark';
+}
 const DEFAULT_PROVIDER_ID = 'copilot';
 const DEFAULT_MODEL_ID = 'gpt-5-mini';
 const DEFAULT_PERMISSION_RULES = [
@@ -3621,6 +3630,12 @@ function setUpHarness() {
     exportSessionIds: [],
   };
   document.body.dataset.vscodeThemeKind = THEME;
+  if (THEME !== 'dark') {
+    // The theme variable overrides live on :root because VSCode injects
+    // --vscode-* variables on the html element; body-level overrides resolve
+    // too late for Tailwind @theme tokens.
+    document.documentElement.classList.add(`theme-${THEME}`);
+  }
   installBridge(scenarioState);
 }
 

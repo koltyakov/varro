@@ -223,7 +223,10 @@ export function formatReasoningHeader(subject: string | null, detail?: string | 
 
 export function formatReasoningDuration(time: ReasoningPart['time']) {
   if (time.end === undefined) return null;
-  return formatDuration(time.end - time.start) || null;
+  const elapsedMs = time.end - time.start;
+  // Sub-second thinking spans are noise in the header; show nothing instead.
+  if (elapsedMs < 1000) return null;
+  return formatDuration(elapsedMs) || null;
 }
 
 function BrainTopicIcon(props: { class?: string }) {

@@ -7,7 +7,7 @@ import {
   unregisterInlineEditMount,
 } from '../../lib/message-edit-state';
 import { isLoading, skipPlanSession, state } from '../../lib/state';
-import { formatDuration, formatNumber, isAssistantMessage } from '../../lib/message-metrics';
+import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type {
   AssistantMessage,
@@ -210,7 +210,7 @@ function AssistantDialogSummary(props: {
         <span class="model-change-label">
           {props.summary.collectingStats
             ? 'Collecting stats...'
-            : `Worked for ${formatDuration(props.summary.durationMs)}${tokenSuffix()}${agentSuffix()}`}
+            : `Worked for ${formatTurnDuration(props.summary.durationMs)}${tokenSuffix()}${agentSuffix()}`}
         </span>
       </div>
       <Show when={props.showImplementPlanAction}>

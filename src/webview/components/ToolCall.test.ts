@@ -130,6 +130,28 @@ describe('formatToolTitle', () => {
       formatToolTitle('task', completedState({ description: 'Trace Varro diff logic' }, 'Working'))
     ).toBe('Trace Varro diff logic');
   });
+
+  it('falls back to the command for errored bash calls without a title', () => {
+    expect(
+      formatToolTitle('bash', {
+        status: 'error',
+        input: { command: 'npm test' },
+        error: 'Command failed with exit code 1',
+        time: { start: 0, end: 1 },
+      })
+    ).toBe('npm test');
+  });
+
+  it('keeps the raw tool name for errored bash calls without a command', () => {
+    expect(
+      formatToolTitle('bash', {
+        status: 'error',
+        input: {},
+        error: 'Command failed',
+        time: { start: 0, end: 1 },
+      })
+    ).toBe('bash');
+  });
 });
 
 describe('shouldShowToolPreview', () => {

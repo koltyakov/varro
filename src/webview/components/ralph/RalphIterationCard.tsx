@@ -121,8 +121,9 @@ function Verdict(props: { label: string; fullName: string; value: RalphVerificat
 
 /**
  * Compress long verification names so the iteration row stays scannable.
- * Multi-word names get initialised (`cargo build` → `cb`); single words
- * keep their first 6 chars. The full name is shown in the tooltip.
+ * Multi-word names get initialised (`cargo build` → `cb`); single words up to
+ * 9 chars (e.g. `typecheck`) stay whole so they don't read like typos, longer
+ * ones are trimmed. The full name is shown in the tooltip.
  */
 function shortenVerdictLabel(name: string): string {
   const parts = name.split(/\s+/).filter(Boolean);
@@ -132,7 +133,7 @@ function shortenVerdictLabel(name: string): string {
       .join('')
       .slice(0, 4);
   const single = parts[0] ?? name;
-  return single.length <= 6 ? single : single.slice(0, 6);
+  return single.length <= 9 ? single : single.slice(0, 8);
 }
 
 function formatTokens(n: number): string {

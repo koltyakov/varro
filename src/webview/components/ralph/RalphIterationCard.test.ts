@@ -134,7 +134,7 @@ describe('RalphIterationCard', () => {
 
     expect(verdicts.map((node) => node.textContent)).toEqual([
       'cb:pass',
-      'typech:fail',
+      'typecheck:fail',
       'lint:skipped',
     ]);
     expect(verdicts[0]?.getAttribute('title')).toBe('cargo build: pass');

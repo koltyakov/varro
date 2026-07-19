@@ -5,6 +5,7 @@ import {
   formatCost,
   formatDuration,
   formatNumber,
+  formatTurnDuration,
   formatRelativeAge,
   getAssistantDuration,
   getAssistantTotalTokens,
@@ -98,6 +99,14 @@ describe('message metrics helpers', () => {
     expect(formatDuration(3_660_000)).toBe('1h 1m');
     expect(formatDuration(90_000_000)).toBe('1d 1h');
     expect(formatDuration(172_800_000)).toBe('2d');
+  });
+
+  it('clamps sub-second turn durations to <1s', () => {
+    expect(formatTurnDuration(undefined)).toBe('<1s');
+    expect(formatTurnDuration(2)).toBe('<1s');
+    expect(formatTurnDuration(999)).toBe('<1s');
+    expect(formatTurnDuration(1_500)).toBe('2s');
+    expect(formatTurnDuration(125_000)).toBe('2m 5s');
   });
 
   it('formats cost values', () => {

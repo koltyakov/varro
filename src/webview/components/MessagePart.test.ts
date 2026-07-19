@@ -96,7 +96,11 @@ describe('formatReasoningDuration', () => {
   });
 
   it('formats completed reasoning time', () => {
-    expect(formatReasoningDuration({ start: 10, end: 17 })).toBe('7ms');
+    expect(formatReasoningDuration({ start: 0, end: 7000 })).toBe('7s');
+  });
+
+  it('hides sub-second reasoning durations', () => {
+    expect(formatReasoningDuration({ start: 10, end: 17 })).toBeNull();
   });
 });
 

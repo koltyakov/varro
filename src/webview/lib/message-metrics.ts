@@ -55,6 +55,12 @@ export function formatDuration(ms: number | undefined): string {
   return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
+/** Turn summaries stay at second granularity; sub-second work reads "<1s". */
+export function formatTurnDuration(ms: number | undefined): string {
+  if (!ms || ms < 1000) return '<1s';
+  return formatDuration(ms);
+}
+
 export function formatCost(cost: number | undefined): string {
   if (!cost) return '';
   if (cost < 0.01) return '<$0.01';

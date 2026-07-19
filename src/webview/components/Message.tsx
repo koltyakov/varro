@@ -7,7 +7,8 @@ import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collaps
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
 import { openProviderSetup } from '../lib/provider-setup';
-import { isActiveSessionWorking, state } from '../lib/state';
+import { getActiveUsageLimitNotice, isActiveSessionWorking, state } from '../lib/state';
+import { parseUsageLimitNotice } from '../lib/usage-limit';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import type {
   AssistantMessage,
@@ -69,9 +70,20 @@ export function Message(props: {
 }) {
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
+  // While the composer's usage-limit banner is up for this session, the latest
+  // assistant 429 error card would repeat the same message and actions; hide it
+  // until the banner clears.
+  const coveredByUsageLimitBanner = createMemo(() => {
+    if (!(props.isLastAssistant ?? false)) return false;
+    const error = assistant()?.error;
+    if (!error || isAbortedAssistantError(error)) return false;
+    if (!parseUsageLimitNotice(error.data?.message || error.name)) return false;
+    return !!getActiveUsageLimitNotice(props.info.sessionID);
+  });
   const assistantErrorMessage = createMemo(() => {
     const error = assistant()?.error;
     if (isAbortedAssistantError(error)) return null;
+    if (coveredByUsageLimitBanner()) return null;
     const message = error?.data?.message?.trim();
     if (message) return message;
     return friendlyErrorName(error?.name);

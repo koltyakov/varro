@@ -1739,6 +1739,57 @@ describe('Message assistant final answer rendering', () => {
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
   });
 
+  it('hides the latest usage-limit error card while the usage-limit banner is active', async () => {
+    const { setState, setSessionUsageLimit } = await import('../lib/state');
+    const { parseUsageLimitNotice } = await import('../lib/usage-limit');
+    const assistant = {
+      ...assistantMessage('message-3'),
+      error: {
+        name: 'server_error',
+        data: { message: '429 usage limit reached. retry in 45s attempt #2' },
+      },
+    };
+
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'session-1',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+    setState('messages', [{ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }]);
+    setSessionUsageLimit(
+      'session-1',
+      parseUsageLimitNotice('429 usage limit reached. retry in 45s attempt #2')!
+    );
+
+    try {
+      cleanup = render(
+        () =>
+          Message({
+            info: assistant,
+            parts: [reasoningPart('reason-1', 'Inspecting')],
+            isLastAssistant: true,
+          }),
+        container!
+      );
+
+      expect(container?.querySelector('.assistant-message-flow-item-error')).toBeNull();
+
+      setSessionUsageLimit('session-1', null);
+
+      const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
+      expect(errorBlock?.textContent).toContain('429 usage limit reached');
+    } finally {
+      setSessionUsageLimit('session-1', null);
+      setState('sessions', []);
+      setState('messages', []);
+    }
+  });
+
   it('renders a connect provider action for invalidated provider auth errors', async () => {
     const { setState } = await import('../lib/state');
     const assistant = {

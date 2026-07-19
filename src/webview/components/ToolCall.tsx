@@ -97,6 +97,13 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
     if (typeof description === 'string' && description.trim()) return description.trim();
   }
 
+  // Error and pending states carry no server title; fall back to the command so
+  // failed bash calls keep the same title shape as completed ones.
+  if (normalizedToolName === 'bash' && !title) {
+    const command = input.command;
+    if (typeof command === 'string' && command.trim()) return command.trim();
+  }
+
   return title || toolName;
 }
 
