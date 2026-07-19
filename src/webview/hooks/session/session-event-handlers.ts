@@ -5,7 +5,7 @@ import {
   isAssistantMessage,
   latestAssistantFinishedBeforeLoading,
 } from '../../lib/message-metrics';
-import { isRunningSessionStatus, normalizePermissionEvent } from '../../lib/session-event-reducer';
+import { isRunningSessionStatus } from '../../lib/session-event-reducer';
 import { hasStreamedFinalResponse } from './session-watchdog';
 import { parseUsageLimitNotice, type UsageLimitNotice } from '../../lib/usage-limit';
 import { validateFileDiffs } from '../../lib/validate-diffs';
@@ -14,6 +14,34 @@ import { permissionsStore } from '../../lib/stores/permissions-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
 import { isSessionTreeStatusWorking } from '../../lib/state';
+import { registerApprovalEventHandlers } from './session-approval-events';
+import type {
+  AssistantUsagePatch,
+  NormalizedSessionEventInfo,
+  ToolExecutionTime,
+} from './session-event-utils';
+import {
+  ACTIVE_SESSION_PROGRESS_EVENTS,
+  PROJECTED_SESSION_EVENTS,
+  STREAMED_COMPLETION_SETTLE_DELAY_MS,
+  currentStreamingSnapshot,
+  getAssistantFinishedMessageId,
+  getAssistantUsagePatchFromStepEvent,
+  getEventString,
+  getEventTimestamp,
+  getPartDeltaQueueKey,
+  getToolExecutionKey,
+  hasActiveAssistantReply,
+  isCompleteMessageInfo,
+  isCompleteMessagePart,
+  isContinuationStepEnd,
+  isContinuationStepFinish,
+  mergeSessionEventInfo,
+  normalizeSessionEventInfo,
+  syncSessionAgent,
+} from './session-event-utils';
+import { createProjectedSessionEventHandler } from './session-projected-events';
+import { registerReasoningEventHandlers } from './session-reasoning-events';
 import type {
   AssistantMessage,
   FileDiff,
@@ -21,129 +49,10 @@ import type {
   MessageEntry,
   Part,
   Permission,
-  QuestionRequest,
   Session,
   SessionEventInfo,
   SessionStatus,
 } from '../../types';
-
-function isCompleteMessageInfo(value: unknown): value is Message {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.id !== 'string' ||
-    !record.id ||
-    typeof record.sessionID !== 'string' ||
-    !record.sessionID ||
-    typeof record.role !== 'string' ||
-    !record.time ||
-    typeof record.time !== 'object' ||
-    typeof (record.time as { created?: unknown }).created !== 'number'
-  ) {
-    return false;
-  }
-
-  if (record.role === 'user') {
-    return !!(
-      record.parentID === undefined &&
-      typeof record.agent === 'string' &&
-      record.model &&
-      typeof record.model === 'object' &&
-      typeof (record.model as { providerID?: unknown }).providerID === 'string' &&
-      typeof (record.model as { modelID?: unknown }).modelID === 'string'
-    );
-  }
-
-  if (record.role === 'assistant') {
-    return !!(
-      typeof record.parentID === 'string' &&
-      typeof record.modelID === 'string' &&
-      typeof record.providerID === 'string' &&
-      typeof record.mode === 'string' &&
-      record.path &&
-      typeof record.path === 'object' &&
-      typeof (record.path as { cwd?: unknown }).cwd === 'string' &&
-      typeof (record.path as { root?: unknown }).root === 'string' &&
-      typeof record.cost === 'number' &&
-      record.tokens &&
-      typeof record.tokens === 'object' &&
-      typeof (record.tokens as { input?: unknown }).input === 'number' &&
-      typeof (record.tokens as { output?: unknown }).output === 'number' &&
-      typeof (record.tokens as { reasoning?: unknown }).reasoning === 'number' &&
-      (record.tokens as { cache?: unknown }).cache &&
-      typeof (record.tokens as { cache?: unknown }).cache === 'object' &&
-      typeof ((record.tokens as { cache?: unknown }).cache as { read?: unknown }).read ===
-        'number' &&
-      typeof ((record.tokens as { cache?: unknown }).cache as { write?: unknown }).write ===
-        'number'
-    );
-  }
-
-  return false;
-}
-
-function isCompleteMessagePart(value: unknown): value is Part {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.id === 'string' &&
-    !!record.id &&
-    typeof record.sessionID === 'string' &&
-    !!record.sessionID &&
-    typeof record.messageID === 'string' &&
-    !!record.messageID &&
-    typeof record.type === 'string' &&
-    !!record.type
-  );
-}
-
-function isContinuationStepEnd(eventName: string, props: Record<string, unknown>) {
-  if (eventName !== 'session.next.step.ended') return false;
-  return isContinuationStepFinish(getEventString(props, 'finish'));
-}
-
-function isContinuationStepFinish(value: string | undefined) {
-  const finish = normalizeStepFinish(value);
-  return (
-    finish === 'tool' ||
-    finish === 'tools' ||
-    finish === 'tool_call' ||
-    finish === 'tool_calls' ||
-    finish === 'tool_use' ||
-    finish === 'tool_uses' ||
-    finish === 'function_call' ||
-    finish === 'function_calls'
-  );
-}
-
-function normalizeStepFinish(value: string | undefined) {
-  return value?.toLowerCase().replace(/[\s-]+/g, '_');
-}
-
-function getPartDeltaQueueKey(messageID: string, partID: string) {
-  return `${messageID}\u0000${partID}`;
-}
-
-const getToolExecutionKey = (sessionId: string, callId: string) => `${sessionId}\u0000${callId}`;
-
-const getEventTimestamp = (props: Record<string, unknown>) => {
-  const timestamp = props.timestamp;
-  return typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : Date.now();
-};
-
-function getPermissionReplyId(props: Record<string, unknown>) {
-  const source =
-    props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : props;
-  return (source.id || source.permissionID || source.requestID) as string | undefined;
-}
-
-// Accept `id` as a fallback for `requestID`, matching the extension host's
-// SessionStateManager so both sides clear question attention on the same
-// event shapes.
-function getQuestionReplyId(props: Record<string, unknown> | undefined) {
-  const requestID = props?.requestID || props?.id;
-  return typeof requestID === 'string' ? requestID : undefined;
-}
 
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
@@ -222,211 +131,6 @@ type EventHandlerOperationDependencies = {
   logError: EventHandlerDependencies['logError'];
 };
 
-type NormalizedSessionEventInfo = SessionEventInfo & { id: string };
-
-const ACTIVE_SESSION_PROGRESS_EVENTS = [
-  'session.next.agent.switched',
-  'session.next.model.switched',
-  'session.next.prompted',
-  'session.next.synthetic',
-  'session.next.shell.started',
-  'session.next.shell.ended',
-  'session.next.step.started',
-  'session.next.step.ended',
-  'session.next.step.failed',
-  'session.next.text.started',
-  'session.next.text.delta',
-  'session.next.text.ended',
-  'session.next.tool.input.started',
-  'session.next.tool.input.delta',
-  'session.next.tool.input.ended',
-  'session.next.tool.called',
-  'session.next.tool.progress',
-  'session.next.tool.success',
-  'session.next.tool.failed',
-  'session.next.retried',
-  'session.next.compaction.started',
-  'session.next.compaction.delta',
-  'session.next.compaction.ended',
-] as const;
-
-const ACTIVE_TEXT_PROGRESS_EVENTS = new Set<string>([
-  'session.next.text.started',
-  'session.next.text.delta',
-  'session.next.text.ended',
-]);
-
-const PROJECTED_SESSION_EVENTS = new Set<string>([
-  ...ACTIVE_TEXT_PROGRESS_EVENTS,
-  'session.next.tool.input.started',
-  'session.next.tool.input.delta',
-  'session.next.tool.input.ended',
-  'session.next.tool.called',
-  'session.next.tool.progress',
-  'session.next.tool.success',
-  'session.next.tool.failed',
-  'session.next.reasoning.started',
-  'session.next.reasoning.delta',
-  'session.next.reasoning.ended',
-]);
-
-// After the final assistant text finishes streaming with no tools in flight, we
-// optimistically settle the turn this long after the last progress event. Any
-// genuine continuation (a tool call, more text/reasoning) arrives well within
-// this window and cancels the timer, so it only fires on a real quiet period.
-const STREAMED_COMPLETION_SETTLE_DELAY_MS = 600;
-
-type ToolExecutionTime = { start?: number; end?: number };
-
-type AssistantUsagePatch = {
-  cost?: number;
-  finish?: string;
-  tokens?: AssistantMessage['tokens'];
-};
-
-function hasActiveAssistantReply(messages: MessageEntry[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]?.info;
-    if (!message) continue;
-    if (message.role === 'user') return false;
-    return !message.error && !message.time.completed;
-  }
-
-  return false;
-}
-
-function getAssistantUsagePatchFromStepEvent(
-  props: Record<string, unknown>
-): AssistantUsagePatch | undefined {
-  const tokens = parseAssistantTokens(props.tokens);
-  const cost = getFiniteNumber(props.cost);
-  const finish = getEventString(props, 'finish');
-  if (!tokens && cost === undefined && !finish) return undefined;
-
-  return { tokens: tokens ?? undefined, cost, finish };
-}
-
-function parseAssistantTokens(value: unknown): AssistantMessage['tokens'] | null {
-  const tokens = asRecord(value);
-  if (!tokens) return null;
-
-  const cache = asRecord(tokens.cache);
-  const input = getFiniteNumber(tokens.input);
-  const output = getFiniteNumber(tokens.output);
-  const reasoning = getFiniteNumber(tokens.reasoning);
-  const cacheRead = getFiniteNumber(cache?.read);
-  const cacheWrite = getFiniteNumber(cache?.write);
-  if (
-    input === undefined ||
-    output === undefined ||
-    reasoning === undefined ||
-    cacheRead === undefined ||
-    cacheWrite === undefined
-  ) {
-    return null;
-  }
-
-  const total = getFiniteNumber(tokens.total);
-  return {
-    ...(total !== undefined ? { total } : {}),
-    input,
-    output,
-    reasoning,
-    cache: { read: cacheRead, write: cacheWrite },
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function getFiniteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function latestAssistantMessageForSession(messages: MessageEntry[], sessionId: string) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || message.info.sessionID !== sessionId || message.info.role !== 'assistant') {
-      continue;
-    }
-    if (!message.info.error && !message.info.time.completed) return message;
-  }
-  return null;
-}
-
-function getAssistantFinishedMessageId(
-  messages: MessageEntry[],
-  partialMessage: { sessionID?: string; id?: unknown },
-  assistantMessage: AssistantMessage | null
-) {
-  if (assistantMessage) return assistantMessage.id;
-  if (typeof partialMessage.id === 'string' && partialMessage.id) return partialMessage.id;
-  if (!partialMessage.sessionID) return null;
-  return latestAssistantMessageForSession(messages, partialMessage.sessionID)?.info.id ?? null;
-}
-
-function normalizeSessionEventInfo(
-  info: SessionEventInfo | undefined,
-  sessionID?: string
-): NormalizedSessionEventInfo | null {
-  if (!info) return null;
-  const normalized = stripNullishSessionInfo(info);
-  const id = typeof normalized.id === 'string' && normalized.id ? normalized.id : sessionID;
-  return id ? { ...normalized, id } : null;
-}
-
-function stripNullishSessionInfo(info: SessionEventInfo): SessionEventInfo {
-  const normalized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(info)) {
-    if (value === null || value === undefined) continue;
-    if (key === 'time' && value && typeof value === 'object') {
-      const time = Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).filter(
-          ([, timeValue]) => timeValue !== null && timeValue !== undefined
-        )
-      );
-      if (Object.keys(time).length > 0) normalized.time = time;
-      continue;
-    }
-    normalized[key] = value;
-  }
-  return normalized as SessionEventInfo;
-}
-
-function mergeSessionEventInfo(info: NormalizedSessionEventInfo): Session | null {
-  const existing = appStore.state.sessions.find((session) => session.id === info.id);
-  if (existing) {
-    return {
-      ...existing,
-      ...info,
-      time: { ...existing.time, ...info.time },
-    };
-  }
-
-  if (
-    typeof info.projectID === 'string' &&
-    typeof info.directory === 'string' &&
-    typeof info.title === 'string' &&
-    typeof info.version === 'string' &&
-    typeof info.time?.created === 'number' &&
-    typeof info.time.updated === 'number'
-  ) {
-    return info as Session;
-  }
-
-  return null;
-}
-
-function syncSessionAgent(info: NormalizedSessionEventInfo) {
-  const agent = (info as { agent?: unknown }).agent;
-  if (typeof agent === 'string' && agent) {
-    appStore.setState('sessionSelectedAgents', info.id, agent);
-  }
-}
-
 export class SessionEventHandlerOperations {
   constructor(private readonly deps: EventHandlerOperationDependencies) {}
 
@@ -484,7 +188,6 @@ export class SessionEventHandlerOperations {
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
   const activeMessageSyncs = new Set<string>();
-  const autoJudgingPermissionIds = new Set<string>();
   const pendingMissingPartDeltas = new Map<
     string,
     {
@@ -743,60 +446,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       deps.logError('abortSession', err);
     });
   };
-  // v2 reasoning events carry the owning assistantMessageID. When that message is loaded
-  // we attach directly to it; otherwise we fall back to the "latest active assistant"
-  // heuristic, preserving the pre-v2 behavior for older servers / not-yet-synced messages.
-  const findReasoningMessage = (sessionId: string, assistantMessageID?: string) => {
-    if (assistantMessageID) {
-      const named = deps
-        .getMessages()
-        .find(
-          (entry) =>
-            entry.info.id === assistantMessageID &&
-            entry.info.sessionID === sessionId &&
-            entry.info.role === 'assistant'
-        );
-      if (named) return named;
-    }
-    return latestAssistantMessageForSession(deps.getMessages(), sessionId);
-  };
-  const ensureReasoningPart = (
-    sessionId: string,
-    reasoningId: string,
-    assistantMessageID?: string
-  ) => {
-    const message = findReasoningMessage(sessionId, assistantMessageID);
-    if (!message) return null;
-    if (!message.parts.some((part) => part.id === reasoningId)) {
-      sessionStore.upsertPart({
-        id: reasoningId,
-        sessionID: sessionId,
-        messageID: message.info.id,
-        type: 'reasoning',
-        text: '',
-      } as Part);
-    }
-    return message.info.id;
-  };
-  const withReasoningMessage = (
-    sessionId: string,
-    reasoningId: string,
-    apply: (messageID: string) => void,
-    assistantMessageID?: string
-  ) => {
-    const messageID = ensureReasoningPart(sessionId, reasoningId, assistantMessageID);
-    if (messageID) {
-      apply(messageID);
-      return;
-    }
-    void deps
-      .syncSessionMessages(sessionId)
-      .then(() => {
-        const syncedMessageID = ensureReasoningPart(sessionId, reasoningId, assistantMessageID);
-        if (syncedMessageID) apply(syncedMessageID);
-      })
-      .catch((err) => deps.logError('syncSessionMessages', err));
-  };
   const findAssistantMessage = (sessionId: string, assistantMessageID?: string) => {
     if (!assistantMessageID) return null;
     return (
@@ -935,226 +584,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       tokens: part.tokens,
     });
   };
-  const findPart = (messageID: string, partID: string): Part | null => {
-    const message = deps.getMessages().find((entry) => entry.info.id === messageID);
-    return message?.parts.find((part) => part.id === partID) || null;
-  };
-  const applyProjectedPart = (
-    sessionId: string,
-    assistantMessageID: string | undefined,
-    part: Part
-  ) => {
-    const message = findAssistantMessage(sessionId, assistantMessageID);
-    if (!message) {
-      scheduleActiveMessageSync(sessionId);
-      return false;
-    }
-    sessionStore.upsertPart(part);
-    return true;
-  };
-  const ensureProjectedTextPart = (
-    sessionId: string,
-    assistantMessageID: string | undefined,
-    partID: string,
-    text = ''
-  ) => {
-    const message = findAssistantMessage(sessionId, assistantMessageID);
-    if (!message) {
-      scheduleActiveMessageSync(sessionId);
-      return null;
-    }
-    const existing = message.parts.find((part) => part.id === partID);
-    if (!existing) {
-      sessionStore.upsertPart({
-        id: partID,
-        sessionID: sessionId,
-        messageID: message.info.id,
-        type: 'text',
-        text,
-      } as Part);
-    }
-    return message.info.id;
-  };
-  const handleProjectedTextEvent = (
-    eventName: string,
-    props: Record<string, unknown>,
-    sessionId: string
-  ) => {
-    const textID = getEventString(props, 'textID');
-    const assistantMessageID = getEventString(props, 'assistantMessageID');
-    if (!textID) return false;
-    const text = getEventString(props, 'text') || '';
-    if (eventName === 'session.next.text.ended') {
-      return !!applyProjectedPart(sessionId, assistantMessageID, {
-        id: textID,
-        sessionID: sessionId,
-        messageID: assistantMessageID || '',
-        type: 'text',
-        text,
-      } as Part);
-    }
-    const messageID = ensureProjectedTextPart(sessionId, assistantMessageID, textID);
-    if (!messageID) return false;
-    if (eventName === 'session.next.text.delta') {
-      const delta = getEventString(props, 'delta') || text;
-      if (delta) sessionStore.applyMessagePartDelta(messageID, textID, delta, sessionId, 'text');
-    }
-    return true;
-  };
-  const handleProjectedToolEvent = (
-    eventName: string,
-    props: Record<string, unknown>,
-    sessionId: string
-  ) => {
-    const assistantMessageID = getEventString(props, 'assistantMessageID');
-    const callID = getEventString(props, 'callID');
-    if (!assistantMessageID || !callID) return false;
-    const message = findAssistantMessage(sessionId, assistantMessageID);
-    if (!message) {
-      scheduleActiveMessageSync(sessionId);
-      return false;
-    }
-    const existing = findPart(assistantMessageID, callID);
-    const existingTool = existing?.type === 'tool' ? existing : null;
-    const timestamp = getEventTimestamp(props);
-    const toolName =
-      getEventString(props, 'name') || getEventString(props, 'tool') || existingTool?.tool || '';
-    const inputText = getEventString(props, 'text') || getEventString(props, 'input') || '';
+  const handleProjectedSessionEvent = createProjectedSessionEventHandler({
+    isSessionInActiveTree,
+    getMessages: () => deps.getMessages(),
+    findAssistantMessage,
+    scheduleActiveMessageSync,
+    syncTodosFromMessages: () => deps.syncTodosFromMessages(),
+  });
 
-    if (eventName === 'session.next.tool.input.delta') {
-      const delta = getEventString(props, 'delta') || inputText;
-      if (!delta || !existingTool || existingTool.state.status !== 'pending') return true;
-      sessionStore.upsertPart({
-        ...existingTool,
-        state: { ...existingTool.state, raw: `${existingTool.state.raw || ''}${delta}` },
-      });
-      return true;
-    }
-
-    if (eventName === 'session.next.tool.input.started') {
-      sessionStore.upsertPart({
-        id: callID,
-        sessionID: sessionId,
-        messageID: assistantMessageID,
-        type: 'tool',
-        callID,
-        tool: toolName,
-        state: { status: 'pending', input: {}, raw: '' },
-      });
-      return true;
-    }
-
-    if (eventName === 'session.next.tool.input.ended') {
-      sessionStore.upsertPart({
-        id: callID,
-        sessionID: sessionId,
-        messageID: assistantMessageID,
-        type: 'tool',
-        callID,
-        tool: toolName,
-        state: { status: 'pending', input: parseToolInput(inputText), raw: inputText },
-      });
-      return true;
-    }
-
-    if (eventName === 'session.next.tool.called') {
-      const input = asToolInput(props.input);
-      sessionStore.upsertPart({
-        id: callID,
-        sessionID: sessionId,
-        messageID: assistantMessageID,
-        type: 'tool',
-        callID,
-        tool: toolName,
-        state: {
-          status: 'running',
-          input,
-          title: toolName,
-          metadata: asToolMetadata(props.provider),
-          time: { start: timestamp },
-        },
-      });
-      return true;
-    }
-
-    if (eventName === 'session.next.tool.progress') {
-      if (!existingTool || existingTool.state.status !== 'running') return true;
-      sessionStore.upsertPart({
-        ...existingTool,
-        state: {
-          ...existingTool.state,
-          metadata: {
-            ...existingTool.state.metadata,
-            structured: asToolMetadata(props.structured),
-            content: props.content,
-          },
-        },
-      });
-      return true;
-    }
-
-    if (eventName === 'session.next.tool.success') {
-      const input = existingTool ? getToolStateInput(existingTool) : {};
-      const start = existingTool ? getToolStartTime(existingTool) : timestamp;
-      sessionStore.upsertPart({
-        id: callID,
-        sessionID: sessionId,
-        messageID: assistantMessageID,
-        type: 'tool',
-        callID,
-        tool: toolName,
-        state: {
-          status: 'completed',
-          input,
-          output: toolOutputToString(props.content, props.structured),
-          title: toolName,
-          metadata: {
-            ...asToolMetadata(props.structured),
-            provider: props.provider,
-            result: props.result,
-          },
-          time: { start, end: timestamp },
-        },
-      });
-      deps.syncTodosFromMessages();
-      return true;
-    }
-
-    if (eventName === 'session.next.tool.failed') {
-      const input = existingTool ? getToolStateInput(existingTool) : {};
-      const start = existingTool ? getToolStartTime(existingTool) : timestamp;
-      sessionStore.upsertPart({
-        id: callID,
-        sessionID: sessionId,
-        messageID: assistantMessageID,
-        type: 'tool',
-        callID,
-        tool: toolName,
-        state: {
-          status: 'error',
-          input,
-          error: getToolErrorMessage(props.error),
-          metadata: { provider: props.provider, result: props.result },
-          time: { start, end: timestamp },
-        },
-      });
-      deps.syncTodosFromMessages();
-      return true;
-    }
-
-    return false;
-  };
-  const handleProjectedSessionEvent = (eventName: string, props: Record<string, unknown>) => {
-    const sessionId = props.sessionID as string | undefined;
-    if (!sessionId || !isSessionInActiveTree(sessionId)) return false;
-    if (eventName.startsWith('session.next.text.')) {
-      return handleProjectedTextEvent(eventName, props, sessionId);
-    }
-    if (eventName.startsWith('session.next.tool.')) {
-      return handleProjectedToolEvent(eventName, props, sessionId);
-    }
-    return false;
-  };
   const syncMessagePartsIfMissing = (message: AssistantMessage) => {
     const localMessage = deps.getMessages().find((entry) => entry.info.id === message.id);
     if (localMessage && localMessage.parts.length > 0) return;
@@ -1489,27 +926,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     })
   );
 
-  cleanups.push(
-    serverEvents.on('session.next.reasoning.started', (data) => {
-      const p = data.properties;
-      const sessionID = p?.sessionID as string | undefined;
-      const reasoningID = getEventString(p, 'reasoningID');
-      const assistantMessageID = getEventString(p, 'assistantMessageID');
-      if (!sessionID) return;
-      if (
-        assistantMessageID &&
-        ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
-      ) {
-        return;
-      }
-      if (!assistantMessageID && ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
-      markSessionProgress(sessionID);
-      if (!reasoningID || !isSessionInActiveTree(sessionID)) return;
-      uiStore.markLoadingActivity();
-      withReasoningMessage(sessionID, reasoningID, () => {}, assistantMessageID);
-    })
-  );
-
   for (const eventName of ACTIVE_SESSION_PROGRESS_EVENTS) {
     cleanups.push(
       serverEvents.on(eventName, (data) => {
@@ -1566,71 +982,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   }
 
   cleanups.push(
-    serverEvents.on('session.next.reasoning.delta', (data) => {
-      const p = data.properties;
-      const sessionID = p?.sessionID as string | undefined;
-      const reasoningID = getEventString(p, 'reasoningID');
-      const assistantMessageID = getEventString(p, 'assistantMessageID');
-      const delta = getEventString(p, 'delta') || getEventString(p, 'text');
-      if (!sessionID) return;
-      if (
-        assistantMessageID &&
-        ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
-      ) {
-        return;
-      }
-      if (!assistantMessageID && ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
-      markSessionProgress(sessionID);
-      if (!reasoningID || !delta || !isSessionInActiveTree(sessionID)) return;
-      uiStore.markLoadingActivity();
-      withReasoningMessage(
-        sessionID,
-        reasoningID,
-        (messageID) => {
-          sessionStore.applyMessagePartDelta(messageID, reasoningID, delta, sessionID, 'text');
-        },
-        assistantMessageID
-      );
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('session.next.reasoning.ended', (data) => {
-      const p = data.properties;
-      const sessionID = p?.sessionID as string | undefined;
-      const reasoningID = getEventString(p, 'reasoningID');
-      const assistantMessageID = getEventString(p, 'assistantMessageID');
-      if (!sessionID) return;
-      if (
-        assistantMessageID &&
-        ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
-      ) {
-        return;
-      }
-      if (!assistantMessageID && ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
-      markSessionProgress(sessionID);
-      if (!reasoningID || !isSessionInActiveTree(sessionID)) return;
-      uiStore.markLoadingActivity();
-      const text = getEventString(p, 'text');
-      withReasoningMessage(
-        sessionID,
-        reasoningID,
-        (messageID) => {
-          if (!text) return;
-          sessionStore.upsertPart({
-            id: reasoningID,
-            sessionID,
-            messageID,
-            type: 'reasoning',
-            text,
-          } as Part);
-        },
-        assistantMessageID
-      );
-    })
-  );
-
-  cleanups.push(
     serverEvents.on('message.part.removed', (data) => {
       const p = data.properties;
       if (!p) return;
@@ -1661,116 +1012,19 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     })
   );
 
-  function handlePermissionEvent(props: Record<string, unknown>) {
-    const permission = normalizePermissionEvent(props);
-    if (!permission) return;
-    if (deps.shouldAutoApprovePermissions(permission.sessionID)) {
-      void deps
-        .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
-        .catch(() => {
-          if (!deps.shouldAutoApprovePermissions(permission.sessionID)) {
-            permissionsStore.addPermission(permission);
-          }
-        });
-      return;
-    }
-    if (deps.shouldAutoJudgePermissions?.(permission.sessionID) && deps.judgePermission) {
-      if (autoJudgingPermissionIds.has(permission.id)) return;
-      autoJudgingPermissionIds.add(permission.id);
-      void deps
-        .judgePermission(permission)
-        .catch((err) => {
-          deps.logError('autoApproveJudge', err);
-          permissionsStore.addPermission(permission);
-        })
-        .finally(() => {
-          autoJudgingPermissionIds.delete(permission.id);
-        });
-      return;
-    }
-    permissionsStore.addPermission(permission);
-  }
-
   cleanups.push(
-    serverEvents.on('permission.updated', (data) => {
-      const props = data.properties;
-      if (props) handlePermissionEvent(props);
+    ...registerReasoningEventHandlers({
+      getMessages: () => deps.getMessages(),
+      syncSessionMessages: (sessionId) => deps.syncSessionMessages(sessionId),
+      logError: (context, err) => deps.logError(context, err),
+      isSessionInActiveTree,
+      markSessionProgress,
+      ignoreStaleProgressForCompletedMessage,
+      ignoreStaleProgressAfterFinishedAssistant,
     })
   );
 
-  cleanups.push(
-    serverEvents.on('permission.asked', (data) => {
-      const props = data.properties;
-      if (props) handlePermissionEvent(props);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('permission.v2.asked', (data) => {
-      const props = data.properties;
-      if (props) handlePermissionEvent(props);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('permission.replied', (data) => {
-      const props = data.properties;
-      if (!props) return;
-      const pid = getPermissionReplyId(props);
-      if (pid) permissionsStore.removePermission(pid);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('permission.v2.replied', (data) => {
-      const props = data.properties;
-      if (!props) return;
-      const pid = getPermissionReplyId(props);
-      if (pid) permissionsStore.removePermission(pid);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('question.asked', (data) => {
-      const props = data.properties;
-      if (props) permissionsStore.upsertQuestion(props as QuestionRequest);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('question.v2.asked', (data) => {
-      const props = data.properties;
-      if (props) permissionsStore.upsertQuestion(props as QuestionRequest);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('question.replied', (data) => {
-      const requestID = getQuestionReplyId(data.properties);
-      if (requestID) permissionsStore.removeQuestion(requestID);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('question.rejected', (data) => {
-      const requestID = getQuestionReplyId(data.properties);
-      if (requestID) permissionsStore.removeQuestion(requestID);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('question.v2.replied', (data) => {
-      const requestID = getQuestionReplyId(data.properties);
-      if (requestID) permissionsStore.removeQuestion(requestID);
-    })
-  );
-
-  cleanups.push(
-    serverEvents.on('question.v2.rejected', (data) => {
-      const requestID = getQuestionReplyId(data.properties);
-      if (requestID) permissionsStore.removeQuestion(requestID);
-    })
-  );
+  cleanups.push(...registerApprovalEventHandlers(deps));
 
   cleanups.push(
     serverEvents.on('todo.updated', (data) => {
@@ -1791,83 +1045,4 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   );
 
   return cleanups;
-}
-
-function currentStreamingSnapshot() {
-  return { partId: appStore.state.streamingPartId, text: appStore.state.streamingText };
-}
-
-function getEventString(value: unknown, key: string): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const item = (value as Record<string, unknown>)[key];
-  return typeof item === 'string' ? item : undefined;
-}
-
-function parseToolInput(value: string): Record<string, unknown> {
-  if (!value.trim()) return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return asToolInput(parsed);
-  } catch {
-    return {};
-  }
-}
-
-function asToolInput(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function asToolMetadata(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function getToolStateInput(part: Part): Record<string, unknown> {
-  if (part.type !== 'tool') return {};
-  const input = part.state.input;
-  return input && typeof input === 'object' && !Array.isArray(input)
-    ? (input as Record<string, unknown>)
-    : {};
-}
-
-function getToolStartTime(part: Part): number {
-  if (part.type !== 'tool') return Date.now();
-  const time = (part.state as { time?: { start?: unknown } }).time;
-  return typeof time?.start === 'number' ? time.start : Date.now();
-}
-
-function getToolErrorMessage(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value && typeof value === 'object') {
-    const message = (value as Record<string, unknown>).message;
-    if (typeof message === 'string') return message;
-  }
-  return 'Tool execution failed';
-}
-
-function toolOutputToString(content: unknown, structured: unknown): string {
-  if (Array.isArray(content)) {
-    const text = content
-      .map((item) => {
-        if (!item || typeof item !== 'object') return '';
-        const record = item as Record<string, unknown>;
-        if (record.type === 'text' && typeof record.text === 'string') return record.text;
-        if (record.type === 'file' && typeof record.uri === 'string') return record.uri;
-        return '';
-      })
-      .filter(Boolean)
-      .join('\n');
-    if (text) return text;
-  }
-  if (structured && typeof structured === 'object') {
-    try {
-      return JSON.stringify(structured, null, 2);
-    } catch {
-      return String(structured);
-    }
-  }
-  return '';
 }
