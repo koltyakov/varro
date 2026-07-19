@@ -122,7 +122,8 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   connectedMcpCount: number;
-  onOpenMcps: () => void;
+  mcpButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
+  onToggleMcps: () => void;
 };
 
 export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
@@ -240,11 +241,12 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
         <div class="toolbar-meta-right">
           <Show when={props.connectedMcpCount > 0}>
             <button
+              ref={props.mcpButtonRef}
               type="button"
               class="toolbar-mcp-count"
               title={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
               aria-label={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
-              onClick={props.onOpenMcps}
+              onClick={props.onToggleMcps}
             >
               <span class="toolbar-mcp-count-label">MCPs:</span>
               <span class="toolbar-mcp-count-value">{props.connectedMcpCount}</span>

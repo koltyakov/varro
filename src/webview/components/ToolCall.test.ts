@@ -989,7 +989,7 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
-    expect(container?.querySelector('.permission-prompt-count')?.textContent).toBe('2');
+    expect(container?.querySelector('.permission-prompt-count')?.textContent).toBe('×2');
   });
 
   it('shows the collapsed permission prompt only on the primary linked tool call', () => {

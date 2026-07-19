@@ -61,6 +61,40 @@ describe('MessageListChrome', () => {
     expect(container?.querySelector('.latest-user-message-sticky-bottom-fade')).not.toBeNull();
   });
 
+  it('toggles the overflow fade as the preview scrolls', async () => {
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-1',
+            index: 3,
+            text: 'A very long prompt that overflows the preview window.',
+            attachmentCount: 0,
+            imageCount: 0,
+          }}
+        />
+      ),
+      container!
+    );
+
+    const clip = container?.querySelector<HTMLElement>('.latest-user-message-sticky-text-clip');
+    const text = container?.querySelector<HTMLElement>('.latest-user-message-sticky-text');
+    expect(clip).not.toBeNull();
+    expect(text).not.toBeNull();
+
+    Object.defineProperties(text!, {
+      clientHeight: { configurable: true, value: 72 },
+      scrollHeight: { configurable: true, value: 200 },
+    });
+    text!.scrollTop = 0;
+    text!.dispatchEvent(new Event('scroll'));
+    expect(clip?.classList.contains('has-more-below')).toBe(true);
+
+    text!.scrollTop = 128;
+    text!.dispatchEvent(new Event('scroll'));
+    expect(clip?.classList.contains('has-more-below')).toBe(false);
+  });
+
   it('invokes the click handler with a custom title', () => {
     const onClick = vi.fn();
     const preview = {

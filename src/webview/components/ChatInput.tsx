@@ -344,6 +344,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let agentPopoverRef: HTMLDivElement | undefined;
   let modelPickerRef: HTMLButtonElement | undefined;
   let modelPopoverRef: HTMLDivElement | undefined;
+  let mcpPickerRef: HTMLButtonElement | undefined;
   let mcpPopoverRef: HTMLDivElement | undefined;
   let toolbarRef: HTMLDivElement | undefined;
   let toolbarLeftRef: HTMLDivElement | undefined;
@@ -1749,6 +1750,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (!clickedInsideInteractiveArea) {
         setShowAgentPicker(false);
         setShowModelPicker(false);
+        setShowMcpPicker(false);
         setShowVariantPicker(false);
         setShowPermissionModePicker(false);
         setShowBusyMenu(false);
@@ -1770,7 +1772,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (showModelPicker() && clickedOutside(target, modelPickerRef, modelPopoverRef)) {
         setShowModelPicker(false);
       }
-      if (showMcpPicker() && target && !mcpPopoverRef?.contains(target)) {
+      if (showMcpPicker() && clickedOutside(target, mcpPickerRef, mcpPopoverRef)) {
         setShowMcpPicker(false);
       }
       if (showVariantPicker() && clickedOutside(target, variantPickerRef, variantPopoverRef)) {
@@ -2747,7 +2749,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
           connectedMcpCount={connectedMcpCount()}
-          onOpenMcps={() => setShowMcpPicker(true)}
+          mcpButtonRef={(el) => {
+            mcpPickerRef = el;
+          }}
+          onToggleMcps={() => {
+            const next = !showMcpPicker();
+            closePopups(next ? 'mcp' : undefined);
+            setShowMcpPicker(next);
+          }}
           showPermissionControl={!composerEditingMessage()}
           permissionButtonRef={(el) => {
             permissionPickerRef = el;

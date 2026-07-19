@@ -486,7 +486,7 @@ describe('ChatInput', () => {
     );
   });
 
-  it('shows the connected MCP count and opens the MCP picker when clicked', () => {
+  it('shows the connected MCP count and toggles the MCP picker or closes it outside', () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
@@ -506,6 +506,15 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('.dropdown-menu')?.textContent).toContain('alpha');
     expect(container?.querySelector('.dropdown-menu')?.textContent).toContain('gamma');
+
+    mcpCount?.click();
+    expect(container?.querySelector('.dropdown-menu')).toBeNull();
+
+    mcpCount?.click();
+    expect(container?.querySelector('.dropdown-menu')).not.toBeNull();
+
+    document.body.click();
+    expect(container?.querySelector('.dropdown-menu')).toBeNull();
   });
 
   it('hides provider-limit UI when polling is disabled', () => {

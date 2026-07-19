@@ -275,6 +275,25 @@ input:focus-visible {
   backface-visibility: hidden;
 }
 
+.latest-user-message-sticky-text-clip {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Signals that the preview window holds more text below the visible lines;
+   toggled from JS because CSS alone can't detect inner-scroll position. */
+.latest-user-message-sticky-text-clip.has-more-below::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.35em;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--color-vscode-request-bubble));
+}
+
 .latest-user-message-sticky-text {
   display: block;
   width: 100%;

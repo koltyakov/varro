@@ -176,7 +176,7 @@ function ContextChip(props: {
       </Show>
       <span class="max-w-[140px] truncate">{props.label}</span>
       <Show when={props.detail}>
-        <span class="shrink-0 text-vscode-muted/60">{props.detail}</span>
+        <span class="shrink-0 text-vscode-muted">{props.detail}</span>
       </Show>
       <Show when={props.onRemove}>
         <button
@@ -207,7 +207,7 @@ function ImageContextChip(props: {
         class="h-5 w-5 shrink-0 rounded border border-vscode-border/20 object-cover"
       />
       <span class="max-w-[120px] truncate">{props.image.filename}</span>
-      <span class="text-vscode-muted/60">{formatImageSize(props.image.size)}</span>
+      <span class="text-vscode-muted">{formatImageSize(props.image.size)}</span>
       <Show when={props.onRemove}>
         <button
           class="ml-0.5 text-vscode-muted/30 transition-colors hover:text-vscode-error"

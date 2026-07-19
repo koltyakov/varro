@@ -52,6 +52,36 @@ describe('PermissionPrompt', () => {
     expect(buttons).toEqual(['Reject', 'Once', 'Always']);
   });
 
+  it('explains grouped requests and that one response applies to all', () => {
+    cleanup = render(
+      () =>
+        PermissionPrompt({
+          permission: createPermission({
+            groupMembers: [
+              { id: 'permission-1', sessionID: 'session-1', messageID: 'message-1' },
+              { id: 'permission-2', sessionID: 'session-1', messageID: 'message-2' },
+            ],
+          }),
+        }),
+      container!
+    );
+
+    const count = container?.querySelector('.permission-prompt-count');
+    expect(count?.textContent).toBe('×2');
+    expect(count?.getAttribute('title')).toBe('2 identical requests grouped');
+
+    const note = container?.querySelector('.permission-prompt-group-note');
+    expect(note?.textContent).toContain('Requested 2 times in parallel');
+    expect(note?.textContent).toContain('one response applies to all');
+  });
+
+  it('hides the group note for a single request', () => {
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+
+    expect(container?.querySelector('.permission-prompt-count')).toBeNull();
+    expect(container?.querySelector('.permission-prompt-group-note')).toBeNull();
+  });
+
   it.each([
     ['Reject', 'reject'],
     ['Once', 'once'],

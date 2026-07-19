@@ -174,7 +174,7 @@ export function AgentPicker(props: {
               >
                 <span class="min-w-0">
                   <span class="block truncate">{props.getLabel(agent)}</span>
-                  <span class="block truncate text-[10px] text-vscode-muted/80">
+                  <span class="block truncate text-[10px] text-vscode-muted">
                     {props.getDetail(agent)}
                   </span>
                 </span>

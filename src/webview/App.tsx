@@ -94,7 +94,7 @@ function WorkspaceLoading() {
       </div>
       <div>
         <p class="text-[13px] font-medium text-vscode-fg">Loading workspace...</p>
-        <p class="mt-1.5 text-[12px] text-vscode-muted/70">Restoring your recent view</p>
+        <p class="mt-1.5 text-[12px] text-vscode-muted">Restoring your recent view</p>
       </div>
     </div>
   );

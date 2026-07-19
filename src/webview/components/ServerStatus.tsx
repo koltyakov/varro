@@ -1,11 +1,78 @@
-import { Show } from 'solid-js';
+import { Show, createSignal, onCleanup } from 'solid-js';
 import { OPENCODE_UPDATE_REQUIRED_PREFIX } from '../../shared/opencode-compatibility';
 import { postMessage } from '../lib/bridge';
 import { openProviderSetup } from '../lib/provider-setup';
 import { defaultAppState } from '../lib/state';
+import { writeClipboard } from '../lib/write-clipboard';
 
 function openExternal(url: string) {
   postMessage({ type: 'vscode/open-external', payload: { url } });
+}
+
+function SetupCommandCard(props: { label: string; command: string }) {
+  const [copied, setCopied] = createSignal(false);
+  let copyTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  onCleanup(() => clearTimeout(copyTimeout));
+
+  const handleCopy = async () => {
+    if (!(await writeClipboard(props.command))) return;
+    setCopied(true);
+    clearTimeout(copyTimeout);
+    copyTimeout = setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div class="w-full px-4">
+      <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted">
+            {props.label}
+          </p>
+          <button
+            type="button"
+            class="shrink-0 text-vscode-muted transition-colors hover:text-vscode-fg"
+            title={copied() ? 'Copied' : `Copy: ${props.command}`}
+            aria-label={copied() ? 'Copied' : `Copy command: ${props.command}`}
+            onClick={() => void handleCopy()}
+          >
+            <Show
+              when={copied()}
+              fallback={
+                <svg
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect width="14" height="14" x="8" y="8" rx="2" />
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                </svg>
+              }
+            >
+              <svg
+                class="h-3.5 w-3.5 text-vscode-success"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </Show>
+          </button>
+        </div>
+        <code class="mt-1 block font-mono text-[12px] text-vscode-fg">{props.command}</code>
+      </div>
+    </div>
+  );
 }
 
 const serverStatus = () => defaultAppState.state.serverStatus;
@@ -39,7 +106,7 @@ export function ServerStatus() {
         </div>
         <div>
           <p class="text-[13px] font-medium text-vscode-fg">Starting OpenCode...</p>
-          <p class="mt-1.5 text-[12px] text-vscode-muted/70">Spawning the local server</p>
+          <p class="mt-1.5 text-[12px] text-vscode-muted">Spawning the local server</p>
         </div>
       </Show>
 
@@ -96,16 +163,24 @@ export function ServerStatus() {
                 Install the CLI to get started.
               </p>
             </div>
-            <div class="w-full px-4">
-              <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
-                <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">
-                  Install
-                </p>
-                <code class="mt-1 block font-mono text-[12px] text-vscode-fg">
-                  npm i -g opencode-ai
-                </code>
-              </div>
-            </div>
+            <SetupCommandCard label="Install" command="npm i -g opencode-ai" />
+            <button
+              type="button"
+              class="server-status-action-button"
+              onClick={() =>
+                postMessage({
+                  type: 'terminal/run',
+                  payload: { command: 'npm i -g opencode-ai', title: 'OpenCode Install' },
+                })
+              }
+            >
+              Open terminal and install
+            </button>
+            <p class="px-4 text-[11px] leading-normal text-vscode-muted">
+              After installing, run{' '}
+              <span class="font-medium text-vscode-fg">Varro: Restart Server</span> from the Command
+              Palette.
+            </p>
             <button
               type="button"
               class="text-[11px] text-vscode-link hover:text-vscode-link-active hover:underline"
@@ -151,16 +226,7 @@ export function ServerStatus() {
               automatically when setup completes.
             </p>
           </div>
-          <div class="w-full px-4">
-            <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
-              <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">
-                Setup
-              </p>
-              <code class="mt-1 block font-mono text-[12px] text-vscode-fg">
-                opencode auth login
-              </code>
-            </div>
-          </div>
+          <SetupCommandCard label="Setup" command="opencode auth login" />
           <button type="button" class="server-status-action-button" onClick={openProviderSetup}>
             Open terminal and add a provider
           </button>
@@ -200,13 +266,8 @@ function UpdateRequiredState(props: { message: string }) {
         <p class="text-[13px] font-medium text-vscode-fg">OpenCode update required</p>
         <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
       </div>
-      <div class="w-full px-4">
-        <div class="w-full rounded-md border border-vscode-border-soft bg-vscode-card px-3 py-2 text-left">
-          <p class="text-[10px] font-medium uppercase tracking-wide text-vscode-muted/70">Update</p>
-          <code class="mt-1 block font-mono text-[12px] text-vscode-fg">opencode upgrade</code>
-        </div>
-      </div>
-      <p class="px-4 text-[11px] leading-normal text-vscode-muted/80">
+      <SetupCommandCard label="Update" command="opencode upgrade" />
+      <p class="px-4 text-[11px] leading-normal text-vscode-muted">
         Then run <span class="font-medium text-vscode-fg">Varro: Restart Server</span> from the
         Command Palette.
       </p>

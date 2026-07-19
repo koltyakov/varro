@@ -68,7 +68,7 @@
 }
 
 .settings-search-input::placeholder {
-  color: color-mix(in srgb, var(--color-vscode-muted) 55%, transparent);
+  color: var(--color-vscode-muted);
 }
 
 .settings-search-clear {

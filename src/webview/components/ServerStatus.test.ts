@@ -80,6 +80,7 @@ describe('ServerStatus', () => {
 
     expect(container?.textContent).toContain('OpenCode is not installed');
     expect(container?.textContent).toContain('npm i -g opencode-ai');
+    expect(container?.textContent).toContain('Varro: Restart Server');
 
     const buttons = Array.from(container?.querySelectorAll('button') || []);
     const inlineLink = buttons.find((button) => button.textContent?.includes('OpenCode'));
@@ -96,6 +97,40 @@ describe('ServerStatus', () => {
       type: 'vscode/open-external',
       payload: { url: 'https://opencode.ai' },
     });
+  });
+
+  it('runs the install command in a terminal from the missing CLI screen', () => {
+    setState('serverStatus', { state: 'error', message: 'OpenCode CLI not found on PATH' });
+
+    renderServerStatus();
+
+    const installButton = Array.from(container?.querySelectorAll('button') || []).find(
+      (button) => button.textContent?.trim() === 'Open terminal and install'
+    );
+    expect(installButton).toBeDefined();
+    installButton?.click();
+
+    expect(postMessageMock).toHaveBeenCalledWith({
+      type: 'terminal/run',
+      payload: { command: 'npm i -g opencode-ai', title: 'OpenCode Install' },
+    });
+  });
+
+  it('copies the setup command to the clipboard', async () => {
+    setState('serverStatus', { state: 'error', message: 'OpenCode CLI not found on PATH' });
+    const writeText = vi.fn(async () => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderServerStatus();
+
+    const copyButton = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copy command: npm i -g opencode-ai"]'
+    );
+    expect(copyButton).not.toBeNull();
+    copyButton?.click();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith('npm i -g opencode-ai');
   });
 
   it('shows actionable guidance when OpenCode must be updated', () => {

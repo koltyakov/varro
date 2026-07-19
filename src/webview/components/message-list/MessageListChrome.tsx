@@ -1,7 +1,26 @@
-import { For, Show } from 'solid-js';
+import { For, Show, createEffect, onCleanup } from 'solid-js';
 import type { Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
+
+function bindStickyTextOverflowFade(text: HTMLElement, trackText: () => string) {
+  const update = () => {
+    const hasMoreBelow = text.scrollTop + text.clientHeight < text.scrollHeight - 1;
+    text.parentElement?.classList.toggle('has-more-below', hasMoreBelow);
+  };
+
+  text.addEventListener('scroll', update, { passive: true });
+  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+  resizeObserver?.observe(text);
+  createEffect(() => {
+    trackText();
+    queueMicrotask(update);
+  });
+  onCleanup(() => {
+    text.removeEventListener('scroll', update);
+    resizeObserver?.disconnect();
+  });
+}
 
 export type StickyUserMessagePreview = {
   id: string;
@@ -31,7 +50,14 @@ export function StickyUserMessagePreviewCard(props: {
               if (!props.loading) props.onClick?.(props.preview);
             }}
           >
-            <div class="latest-user-message-sticky-text">{props.preview.text}</div>
+            <div class="latest-user-message-sticky-text-clip">
+              <div
+                class="latest-user-message-sticky-text"
+                ref={(text) => bindStickyTextOverflowFade(text, () => props.preview.text)}
+              >
+                {props.preview.text}
+              </div>
+            </div>
             <Show when={props.loading}>
               <div class="latest-user-message-sticky-loading">
                 <span class="latest-user-message-sticky-spinner" aria-hidden="true" />

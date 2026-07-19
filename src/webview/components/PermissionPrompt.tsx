@@ -44,7 +44,13 @@ export function PermissionPrompt(props: { permission: Permission }) {
         </svg>
         <span class="permission-prompt-label">Permission Required</span>
         <Show when={duplicateCount() > 1}>
-          <span class="permission-prompt-count">{duplicateCount()}</span>
+          <span
+            class="permission-prompt-count"
+            title={`${duplicateCount()} identical requests grouped`}
+            aria-label={`${duplicateCount()} identical requests grouped`}
+          >
+            ×{duplicateCount()}
+          </span>
         </Show>
       </div>
 
@@ -58,6 +64,12 @@ export function PermissionPrompt(props: { permission: Permission }) {
               <span class="permission-meta-value">{formatMetadataValue(value)}</span>
             </div>
           ))}
+        </div>
+      </Show>
+
+      <Show when={duplicateCount() > 1}>
+        <div class="permission-prompt-group-note">
+          Requested {duplicateCount()} times in parallel — one response applies to all.
         </div>
       </Show>
 

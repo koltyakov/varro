@@ -518,6 +518,13 @@ body.vscode-high-contrast-light
   word-break: break-all;
 }
 
+.permission-prompt-group-note {
+  margin: 2px 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-vscode-muted);
+}
+
 .permission-prompt-actions {
   display: flex;
   justify-content: flex-end;
