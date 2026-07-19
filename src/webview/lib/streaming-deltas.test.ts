@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createStreamingDeltaQueue } from './streaming-deltas';
+import { createStreamingDeltaQueue, shouldUseStreamingText } from './streaming-deltas';
 
 function captureSchedule() {
   const callbacks: Array<() => void> = [];
@@ -129,5 +129,35 @@ describe('createStreamingDeltaQueue', () => {
     q.scheduleFlush();
     drain();
     expect(flush).toHaveBeenCalledTimes(2);
+  });
+});
+
+// shouldUseStreamingText is the guard that decides whether streaming text may
+// overwrite committed part text. Its exact asymmetry matters: streamed text
+// must only ever extend what the user already sees. Loosening any of these
+// cases reintroduces text rollback or wipes during snapshot races.
+describe('shouldUseStreamingText', () => {
+  it('accepts identical text', () => {
+    expect(shouldUseStreamingText('abc', 'abc')).toBe(true);
+  });
+
+  it('accepts a strict extension of the committed text', () => {
+    expect(shouldUseStreamingText('abc', 'abcdef')).toBe(true);
+  });
+
+  it('accepts any streaming text when nothing is committed yet', () => {
+    expect(shouldUseStreamingText('', 'abc')).toBe(true);
+  });
+
+  it('rejects empty streaming text so committed text is never wiped', () => {
+    expect(shouldUseStreamingText('abc', '')).toBe(false);
+  });
+
+  it('rejects stale streaming text shorter than the committed text', () => {
+    expect(shouldUseStreamingText('abcdef', 'abc')).toBe(false);
+  });
+
+  it('rejects divergent streaming text even when longer', () => {
+    expect(shouldUseStreamingText('abc', 'abX-longer-but-diverged')).toBe(false);
   });
 });
