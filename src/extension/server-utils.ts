@@ -2,7 +2,9 @@ import type { ChildProcess } from 'child_process';
 import type { ServerStatus } from '../shared/protocol';
 
 export function isPortInUseMessage(text: string): boolean {
-  return /\bEADDRINUSE\b|address already in use|port .* (already )?in use/i.test(text);
+  return /\bEADDRINUSE\b|address already in use|port .* (already )?in use|only one usage of each socket address/i.test(
+    text
+  );
 }
 
 export function normalizeRunningStatus(next: ServerStatus, previous: ServerStatus): ServerStatus {

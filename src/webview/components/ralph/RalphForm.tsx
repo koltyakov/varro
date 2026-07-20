@@ -13,6 +13,7 @@ import { ModelPicker, getVariantsForModel } from '../ModelPicker';
 import { ModelPickerButton, VariantPicker } from '../chat-input/ToolbarPickers';
 import { getPreferredVariant } from '../../lib/model-variants';
 import { formatVariantLabel } from '../../lib/format';
+import { getLeafPathName } from '../../lib/path-display';
 
 const DEFAULT_ITERATIONS = 10;
 
@@ -157,7 +158,7 @@ export function RalphForm() {
     setIsSubmitting(true);
 
     try {
-      const planLabel = path.split('/').pop() || path;
+      const planLabel = getLeafPathName(path);
       const permissionMode: RalphConfig['permissionMode'] = 'full';
       const previousSessionId = state.activeSessionId;
       const shouldDeletePreviousSession = shouldDeletePreviousBlankSession(

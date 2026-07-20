@@ -1214,7 +1214,7 @@ function createPendingIteration(index: number): RalphIteration {
 }
 
 function planDocLabel(path: string): string {
-  return path.split('/').pop() || path;
+  return path.split(/[\\/]/).pop() || path;
 }
 
 /**

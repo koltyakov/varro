@@ -1,10 +1,11 @@
+import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { readFileMock } = vi.hoisted(() => ({
   readFileMock: vi.fn(),
 }));
 
-import { createCopilotAdapter } from './copilot';
+import { createCopilotAdapter, getGhHostsFileCandidates } from './copilot';
 import type { ProviderMetadata } from '../../util/provider-limit';
 
 vi.mock('fs/promises', () => ({
@@ -353,5 +354,40 @@ describe('createCopilotAdapter', () => {
       checkedAt: 1_000,
       note: 'Failed to poll the GitHub Copilot quota endpoint',
     });
+  });
+});
+
+describe('getGhHostsFileCandidates', () => {
+  it('prefers GH_CONFIG_DIR, then XDG_CONFIG_HOME, then the home config directory', () => {
+    expect(
+      getGhHostsFileCandidates(
+        { GH_CONFIG_DIR: '/custom/gh', XDG_CONFIG_HOME: '/xdg' },
+        '/home/user',
+        'linux'
+      )
+    ).toEqual([
+      join('/custom/gh', 'hosts.yml'),
+      join('/xdg', 'gh', 'hosts.yml'),
+      join('/home/user', '.config', 'gh', 'hosts.yml'),
+    ]);
+  });
+
+  it('includes the AppData GitHub CLI directory on Windows', () => {
+    expect(
+      getGhHostsFileCandidates(
+        { APPDATA: 'C:\\Users\\user\\AppData\\Roaming' },
+        'C:\\Users\\user',
+        'win32'
+      )
+    ).toEqual([
+      join('C:\\Users\\user\\AppData\\Roaming', 'GitHub CLI', 'hosts.yml'),
+      join('C:\\Users\\user', '.config', 'gh', 'hosts.yml'),
+    ]);
+  });
+
+  it('ignores AppData outside Windows and blank overrides', () => {
+    expect(
+      getGhHostsFileCandidates({ APPDATA: '/appdata', GH_CONFIG_DIR: '  ' }, '/home/user', 'darwin')
+    ).toEqual([join('/home/user', '.config', 'gh', 'hosts.yml')]);
   });
 });

@@ -25,6 +25,11 @@ describe('server utils', () => {
 
   it('detects port-in-use errors and normalizes running status', () => {
     expect(isPortInUseMessage('listen EADDRINUSE: address already in use')).toBe(true);
+    expect(
+      isPortInUseMessage(
+        'Only one usage of each socket address (protocol/network address/port) is normally permitted'
+      )
+    ).toBe(true);
     expect(isPortInUseMessage('different error')).toBe(false);
 
     expect(

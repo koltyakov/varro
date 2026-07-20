@@ -9,6 +9,7 @@ import {
   formatVariantLabel,
   getProviderLimitCompactBadges,
 } from '../../lib/format';
+import { getLeafPathName } from '../../lib/path-display';
 import { getProviderLimit } from '../../lib/state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { ralphRunner } from './ralph-runner';
@@ -242,7 +243,7 @@ export function RalphDashboard(props: { sessionId: string }) {
 }
 
 function planLabel(path: string): string {
-  return path.split('/').pop() || path;
+  return getLeafPathName(path);
 }
 
 function formatReasoningLevel(variant: string | undefined): string {

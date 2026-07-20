@@ -18,8 +18,26 @@ import {
 } from '../adapter-utils';
 
 const COPILOT_USER_ENDPOINT = 'https://api.github.com/copilot_internal/user';
-const GITHUB_HOSTS_FILE_PATH = join(homedir(), '.config', 'gh', 'hosts.yml');
 const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
+
+// Mirrors gh's own config-dir resolution: GH_CONFIG_DIR, then XDG_CONFIG_HOME,
+// then %AppData%\GitHub CLI on Windows, then ~/.config/gh.
+export function getGhHostsFileCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  home = homedir(),
+  platform = process.platform
+): string[] {
+  const candidates: string[] = [];
+  const ghConfigDir = env.GH_CONFIG_DIR?.trim();
+  if (ghConfigDir) candidates.push(join(ghConfigDir, 'hosts.yml'));
+  const xdgConfigHome = env.XDG_CONFIG_HOME?.trim();
+  if (xdgConfigHome) candidates.push(join(xdgConfigHome, 'gh', 'hosts.yml'));
+  if (platform === 'win32' && env.APPDATA) {
+    candidates.push(join(env.APPDATA, 'GitHub CLI', 'hosts.yml'));
+  }
+  candidates.push(join(home, '.config', 'gh', 'hosts.yml'));
+  return [...new Set(candidates)];
+}
 
 const COPILOT_QUOTA_LABELS: Record<string, string> = {
   premium_interactions: 'Premium Requests',
@@ -215,12 +233,13 @@ async function resolveCopilotAuthToken(
 }
 
 async function readCopilotTokenFromGhHosts() {
-  try {
-    const raw = await readFile(GITHUB_HOSTS_FILE_PATH, 'utf-8');
-    return parseGhHostsOauthToken(raw);
-  } catch {
-    return null;
+  for (const hostsPath of getGhHostsFileCandidates()) {
+    try {
+      const token = parseGhHostsOauthToken(await readFile(hostsPath, 'utf-8'));
+      if (token) return token;
+    } catch {}
   }
+  return null;
 }
 
 function parseGhHostsOauthToken(raw: string) {
