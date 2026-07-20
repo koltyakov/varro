@@ -43,6 +43,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
   Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   if (originalOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
@@ -429,6 +430,127 @@ describe('OpenCodeProcess server ownership leases', () => {
     expect(kill).not.toHaveBeenCalled();
     await expect(stat(leasePath)).rejects.toThrow();
     kill.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('retries Windows ownership confirmation while the listener becomes visible', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const child = Object.assign(new EventEmitter(), {
+      pid: 43_210,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    });
+    let listenerQueries = 0;
+    spawnMock.mockImplementation((command: string, args: string[]) => {
+      if (command === 'C:\\OpenCode\\opencode.exe') return child;
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => {
+        const script = args.at(-1) || '';
+        if (command === 'powershell.exe' && script.includes('Get-NetTCPConnection')) {
+          listenerQueries += 1;
+          if (listenerQueries > 1) result.stdout.emit('data', Buffer.from('43210\n'));
+        } else if (command === 'powershell.exe' && script.includes('ExecutablePath')) {
+          result.stdout.emit('data', Buffer.from('C:\\OpenCode\\opencode.exe\n'));
+        } else if (command === 'powershell.exe' && script.includes('CreationDate')) {
+          result.stdout.emit('data', Buffer.from('123456\n'));
+        }
+        result.emit('close', 0);
+      });
+      return result;
+    });
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'C:\\OpenCode\\opencode.exe',
+      false,
+      undefined,
+      leasePath
+    );
+    manager.launchServer({
+      getWorkspaceCwd: () => undefined,
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    await expect(manager.confirmManagedServerOwnership()).resolves.toBe(true);
+
+    expect(listenerQueries).toBe(2);
+    expect(manager.managedProcess).toBe(true);
+    expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toEqual(
+      expect.objectContaining({ pid: 43_210, state: 'active' })
+    );
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('allows slow Windows process inspection to finish', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const child = Object.assign(new EventEmitter(), {
+      pid: 43_210,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    });
+    const inspectionKills: Array<ReturnType<typeof vi.fn>> = [];
+    spawnMock.mockImplementation((command: string, args: string[]) => {
+      if (command === 'C:\\OpenCode\\opencode.exe') return child;
+      const kill = vi.fn();
+      inspectionKills.push(kill);
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill,
+      });
+      setTimeout(() => {
+        const script = args.at(-1) || '';
+        if (script.includes('Get-NetTCPConnection')) {
+          result.stdout.emit('data', Buffer.from('43210\n'));
+        } else if (script.includes('ExecutablePath')) {
+          result.stdout.emit('data', Buffer.from('C:\\OpenCode\\opencode.exe\n'));
+        } else if (script.includes('CreationDate')) {
+          result.stdout.emit('data', Buffer.from('123456\n'));
+        }
+        result.emit('close', 0);
+      }, 3_000);
+      return result;
+    });
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      'C:\\OpenCode\\opencode.exe',
+      false,
+      undefined,
+      leasePath
+    );
+    manager.launchServer({
+      getWorkspaceCwd: () => undefined,
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    const confirmation = manager.confirmManagedServerOwnership();
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    await expect(confirmation).resolves.toBe(true);
+    expect(inspectionKills).toHaveLength(3);
+    expect(inspectionKills.every((kill) => kill.mock.calls.length === 0)).toBe(true);
     await rm(directory, { recursive: true, force: true });
   });
 

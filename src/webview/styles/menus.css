@@ -16,6 +16,13 @@
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent) transparent;
 }
 
+.model-picker-empty {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: center;
+}
+
 .dropdown-group-header {
   padding: 5px 10px;
   font-size: 10px;

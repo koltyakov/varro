@@ -125,6 +125,20 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
+  it('invalidates when a watcher event wins the initial signature race', async () => {
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+
+    await (provider as unknown as ProviderRefreshAccess).refreshProviderState(undefined, true);
+
+    expect(server.restart).toHaveBeenCalledOnce();
+    await provider.dispose();
+  });
+
   it('refreshes the UI immediately and defers a managed restart until work is idle', async () => {
     vi.useFakeTimers();
     let statusRequestCount = 0;
@@ -165,17 +179,21 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
-  it('never restarts an unmanaged server during provider refresh', async () => {
+  it('invalidates an unmanaged server without restarting during provider refresh', async () => {
     const server = createServer({
       readServerInfo: vi.fn(async () => ({ managedProcess: false })),
-      request: vi.fn(),
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question') return [];
+        return true;
+      }),
     });
     const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
 
     await (provider as unknown as ProviderRefreshAccess).refreshProviderState();
 
-    expect(server.request).not.toHaveBeenCalled();
+    expect(server.request).toHaveBeenCalledWith('POST', '/global/dispose');
     expect(server.restart).not.toHaveBeenCalled();
     expect(posted).toContainEqual({ type: 'providers/refresh' });
 
@@ -183,7 +201,7 @@ describe('SidebarProvider provider refresh', () => {
     access.setProviderWatchActive(true);
     await Promise.resolve();
     await Promise.resolve();
-    expect(server.readServerInfo).toHaveBeenCalledOnce();
+    expect(server.readServerInfo).toHaveBeenCalledTimes(2);
     await provider.dispose();
   });
 

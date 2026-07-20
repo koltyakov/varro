@@ -121,6 +121,9 @@ type CommandResult = {
 };
 
 const PROCESS_COMMAND_TIMEOUT_MS = 2000;
+const WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS = 10_000;
+const WINDOWS_OWNERSHIP_CONFIRM_ATTEMPTS = 3;
+const WINDOWS_OWNERSHIP_CONFIRM_RETRY_MS = 250;
 const PROCESS_STOP_TIMEOUT_MS = 5000;
 const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
 const INJECTED_CONFIG_DIRECTORY_PREFIX = 'varro-opencode-config-';
@@ -194,7 +197,11 @@ function runProcess(
 async function findListeningPids(port: number) {
   if (process.platform === 'win32') {
     const script = `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`;
-    const result = await runProcess('powershell.exe', ['-NoProfile', '-Command', script]);
+    const result = await runProcess(
+      'powershell.exe',
+      ['-NoProfile', '-Command', script],
+      WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+    );
     return parsePids(result.stdout);
   }
 
@@ -228,7 +235,13 @@ function isCommandUnavailable(result: CommandResult) {
 async function readProcessExecutable(pid: number) {
   if (process.platform === 'win32') {
     const script = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").ExecutablePath`;
-    return (await runProcess('powershell.exe', ['-NoProfile', '-Command', script])).stdout.trim();
+    return (
+      await runProcess(
+        'powershell.exe',
+        ['-NoProfile', '-Command', script],
+        WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+      )
+    ).stdout.trim();
   }
 
   if (process.platform === 'linux') {
@@ -252,7 +265,11 @@ async function readProcessBirthIdentity(pid: number) {
   if (process.platform === 'win32') {
     const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($p) { $p.CreationDate.ToUniversalTime().Ticks }`;
     const value = (
-      await runProcess('powershell.exe', ['-NoProfile', '-Command', script])
+      await runProcess(
+        'powershell.exe',
+        ['-NoProfile', '-Command', script],
+        WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+      )
     ).stdout.trim();
     return value ? `win32:${value}` : '';
   }
@@ -278,11 +295,15 @@ async function readProcessBirthIdentity(pid: number) {
 async function readParentPid(pid: number) {
   const result =
     process.platform === 'win32'
-      ? await runProcess('powershell.exe', [
-          '-NoProfile',
-          '-Command',
-          `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").ParentProcessId`,
-        ])
+      ? await runProcess(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-Command',
+            `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").ParentProcessId`,
+          ],
+          WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS
+        )
       : await runProcess('ps', ['-p', String(pid), '-o', 'ppid=']);
   const parentPid = Number.parseInt(result.stdout.trim(), 10);
   return Number.isSafeInteger(parentPid) && parentPid > 0 ? parentPid : null;
@@ -765,26 +786,40 @@ export class OpenCodeProcess {
       return false;
     }
 
-    const listeners = await findListeningPids(this._port);
     let listenerPid: number | undefined;
-    for (const pid of listeners) {
-      if (await isProcessOrDescendant(pid, proc.pid)) {
-        listenerPid = pid;
-        break;
+    let executable = '';
+    let birthIdentity = '';
+    const attempts = process.platform === 'win32' ? WINDOWS_OWNERSHIP_CONFIRM_ATTEMPTS : 1;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      listenerPid = undefined;
+      executable = '';
+      birthIdentity = '';
+      const listeners = await findListeningPids(this._port);
+      for (const pid of listeners) {
+        if (await isProcessOrDescendant(pid, proc.pid)) {
+          listenerPid = pid;
+          break;
+        }
       }
+      if (listenerPid) {
+        [executable, birthIdentity] = await Promise.all([
+          readProcessExecutable(listenerPid),
+          readProcessBirthIdentity(listenerPid),
+        ]);
+        if (executable && birthIdentity) break;
+      }
+      if (attempt + 1 < attempts) await delay(WINDOWS_OWNERSHIP_CONFIRM_RETRY_MS);
     }
     if (!listenerPid) {
       this._managedProcess = false;
       logger.warn(`Could not bind managed OpenCode ownership to port ${this._port}`);
       return false;
     }
-    const executable = await readProcessExecutable(listenerPid);
     if (!executable) {
       this._managedProcess = false;
       logger.warn(`Could not read executable identity for managed OpenCode PID ${listenerPid}`);
       return false;
     }
-    const birthIdentity = await readProcessBirthIdentity(listenerPid);
     if (!birthIdentity) {
       this._managedProcess = false;
       logger.warn(`Could not read process birth identity for managed OpenCode PID ${listenerPid}`);

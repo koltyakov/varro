@@ -248,7 +248,7 @@ export function ModelPicker(props: {
           <Show
             when={visibleProviders().length > 0}
             fallback={
-              <div class="px-3 py-4 text-center text-[11px] text-vscode-muted">
+              <div class="model-picker-empty px-3 text-center text-[11px] text-vscode-muted">
                 No models available
               </div>
             }
@@ -256,7 +256,7 @@ export function ModelPicker(props: {
             <Show
               when={filteredProviders().length > 0}
               fallback={
-                <div class="px-3 py-4 text-center text-[11px] text-vscode-muted">
+                <div class="model-picker-empty px-3 text-center text-[11px] text-vscode-muted">
                   No matching models
                 </div>
               }

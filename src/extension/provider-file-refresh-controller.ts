@@ -100,7 +100,10 @@ export class ProviderFileRefreshController {
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (requireSignatureChange && this.observedFilesSignature === null) {
       this.observedFilesSignature = signature;
+      this.dependencies.clearProviderLimitCache();
+      this.restartPending = true;
       this.dependencies.postRefresh();
+      await this.maybeRestart(generation, 0);
       return;
     }
     if (requireSignatureChange && signature === this.observedFilesSignature) {
@@ -216,11 +219,7 @@ export class ProviderFileRefreshController {
         this.scheduleRestartRetry(generation, retryCount);
         return;
       }
-      if (!managedProcess) {
-        this.restartPending = false;
-        return;
-      }
-      managedProcessConfirmed = true;
+      managedProcessConfirmed = managedProcess;
     }
     if (this.dependencies.hasLocallyActiveWork()) {
       this.scheduleRestartRetry(generation, retryCount, false, managedProcessConfirmed);
@@ -247,12 +246,8 @@ export class ProviderFileRefreshController {
     }
     const stillManaged = await this.readManagedServerState();
     if (this.disposed || generation !== this.refreshGeneration) return;
-    if (stillManaged !== true) {
-      if (stillManaged === null) {
-        this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
-      } else {
-        this.restartPending = false;
-      }
+    if (stillManaged === null) {
+      this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
       return;
     }
     if (
@@ -265,7 +260,11 @@ export class ProviderFileRefreshController {
     }
 
     try {
-      await this.dependencies.server.restart();
+      if (stillManaged) {
+        await this.dependencies.server.restart();
+      } else {
+        await this.dependencies.server.request('POST', '/global/dispose');
+      }
       if (this.disposed || generation !== this.refreshGeneration) return;
       this.restartPending = false;
       this.dependencies.clearProviderLimitCache();
@@ -273,7 +272,7 @@ export class ProviderFileRefreshController {
     } catch (err) {
       if (this.disposed || generation !== this.refreshGeneration) return;
       logger.warn(
-        `Provider refresh restart failed: ${err instanceof Error ? err.message : String(err)}`
+        `Provider refresh invalidation failed: ${err instanceof Error ? err.message : String(err)}`
       );
       this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
     }
