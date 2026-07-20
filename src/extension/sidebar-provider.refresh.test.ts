@@ -205,6 +205,34 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
+  it('invalidates a stale unmanaged server when provider watching opens', async () => {
+    const server = createServer({
+      readServerInfo: vi.fn(async () => ({ managedProcess: false })),
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question') return [];
+        return true;
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const access = provider as unknown as ProviderRefreshAccess;
+    await access.initializeProviderFileSignature();
+
+    access.setProviderWatchActive(true);
+
+    await vi.waitFor(() => expect(server.request).toHaveBeenCalledWith('POST', '/global/dispose'));
+    expect(server.restart).not.toHaveBeenCalled();
+
+    access.setProviderWatchActive(false);
+    access.setProviderWatchActive(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(server.request.mock.calls.filter(([, path]) => path === '/global/dispose')).toHaveLength(
+      1
+    );
+    await provider.dispose();
+  });
+
   it('resumes a pending managed restart when provider watching is reopened', async () => {
     vi.useFakeTimers();
     let idle = false;

@@ -43,6 +43,7 @@ export class ProviderFileRefreshController {
   private refreshGeneration = 0;
   private observedFilesSignature: string | null = null;
   private restartPending = false;
+  private unmanagedServerSynchronized = false;
   private disposed = false;
 
   constructor(
@@ -191,6 +192,13 @@ export class ProviderFileRefreshController {
     if (changed) {
       this.dependencies.clearProviderLimitCache();
       this.restartPending = true;
+    } else if (
+      !this.unmanagedServerSynchronized &&
+      this.dependencies.server.status.state === 'running'
+    ) {
+      const managedProcess = await this.readManagedServerState();
+      if (this.disposed || generation !== this.refreshGeneration) return;
+      if (managedProcess === false) this.restartPending = true;
     }
     this.dependencies.postRefresh();
     if (this.restartPending) {
@@ -264,6 +272,7 @@ export class ProviderFileRefreshController {
         await this.dependencies.server.restart();
       } else {
         await this.dependencies.server.request('POST', '/global/dispose');
+        this.unmanagedServerSynchronized = true;
       }
       if (this.disposed || generation !== this.refreshGeneration) return;
       this.restartPending = false;
