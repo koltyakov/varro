@@ -268,6 +268,22 @@ describe('bridge', () => {
     bridge.cleanupBridge();
   });
 
+  it('reports sender failures that throw values failing instanceof Error', async () => {
+    const bridge = await loadBridge();
+    window.__sendToExtension = vi.fn(() => {
+      // Cross-realm DOMExceptions (e.g. DataCloneError from structured clone
+      // in the webview host) fail instanceof Error checks; they must still be
+      // reported as send failures, not as a missing transport.
+      throw { name: 'DataCloneError', message: '#<Object> could not be cloned.' };
+    });
+
+    await expect(bridge.apiCall('GET', '/session', undefined, { retries: 0 })).rejects.toThrow(
+      'Extension transport failed: GET /session: #<Object> could not be cloned.'
+    );
+
+    bridge.cleanupBridge();
+  });
+
   it('does not create API requests after cleanup', async () => {
     const bridge = await loadBridge();
     window.__sendToExtension = vi.fn();

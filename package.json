@@ -68,7 +68,7 @@
     "jsdom": "29.1.1",
     "oxfmt": "0.59.0",
     "oxlint": "1.74.0",
-    "postcss": "8.5.19",
+    "postcss": "8.5.20",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.1.5",

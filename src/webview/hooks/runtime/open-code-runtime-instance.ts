@@ -16,6 +16,7 @@ import { ralphStore } from '../../lib/stores/ralph-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
+import { toApprovedPermissionReference, toPlainJudgeModel } from '../../lib/judge-request';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
@@ -415,10 +416,12 @@ function getActiveProviderSelection() {
 }
 
 function resolvePermissionJudgeModel(sessionId: string) {
-  return routingStore.resolveSelectedModel(
-    routingStore.getSelectedModelForSession(sessionId) || appStore.state.selectedModel,
-    appStore.state.providers,
-    appStore.state.providerDefaults
+  return toPlainJudgeModel(
+    routingStore.resolveSelectedModel(
+      routingStore.getSelectedModelForSession(sessionId) || appStore.state.selectedModel,
+      appStore.state.providers,
+      appStore.state.providerDefaults
+    )
   );
 }
 
@@ -1437,13 +1440,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   ) {
     approvedPermissionReferences = [
       ...approvedPermissionReferences,
-      {
-        type: permission.type,
-        title: permission.title,
-        response,
-        ...(permission.pattern !== undefined ? { pattern: permission.pattern } : {}),
-        ...(permission.metadata ? { metadata: permission.metadata } : {}),
-      },
+      toApprovedPermissionReference(permission, response),
     ].slice(-20);
   }
 

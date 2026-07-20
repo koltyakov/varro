@@ -223,13 +223,26 @@ function sendApiCall<T>(
         pendingRetries.add(retry);
         return;
       }
+      // sendError may cross the webview host realm boundary (e.g. a
+      // DataCloneError from structured clone), where instanceof Error fails;
+      // any thrown value is a send failure, not a missing transport.
       reject(
-        sendError instanceof Error
-          ? new Error(`Extension transport failed: ${method} ${path}: ${sendError.message}`)
+        sendError !== undefined
+          ? new Error(
+              `Extension transport failed: ${method} ${path}: ${describeSendError(sendError)}`
+            )
           : new Error(`Extension transport unavailable: ${method} ${path}`)
       );
     });
   });
+}
+
+function describeSendError(value: unknown): string {
+  if (value && typeof value === 'object' && 'message' in value) {
+    const message = (value as { message: unknown }).message;
+    if (typeof message === 'string' && message) return message;
+  }
+  return String(value);
 }
 
 function sanitizeDiagnosticPath(path: string): string {
