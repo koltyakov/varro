@@ -1,81 +1,81 @@
-# Varro: OpenCode for VS Code
+# Varro for OpenCode
 
 [![Visual Studio Marketplace](https://vsmarketplacebadges.dev/version-short/koltyakov.varro.svg)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
 [![Installs](https://vsmarketplacebadges.dev/installs-short/koltyakov.varro.svg)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/koltyakov/varro/blob/main/LICENSE)
 
-**The best OpenCode UI for VS Code.**
+Varro is a focused VS Code UI for [OpenCode](https://opencode.ai), designed for daily agentic development. It keeps chat, project context, session management, permissions, model controls, provider limits, and token usage inside the editor.
 
-Varro turns [OpenCode](https://opencode.ai) into a polished, focused workspace for agentic development. Run several sessions at once, build prompts from real editor context, and keep provider limits and token consumption visible without living in a terminal.
-
-Varro is deliberately simple. It does not recreate an IDE inside your IDE or bury the core workflow under feature clutter. Chat, context, sessions, approvals, and usage are designed as one coherent experience.
-
-[**Install Varro from the VS Code Marketplace**](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
+Your local OpenCode configuration remains the source of truth for agents, providers, models, commands, skills, and MCP servers.
 
 ![Varro running OpenCode in VS Code](https://raw.githubusercontent.com/koltyakov/varro/main/assets/demo.png)
 
 ## Why Varro
 
-- **A chat experience built for coding.** Readable streaming output, compact tool activity, diff summaries, sticky prompt context, message queues, steering, and approvals all stay in one flow.
-- **Context without ceremony.** The active file and selection can follow you automatically. Add Explorer files, editor or terminal selections, dragged folders, pasted images, and `@` mentions directly from the composer.
-- **Multi-session development without chaos.** Run work in parallel and see which sessions are running, waiting for you, failed, completed, or ready to hand off from planning.
-- **Provider limits before they surprise you.** When a provider exposes quota data, available windows, remaining capacity, and reset timing sit next to the model controls. If a limit is reached, Varro lets you stop retries or switch providers.
-- **Token usage without guesswork.** Inspect context-window fill and a session breakdown for input, output, reasoning, and cache tokens, including sub-agent usage.
-- **Power without clutter.** Agents, models, reasoning variants, skills, commands, and MCPs come from your OpenCode setup. Varro makes them easier to use instead of adding another configuration layer.
+- **Compact, consistent UI.** Streaming output, reasoning, tool activity, permissions, questions, todos, and changed files share the same chat flow and remain readable in a sidebar.
+- **Focused scope.** Chat, context, sessions, approvals, and usage information stay central. Planning and automation are available without taking over the normal prompt-and-response workflow.
+- **Context-aware composer.** The active file and selection can follow the conversation automatically, while Explorer items, terminal output, files, folders, images, and `@` mentions can be added explicitly.
+- **Parallel sessions with explicit state.** Workspace sessions identify running, attention-needed, failed, completed, and plan-ready work. Notifications and the status bar cover sessions running in the background.
+- **Visible provider limits.** When quota data is available, remaining capacity and reset windows appear next to the model controls, where they can inform provider and model selection.
+- **Detailed token accounting.** Context-window fill and session totals for input, output, reasoning, cache, and sub-agent activity can be inspected without leaving the chat.
+- **Direct OpenCode controls.** Agents, models, reasoning variants, permission modes, and per-session MCP connections are available from the composer.
 
-## Parallel Work That Stays Clear
+## Sessions
 
-Start another session while an agent is working and keep coding. Varro scopes sessions to the current workspace and gives every run a useful status: `Running`, `Needs attention`, `Failed`, `Plan ready`, or `Completed`.
+Sessions are filtered to the current workspace and sorted by recent activity. Each session can show changed files, line additions and removals, token usage, duration, and current state.
 
-Search, pin, rename, resume, and recycle sessions without losing their history. Sub-agent sessions stay connected to their parent. When Varro is hidden, VS Code notifications and a status bar summary tell you when work finishes or needs input.
+You can search, pin, rename, resume, or move sessions to the recycle bin. Sub-agent sessions remain linked to their parent session. On larger layouts, the session list can stay open beside the active chat.
+
+When the sidebar is hidden, Varro can notify you when a session finishes, requests permission, or asks a question.
 
 ![Workspace sessions with status, token, and change summaries](https://raw.githubusercontent.com/koltyakov/varro/main/assets/sessions.png)
 
-## Usage You Can Actually See
+## Context And Composer
 
-Agentic development should not hide the meter. When a provider exposes quota information, Varro shows each available limit window, the capacity left, and when it resets. Warnings remain close to the composer where model decisions happen.
+- The active file and current selection are included automatically by default.
+- A document chip shows the current live editor context and lets you disable it for the session.
+- Files, folders, line ranges, and terminal output can be added with `Varro: Add to Context` or `Cmd+Shift+K` / `Ctrl+Shift+K`.
+- Files and folders can be dragged into the composer, and images can be pasted directly.
+- Typing `@` searches workspace files and available agents.
+- While a session is running, you can queue a follow-up, steer the current run, or stop and replace the prompt.
+- Composer undo and redo include file and image attachment changes.
 
-The context indicator shows how full the selected model's window is. Open it for exact session totals across input, output, reasoning, cache reads, cache writes, and sub-agents. You can compact before the context window becomes a problem instead of discovering it after a failed run.
+## Usage And Limits
+
+The context indicator reports how much of the selected model's known context window is in use. Its popup includes session totals for input, output, reasoning, cache reads, cache writes, and sub-agent tokens.
+
+Provider-limit status is shown when OpenCode metadata or a supported provider endpoint supplies quota data. Available windows include remaining capacity and reset timing. If a provider returns a usage-limit error, Varro provides actions to stop retrying or switch providers.
 
 ![Context window and session token breakdown](https://raw.githubusercontent.com/koltyakov/varro/main/assets/context.png)
 
-## Context-First Chat
+## Models And MCPs
 
-Varro treats context as part of the prompt, not as a separate setup step.
+The model picker loads providers and models from OpenCode. It shows known capabilities such as tool support, reasoning variants, vision support, and context-window size. Providers and individual models can be hidden from the picker without changing the underlying OpenCode configuration.
 
-- Follow the active file and current selection automatically, with a visible chip to turn live context on or off.
-- Add files, folders, line ranges, or terminal output with `Varro: Add to Context` or `Cmd+Shift+K` / `Ctrl+Shift+K`.
-- Drag files and folders into chat, paste images, or type `@` to find workspace files and agents.
-- Queue a follow-up while the agent is running, steer the current run, or stop and replace the prompt.
-- Undo and redo composer edits together with their attachments, not just the text.
-
-## Your OpenCode Setup, Made Usable
-
-Varro uses the agents, providers, models, commands, skills, and MCP servers from your local OpenCode configuration. The model picker keeps a large setup navigable and exposes useful capabilities such as tools, reasoning variants, vision support, and known context-window sizes.
+MCP servers are also loaded from OpenCode and can be connected or disconnected per session.
 
 ![Provider and model selection in Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/providers.png)
 
-## More When You Need It
+## Additional Workflows
 
-- Inline permission prompts and follow-up questions
-- Agent todos, changed-file summaries, and source-control handoff
-- Plan-ready sessions with one-click document or implementation handoff
-- Ralph loops for plan-driven implementation, verification, and repair
-- Per-session MCP selection and permission modes
-- Built-in and custom slash commands, including `/review`, `/compact`, `/export`, `/skills`, and `/ralph`
-- Automatic reconnection to resumable work after a VS Code reload
+- Answer OpenCode questions and permission requests in the chat
+- Open changed files or hand the session off to VS Code Source Control
+- Open a completed plan as a Markdown document or continue it in an implementation session
+- Run plan-driven Ralph loops with iteration, verification, repair, pause, and resume controls
+- Use built-in and custom slash commands such as `/review`, `/compact`, `/export`, `/skills`, and `/ralph`
+- Reconnect to resumable sessions after a VS Code reload
 
 ## Quick Start
 
 1. [Install Varro](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro) from the VS Code Marketplace.
 2. Install the OpenCode CLI with `npm install -g opencode-ai`.
-3. Run `opencode auth login`, or open Varro and use `/connect`, if you have not configured a provider yet.
-4. Open a folder in VS Code and select `Varro` from the Activity Bar. Varro starts or connects to OpenCode when the chat first needs it.
-5. Start prompting. The active file and current selection are included automatically by default.
+3. Run `opencode auth login`, or use `/connect` in Varro, if no provider is configured yet.
+4. Open a folder in VS Code and select `Varro` from the Activity Bar.
+5. Start a session. Varro starts or connects to OpenCode when the chat first needs it.
 
-For the best layout, move Varro to the `Secondary Side Bar` so the editor and chat remain visible together.
+For a side-by-side editor and chat layout, move Varro to the `Secondary Side Bar`.
 
-Varro connects to `http://127.0.0.1:4096` by default. To manage the server yourself, disable `varro.server.autoStart` and run `opencode serve --port 4096`.
+Varro connects to `http://127.0.0.1:4096` by default. To manage the server manually, disable `varro.server.autoStart` and run `opencode serve --port 4096`.
 
 ## Requirements
 
@@ -92,4 +92,4 @@ Varro connects to `http://127.0.0.1:4096` by default. To manage the server yours
 
 ## License
 
-Varro is free and open source under the [MIT License](https://github.com/koltyakov/varro/blob/main/LICENSE).
+Varro is available under the [MIT License](https://github.com/koltyakov/varro/blob/main/LICENSE).
