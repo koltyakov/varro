@@ -272,6 +272,38 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
+  it('does not restart again when provider watching toggles during an in-flight restart', async () => {
+    let resolveRestart!: (url: string) => void;
+    const server = createServer({
+      restart: vi.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveRestart = resolve;
+          })
+      ),
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.setProviderWatchActive(true);
+
+    const refresh = access.refreshProviderState();
+    await vi.waitFor(() => expect(server.restart).toHaveBeenCalledOnce());
+
+    access.setProviderWatchActive(false);
+    resolveRestart('http://127.0.0.1:4096');
+    await refresh;
+
+    access.setProviderWatchActive(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(server.restart).toHaveBeenCalledOnce();
+    await provider.dispose();
+  });
+
   it('does not continue toward a restart after disposal during an ownership check', async () => {
     let resolveOwnership!: (value: { managedProcess: boolean }) => void;
     const ownership = new Promise<{ managedProcess: boolean }>((resolve) => {

@@ -274,8 +274,12 @@ export class ProviderFileRefreshController {
         await this.dependencies.server.request('POST', '/global/dispose');
         this.unmanagedServerSynchronized = true;
       }
-      if (this.disposed || generation !== this.refreshGeneration) return;
+      // The invalidation happened, so the pending flag must clear even when the
+      // generation moved on (e.g. the webview toggled watching while the server
+      // was restarting); a signature change during the restart is still caught
+      // by the next activation's signature comparison.
       this.restartPending = false;
+      if (this.disposed || generation !== this.refreshGeneration) return;
       this.dependencies.clearProviderLimitCache();
       this.dependencies.postRefresh();
     } catch (err) {
