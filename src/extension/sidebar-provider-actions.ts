@@ -23,6 +23,7 @@ export interface SidebarProviderActionDeps {
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
   restProxy: RestProxy;
+  refreshProviders(): Promise<void>;
   postContext(): void;
   postTerminalSelection(selection: { text: string; terminalName: string } | null): void;
   postConfigState(): void;
@@ -54,9 +55,7 @@ export function createSidebarProviderActions(
       deps.postContext();
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);
     },
-    refreshProviders: () => {
-      deps.postConfigState();
-    },
+    refreshProviders: () => deps.refreshProviders(),
     clearTerminalSelection: () => {
       deps.contextProvider.clearTerminalSelection();
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);

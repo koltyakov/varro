@@ -69,8 +69,8 @@ const {
   latestSidebarProviderInstance: {
     current: null as null | {
       dispose: ReturnType<typeof vi.fn>;
-      initializeProviderFileSignature: ReturnType<typeof vi.fn>;
       post: ReturnType<typeof vi.fn>;
+      startProviderFileObservation: ReturnType<typeof vi.fn>;
     },
   },
   loggerMock: {
@@ -120,14 +120,14 @@ vi.mock('./sidebar-provider', () => ({
   SidebarProvider: class {
     static viewType = 'varro.sidebar';
     dispose = vi.fn(() => Promise.resolve());
-    initializeProviderFileSignature = vi.fn(() => Promise.resolve());
     post = vi.fn();
+    startProviderFileObservation = vi.fn();
 
     constructor(...args: unknown[]) {
       latestSidebarProviderInstance.current = {
         dispose: this.dispose,
-        initializeProviderFileSignature: this.initializeProviderFileSignature,
         post: this.post,
+        startProviderFileObservation: this.startProviderFileObservation,
       };
       sidebarProviderMock(...args);
     }
@@ -273,6 +273,9 @@ describe('extension activation', () => {
     );
     expect(registerCommandsMock.mock.calls[0]?.[3]).toMatchObject(latestServerInstance.current!);
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:activated', true);
+    expect(
+      latestSidebarProviderInstance.current?.startProviderFileObservation
+    ).toHaveBeenCalledOnce();
     expect(context.subscriptions).toHaveLength(2);
   });
 

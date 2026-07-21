@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Provider } from '../types';
-import { sortProviderModels } from './model-ordering';
+import { getSupersededModelIds, sortProviderModels } from './model-ordering';
 
 function createModel(
   id: string,
@@ -77,5 +77,84 @@ describe('sortProviderModels', () => {
       'other-standard',
       'other-sol',
     ]);
+  });
+});
+
+describe('getSupersededModelIds', () => {
+  it('finds older releases in the same family and role lane', () => {
+    const models = [
+      createModel('claude-opus-4-1', 'Claude Opus 4.1', {
+        family: 'claude-opus',
+        release_date: '2025-08-05',
+      }),
+      createModel('claude-opus-4-8', 'Claude Opus 4.8', {
+        family: 'claude-opus',
+        release_date: '2026-05-28',
+      }),
+      createModel('claude-sonnet-4-6', 'Claude Sonnet 4.6', {
+        family: 'claude-sonnet',
+        release_date: '2026-02-17',
+      }),
+    ];
+
+    expect([...getSupersededModelIds(models)]).toEqual(['claude-opus-4-1']);
+  });
+
+  it('keeps model roles and output modalities in separate lanes', () => {
+    const models = [
+      createModel('gpt-4o', 'GPT-4o', {
+        family: 'gpt',
+        release_date: '2024-05-13',
+      }),
+      createModel('gpt-5', 'GPT-5', { family: 'gpt', release_date: '2025-08-07' }),
+      createModel('gpt-4o-mini', 'GPT-4o Mini', {
+        family: 'gpt',
+        release_date: '2024-07-18',
+      }),
+      createModel('gpt-5-codex', 'GPT-5 Codex', {
+        family: 'gpt',
+        release_date: '2025-09-15',
+      }),
+      createModel('gpt-5-image', 'GPT-5 Image', {
+        family: 'gpt',
+        release_date: '2025-10-01',
+        capabilities: { output: ['image'] },
+      }),
+    ];
+
+    expect([...getSupersededModelIds(models)]).toEqual(['gpt-4o']);
+  });
+
+  it('does not let previews or undated models supersede stable releases', () => {
+    const models = [
+      createModel('gemini-2.5-flash', 'Gemini 2.5 Flash', {
+        family: 'gemini-flash',
+        release_date: '2025-05-20',
+      }),
+      createModel('gemini-3-flash', 'Gemini 3 Flash', {
+        family: 'gemini-flash',
+        release_date: '2026-01-01',
+        status: 'beta',
+      }),
+      createModel('gemini-flash-latest', 'Gemini Flash Latest', {
+        family: 'gemini-flash',
+      }),
+    ];
+
+    expect([...getSupersededModelIds(models)]).toEqual([]);
+  });
+
+  it('supersedes deprecated siblings when a stable alternative exists', () => {
+    const models = [
+      createModel('mistral-medium-2505', 'Mistral Medium 2505', {
+        family: 'mistral-medium',
+        status: 'deprecated',
+      }),
+      createModel('mistral-medium-2604', 'Mistral Medium 2604', {
+        family: 'mistral-medium',
+      }),
+    ];
+
+    expect([...getSupersededModelIds(models)]).toEqual(['mistral-medium-2505']);
   });
 });

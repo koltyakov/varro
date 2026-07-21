@@ -3,6 +3,12 @@ import { render } from 'solid-js/web';
 import { setState } from '../lib/state';
 import { ModelsPanel } from './ModelsPanel';
 
+declare global {
+  interface Window {
+    __sendToExtension?: (message: unknown) => void;
+  }
+}
+
 const clientMocks = vi.hoisted(() => ({
   openCodeConfig: vi.fn(),
   saveModelRouting: vi.fn(),
@@ -41,6 +47,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   container = document.createElement('div');
   document.body.appendChild(container);
+  delete window.__sendToExtension;
   originalResizeObserver = globalThis.ResizeObserver;
   globalThis.ResizeObserver = class ResizeObserver {
     observe() {}
@@ -121,6 +128,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  delete window.__sendToExtension;
   setState('providers', []);
   setState('providerDefaults', {});
   setState('agents', []);
@@ -134,6 +142,20 @@ afterEach(() => {
 });
 
 describe('ModelsPanel', () => {
+  it('requests a provider reload from the extension', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(() => ModelsPanel(), container!);
+
+    const reloadButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Reload providers"]'
+    );
+    reloadButton?.click();
+
+    expect(reloadButton).toBeInstanceOf(HTMLButtonElement);
+    expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
+  });
+
   it('renders an inline release date for desktop layouts', async () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();

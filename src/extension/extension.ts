@@ -113,11 +113,7 @@ export async function activate(context: vscode.ExtensionContext) {
   registerCommands(context, sidebarProvider!, contextProvider!, server!);
 
   vscode.commands.executeCommand('setContext', 'varro:activated', true);
-  void sidebarProvider.initializeProviderFileSignature().catch((err) => {
-    logger.warn(
-      `Failed to initialize provider file observation: ${err instanceof Error ? err.message : String(err)}`
-    );
-  });
+  sidebarProvider.startProviderFileObservation();
   void (async () => {
     try {
       await sweepStaleInjectedConfigDirectories();

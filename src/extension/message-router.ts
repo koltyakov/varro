@@ -27,7 +27,7 @@ export interface MessageRouterCallbacks {
   setWebviewFocus(focused: boolean): void;
   setProviderWatchActive(active: boolean): void;
   requestContext(): void;
-  refreshProviders(): void;
+  refreshProviders(): Promise<void>;
   clearTerminalSelection(): void;
   runInTerminal(command: string, title?: string): void;
   exportSession(sessionId: string): Promise<void>;
@@ -68,7 +68,7 @@ export class MessageRouter {
           this.handleContextRequestMessage();
           break;
         case 'providers/refresh':
-          this.handleProvidersRefreshMessage();
+          await this.handleProvidersRefreshMessage();
           break;
         case 'terminal-selection/clear':
           this.handleTerminalSelectionClearMessage();
@@ -153,8 +153,8 @@ export class MessageRouter {
     this.callbacks.requestContext();
   }
 
-  private handleProvidersRefreshMessage() {
-    this.callbacks.refreshProviders();
+  private async handleProvidersRefreshMessage() {
+    await this.callbacks.refreshProviders();
   }
 
   private handleTerminalSelectionClearMessage() {

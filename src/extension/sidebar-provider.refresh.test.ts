@@ -17,6 +17,7 @@ type ProviderRefreshAccess = {
   readProviderFilesSignature(): Promise<string>;
   refreshProviderState(generation?: number, requireSignatureChange?: boolean): Promise<void>;
   setProviderWatchActive(active: boolean): void;
+  startProviderFileObservation(): void;
 };
 
 afterEach(() => {
@@ -29,6 +30,62 @@ describe('SidebarProvider provider refresh', () => {
 
     expect(providerFileSystem.stat).not.toHaveBeenCalled();
     expect(providerFileSystem.readFile).not.toHaveBeenCalled();
+    await provider.dispose();
+  });
+
+  it('refreshes providers after an auth change without opening model settings', async () => {
+    vi.useFakeTimers();
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+
+    (provider as unknown as ProviderRefreshAccess).startProviderFileObservation();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
+    const patterns = vscodeMock.workspace.createFileSystemWatcher.mock.calls.map(
+      ([pattern]: [{ pattern: string }]) => pattern.pattern
+    );
+    expect(patterns).toEqual(['config.json', 'opencode.json', 'opencode.jsonc', 'auth.json']);
+
+    posted.length = 0;
+    providerFileSystem.stat.mockResolvedValue({
+      ino: 1,
+      isFile: () => true,
+      mtimeMs: 1,
+      size: 6,
+    });
+    providerFileSystem.readFile.mockResolvedValue(Buffer.from('logout'));
+    const authWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[3]?.value as
+      | { onDidChange: ReturnType<typeof vi.fn> }
+      | undefined;
+    authWatcher?.onDidChange.mock.calls[0]?.[0]();
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(server.restart).toHaveBeenCalledOnce();
+    expect(posted).toContainEqual({ type: 'providers/refresh' });
+    await provider.dispose();
+  });
+
+  it('manually reloads providers when requested by the webview', async () => {
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question') return [];
+        return undefined;
+      }),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({ type: 'providers/refresh' });
+
+    expect(posted).toContainEqual({ type: 'providers/refresh' });
     await provider.dispose();
   });
 

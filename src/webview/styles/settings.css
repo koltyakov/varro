@@ -33,6 +33,17 @@
   gap: 4px;
 }
 
+.settings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.settings-header-actions .settings-reload-icon {
+  width: 12px;
+  height: 12px;
+}
+
 .settings-header-title {
   font-size: 12px;
   font-weight: 600;

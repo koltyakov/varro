@@ -219,6 +219,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         contextFilesState: this.contextFilesState,
         sessionExportService: this.sessionExportService,
         restProxy: this.restProxy,
+        refreshProviders: () => this.refreshProviderState(),
         postContext: () => this.postContext(),
         postTerminalSelection: (selection) => this.postTerminalSelection(selection),
         postConfigState: () => this.postConfigState(),
@@ -274,6 +275,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async initializeProviderFileSignature() {
     await this.providerFileRefresh.initializeSignature();
+  }
+
+  startProviderFileObservation() {
+    this.providerFileRefresh.setActive(true);
   }
 
   async handleMessage(msg: WebviewMessage) {

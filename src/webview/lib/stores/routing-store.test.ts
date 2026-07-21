@@ -118,4 +118,79 @@ describe('routingStore', () => {
     expect(routingStore.isProviderVisible('provider-1')).toBe(false);
     expect(routingStore.getVisibleProviders(state.providers)).toEqual([]);
   });
+
+  it('hides superseded models when a provider is first connected', () => {
+    const connected = createProvider('provider-1');
+    connected.models['model-1'] = {
+      ...connected.models['model-1'],
+      family: 'model',
+      release_date: '2025-01-01',
+    };
+    connected.models['model-2'] = {
+      ...connected.models['model-2'],
+      family: 'model',
+      release_date: '2026-01-01',
+    };
+
+    routingStore.setProviders([connected], {}, ['provider-1']);
+
+    expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(false);
+    expect(routingStore.isModelVisible('provider-1', 'model-2')).toBe(true);
+
+    routingStore.setModelVisible('provider-1', 'model-1', true);
+    routingStore.setProviders([connected]);
+
+    expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
+  });
+
+  it('keeps the provider default enabled on first connection', () => {
+    const connected = createProvider('provider-1');
+    connected.models['model-1'] = {
+      ...connected.models['model-1'],
+      family: 'model',
+      release_date: '2025-01-01',
+    };
+    connected.models['model-2'] = {
+      ...connected.models['model-2'],
+      family: 'model',
+      release_date: '2026-01-01',
+    };
+
+    routingStore.setProviders([connected], { 'provider-1': 'model-1' }, ['provider-1']);
+
+    expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
+  });
+
+  it('does not change checkbox choices when newer models appear', () => {
+    const connected = createProvider('provider-1');
+    connected.models['model-1'] = {
+      ...connected.models['model-1'],
+      family: 'model',
+      release_date: '2025-01-01',
+    };
+    connected.models['model-2'] = {
+      ...connected.models['model-2'],
+      family: 'model',
+      release_date: '2026-01-01',
+    };
+    routingStore.setProviders([connected], {}, ['provider-1']);
+    routingStore.setModelVisible('provider-1', 'model-1', true);
+    routingStore.setModelVisible('provider-1', 'model-2', false);
+
+    const refreshed = createProvider('provider-1');
+    refreshed.models = {
+      ...connected.models,
+      'model-3': {
+        ...connected.models['model-2'],
+        id: 'model-3',
+        name: 'Model 3',
+        release_date: '2027-01-01',
+      },
+    };
+    routingStore.setProviders([refreshed]);
+
+    expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
+    expect(routingStore.isModelVisible('provider-1', 'model-2')).toBe(false);
+    expect(routingStore.isModelVisible('provider-1', 'model-3')).toBe(true);
+  });
 });

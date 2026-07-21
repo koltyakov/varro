@@ -18,7 +18,7 @@ function createCallbacks(): MessageRouterCallbacks {
     setWebviewFocus: vi.fn(),
     setProviderWatchActive: vi.fn(),
     requestContext: vi.fn(),
-    refreshProviders: vi.fn(),
+    refreshProviders: vi.fn(() => Promise.resolve()),
     clearTerminalSelection: vi.fn(),
     runInTerminal: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),

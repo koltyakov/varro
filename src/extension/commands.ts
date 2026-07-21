@@ -256,6 +256,9 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   const activeAgents = serverInfo.activeAgentError
     ? `error: ${serverInfo.activeAgentError}`
     : String(serverInfo.activeAgentCount ?? 'unknown');
+  const loadedWorkspaces = serverInfo.loadedWorkspaceError
+    ? `error: ${serverInfo.loadedWorkspaceError}`
+    : String(serverInfo.loadedWorkspaceCount ?? 'unknown');
 
   return [
     `# ${name} About`,
@@ -274,6 +277,7 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `- Server version: ${serverInfo.health.version || 'unknown'}`,
     `- Server ownership: ${serverInfo.managedProcess ? 'managed by Varro' : 'unmanaged'}`,
     `- Active agents: ${activeAgents}`,
+    `- Loaded workspaces: ${loadedWorkspaces}`,
     `- Auto updates: ${autoUpdate ? 'enabled' : 'disabled'}`,
     `- CLI command: ${serverInfo.command}`,
     `- Workspace: ${serverInfo.workspaceCwd || 'none'}`,

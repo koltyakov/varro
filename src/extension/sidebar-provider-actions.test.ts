@@ -76,6 +76,7 @@ function createActionFixture() {
       sessionExportService as unknown as SidebarProviderActionDeps['sessionExportService'],
     restProxy: restProxy as unknown as SidebarProviderActionDeps['restProxy'],
     setProviderWatchActive: vi.fn(),
+    refreshProviders: vi.fn(() => Promise.resolve()),
     postContext: vi.fn(),
     postTerminalSelection: vi.fn(),
     postConfigState: vi.fn(),
@@ -122,7 +123,7 @@ describe('createSidebarProviderActions', () => {
     actions.setWebviewFocus(true);
     actions.setProviderWatchActive(true);
     actions.requestContext();
-    actions.refreshProviders();
+    await actions.refreshProviders();
     actions.showOutput();
     actions.clearTerminalSelection();
     actions.runInTerminal('npm test', 'Tests');
@@ -142,7 +143,7 @@ describe('createSidebarProviderActions', () => {
     expect(webviewSession.setFocus).toHaveBeenCalledWith(true);
     expect(deps.setProviderWatchActive).toHaveBeenCalledWith(true);
     expect(deps.postContext).toHaveBeenCalledTimes(2);
-    expect(deps.postConfigState).toHaveBeenCalledTimes(1);
+    expect(deps.refreshProviders).toHaveBeenCalledOnce();
     expect(mocks.logger.show).toHaveBeenCalledOnce();
     expect(deps.postTerminalSelection).toHaveBeenNthCalledWith(1, {
       text: 'npm test',

@@ -106,7 +106,11 @@ export function createDataLoaderOperations(deps: {
   setCommands(commands: Command[]): void;
   listProviders(): Promise<{ providers: Provider[]; default?: Record<string, string> }>;
   setProvidersLoaded(value: boolean): void;
-  setProviders(providers: Provider[]): void;
+  setProviders(
+    providers: Provider[],
+    defaults?: Record<string, string>,
+    newlyConnectedProviderIDs?: readonly string[]
+  ): void;
   setProviderDefaults(defaults: Record<string, string>): void;
   getSelectedModel(): SelectedModel | null;
   setSelectedModel(model: SelectedModel | null): void;
@@ -140,6 +144,7 @@ export function createDataLoaderOperations(deps: {
   let emptySessionSnapshotCount = 0;
   let mcpLoadGeneration = 0;
   let inFlightMcpLoad: { sessionId: string | null; promise: Promise<void> } | null = null;
+  let knownProviderIDs: Set<string> | null = null;
 
   const shouldApplySessionsSnapshot = (sessions: Session[]) => {
     if (sessions.length > 0 || deps.getSessions().length === 0) {
@@ -219,7 +224,17 @@ export function createDataLoaderOperations(deps: {
       {
         listProviders: deps.listProviders,
         setProvidersLoaded: deps.setProvidersLoaded,
-        setProviders: deps.setProviders,
+        setProviders: (providers, defaults) => {
+          const knownProviders = knownProviderIDs;
+          const newlyConnectedProviderIDs = knownProviders
+            ? providers
+                .filter((provider) => !knownProviders.has(provider.id))
+                .map((provider) => provider.id)
+            : [];
+          deps.setProviders(providers, defaults, newlyConnectedProviderIDs);
+          knownProviderIDs ??= new Set();
+          for (const provider of providers) knownProviderIDs.add(provider.id);
+        },
         setProviderDefaults: deps.setProviderDefaults,
         getSelectedModel: deps.getSelectedModel,
         setSelectedModel: deps.setSelectedModel,
@@ -446,7 +461,7 @@ export async function loadProvidersWithDependencies(
   deps: {
     listProviders(): Promise<{ providers: Provider[]; default?: Record<string, string> }>;
     setProvidersLoaded(value: boolean): void;
-    setProviders(providers: Provider[]): void;
+    setProviders(providers: Provider[], defaults?: Record<string, string>): void;
     setProviderDefaults(defaults: Record<string, string>): void;
     getSelectedModel(): SelectedModel | null;
     setSelectedModel(model: SelectedModel | null): void;
@@ -475,7 +490,7 @@ export async function loadProvidersWithDependencies(
     if (openAiDefault && !openAiProvider?.models[openAiDefault]) {
       delete providerDefaults.openai;
     }
-    deps.setProviders(providers);
+    deps.setProviders(providers, providerDefaults);
     deps.setProviderDefaults(providerDefaults);
     deps.setProvidersLoaded(true);
 

@@ -51,7 +51,7 @@ vi.mock('./error-hub', () => ({ errorHub: { report: vi.fn() } }));
 
 import { registerCommands } from './commands';
 
-function register(workspacePath: string | null = '/repo') {
+function register(workspacePath: string | null = '/repo', server: unknown = {}) {
   registeredCommands.clear();
   const sidebar = {
     post: vi.fn(),
@@ -71,9 +71,37 @@ function register(workspacePath: string | null = '/repo') {
   };
   const context = { subscriptions: [] };
 
-  registerCommands(context as never, sidebar as never, contextProvider as never, {} as never);
+  registerCommands(context as never, sidebar as never, contextProvider as never, server as never);
   return { sidebar };
 }
+
+describe('About command', () => {
+  it('shows the number of loaded OpenCode workspaces', async () => {
+    register('/repo', {
+      readServerInfo: vi.fn().mockResolvedValue({
+        status: { state: 'running', url: 'http://127.0.0.1:4096' },
+        url: 'http://127.0.0.1:4096',
+        port: 4096,
+        command: 'opencode',
+        managedProcess: true,
+        cliVersion: '1.18.4',
+        cliVersionError: null,
+        activeAgentCount: 1,
+        activeAgentError: null,
+        loadedWorkspaceCount: 3,
+        loadedWorkspaceError: null,
+        health: { healthy: true, version: '1.18.4' },
+        workspaceCwd: '/repo',
+      }),
+    });
+
+    await runCommand('varro.about');
+
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('- Loaded workspaces: 3') })
+    );
+  });
+});
 
 async function runCommand(id: string) {
   const handler = registeredCommands.get(id);

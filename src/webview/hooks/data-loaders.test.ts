@@ -264,6 +264,30 @@ describe('data loaders', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it('initializes model visibility only for providers connected after the initial load', async () => {
+    let providers = [provider('existing', {})];
+    const setProviders = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listProviders: async () => ({ providers }),
+        setProviders,
+      })
+    );
+
+    await operations.loadProviders();
+    expect(setProviders).toHaveBeenLastCalledWith(providers, {}, []);
+
+    providers = [...providers, provider('newly-connected', {})];
+    await operations.loadProviders();
+    expect(setProviders).toHaveBeenLastCalledWith(providers, {}, ['newly-connected']);
+
+    providers = providers.filter((item) => item.id !== 'newly-connected');
+    await operations.loadProviders();
+    providers = [...providers, provider('newly-connected', {})];
+    await operations.loadProviders();
+    expect(setProviders).toHaveBeenLastCalledWith(providers, {}, []);
+  });
+
   it('excludes unavailable models from OpenAI', async () => {
     const openAi = provider('openai', {
       'gpt-5.6-pro': {
@@ -321,6 +345,7 @@ describe('data loaders', () => {
     const loadedProviders = setProviders.mock.calls[0]?.[0];
     expect(Object.keys(loadedProviders[0].models)).toEqual(['gpt-5.5']);
     expect(Object.keys(loadedProviders[1].models)).toEqual(['pro']);
+    expect(setProviders).toHaveBeenCalledWith(loadedProviders, { other: 'pro' });
     expect(setProviderDefaults).toHaveBeenCalledWith({ other: 'pro' });
     expect(setSelectedModel).toHaveBeenCalledWith({
       providerID: 'openai',

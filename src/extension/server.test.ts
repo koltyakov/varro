@@ -761,10 +761,18 @@ describe('OpenCodeServer maintenance', () => {
     api.managedProcess = false;
     api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.18.2');
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.18' });
-    api.request = vi.fn().mockResolvedValue({
-      'session-1': { type: 'busy' },
-      'session-2': { type: 'retry' },
-      'session-3': { type: 'idle' },
+    api.request = vi.fn().mockImplementation(async (_method, path) => {
+      if (path === '/experimental/workspace/status') {
+        return [
+          { workspaceID: 'workspace-1', status: 'connected' },
+          { workspaceID: 'workspace-2', status: 'disconnected' },
+        ];
+      }
+      return {
+        'session-1': { type: 'busy' },
+        'session-2': { type: 'retry' },
+        'session-3': { type: 'idle' },
+      };
     });
 
     const info = await server.readServerInfo();
@@ -772,6 +780,8 @@ describe('OpenCodeServer maintenance', () => {
     expect(info.managedProcess).toBe(false);
     expect(info.activeAgentCount).toBe(2);
     expect(info.activeAgentError).toBeNull();
+    expect(info.loadedWorkspaceCount).toBe(2);
+    expect(info.loadedWorkspaceError).toBeNull();
   });
 
   it('restarts a managed idle server when the installed CLI is newer', async () => {

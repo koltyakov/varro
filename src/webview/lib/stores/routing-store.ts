@@ -1,5 +1,7 @@
 import type { Agent, Command, Provider } from '../../types';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
+import { getSupersededModelIds } from '../model-ordering';
+import { STORAGE_KEYS, writeStored } from '../state-storage';
 import {
   clearSelectedAgentForSession,
   clearSelectedMcpsForSession,
@@ -67,7 +69,33 @@ export const routingStore = {
   setProvidersLoaded(value: boolean) {
     setState('providersLoaded', value);
   },
-  setProviders(providers: Provider[]) {
+  setProviders(
+    providers: Provider[],
+    defaults: Record<string, string> = {},
+    newlyConnectedProviderIDs: readonly string[] = []
+  ) {
+    const newlyConnectedProviderSet = new Set(newlyConnectedProviderIDs);
+    const nextHiddenModels = new Set(state.hiddenModels);
+
+    for (const provider of providers) {
+      if (!newlyConnectedProviderSet.has(provider.id)) continue;
+
+      const protectedModelIDs = new Set([
+        defaults[provider.id],
+        state.selectedModel?.providerID === provider.id ? state.selectedModel.modelID : undefined,
+      ]);
+      for (const modelID of getSupersededModelIds(Object.values(provider.models))) {
+        if (!protectedModelIDs.has(modelID)) {
+          nextHiddenModels.add(modelVisibilityKey(provider.id, modelID));
+        }
+      }
+    }
+
+    if (nextHiddenModels.size !== state.hiddenModels.length) {
+      const hiddenModels = [...nextHiddenModels];
+      setState('hiddenModels', hiddenModels);
+      writeStored(STORAGE_KEYS.hiddenModels, hiddenModels);
+    }
     setState('providers', providers);
   },
   setProviderDefaults(defaults: Record<string, string>) {

@@ -30,7 +30,7 @@
   .inline-edit-composer-slot
   .interactive-input-part.editing-message
   .rich-composer {
-  max-height: max(200px, calc(100dvh - 162px));
+  max-height: min(200px, calc(100dvh - 162px));
 }
 
 /* Everything below the edited message is abandoned when the edit is sent. */

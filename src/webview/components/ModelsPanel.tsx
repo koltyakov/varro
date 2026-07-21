@@ -51,11 +51,7 @@ async function loadCompatibilityState() {
 
 export function ModelsPanel() {
   onMount(() => {
-    postMessage({ type: 'providers/watch', payload: { active: true } });
     void refreshRoutingState();
-    onCleanup(() => {
-      postMessage({ type: 'providers/watch', payload: { active: false } });
-    });
   });
 
   const [query, setQuery] = createSignal('');
@@ -167,17 +163,40 @@ export function ModelsPanel() {
             </button>
             <span class="settings-header-title">Models</span>
           </div>
-          <button
-            type="button"
-            class="chat-header-btn"
-            onClick={openProviderSetup}
-            title="Add provider"
-            aria-label="Add provider"
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8 2.25a.75.75 0 01.75.75v4.25H13a.75.75 0 010 1.5H8.75V13a.75.75 0 01-1.5 0V8.75H3a.75.75 0 010-1.5h4.25V3A.75.75 0 018 2.25z" />
-            </svg>
-          </button>
+          <div class="settings-header-actions">
+            <button
+              type="button"
+              class="chat-header-btn"
+              onClick={() => postMessage({ type: 'providers/refresh' })}
+              title="Reload providers"
+              aria-label="Reload providers"
+            >
+              <svg
+                class="settings-reload-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21.8883 13.5C21.1645 18.3113 17.013 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C16.1006 2 19.6248 4.46819 21.1679 8" />
+                <path d="M17 8H21.4C21.7314 8 22 7.73137 22 7.4V3" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="chat-header-btn"
+              onClick={openProviderSetup}
+              title="Add provider"
+              aria-label="Add provider"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 2.25a.75.75 0 01.75.75v4.25H13a.75.75 0 010 1.5H8.75V13a.75.75 0 01-1.5 0V8.75H3a.75.75 0 010-1.5h4.25V3A.75.75 0 018 2.25z" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
