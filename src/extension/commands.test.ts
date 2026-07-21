@@ -76,7 +76,7 @@ function register(workspacePath: string | null = '/repo', server: unknown = {}) 
 }
 
 describe('About command', () => {
-  it('shows the number of loaded OpenCode workspaces', async () => {
+  it('shows OpenCode server diagnostics', async () => {
     register('/repo', {
       readServerInfo: vi.fn().mockResolvedValue({
         status: { state: 'running', url: 'http://127.0.0.1:4096' },
@@ -88,8 +88,6 @@ describe('About command', () => {
         cliVersionError: null,
         activeAgentCount: 1,
         activeAgentError: null,
-        loadedWorkspaceCount: 3,
-        loadedWorkspaceError: null,
         health: { healthy: true, version: '1.18.4' },
         workspaceCwd: '/repo',
       }),
@@ -98,7 +96,10 @@ describe('About command', () => {
     await runCommand('varro.about');
 
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.stringContaining('- Loaded workspaces: 3') })
+      expect.objectContaining({ content: expect.stringContaining('- Active agents: 1') })
+    );
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.not.stringContaining('- Loaded workspaces:') })
     );
   });
 });

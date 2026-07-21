@@ -34,8 +34,6 @@ export interface OpenCodeServerInfo {
   cliVersionError: string | null;
   activeAgentCount: number | null;
   activeAgentError: string | null;
-  loadedWorkspaceCount: number | null;
-  loadedWorkspaceError: string | null;
   health: { healthy: boolean; version?: string };
   workspaceCwd: string | undefined;
 }
@@ -742,8 +740,6 @@ export class OpenCodeServer extends EventEmitter {
     let cliVersionError: string | null = null;
     let activeAgentCount: number | null = null;
     let activeAgentError: string | null = null;
-    let loadedWorkspaceCount: number | null = null;
-    let loadedWorkspaceError: string | null = null;
 
     try {
       cliVersion = await this.readInstalledCliVersion();
@@ -755,12 +751,6 @@ export class OpenCodeServer extends EventEmitter {
         activeAgentCount = countActiveAgents(await this.request('GET', '/session/status'));
       } catch (err) {
         activeAgentError = err instanceof Error ? err.message : String(err);
-      }
-      try {
-        const statuses = await this.request('GET', '/experimental/workspace/status');
-        loadedWorkspaceCount = Array.isArray(statuses) ? statuses.length : 0;
-      } catch (err) {
-        loadedWorkspaceError = err instanceof Error ? err.message : String(err);
       }
     }
 
@@ -776,8 +766,6 @@ export class OpenCodeServer extends EventEmitter {
       cliVersionError,
       activeAgentCount,
       activeAgentError,
-      loadedWorkspaceCount,
-      loadedWorkspaceError,
       health: await this.readHealthInfo(),
       workspaceCwd: this.getWorkspaceCwd(),
     };
