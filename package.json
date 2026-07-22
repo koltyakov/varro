@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro for OpenCode",
-  "version": "0.21.2",
+  "version": "0.21.3",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -66,9 +66,9 @@
     "@vscode/vsce": "3.9.2",
     "esbuild": "0.28.1",
     "jsdom": "29.1.1",
-    "oxfmt": "0.59.0",
-    "oxlint": "1.74.0",
-    "postcss": "8.5.20",
+    "oxfmt": "0.60.0",
+    "oxlint": "1.75.0",
+    "postcss": "8.5.22",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.1.5",

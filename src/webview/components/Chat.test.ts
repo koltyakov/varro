@@ -47,6 +47,7 @@ import {
   skipPlanSession,
 } from '../lib/state';
 import { ralphStore } from '../lib/stores/ralph-store';
+import { clearDirectSessionReturn, rememberDirectSessionReturn } from '../lib/session-navigation';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -128,6 +129,7 @@ afterEach(() => {
   setDesktopSessionPaneSide('left');
   setShowSessionPicker(false);
   setShowSettings(false);
+  clearDirectSessionReturn();
   for (const run of ralphStore.getAllRuns()) {
     ralphStore.removeRun(run.config.managerSessionId);
   }
@@ -1232,6 +1234,9 @@ describe('header status badges', () => {
       '.chat-header .chat-header-btn[title="Back to sub-agent sessions"]'
     ) as HTMLButtonElement | null;
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
+    expect(
+      container?.querySelectorAll('.chat-header-btn[title="Back to sub-agent sessions"]')
+    ).toHaveLength(1);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
@@ -1244,6 +1249,85 @@ describe('header status badges', () => {
       container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
     ).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.session-item-title')?.textContent?.trim()).toBe('child');
+  });
+
+  it('returns directly to the parent session when the sub-agent was opened from its task', async () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+
+    setState('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })]);
+    setState('activeSessionId', 'child');
+    rememberDirectSessionReturn('child', 'parent');
+
+    cleanup = render(() => Chat(), container!);
+
+    const backButton = container?.querySelector(
+      '.chat-header .chat-header-btn[title="Back to parent session"]'
+    ) as HTMLButtonElement | null;
+    expect(backButton).toBeInstanceOf(HTMLButtonElement);
+
+    backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('parent');
+    expect(
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)')
+    ).toBeNull();
+  });
+
+  it('shows desktop sub-agent navigation in both the chat header and session sidebar', async () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+    desktopMediaQueryMatches = true;
+    setState('sessions', [
+      session('parent', 500),
+      session('child', 400, { parentID: 'parent' }),
+      session('sibling', 300, { parentID: 'parent' }),
+      session('other', 200),
+    ]);
+    setState('activeSessionId', 'child');
+
+    cleanup = render(() => Chat(), container!);
+
+    const desktopBackButton = container?.querySelector(
+      '.chat-header-chat-desktop .chat-header-btn[title="Back to parent session"]'
+    ) as HTMLButtonElement | null;
+    const sidebar = container?.querySelector('.session-list-view-sidebar');
+    const sidebarHeader = container?.querySelector('.chat-session-sidebar-header');
+    expect(desktopBackButton).toBeInstanceOf(HTMLButtonElement);
+    expect(
+      container?.querySelectorAll('.chat-header-btn[title="Back to parent session"]')
+    ).toHaveLength(1);
+    expect(sidebarHeader?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Sub-agents for parent'
+    );
+    expect(
+      sidebarHeader?.querySelector('.chat-header-btn[title="Back to sessions"]')
+    ).toBeInstanceOf(HTMLButtonElement);
+    expect(
+      Array.from(sidebar?.querySelectorAll('.session-item-title') ?? []).map((item) =>
+        item.textContent?.trim()
+      )
+    ).toEqual(['child', 'sibling']);
+
+    sidebarHeader
+      ?.querySelector<HTMLButtonElement>('.chat-header-btn[title="Back to sessions"]')
+      ?.click();
+    await Promise.resolve();
+
+    expect(
+      Array.from(sidebar?.querySelectorAll('.session-item-title') ?? []).map((item) =>
+        item.textContent?.trim()
+      )
+    ).toEqual(['parent', 'other']);
+    expect(selectSessionSpy).not.toHaveBeenCalled();
+
+    desktopBackButton?.click();
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('parent');
   });
 
   it('returns from a nested sub-agent session to the top session sub-agent list', async () => {

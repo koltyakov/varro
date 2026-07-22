@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import { setExpandThinkingByDefaultPreference, setState } from '../lib/state';
 import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
 import {
@@ -12,6 +13,17 @@ import {
 } from './ToolCall';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import { client } from '../lib/client';
+import { clearDirectSessionReturn, getDirectSessionReturnId } from '../lib/session-navigation';
+
+const selectSessionMock = vi.hoisted(() => vi.fn(async () => {}));
+
+vi.mock('../hooks/useOpenCode', async () => {
+  const actual = await vi.importActual<typeof UseOpenCodeModule>('../hooks/useOpenCode');
+  return {
+    ...actual,
+    selectSession: selectSessionMock,
+  };
+});
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -26,6 +38,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   setExpandThinkingByDefaultPreference(false);
+  selectSessionMock.mockClear();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
 
@@ -41,6 +54,8 @@ afterEach(() => {
   setState('messages', []);
   setState('sessions', []);
   setState('allAgents', []);
+  setState('activeSessionId', null);
+  clearDirectSessionReturn();
   resetToolCallExpansionState();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
   vi.useRealTimers();
@@ -598,9 +613,46 @@ describe('ToolCall', () => {
 
     expect(container?.querySelectorAll('.tool-status-dot')).toHaveLength(1);
     const runningStatus = container?.querySelector('.tool-invocation-subagent-running');
-    expect(runningStatus?.getAttribute('role')).toBe('status');
+    expect(runningStatus?.getAttribute('aria-live')).toBe('polite');
+    expect((runningStatus as HTMLButtonElement | null)?.disabled).toBe(true);
     expect(runningStatus?.textContent).toContain('Explore subagent is working');
     expect(runningStatus?.textContent).toContain('Results will appear here when ready.');
+  });
+
+  it('opens the running subagent session from its status card', () => {
+    setState('activeSessionId', 'session-1');
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: {
+          subagent_type: 'general',
+          prompt: 'Review the implementation',
+        },
+        title: 'Review implementation',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const runningStatus = container?.querySelector<HTMLButtonElement>(
+      '.tool-invocation-subagent-running'
+    );
+    expect(runningStatus?.disabled).toBe(false);
+    expect(runningStatus?.title).toBe('Open subagent session');
+
+    runningStatus?.click();
+
+    expect(selectSessionMock).toHaveBeenCalledWith('subagent-session-1');
+    expect(getDirectSessionReturnId('subagent-session-1')).toBe('session-1');
   });
 
   it('shows retry status when subagent session is retrying', () => {

@@ -25,6 +25,8 @@ import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { resolveTaskSessionId } from '../lib/task-session';
+import { rememberDirectSessionReturn } from '../lib/session-navigation';
+import { selectSession } from '../hooks/useOpenCode';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 
@@ -825,6 +827,12 @@ function GenericToolCall(props: {
     const status = appState.sessionStatus[sessionId];
     return status?.type === 'retry' ? status : null;
   };
+  const openTaskSession = () => {
+    const sessionId = taskSessionId();
+    if (!sessionId) return;
+    rememberDirectSessionReturn(sessionId, appState.activeSessionId || props.tool.sessionID);
+    void selectSession(sessionId);
+  };
   const bashCommand = () => {
     const command = props.state.input?.command;
     return typeof command === 'string'
@@ -1025,10 +1033,13 @@ function GenericToolCall(props: {
           </Show>
           <Show when={props.state.status === 'running'}>
             <Show when={isTask()} fallback={<div class="tool-invocation-running">Running…</div>}>
-              <div
+              <button
+                type="button"
                 class={`tool-invocation-running tool-invocation-subagent-running${taskRetryStatus() ? ' is-retrying' : ''}`}
-                role="status"
+                onClick={openTaskSession}
+                disabled={!taskSessionId()}
                 aria-live="polite"
+                title={taskSessionId() ? 'Open subagent session' : undefined}
               >
                 <span class="tool-invocation-activity-ring" aria-hidden="true" />
                 <span class="tool-invocation-running-copy">
@@ -1043,7 +1054,7 @@ function GenericToolCall(props: {
                     </Show>
                   </span>
                 </span>
-              </div>
+              </button>
             </Show>
           </Show>
         </div>

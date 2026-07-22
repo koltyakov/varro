@@ -52,9 +52,12 @@ export function ChatWorkspace(props: {
   slowApiRequests: readonly SlowApiRequest[];
   sessionFilter: SessionListFilter | null;
   subagentParentId: string | null;
+  sidebarSubagentParentId: string | null;
   sessionListFilterLabel: string | null;
   sessionListFilterPrefix: string;
   sessionListFilterTitle?: string;
+  sidebarSessionListFilterLabel: string | null;
+  sidebarSessionListFilterTitle?: string;
   primarySessionsCount: number;
   shouldShowFailedBadge: boolean;
   shouldShowAttentionBadge: boolean;
@@ -72,7 +75,8 @@ export function ChatWorkspace(props: {
   sessionSidebarCompletedCount: number;
   sessionSidebarRunningCount: number;
   activeTitle: string;
-  isSubagentSession: boolean;
+  activeBackTitle: string;
+  showDesktopBackButton: boolean;
   activeSubagentRootId: string | null;
   activeSubagentCount: number;
   activeSubagentLabel: string;
@@ -80,6 +84,8 @@ export function ChatWorkspace(props: {
   onOpenAllSessions: () => void;
   onOpenParentSession: () => void;
   onOpenSubagentSessions: (parentSessionId: string) => void;
+  onOpenSidebarSubagentSessions: (parentSessionId: string) => void;
+  onOpenTopLevelSidebarSessions: () => void;
   onOpenFailedSessions: () => void;
   onOpenAttentionSessions: () => void;
   onOpenPlanReadySessions: () => void;
@@ -88,13 +94,22 @@ export function ChatWorkspace(props: {
   onCreateSessionFromPicker: () => void;
   onCreateSession: () => void;
 }) {
+  const sidebarSubagentParentId = () =>
+    props.showSessionPicker ? props.subagentParentId : props.sidebarSubagentParentId;
+  const sidebarFilterLabel = () =>
+    props.showSessionPicker ? props.sessionListFilterLabel : props.sidebarSessionListFilterLabel;
+  const sidebarFilterPrefix = () =>
+    props.showSessionPicker ? props.sessionListFilterPrefix : 'Viewing:';
+  const sidebarFilterTitle = () =>
+    props.showSessionPicker ? props.sessionListFilterTitle : props.sidebarSessionListFilterTitle;
   const sessionPickerHeader = (useSidebarCounts = false) => (
     <SessionPickerHeader
-      filterLabel={props.sessionListFilterLabel}
-      filterPrefix={props.sessionListFilterPrefix}
-      filterTitle={props.sessionListFilterTitle}
+      filterLabel={useSidebarCounts ? sidebarFilterLabel() : props.sessionListFilterLabel}
+      filterPrefix={useSidebarCounts ? sidebarFilterPrefix() : props.sessionListFilterPrefix}
+      filterTitle={useSidebarCounts ? sidebarFilterTitle() : props.sessionListFilterTitle}
       primarySessionsCount={props.primarySessionsCount}
-      showBackButton={!!props.subagentParentId}
+      showBackButton={!!(useSidebarCounts ? sidebarSubagentParentId() : props.subagentParentId)}
+      backTitle={useSidebarCounts ? 'Back to sessions' : undefined}
       showFailedBadge={props.shouldShowFailedBadge}
       showAttentionBadge={props.shouldShowAttentionBadge}
       showPlanReadyBadge={props.shouldShowPlanReadyBadge}
@@ -114,8 +129,10 @@ export function ChatWorkspace(props: {
         useSidebarCounts ? props.sessionSidebarRunningCount : props.runningSessionsCount
       }
       showNewChatButton
-      onBack={props.onOpenParentSession}
-      onClearFilter={props.onClearSessionListView}
+      onBack={useSidebarCounts ? props.onOpenTopLevelSidebarSessions : props.onOpenParentSession}
+      onClearFilter={
+        useSidebarCounts ? props.onOpenTopLevelSidebarSessions : props.onClearSessionListView
+      }
       onOpenFailedSessions={props.onOpenFailedSessions}
       onOpenAttentionSessions={props.onOpenAttentionSessions}
       onOpenPlanReadySessions={props.onOpenPlanReadySessions}
@@ -129,7 +146,7 @@ export function ChatWorkspace(props: {
     <ActiveChatHeader
       title={props.activeTitle}
       showBackButton={showBackButton}
-      isSubagentSession={props.isSubagentSession}
+      backTitle={props.activeBackTitle}
       showActions={showActions}
       activeSubagentRootId={props.activeSubagentRootId}
       activeSubagentCount={props.activeSubagentCount}
@@ -161,8 +178,8 @@ export function ChatWorkspace(props: {
         embedded
         class="session-list-view-sidebar"
         sessionFilter={props.showSessionPicker ? props.sessionFilter : null}
-        subagentParentId={props.showSessionPicker ? props.subagentParentId : null}
-        onOpenSubagents={props.showSessionPicker ? props.onOpenSubagentSessions : undefined}
+        subagentParentId={sidebarSubagentParentId()}
+        onOpenSubagents={props.onOpenSidebarSubagentSessions}
       />
     </aside>
   );
@@ -170,7 +187,7 @@ export function ChatWorkspace(props: {
   const mainShell = () => (
     <div class="chat-main-shell">
       <div class="chat-header chat-header-chat-desktop">
-        <div class="chat-header-inner">{activeChatHeader(false)}</div>
+        <div class="chat-header-inner">{activeChatHeader(props.showDesktopBackButton)}</div>
       </div>
       <div class="chat-main-column-shell">
         <Show
@@ -196,7 +213,10 @@ export function ChatWorkspace(props: {
         class={`chat-header ${props.shouldRenderWorkspace ? 'chat-header-centered chat-header-chat-layout' : ''}`}
       >
         <div class="chat-header-inner">
-          <Show when={props.showSessionPicker} fallback={activeChatHeader(true)}>
+          <Show
+            when={props.showSessionPicker}
+            fallback={activeChatHeader(!props.showDesktopBackButton)}
+          >
             {sessionPickerHeader()}
           </Show>
         </div>

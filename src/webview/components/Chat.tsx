@@ -31,6 +31,11 @@ import {
 import type { SessionListFilter } from './chat/SessionListView';
 import { onMessage, onSlowApiRequestsChange, type SlowApiRequest } from '../lib/bridge';
 import { compareSessionsByActivity } from '../lib/session-order';
+import {
+  clearDirectSessionReturn,
+  clearDirectSessionReturnUnless,
+  getDirectSessionReturnId,
+} from '../lib/session-navigation';
 
 type HeaderSessionCounts = {
   running: number;
@@ -58,6 +63,7 @@ function isDesktopSessionPaneRight() {
 export function Chat() {
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
+  const [sidebarSubagentParentId, setSidebarSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
   const [isEnteringChatView, setIsEnteringChatView] = createSignal(false);
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
@@ -149,6 +155,13 @@ export function Chat() {
         if (!isEventStreamDegraded()) setShowReconnectBanner(false);
       }, remainingVisibleMs);
     })
+  );
+
+  createEffect(
+    on(
+      () => state.activeSessionId,
+      (sessionId) => clearDirectSessionReturnUnless(sessionId)
+    )
   );
 
   createEffect(
@@ -308,9 +321,22 @@ export function Chat() {
     setSessionFilter(null);
     setSubagentParentId(null);
     const sessionId = state.activeSessionId;
+    const directReturnSessionId = getDirectSessionReturnId(sessionId);
+    if (directReturnSessionId) {
+      clearDirectSessionReturn();
+      setShowSessionPicker(false);
+      await selectSession(directReturnSessionId);
+      return;
+    }
     const parentSessionId = sessionId ? sessionsById().get(sessionId)?.parentID : null;
     if (parentSessionId) {
-      setSubagentParentId(getSessionTreeRootId(sessionId) || parentSessionId);
+      const rootSessionId = getSessionTreeRootId(sessionId) || parentSessionId;
+      if (isDesktopSessionLayout()) {
+        setShowSessionPicker(false);
+        await selectSession(rootSessionId);
+        return;
+      }
+      setSubagentParentId(rootSessionId);
       setShowSessionPicker(true);
       return;
     }
@@ -441,10 +467,46 @@ export function Chat() {
     setShowSessionPicker(true);
   };
 
+  const openSidebarSubagentSessions = (parentSessionId: string) => {
+    if (showSessionPicker()) {
+      setSessionFilter(null);
+      setSubagentParentId(parentSessionId);
+      return;
+    }
+    setSidebarSubagentParentId(parentSessionId);
+  };
+
+  const openTopLevelSidebarSessions = () => {
+    setSessionFilter(null);
+    setSubagentParentId(null);
+    setSidebarSubagentParentId(null);
+  };
+
   const activeSession = createMemo(() => {
     const sessionId = state.activeSessionId;
     return sessionId ? sessionsById().get(sessionId) || null : null;
   });
+  const activeBackTitle = createMemo(() => {
+    if (
+      getDirectSessionReturnId(state.activeSessionId) ||
+      (isDesktopSessionLayout() && activeSession()?.parentID)
+    ) {
+      return 'Back to parent session';
+    }
+    return activeSession()?.parentID ? 'Back to sub-agent sessions' : 'Back to sessions';
+  });
+  createEffect(
+    on(
+      [
+        () => state.activeSessionId,
+        () => activeSession()?.parentID || null,
+        () => getSessionTreeRootId(state.activeSessionId),
+      ],
+      ([, parentSessionId, rootSessionId]) => {
+        setSidebarSubagentParentId(parentSessionId ? rootSessionId || parentSessionId : null);
+      }
+    )
+  );
   const activeSubagentRootId = createMemo(() => {
     const session = activeSession();
     return session && !session.parentID ? session.id : null;
@@ -489,6 +551,19 @@ export function Chat() {
   });
   const shouldShowHeaderBadge = (filter: SessionListFilter) =>
     shouldShowSessionHeaderBadge(sessionFilter(), filter);
+  const sidebarSubagentParent = createMemo(() => {
+    const parentId = sidebarSubagentParentId();
+    return parentId ? sessionsById().get(parentId) || null : null;
+  });
+  const sidebarSessionListFilterLabel = createMemo(() => {
+    const parent = sidebarSubagentParent();
+    if (parent) return `Sub-agents for ${normalizeSessionTitle(parent.title) || 'Untitled'}`;
+    return sidebarSubagentParentId() ? 'Sub-agents' : null;
+  });
+  const sidebarSessionListFilterTitle = createMemo(() => {
+    const label = sidebarSessionListFilterLabel();
+    return label || undefined;
+  });
 
   return (
     <ChatWorkspace
@@ -501,9 +576,12 @@ export function Chat() {
       slowApiRequests={slowApiRequests()}
       sessionFilter={sessionFilter()}
       subagentParentId={subagentParentId()}
+      sidebarSubagentParentId={sidebarSubagentParentId()}
       sessionListFilterLabel={sessionListFilterLabel()}
       sessionListFilterPrefix={sessionListFilterPrefix()}
       sessionListFilterTitle={sessionListFilterTitle()}
+      sidebarSessionListFilterLabel={sidebarSessionListFilterLabel()}
+      sidebarSessionListFilterTitle={sidebarSessionListFilterTitle()}
       primarySessionsCount={primarySessionsCount()}
       shouldShowFailedBadge={shouldShowHeaderBadge('failed')}
       shouldShowAttentionBadge={shouldShowHeaderBadge('attention')}
@@ -521,7 +599,11 @@ export function Chat() {
       sessionSidebarCompletedCount={sessionSidebarCompletedCount()}
       sessionSidebarRunningCount={sessionSidebarRunningCount()}
       activeTitle={activeTitle()}
-      isSubagentSession={!!activeSession()?.parentID}
+      activeBackTitle={activeBackTitle()}
+      showDesktopBackButton={
+        isDesktopSessionLayout() &&
+        (!!activeSession()?.parentID || !!getDirectSessionReturnId(state.activeSessionId))
+      }
       activeSubagentRootId={activeSubagentCount() > 0 ? activeSubagentRootId() : null}
       activeSubagentCount={activeSubagentCount()}
       activeSubagentLabel={activeSubagentLabel()}
@@ -531,6 +613,8 @@ export function Chat() {
       }}
       onOpenParentSession={openSubagentListParentSession}
       onOpenSubagentSessions={openSubagentSessions}
+      onOpenSidebarSubagentSessions={openSidebarSubagentSessions}
+      onOpenTopLevelSidebarSessions={openTopLevelSidebarSessions}
       onOpenFailedSessions={openFailedSessions}
       onOpenAttentionSessions={openAttentionSessions}
       onOpenPlanReadySessions={openPlanReadySessions}

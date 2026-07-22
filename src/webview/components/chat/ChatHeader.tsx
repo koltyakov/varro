@@ -14,6 +14,7 @@ export function SessionPickerHeader(props: {
   filterTitle?: string;
   primarySessionsCount: number;
   showBackButton?: boolean;
+  backTitle?: string;
   showFailedBadge: boolean;
   showAttentionBadge: boolean;
   showPlanReadyBadge: boolean;
@@ -41,7 +42,7 @@ export function SessionPickerHeader(props: {
           <button
             class="chat-header-btn"
             onClick={() => props.onBack?.()}
-            title="Back to parent session"
+            title={props.backTitle || 'Back to parent session'}
           >
             <svg viewBox="0 0 16 16" fill="currentColor">
               <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
@@ -114,7 +115,7 @@ export function SessionPickerHeader(props: {
 export function ActiveChatHeader(props: {
   title: string;
   showBackButton: boolean;
-  isSubagentSession: boolean;
+  backTitle: string;
   showActions?: boolean;
   activeSubagentRootId: string | null;
   activeSubagentCount: number;
@@ -137,11 +138,7 @@ export function ActiveChatHeader(props: {
     <>
       <div class="chat-header-left">
         <Show when={props.showBackButton}>
-          <button
-            class="chat-header-btn"
-            onClick={props.onBack}
-            title={props.isSubagentSession ? 'Back to sub-agent sessions' : 'Back to sessions'}
-          >
+          <button class="chat-header-btn" onClick={props.onBack} title={props.backTitle}>
             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
               <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
             </svg>

@@ -824,12 +824,29 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-subagent-running {
+  width: 100%;
   gap: 9px;
   margin-top: 10px;
   padding: 9px 10px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 18%, transparent);
   border-radius: 5px;
   background: color-mix(in srgb, var(--color-vscode-accent) 5%, transparent);
+  font-family: inherit;
+  text-align: left;
+}
+
+.chat-tool-invocation-part .tool-invocation-subagent-running:not(:disabled) {
+  cursor: pointer;
+}
+
+.chat-tool-invocation-part .tool-invocation-subagent-running:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 32%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-accent) 9%, transparent);
+}
+
+.chat-tool-invocation-part .tool-invocation-subagent-running:focus-visible {
+  outline: 1px solid var(--color-vscode-focus-border);
+  outline-offset: 1px;
 }
 
 .chat-tool-invocation-part .tool-invocation-activity-ring {
