@@ -240,7 +240,7 @@
         },
         "varro.chat.showInlineFileChanges": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Show line-by-line edits directly in file-change tool cards."
         },
         "varro.chat.desktopSessionPaneSide": {

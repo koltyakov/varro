@@ -348,7 +348,13 @@ export function ToolCall(props: {
 
   const toolContent = () => {
     if (fileChanges().length > 0) {
-      return <FileChangeCard toolState={state()} changes={fileChanges()} />;
+      return (
+        <FileChangeCard
+          toolState={state()}
+          changes={fileChanges()}
+          previewStateKey={expansionKey()}
+        />
+      );
     }
 
     if (isReadTool()) {
@@ -503,7 +509,11 @@ function ReadToolCard(props: {
   );
 }
 
-function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChange[] }) {
+function FileChangeCard(props: {
+  toolState: ToolPart['state'];
+  changes: FileChange[];
+  previewStateKey: string;
+}) {
   let moreButtonRef: HTMLButtonElement | undefined;
   let moreMenuRef: HTMLDivElement | undefined;
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
@@ -755,7 +765,7 @@ function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChan
       </Show>
       <Show when={showInlineFileChanges() && inlineDiffs().length > 0}>
         <div class="file-change-inline-diffs file-change-inline-diffs-unwrapped">
-          <DiffView diffs={inlineDiffs()} showChanges />
+          <DiffView diffs={inlineDiffs()} showChanges stateKey={props.previewStateKey} />
         </div>
       </Show>
     </>
