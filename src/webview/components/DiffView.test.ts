@@ -203,6 +203,12 @@ describe('DiffView', () => {
 
     viewport?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 20 }));
 
+    expect(container?.querySelector('.diff-view-lines-shell-scrolling')).toBeNull();
+
+    viewport?.click();
+    expect(document.activeElement).toBe(viewport);
+    viewport?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 20 }));
+
     expect(container?.querySelector('.diff-view-lines-shell-scrolling')).toBeInstanceOf(
       HTMLDivElement
     );

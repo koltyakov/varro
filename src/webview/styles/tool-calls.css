@@ -494,8 +494,7 @@
 .diff-view-lines {
   position: relative;
   max-height: 128px;
-  overflow-x: auto;
-  overflow-y: auto;
+  overflow: hidden;
   scrollbar-width: none;
   border-top: 1px solid var(--color-vscode-border-default);
   background: var(--color-vscode-result-editor-bg);
@@ -509,9 +508,11 @@
 
 .diff-view-lines-expanded {
   max-height: 480px;
+  overflow: auto;
 }
 
 .diff-view-lines:focus {
+  overflow: auto;
   outline: none;
 }
 

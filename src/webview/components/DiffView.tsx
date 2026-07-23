@@ -420,6 +420,7 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
     });
   };
   const showScrollbarsTemporarily = () => {
+    if (!expanded() && document.activeElement !== linesViewport) return;
     setScrollbarsActive(true);
     if (scrollbarActivityTimer !== undefined) clearTimeout(scrollbarActivityTimer);
     scrollbarActivityTimer = setTimeout(() => {
@@ -606,6 +607,9 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
             role="table"
             tabIndex={0}
             aria-label={`Changes in ${file() || 'file'}`}
+            onClick={() => {
+              if (!expanded()) linesViewport?.focus({ preventScroll: true });
+            }}
             onFocus={updateScrollThumbs}
             onScroll={updateScrollThumbs}
             onTouchMove={showScrollbarsTemporarily}
