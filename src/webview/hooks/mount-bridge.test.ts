@@ -17,6 +17,7 @@ const {
   syncSessionMarkersForWorkspace,
   setExpandThinkingByDefaultPreference,
   setShowStickyUserPromptPreference,
+  setShowInlineFileChanges,
   setDesktopSessionPaneSide,
   setDefaultPermissionModePreference,
   setProviderLimitPollIntervalSeconds,
@@ -37,6 +38,7 @@ const {
   syncSessionMarkersForWorkspace: vi.fn(),
   setExpandThinkingByDefaultPreference: vi.fn(),
   setShowStickyUserPromptPreference: vi.fn(),
+  setShowInlineFileChanges: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
   setDefaultPermissionModePreference: vi.fn(),
   setProviderLimitPollIntervalSeconds: vi.fn(),
@@ -66,6 +68,7 @@ vi.mock('../lib/state', async () => {
     syncSessionMarkersForWorkspace,
     setExpandThinkingByDefaultPreference,
     setShowStickyUserPromptPreference,
+    setShowInlineFileChanges,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
     setProviderLimitPollIntervalSeconds,
@@ -333,6 +336,7 @@ describe('mount bridge helpers', () => {
       payload: {
         expandThinkingByDefault: true,
         showStickyUserPrompt: true,
+        showInlineFileChanges: true,
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
         providerLimitPollIntervalSeconds: 90,
@@ -352,6 +356,7 @@ describe('mount bridge helpers', () => {
     expect(setProviderLimitPollIntervalSeconds).toHaveBeenCalledWith(90);
     expect(setProviderLimitThresholdPercent).toHaveBeenCalledWith(25);
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
+    expect(setShowInlineFileChanges).toHaveBeenCalledWith(true);
   });
 
   it('routes workspace status events into shared workspace state', () => {

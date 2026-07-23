@@ -152,6 +152,8 @@ export interface AppStateInstance {
   setExpandThinkingByDefault: Setter<boolean>;
   showStickyUserPrompt: Accessor<boolean>;
   setShowStickyUserPrompt: Setter<boolean>;
+  showInlineFileChanges: Accessor<boolean>;
+  setShowInlineFileChanges: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
   providerLimitPollIntervalSeconds: Accessor<number>;
@@ -288,6 +290,9 @@ export function createAppState(): AppStateInstance {
   const [showStickyUserPrompt, setShowStickyUserPrompt] = createSignal(
     readShowStickyUserPrompt(initialWebviewState)
   );
+  const [showInlineFileChanges, setShowInlineFileChanges] = createSignal(
+    initialWebviewState.showInlineFileChanges ?? false
+  );
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
   );
@@ -349,6 +354,8 @@ export function createAppState(): AppStateInstance {
     setExpandThinkingByDefault,
     showStickyUserPrompt,
     setShowStickyUserPrompt,
+    showInlineFileChanges,
+    setShowInlineFileChanges,
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
     providerLimitPollIntervalSeconds,
@@ -419,6 +426,8 @@ export const expandThinkingByDefault = defaultAppState.expandThinkingByDefault;
 export const setExpandThinkingByDefault = defaultAppState.setExpandThinkingByDefault;
 export const showStickyUserPrompt = defaultAppState.showStickyUserPrompt;
 export const setShowStickyUserPrompt = defaultAppState.setShowStickyUserPrompt;
+export const showInlineFileChanges = defaultAppState.showInlineFileChanges;
+export const setShowInlineFileChanges = defaultAppState.setShowInlineFileChanges;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
 export const providerLimitPollIntervalSeconds = defaultAppState.providerLimitPollIntervalSeconds;
@@ -481,6 +490,7 @@ export function resetDefaultAppState() {
   setShowThinking(next.showThinking());
   setExpandThinkingByDefault(next.expandThinkingByDefault());
   setShowStickyUserPrompt(next.showStickyUserPrompt());
+  setShowInlineFileChanges(next.showInlineFileChanges());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
   setProviderLimitPollIntervalSeconds(next.providerLimitPollIntervalSeconds());
   setProviderLimitThresholdPercent(next.providerLimitThresholdPercent());

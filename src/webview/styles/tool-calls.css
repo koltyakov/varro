@@ -389,7 +389,7 @@
   transition: background-color 0.1s;
 }
 
-.diff-view-item + .diff-view-item {
+.diff-view-file + .diff-view-file {
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
 }
 
@@ -430,6 +430,153 @@
 }
 .diff-lines-removed {
   color: var(--color-vscode-lines-del);
+}
+
+.diff-view-widget-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: visible;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.diff-view-widget-inline .diff-view-file {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-vscode-bg) 92%, var(--color-vscode-fg));
+}
+
+.diff-view-widget-inline .diff-view-file + .diff-view-file {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+}
+
+.diff-view-lines {
+  max-height: 420px;
+  overflow-x: auto;
+  overflow-y: auto;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
+  background: var(--color-vscode-result-editor-bg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  tab-size: 2;
+}
+
+.diff-view-lines:focus {
+  outline: none;
+}
+
+.diff-view-lines::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.diff-view-lines::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.diff-view-lines::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+
+.diff-view-lines::-webkit-scrollbar-thumb {
+  border: 2px solid transparent !important;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vscode-scrollbarSlider-background) 20%, transparent)
+    padding-box !important;
+}
+
+.diff-view-lines::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--vscode-scrollbarSlider-hoverBackground) 35%, transparent)
+    padding-box !important;
+}
+
+.diff-view-lines::-webkit-scrollbar-thumb:active {
+  background: color-mix(in srgb, var(--vscode-scrollbarSlider-activeBackground) 50%, transparent)
+    padding-box !important;
+}
+
+.diff-view-file:has(.diff-view-lines:focus) {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 38%, var(--color-vscode-border));
+}
+
+.diff-view-line {
+  display: grid;
+  grid-template-columns: 44px 44px 18px minmax(max-content, 1fr);
+  width: 100%;
+  min-height: 17px;
+}
+
+.diff-view-lines-content {
+  width: max-content;
+  min-width: 100%;
+}
+
+.diff-view-lines-unnumbered .diff-view-line {
+  grid-template-columns: 18px minmax(max-content, 1fr);
+}
+
+.diff-view-lines-unnumbered .diff-view-line-number {
+  display: none;
+}
+
+.diff-view-line-number {
+  padding: 0 8px 0 4px;
+  color: var(--color-vscode-muted);
+  text-align: right;
+  user-select: none;
+  border-right: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+}
+
+.diff-view-line-marker {
+  display: block;
+  padding: 0;
+  text-align: center;
+  user-select: none;
+}
+
+.diff-view-line-content {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  padding: 0 12px 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  white-space: pre;
+}
+
+.diff-view-line-addition {
+  color: var(--color-vscode-lines-add);
+  background: color-mix(in srgb, var(--color-vscode-lines-add) 13%, transparent);
+}
+
+.diff-view-line-deletion {
+  color: var(--color-vscode-lines-del);
+  background: color-mix(in srgb, var(--color-vscode-lines-del) 13%, transparent);
+}
+
+.diff-view-line-hunk {
+  color: var(--color-vscode-muted);
+  background: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
+}
+
+.diff-view-line-hunk .diff-view-line-content {
+  grid-column: 1 / -1;
+  padding-left: 8px;
+}
+
+.diff-view-line-hunk :not(.diff-view-line-content) {
+  display: none;
 }
 
 kbd {
@@ -901,6 +1048,14 @@ kbd {
 
 .file-change-card:has(.file-edit-more-menu) {
   z-index: 3;
+}
+
+.file-change-inline-diffs {
+  padding: 0 8px 8px;
+}
+
+.file-change-inline-diffs-unwrapped {
+  padding: 0;
 }
 
 .file-change-card-header,

@@ -84,6 +84,25 @@ describe('tool file change helpers', () => {
     });
   });
 
+  it('retains edit input content for inline rendering', () => {
+    expect(
+      getToolFileChange(
+        'edit',
+        completedState({
+          filePath: 'src/app.ts',
+          oldString: 'const value = 1;',
+          newString: 'const value = 2;',
+        })
+      )
+    ).toEqual({
+      kind: 'edited',
+      path: 'src/app.ts',
+      before: 'const value = 1;',
+      after: 'const value = 2;',
+      dedupeKey: 'edited:src/app.ts',
+    });
+  });
+
   it('detects moves from explicit paths or titles', () => {
     expect(
       getToolFileChange('rename', completedState({ fromPath: 'src/old.ts', toPath: 'src/new.ts' }))
@@ -136,6 +155,7 @@ describe('tool file change helpers', () => {
               relativePath: 'src/new.ts',
               additions: 2,
               deletions: 0,
+              patch: '@@ -0,0 +1,2 @@\n+one\n+two',
             },
             {
               type: 'update',
@@ -143,6 +163,7 @@ describe('tool file change helpers', () => {
               relativePath: 'src/app.ts',
               additions: 3,
               deletions: 1,
+              patch: '@@ -1 +1 @@\n-old\n+new',
             },
             {
               type: 'move',
@@ -163,6 +184,7 @@ describe('tool file change helpers', () => {
         path: 'src/new.ts',
         additions: 2,
         deletions: 0,
+        patch: '@@ -0,0 +1,2 @@\n+one\n+two',
         dedupeKey: 'added:src/new.ts',
       },
       {
@@ -170,6 +192,7 @@ describe('tool file change helpers', () => {
         path: 'src/app.ts',
         additions: 3,
         deletions: 1,
+        patch: '@@ -1 +1 @@\n-old\n+new',
         dedupeKey: 'edited:src/app.ts',
       },
       {
@@ -212,8 +235,22 @@ describe('tool file change helpers', () => {
     };
 
     expect(getToolFileChanges('functions.apply_patch', state)).toEqual([
-      { kind: 'added', path: 'src/new.ts', dedupeKey: 'added:src/new.ts' },
-      { kind: 'edited', path: 'src/app.ts', dedupeKey: 'edited:src/app.ts' },
+      {
+        kind: 'added',
+        path: 'src/new.ts',
+        patch: '+export const value = true;',
+        additions: 1,
+        deletions: 0,
+        dedupeKey: 'added:src/new.ts',
+      },
+      {
+        kind: 'edited',
+        path: 'src/app.ts',
+        patch: '@@\n-old\n+new',
+        additions: 1,
+        deletions: 1,
+        dedupeKey: 'edited:src/app.ts',
+      },
       {
         kind: 'moved',
         path: 'src/renamed.ts',
@@ -221,7 +258,13 @@ describe('tool file change helpers', () => {
         toPath: 'src/renamed.ts',
         dedupeKey: 'moved:src/old.ts->src/renamed.ts',
       },
-      { kind: 'removed', path: 'src/gone.ts', dedupeKey: 'removed:src/gone.ts' },
+      {
+        kind: 'removed',
+        path: 'src/gone.ts',
+        additions: 0,
+        deletions: 0,
+        dedupeKey: 'removed:src/gone.ts',
+      },
     ]);
   });
 

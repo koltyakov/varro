@@ -10,13 +10,19 @@ import {
 import { isAbortedToolError } from '../../shared/error-classification';
 import type {
   AssistantMessage,
+  FileDiff,
   QuestionRequest,
   ToolPart,
   ToolStateCompleted,
   ToolStateError,
 } from '../types';
 import { postMessage } from '../lib/bridge';
-import { state as appState, getPermissionGroupMembers, getSessionTreeRootId } from '../lib/state';
+import {
+  state as appState,
+  getPermissionGroupMembers,
+  getSessionTreeRootId,
+  showInlineFileChanges,
+} from '../lib/state';
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { formatDuration, formatNumber } from '../lib/message-metrics';
@@ -29,6 +35,7 @@ import { rememberDirectSessionReturn } from '../lib/session-navigation';
 import { selectSession } from '../hooks/useOpenCode';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
+import { DiffView } from './DiffView';
 
 export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
@@ -513,6 +520,24 @@ function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChan
   const visibleMultiFileChanges = () => changes().slice(0, visibleMultiFileCount());
   const hiddenMultiFileChanges = () => changes().slice(visibleMultiFileCount());
   const hiddenMultiFileCount = () => hiddenMultiFileChanges().length;
+  const inlineDiffs = createMemo<FileDiff[]>(() =>
+    changes().flatMap((item) => {
+      if (item.patch === undefined && item.before === undefined && item.after === undefined)
+        return [];
+      const before = item.before ?? (item.after !== undefined ? '' : undefined);
+      const after = item.after ?? (item.before !== undefined ? '' : undefined);
+      return [
+        {
+          file: item.toPath || item.path,
+          before,
+          after,
+          patch: item.patch,
+          additions: item.additions ?? countContentLines(after),
+          deletions: item.deletions ?? countContentLines(before),
+        },
+      ];
+    })
+  );
 
   createEffect(() => {
     if (hiddenMultiFileCount() === 0) setMoreMenuOpen(false);
@@ -594,138 +619,153 @@ function FileChangeCard(props: { toolState: ToolPart['state']; changes: FileChan
       : null;
 
   return (
-    <div class="chat-tool-invocation-part file-change-card">
-      <div class="file-change-card-header">
-        <span
-          class={`file-edit-dot ${isRunning() ? 'running' : isError() ? (isAborted() ? 'aborted' : 'error') : 'done'}`}
-          aria-label={
-            isRunning() ? 'Running' : isError() ? (isAborted() ? 'Aborted' : 'Error') : 'Done'
-          }
-        />
-        <span class="file-edit-action-label">{action()}</span>
-        <Show
-          when={!isMultiFile()}
-          fallback={<span class="file-edit-summary-label">{changes().length} files</span>}
-        >
-          <Show
-            when={effectiveKind() !== 'moved'}
-            fallback={
-              <span class="file-edit-move-paths">
-                <a
-                  href="#"
-                  class="file-path-link file-edit-path-link"
-                  onClick={openFileChangePath(change().fromPath || change().path)}
-                >
-                  {formatFileChangeDisplayName(change().fromPath || change().path)}
-                </a>
-                <span class="file-edit-move-arrow">→</span>
-                <a
-                  href="#"
-                  class="file-path-link file-edit-path-link"
-                  onClick={openFileChangePath(change().toPath || change().path)}
-                >
-                  {formatFileChangeDisplayName(change().toPath || change().path)}
-                </a>
-              </span>
-            }
-          >
-            <a
-              href="#"
-              class="file-path-link file-edit-path-link"
-              onClick={openFileChangePath(change().path)}
+    <>
+      <Show when={!showInlineFileChanges() || inlineDiffs().length === 0}>
+        <div class="chat-tool-invocation-part file-change-card">
+          <div class="file-change-card-header">
+            <span
+              class={`file-edit-dot ${isRunning() ? 'running' : isError() ? (isAborted() ? 'aborted' : 'error') : 'done'}`}
+              aria-label={
+                isRunning() ? 'Running' : isError() ? (isAborted() ? 'Aborted' : 'Error') : 'Done'
+              }
+            />
+            <span class="file-edit-action-label">{action()}</span>
+            <Show
+              when={!isMultiFile()}
+              fallback={<span class="file-edit-summary-label">{changes().length} files</span>}
             >
-              {formatFileChangeDisplayName(change().path)}
-            </a>
-          </Show>
-        </Show>
-        <Show when={isMultiFile()}>
-          <span class="file-edit-multi-list">
-            <For each={visibleMultiFileChanges()}>
-              {(item) => {
-                const displayName = () => formatFileChangeDisplayName(item.toPath || item.path);
-                return (
-                  <a
-                    href="#"
-                    class="file-path-link file-edit-path-link"
-                    title={displayName()}
-                    onClick={openFileChangePath(item.toPath || item.path)}
-                  >
-                    {displayName()}
-                  </a>
-                );
-              }}
-            </For>
-            <Show when={hiddenMultiFileCount() > 0}>
-              <span class="file-edit-more-wrap">
-                <button
-                  ref={(el) => (moreButtonRef = el)}
-                  type="button"
-                  class="file-edit-more-count"
-                  aria-haspopup="menu"
-                  aria-expanded={moreMenuOpen()}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setMoreMenuOpen((open) => !open);
-                  }}
+              <Show
+                when={effectiveKind() !== 'moved'}
+                fallback={
+                  <span class="file-edit-move-paths">
+                    <a
+                      href="#"
+                      class="file-path-link file-edit-path-link"
+                      onClick={openFileChangePath(change().fromPath || change().path)}
+                    >
+                      {formatFileChangeDisplayName(change().fromPath || change().path)}
+                    </a>
+                    <span class="file-edit-move-arrow">→</span>
+                    <a
+                      href="#"
+                      class="file-path-link file-edit-path-link"
+                      onClick={openFileChangePath(change().toPath || change().path)}
+                    >
+                      {formatFileChangeDisplayName(change().toPath || change().path)}
+                    </a>
+                  </span>
+                }
+              >
+                <a
+                  href="#"
+                  class="file-path-link file-edit-path-link"
+                  onClick={openFileChangePath(change().path)}
                 >
-                  +{hiddenMultiFileCount()} more
-                </button>
-                <Show when={moreMenuOpen()}>
-                  <div
-                    ref={(el) => (moreMenuRef = el)}
-                    class="file-edit-more-menu"
-                    role="menu"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <For each={hiddenMultiFileChanges()}>
-                      {(item) => {
-                        const path = () => item.toPath || item.path;
-                        const displayName = () => formatFileChangeDisplayName(path());
-                        return (
-                          <a
-                            href="#"
-                            class="file-edit-more-menu-item"
-                            role="menuitem"
-                            title={displayName()}
-                            onClick={(event) => {
-                              setMoreMenuOpen(false);
-                              openFileChangePath(path())(event);
-                            }}
-                          >
-                            <span class="file-edit-more-menu-path">{displayName()}</span>
-                          </a>
-                        );
+                  {formatFileChangeDisplayName(change().path)}
+                </a>
+              </Show>
+            </Show>
+            <Show when={isMultiFile()}>
+              <span class="file-edit-multi-list">
+                <For each={visibleMultiFileChanges()}>
+                  {(item) => {
+                    const displayName = () => formatFileChangeDisplayName(item.toPath || item.path);
+                    return (
+                      <a
+                        href="#"
+                        class="file-path-link file-edit-path-link"
+                        title={displayName()}
+                        onClick={openFileChangePath(item.toPath || item.path)}
+                      >
+                        {displayName()}
+                      </a>
+                    );
+                  }}
+                </For>
+                <Show when={hiddenMultiFileCount() > 0}>
+                  <span class="file-edit-more-wrap">
+                    <button
+                      ref={(el) => (moreButtonRef = el)}
+                      type="button"
+                      class="file-edit-more-count"
+                      aria-haspopup="menu"
+                      aria-expanded={moreMenuOpen()}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setMoreMenuOpen((open) => !open);
                       }}
-                    </For>
-                  </div>
+                    >
+                      +{hiddenMultiFileCount()} more
+                    </button>
+                    <Show when={moreMenuOpen()}>
+                      <div
+                        ref={(el) => (moreMenuRef = el)}
+                        class="file-edit-more-menu"
+                        role="menu"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <For each={hiddenMultiFileChanges()}>
+                          {(item) => {
+                            const path = () => item.toPath || item.path;
+                            const displayName = () => formatFileChangeDisplayName(path());
+                            return (
+                              <a
+                                href="#"
+                                class="file-edit-more-menu-item"
+                                role="menuitem"
+                                title={displayName()}
+                                onClick={(event) => {
+                                  setMoreMenuOpen(false);
+                                  openFileChangePath(path())(event);
+                                }}
+                              >
+                                <span class="file-edit-more-menu-path">{displayName()}</span>
+                              </a>
+                            );
+                          }}
+                        </For>
+                      </div>
+                    </Show>
+                  </span>
                 </Show>
               </span>
             </Show>
-          </span>
-        </Show>
-        <Show when={isCompleted() && diffStats()}>
-          <span class="file-edit-diff-stats">
-            <span class="diff-lines-added">+{diffStats()!.additions}</span>
-            <span class="diff-lines-removed">-{diffStats()!.deletions}</span>
-          </span>
-        </Show>
-        <Show when={isRunning()}>
-          <span class="file-edit-running-label">editing…</span>
-        </Show>
-        <Show when={isError()}>
-          <span class={`file-edit-error-label${isAborted() ? ' is-aborted' : ''}`}>
-            {isAborted() ? 'aborted' : 'failed'}
-          </span>
-        </Show>
-        <Show when={completedDurationLabel()}>
-          <span class="tool-invocation-duration file-edit-duration">
-            {completedDurationLabel()}
-          </span>
-        </Show>
-      </div>
-    </div>
+            <Show when={isCompleted() && diffStats()}>
+              <span class="file-edit-diff-stats">
+                <span class="diff-lines-added">+{diffStats()!.additions}</span>
+                <span class="diff-lines-removed">-{diffStats()!.deletions}</span>
+              </span>
+            </Show>
+            <Show when={isRunning()}>
+              <span class="file-edit-running-label">editing…</span>
+            </Show>
+            <Show when={isError()}>
+              <span class={`file-edit-error-label${isAborted() ? ' is-aborted' : ''}`}>
+                {isAborted() ? 'aborted' : 'failed'}
+              </span>
+            </Show>
+            <Show when={completedDurationLabel()}>
+              <span class="tool-invocation-duration file-edit-duration">
+                {completedDurationLabel()}
+              </span>
+            </Show>
+          </div>
+        </div>
+      </Show>
+      <Show when={showInlineFileChanges() && inlineDiffs().length > 0}>
+        <div class="file-change-inline-diffs file-change-inline-diffs-unwrapped">
+          <DiffView diffs={inlineDiffs()} showChanges />
+        </div>
+      </Show>
+    </>
   );
+}
+
+function countContentLines(content: string | undefined) {
+  if (!content) return 0;
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  return lines.length - (lines.at(-1) === '' ? 1 : 0);
 }
 
 function GenericToolCall(props: {

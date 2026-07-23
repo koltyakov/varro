@@ -38,6 +38,9 @@ export function createMountBridgeOperations(deps: {
         setConfig: (payload) => {
           uiStore.setExpandThinkingByDefaultPreference(payload.expandThinkingByDefault);
           uiStore.setShowStickyUserPromptPreference(payload.showStickyUserPrompt);
+          if (payload.showInlineFileChanges !== undefined) {
+            uiStore.setShowInlineFileChanges(payload.showInlineFileChanges);
+          }
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
           permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
           if (payload.providerLimitThresholdPercent !== undefined) {

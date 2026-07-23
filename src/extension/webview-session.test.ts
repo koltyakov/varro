@@ -140,6 +140,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     readConfig: vi.fn(() => ({
       expandThinkingByDefault: false,
       showStickyUserPrompt: true,
+      showInlineFileChanges: true,
       desktopSessionPaneSide: 'left' as const,
       defaultPermissionMode: 'default' as const,
       providerLimitPollIntervalSeconds: 120,

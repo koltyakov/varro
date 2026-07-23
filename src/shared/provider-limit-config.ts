@@ -7,6 +7,7 @@ export const DEFAULT_PROVIDER_LIMIT_THRESHOLD_PERCENT = 100;
 export type ExtensionConfigState = {
   expandThinkingByDefault: boolean;
   showStickyUserPrompt: boolean;
+  showInlineFileChanges?: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
   defaultPermissionMode: PermissionMode;
   providerLimitPollIntervalSeconds: number;
@@ -17,6 +18,7 @@ export type WebviewConfigUpdatePayload = Pick<
   ExtensionConfigState,
   | 'expandThinkingByDefault'
   | 'showStickyUserPrompt'
+  | 'showInlineFileChanges'
   | 'desktopSessionPaneSide'
   | 'defaultPermissionMode'
 >;

@@ -27,6 +27,7 @@ import {
   messageInfoVersion,
   showStickyUserPrompt,
   showModelPicker,
+  showInlineFileChanges,
 } from '../lib/state';
 import { isAssistantMessage } from '../lib/message-metrics';
 import type { AssistantMessage, Part } from '../types';
@@ -42,6 +43,7 @@ import { loadOlderSessionHistoryPage, recheckSessionStatus } from '../hooks/useO
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatModelName, formatVariantLabel } from '../lib/format';
 import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
+import { getToolInlineFileChangesLayoutSignature } from '../lib/tool-file-change';
 import {
   buildPermissionRequestLookup,
   buildQuestionRequestLookup,
@@ -114,6 +116,38 @@ const TRAILING_SUMMARY_SETTLE_DELAY_MS = 700;
 // Only offer "jump to latest" when at least this much content is hidden
 // below the viewport; a barely-scrolled list doesn't need the button.
 const JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX = 240;
+
+export function getInlinePreviewLayoutSignatures(
+  messages: readonly { info: { id: string }; parts: readonly Part[] }[],
+  enabled: boolean
+) {
+  const signatures = new Map<string, string>();
+  if (!enabled) return signatures;
+
+  for (const message of messages) {
+    const partSignatures: string[] = [];
+    for (const part of message.parts) {
+      if (part.type !== 'tool') continue;
+      const signature = getToolInlineFileChangesLayoutSignature(part.tool, part.state);
+      if (signature) partSignatures.push(`${part.id}:${signature}`);
+    }
+    if (partSignatures.length > 0) {
+      signatures.set(message.info.id, partSignatures.join('\u0000'));
+    }
+  }
+  return signatures;
+}
+
+export function getChangedInlinePreviewMessageIds(
+  previous: ReadonlyMap<string, string>,
+  current: ReadonlyMap<string, string>,
+  currentMessageIds: ReadonlySet<string>
+) {
+  return [...new Set([...previous.keys(), ...current.keys()])].filter(
+    (messageId) =>
+      currentMessageIds.has(messageId) && previous.get(messageId) !== current.get(messageId)
+  );
+}
 
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
@@ -353,6 +387,10 @@ export function MessageList() {
   });
 
   const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
+  const inlinePreviewLayoutSignatures = createMemo(() =>
+    getInlinePreviewLayoutSignatures(messages(), showInlineFileChanges())
+  );
+  let previousInlinePreviewLayoutSignatures = new Map<string, string>();
 
   // Principle: native scrollbar mapping must come from real layout, not guessed row heights.
   // Large transcripts stay non-virtualized until every row has an exact measured height; only then
@@ -378,6 +416,32 @@ export function MessageList() {
     if (pruneMeasuredHeights(measuredHeights, messageIds())) {
       setMeasurementVersion((version) => version + 1);
     }
+  });
+
+  createEffect(() => {
+    const current = inlinePreviewLayoutSignatures();
+    const currentMessageIds = new Set(messageIds());
+    let invalidatedOffscreenHeight = false;
+
+    for (const messageId of getChangedInlinePreviewMessageIds(
+      previousInlinePreviewLayoutSignatures,
+      current,
+      currentMessageIds
+    )) {
+      const mountedRow = trackRef?.querySelector<HTMLDivElement>(
+        `[data-msg-id="${CSS.escape(messageId)}"]`
+      );
+      if (mountedRow) {
+        queueMicrotask(() => measureMountedRow(mountedRow, messageId));
+        continue;
+      }
+      if (!measuredHeights.delete(messageId)) continue;
+      markVirtualMetricsDirty(messageId);
+      invalidatedOffscreenHeight = true;
+    }
+
+    previousInlinePreviewLayoutSignatures = new Map(current);
+    if (invalidatedOffscreenHeight) publishMeasurementVersion();
   });
 
   const hasIncompleteLatestVisibleAssistantReply = createMemo(() => {

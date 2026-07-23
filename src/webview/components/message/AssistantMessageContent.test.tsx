@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { resetDefaultAppState, setIsLoading } from '../../lib/state';
 import type { AssistantMessage, Part, TextPart, ToolPart } from '../../types';
-import { AssistantMessageContent, deduplicateFileEdits } from './AssistantMessageContent';
+import {
+  AssistantMessageContent,
+  deduplicateFileEdits,
+  getFileEditStackRenderKey,
+} from './AssistantMessageContent';
 
 type MockMarkdownRendererProps = {
   content: string;
@@ -252,6 +256,29 @@ describe('AssistantMessageContent', () => {
     expect(stack).toBeInstanceOf(HTMLDivElement);
     expect(stack?.querySelectorAll('.message-part-mock')).toHaveLength(2);
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
+  });
+
+  it('revises file stack keys only when inline preview content affects layout', () => {
+    const compactPart = fileEditPart('edit-1', 'src/one.ts');
+    const previewPart: ToolPart = {
+      ...fileEditPart('edit-2', 'src/two.ts'),
+      tool: 'edit',
+      state: completedToolState(
+        {
+          filePath: 'src/two.ts',
+          oldString: 'const value = 1;',
+          newString: 'const value = 2;',
+        },
+        'Edited src/two.ts'
+      ),
+    };
+
+    expect(getFileEditStackRenderKey([compactPart], true)).toBe(
+      getFileEditStackRenderKey([compactPart], false)
+    );
+    expect(getFileEditStackRenderKey([previewPart], true)).not.toBe(
+      getFileEditStackRenderKey([previewPart], false)
+    );
   });
 
   it('renders retry actions for assistant errors and disables them while loading', () => {

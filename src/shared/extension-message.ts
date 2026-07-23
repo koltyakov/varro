@@ -149,6 +149,9 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
         payload: {
           expandThinkingByDefault: payload.expandThinkingByDefault,
           showStickyUserPrompt: payload.showStickyUserPrompt,
+          ...(typeof payload.showInlineFileChanges === 'boolean'
+            ? { showInlineFileChanges: payload.showInlineFileChanges }
+            : {}),
           desktopSessionPaneSide: payload.desktopSessionPaneSide,
           defaultPermissionMode: payload.defaultPermissionMode,
           ...(typeof payload.providerLimitPollIntervalSeconds === 'number' &&

@@ -8,6 +8,9 @@ export type FileChange = {
   path: string;
   fromPath?: string;
   toPath?: string;
+  before?: string;
+  after?: string;
+  patch?: string;
   additions?: number;
   deletions?: number;
   dedupeKey: string;
@@ -144,6 +147,14 @@ function numberValue(source: Record<string, unknown>, key: string): number | und
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function stringValue(source: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string') return value;
+  }
+  return undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -159,6 +170,9 @@ function withDedupeKey(change: Omit<FileChange, 'dedupeKey'>): FileChange {
   };
   if (change.fromPath !== undefined) result.fromPath = change.fromPath;
   if (change.toPath !== undefined) result.toPath = change.toPath;
+  if (change.before !== undefined) result.before = change.before;
+  if (change.after !== undefined) result.after = change.after;
+  if (change.patch !== undefined) result.patch = change.patch;
   if (change.additions !== undefined) result.additions = change.additions;
   if (change.deletions !== undefined) result.deletions = change.deletions;
   return result;
@@ -229,6 +243,39 @@ export function getToolFileChangeSignature(toolName: string, toolState: ToolStat
   return changes.map((change) => change.dedupeKey).join('|');
 }
 
+export function getToolInlineFileChangesLayoutSignature(
+  toolName: string,
+  toolState: ToolState
+): string | null {
+  const previewChanges = getToolFileChanges(toolName, toolState).filter(
+    (change) =>
+      change.patch !== undefined || change.before !== undefined || change.after !== undefined
+  );
+  if (previewChanges.length === 0) return null;
+
+  return previewChanges
+    .map((change) => {
+      const content =
+        change.patch !== undefined
+          ? `patch:${change.patch}`
+          : `snapshots:${change.before ?? ''}\u0000${change.after ?? ''}`;
+      return `${change.dedupeKey}:${getLayoutContentSignature(content)}`;
+    })
+    .join('|');
+}
+
+function getLayoutContentSignature(content: string) {
+  let hash = 2_166_136_261;
+  let lineCount = 1;
+  for (let index = 0; index < content.length; index += 1) {
+    const code = content.charCodeAt(index);
+    if (code === 10) lineCount += 1;
+    hash ^= code;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `${content.length}:${lineCount}:${hash >>> 0}`;
+}
+
 function computeToolFileChanges(toolName: string, toolState: ToolState): FileChange[] {
   const metadata = getToolMetadata(toolState) || {};
   const metadataChanges = fileChangesFromMetadataFiles(metadata);
@@ -261,16 +308,31 @@ function fileChangesFromMetadataFiles(metadata: Record<string, unknown>): FileCh
       kindFromText(firstString(item, OPERATION_KEYS)) || (toPath && fromPath ? 'moved' : null);
     const additions = numberValue(item, 'additions');
     const deletions = numberValue(item, 'deletions');
+    const before = stringValue(item, ['before', 'oldContent', 'old_content']);
+    const after = stringValue(item, ['after', 'newContent', 'new_content']);
+    const patch = firstString(item, ['patch', 'diff']);
 
     if (kind === 'moved') {
       const path = toPath || primaryPath || fromPath;
       if (!path) return [];
-      return [withDedupeKey({ kind, path, fromPath, toPath, additions, deletions })];
+      return [
+        withDedupeKey({
+          kind,
+          path,
+          fromPath,
+          toPath,
+          before,
+          after,
+          patch,
+          additions,
+          deletions,
+        }),
+      ];
     }
 
     const path = primaryPath || toPath || fromPath;
     if (!path || !kind) return [];
-    return [withDedupeKey({ kind, path, additions, deletions })];
+    return [withDedupeKey({ kind, path, before, after, patch, additions, deletions })];
   });
 }
 
@@ -298,7 +360,15 @@ function fileChangesFromPatchInput(input: Record<string, unknown>): FileChange[]
     }
 
     const kind = operation === 'add' ? 'added' : operation === 'delete' ? 'removed' : 'edited';
-    return [withDedupeKey({ kind, path })];
+    const sectionEnd = headers[index + 1]?.index ?? patchText.length;
+    const section = patchText
+      .slice((match.index ?? 0) + match[0].length, sectionEnd)
+      .replace(/\r?\n\*\*\* End Patch\s*$/, '')
+      .replace(/^\r?\n/, '')
+      .replace(/\r?\n$/, '');
+    const additions = section.split('\n').filter((line) => line.startsWith('+')).length;
+    const deletions = section.split('\n').filter((line) => line.startsWith('-')).length;
+    return [withDedupeKey({ kind, path, patch: section || undefined, additions, deletions })];
   });
 }
 
@@ -314,6 +384,9 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
   const toPath = firstString(source, TARGET_PATH_KEYS);
   const additions = numberValue(source, 'additions') ?? numberValue(source, 'linesAdded');
   const deletions = numberValue(source, 'deletions') ?? numberValue(source, 'linesRemoved');
+  const before = stringValue(source, ['oldString', 'old_string', 'before', 'oldContent']);
+  const after = stringValue(source, ['newString', 'new_string', 'after', 'newContent', 'content']);
+  const patch = firstString(source, ['patch', 'diff']);
   const normalizedToolName = toolName.trim().toLowerCase();
   const inferredKind =
     (fromPath && toPath && normalizePath(fromPath) !== normalizePath(toPath) ? 'moved' : null) ||
@@ -340,6 +413,9 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
       toPath: to,
       additions,
       deletions,
+      before,
+      after,
+      patch,
     });
   }
 
@@ -354,6 +430,9 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
     path,
     additions,
     deletions,
+    before,
+    after,
+    patch,
   });
 }
 

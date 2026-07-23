@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
-import { setExpandThinkingByDefaultPreference, setState } from '../lib/state';
+import {
+  setExpandThinkingByDefaultPreference,
+  setShowInlineFileChanges,
+  setState,
+} from '../lib/state';
 import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
 import {
   ToolCall,
@@ -38,6 +42,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   setExpandThinkingByDefaultPreference(false);
+  setShowInlineFileChanges(false);
   selectSessionMock.mockClear();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
@@ -48,6 +53,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   setExpandThinkingByDefaultPreference(false);
+  setShowInlineFileChanges(false);
   setState('permissions', []);
   setState('questions', []);
   setState('sessionStatus', {});
@@ -1664,5 +1670,45 @@ describe('FileChangeCard', () => {
       payload: { path: 'src/three.ts', kind: 'file', view: 'diff' },
     });
     expect(container?.querySelector('.file-edit-more-menu')).toBeNull();
+  });
+
+  it('shows live apply_patch changes inline when enabled', () => {
+    setShowInlineFileChanges(true);
+    const part: ToolPart = {
+      id: 'tool-inline-patch',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-inline-patch',
+      tool: 'apply_patch',
+      state: {
+        status: 'running',
+        input: {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-const oldValue = 1;
++const newValue = 2;
+*** Add File: src/new.ts
++export const enabled = true;
+*** End Patch`,
+        },
+        title: 'apply_patch',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-change-card')).toBeNull();
+    expect(container?.querySelector('.file-edit-action-label')).toBeNull();
+    expect(container?.querySelectorAll('.file-change-inline-diffs .diff-view-file')).toHaveLength(
+      2
+    );
+    expect(container?.querySelector('.diff-view-line-deletion')?.textContent).toContain(
+      'const oldValue = 1;'
+    );
+    expect(container?.querySelectorAll('.diff-view-line-addition')).toHaveLength(2);
   });
 });

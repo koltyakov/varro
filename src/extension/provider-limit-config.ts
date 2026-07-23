@@ -45,6 +45,7 @@ export function readExtensionConfigState(
   return {
     expandThinkingByDefault: config.get<boolean>('chat.expandThinkingByDefault') ?? false,
     showStickyUserPrompt: config.get<boolean>('chat.showStickyUserPrompt', true),
+    showInlineFileChanges: config.get<boolean>('chat.showInlineFileChanges', false),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
     defaultPermissionMode: readDefaultPermissionMode(config),
     providerLimitPollIntervalSeconds: providerLimitConfig.pollIntervalSeconds,

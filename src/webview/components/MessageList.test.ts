@@ -23,7 +23,11 @@ import type {
   Session,
   UserMessage,
 } from '../types';
-import { MessageList } from './MessageList';
+import {
+  MessageList,
+  getChangedInlinePreviewMessageIds,
+  getInlinePreviewLayoutSignatures,
+} from './MessageList';
 import {
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
@@ -247,6 +251,68 @@ function reasoningPart(id: string, text: string): Part {
     time: { start: 1 },
   };
 }
+
+describe('inline preview virtualization signatures', () => {
+  const compactFileEdit: Part = {
+    id: 'compact-edit',
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'tool',
+    callID: 'compact-call',
+    tool: 'apply_patch',
+    state: {
+      status: 'completed',
+      input: {},
+      output: '',
+      title: 'apply_patch',
+      metadata: {
+        files: [{ type: 'update', relativePath: 'src/app.ts', additions: 1, deletions: 1 }],
+      },
+      time: { start: 1, end: 2 },
+    },
+  };
+  const previewFileEdit: Part = {
+    id: 'preview-edit',
+    sessionID: 'session-1',
+    messageID: 'message-2',
+    type: 'tool',
+    callID: 'preview-call',
+    tool: 'apply_patch',
+    state: {
+      status: 'running',
+      input: { patchText: '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new' },
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 1 },
+    },
+  };
+
+  it('does not create layout revisions for compact cards without preview content', () => {
+    const messages = [{ info: { id: 'message-1' }, parts: [compactFileEdit] }];
+
+    expect(getInlinePreviewLayoutSignatures(messages, false)).toEqual(new Map());
+    expect(getInlinePreviewLayoutSignatures(messages, true)).toEqual(new Map());
+  });
+
+  it('invalidates only messages whose inline preview layout changes', () => {
+    const messages = [{ info: { id: 'message-2' }, parts: [previewFileEdit] }];
+    const previewSignatures = getInlinePreviewLayoutSignatures(messages, true);
+    const messageIds = new Set(['message-1', 'message-2']);
+
+    expect(getChangedInlinePreviewMessageIds(new Map(), previewSignatures, messageIds)).toEqual([
+      'message-2',
+    ]);
+    expect(
+      getChangedInlinePreviewMessageIds(previewSignatures, previewSignatures, messageIds)
+    ).toEqual([]);
+    expect(getChangedInlinePreviewMessageIds(previewSignatures, new Map(), messageIds)).toEqual([
+      'message-2',
+    ]);
+    expect(
+      getChangedInlinePreviewMessageIds(previewSignatures, new Map(), new Set(['message-1']))
+    ).toEqual([]);
+  });
+});
 
 beforeEach(() => {
   container = document.createElement('div');

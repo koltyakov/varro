@@ -388,6 +388,7 @@ export type InitialWebviewState = {
   remoteExtensionHost?: boolean;
   expandThinkingByDefault?: boolean;
   showStickyUserPrompt?: boolean;
+  showInlineFileChanges?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
   providerLimitPollIntervalSeconds?: number;

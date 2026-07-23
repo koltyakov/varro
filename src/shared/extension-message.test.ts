@@ -398,6 +398,7 @@ describe('parseExtensionMessage', () => {
         payload: {
           expandThinkingByDefault: true,
           showStickyUserPrompt: false,
+          showInlineFileChanges: true,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'full',
           providerLimitPollIntervalSeconds: 120,
@@ -410,6 +411,7 @@ describe('parseExtensionMessage', () => {
       payload: {
         expandThinkingByDefault: true,
         showStickyUserPrompt: false,
+        showInlineFileChanges: true,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'full',
         providerLimitPollIntervalSeconds: 120,

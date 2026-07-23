@@ -20,6 +20,17 @@
   z-index: 6;
 }
 
+/* File menus also cross virtualized row boundaries. Keep the active row above
+   its siblings and relax paint containment only while the menu is open. */
+.interactive-list-track.virtualized .interactive-item-container:has(.file-edit-more-menu) {
+  contain: layout style;
+}
+
+.interactive-item-container:has(.file-edit-more-menu) {
+  position: relative;
+  z-index: 6;
+}
+
 /* Inline, the message row's track already provides horizontal padding. */
 .interactive-session .inline-edit-composer-slot .interactive-input-part {
   margin: 0;
@@ -510,6 +521,10 @@ body.vscode-light
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.assistant-file-edit-stack:has(.file-change-inline-diffs-unwrapped) {
+  gap: 12px;
 }
 
 .interactive-item-container.interactive-response.interactive-response-file-edit-group-start {

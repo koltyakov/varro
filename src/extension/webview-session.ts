@@ -59,6 +59,7 @@ export class WebviewSession {
       readConfig(): {
         expandThinkingByDefault: boolean;
         showStickyUserPrompt: boolean;
+        showInlineFileChanges?: boolean;
         desktopSessionPaneSide: 'left' | 'right';
         defaultPermissionMode: PermissionMode;
         providerLimitPollIntervalSeconds: number;
@@ -245,6 +246,7 @@ export class WebviewSession {
       remoteExtensionHost: Boolean(vscode.env?.remoteName),
       expandThinkingByDefault: config.expandThinkingByDefault,
       showStickyUserPrompt: config.showStickyUserPrompt,
+      showInlineFileChanges: config.showInlineFileChanges,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,
       providerLimitPollIntervalSeconds: config.providerLimitPollIntervalSeconds,

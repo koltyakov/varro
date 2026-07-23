@@ -1,11 +1,14 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import { isLoading } from '../../lib/state';
+import { isLoading, showInlineFileChanges } from '../../lib/state';
 import {
   getFinalAssistantTextPartId,
   isFileEditPart,
   shouldShowAssistantPartInHighlightedCard,
 } from '../../lib/part-utils';
-import { getToolFileChangeSignature } from '../../lib/tool-file-change';
+import {
+  getToolFileChangeSignature,
+  getToolInlineFileChangesLayoutSignature,
+} from '../../lib/tool-file-change';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
 import { MarkdownRenderer } from '../MarkdownRenderer';
@@ -216,6 +219,20 @@ function samePartList(previous: readonly Part[], next: readonly Part[]) {
   return previous.length === next.length && previous.every((part, index) => part === next[index]);
 }
 
+export function getFileEditStackRenderKey(
+  parts: readonly ToolPart[],
+  inlinePreviewEnabled: boolean
+) {
+  const baseKey = `file-edit-stack:${parts[0]!.id}:${parts[parts.length - 1]!.id}`;
+  if (!inlinePreviewEnabled) return baseKey;
+
+  const inlinePreviewSignature = parts
+    .map((part) => getToolInlineFileChangesLayoutSignature(part.tool, part.state))
+    .filter((signature): signature is string => signature !== null)
+    .join('|');
+  return inlinePreviewSignature ? `${baseKey}:inline:${inlinePreviewSignature}` : baseKey;
+}
+
 export function calculateAssistantPartVirtualRange(args: {
   itemKeys: string[];
   measuredHeights: Map<string, number>;
@@ -352,7 +369,7 @@ export function AssistantMessageContent(props: {
         while (index + 1 < parts.length && isFileEditPart(parts[index + 1]!)) {
           fileEditParts.push(parts[++index]! as ToolPart);
         }
-        const key = `file-edit-stack:${fileEditParts[0]!.id}:${fileEditParts[fileEditParts.length - 1]!.id}`;
+        const key = getFileEditStackRenderKey(fileEditParts, showInlineFileChanges());
         const previous = previousByKey.get(key);
         if (previous?.kind === 'file-edit-stack' && samePartList(previous.parts, fileEditParts)) {
           items.push(previous);

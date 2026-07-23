@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro for OpenCode",
-  "version": "0.21.4",
+  "version": "0.22.0",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -237,6 +237,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show the sticky user prompt preview while scrolling long assistant responses."
+        },
+        "varro.chat.showInlineFileChanges": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show line-by-line edits directly in file-change tool cards."
         },
         "varro.chat.desktopSessionPaneSide": {
           "type": "string",
