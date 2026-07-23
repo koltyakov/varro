@@ -421,7 +421,6 @@ export function MessageList() {
   createEffect(() => {
     const current = inlinePreviewLayoutSignatures();
     const currentMessageIds = new Set(messageIds());
-    let invalidatedOffscreenHeight = false;
 
     for (const messageId of getChangedInlinePreviewMessageIds(
       previousInlinePreviewLayoutSignatures,
@@ -431,17 +430,15 @@ export function MessageList() {
       const mountedRow = trackRef?.querySelector<HTMLDivElement>(
         `[data-msg-id="${CSS.escape(messageId)}"]`
       );
-      if (mountedRow) {
-        queueMicrotask(() => measureMountedRow(mountedRow, messageId));
+      if (!mountedRow) {
+        // Keep the last measured height as a provisional estimate until the row mounts again.
+        // Deleting it would disable virtualization and mount the entire transcript at once.
         continue;
       }
-      if (!measuredHeights.delete(messageId)) continue;
-      markVirtualMetricsDirty(messageId);
-      invalidatedOffscreenHeight = true;
+      queueMicrotask(() => measureMountedRow(mountedRow, messageId));
     }
 
     previousInlinePreviewLayoutSignatures = new Map(current);
-    if (invalidatedOffscreenHeight) publishMeasurementVersion();
   });
 
   const hasIncompleteLatestVisibleAssistantReply = createMemo(() => {
@@ -751,30 +748,68 @@ export function MessageList() {
     // environments may never deliver ResizeObserver entries, so virtualization must not depend on
     // observer callbacks alone.
     const height = element.getBoundingClientRect().height || 160;
-    if ((measuredHeights.get(messageId) ?? -1) === height) return;
-    measuredHeights.set(messageId, height);
-    markVirtualMetricsDirty(messageId);
+    if (!applyRowHeightMeasurements([{ messageId, height }])) return;
     if (hasMeasuredEveryMessage()) scheduleMeasurementDebounce();
   }
 
-  function setMeasuredHeightsFor(entries: ResizeObserverEntry[]) {
+  function applyRowHeightMeasurements(measurements: Array<{ messageId: string; height: number }>) {
+    // ResizeObserver reports after layout. Use the old prefix metrics to offset growth above the
+    // viewport before paint, including while the user is actively scrolling.
+    const firstVisibleIndex =
+      containerRef && shouldVirtualize() && !autoScroll()
+        ? getFirstVisibleMessageIndexFromVirtualMetrics({
+            metrics: virtualMetrics(),
+            scrollTop: containerRef.scrollTop,
+          })
+        : null;
+    let scrollAdjustment = 0;
     let changed = false;
-    for (const entry of entries) {
-      const element = entry.target as HTMLDivElement;
-      const messageId = element.dataset.msgId;
-      const height = element.getBoundingClientRect().height;
-      if (!messageId || (measuredHeights.get(messageId) ?? -1) === height) {
-        continue;
+
+    for (const { messageId, height } of measurements) {
+      const previousHeight = measuredHeights.get(messageId);
+      if ((previousHeight ?? -1) === height) continue;
+
+      if (previousHeight !== undefined && firstVisibleIndex !== null) {
+        const index = messageIndexById().get(messageId);
+        if (index !== undefined && index < firstVisibleIndex) {
+          scrollAdjustment += height - previousHeight;
+        }
       }
 
       measuredHeights.set(messageId, height);
       markVirtualMetricsDirty(messageId);
-      element.style.setProperty('--cis', `${height}px`);
-      element.dataset.cis = '';
       changed = true;
     }
 
-    if (!changed) return;
+    if (containerRef && Math.abs(scrollAdjustment) > 0.5) {
+      suppressSyncScrollTop = true;
+      containerRef.scrollTop = Math.max(0, containerRef.scrollTop + scrollAdjustment);
+      suppressSyncScrollTop = false;
+      lastObservedScrollTop = containerRef.scrollTop;
+      batch(() => {
+        setScrollTop(containerRef!.scrollTop);
+        setViewportHeight(containerRef!.clientHeight);
+      });
+      scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
+    }
+
+    return changed;
+  }
+
+  function setMeasuredHeightsFor(entries: ResizeObserverEntry[]) {
+    const measurements: Array<{ messageId: string; height: number }> = [];
+    for (const entry of entries) {
+      const element = entry.target as HTMLDivElement;
+      const messageId = element.dataset.msgId;
+      const height = element.getBoundingClientRect().height;
+      if (!messageId) continue;
+
+      element.style.setProperty('--cis', `${height}px`);
+      element.dataset.cis = '';
+      measurements.push({ messageId, height });
+    }
+
+    if (!applyRowHeightMeasurements(measurements)) return;
 
     scheduleMeasurementDebounce();
     scheduleVisibleMeasurement({ afterResize: true });

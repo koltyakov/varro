@@ -100,6 +100,58 @@ async function appendDeltaToMultiAgentStreaming(
   }, delta);
 }
 
+async function updateDiffPreview(
+  page: import('@playwright/test').Page,
+  messageId: string,
+  fileCount: number
+) {
+  const patchText = [
+    '*** Begin Patch',
+    ...Array.from({ length: fileCount }, (_, index) =>
+      [
+        `*** Update File: src/async-report-${index}.ts`,
+        '@@',
+        `-export const value${index} = 'pending';`,
+        `+export const value${index} = 'ready';`,
+      ].join('\n')
+    ),
+    '*** End Patch',
+  ].join('\n');
+  const partId = `${messageId}-patch`;
+
+  await page.evaluate(
+    ({ id, part, patch }) => {
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'message.part.updated',
+            properties: {
+              part: {
+                id: part,
+                sessionID: 'session-diff-preview-large-transcript',
+                messageID: id,
+                type: 'tool',
+                callID: `${part}-call`,
+                tool: 'apply_patch',
+                state: {
+                  status: 'running',
+                  input: { patchText: patch },
+                  title: 'apply_patch',
+                  metadata: {},
+                  time: { start: 1 },
+                },
+              },
+            },
+          },
+        },
+        '*'
+      );
+    },
+    { id: messageId, part: partId, patch: patchText }
+  );
+}
+
 test.describe('auto-scroll', () => {
   test('starts at the bottom of the conversation', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
@@ -264,6 +316,116 @@ test.describe('auto-scroll', () => {
       expect(current.firstIndex).toBeLessThanOrEqual(previous.firstIndex + 1);
       expect(previous.firstIndex - current.firstIndex).toBeLessThan(14);
     }
+  });
+
+  test('keeps visible content anchored while diff previews resize asynchronously', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    await expect
+      .poll(() => list.evaluate((element) => element.querySelectorAll('[data-msg-id]').length))
+      .toBeLessThan(50);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * 0.55);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 4);
+
+    const before = await list.evaluate((element) => {
+      const containerRect = element.getBoundingClientRect();
+      const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+      const firstVisible = rows.find((row) => {
+        const rect = row.getBoundingClientRect();
+        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+      });
+      const diffRowsAbove = rows.filter((row) => {
+        const rect = row.getBoundingClientRect();
+        return row.querySelector('.diff-view-widget') && rect.bottom <= containerRect.top;
+      });
+      const target = diffRowsAbove.at(-1);
+      element.dataset.maxRenderedMessageRows = String(rows.length);
+      const rowObserver = new MutationObserver((records) => {
+        const addedRows = records.reduce((count, record) => {
+          for (const node of record.addedNodes) {
+            if (!(node instanceof Element)) continue;
+            count += node.matches('[data-msg-id]') ? 1 : 0;
+            count += node.querySelectorAll('[data-msg-id]').length;
+          }
+          return count;
+        }, 0);
+        element.dataset.maxRenderedMessageRows = String(
+          Math.max(
+            Number(element.dataset.maxRenderedMessageRows ?? 0),
+            element.querySelectorAll('[data-msg-id]').length,
+            addedRows
+          )
+        );
+      });
+      rowObserver.observe(element, { childList: true, subtree: true });
+
+      return {
+        anchorId: firstVisible?.dataset.msgId ?? '',
+        anchorTop: firstVisible ? firstVisible.getBoundingClientRect().top - containerRect.top : 0,
+        targetId: target?.dataset.msgId ?? '',
+      };
+    });
+
+    expect(before.anchorId).not.toBe('');
+    expect(before.targetId).not.toBe('');
+
+    await list.dispatchEvent('wheel', { deltaY: -1 });
+    await updateDiffPreview(page, before.targetId, 20);
+    await expect(page.locator(`[data-msg-id="${before.targetId}"] .diff-view-file`)).toHaveCount(20);
+    await waitForAnimationFrames(page, 4);
+
+    const afterMountedResize = await list.evaluate((element) => {
+      const containerRect = element.getBoundingClientRect();
+      const firstVisible = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+        (row) => {
+          const rect = row.getBoundingClientRect();
+          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+        }
+      );
+      return {
+        anchorId: firstVisible?.dataset.msgId ?? '',
+        anchorTop: firstVisible ? firstVisible.getBoundingClientRect().top - containerRect.top : 0,
+      };
+    });
+
+    expect(afterMountedResize.anchorId).toBe(before.anchorId);
+    expect(Math.abs(afterMountedResize.anchorTop - before.anchorTop)).toBeLessThan(3);
+
+    const beforeOffscreenUpdate = afterMountedResize;
+    await expect(page.locator('[data-msg-id="message-diff-preview-assistant-0"]')).toHaveCount(0);
+    await list.dispatchEvent('wheel', { deltaY: -1 });
+    await updateDiffPreview(page, 'message-diff-preview-assistant-0', 24);
+    await waitForAnimationFrames(page, 4);
+
+    const afterOffscreenUpdate = await list.evaluate((element) => {
+      const containerRect = element.getBoundingClientRect();
+      const firstVisible = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+        (row) => {
+          const rect = row.getBoundingClientRect();
+          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+        }
+      );
+      return {
+        anchorId: firstVisible?.dataset.msgId ?? '',
+        anchorTop: firstVisible ? firstVisible.getBoundingClientRect().top - containerRect.top : 0,
+        maxRenderedMessageRows: Number(element.dataset.maxRenderedMessageRows ?? 0),
+      };
+    });
+
+    expect(afterOffscreenUpdate.anchorId).toBe(beforeOffscreenUpdate.anchorId);
+    expect(Math.abs(afterOffscreenUpdate.anchorTop - beforeOffscreenUpdate.anchorTop)).toBeLessThan(
+      3
+    );
+    expect(afterOffscreenUpdate.maxRenderedMessageRows).toBeLessThan(50);
   });
 
   test('mixed small chat scrolls upward without random jumps', async ({ page }) => {

@@ -72,6 +72,7 @@ const SCENARIO_NAMES = [
   'ralph-dashboard',
   'statusbar-focus',
   'large-transcript',
+  'diff-preview-large-transcript',
   'mixed-small-transcript',
   'heterogeneous-large-transcript',
   'huge-content-transcript',
@@ -124,6 +125,7 @@ type ScenarioState = {
   readyStatus?: ServerStatus;
   nextSequence: number;
   healthFailuresRemaining: number;
+  showInlineFileChanges?: boolean;
 };
 
 type HarnessWindow = Window & {
@@ -581,6 +583,29 @@ function makeTodoToolPart(
       title: 'Track implementation tasks',
       metadata: {},
       time: { start: BASE_TIME, end: BASE_TIME + 1 },
+    },
+  };
+}
+
+function makeApplyPatchToolPart(
+  sessionId: string,
+  messageId: string,
+  id: string,
+  patchText: string
+): Extract<Part, { type: 'tool' }> {
+  return {
+    id,
+    sessionID: sessionId,
+    messageID: messageId,
+    type: 'tool',
+    callID: `${id}-call`,
+    tool: 'apply_patch',
+    state: {
+      status: 'running',
+      input: { patchText },
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: BASE_TIME },
     },
   };
 }
@@ -2141,6 +2166,51 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     return state;
   }
 
+  if (name === 'diff-preview-large-transcript') {
+    const session = makeSession(
+      'session-diff-preview-large-transcript',
+      'Async diff preview scroll stability',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 60; index += 1) {
+      const createdAt = BASE_TIME - (200 - index) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-diff-preview-user-${index}`,
+        [`Review asynchronous report change ${index}.`],
+        createdAt
+      );
+      const assistantId = `message-diff-preview-assistant-${index}`;
+      const patchId = `${assistantId}-patch`;
+      const assistant = makeCompletedAssistantMessageWithParts(
+        session.id,
+        assistantId,
+        user.info.id,
+        createdAt + 1,
+        `Prepared report update ${index}.`,
+        [
+          makeApplyPatchToolPart(
+            session.id,
+            assistantId,
+            patchId,
+            `*** Begin Patch\n*** Update File: src/report-${index}.ts\n@@\n-export const status = 'pending';\n+export const status = 'ready';\n*** End Patch`
+          ),
+        ]
+      );
+      messages.push(user, assistant);
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.showInlineFileChanges = true;
+    state.nextSequence = 392;
+    return state;
+  }
+
   if (name === 'mixed-small-transcript') {
     const session = makeSession(
       'session-mixed-small-transcript',
@@ -2851,6 +2921,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
     showStickyUserPrompt: true,
+    showInlineFileChanges: state.showInlineFileChanges,
     defaultPermissionMode: 'default',
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
     pendingQuestions: [],
