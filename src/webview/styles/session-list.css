@@ -314,12 +314,11 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .session-item.is-pinned {
-  background: color-mix(in srgb, var(--color-vscode-accent) 7%, transparent);
-  box-shadow: inset 2px 0 color-mix(in srgb, var(--color-vscode-accent) 65%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-warning) 8%, transparent);
 }
 
 .session-item.is-pinned.keyboard-focus {
-  background: color-mix(in srgb, var(--color-vscode-accent) 11%, var(--color-vscode-hover));
+  background: color-mix(in srgb, var(--color-vscode-warning) 12%, var(--color-vscode-hover));
 }
 
 @media (min-width: 1400px) {

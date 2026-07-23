@@ -444,9 +444,26 @@
 
 .diff-view-widget-inline .diff-view-file {
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  border: 1px solid var(--color-vscode-border-default);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--color-vscode-bg) 92%, var(--color-vscode-fg));
+  background: var(--color-vscode-result-editor-bg);
+}
+
+.diff-view-widget-inline .diff-view-item {
+  padding-block: 7px;
+  background: color-mix(in srgb, var(--color-vscode-fg) 5%, var(--color-vscode-result-editor-bg));
+}
+
+.diff-view-widget-inline .diff-view-icon {
+  opacity: 0.7;
+}
+
+.diff-view-widget-inline .diff-view-filename {
+  opacity: 0.9;
+}
+
+.diff-view-widget-inline .diff-view-item-button:hover {
+  background: color-mix(in srgb, var(--color-vscode-fg) 9%, var(--color-vscode-result-editor-bg));
 }
 
 .diff-view-widget-inline .diff-view-file + .diff-view-file {
@@ -459,7 +476,7 @@
   overflow-y: auto;
   scrollbar-width: auto;
   scrollbar-color: auto;
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
+  border-top: 1px solid var(--color-vscode-border-default);
   background: var(--color-vscode-result-editor-bg);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -508,7 +525,7 @@
 
 .diff-view-line {
   display: grid;
-  grid-template-columns: 44px 44px 18px minmax(max-content, 1fr);
+  grid-template-columns: 34px 34px 18px minmax(max-content, 1fr);
   width: 100%;
   min-height: 17px;
 }
@@ -527,11 +544,16 @@
 }
 
 .diff-view-line-number {
-  padding: 0 8px 0 4px;
+  padding: 0 5px 0 3px;
   color: var(--color-vscode-muted);
+  font-size: 9px;
   text-align: right;
   user-select: none;
-  border-right: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+  background: var(--color-vscode-result-editor-bg);
+}
+
+.diff-view-line-number:nth-child(2) {
+  border-right: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
 }
 
 .diff-view-line-marker {
@@ -556,18 +578,40 @@
 }
 
 .diff-view-line-addition {
-  color: var(--color-vscode-lines-add);
-  background: color-mix(in srgb, var(--color-vscode-lines-add) 13%, transparent);
+  color: var(--color-vscode-fg);
+  background: color-mix(
+    in srgb,
+    var(--vscode-diffEditor-insertedLineBackground, var(--color-vscode-diff-add)) 90%,
+    var(--color-vscode-lines-add)
+  );
 }
 
 .diff-view-line-deletion {
+  color: var(--color-vscode-fg);
+  background: color-mix(
+    in srgb,
+    var(--vscode-diffEditor-removedLineBackground, var(--color-vscode-diff-del)) 90%,
+    var(--color-vscode-lines-del)
+  );
+}
+
+.diff-view-line-addition .diff-view-line-marker {
+  color: var(--color-vscode-lines-add);
+  font-weight: 600;
+}
+
+.diff-view-line-deletion .diff-view-line-marker {
   color: var(--color-vscode-lines-del);
-  background: color-mix(in srgb, var(--color-vscode-lines-del) 13%, transparent);
+  font-weight: 600;
 }
 
 .diff-view-line-hunk {
-  color: var(--color-vscode-muted);
-  background: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-accent) 50%, var(--color-vscode-fg));
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-accent) 8%,
+    var(--color-vscode-result-editor-bg)
+  );
 }
 
 .diff-view-line-hunk .diff-view-line-content {

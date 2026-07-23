@@ -205,15 +205,11 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean }) {
           class="diff-view-icon"
           width="14"
           height="14"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
+          viewBox="0 0 32 32"
+          fill="currentColor"
+          aria-hidden="true"
         >
-          <path d="M9 1H4.5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V4.5L9 1z" />
-          <path d="M9 1v4h3.5" />
+          <path d="M13 4 6 11v17h20V4H13Zm-1 3.828V10H9.828L12 7.828ZM24 26H8V12h6V6h10v20Z" />
         </svg>
         <span class="diff-view-filename">{file() || 'Unknown file'}</span>
         <span class="diff-view-stats">
