@@ -1114,6 +1114,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       if (sessionId) messageSyncGenerations.invalidate(sessionId);
     },
     pruneMessagesFrom: sessionStore.pruneMessagesFrom,
+    deleteMessage: (sessionId, messageId) => client.session.deleteMessage(sessionId, messageId),
     revertSession: (sessionId, messageId) => client.session.revert(sessionId, messageId),
     syncSession,
     syncSessionMessages,

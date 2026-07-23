@@ -948,6 +948,7 @@ const API_ROUTES: ApiRoute[] = [
       onlyQuery(url, 'limit', 'before') &&
       (!url.searchParams.has('before') || requiredQuery(url, 'limit'))
   ),
+  route('/session/:id/message/:messageId', methodsNoQuery('DELETE')),
   route('/session/:id/todo', methodsNoQuery('GET')),
   route(
     '/session/:id/:action',

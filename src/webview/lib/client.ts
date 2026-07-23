@@ -99,6 +99,12 @@ export const client = {
       if (response.nextCursor) items.nextCursor = response.nextCursor;
       return items;
     },
+    async deleteMessage(id: string, messageID: string): Promise<boolean> {
+      return apiCall(
+        'DELETE',
+        `/session/${encodeURIComponent(id)}/message/${encodeURIComponent(messageID)}`
+      );
+    },
     async todos(id: string): Promise<Todo[]> {
       return apiCall('GET', `/session/${id}/todo`);
     },

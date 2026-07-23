@@ -58,6 +58,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/session/abc/message')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=200')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=200&before=cursor-2')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/session/abc/message/message-1')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/todo')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/unrevert')).toBe(true);
     expect(isAllowedApiRequest('POST', '/question/request-1/reply')).toBe(true);
@@ -102,6 +103,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=5&extra=1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/message?before=cursor-2')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session/abc/message?limit=5')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session/abc/message/message-1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/provider-limit?modelID=gpt')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/workspace-file')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/workspace-path/resolve')).toBe(false);

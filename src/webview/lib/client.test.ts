@@ -66,6 +66,7 @@ describe('client', () => {
     await client.session.status();
     await client.session.messages('session-1');
     await client.session.messages('session-1', { limit: 200 });
+    await client.session.deleteMessage('session-1', 'message-1');
     await client.session.todos('session-1');
     await client.session.sendAsync('session-1', {
       parts: [{ type: 'text', text: 'Hello' }],
@@ -126,6 +127,7 @@ describe('client', () => {
       ['GET', '/session/status'],
       ['GET', '/session/session-1/message'],
       ['GET', '/session/session-1/message?limit=200'],
+      ['DELETE', '/session/session-1/message/message-1'],
       ['GET', '/session/session-1/todo'],
       [
         'POST',

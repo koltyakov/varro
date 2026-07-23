@@ -104,12 +104,9 @@ export async function editMessageWithDependencies(
     startLoading(): void;
     invalidateMessageSync?(): void;
     pruneMessagesFrom?(sessionId: string, messageId: string): (() => void) | null;
-    revertSession(sessionId: string, messageId: string): Promise<unknown>;
-    syncSession(sessionId: string): Promise<void>;
+    deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
     syncSessionMessages(sessionId: string): Promise<void>;
     sendEditedMessage(text: string): Promise<boolean>;
-    unrevertSession(sessionId: string): Promise<Session>;
-    upsertSession(session: Session): void;
     stopLoading(): void;
     setError(message: string): void;
   },
@@ -120,23 +117,27 @@ export async function editMessageWithDependencies(
   const sessionId = deps.getActiveSessionId();
   if (!sessionId || (!options?.allowEmptyText && !text.trim())) return false;
 
-  const target = deps
-    .getMessages()
-    .find((entry) => entry.info.role === 'user' && entry.info.id === messageId);
+  const messages = deps.getMessages();
+  const targetIndex = messages.findIndex(
+    (entry) => entry.info.role === 'user' && entry.info.id === messageId
+  );
+  const target = messages[targetIndex];
   if (!target || target.info.sessionID !== sessionId) return false;
 
-  let restorePrunedMessages: (() => void) | null = null;
+  const messagesToDelete = messages.slice(targetIndex).toReversed();
   try {
     deps.startLoading();
     deps.invalidateMessageSync?.();
-    restorePrunedMessages = deps.pruneMessagesFrom?.(sessionId, messageId) ?? null;
+    deps.pruneMessagesFrom?.(sessionId, messageId);
     if (deps.isSessionWorking(sessionId)) {
       await deps.abortSession();
     }
-    await deps.revertSession(sessionId, messageId);
-    await deps.syncSession(sessionId);
+    // Session revert also restores filesystem snapshots; direct history deletion does not.
+    for (const message of messagesToDelete) {
+      await deps.deleteMessage(sessionId, message.info.id);
+    }
   } catch (err) {
-    restorePrunedMessages?.();
+    await deps.syncSessionMessages(sessionId).catch(() => {});
     deps.stopLoading();
     deps.setError(err instanceof Error ? err.message : 'Failed to edit message');
     return false;
@@ -147,15 +148,6 @@ export async function editMessageWithDependencies(
   } catch (err) {
     deps.setError(err instanceof Error ? err.message : 'Failed to send edited message');
   }
-
-  try {
-    deps.upsertSession(await deps.unrevertSession(sessionId));
-  } catch (err) {
-    deps.setError(
-      `Failed to restore the original message: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-  restorePrunedMessages?.();
   deps.stopLoading();
   return false;
 }
@@ -257,6 +249,7 @@ type SessionControlDependencies = {
   sendEditedMessage(text: string): Promise<boolean>;
   invalidateMessageSync(): void;
   pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null;
+  deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
   unrevertSession(sessionId: string): Promise<Session>;
   upsertSession(session: Session): void;
   clearPendingAbort(sessionId: string): void;
@@ -325,12 +318,9 @@ export class SessionControlOperations {
         startLoading: this.deps.startLoading,
         invalidateMessageSync: this.deps.invalidateMessageSync,
         pruneMessagesFrom: this.deps.pruneMessagesFrom,
-        revertSession: this.deps.revertSession,
-        syncSession: this.deps.syncSession,
+        deleteMessage: this.deps.deleteMessage,
         syncSessionMessages: this.deps.syncSessionMessages,
         sendEditedMessage: this.deps.sendEditedMessage,
-        unrevertSession: this.deps.unrevertSession,
-        upsertSession: this.deps.upsertSession,
         stopLoading: this.deps.stopLoading,
         setError: this.deps.setError,
       },
