@@ -281,17 +281,10 @@ input:focus-visible {
   min-width: 0;
 }
 
-/* Signals that the preview window holds more text below the visible lines;
-   toggled from JS because CSS alone can't detect inner-scroll position. */
-.latest-user-message-sticky-text-clip.has-more-below::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1.35em;
-  pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--color-vscode-request-bubble));
+/* Fade only the text so the card background remains a single, seamless color. */
+.latest-user-message-sticky-text-clip.has-more-below .latest-user-message-sticky-text {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.35em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.35em), transparent);
 }
 
 .latest-user-message-sticky-text {

@@ -5,7 +5,8 @@ import type { NormalizedTodo } from '../types';
 const todos = () => defaultAppState.state.todos;
 const TODO_LIST_CHAT_SHARE = 0.28;
 const MIN_TODO_LIST_HEIGHT = 52;
-const MAX_TODO_LIST_HEIGHT = 220;
+// List padding plus eight single-line todo rows and their gaps.
+const MAX_TODO_LIST_HEIGHT = 185;
 const DEFAULT_TODO_LIST_HEIGHT = 160;
 const MIN_CHAT_VIEW_HEIGHT = 140;
 const MIN_CHAT_VIEW_SHARE = 0.4;
@@ -16,7 +17,6 @@ export function TodoList() {
   const progress = () => (total() > 0 ? (completed() / total()) * 100 : 0);
   const allDone = () => total() > 0 && completed() === total();
   const inProgressTodos = () => todos().filter((todo) => todo.status === 'in_progress');
-  const inProgressTodo = () => inProgressTodos()[0];
   const [activeTodoIndex, setActiveTodoIndex] = createSignal(0);
   const activeTodo = () => {
     const running = inProgressTodos();
@@ -85,15 +85,15 @@ export function TodoList() {
   });
 
   createEffect(() => {
-    const inProgressTodoId = inProgressTodo()?.id;
-    if (!inProgressTodoId || collapsed()) return;
+    const activeTodoId = activeTodo()?.id;
+    if (!activeTodoId || collapsed()) return;
 
     queueMicrotask(() => {
-      if (collapsed() || inProgressTodo()?.id !== inProgressTodoId) return;
-      const inProgressItem = Array.from(listRef?.children || []).find(
-        (item) => (item as HTMLElement).dataset.todoId === inProgressTodoId
+      if (collapsed() || activeTodo()?.id !== activeTodoId) return;
+      const activeItem = Array.from(listRef?.children || []).find(
+        (item) => (item as HTMLElement).dataset.todoId === activeTodoId
       );
-      inProgressItem?.scrollIntoView?.({ block: 'nearest' });
+      activeItem?.scrollIntoView?.({ block: 'nearest' });
     });
   });
 

@@ -44,6 +44,14 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn(actual.existsSync),
+    readFileSync: vi.fn((path: FsModule.PathOrFileDescriptor, options?: unknown) => {
+      if (typeof path === 'string' && /(?:^|[/\\])varro-opencode-server-\d+\.json$/.test(path)) {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+          code: 'ENOENT',
+        });
+      }
+      return actual.readFileSync(path, options as never);
+    }),
   };
 });
 vi.mock('fs/promises', async () => {

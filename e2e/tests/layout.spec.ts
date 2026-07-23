@@ -16,6 +16,17 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
 
   await expect(sticky).toBeVisible();
   await expect(sticky).toContainText('keep this prompt visible while the answer scrolls');
+  const textClip = sticky.locator('.latest-user-message-sticky-text-clip');
+  await expect(textClip).toHaveClass(/has-more-below/);
+  const overflowFade = await textClip.evaluate((element) => {
+    const text = element.querySelector('.latest-user-message-sticky-text');
+    return {
+      maskImage: text ? getComputedStyle(text).maskImage : 'none',
+      overlayContent: getComputedStyle(element, '::after').content,
+    };
+  });
+  expect(overflowFade.maskImage).not.toBe('none');
+  expect(overflowFade.overlayContent).toBe('none');
 
   const gaps = await getE2EState(page, () => {
     const header = document.querySelector('.interactive-session > .chat-header') as HTMLElement | null;

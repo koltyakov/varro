@@ -141,7 +141,7 @@ describe('TodoList', () => {
     );
   });
 
-  it('scrolls the active todo into view', async () => {
+  it('scrolls to the active todo when it changes', async () => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -159,6 +159,14 @@ describe('TodoList', () => {
     const activeItem = container!.querySelector('[data-todo-id="todo-2"]');
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     expect(scrollIntoView.mock.contexts).toContain(activeItem);
+
+    scrollIntoView.mockClear();
+    setState('todos', 1, 'status', 'completed');
+    await Promise.resolve();
+
+    const nextActiveItem = container!.querySelector('[data-todo-id="todo-3"]');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(scrollIntoView.mock.contexts).toContain(nextActiveItem);
   });
 
   it('starts collapsed when all todos are completed and expands when a new todo arrives', async () => {
@@ -265,15 +273,15 @@ describe('TodoList', () => {
     const chatShell = container!.querySelector('.chat-main-column-shell') as HTMLDivElement;
     const chatView = container!.querySelector('.interactive-list') as HTMLDivElement;
     const mount = container!.querySelector('.todo-mount') as HTMLDivElement;
-    Object.defineProperty(chatShell, 'clientHeight', { configurable: true, value: 600 });
-    Object.defineProperty(chatView, 'clientHeight', { configurable: true, value: 300 });
+    Object.defineProperty(chatShell, 'clientHeight', { configurable: true, value: 1_000 });
+    Object.defineProperty(chatView, 'clientHeight', { configurable: true, value: 500 });
 
     cleanup = render(() => TodoList(), mount);
 
     const toggle = mount.querySelector('button.todo-block-header') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect((mount.querySelector('.todo-block-list') as HTMLUListElement).style.maxHeight).toBe(
-      '168px'
+      '185px'
     );
 
     Object.defineProperty(chatShell, 'clientHeight', { configurable: true, value: 320 });
