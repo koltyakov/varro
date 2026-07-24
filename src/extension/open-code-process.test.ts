@@ -1,5 +1,15 @@
 import { EventEmitter } from 'events';
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -490,6 +500,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       symlink(`socket:[${socketInode}]`, join(procRoot, String(listenerPid), 'fd/3')),
       symlink('/usr/bin/opencode', join(procRoot, String(listenerPid), 'exe')),
     ]);
+    const procExecutable = await readlink(join(procRoot, String(listenerPid), 'exe'));
     spawnMock.mockImplementation((command: string) => {
       if (command === '/usr/bin/opencode') return child;
       const result = Object.assign(new EventEmitter(), {
@@ -530,7 +541,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toMatchObject({
       pid: listenerPid,
       port: 4096,
-      executable: '/usr/bin/opencode',
+      executable: procExecutable,
       birthIdentity: 'linux:123456',
       state: 'active',
     });
