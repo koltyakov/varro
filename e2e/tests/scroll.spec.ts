@@ -557,6 +557,7 @@ test.describe('auto-scroll', () => {
       return {
         clientHeight: viewport.clientHeight,
         fadeHeight,
+        hasHorizontalScrollbar: !!shell.querySelector('.diff-view-scrollbar-horizontal'),
         rowHeight: rows[0]!.getBoundingClientRect().height,
         shellHeight: shell.getBoundingClientRect().height,
         toggleInHeader: toggle.parentElement?.classList.contains('diff-view-item-expandable'),
@@ -566,6 +567,7 @@ test.describe('auto-scroll', () => {
 
     expect(dimensions.visibleRowCount).toBe(6);
     expect(dimensions.clientHeight).toBe(dimensions.rowHeight * 6);
+    expect(dimensions.hasHorizontalScrollbar).toBe(false);
     expect(dimensions.shellHeight).toBe(dimensions.clientHeight + 1);
     expect(dimensions.fadeHeight).toBe(dimensions.rowHeight / 2);
     expect(dimensions.toggleInHeader).toBe(true);

@@ -979,7 +979,7 @@ function DiffItem(props: {
               </div>
             )}
           </Show>
-          <Show when={horizontalThumb()}>
+          <Show when={expanded() || !canExpand() ? horizontalThumb() : null}>
             {(thumb) => (
               <div
                 class="diff-view-scrollbar diff-view-scrollbar-horizontal"

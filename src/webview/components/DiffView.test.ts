@@ -242,11 +242,7 @@ describe('DiffView', () => {
         '.diff-view-scrollbar-vertical .diff-view-scrollbar-thumb'
       )?.style.height
     ).toBe('28px');
-    expect(
-      container?.querySelector<HTMLElement>(
-        '.diff-view-scrollbar-horizontal .diff-view-scrollbar-thumb'
-      )?.style.width
-    ).toBe('148px');
+    expect(container?.querySelector('.diff-view-scrollbar-horizontal')).toBeNull();
     const verticalScrollbarThumb = container?.querySelector<HTMLElement>(
       '.diff-view-scrollbar-vertical .diff-view-scrollbar-thumb'
     );
@@ -295,6 +291,11 @@ describe('DiffView', () => {
     expect(toggle?.title).toBe('Collapse diff preview');
     expect(viewport?.classList.contains('diff-view-lines-expanded')).toBe(true);
     expect(container?.textContent).toContain('final context');
+    expect(
+      container?.querySelector<HTMLElement>(
+        '.diff-view-scrollbar-horizontal .diff-view-scrollbar-thumb'
+      )?.style.width
+    ).toBe('148px');
 
     toggle?.focus();
     expect(document.activeElement).toBe(toggle);
@@ -379,6 +380,37 @@ describe('DiffView', () => {
     );
 
     expect(container?.querySelector('.diff-view-lines-unnumbered')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('shows horizontal scrolling when the preview already contains every line', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
+      return this.classList.contains('diff-view-lines') ? 300 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function () {
+      return this.classList.contains('diff-view-lines') ? 600 : 0;
+    });
+
+    cleanup = render(
+      () =>
+        DiffView({
+          showChanges: true,
+          diffs: [
+            {
+              file: 'src/example.ts',
+              patch: '@@ -1 +1 @@\n-old\n+new',
+              additions: 1,
+              deletions: 1,
+            },
+          ],
+        }),
+      container!
+    );
+    await Promise.resolve();
+
+    expect(container?.querySelector('.diff-view-toggle')).toBeNull();
+    expect(container?.querySelector('.diff-view-scrollbar-horizontal')).toBeInstanceOf(
+      HTMLDivElement
+    );
   });
 
   it('builds focused hunks from before and after content when patch text is unavailable', () => {
