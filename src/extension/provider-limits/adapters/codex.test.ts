@@ -128,6 +128,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
+      planName: 'Pro',
       note: 'Polled Codex OAuth usage endpoint',
       windows: [
         {
@@ -205,6 +206,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
+      planName: 'Pro',
       note: 'Polled Codex OAuth usage endpoint',
     });
     expect(status.status === 'available' ? status.windows : []).toEqual(
@@ -454,6 +456,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
+      planName: 'Free',
       note: 'Polled Codex OAuth usage endpoint',
       windows: [
         {
@@ -516,6 +519,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
+      planName: 'Pro',
       note: 'Polled Codex OAuth usage endpoint',
       windows: [
         {
@@ -696,6 +700,7 @@ describe('createCodexAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
+      planName: 'Pro',
       note: 'Polled Codex OAuth usage endpoint',
       windows: [
         {

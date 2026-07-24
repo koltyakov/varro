@@ -116,6 +116,7 @@ describe('createCopilotAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
+      planName: 'Individual Pro',
       note: 'Polled GitHub Copilot internal quota endpoint',
       windows: [
         {
@@ -159,6 +160,7 @@ describe('createCopilotAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
+      planName: 'Free',
       note: 'Polled GitHub Copilot internal quota endpoint',
       windows: [
         {

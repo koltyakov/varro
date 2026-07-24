@@ -71,6 +71,7 @@ describe('createOpenRouterAdapter', () => {
             usage_daily: 1.25,
             usage_weekly: 4.5,
             usage_monthly: 17.5,
+            is_free_tier: true,
           },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -90,6 +91,7 @@ describe('createOpenRouterAdapter', () => {
       status: 'available',
       source: 'provider',
       checkedAt: 1_000,
+      planName: 'Free',
       note: 'Polled OpenRouter auth key endpoint',
       windows: [
         {

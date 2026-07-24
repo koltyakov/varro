@@ -102,6 +102,7 @@ export function createCopilotAdapter(): ProviderLimitAdapter {
 
         const payload = (await response.json()) as unknown;
         const windows = extractCopilotWindows(payload, checkedAt);
+        const planName = extractCopilotPlanName(payload);
         if (windows.length === 0) {
           return unsupportedProviderStatus(
             provider.id,
@@ -118,6 +119,7 @@ export function createCopilotAdapter(): ProviderLimitAdapter {
           source: 'provider',
           checkedAt,
           windows,
+          ...(planName ? { planName } : {}),
           note: 'Polled GitHub Copilot internal quota endpoint',
         };
       } catch {
@@ -132,6 +134,15 @@ export function createCopilotAdapter(): ProviderLimitAdapter {
       }
     },
   };
+}
+
+function extractCopilotPlanName(payload: unknown) {
+  const record = asRecord(payload);
+  if (!record) return null;
+  if (getString(record.access_type_sku) === 'free_limited_copilot') return 'Free';
+
+  const plan = getString(record.copilot_plan);
+  return plan ? toLabel(plan) : null;
 }
 
 function extractCopilotWindows(payload: unknown, checkedAt: number): ProviderLimitWindow[] {

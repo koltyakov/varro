@@ -94,6 +94,7 @@ export function createCodexAdapter(): ProviderLimitAdapter {
 
           const payload = (await response.json()) as unknown;
           const windows = extractCodexWindows(payload, checkedAt);
+          const planName = extractCodexPlanName(payload);
           if (windows.length === 0) {
             return unsupportedProviderStatus(
               provider.id,
@@ -110,6 +111,7 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             source: 'provider',
             checkedAt,
             windows,
+            ...(planName ? { planName } : {}),
             note: 'Polled Codex OAuth usage endpoint',
           };
         }
@@ -176,6 +178,11 @@ function extractCodexWindows(payload: unknown, checkedAt: number) {
   return [...windows, ...sparkWindows].toSorted(
     (left, right) => codexWindowSortOrder(left.id) - codexWindowSortOrder(right.id)
   );
+}
+
+function extractCodexPlanName(payload: unknown) {
+  const planType = getString(asRecord(payload)?.plan_type);
+  return planType ? toLabel(planType) : null;
 }
 
 function buildCodexWindow(

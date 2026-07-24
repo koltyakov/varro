@@ -79,6 +79,7 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
           source: 'provider',
           checkedAt,
           windows: [window],
+          ...(isOpenRouterFreeTier(payload) ? { planName: 'Free' } : {}),
           note: 'Polled OpenRouter auth key endpoint',
         };
       } catch {
@@ -93,6 +94,10 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
       }
     },
   };
+}
+
+function isOpenRouterFreeTier(payload: unknown) {
+  return asRecord(asRecord(payload)?.data)?.is_free_tier === true;
 }
 
 function extractOpenRouterSpendWindow(payload: unknown): ProviderLimitWindow | null {

@@ -955,7 +955,7 @@ describe('ChatInput', () => {
     setProviderLimitThresholdPercent(40);
     setupModelState();
     setState('providerLimits', {
-      'openai:gpt-4o': availableProviderLimit(),
+      'openai:gpt-4o': availableProviderLimit({ planName: 'Pro' }),
     });
 
     cleanup = render(() => ChatInput(), container!);
@@ -969,7 +969,9 @@ describe('ChatInput', () => {
     const popup = container?.querySelector('.provider-limit-popup');
 
     expect(popup).not.toBeNull();
-    expect(popup?.textContent).toContain('OpenAI');
+    expect(popup?.querySelector('.provider-limit-popup-provider')?.textContent).toBe(
+      'OpenAI · Pro'
+    );
     expect(popup?.textContent).not.toContain('GPT-4o');
     expect(button?.hasAttribute('title')).toBe(false);
     expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 39 / 100 left');

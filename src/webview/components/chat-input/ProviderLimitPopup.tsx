@@ -25,6 +25,8 @@ export function ProviderLimitPopup(props: {
   onClose: () => void;
 }) {
   const windows = () => getOrderedProviderLimitWindows(props.limit);
+  const planName = () =>
+    props.limit?.status === 'available' ? props.limit.planName || null : null;
   let popupEl: HTMLDivElement | undefined;
 
   const setRef = (el: HTMLDivElement) => {
@@ -66,7 +68,10 @@ export function ProviderLimitPopup(props: {
       </Show>
 
       <Show when={props.providerName}>
-        <div class="provider-limit-popup-provider">{props.providerName}</div>
+        <div class="provider-limit-popup-provider">
+          {props.providerName}
+          <Show when={planName()}>{(name) => <> · {name()}</>}</Show>
+        </div>
       </Show>
     </div>
   );

@@ -117,6 +117,7 @@ export type ProviderLimitStatus =
       source: 'opencode' | 'provider';
       checkedAt: number;
       windows: ProviderLimitWindow[];
+      planName?: string;
       note?: string;
     }
   | {
