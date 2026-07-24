@@ -1333,6 +1333,7 @@ describe('state helpers', () => {
     expect(stateModule.showThinking()).toBe(true);
     expect(stateModule.expandThinkingByDefault()).toBe(false);
     expect(stateModule.showStickyUserPrompt()).toBe(true);
+    expect(stateModule.showChangedFiles()).toBe(false);
 
     stateModule.requestComposerFocus();
     stateModule.requestOpenAttentionSessions();

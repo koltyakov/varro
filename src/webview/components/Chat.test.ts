@@ -1004,7 +1004,7 @@ describe('header status badges', () => {
       url: 'http://127.0.0.1:4096',
       eventStream: 'degraded',
     });
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(9999);
     setState('serverStatus', {
       state: 'running',
       url: 'http://127.0.0.1:4096',
@@ -1028,7 +1028,7 @@ describe('header status badges', () => {
       url: 'http://127.0.0.1:4096',
       eventStream: 'degraded',
     });
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(10_000);
 
     expect(container?.querySelector('.chat-transport-banner')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-transport-title')?.textContent).toBe(
@@ -1040,7 +1040,7 @@ describe('header status badges', () => {
       url: 'http://127.0.0.1:4096',
       eventStream: 'healthy',
     });
-    vi.advanceTimersByTime(3999);
+    vi.advanceTimersByTime(1999);
 
     expect(container?.querySelector('.chat-transport-banner')).toBeInstanceOf(HTMLDivElement);
 

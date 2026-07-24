@@ -1,14 +1,17 @@
 import { expect, test } from '@playwright/test';
 
 test('shows the degraded transport banner while keeping chat usable', async ({ page }) => {
+  await page.clock.install();
   await page.goto('/e2e/harness/index.html?scenario=transport-degraded');
+  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
+  await page.clock.fastForward(10_000);
 
   await expect(page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' })).toBeVisible();
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
-  await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
 });
 
 test('clears the reconnect banner after live updates recover for an active session', async ({ page }) => {
+  await page.clock.install();
   await page.goto('/e2e/harness/index.html?scenario=restored-session');
 
   await expect(page.getByTitle('Back to sessions').locator('..').getByText('Restored Session')).toBeVisible();
@@ -26,6 +29,7 @@ test('clears the reconnect banner after live updates recover for an active sessi
     );
   });
 
+  await page.clock.fastForward(10_000);
   await expect(banner).toBeVisible();
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
 
@@ -40,9 +44,8 @@ test('clears the reconnect banner after live updates recover for an active sessi
   });
 
   await expect(banner).toBeVisible();
-  await expect
-    .poll(() => banner.count(), { timeout: 6_000 })
-    .toBe(0);
+  await page.clock.fastForward(2_000);
+  await expect(banner).toHaveCount(0);
   await expect(
     page.getByText('Refactor status looks good. The latest cleanup is ready for review.', {
       exact: true,
@@ -51,6 +54,7 @@ test('clears the reconnect banner after live updates recover for an active sessi
 });
 
 test('keeps the active session visible through a maintenance reconnect cycle', async ({ page }) => {
+  await page.clock.install();
   await page.goto('/e2e/harness/index.html?scenario=maintenance-reconnect');
 
   await expect(
@@ -63,12 +67,9 @@ test('keeps the active session visible through a maintenance reconnect cycle', a
   ).toBeVisible();
 
   const banner = page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' });
-  await expect(banner).toBeVisible();
+  await page.clock.fastForward(2_000);
+  await expect(banner).toHaveCount(0);
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
-
-  await expect
-    .poll(() => banner.count(), { timeout: 7_000 })
-    .toBe(0);
 
   await expect(
     page.getByText('The previous response should stay visible while the stream reconnects.', {
@@ -79,18 +80,15 @@ test('keeps the active session visible through a maintenance reconnect cycle', a
 });
 
 test('preserves composer input through a maintenance reconnect cycle', async ({ page }) => {
+  await page.clock.install();
   await page.goto('/e2e/harness/index.html?scenario=maintenance-reconnect');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Keep this draft while transport reconnects');
 
   const banner = page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' });
-  await expect(banner).toBeVisible();
-  await expect(composer).toHaveText('Keep this draft while transport reconnects');
-
-  await expect
-    .poll(() => banner.count(), { timeout: 7_000 })
-    .toBe(0);
+  await page.clock.fastForward(2_000);
+  await expect(banner).toHaveCount(0);
 
   await expect(composer).toHaveText('Keep this draft while transport reconnects');
   await expect(composer).toBeEditable();

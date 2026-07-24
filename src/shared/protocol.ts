@@ -389,6 +389,7 @@ export type InitialWebviewState = {
   expandThinkingByDefault?: boolean;
   showStickyUserPrompt?: boolean;
   showInlineFileChanges?: boolean;
+  showChangedFiles?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
   providerLimitPollIntervalSeconds?: number;

@@ -152,6 +152,9 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
           ...(typeof payload.showInlineFileChanges === 'boolean'
             ? { showInlineFileChanges: payload.showInlineFileChanges }
             : {}),
+          ...(typeof payload.showChangedFiles === 'boolean'
+            ? { showChangedFiles: payload.showChangedFiles }
+            : {}),
           desktopSessionPaneSide: payload.desktopSessionPaneSide,
           defaultPermissionMode: payload.defaultPermissionMode,
           ...(typeof payload.providerLimitPollIntervalSeconds === 'number' &&

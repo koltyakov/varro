@@ -243,6 +243,11 @@
           "default": true,
           "description": "Show line-by-line edits directly in file-change tool cards."
         },
+        "varro.chat.showChangedFiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the changed-files panel above the chat input."
+        },
         "varro.chat.desktopSessionPaneSide": {
           "type": "string",
           "enum": [

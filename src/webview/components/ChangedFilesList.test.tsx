@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { ChangedFilesList } from './ChangedFilesList';
-import { resetDefaultAppState, setState } from '../lib/state';
+import { resetDefaultAppState, setShowChangedFiles, setState } from '../lib/state';
 import type { Message, Part, Session } from '../types';
 
 let container: HTMLDivElement | null = null;
@@ -65,6 +65,7 @@ function largeFileEditPart(path: string): Part {
 describe('ChangedFilesList', () => {
   beforeEach(() => {
     resetDefaultAppState();
+    setShowChangedFiles(true);
     delete window.__sendToExtension;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -99,6 +100,22 @@ describe('ChangedFilesList', () => {
     expect(container?.textContent).toContain('1');
     expect(container?.textContent).toContain('+4');
     expect(container?.textContent).toContain('-1');
+  });
+
+  it('hides changed files until the setting is enabled', async () => {
+    setShowChangedFiles(false);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session()]);
+    setState('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+
+    expect(container?.textContent).not.toContain('Files');
+
+    setShowChangedFiles(true);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Files');
   });
 
   it('keeps message-derived files visible while the same session is busy', async () => {

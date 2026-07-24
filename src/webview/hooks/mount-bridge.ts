@@ -41,6 +41,9 @@ export function createMountBridgeOperations(deps: {
           if (payload.showInlineFileChanges !== undefined) {
             uiStore.setShowInlineFileChanges(payload.showInlineFileChanges);
           }
+          if (payload.showChangedFiles !== undefined) {
+            uiStore.setShowChangedFiles(payload.showChangedFiles);
+          }
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
           permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
           if (payload.providerLimitThresholdPercent !== undefined) {

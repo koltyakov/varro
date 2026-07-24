@@ -1,5 +1,5 @@
 import { For, Show, createMemo, createSignal } from 'solid-js';
-import { isActiveSessionWorking, state } from '../lib/state';
+import { isActiveSessionWorking, showChangedFiles, state } from '../lib/state';
 import { postMessage } from '../lib/bridge';
 import {
   getDiffFileChanges,
@@ -111,7 +111,7 @@ export function ChangedFilesList() {
   const [collapsed, setCollapsed] = createSignal(true);
 
   return (
-    <Show when={total() > 0}>
+    <Show when={showChangedFiles() && total() > 0}>
       <div class="todo-block changed-files-block animate-fade-in">
         <button
           type="button"

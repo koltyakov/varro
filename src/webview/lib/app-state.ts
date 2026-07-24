@@ -154,6 +154,8 @@ export interface AppStateInstance {
   setShowStickyUserPrompt: Setter<boolean>;
   showInlineFileChanges: Accessor<boolean>;
   setShowInlineFileChanges: Setter<boolean>;
+  showChangedFiles: Accessor<boolean>;
+  setShowChangedFiles: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
   providerLimitPollIntervalSeconds: Accessor<number>;
@@ -293,6 +295,9 @@ export function createAppState(): AppStateInstance {
   const [showInlineFileChanges, setShowInlineFileChanges] = createSignal(
     initialWebviewState.showInlineFileChanges ?? false
   );
+  const [showChangedFiles, setShowChangedFiles] = createSignal(
+    initialWebviewState.showChangedFiles ?? false
+  );
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
   );
@@ -356,6 +361,8 @@ export function createAppState(): AppStateInstance {
     setShowStickyUserPrompt,
     showInlineFileChanges,
     setShowInlineFileChanges,
+    showChangedFiles,
+    setShowChangedFiles,
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
     providerLimitPollIntervalSeconds,
@@ -428,6 +435,8 @@ export const showStickyUserPrompt = defaultAppState.showStickyUserPrompt;
 export const setShowStickyUserPrompt = defaultAppState.setShowStickyUserPrompt;
 export const showInlineFileChanges = defaultAppState.showInlineFileChanges;
 export const setShowInlineFileChanges = defaultAppState.setShowInlineFileChanges;
+export const showChangedFiles = defaultAppState.showChangedFiles;
+export const setShowChangedFiles = defaultAppState.setShowChangedFiles;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
 export const providerLimitPollIntervalSeconds = defaultAppState.providerLimitPollIntervalSeconds;
@@ -491,6 +500,7 @@ export function resetDefaultAppState() {
   setExpandThinkingByDefault(next.expandThinkingByDefault());
   setShowStickyUserPrompt(next.showStickyUserPrompt());
   setShowInlineFileChanges(next.showInlineFileChanges());
+  setShowChangedFiles(next.showChangedFiles());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
   setProviderLimitPollIntervalSeconds(next.providerLimitPollIntervalSeconds());
   setProviderLimitThresholdPercent(next.providerLimitThresholdPercent());
