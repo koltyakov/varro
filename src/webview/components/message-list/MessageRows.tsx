@@ -38,6 +38,8 @@ export type MessageRowSharedProps = {
   highlightedAssistantMessageIds?: ReadonlySet<string>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
+  claimMessageEntrance?: (messageId: string) => boolean;
+  claimAssistantItemReveal?: (messageId: string, renderKey: string) => boolean;
   observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
   isPlanningAssistantMessage: (info: AssistantMessage) => boolean;
   questionRequestForTool: (part: ToolPart) => QuestionRequest | null;
@@ -78,6 +80,7 @@ function InlineEditComposerSlot() {
 
 export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps) {
   let rowRef: HTMLDivElement | undefined;
+  const animateEntrance = props.claimMessageEntrance?.(props.msg.info.id) ?? false;
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const isEditingThisMessage = () =>
     props.msg.info.role === 'user' && editingMessage()?.messageId === props.msg.info.id;
@@ -133,7 +136,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
         fileEditStackGroup()
           ? `interactive-response-file-edit-group interactive-response-file-edit-group-${fileEditStackGroup()}`
           : ''
-      }${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
+      }${animateEntrance ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
       }`}
     >
@@ -157,6 +160,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
           fileEditStackGroup={fileEditStackGroup()}
           streamingPartId={streamingPartId()}
           streamingText={streamingText()}
+          claimAssistantItemReveal={props.claimAssistantItemReveal}
           questionRequestForTool={props.questionRequestForTool}
           permissionMatchForTool={props.permissionMatchForTool}
         />

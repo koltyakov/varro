@@ -287,8 +287,8 @@ Context:
 Provider limits:
 
 - `varro.providerLimits.enabledAdapters` - allowlist of provider-limit adapters Varro may poll
-- Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity)
-- Default enabled IDs: `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, `openai`
+- Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `kimi` (Kimi For Coding), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity)
+- Default enabled IDs: `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, `kimi`, `openai`
 - `varro.providerLimits.disabled` - disable provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval, with active sessions refreshed every `30` seconds when the default interval is in use
 - `varro.providerLimits.thresholdPercent` - show provider-limit UI when any provider-limit window has this remaining percentage less than or equal to the threshold; defaults to `100`
 

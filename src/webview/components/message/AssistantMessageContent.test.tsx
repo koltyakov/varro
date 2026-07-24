@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { resetDefaultAppState, setIsLoading } from '../../lib/state';
 import type { AssistantMessage, Part, TextPart, ToolPart } from '../../types';
@@ -184,6 +185,114 @@ describe('deduplicateFileEdits', () => {
 });
 
 describe('AssistantMessageContent', () => {
+  it('reveals live parts once without replaying the animation for part updates', () => {
+    const info = createAssistantMessage({ time: { created: 0 } });
+    const initialPart = textPart('text-1', 'Streaming');
+    const [parts, setParts] = createSignal<Part[]>([initialPart]);
+
+    cleanup = render(
+      () => (
+        <AssistantMessageContent
+          info={info}
+          parts={parts()}
+          textForPart={(part) =>
+            part.type === 'text' || part.type === 'reasoning' ? part.text : null
+          }
+        />
+      ),
+      container!
+    );
+
+    expect(
+      container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
+    ).toContain('assistant-message-flow-item-streamed');
+
+    setParts([{ ...initialPart, text: 'Streaming update' }]);
+
+    expect(
+      container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
+    ).not.toContain('assistant-message-flow-item-streamed');
+
+    setParts((current) => [...current, textPart('text-2', 'Next block')]);
+
+    expect(
+      container?.querySelector('[data-assistant-render-key="part:text-2"]')?.classList
+    ).toContain('assistant-message-flow-item-streamed');
+  });
+
+  it('does not reveal parts when mounting completed history', () => {
+    renderAssistantMessageContent({ parts: [textPart('text-1', 'Completed')] });
+
+    expect(container?.querySelector('.assistant-message-flow-item-streamed')).toBeNull();
+  });
+
+  it('does not replay reveals when remounted with a shared claim function', () => {
+    const info = createAssistantMessage({ time: { created: 0 } });
+    const claimedKeys = new Map<string, Set<string>>();
+    const claimItemReveal = (messageId: string, renderKey: string) => {
+      let keys = claimedKeys.get(messageId);
+      if (!keys) {
+        keys = new Set();
+        claimedKeys.set(messageId, keys);
+      }
+      if (keys.has(renderKey)) return false;
+      keys.add(renderKey);
+      return true;
+    };
+    const renderStreamingPart = () =>
+      render(
+        () => (
+          <AssistantMessageContent
+            info={info}
+            parts={[textPart('text-1', 'Streaming')]}
+            textForPart={(part) =>
+              part.type === 'text' || part.type === 'reasoning' ? part.text : null
+            }
+            claimItemReveal={claimItemReveal}
+          />
+        ),
+        container!
+      );
+
+    cleanup = renderStreamingPart();
+    expect(container?.querySelector('.assistant-message-flow-item-streamed')).not.toBeNull();
+
+    cleanup?.();
+    container!.innerHTML = '';
+
+    cleanup = renderStreamingPart();
+    expect(container?.querySelector('.assistant-message-flow-item-streamed')).toBeNull();
+  });
+
+  it('does not re-animate a file-edit stack when another edit is appended', () => {
+    const info = createAssistantMessage({ time: { created: 0 } });
+    const [parts, setParts] = createSignal<Part[]>([fileEditPart('edit-1', 'src/a.ts')]);
+    const stackSelector = '[data-assistant-render-key^="file-edit-stack:"]';
+
+    cleanup = render(
+      () => (
+        <AssistantMessageContent
+          info={info}
+          parts={parts()}
+          textForPart={(part) =>
+            part.type === 'text' || part.type === 'reasoning' ? part.text : null
+          }
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector(stackSelector)?.classList).toContain(
+      'assistant-message-flow-item-streamed'
+    );
+
+    setParts((current) => [...current, fileEditPart('edit-2', 'src/b.ts')]);
+
+    expect(container?.querySelector(stackSelector)?.classList).not.toContain(
+      'assistant-message-flow-item-streamed'
+    );
+  });
+
   it('filters highlighted-card meta text using effective text and opens read mode for the final answer while Shift is pressed', async () => {
     const filteredPart = textPart('text-1', 'Visible before text rewrite');
     const finalPart = textPart(

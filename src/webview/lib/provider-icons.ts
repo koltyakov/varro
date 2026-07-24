@@ -29,6 +29,7 @@ const PROVIDER_ICON_MAP: Record<string, string> = {
   'opencode-go': opencodeIcon,
   qwen: qwenIcon,
   kimi: kimiIcon,
+  'kimi-for-coding': kimiIcon,
 };
 
 export function getProviderIcon(providerID: string | null | undefined) {

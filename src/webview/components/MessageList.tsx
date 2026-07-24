@@ -1,6 +1,7 @@
 import {
   Show,
   batch,
+  createComputed,
   createEffect,
   createMemo,
   createSignal,
@@ -147,6 +148,15 @@ export function getChangedInlinePreviewMessageIds(
     (messageId) =>
       currentMessageIds.has(messageId) && previous.get(messageId) !== current.get(messageId)
   );
+}
+
+export function getNewlyAppendedMessageIds(
+  previousIds: readonly string[],
+  currentIds: readonly string[]
+) {
+  if (currentIds.length <= previousIds.length) return [];
+  if (!previousIds.every((id, index) => currentIds[index] === id)) return [];
+  return currentIds.slice(previousIds.length);
 }
 
 export function MessageList() {
@@ -387,6 +397,72 @@ export function MessageList() {
   });
 
   const messageIds = createMemo(() => messages().map((msg) => msg.info.id));
+  const claimedEntranceMessageIds = new Set<string>();
+  const revealedFlowItemKeys = new Map<string, Set<string>>();
+
+  // Eager computation: entering ids must be captured per update flush. A lazy memo
+  // would collapse "appended while scrolled up" and "scrolled back down" into one
+  // recompute and wrongly animate the off-screen message when it mounts.
+  const [enteringMessageIds, setEnteringMessageIds] = createSignal<ReadonlySet<string>>(new Set());
+  let entranceSessionId: string | null = null;
+  let previousEntranceMessageIds: readonly string[] = [];
+  createComputed(() => {
+    const sessionId = state.activeSessionId;
+    const currentMessageIds = messageIds();
+    if (sessionId !== entranceSessionId) {
+      entranceSessionId = sessionId;
+      previousEntranceMessageIds = currentMessageIds;
+      setEnteringMessageIds(new Set<string>());
+      return;
+    }
+
+    // Only mark appends while pinned to the bottom; a message that arrives
+    // while scrolled up must not animate when it is scrolled into view later.
+    const appendedIds: string[] = autoScroll()
+      ? getNewlyAppendedMessageIds(previousEntranceMessageIds, currentMessageIds)
+      : [];
+    previousEntranceMessageIds = currentMessageIds;
+    setEnteringMessageIds(new Set(appendedIds));
+  });
+
+  let clearedEntranceSessionId: string | null = null;
+  createEffect(() => {
+    const sessionId = state.activeSessionId;
+    if (sessionId === clearedEntranceSessionId) return;
+    clearedEntranceSessionId = sessionId;
+    claimedEntranceMessageIds.clear();
+    revealedFlowItemKeys.clear();
+  });
+
+  createEffect(() => {
+    const currentIds = new Set(messageIds());
+    for (const id of claimedEntranceMessageIds) {
+      if (!currentIds.has(id)) claimedEntranceMessageIds.delete(id);
+    }
+    for (const id of revealedFlowItemKeys.keys()) {
+      if (!currentIds.has(id)) revealedFlowItemKeys.delete(id);
+    }
+  });
+
+  function claimMessageEntrance(messageId: string) {
+    if (!enteringMessageIds().has(messageId) || claimedEntranceMessageIds.has(messageId)) {
+      return false;
+    }
+    claimedEntranceMessageIds.add(messageId);
+    return true;
+  }
+
+  function claimAssistantItemReveal(messageId: string, renderKey: string) {
+    let keys = revealedFlowItemKeys.get(messageId);
+    if (!keys) {
+      keys = new Set();
+      revealedFlowItemKeys.set(messageId, keys);
+    }
+    if (keys.has(renderKey)) return false;
+    keys.add(renderKey);
+    return true;
+  }
+
   const inlinePreviewLayoutSignatures = createMemo(() =>
     getInlinePreviewLayoutSignatures(messages(), showInlineFileChanges())
   );
@@ -1982,6 +2058,8 @@ export function MessageList() {
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}
+              claimMessageEntrance={claimMessageEntrance}
+              claimAssistantItemReveal={claimAssistantItemReveal}
               observeMeasuredRow={observeMeasuredRow}
               isPlanningAssistantMessage={isPlanningAssistantMessage}
               questionRequestForTool={getQuestionRequestForTool}

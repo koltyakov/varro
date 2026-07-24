@@ -64,6 +64,7 @@ export function Message(props: {
   fileEditStackGroup?: AssistantFileEditStackGroup | null;
   streamingPartId?: string | null;
   streamingText?: string;
+  claimAssistantItemReveal?: (messageId: string, renderKey: string) => boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
 }) {
@@ -267,6 +268,7 @@ export function Message(props: {
                 nearViewport={props.nearViewport}
                 outerListVirtualized={props.outerListVirtualized}
                 textForPart={getEffectivePartText}
+                claimItemReveal={props.claimAssistantItemReveal}
                 questionRequestForTool={props.questionRequestForTool}
                 permissionMatchForTool={props.permissionMatchForTool}
               />

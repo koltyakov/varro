@@ -518,6 +518,45 @@ test.describe('auto-scroll', () => {
     expect(topOffset).toBeLessThan(2);
   });
 
+  test('shows six collapsed diff rows with the toggle over the final row', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await expect(page.locator('.interactive-list')).toBeVisible();
+
+    const messageId = 'message-diff-preview-assistant-59';
+    await updateExpandableDiffPreview(page, messageId);
+
+    const preview = page.locator(`[data-msg-id="${messageId}"] .diff-view-lines`);
+    const dimensions = await preview.evaluate((viewport) => {
+      const viewportRect = viewport.getBoundingClientRect();
+      const rows = Array.from(viewport.querySelectorAll<HTMLElement>('.diff-view-line'));
+      const visibleRows = rows.filter((row) => {
+        const rect = row.getBoundingClientRect();
+        return rect.top < viewportRect.bottom && rect.bottom > viewportRect.top;
+      });
+      const finalVisibleRect = visibleRows.at(-1)!.getBoundingClientRect();
+      const toggleRect = viewport
+        .closest<HTMLElement>('.diff-view-lines-shell')!
+        .querySelector<HTMLElement>('.diff-view-toggle')!
+        .getBoundingClientRect();
+      const fadeHeight = Number.parseFloat(
+        getComputedStyle(viewport.closest<HTMLElement>('.diff-view-lines-shell')!, '::after').height
+      );
+
+      return {
+        clientHeight: viewport.clientHeight,
+        fadeHeight,
+        finalRowOverlap: finalVisibleRect.bottom - toggleRect.top,
+        rowHeight: rows[0]!.getBoundingClientRect().height,
+        visibleRowCount: visibleRows.length,
+      };
+    });
+
+    expect(dimensions.visibleRowCount).toBe(6);
+    expect(dimensions.clientHeight).toBe(dimensions.rowHeight * 6);
+    expect(dimensions.finalRowOverlap).toBeGreaterThan(0);
+    expect(dimensions.fadeHeight).toBe(dimensions.rowHeight / 2);
+  });
+
   test('stays at the bottom when an expanded diff is collapsed', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
     const list = page.locator('.interactive-list');

@@ -493,7 +493,7 @@
 
 .diff-view-lines {
   position: relative;
-  max-height: 128px;
+  max-height: 115px;
   overflow: hidden;
   scrollbar-width: none;
   border-top: 1px solid var(--color-vscode-border-default);
@@ -501,7 +501,7 @@
   container-type: inline-size;
   font-family: var(--font-mono);
   font-size: 11.5px;
-  line-height: 1.65;
+  line-height: 19px;
   font-variant-numeric: tabular-nums;
   tab-size: 2;
 }
@@ -597,14 +597,10 @@
   min-width: 100%;
 }
 
-.diff-view-lines-shell:has(.diff-view-toggle) .diff-view-lines-content {
-  padding-bottom: 14px;
-}
-
 .diff-view-lines-shell:not(.diff-view-lines-shell-expanded):has(.diff-view-toggle)
   .diff-view-lines-content {
   /* Let the final changed row align with the top of the collapsed viewport. */
-  padding-bottom: calc(128px - 19px);
+  padding-bottom: calc(114px - 19px);
 }
 
 .diff-view-gap {
@@ -644,14 +640,10 @@
   right: 0;
   bottom: 0;
   left: 0;
-  height: 20px;
+  height: 9.5px;
   pointer-events: none;
   content: '';
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--color-vscode-result-editor-bg) 92%, transparent) 72%
-  );
+  background: linear-gradient(to bottom, transparent, var(--color-vscode-result-editor-bg) 72%);
 }
 
 .diff-view-toggle {

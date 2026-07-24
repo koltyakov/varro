@@ -27,6 +27,7 @@ import {
   MessageList,
   getChangedInlinePreviewMessageIds,
   getInlinePreviewLayoutSignatures,
+  getNewlyAppendedMessageIds,
 } from './MessageList';
 import {
   getStandalonePermissionPrompts,
@@ -251,6 +252,153 @@ function reasoningPart(id: string, text: string): Part {
     time: { start: 1 },
   };
 }
+
+describe('message entrance detection', () => {
+  it('returns only messages appended at the end of the current transcript', () => {
+    expect(
+      getNewlyAppendedMessageIds(['message-1'], ['message-1', 'message-2', 'message-3'])
+    ).toEqual(['message-2', 'message-3']);
+  });
+
+  it('does not treat prepended history or a replaced transcript as new messages', () => {
+    expect(getNewlyAppendedMessageIds(['message-2'], ['message-1', 'message-2'])).toEqual([]);
+    expect(getNewlyAppendedMessageIds(['message-1'], ['other-message'])).toEqual([]);
+  });
+});
+
+describe('MessageList entrance animation', () => {
+  it('animates a newly appended message row only once while pinned to the bottom', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
+      { info: userMessage('user-2'), parts: [textPart('text-2', 'Second prompt')] },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="user-2"]')?.classList).toContain(
+      'interactive-item-entering'
+    );
+
+    // Recreating the transcript with fresh entry objects must not replay the entrance.
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
+      { info: userMessage('user-2'), parts: [textPart('text-2', 'Second prompt')] },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="user-2"]')?.classList).not.toContain(
+      'interactive-item-entering'
+    );
+  });
+
+  it('does not mark appends as entering while scrolled away from the bottom', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First')] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 7200 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'First')] },
+      { info: userMessage('user-2'), parts: [textPart('text-2', 'Second')] },
+    ]);
+    await Promise.resolve();
+
+    const appendedRow = container?.querySelector('[data-msg-id="user-2"]');
+    expect(appendedRow).not.toBeNull();
+    expect(appendedRow?.classList).not.toContain('interactive-item-entering');
+  });
+
+  it('does not animate a message that was appended while scrolled up when it mounts later', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+
+    const buildMessages = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        info: userMessage(`user-${index}`),
+        parts: [{ ...textPart(`text-${index}`, `Prompt ${index}`), messageID: `user-${index}` }],
+      }));
+
+    try {
+      setState('activeSessionId', 'session-1');
+      replaceMessages(buildMessages(60));
+
+      cleanup = render(() => MessageList(), container!);
+
+      const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+      let rowCount = 60;
+      let scrollTopValue = 0;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', {
+        configurable: true,
+        get: () => rowCount * 120,
+      });
+      Object.defineProperty(list, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+        if (this.classList.contains('interactive-item-container')) {
+          return new DOMRect(0, 0, 500, 120);
+        }
+        return new DOMRect(0, 0, 500, 400);
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      animationFrames.flush();
+      await Promise.resolve();
+
+      // Virtualization is active and pinned to the bottom.
+      expect(container?.querySelector('[data-msg-id="user-0"]')).toBeNull();
+
+      // Scroll up: new appends must not be marked as entering.
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+      scrollTopValue = 0;
+      list.dispatchEvent(new Event('scroll'));
+      animationFrames.flush();
+      await Promise.resolve();
+
+      rowCount = 61;
+      replaceMessages(buildMessages(61));
+      await Promise.resolve();
+      animationFrames.flush();
+      await Promise.resolve();
+
+      expect(container?.querySelector('[data-msg-id="user-60"]')).toBeNull();
+
+      // Scroll back down: the row mounts now, without an entrance animation.
+      scrollTopValue = rowCount * 120 - 400;
+      list.dispatchEvent(new Event('scroll'));
+      animationFrames.flush();
+      await Promise.resolve();
+      animationFrames.flush();
+      await Promise.resolve();
+
+      const appendedRow = container?.querySelector('[data-msg-id="user-60"]');
+      expect(appendedRow).not.toBeNull();
+      expect(appendedRow?.classList).not.toContain('interactive-item-entering');
+    } finally {
+      animationFrames.restore();
+    }
+  });
+});
 
 describe('inline preview virtualization signatures', () => {
   const compactFileEdit: Part = {

@@ -20,6 +20,12 @@ type AssistantRenderItem =
   | { kind: 'part'; key: string; part: Part }
   | { kind: 'file-edit-stack'; key: string; parts: ToolPart[] };
 
+// File-edit stacks rekey on every appended edit, so track their reveal by the
+// first part id; otherwise appending an edit replays the whole stack animation.
+function getRevealTrackingKey(item: AssistantRenderItem) {
+  return item.kind === 'file-edit-stack' ? `file-edit-stack:${item.parts[0]!.id}` : item.key;
+}
+
 const COMPACTION_BOUNDARY_RE =
   /^(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*\r?\n)+|(?:\r?\n(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*))+[ \t]*(?:\r?\n\s*)*$/g;
 const [readModeShiftPressed, setReadModeShiftPressed] = createSignal(false);
@@ -211,6 +217,7 @@ export function AssistantMessageContent(props: {
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
   textForPart: (part: Part) => string | null;
+  claimItemReveal?: (messageId: string, renderKey: string) => boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
 }) {
@@ -310,14 +317,28 @@ export function AssistantMessageContent(props: {
 
     return items;
   }, []);
+  const revealedRenderKeys = new Set<string>();
 
   const isLightweight = createMemo(
     () => props.outerListVirtualized && props.nearViewport === false
   );
 
-  const renderAssistantItem = (item: AssistantRenderItem) =>
-    item.kind === 'file-edit-stack' ? (
-      <div class="assistant-message-flow-item" data-assistant-render-key={item.key}>
+  const claimReveal = (trackingKey: string) => {
+    if (props.claimItemReveal) return props.claimItemReveal(props.info.id, trackingKey);
+    if (revealedRenderKeys.has(trackingKey)) return false;
+    revealedRenderKeys.add(trackingKey);
+    return true;
+  };
+
+  const getRevealClass = (item: AssistantRenderItem) => {
+    if (props.info.time.completed !== undefined) return '';
+    return claimReveal(getRevealTrackingKey(item)) ? ' assistant-message-flow-item-streamed' : '';
+  };
+
+  const renderAssistantItem = (item: AssistantRenderItem) => {
+    const revealClass = getRevealClass(item);
+    return item.kind === 'file-edit-stack' ? (
+      <div class={`assistant-message-flow-item${revealClass}`} data-assistant-render-key={item.key}>
         <div class="assistant-file-edit-stack">
           <For each={item.parts}>
             {(part) => (
@@ -344,11 +365,11 @@ export function AssistantMessageContent(props: {
     ) : (
       <div
         data-assistant-render-key={item.key}
-        class={getAssistantFlowItemClass(
+        class={`${getAssistantFlowItemClass(
           item.part,
           finalTextPartId(),
           !!props.highlightPlanningAnswer
-        )}
+        )}${revealClass}`}
       >
         <Show
           when={
@@ -388,6 +409,7 @@ export function AssistantMessageContent(props: {
         />
       </div>
     );
+  };
 
   return (
     <div class="assistant-message-flow">

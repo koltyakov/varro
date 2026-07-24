@@ -107,6 +107,19 @@ describe('provider limit adapters', () => {
     expect(adapter?.id).toBe('minimax');
   });
 
+  it('matches the Kimi adapter for Kimi For Coding providers', () => {
+    const adapter = findProviderLimitAdapter(
+      {
+        id: 'kimi-for-coding',
+        options: { apiKey: 'kimi_test_key_12345' },
+        models: { 'kimi-for-coding': { api: { url: 'https://api.kimi.com/coding/v1' } } },
+      },
+      { 'kimi-for-coding': { type: 'api', key: 'kimi_test_key_12345' } }
+    );
+
+    expect(adapter?.id).toBe('kimi');
+  });
+
   it('matches the Antigravity adapter only when explicitly enabled', () => {
     const provider: ProviderMetadata = {
       id: 'antigravity',

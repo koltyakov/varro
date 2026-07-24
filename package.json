@@ -344,9 +344,10 @@
             "openrouter",
             "zai",
             "minimax",
+            "kimi",
             "openai"
           ],
-          "markdownDescription": "Allowlist of provider-limit adapters Varro may poll. Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity). Defaults to `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, and `openai`."
+          "markdownDescription": "Allowlist of provider-limit adapters Varro may poll. Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `kimi` (Kimi For Coding), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity). Defaults to `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, `kimi`, and `openai`."
         }
       }
     }

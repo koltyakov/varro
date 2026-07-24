@@ -305,7 +305,7 @@ describe('TodoList', () => {
     expect(container?.querySelectorAll('li.todo-block-item')).toHaveLength(2);
   });
 
-  it('limits visible rows to the chat height and auto-collapses when chat room is scarce', async () => {
+  it('limits the open list to five rows and auto-collapses when chat room is scarce', async () => {
     let resizeCallback: ResizeObserverCallback | undefined;
     class TestResizeObserver {
       constructor(callback: ResizeObserverCallback) {
@@ -337,7 +337,7 @@ describe('TodoList', () => {
     const toggle = mount.querySelector('button.todo-block-header') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect((mount.querySelector('.todo-block-list') as HTMLUListElement).style.maxHeight).toBe(
-      '185px'
+      '117px'
     );
 
     Object.defineProperty(chatShell, 'clientHeight', { configurable: true, value: 320 });

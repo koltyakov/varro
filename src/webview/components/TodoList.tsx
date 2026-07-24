@@ -5,9 +5,9 @@ import type { NormalizedTodo } from '../types';
 const todos = () => defaultAppState.state.todos;
 const TODO_LIST_CHAT_SHARE = 0.28;
 const MIN_TODO_LIST_HEIGHT = 52;
-// List padding plus eight single-line todo rows and their gaps.
-const MAX_TODO_LIST_HEIGHT = 185;
-const DEFAULT_TODO_LIST_HEIGHT = 160;
+// List padding plus five single-line todo rows and their gaps.
+const MAX_TODO_LIST_HEIGHT = 117;
+const DEFAULT_TODO_LIST_HEIGHT = MAX_TODO_LIST_HEIGHT;
 const MIN_CHAT_VIEW_HEIGHT = 140;
 const MIN_CHAT_VIEW_SHARE = 0.4;
 

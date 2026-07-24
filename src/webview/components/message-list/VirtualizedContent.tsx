@@ -51,6 +51,8 @@ export function VirtualizedContent(
               hasBuildAgent={props.hasBuildAgent}
               latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
               outerListVirtualized={props.outerListVirtualized}
+              claimMessageEntrance={props.claimMessageEntrance}
+              claimAssistantItemReveal={props.claimAssistantItemReveal}
               observeMeasuredRow={props.observeMeasuredRow}
               isPlanningAssistantMessage={props.isPlanningAssistantMessage}
               questionRequestForTool={props.questionRequestForTool}

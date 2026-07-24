@@ -13,6 +13,7 @@ const DEFAULT_ENABLED_PROVIDER_LIMIT_ADAPTERS = [
   'openrouter',
   'zai',
   'minimax',
+  'kimi',
   'openai',
 ] as const;
 

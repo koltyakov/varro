@@ -201,7 +201,7 @@ input:focus-visible {
   position: sticky;
   overflow-anchor: none;
   top: 0;
-  z-index: 4;
+  z-index: 7;
   height: 0;
   pointer-events: none;
   width: 100%;

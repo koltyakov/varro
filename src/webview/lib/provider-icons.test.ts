@@ -40,6 +40,7 @@ describe('getProviderIcon', () => {
     ['opencode-go', opencodeIcon],
     ['qwen', qwenIcon],
     ['kimi', kimiIcon],
+    ['kimi-for-coding', kimiIcon],
   ])('maps provider "%s" to the expected icon asset', (provider, icon) => {
     expect(getProviderIcon(provider)).toBe(icon);
   });
