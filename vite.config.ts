@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import solid from 'vite-plugin-solid';
 import { defineConfig } from 'vite';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectRoot = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [solid(), tailwindcss()],
@@ -13,12 +13,12 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/webview/index.tsx'),
+      entry: resolve(projectRoot, 'src/webview/index.tsx'),
       name: 'varroWebview',
       formats: ['iife'],
       fileName: () => 'webview.js',
     },
-    outDir: resolve(__dirname, 'dist/webview'),
+    outDir: resolve(projectRoot, 'dist/webview'),
     emptyOutDir: true,
     rollupOptions: {
       output: {

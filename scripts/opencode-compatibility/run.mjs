@@ -71,7 +71,7 @@ async function readPublishedVersions() {
   const metadata = await response.json();
   return Object.keys(metadata.versions || {})
     .filter((version) => /^\d+\.\d+\.\d+$/.test(version))
-    .sort((left, right) => compareVersions(right, left));
+    .toSorted((left, right) => compareVersions(right, left));
 }
 
 function selectPublishedVersions(allVersions, count, declaredFloor, declaredCeiling, anchorFloor) {
@@ -94,7 +94,7 @@ function selectPublishedVersions(allVersions, count, declaredFloor, declaredCeil
     const predecessor = allVersions[floorIndex + 1];
     if (predecessor) selected.push(predecessor);
   }
-  return [...new Set(selected)].sort((left, right) => compareVersions(right, left));
+  return [...new Set(selected)].toSorted((left, right) => compareVersions(right, left));
 }
 
 function runDocker(args, options = {}) {
@@ -185,7 +185,7 @@ const options = parseArguments(process.argv.slice(2));
 assertDockerAvailable();
 const { floor: declaredFloor, ceiling: declaredCeiling } = await readDeclaredCompatibilityRange();
 const versions = options.versions
-  ? options.versions.sort((left, right) => compareVersions(right, left))
+  ? options.versions.toSorted((left, right) => compareVersions(right, left))
   : selectPublishedVersions(
       await readPublishedVersions(),
       options.count,

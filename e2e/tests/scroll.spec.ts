@@ -1,18 +1,19 @@
 import { expect, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { getScrollMetrics } from './helpers';
 
-async function waitForAnimationFrame(page: import('@playwright/test').Page) {
+async function waitForAnimationFrame(page: Page) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
 }
 
-async function waitForAnimationFrames(page: import('@playwright/test').Page, count: number) {
+async function waitForAnimationFrames(page: Page, count: number) {
   for (let index = 0; index < count; index += 1) {
     await waitForAnimationFrame(page);
   }
 }
 
 async function appendDeltaToLastLargeAssistant(
-  page: import('@playwright/test').Page,
+  page: Page,
   delta: string
 ) {
   await page.evaluate((nextDelta) => {
@@ -35,7 +36,7 @@ async function appendDeltaToLastLargeAssistant(
   }, delta);
 }
 
-async function getVirtualScrollSample(list: import('@playwright/test').Locator) {
+async function getVirtualScrollSample(list: Locator) {
   return list.evaluate((element) => {
     const containerRect = element.getBoundingClientRect();
     const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
@@ -55,7 +56,35 @@ async function getVirtualScrollSample(list: import('@playwright/test').Locator) 
   });
 }
 
-async function appendDeltaToRapidStreaming(page: import('@playwright/test').Page, delta: string) {
+async function getBlankBottomArea(list: Locator) {
+  return list.evaluate((element) => {
+    const containerRect = element.getBoundingClientRect();
+    const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+    let lastRenderedBottom = 0;
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom > lastRenderedBottom) {
+        lastRenderedBottom = rect.bottom;
+      }
+    }
+    const viewportBottom = containerRect.bottom;
+    const blankPx = Math.max(0, viewportBottom - lastRenderedBottom);
+    const hasBottomSpacer = element.querySelector('.interactive-list-track > div:last-child');
+    const bottomSpacerHeight = hasBottomSpacer
+      ? (hasBottomSpacer as HTMLElement).getBoundingClientRect().height
+      : 0;
+    return {
+      blankPx,
+      viewportHeight: element.clientHeight,
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      bottomSpacerHeight,
+      renderedRowCount: rows.length,
+    };
+  });
+}
+
+async function appendDeltaToRapidStreaming(page: Page, delta: string) {
   await page.evaluate((nextDelta) => {
     window.postMessage(
       {
@@ -77,7 +106,7 @@ async function appendDeltaToRapidStreaming(page: import('@playwright/test').Page
 }
 
 async function appendDeltaToMultiAgentStreaming(
-  page: import('@playwright/test').Page,
+  page: Page,
   delta: string
 ) {
   await page.evaluate((nextDelta) => {
@@ -101,7 +130,7 @@ async function appendDeltaToMultiAgentStreaming(
 }
 
 async function updateDiffPreview(
-  page: import('@playwright/test').Page,
+  page: Page,
   messageId: string,
   fileCount: number
 ) {
@@ -121,7 +150,7 @@ async function updateDiffPreview(
 }
 
 async function updateExpandableDiffPreview(
-  page: import('@playwright/test').Page,
+  page: Page,
   messageId: string
 ) {
   const patchText = [
@@ -136,7 +165,7 @@ async function updateExpandableDiffPreview(
 }
 
 async function updateDiffPreviewWithPatch(
-  page: import('@playwright/test').Page,
+  page: Page,
   messageId: string,
   patchText: string
 ) {
@@ -525,8 +554,9 @@ test.describe('auto-scroll', () => {
     });
 
     const collapseDistances = await toggle.evaluate(async (button) => {
-      const list = button.closest<HTMLElement>('.interactive-list')!;
-      const sample = () => list.scrollHeight - list.clientHeight - list.scrollTop;
+      const scrollList = button.closest<HTMLElement>('.interactive-list')!;
+      const sample = () =>
+        scrollList.scrollHeight - scrollList.clientHeight - scrollList.scrollTop;
       (button as HTMLButtonElement).click();
       const distances = [sample()];
       for (let index = 0; index < 6; index += 1) {
@@ -641,8 +671,8 @@ test.describe('auto-scroll', () => {
     const boundary = page.locator('[data-msg-id="message-diff-preview-user-35"]');
     await expect(boundary).toBeAttached();
     const anchorTop = await boundary.evaluate((row) => {
-      const list = row.closest<HTMLElement>('.interactive-list')!;
-      return row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+      const scrollList = row.closest<HTMLElement>('.interactive-list')!;
+      return row.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
     });
     expect(Math.abs(anchorTop)).toBeLessThan(80);
     expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
@@ -878,9 +908,6 @@ test.describe('sticky preview overlap', () => {
         '[data-msg-id="message-sticky-user-2"] .user-message-card'
       );
       if (!stickyEl || !nextPrompt) return false;
-
-      const stickyBottom = stickyEl.getBoundingClientRect().bottom;
-      const promptTop = nextPrompt.getBoundingClientRect().top;
 
       const step = 5;
       for (let i = 0; i < 600; i++) {
@@ -1225,34 +1252,6 @@ test.describe('rapid streaming jitter resistance', () => {
 });
 
 test.describe('viewport content coverage', () => {
-  async function getBlankBottomArea(list: import('@playwright/test').Locator) {
-    return list.evaluate((element) => {
-      const containerRect = element.getBoundingClientRect();
-      const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
-      let lastRenderedBottom = 0;
-      for (const row of rows) {
-        const rect = row.getBoundingClientRect();
-        if (rect.bottom > lastRenderedBottom) {
-          lastRenderedBottom = rect.bottom;
-        }
-      }
-      const viewportBottom = containerRect.bottom;
-      const blankPx = Math.max(0, viewportBottom - lastRenderedBottom);
-      const hasBottomSpacer = element.querySelector('.interactive-list-track > div:last-child');
-      const bottomSpacerHeight = hasBottomSpacer
-        ? (hasBottomSpacer as HTMLElement).getBoundingClientRect().height
-        : 0;
-      return {
-        blankPx,
-        viewportHeight: element.clientHeight,
-        scrollTop: element.scrollTop,
-        scrollHeight: element.scrollHeight,
-        bottomSpacerHeight,
-        renderedRowCount: rows.length,
-      };
-    });
-  }
-
   test('no blank bottom space when scrolled to top of a large transcript', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
@@ -1587,7 +1586,7 @@ test.describe('viewport content coverage', () => {
 });
 
 async function appendDeltaToMultiAgentLargeStreaming(
-  page: import('@playwright/test').Page,
+  page: Page,
   delta: string
 ) {
   await page.evaluate((nextDelta) => {

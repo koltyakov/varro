@@ -2948,11 +2948,12 @@ function dispatchPostReadyMessage(message: unknown) {
     message &&
     typeof message === 'object' &&
     '__message' in message &&
-    typeof (message as { __message: unknown }).__message !== 'undefined'
+    typeof (message as { __message: unknown })['__message'] !== 'undefined'
   ) {
     const scheduled = message as { __dispatchDelayMs?: unknown; __message: unknown };
-    const delayMs = typeof scheduled.__dispatchDelayMs === 'number' ? scheduled.__dispatchDelayMs : 0;
-    window.setTimeout(() => dispatchPostReadyMessage(scheduled.__message), delayMs);
+    const delayMs =
+      typeof scheduled['__dispatchDelayMs'] === 'number' ? scheduled['__dispatchDelayMs'] : 0;
+    window.setTimeout(() => dispatchPostReadyMessage(scheduled['__message']), delayMs);
     return;
   }
 
