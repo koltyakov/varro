@@ -18,6 +18,7 @@ export function TodoList() {
   const allDone = () => total() > 0 && completed() === total();
   const inProgressTodos = () => todos().filter((todo) => todo.status === 'in_progress');
   const [activeTodoIndex, setActiveTodoIndex] = createSignal(0);
+  const [hiddenAfterCompletion, setHiddenAfterCompletion] = createSignal(false);
   const activeTodo = () => {
     const running = inProgressTodos();
     return (
@@ -70,6 +71,12 @@ export function TodoList() {
     const hasNewTodo = todos().some((todo) => !previousTodoIds.has(todo.id));
     const nextUserMessageCount = userMessageCount();
     const nextAllDone = allDone();
+
+    if (!nextAllDone || hasNewTodo) {
+      setHiddenAfterCompletion(false);
+    } else if (nextUserMessageCount > previousUserMessageCount) {
+      setHiddenAfterCompletion(true);
+    }
 
     if (nextAllDone && !previousAllDone) {
       setAutomaticCollapsed(true);
@@ -147,82 +154,84 @@ export function TodoList() {
   };
 
   return (
-    <div
-      class="todo-block animate-fade-in"
-      ref={(element) => {
-        blockRef = element;
-      }}
-    >
-      <button
-        type="button"
-        class="todo-block-header"
-        onClick={toggleCollapsed}
-        aria-expanded={!collapsed()}
+    <Show when={!hiddenAfterCompletion()}>
+      <div
+        class="todo-block animate-fade-in"
+        ref={(element) => {
+          blockRef = element;
+        }}
       >
-        <svg
-          class={`todo-block-chevron ${collapsed() ? 'collapsed' : ''}`}
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
+        <button
+          type="button"
+          class="todo-block-header"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed()}
         >
-          <path d="M4 6l4 4 4-4" />
-        </svg>
-        <span class="todo-block-title">Todos</span>
-        <span class="todo-block-count">
-          {completed()}
-          <span class="todo-block-count-sep">/</span>
-          {total()}
-        </span>
-        <Show when={collapsed() && activeTodo()}>
-          {(todo) => (
-            <span class="todo-block-active" title={todo().content}>
-              <svg class="todo-block-active-indicators" viewBox="0 0 6 14" aria-hidden="true">
-                <For each={activeTodoDots()}>
-                  {(dot, index) => (
-                    <circle
-                      class={`todo-block-active-dot ${index() === activeTodoIndex() ? 'is-current' : ''}`}
-                      cx="3"
-                      cy={dot.center}
-                      r={dot.radius}
-                      fill="currentColor"
-                    />
-                  )}
-                </For>
-              </svg>
-              <span class="todo-block-active-text">{todo().content}</span>
-            </span>
-          )}
-        </Show>
-        <div
-          class="todo-block-progress"
-          role="progressbar"
-          aria-valuenow={completed()}
-          aria-valuemin={0}
-          aria-valuemax={total()}
-          aria-label={`${completed()} of ${total()} todos completed`}
-        >
+          <svg
+            class={`todo-block-chevron ${collapsed() ? 'collapsed' : ''}`}
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 6l4 4 4-4" />
+          </svg>
+          <span class="todo-block-title">Todos</span>
+          <span class="todo-block-count">
+            {completed()}
+            <span class="todo-block-count-sep">/</span>
+            {total()}
+          </span>
+          <Show when={collapsed() && activeTodo()}>
+            {(todo) => (
+              <span class="todo-block-active" title={todo().content}>
+                <svg class="todo-block-active-indicators" viewBox="0 0 6 14" aria-hidden="true">
+                  <For each={activeTodoDots()}>
+                    {(dot, index) => (
+                      <circle
+                        class={`todo-block-active-dot ${index() === activeTodoIndex() ? 'is-current' : ''}`}
+                        cx="3"
+                        cy={dot.center}
+                        r={dot.radius}
+                        fill="currentColor"
+                      />
+                    )}
+                  </For>
+                </svg>
+                <span class="todo-block-active-text">{todo().content}</span>
+              </span>
+            )}
+          </Show>
           <div
-            class={`todo-block-progress-fill ${allDone() ? 'is-complete' : ''}`}
-            style={{ width: `${progress()}%` }}
-          />
-        </div>
-      </button>
-      {!collapsed() && (
-        <ul
-          class="todo-block-list"
-          ref={(element) => {
-            listRef = element;
-          }}
-          style={{ 'max-height': `${listMaxHeight()}px` }}
-        >
-          <For each={todos()}>{(todo) => <TodoItem todo={todo} />}</For>
-        </ul>
-      )}
-    </div>
+            class="todo-block-progress"
+            role="progressbar"
+            aria-valuenow={completed()}
+            aria-valuemin={0}
+            aria-valuemax={total()}
+            aria-label={`${completed()} of ${total()} todos completed`}
+          >
+            <div
+              class={`todo-block-progress-fill ${allDone() ? 'is-complete' : ''}`}
+              style={{ width: `${progress()}%` }}
+            />
+          </div>
+        </button>
+        {!collapsed() && (
+          <ul
+            class="todo-block-list"
+            ref={(element) => {
+              listRef = element;
+            }}
+            style={{ 'max-height': `${listMaxHeight()}px` }}
+          >
+            <For each={todos()}>{(todo) => <TodoItem todo={todo} />}</For>
+          </ul>
+        )}
+      </div>
+    </Show>
   );
 }
 

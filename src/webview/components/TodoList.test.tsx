@@ -106,6 +106,61 @@ describe('TodoList', () => {
     expect(items).toHaveLength(4);
   });
 
+  it('hides resolved todos on the next prompt and reappears for new work', async () => {
+    setState('messages', [
+      {
+        info: userMessage('user-current'),
+        parts: [],
+      },
+    ]);
+    setState('todos', [
+      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+      { id: 'todo-2', content: 'Cancelled task', status: 'cancelled', priority: 'low' },
+    ]);
+
+    cleanup = render(() => TodoList(), container!);
+
+    expect(container?.querySelector('.todo-block')).not.toBeNull();
+
+    setState('messages', (messages) => [
+      ...messages,
+      {
+        info: userMessage('user-while-unfinished'),
+        parts: [],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.todo-block')).not.toBeNull();
+    expect(container?.textContent).toContain('Working task');
+
+    setState('todos', 0, 'status', 'completed');
+    await Promise.resolve();
+
+    expect(container?.querySelector('.todo-block')).not.toBeNull();
+    expect(container?.textContent).toContain('2/2');
+
+    setState('messages', (messages) => [
+      ...messages,
+      {
+        info: userMessage('user-next'),
+        parts: [],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.todo-block')).toBeNull();
+
+    setState('todos', (todos) => [
+      ...todos,
+      { id: 'todo-3', content: 'New task', status: 'pending', priority: 'medium' },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.todo-block')).not.toBeNull();
+    expect(container?.textContent).toContain('New task');
+  });
+
   it('shows a dot per running todo and rotates their collapsed labels every five seconds', async () => {
     vi.useFakeTimers();
     setState('todos', [
@@ -222,7 +277,7 @@ describe('TodoList', () => {
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('collapses completed todos for a new prompt and expands when a new todo arrives', async () => {
+  it('hides completed todos for a new prompt and expands when a new todo arrives', async () => {
     setState('todos', [
       { id: 'todo-1', content: 'Done task', status: 'completed', priority: 'medium' },
     ]);
@@ -236,8 +291,7 @@ describe('TodoList', () => {
     setState('messages', [{ info: userMessage('user-1'), parts: [] }]);
     await Promise.resolve();
 
-    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-    expect(container?.querySelector('ul.todo-block-list')).toBeNull();
+    expect(container?.querySelector('.todo-block')).toBeNull();
 
     setState('todos', (todos) => [
       ...todos,
@@ -245,7 +299,9 @@ describe('TodoList', () => {
     ]);
     await Promise.resolve();
 
-    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
     expect(container?.querySelectorAll('li.todo-block-item')).toHaveLength(2);
   });
 
