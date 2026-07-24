@@ -54,6 +54,9 @@ import type {
   SessionStatus,
 } from '../../types';
 
+const MISSING_PART_RECOVERY_RETRY_MIN_MS = 100;
+const MISSING_PART_RECOVERY_RETRY_MAX_MS = 1_000;
+
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
@@ -194,6 +197,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       sessionID: string;
       generation: number;
       syncing: boolean;
+      retryDelayMs: number;
       retryTimer?: ReturnType<typeof setTimeout>;
     }
   >();
@@ -626,6 +630,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       sessionID: string;
       generation: number;
       syncing: boolean;
+      retryDelayMs: number;
       retryTimer?: ReturnType<typeof setTimeout>;
     }
   ) => {
@@ -647,14 +652,19 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           return;
         }
 
-        // A delta arrived after the follow-up read its snapshot. Yield before
-        // another bounded pass so sustained traffic cannot create a tight loop.
+        // A delta arrived after the follow-up read its snapshot. Back off before
+        // another bounded pass so sustained traffic cannot continuously refetch.
+        const retryDelayMs = pending.retryDelayMs;
+        pending.retryDelayMs = Math.min(
+          pending.retryDelayMs * 2,
+          MISSING_PART_RECOVERY_RETRY_MAX_MS
+        );
         pending.retryTimer = setTimeout(() => {
           pending.retryTimer = undefined;
           if (pendingMissingPartDeltas.get(key) !== pending) return;
           pending.syncing = false;
           recoverMissingPartDeltas(key, pending);
-        }, 0);
+        }, retryDelayMs);
       })
       .catch((err) => {
         if (pending.retryTimer !== undefined) clearTimeout(pending.retryTimer);
@@ -667,7 +677,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const queueMissingPartDelta = (sessionID: string, messageID: string, partID: string) => {
     const key = getPartDeltaQueueKey(messageID, partID);
     const existing = pendingMissingPartDeltas.get(key);
-    const pending = existing || { sessionID, generation: 0, syncing: false };
+    const pending = existing || {
+      sessionID,
+      generation: 0,
+      syncing: false,
+      retryDelayMs: MISSING_PART_RECOVERY_RETRY_MIN_MS,
+    };
     pending.sessionID = sessionID;
     pending.generation += 1;
     pendingMissingPartDeltas.set(key, pending);

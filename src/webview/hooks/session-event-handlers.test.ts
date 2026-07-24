@@ -1462,8 +1462,9 @@ describe('registerSessionEventHandlers', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
-  it('starts another bounded recovery when a delta arrives after the follow-up snapshot', async () => {
+  it('backs off before recovering a delta that arrives after the follow-up snapshot', async () => {
     const handlers = installHandlers();
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     let messages: ReturnType<typeof createAssistantEntry>[] = [];
     let serverText = 'first second';
     let resolveInitialSync: (() => void) | undefined;
@@ -1551,6 +1552,8 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledTimes(2);
 
     resolveFollowUpSync?.();
+    await vi.waitFor(() => expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 100));
+    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(4));
 
     expect(messages[0]?.parts[0]).toMatchObject({ text: 'first second third' });
@@ -1574,6 +1577,7 @@ describe('registerSessionEventHandlers', () => {
       'session-1',
       'text'
     );
+    setTimeoutSpy.mockRestore();
   });
 
   it('creates and streams reasoning parts from session.next reasoning events', () => {

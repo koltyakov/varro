@@ -262,7 +262,8 @@ export function getToolFileChange(toolName: string, toolState: ToolState): FileC
   const cached = toolFileChangeCache.get(toolState);
   if (cached !== undefined) return cached;
 
-  const result = getToolFileChanges(toolName, toolState)[0] || null;
+  const result =
+    getToolFileChanges(toolName, toolState).find((change) => !change.isSummary) || null;
   toolFileChangeCache.set(toolState, result);
   return result;
 }
@@ -273,7 +274,7 @@ export function getToolFileChanges(toolName: string, toolState: ToolState): File
 
   const result = computeToolFileChanges(toolName, toolState);
   toolFileChangesCache.set(toolState, result);
-  toolFileChangeCache.set(toolState, result[0] || null);
+  toolFileChangeCache.set(toolState, result.find((change) => !change.isSummary) || null);
   return result;
 }
 

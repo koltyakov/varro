@@ -683,6 +683,26 @@ describe('tool file change helpers', () => {
     expect(storedWork[3]?.previewMessage).toContain('total inline patch content limit');
   });
 
+  it('does not treat a truncation summary as a singular file change', () => {
+    const createSummaryOnlyState = () =>
+      completedState(
+        {},
+        {
+          metadata: {
+            files: Array.from({ length: 65 }, () => ({})),
+          },
+        }
+      );
+    const directState = createSummaryOnlyState();
+    const pluralFirstState = createSummaryOnlyState();
+
+    expect(getToolFileChange('apply_patch', directState)).toBeNull();
+    expect(getToolFileChanges('apply_patch', pluralFirstState)).toEqual([
+      expect.objectContaining({ isSummary: true, previewStatus: 'truncated' }),
+    ]);
+    expect(getToolFileChange('apply_patch', pluralFirstState)).toBeNull();
+  });
+
   it('returns null when there is no recognizable file change', () => {
     expect(getToolFileChange('bash', completedState({ command: 'pwd' }))).toBeNull();
     expect(getToolFileChange('tool', completedState({}, { title: 'Updated value' }))).toBeNull();
