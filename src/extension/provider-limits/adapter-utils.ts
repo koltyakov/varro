@@ -13,8 +13,13 @@ export function getString(value: unknown): string {
 export function parseFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string') return null;
-  const normalized = value.trim().replace(/,/g, '');
-  if (!normalized) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  // Strip thousands separators only. Stripping every comma turns a decimal
+  // comma ("1,5") into a hundredfold-larger integer.
+  const normalized = /^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(trimmed)
+    ? trimmed.replace(/,/g, '')
+    : trimmed;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }

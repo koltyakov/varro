@@ -1,14 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as FsPromises from 'node:fs/promises';
 
 const loggerMock = vi.hoisted(() => ({
   warn: vi.fn(),
   error: vi.fn(),
 }));
 
+// Models a real clipboard: reads observe whatever was written last. A queued
+// `terminalSelection` is what `terminal.copySelection` puts on the clipboard
+// (null = the terminal had nothing to copy, so the clipboard is left alone).
 const clipboardState = vi.hoisted(() => ({
-  values: [] as string[],
+  current: '',
   writes: [] as string[],
+  terminalSelection: null as string | null,
+  // When set, `writeText` returns this promise instead of resolving immediately,
+  // so a test can hold a clipboard write open.
+  deferWrite: null as { promise: Promise<void>; resolve: () => void } | null,
 }));
+
+// `realpath` resolves through `symlinks` so containment can be tested without
+// touching the filesystem; unmapped paths resolve to themselves.
+const fsState = vi.hoisted(() => ({ symlinks: new Map<string, string>() }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  const realpath = vi.fn(async (target: string) => {
+    for (const [linkPath, linkTarget] of fsState.symlinks) {
+      if (target === linkPath) return linkTarget;
+      if (target.startsWith(`${linkPath}/`)) {
+        return `${linkTarget}${target.slice(linkPath.length)}`;
+      }
+    }
+    return target;
+  });
+  return { ...actual, realpath, default: { ...actual, realpath } };
+});
 
 const vscodeMock = vi.hoisted(() => ({
   window: {
@@ -40,15 +66,32 @@ const vscodeMock = vi.hoisted(() => ({
     openTextDocument: vi.fn(),
   },
   commands: {
-    executeCommand: vi.fn(() => Promise.resolve(undefined)),
+    executeCommand: vi.fn((command: string) => {
+      if (
+        command === 'workbench.action.terminal.copySelection' &&
+        clipboardState.terminalSelection !== null
+      ) {
+        clipboardState.current = clipboardState.terminalSelection;
+      }
+      return Promise.resolve(undefined);
+    }),
   },
   extensions: {
     getExtension: vi.fn(),
   },
   env: {
     clipboard: {
-      readText: vi.fn(() => Promise.resolve(clipboardState.values.shift() ?? '')),
+      readText: vi.fn(() => Promise.resolve(clipboardState.current)),
       writeText: vi.fn((value: string) => {
+        const deferred = clipboardState.deferWrite;
+        if (deferred) {
+          clipboardState.deferWrite = null;
+          return deferred.promise.then(() => {
+            clipboardState.current = value;
+            clipboardState.writes.push(value);
+          });
+        }
+        clipboardState.current = value;
         clipboardState.writes.push(value);
         return Promise.resolve();
       }),
@@ -83,11 +126,16 @@ vi.mock('vscode', () => vscodeMock);
 
 import { ContextProvider } from './context-provider';
 
+function noop() {}
+
 describe('ContextProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clipboardState.values = [];
+    clipboardState.current = '';
     clipboardState.writes = [];
+    clipboardState.terminalSelection = null;
+    clipboardState.deferWrite = null;
+    fsState.symlinks.clear();
     vscodeMock.window.activeTerminal = { name: 'Terminal 1' };
     vscodeMock.window.activeTextEditor = undefined;
     vscodeMock.window.tabGroups.activeTabGroup.activeTab = undefined;
@@ -97,7 +145,15 @@ describe('ContextProvider', () => {
     vscodeMock.workspace.asRelativePath.mockReset();
     vscodeMock.window.showTextDocument.mockReset();
     vscodeMock.extensions.getExtension.mockReset();
-    vscodeMock.commands.executeCommand.mockResolvedValue(undefined);
+    vscodeMock.commands.executeCommand.mockImplementation((command: string) => {
+      if (
+        command === 'workbench.action.terminal.copySelection' &&
+        clipboardState.terminalSelection !== null
+      ) {
+        clipboardState.current = clipboardState.terminalSelection;
+      }
+      return Promise.resolve(undefined);
+    });
     vscodeMock.languages.getDiagnostics.mockReset();
     vscodeMock.languages.getDiagnostics.mockReturnValue([]);
     vscodeMock.workspace.workspaceFolders = [];
@@ -107,7 +163,8 @@ describe('ContextProvider', () => {
   });
 
   it('does not reuse stale clipboard text when terminal copy captures nothing', async () => {
-    clipboardState.values = ['existing clipboard', 'existing clipboard', 'existing clipboard'];
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = null;
     const provider = new ContextProvider(vi.fn());
 
     try {
@@ -116,13 +173,15 @@ describe('ContextProvider', () => {
       expect(result).toEqual({ ok: false, reason: 'empty-selection' });
       expect(provider.terminalSelection).toBeNull();
       expect(vscodeMock.env.clipboard.writeText).toHaveBeenCalledWith('existing clipboard');
+      expect(clipboardState.current).toBe('existing clipboard');
     } finally {
       provider.dispose();
     }
   });
 
   it('restores the clipboard after capturing terminal selection', async () => {
-    clipboardState.values = ['existing clipboard', 'new terminal output'];
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'new terminal output';
     const provider = new ContextProvider(vi.fn());
 
     try {
@@ -134,19 +193,175 @@ describe('ContextProvider', () => {
         terminalName: 'Terminal 1',
       });
       expect(vscodeMock.env.clipboard.writeText).toHaveBeenCalledWith('existing clipboard');
+      expect(clipboardState.current).toBe('existing clipboard');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('captures a terminal selection that matches the existing clipboard text', async () => {
+    clipboardState.current = 'shared text';
+    clipboardState.terminalSelection = 'shared text';
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const result = await provider.captureTerminalSelection();
+
+      expect(result).toEqual({ ok: true, terminalName: 'Terminal 1' });
+      expect(provider.terminalSelection).toEqual({
+        text: 'shared text',
+        terminalName: 'Terminal 1',
+      });
+      expect(clipboardState.current).toBe('shared text');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('never surfaces the priming sentinel as a terminal selection', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = null;
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const result = await provider.captureTerminalSelection();
+
+      expect(result).toEqual({ ok: false, reason: 'empty-selection' });
+      expect(provider.terminalSelection).toBeNull();
+      expect(
+        clipboardState.writes.some((value) => value.includes('varro-terminal-selection-'))
+      ).toBe(true);
+      expect(clipboardState.current).not.toContain('varro-terminal-selection-');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('serializes overlapping captures so neither reads the other sentinel', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'terminal output';
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const [first, second] = await Promise.all([
+        provider.captureTerminalSelection(),
+        provider.captureTerminalSelection(),
+      ]);
+
+      expect(first).toEqual({ ok: true, terminalName: 'Terminal 1' });
+      expect(second).toEqual({ ok: true, terminalName: 'Terminal 1' });
+      expect(provider.terminalSelection).toEqual({
+        text: 'terminal output',
+        terminalName: 'Terminal 1',
+      });
+      expect(clipboardState.current).toBe('existing clipboard');
+      expect(clipboardState.current).not.toContain('varro-terminal-selection-');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('does not strand a sentinel when overlapping captures find no selection', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = null;
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const results = await Promise.all([
+        provider.captureTerminalSelection(),
+        provider.captureTerminalSelection(),
+        provider.captureTerminalSelection(),
+      ]);
+
+      for (const result of results) {
+        expect(result).toEqual({ ok: false, reason: 'empty-selection' });
+      }
+      expect(clipboardState.current).toBe('existing clipboard');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('does not leave the sentinel behind when the priming write resolves late', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = null;
+    let releasePrime: () => void = noop;
+    const primePromise = new Promise<void>((resolve) => {
+      releasePrime = resolve;
+    });
+    clipboardState.deferWrite = { promise: primePromise, resolve: releasePrime };
+    vi.useFakeTimers();
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const capture = provider.captureTerminalSelection();
+      const settled = expect(capture).rejects.toThrow(/Timed out priming clipboard/);
+      // Push past the 1500ms prime timeout *and* the bounded settle wait in the
+      // restore, so the write really is still outstanding when cleanup runs.
+      await vi.advanceTimersByTimeAsync(5_000);
+      await settled;
+      expect(clipboardState.current).toBe('existing clipboard');
+      // A failed capture must not leave a previous selection behind.
+      expect(provider.terminalSelection).toBeNull();
+
+      // Now the abandoned write finally lands, clobbering the restore. It must
+      // be undone rather than left as the user's clipboard contents.
+      releasePrime();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(clipboardState.current).toBe('existing clipboard');
+      expect(clipboardState.current).not.toContain('varro-terminal-selection-');
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears a prior selection when a later capture throws', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'terminal output';
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await provider.captureTerminalSelection();
+      expect(provider.terminalSelection).toEqual({
+        text: 'terminal output',
+        terminalName: 'Terminal 1',
+      });
+
+      // The copy command itself fails; the previous capture must not survive as
+      // stale state, since it is replayed into webview initialization.
+      vscodeMock.commands.executeCommand.mockRejectedValueOnce(new Error('command failed'));
+
+      await expect(provider.captureTerminalSelection()).rejects.toThrow('command failed');
+      expect(provider.terminalSelection).toBeNull();
+      expect(clipboardState.current).toBe('existing clipboard');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('allows a contained entry whose name begins with dots', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'config' });
+
+    try {
+      // `..config` is a real entry inside the workspace, not a climb out of it.
+      await expect(
+        provider.readFile('/repo/..config/file', { restrictToWorkspace: true })
+      ).resolves.toBe('config');
     } finally {
       provider.dispose();
     }
   });
 
   it('clears stale terminal selection when a later capture fails', async () => {
-    clipboardState.values = [
-      'existing clipboard',
-      'new terminal output',
-      'existing clipboard',
-      'existing clipboard',
-      'existing clipboard',
-    ];
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'new terminal output';
     const provider = new ContextProvider(vi.fn());
 
     try {
@@ -156,6 +371,7 @@ describe('ContextProvider', () => {
         terminalName: 'Terminal 1',
       });
 
+      clipboardState.terminalSelection = null;
       const result = await provider.captureTerminalSelection();
 
       expect(result).toEqual({ ok: false, reason: 'empty-selection' });
@@ -166,7 +382,8 @@ describe('ContextProvider', () => {
   });
 
   it('returns no-terminal and clears prior terminal selection when no terminal is active', async () => {
-    clipboardState.values = ['existing clipboard', 'new terminal output'];
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'new terminal output';
     const provider = new ContextProvider(vi.fn());
 
     try {
@@ -182,6 +399,251 @@ describe('ContextProvider', () => {
 
       expect(result).toEqual({ ok: false, reason: 'no-terminal' });
       expect(provider.terminalSelection).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('reads absolute paths outside the workspace when unrestricted', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'secret' });
+
+    try {
+      await expect(provider.readFile('/etc/passwd')).resolves.toBe('secret');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('refuses absolute paths outside the workspace when restricted', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'secret' });
+
+    try {
+      await expect(
+        provider.readFile('/etc/passwd', { restrictToWorkspace: true })
+      ).resolves.toBeNull();
+      await expect(
+        provider.resolvePath('/etc/passwd', { restrictToWorkspace: true })
+      ).resolves.toBeNull();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('still reads restricted absolute paths inside the workspace', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'source' });
+
+    try {
+      await expect(
+        provider.readFile('/repo/src/app.ts', { restrictToWorkspace: true })
+      ).resolves.toBe('source');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('refuses an absolute path that reaches outside via a workspace symlink', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    // `/repo/vendor` is a symlink to `/etc`, so `/repo/vendor/passwd` is
+    // lexically inside the workspace but canonically outside it.
+    fsState.symlinks.set('/repo/vendor', '/etc');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'secret' });
+
+    try {
+      await expect(
+        provider.readFile('/repo/vendor/passwd', { restrictToWorkspace: true })
+      ).resolves.toBeNull();
+      await expect(
+        provider.resolvePath('/repo/vendor/passwd', { restrictToWorkspace: true })
+      ).resolves.toBeNull();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('refuses a relative path that reaches outside via a workspace symlink', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    fsState.symlinks.set('/repo/vendor', '/etc');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'secret' });
+
+    try {
+      await expect(
+        provider.readFile('vendor/passwd', { restrictToWorkspace: true })
+      ).resolves.toBeNull();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('allows a symlink that stays inside the workspace', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    fsState.symlinks.set('/repo/link', '/repo/real');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'source' });
+
+    try {
+      await expect(
+        provider.readFile('/repo/link/app.ts', { restrictToWorkspace: true })
+      ).resolves.toBe('source');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('opens the verified canonical path, not the unverified symlink path', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    fsState.symlinks.set('/repo/link', '/repo/real');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'source' });
+
+    try {
+      await provider.readFile('/repo/link/app.ts', { restrictToWorkspace: true });
+
+      // Reading the original path would leave a window for the symlink to be
+      // repointed between the containment check and the open.
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+        fsPath: '/repo/real/app.ts',
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('opens the requested path unchanged when the caller is unrestricted', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    fsState.symlinks.set('/repo/link', '/repo/real');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'source' });
+
+    try {
+      await provider.readFile('/repo/link/app.ts');
+
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+        fsPath: '/repo/link/app.ts',
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('reports the lexical path as metadata even when it resolves elsewhere', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    fsState.symlinks.set('/repo/link', '/repo/real');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.asRelativePath.mockReturnValue('link/app.ts');
+
+    try {
+      await expect(
+        provider.resolvePath('/repo/link/app.ts', { restrictToWorkspace: true })
+      ).resolves.toEqual({
+        path: '/repo/link/app.ts',
+        relativePath: 'link/app.ts',
+        type: 'file',
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('allows a workspace root that is itself reached through a symlink', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    // The workspace folder path is a symlink; both sides canonicalize together.
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    fsState.symlinks.set('/repo', '/private/repo');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'source' });
+
+    try {
+      await expect(
+        provider.readFile('/repo/src/app.ts', { restrictToWorkspace: true })
+      ).resolves.toBe('source');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('still follows a workspace symlink when the caller is unrestricted', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    fsState.symlinks.set('/repo/vendor', '/etc');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'contents' });
+
+    try {
+      await expect(provider.readFile('/repo/vendor/passwd')).resolves.toBe('contents');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('refuses workspace-relative paths that climb out of the folder', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'secret' });
+
+    try {
+      await expect(provider.readFile('../../etc/passwd')).resolves.toBeNull();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('does not open a missing diff path that climbs out of the workspace', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.workspace.fs.stat.mockRejectedValue(new Error('File not found'));
+    vscodeMock.extensions.getExtension.mockReturnValue(undefined);
+
+    try {
+      await provider.openPath('../outside/secret.ts', { kind: 'file', view: 'diff' });
+
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+      expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
     } finally {
       provider.dispose();
     }

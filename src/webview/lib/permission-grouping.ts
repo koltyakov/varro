@@ -19,8 +19,11 @@ function stableSerializePermissionValue(value: unknown): string {
     return `[${value.map((item) => stableSerializePermissionValue(item)).join(',')}]`;
   }
   if (typeof value === 'object') {
+    // Code-unit ordering, not collation: `localeCompare` varies with locale and
+    // ICU build, and ties for strings that differ only by ignorable characters,
+    // so equal permissions could serialize to different grouping signatures.
     const entries = Object.entries(value as Record<string, unknown>).toSorted(([a], [b]) =>
-      a.localeCompare(b)
+      a < b ? -1 : a > b ? 1 : 0
     );
     return `{${entries
       .map(([key, item]) => `${JSON.stringify(key)}:${stableSerializePermissionValue(item)}`)

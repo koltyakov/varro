@@ -128,6 +128,79 @@ describe('createSessionTreeIndex', () => {
     expect(idx.getTreeIds('b', sessions, emptyLimits)).toEqual(['b']);
   });
 
+  it('indexes a subtree whose parent is missing from the session list', () => {
+    const idx = createSessionTreeIndex();
+    // `orphan`'s parent is hidden/trashed/out-of-workspace and so absent here.
+    const sessions = [
+      makeSession('orphan', { parentID: 'filtered-out' }),
+      makeSession('c1', { parentID: 'orphan' }),
+      makeSession('gc1', { parentID: 'c1' }),
+    ];
+
+    expect(idx.getTreeIds('orphan', sessions, emptyLimits).toSorted()).toEqual([
+      'c1',
+      'gc1',
+      'orphan',
+    ]);
+    expect(idx.getRootId('gc1', sessions, emptyLimits)).toBe('orphan');
+  });
+
+  it('matches collectSessionTreeIds for a subtree with a missing parent', () => {
+    const idx = createSessionTreeIndex();
+    const sessions = [
+      makeSession('root'),
+      makeSession('orphan', { parentID: 'filtered-out' }),
+      makeSession('c1', { parentID: 'orphan' }),
+    ];
+
+    expect(idx.getTreeIds('orphan', sessions, emptyLimits).toSorted()).toEqual(
+      collectSessionTreeIds('orphan', sessions).toSorted()
+    );
+  });
+
+  it('getActiveUsageLimitNotice covers a tree whose parent is missing', () => {
+    const idx = createSessionTreeIndex();
+    const sessions = [
+      makeSession('orphan', { parentID: 'filtered-out' }),
+      makeSession('c1', { parentID: 'orphan' }),
+    ];
+    const limits: Record<string, UsageLimitNotice | null> = { c1: makeNotice('c1') };
+
+    expect(idx.getActiveUsageLimitNotice('orphan', sessions, limits)).toEqual(
+      expect.objectContaining({ sessionID: 'c1' })
+    );
+  });
+
+  it('indexes trees deeper than the recursion limit', () => {
+    const idx = createSessionTreeIndex();
+    const depth = 60_000;
+    const sessions = [makeSession('s0')];
+    for (let index = 1; index < depth; index += 1) {
+      sessions.push(makeSession(`s${index}`, { parentID: `s${index - 1}` }));
+    }
+
+    expect(idx.getTreeIds('s0', sessions, emptyLimits)).toHaveLength(depth);
+    expect(idx.getRootId(`s${depth - 1}`, sessions, emptyLimits)).toBe('s0');
+  });
+
+  it('indexes a leaf-first cycle component in linear time', () => {
+    const idx = createSessionTreeIndex();
+    const depth = 20_000;
+    // Leaf first, then its ancestors, ending in a two-node parent cycle. Walking
+    // from each unindexed session in list order would re-walk the whole suffix.
+    const sessions: Session[] = [];
+    for (let index = depth; index >= 2; index -= 1) {
+      sessions.push(makeSession(`c${index}`, { parentID: `c${index - 1}` }));
+    }
+    sessions.push(makeSession('c1', { parentID: 'c0' }));
+    sessions.push(makeSession('c0', { parentID: 'c1' }));
+
+    const started = Date.now();
+    expect(idx.getTreeIds('c1', sessions, emptyLimits)).toHaveLength(depth + 1);
+    expect(idx.getRootId(`c${depth}`, sessions, emptyLimits)).toBe('c1');
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
   it('deduplicates a root-reachable duplicate-ID cycle', () => {
     const idx = createSessionTreeIndex();
     const sessions = [

@@ -169,13 +169,32 @@ export function replaceContextFiles(files: DroppedFile[]) {
   );
 }
 
-export function replaceClipboardImages(images: ClipboardImage[]) {
+/**
+ * Replaces the attached images, enforcing the cap. Callers that add one image at
+ * a time refuse to run once the list is full, so an over-cap list seeded here
+ * (a message authored elsewhere with more attachments, say) would otherwise
+ * never shrink back. Returns the images that were dropped so the caller can
+ * reconcile their `[filename]` markers in whatever text it is about to apply.
+ */
+export function replaceClipboardImages(images: ClipboardImage[]): ClipboardImage[] {
+  const capped = images.slice(-MAX_CLIPBOARD_IMAGES);
+  const dropped = images.slice(0, images.length - capped.length);
   clearClipboardImageAttachmentSequences();
-  seedClipboardImageAttachmentSequences(images);
+  seedClipboardImageAttachmentSequences(capped);
   setState(
     'clipboardImages',
-    images.map((image) => ({ ...image }))
+    capped.map((image) => ({ ...image }))
   );
+  return dropped;
+}
+
+/** Blanks the markers of images that are no longer attached. */
+export function stripClipboardImagePlaceholders(text: string, images: ClipboardImage[]) {
+  let result = text;
+  for (const image of images) {
+    result = result.split(`[${image.filename}]`).join('_____');
+  }
+  return result;
 }
 
 export function addClipboardImage(image: ClipboardImage) {
@@ -193,9 +212,13 @@ export function addClipboardImage(image: ClipboardImage) {
   setState(
     'clipboardImages',
     produce((images) => {
-      if (images.length >= MAX_CLIPBOARD_IMAGES) {
+      // Loop rather than drop one so this converges regardless of how the list
+      // got over the cap; `replaceClipboardImages` is what keeps it from
+      // happening in the first place.
+      while (images.length >= MAX_CLIPBOARD_IMAGES) {
         const removed = images.shift();
-        if (removed) removeClipboardImageAttachmentSequence(removed.id);
+        if (!removed) break;
+        removeClipboardImageAttachmentSequence(removed.id);
       }
       if (!images.find((item) => item.id === image.id)) {
         images.push({ ...image, attachmentSequence });

@@ -556,7 +556,9 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(6, 'GET', '/varro/workspace-file?path=src/foo.ts'));
-    expect(callbacks.contextProvider.readFile).toHaveBeenCalledWith('src/foo.ts');
+    expect(callbacks.contextProvider.readFile).toHaveBeenCalledWith('src/foo.ts', {
+      restrictToWorkspace: true,
+    });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 6, data: fileContent });
   });
 
@@ -577,7 +579,9 @@ describe('RestProxy handleRequest', () => {
       makePayload(61, 'GET', '/varro/workspace-path/resolve?path=src/foo.ts')
     );
 
-    expect(callbacks.contextProvider.resolvePath).toHaveBeenCalledWith('src/foo.ts');
+    expect(callbacks.contextProvider.resolvePath).toHaveBeenCalledWith('src/foo.ts', {
+      restrictToWorkspace: true,
+    });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 61, data: resolved });
   });
 

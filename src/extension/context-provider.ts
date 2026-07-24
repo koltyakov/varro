@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { isAbsolute, join } from 'path';
+import { randomUUID } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
+import { isAbsolute, join, relative, sep } from 'path';
 import type { EditorContext } from '../shared/protocol';
 import { logger } from './logger';
 import {
@@ -8,10 +10,22 @@ import {
   resolveWorkspaceRelativePath,
 } from './util/path';
 
+export type WorkspaceResolutionOptions = {
+  /** Resolve paths that do not exist on disk yet (e.g. a deleted file in a diff). */
+  allowMissing?: boolean;
+  /**
+   * Refuse paths that land outside every workspace folder. Set by callers
+   * relaying a path that originated in the webview, so a compromised or buggy
+   * renderer cannot read arbitrary files through the extension host.
+   */
+  restrictToWorkspace?: boolean;
+};
+
 export class ContextProvider implements vscode.Disposable {
   private static readonly TERMINAL_COPY_DELAY_MS = 40;
   private static readonly TERMINAL_COPY_MAX_ATTEMPTS = 5;
   private static readonly TERMINAL_COPY_TIMEOUT_MS = 1500;
+  private static readonly LATE_CLIPBOARD_WRITE_TIMEOUT_MS = 10_000;
   private static readonly ACTIVE_EDITOR_SETTLE_DELAY_MS = 60;
   private disposables: vscode.Disposable[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -24,6 +38,8 @@ export class ContextProvider implements vscode.Disposable {
     diagnostics: [],
   };
   private _terminalSelection: { text: string; terminalName: string } | null = null;
+  private terminalCaptureQueue: Promise<void> = Promise.resolve();
+  private pendingClipboardSettle: Promise<void> = Promise.resolve();
   private _lastContextSnapshot: ContextSnapshot | null = null;
   private _lastEmittedContextSnapshot: EditorContext | null = null;
   private _lastDiagnosticsSourceKey: string | null = null;
@@ -60,7 +76,43 @@ export class ContextProvider implements vscode.Disposable {
     return this._terminalSelection;
   }
 
-  async captureTerminalSelection(): Promise<
+  /**
+   * Serialized: the capture is a read-modify-restore transaction on the single
+   * system clipboard. Overlapping runs would read each other's sentinel as
+   * terminal output and interleave their restores, which can strand a sentinel
+   * on the user's clipboard.
+   */
+  captureTerminalSelection(): Promise<
+    { ok: true; terminalName: string } | { ok: false; reason: 'no-terminal' | 'empty-selection' }
+  > {
+    const run = this.terminalCaptureQueue.then(
+      () => this.captureTerminalSelectionNow(),
+      () => this.captureTerminalSelectionNow()
+    );
+    // The queue is held until any clipboard write this run abandoned has also
+    // settled, so the next capture cannot mistake a late landing for output.
+    this.terminalCaptureQueue = run.then(
+      () => this.pendingClipboardSettle,
+      () => this.pendingClipboardSettle
+    );
+    return run;
+  }
+
+  private async captureTerminalSelectionNow(): Promise<
+    { ok: true; terminalName: string } | { ok: false; reason: 'no-terminal' | 'empty-selection' }
+  > {
+    try {
+      return await this.runTerminalSelectionCapture();
+    } catch (err) {
+      // A clipboard or command failure leaves us with no idea what the terminal
+      // holds. Keeping the previous capture would attach stale text to the next
+      // prompt, since it is replayed into webview initialization.
+      this._terminalSelection = null;
+      throw err;
+    }
+  }
+
+  private async runTerminalSelectionCapture(): Promise<
     { ok: true; terminalName: string } | { ok: false; reason: 'no-terminal' | 'empty-selection' }
   > {
     const terminal = vscode.window.activeTerminal;
@@ -74,11 +126,41 @@ export class ContextProvider implements vscode.Disposable {
       ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
       'Timed out reading clipboard before terminal selection capture'
     );
+    // Prime the clipboard with a value the terminal cannot produce. Comparing
+    // against the *previous* clipboard instead would report "empty selection"
+    // whenever the selected text already happened to be on the clipboard.
+    const sentinel = `varro-terminal-selection-${randomUUID()}`;
     let selectionText = '';
-    let clipboardChanged = false;
     let capturedSelection = false;
 
+    // Issued outside the timeout wrapper: `withTimeout` abandons the wait but
+    // cannot cancel the write, so from here on the clipboard counts as dirtied
+    // and the restore below is unconditional.
+    const primeWrite = Promise.resolve(vscode.env.clipboard.writeText(sentinel));
+    let restoreCompleted = false;
+
+    // An abandoned prime that lands after cleanup puts the sentinel back on the
+    // clipboard, so undo it once it finally settles. Bounded, because a write
+    // that never settles must not wedge every later capture.
+    this.pendingClipboardSettle = withTimeout(
+      primeWrite.catch(() => undefined),
+      ContextProvider.LATE_CLIPBOARD_WRITE_TIMEOUT_MS,
+      'Timed out waiting for an abandoned clipboard write to settle'
+    )
+      .then(async () => {
+        if (!restoreCompleted) return;
+        await vscode.env.clipboard.writeText(previousClipboard);
+      })
+      .catch(() => {
+        logger.warn('Could not undo a late clipboard write from terminal selection capture');
+      });
+
     try {
+      await withTimeout(
+        primeWrite,
+        ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
+        'Timed out priming clipboard before terminal selection capture'
+      );
       await withTimeout(
         vscode.commands.executeCommand('workbench.action.terminal.copySelection'),
         ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
@@ -91,21 +173,27 @@ export class ContextProvider implements vscode.Disposable {
           ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
           'Timed out reading clipboard while capturing terminal selection'
         );
-        if (selectionText !== previousClipboard) {
-          clipboardChanged = true;
-          if (selectionText.trim().length > 0) {
-            capturedSelection = true;
-            break;
-          }
+        // Any value other than the sentinel means the copy landed, so a
+        // blank result is a genuinely empty selection rather than a slow copy.
+        if (selectionText !== sentinel) {
+          capturedSelection = selectionText.trim().length > 0;
+          break;
         }
       }
     } finally {
-      if (clipboardChanged) {
-        try {
-          await vscode.env.clipboard.writeText(previousClipboard);
-        } catch {
-          logger.warn('Failed to restore clipboard after terminal selection capture');
-        }
+      try {
+        // Let a slow prime settle first, or it would land on the clipboard
+        // after the restore and strand the sentinel there.
+        await withTimeout(
+          primeWrite.catch(() => undefined),
+          ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
+          'Timed out waiting for the clipboard prime to settle'
+        ).catch(() => undefined);
+        await vscode.env.clipboard.writeText(previousClipboard);
+      } catch {
+        logger.warn('Failed to restore clipboard after terminal selection capture');
+      } finally {
+        restoreCompleted = true;
       }
     }
 
@@ -282,10 +370,12 @@ export class ContextProvider implements vscode.Disposable {
     this.onChange(this._context);
   }
 
-  async readFile(path: string): Promise<string | null> {
+  async readFile(path: string, options?: WorkspaceResolutionOptions): Promise<string | null> {
     try {
-      const resolved = await this.resolveWorkspaceUri(path);
-      const uri = resolved?.uri;
+      const resolved = await this.resolveWorkspaceUri(path, options);
+      // Read through the verified canonical path when there is one; `uri` keeps
+      // the lexical spelling for display metadata only.
+      const uri = resolved?.verifiedUri ?? resolved?.uri;
       if (!uri) return null;
       const doc = await vscode.workspace.openTextDocument(uri);
       return doc.getText();
@@ -296,10 +386,11 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   async resolvePath(
-    path: string
+    path: string,
+    options?: WorkspaceResolutionOptions
   ): Promise<{ path: string; relativePath: string; type: 'file' | 'directory' } | null> {
     try {
-      const resolved = await this.resolveWorkspaceUri(path);
+      const resolved = await this.resolveWorkspaceUri(path, options);
       const uri = resolved?.uri;
       if (!uri) return null;
 
@@ -320,7 +411,9 @@ export class ContextProvider implements vscode.Disposable {
     options?: { line?: number; kind?: 'auto' | 'file' | 'directory'; view?: 'diff' }
   ) {
     try {
-      const resolved = await this.resolveWorkspaceUri(path, options?.view === 'diff');
+      const resolved = await this.resolveWorkspaceUri(path, {
+        allowMissing: options?.view === 'diff',
+      });
       const uri = resolved?.uri;
       if (!uri) {
         logger.warn(`Could not resolve file path: ${path}`);
@@ -360,8 +453,19 @@ export class ContextProvider implements vscode.Disposable {
 
   private async resolveWorkspaceUri(
     rawPath: string,
-    allowMissing = false
-  ): Promise<{ uri: vscode.Uri; workspaceFolder?: vscode.WorkspaceFolder } | null> {
+    options?: WorkspaceResolutionOptions
+  ): Promise<{
+    uri: vscode.Uri;
+    workspaceFolder?: vscode.WorkspaceFolder;
+    /**
+     * Canonical path that containment was actually verified against. Restricted
+     * reads must open this rather than `uri`, or a symlink swapped between the
+     * check and the read would serve a file that was never verified.
+     */
+    verifiedUri?: vscode.Uri;
+  } | null> {
+    const allowMissing = options?.allowMissing === true;
+    const restrictToWorkspace = options?.restrictToWorkspace === true;
     const input = rawPath.trim();
     if (!input) return null;
 
@@ -369,12 +473,16 @@ export class ContextProvider implements vscode.Disposable {
       const uri = vscode.Uri.file(input);
       if (allowMissing) {
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-        return workspaceFolder ? { uri, workspaceFolder } : { uri };
+        if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
+        const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
+        return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
       }
       try {
         await vscode.workspace.fs.stat(uri);
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-        return workspaceFolder ? { uri, workspaceFolder } : { uri };
+        if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
+        const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
+        return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
       } catch {
         return null;
       }
@@ -386,6 +494,10 @@ export class ContextProvider implements vscode.Disposable {
 
     const relativePath = normalizeRelativeWorkspacePath(resolved.relativePath);
     if (!relativePath) return null;
+    // A workspace-relative path never needs to climb out of its folder. The
+    // per-candidate containment check below cannot catch this on the
+    // `allowMissing` fallback, which joins without ever stat-ing the result.
+    if (relativePath.split('/').includes('..')) return null;
 
     const resolutionOrder = resolved.workspaceFolder
       ? [
@@ -398,13 +510,20 @@ export class ContextProvider implements vscode.Disposable {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       try {
         await vscode.workspace.fs.stat(candidate);
-        if (vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath === folder.uri.fsPath) {
-          return { uri: candidate, workspaceFolder: folder };
+        if (vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath !== folder.uri.fsPath) {
+          continue;
         }
+        if (!restrictToWorkspace) return { uri: candidate, workspaceFolder: folder };
+        const verifiedUri = await resolveInsideWorkspace(candidate, folder);
+        if (!verifiedUri) continue;
+        return { uri: candidate, workspaceFolder: folder, verifiedUri };
       } catch {}
     }
 
     if (allowMissing && resolutionOrder[0]) {
+      // Nothing to canonicalize for a path that does not exist, so a restricted
+      // caller gets no answer rather than an unverified one.
+      if (restrictToWorkspace) return null;
       return {
         uri: vscode.Uri.file(join(resolutionOrder[0].uri.fsPath, relativePath)),
         workspaceFolder: resolutionOrder[0],
@@ -467,6 +586,40 @@ async function hasGitChange(uri: vscode.Uri): Promise<boolean> {
         ...repository.state.mergeChanges,
       ].some((change) => change.uri.fsPath === uri.fsPath)
     );
+}
+
+/**
+ * Containment by canonical path. `vscode.workspace.getWorkspaceFolder` matches
+ * lexically, so a symlink inside the workspace that points outside it — say
+ * `<workspace>/vendor -> /etc` — is reported as workspace-owned. Resolving both
+ * sides first closes that.
+ */
+async function resolveInsideWorkspace(
+  uri: vscode.Uri,
+  workspaceFolder: vscode.WorkspaceFolder | undefined
+): Promise<vscode.Uri | null> {
+  if (!workspaceFolder) return null;
+  try {
+    const [target, root] = await Promise.all([
+      realpath(uri.fsPath),
+      realpath(workspaceFolder.uri.fsPath),
+    ]);
+    const relativeToRoot = relative(root, target);
+    // `startsWith('..')` alone would also reject a contained `..config` entry.
+    const escapesRoot =
+      relativeToRoot === '..' ||
+      relativeToRoot.startsWith(`..${sep}`) ||
+      isAbsolute(relativeToRoot);
+    if (relativeToRoot !== '' && escapesRoot) return null;
+    return vscode.Uri.file(target);
+  } catch (err) {
+    logger.warn(
+      `Refusing ${uri.fsPath}: could not verify it resolves inside the workspace (${
+        err instanceof Error ? err.message : String(err)
+      })`
+    );
+    return null;
+  }
 }
 
 type ContextSnapshot = Pick<EditorContext, 'workspacePath' | 'activeFile' | 'selection'>;

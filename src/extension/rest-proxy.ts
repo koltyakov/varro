@@ -168,16 +168,24 @@ export class RestProxy {
         return;
       }
 
+      // These paths arrive from the webview, so they stay confined to the
+      // workspace — the extension host must not be a read primitive for
+      // arbitrary local files.
       const workspaceFileRequest = this.parseWorkspaceFileRequest(method, payload.path);
       if (workspaceFileRequest) {
-        const data = await this.callbacks.contextProvider.readFile(workspaceFileRequest.path);
+        const data = await this.callbacks.contextProvider.readFile(workspaceFileRequest.path, {
+          restrictToWorkspace: true,
+        });
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
 
       const workspaceResolveRequest = this.parseWorkspaceResolveRequest(method, payload.path);
       if (workspaceResolveRequest) {
-        const data = await this.callbacks.contextProvider.resolvePath(workspaceResolveRequest.path);
+        const data = await this.callbacks.contextProvider.resolvePath(
+          workspaceResolveRequest.path,
+          { restrictToWorkspace: true }
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }

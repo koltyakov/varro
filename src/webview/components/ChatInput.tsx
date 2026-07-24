@@ -55,6 +55,7 @@ import {
   isSessionCompacting,
   providerLimitPollIntervalSeconds,
   replaceClipboardImages,
+  stripClipboardImagePlaceholders,
   replaceContextFiles,
   connectionInitialized,
 } from '../lib/state';
@@ -182,10 +183,11 @@ import {
   readItemByType,
 } from './chat-input/drop-paths';
 import {
-  addPastedMentionContextFiles,
   getPastedContextFiles,
   getPromptTextWithoutContextReferences,
+  resolvePastedMentionContextFiles,
 } from './chat-input/pasted-context';
+import { logError } from '../lib/log';
 import {
   acceptQueuedSteer,
   failedSteerQueuedMessageIds,
@@ -291,11 +293,12 @@ function applyEditContext(context: MessageEditContext, mergeWholeFileIntoActiveC
       return [{ ...file, path: activeFile.path, relativePath: activeFile.relativePath }];
     })
   );
-  replaceClipboardImages(context.images);
+  const droppedImages = replaceClipboardImages(context.images);
   setState(
     'terminalSelection',
     context.terminalSelection ? { ...context.terminalSelection } : null
   );
+  return droppedImages;
 }
 
 function getSessionTreeIdsForSession(sessionId: string | null | undefined) {
@@ -431,6 +434,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [historyDraft, setHistoryDraft] = createSignal('');
   const [loadingOlderMessageHistory, setLoadingOlderMessageHistory] = createSignal(false);
   const [caretPosition, setCaretPosition] = createSignal(0);
+  // Guards async paste follow-ups against landing in a torn-down composer.
+  let composerDisposed = false;
+  onCleanup(() => {
+    composerDisposed = true;
+  });
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
   const [showFileSearchHint, setShowFileSearchHint] = createSignal(false);
@@ -1415,6 +1423,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     });
   }
 
+  /**
+   * Applies an edit/restore snapshot as one unit. The image cap can discard
+   * attachments the snapshot's text still references, so the markers for those
+   * are blanked here rather than left pointing at nothing.
+   */
+  function applyComposerEditState(
+    context: MessageEditContext,
+    text: string,
+    mergeWholeFileIntoActiveContext = false
+  ) {
+    const droppedImages = applyEditContext(context, mergeWholeFileIntoActiveContext);
+    setComposerValue(stripClipboardImagePlaceholders(text, droppedImages));
+  }
+
   function cancelQueuedMessageEdit() {
     if (!queuedMessageEdit()) return;
     batch(() => {
@@ -1450,13 +1472,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setHistoryDraft('');
       setCompletionIndex(0);
       setSuppressCompletion(false);
-      applyEditContext({
-        files: queued.droppedFiles ?? [],
-        images: queued.clipboardImages ?? [],
-        terminalSelection: queued.terminalSelection ?? null,
-      });
+      applyComposerEditState(
+        {
+          files: queued.droppedFiles ?? [],
+          images: queued.clipboardImages ?? [],
+          terminalSelection: queued.terminalSelection ?? null,
+        },
+        queued.text
+      );
       setQueuedMessageEdit({ id: queued.id, sessionId: queued.sessionId });
-      setComposerValue(queued.text);
     });
   }
 
@@ -1694,7 +1718,36 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
     }
 
-    void addPastedMentionContextFiles(pastedText);
+    // `@file` mentions only become attachments after an async workspace lookup,
+    // so the composer cannot be gated on them at paste time the way selection
+    // and active-file references are. Snapshot what the composer looks like the
+    // moment the paste lands, then only attach and withdraw if that exact
+    // composer is still on screen when the lookups return.
+    const pasteSessionId = state.activeSessionId;
+    let pastedRange: { start: number; value: string } | null = null;
+    queueMicrotask(() => {
+      const caret = caretPosition();
+      const start = caret - pastedText.length;
+      const value = inputText();
+      if (start < 0 || value.slice(start, caret) !== pastedText) return;
+      pastedRange = { start, value };
+    });
+
+    void resolvePastedMentionContextFiles(pastedText)
+      .then((mentions) => {
+        if (composerDisposed || state.activeSessionId !== pasteSessionId) return;
+        for (const file of mentions.files) {
+          addContextFile(file);
+        }
+        if (mentions.mentionCount === 0 || mentions.resolvedCount < mentions.mentionCount) return;
+        if (pastedPromptText.length > 0 || !pastedRange) return;
+        batch(() => {
+          withdrawPastedText(pastedRange!, pastedText, setInputText, setCaretPosition);
+        });
+      })
+      .catch((err) => {
+        logError('chat-input:resolvePastedMentions', err);
+      });
 
     const imageItems = Array.from(clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
@@ -1916,8 +1969,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setMessageEditDraftBackup(untrack(captureEditDraftBackup));
     }
     activeEditMessageId = editing.messageId;
-    applyEditContext(editing.context, activeContextEnabled(editing.sessionId));
-    setComposerValue(editing.text);
+    applyComposerEditState(editing.context, editing.text, activeContextEnabled(editing.sessionId));
     queueMicrotask(() => {
       if (richEditorRef) {
         richEditorRef.focus();
@@ -1931,8 +1983,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const draft = getMessageEditDraftBackup();
     resetMessageEditState();
     if (draft) {
-      applyEditContext(draft);
-      setComposerValue(draft.text);
+      applyComposerEditState(draft, draft.text);
     } else {
       setComposerValue('');
     }
@@ -2951,6 +3002,25 @@ function describeUsageLimit(
 
 function getPastedImageFilename(index: number) {
   return index <= 1 ? 'Image' : `Image ${index}`;
+}
+
+/**
+ * Removes the exact span the paste inserted, identified by its recorded offset
+ * rather than by searching for its text — a composer that already contained the
+ * same mention would otherwise lose the wrong copy. Any edit since the paste
+ * (the value no longer matches the snapshot) leaves the text untouched.
+ */
+function withdrawPastedText(
+  range: { start: number; value: string },
+  pastedText: string,
+  setValue: (value: string) => void,
+  setCaret: (caret: number) => void
+) {
+  if (!pastedText || inputText() !== range.value) return;
+  const end = range.start + pastedText.length;
+  if (range.value.slice(range.start, end) !== pastedText) return;
+  setValue(range.value.slice(0, range.start) + range.value.slice(end));
+  setCaret(range.start);
 }
 
 function clickedOutside(target: Node | null, trigger?: HTMLElement, popup?: HTMLElement) {

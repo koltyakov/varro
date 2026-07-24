@@ -106,6 +106,60 @@ describe('MarkdownRenderer', () => {
     expect(path?.hasAttribute('onload')).toBe(false);
   });
 
+  // Namespace-confusion payloads: these re-parse into a different tree than they
+  // serialize from, which is how a sanitize -> serialize -> re-parse pipeline
+  // resurrects script. Rendering must not yield executable markup for any of
+  // them, and must reach a fixed point (re-rendering the output changes nothing
+  // dangerous).
+  const mutationXssPayloads: Array<[string, string]> = [
+    ['svg/style breakout', '<svg></p><style><a id="</style><img src=1 onerror=alert(1)>">'],
+    [
+      'math/mglyph breakout',
+      '<math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;/mtext&gt;&lt;img src=1 onerror=alert(1)&gt;">',
+    ],
+    ['noscript breakout', '<noscript><p title="</noscript><img src=x onerror=alert(1)>">'],
+    [
+      'form/mglyph breakout',
+      '<form><math><mtext></form><form><mglyph><style></math><img src onerror=alert(1)>',
+    ],
+    ['svg foreignObject breakout', '<svg><foreignObject><p><style><img src=1 onerror=alert(1)>'],
+    ['comment breakout', '<svg><!--</svg><img src=1 onerror=alert(1)>-->'],
+  ];
+
+  for (const [name, payload] of mutationXssPayloads) {
+    it(`does not resurrect script from a ${name} payload`, () => {
+      cleanup = render(() => MarkdownRenderer({ content: payload }), container!);
+
+      const html = container?.innerHTML ?? '';
+      expect(container?.querySelector('script')).toBeNull();
+      expect(container?.querySelector('img')).toBeNull();
+      expect(container?.querySelector('style')).toBeNull();
+      expect(html).not.toMatch(/\bon[a-z]+\s*=/i);
+      expect(html).not.toContain('alert(1)');
+
+      // Parser fixed point: feed the rendered markup straight back into the HTML
+      // parser with no sanitizer in between. Re-rendering it through
+      // MarkdownRenderer would just re-sanitize and prove nothing — the property
+      // under test is that the string we hand to `innerHTML` cannot itself parse
+      // into something executable.
+      const sink = document.createElement('div');
+      sink.innerHTML = html;
+
+      expect(sink.querySelector('script')).toBeNull();
+      expect(sink.querySelector('img')).toBeNull();
+      expect(sink.querySelector('style')).toBeNull();
+      expect(sink.querySelectorAll('*').length).toBe(container?.querySelectorAll('*').length);
+      for (const element of Array.from(sink.querySelectorAll('*'))) {
+        for (const attribute of Array.from(element.attributes)) {
+          expect(attribute.name.startsWith('on')).toBe(false);
+        }
+      }
+      // Serializing the reparsed tree must not drift either; a tree that
+      // re-serializes differently is the signature of a mutation payload.
+      expect(sink.innerHTML).toBe(html);
+    });
+  }
+
   it('opens local markdown file links through VS Code', () => {
     const send = vi.fn();
     window.__sendToExtension = send;

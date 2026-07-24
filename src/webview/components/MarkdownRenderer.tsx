@@ -613,23 +613,24 @@ function sanitizeHtml(html: string, disableCache: boolean): string {
     if (cached !== undefined) return cached;
   }
 
-  const sanitized = DOMPurify.sanitize(html, {
+  // Take the sanitized DOM rather than a string: re-parsing DOMPurify's own
+  // output to rewrite anchors would hand the result back to the HTML parser a
+  // second time, which is where mutation-XSS lives. Mutating the fragment
+  // DOMPurify vetted keeps a single parse/serialize round trip.
+  const fragment = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ALLOWED_HTML_TAGS,
     ALLOWED_ATTR: ALLOWED_HTML_ATTRIBUTES,
     FORBID_ATTR: ['style'],
+    RETURN_DOM_FRAGMENT: true,
   });
 
-  let result: string;
-  if (!sanitized.includes('<a')) {
-    result = sanitized;
-  } else {
-    const template = document.createElement('template');
-    template.innerHTML = sanitized;
-    for (const anchor of Array.from(template.content.querySelectorAll<HTMLAnchorElement>('a'))) {
-      sanitizeAnchorHref(anchor);
-    }
-    result = template.innerHTML;
+  for (const anchor of Array.from(fragment.querySelectorAll<HTMLAnchorElement>('a'))) {
+    sanitizeAnchorHref(anchor);
   }
+
+  const container = document.createElement('div');
+  container.append(fragment);
+  const result = container.innerHTML;
 
   if (!disableCache) setCachedValue(sanitizeHtmlCache, html, result);
   return result;

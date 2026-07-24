@@ -723,6 +723,52 @@ describe('state helpers', () => {
     expect(stateModule.nextPastedImageIndex()).toBe(1);
   });
 
+  it('caps clipboard images when a draft is restored over the limit', async () => {
+    const stateModule = await loadState();
+
+    const restored = Array.from({ length: stateModule.MAX_CLIPBOARD_IMAGES + 3 }, (_, index) => ({
+      id: `restored-${index + 1}`,
+      url: `blob:restored-${index + 1}`,
+      mime: 'image/png',
+      filename: `restored-${index + 1}.png`,
+      size: 10,
+    }));
+
+    const dropped = stateModule.replaceClipboardImages(restored);
+
+    expect(dropped.map((image) => image.id)).toEqual(['restored-1', 'restored-2', 'restored-3']);
+    expect(stateModule.state.clipboardImages).toHaveLength(stateModule.MAX_CLIPBOARD_IMAGES);
+    // Keeps the most recent entries rather than truncating to the oldest.
+    expect(stateModule.state.clipboardImages.at(-1)?.id).toBe(
+      `restored-${stateModule.MAX_CLIPBOARD_IMAGES + 3}`
+    );
+
+    // Markers for the images the cap discarded are blanked, not left dangling.
+    const restoredText = restored.map((image) => `[${image.filename}]`).join(' ');
+    const reconciled = stateModule.stripClipboardImagePlaceholders(
+      restoredText,
+      restored.slice(0, 3)
+    );
+    expect(reconciled).not.toContain('[restored-1.png]');
+    expect(reconciled).not.toContain('[restored-3.png]');
+    expect(reconciled).toContain('[restored-4.png]');
+
+    // A restored-at-cap list still accepts a new image by evicting the oldest.
+    const added = stateModule.addClipboardImage({
+      id: 'fresh',
+      url: 'blob:fresh',
+      mime: 'image/png',
+      filename: 'fresh.png',
+      size: 10,
+    });
+
+    expect(added).toBe(true);
+    expect(stateModule.state.clipboardImages).toHaveLength(stateModule.MAX_CLIPBOARD_IMAGES);
+    expect(stateModule.state.clipboardImages.at(-1)?.id).toBe('fresh');
+
+    stateModule.clearClipboardImages();
+  });
+
   it('tracks global and per-session selected models independently', async () => {
     const stateModule = await loadState();
 

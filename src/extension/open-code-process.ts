@@ -139,6 +139,7 @@ type CommandResult = {
 };
 
 const PROCESS_COMMAND_TIMEOUT_MS = 2000;
+const PROCESS_COMMAND_KILL_GRACE_MS = 1000;
 const WINDOWS_PROCESS_INSPECTION_TIMEOUT_MS = 10_000;
 const WINDOWS_OWNERSHIP_CONFIRM_ATTEMPTS = 3;
 const WINDOWS_OWNERSHIP_CONFIRM_RETRY_MS = 250;
@@ -186,7 +187,18 @@ function runProcess(
     };
 
     timer = setTimeout(() => {
-      proc?.kill();
+      const timedOutProcess = proc;
+      timedOutProcess?.kill();
+      // These are short-lived inspection commands (lsof, ps, powershell). If one
+      // ignores SIGTERM it would otherwise outlive the extension host, so
+      // escalate. The escalation must outlive `finish`, which only resolves the
+      // promise and leaves the child running.
+      if (timedOutProcess && timedOutProcess.exitCode === null) {
+        const killTimer = setTimeout(() => {
+          if (timedOutProcess.exitCode === null) timedOutProcess.kill('SIGKILL');
+        }, PROCESS_COMMAND_KILL_GRACE_MS);
+        killTimer.unref?.();
+      }
       finish({ stdout, stderr, code: null });
     }, timeoutMs);
 

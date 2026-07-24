@@ -1,5 +1,4 @@
 import { client } from '../../lib/client';
-import { addContextFile } from '../../lib/state';
 import { getWorkspaceRelativePath, isAbsolutePath, normalizePath } from '../../lib/path-display';
 import { mergeContextFile, parseSelectionReference } from '../../../shared/context-files';
 import type { DroppedFile } from '../../../shared/protocol';
@@ -33,8 +32,21 @@ export function getPastedContextFiles(text: string, workspacePath: string | null
   return Array.from(files.values());
 }
 
-export async function addPastedMentionContextFiles(text: string) {
-  if (!text.trim()) return;
+export type PastedMentionResult = {
+  mentionCount: number;
+  resolvedCount: number;
+  files: DroppedFile[];
+};
+
+/**
+ * Resolves `@file` mentions without touching global state. Attaching is left to
+ * the caller so it can first confirm the composer that produced the paste is
+ * still the one on screen — the lookups are async and the user may have sent,
+ * cleared, or switched sessions in the meantime.
+ */
+export async function resolvePastedMentionContextFiles(text: string): Promise<PastedMentionResult> {
+  const result: PastedMentionResult = { mentionCount: 0, resolvedCount: 0, files: [] };
+  if (!text.trim()) return result;
 
   const lines = text
     .split(/\r?\n/)
@@ -45,14 +57,20 @@ export async function addPastedMentionContextFiles(text: string) {
 
   for (const line of lines) {
     for (const mention of extractPastedFileMentions(line)) {
-      const file = await resolveDroppedFileReference(mention.path, mention.isDirectory);
-      if (file) addOrMergePastedContextFile(files, file);
+      result.mentionCount += 1;
+      // Per-mention: one failed lookup must not abandon the mentions that did
+      // resolve, and an unreachable host is just an unresolved mention.
+      const file = await resolveDroppedFileReference(mention.path, mention.isDirectory).catch(
+        () => null
+      );
+      if (!file) continue;
+      result.resolvedCount += 1;
+      addOrMergePastedContextFile(files, file);
     }
   }
 
-  for (const file of files.values()) {
-    addContextFile(file);
-  }
+  result.files = Array.from(files.values());
+  return result;
 }
 
 export function getPromptTextWithoutContextReferences(text: string) {
@@ -65,15 +83,20 @@ export function getPromptTextWithoutContextReferences(text: string) {
       if (/^\[Active file: .+\]$/.test(line)) return false;
       return (
         extractPastedFileMentions(line).length === 0 ||
-        line.replace(/(^|[\s(])@([^\s@]+?\/?)(?=$|[\s),.:;!?])/g, '$1').trim().length > 0
+        stripPastedFileMentions(line).trim().length > 0
       );
     })
     .join('\n')
     .trim();
 }
 
+// Recognizes `@path/to/file.ts` mentions. Extraction and stripping must share
+// this pattern: a stripping pattern that matched a shorter span would leave a
+// residue behind and keep a mention-only line in the prompt.
+const PASTED_FILE_MENTION_RE = /(^|[\s(])@([^\s@)]+?\/?)(?=$|[\s),:;!?])/g;
+
 function extractPastedFileMentions(line: string): Array<{ path: string; isDirectory: boolean }> {
-  const matches = line.matchAll(/(^|[\s(])@([^\s@)]+?\/?)(?=$|[\s),:;!?])/g);
+  const matches = line.matchAll(PASTED_FILE_MENTION_RE);
   const mentions: Array<{ path: string; isDirectory: boolean }> = [];
 
   for (const match of matches) {
@@ -87,6 +110,14 @@ function extractPastedFileMentions(line: string): Array<{ path: string; isDirect
   }
 
   return mentions;
+}
+
+function stripPastedFileMentions(line: string) {
+  return line.replace(PASTED_FILE_MENTION_RE, (match, prefix: string, rawPath: string) => {
+    const path = rawPath.trim();
+    if (!path || !isLikelyFileMentionPath(path, path.endsWith('/'))) return match;
+    return prefix;
+  });
 }
 
 function isLikelyFileMentionPath(value: string, isDirectory = false) {

@@ -255,7 +255,10 @@ function readContextRows(section: Element | undefined) {
   );
 }
 
-async function flushAsyncWork(count = 4) {
+// Mention resolution awaits one lookup per mention and then a guarded
+// attach/withdraw step, so the chain is several ticks deep for a multi-mention
+// paste. Drain generously rather than tuning per call site.
+async function flushAsyncWork(count = 16) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
   }
@@ -2253,6 +2256,163 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('Review @README.md and @docs/');
     expect(client.varro.resolveWorkspacePath).toHaveBeenCalledWith('README.md');
     expect(client.varro.resolveWorkspacePath).toHaveBeenCalledWith('docs');
+  });
+
+  it('withdraws a mention-only paste from the composer once it becomes an attachment', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(state.droppedFiles).toEqual([
+      {
+        path: '/repo/README.md',
+        relativePath: 'README.md',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      },
+    ]);
+    expect(inputText()).toBe('');
+  });
+
+  it('does not attach or withdraw when the session changes while the lookup is pending', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setState('activeSessionId', 'session-a');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    // The user switches sessions before the workspace lookup comes back.
+    setState('activeSessionId', 'session-b');
+    await flushAsyncWork();
+
+    expect(state.droppedFiles).toEqual([]);
+    setState('activeSessionId', null);
+  });
+
+  it('withdraws the pasted copy, not an identical mention already in the composer', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    // Pre-existing identical mention; with no DOM selection the paste appends
+    // at the end, so the two copies sit at different offsets. Searching by
+    // content would strip the leading copy and leave ' and notes@README.md'.
+    setInputText('@README.md and notes');
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('@README.md and notes');
+  });
+
+  it('keeps a mention-only paste as text when the mention does not resolve', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? '@scope/package' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(state.droppedFiles).toEqual([]);
+    expect(inputText()).toBe('@scope/package');
+  });
+
+  it('keeps a mention-only paste when the user typed inside it before it resolved', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    setInputText('@READ-edited-ME.md');
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('@READ-edited-ME.md');
   });
 
   it('keeps unresolved scoped package names as plain pasted text', async () => {
